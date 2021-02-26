@@ -1,7 +1,7 @@
 *.html
 # vscode related
 .vscode/
-dynamo/.vscode/
+spat/.vscode/
 
 ._.DS_Store
 ~/
@@ -19,8 +19,8 @@ integral_seq/
 env/
 
 load_model_from_*
-dynamo.egg-info/
-dynamo_release.egg-info/
+spat.egg-info/
+spat_release.egg-info/
 
 # Python / Byte-compiled / optimized / DLL
 __pycache__/
@@ -41,7 +41,7 @@ Thumbs.db
 
 # Docs build
 docs/build
-docs/source/dynamo*
+docs/source/spat*
 docs/source/_autosummary
 
 # always-ignore directories
