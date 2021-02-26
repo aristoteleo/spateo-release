@@ -1,0 +1,8 @@
+.gitignore
+README.md
+setup.py
+spat_release.egg-info/PKG-INFO
+spat_release.egg-info/SOURCES.txt
+spat_release.egg-info/dependency_links.txt
+spat_release.egg-info/requires.txt
+spat_release.egg-info/top_level.txt

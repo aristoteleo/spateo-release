@@ -1,0 +1,25 @@
+Metadata-Version: 2.1
+Name: spat-release
+Version: 0.0.0
+Summary: A complete solution of spatialtemporal dynamics analyses toolkit of single cell spatial transcriptomics
+Home-page: https://github.com/aristoteleo/spat-release
+Author: Xiaojie Qiu
+Author-email: xqiu.sc@gmail.com
+License: BSD
+Download-URL: https://github.com/aristoteleo/spatt-release
+Description: # spat-release
+        Spatiotemporal modeling of spatial transcriptomics 
+        
+Keywords: SpatialTranscriptomics,stereo-seq,Visium,seqFish,MERFISH,slide-seq,DBiT-seq,HDST-seq,osmFISH,spatialtemporal
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+Provides-Extra: spatial
+Provides-Extra: interactive_plots
+Provides-Extra: network
+Provides-Extra: dimension_reduction
+Provides-Extra: test
+Provides-Extra: bigdata_visualization
