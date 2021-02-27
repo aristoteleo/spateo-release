@@ -1,4 +1,4 @@
-"""Mapping Vector Field of Single Cells
+"""A complete solution of spatialtemporal dynamics analyses toolkit of single cell spatial transcriptomics
 """
 
 from .get_version import get_version
