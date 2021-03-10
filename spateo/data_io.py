@@ -55,7 +55,7 @@ def centroid(bin_ind, coord_min, binsize=50):
 
 
 def readBGI(filename, binsize=50, version='stereo_v1'):
-    """A helper function that facilitates constructing an AnnData object suitable for downstream spat analysis
+    """A helper function that facilitates constructing an AnnData object suitable for downstream spateo analysis
 
     Parameters
     ----------

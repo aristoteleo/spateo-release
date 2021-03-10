@@ -7,7 +7,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
-    name="spat-release",
+    name="spateo-release",
     version="0.0.0",
     python_requires=">=3.7",
     install_requires=[

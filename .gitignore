@@ -1,7 +1,7 @@
 *.html
 # vscode related
 .vscode/
-spat/.vscode/
+spateo/.vscode/
 
 ._.DS_Store
 ~/
