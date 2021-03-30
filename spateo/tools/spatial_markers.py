@@ -80,23 +80,43 @@ def cluster_specific_genes(adata,
         return adata 
       
       
+import random
+from random import sample
+random.seed(19491001)
+
 def GM_lag_model(adata, 
                 genes,
                 group,
+                drop_dummy=None,
                 n_neighbors=8,
                 layer=None,
                 ):
     group_num = adata.obs[group].value_counts()
+    max_group, min_group, min_group_ncells = group_num.index[0], group_num.index[-1], group_num[-1]
 
     group_name = adata.obs[group]
+    db = pd.DataFrame({'group': group_name})
+    
+    if drop_dummy is None: 
+        db.iloc[sample(np.arange(adata.n_obs).tolist(), min_group_ncells), :] = 'others'
+        drop_columns = ['group_others']
+    elif drop_dummy in group_name:
+        group_inds = np.where(db['group'] == drop_dummy)[0]
+        db.iloc[group_inds, :] = 'others'
+        drop_columns = ['group_others', 'group_' + str(drop_dummy)]
+    else:
+        raise ValueError(f"drop_dummy, {drop_dummy} you provided is not in the adata.obs[{group}].")
+    
+    X = pd.get_dummies(data=db, drop_first=False)
+    variable_names = X.columns.difference(drop_columns).to_list()
 
-    uniq_g, group_name = group_name.unique(), group_name.to_list()
+    uniq_g, group_name = set(group_name).difference([drop_dummy]), group_name.to_list()
+    
+    uniq_g = list(np.sort(list(uniq_g))) # sort and convert to list 
 
     # Generate W from the GeoDataFrame
-    w = weights.distance.KNN.from_array(E9_5.obsm['spatial'], k=n_neighbors)
-
-    # Row-standardization
-    w.transform = 'R'
+    knn = weights.distance.KNN.from_array(adata.obsm['spatial'], k=n_neighbors)
+    knn.transform = 'R'
 
     if genes is None:
         genes = adata.var.index[adata.var.use_for_pca]
@@ -108,36 +128,29 @@ def GM_lag_model(adata,
         adata.var[str(i) + '_GM_lag_zstat'] = None
         adata.var[str(i) + '_GM_lag_pval'] = None
         
-    db = pd.DataFrame({'group': group_name})
-
-    X = pd.get_dummies(data=db, drop_first=True)
-
-    variable_names = X.columns.to_list()
-
     for i, cur_g in tqdm(enumerate(genes), desc="performing GM_lag_model and assign coefficient and p-val to cell type"):
         if layer is None:
-            X['log_exp'] = adata[:, cur_g].X.A.flatten()
+            X['log_exp'] = adata[:, cur_g].X.A
         else:
-            X['log_exp'] = adata[:, cur_g].layers[layer].A.flatten()
+            X['log_exp'] = adata[:, cur_g].layers[layer].A
         
         try:
             model = spreg.GM_Lag(X[['log_exp']].values, X[variable_names].values, 
                                  w=knn, name_y='log_exp', name_x=variable_names)
-        except: 
-            for ind, g in enumerate(['const'] + uniq_g + ['W_log_exp']): 
-                adata.var.loc[cur_g, g + '_GM_lag_coeff'] = np.nan
-                adata.var.loc[cur_g, g + '_GM_lag_zstat'] = np.nan
-                adata.var.loc[cur_g, g + '_GM_lag_pval'] = np.nan
-        finally:
-            a = pd.DataFrame(model.betas, model.name_x + ['W_log_exp'], columns=['Coefficient'])
+            a = pd.DataFrame(model.betas, model.name_x + ['W_log_exp'], columns=['coef'])
 
             b = pd.DataFrame(model.z_stat, model.name_x + ['W_log_exp'], columns=['z_stat', 'p_val'])
 
             df = a.merge(b, left_index=True, right_index=True)
-
+            
             for ind, g in enumerate(['const'] + uniq_g + ['W_log_exp']): 
-                adata.var.loc[cur_g, g + '_GM_lag_coeff'] = df.iloc[ind, 0]
-                adata.var.loc[cur_g, g + '_GM_lag_zstat'] = df.iloc[ind, 1]
-                adata.var.loc[cur_g, g + '_GM_lag_pval'] = df.iloc[ind, 2]
+                adata.var.loc[cur_g, str(g) + '_GM_lag_coeff'] = df.iloc[ind, 0]
+                adata.var.loc[cur_g, str(g) + '_GM_lag_zstat'] = df.iloc[ind, 1]
+                adata.var.loc[cur_g, str(g) + '_GM_lag_pval'] = df.iloc[ind, 2]
+        except: 
+            for ind, g in enumerate(['const'] + uniq_g + ['W_log_exp']): 
+                adata.var.loc[cur_g, str(g) + '_GM_lag_coeff'] = np.nan
+                adata.var.loc[cur_g, str(g) + '_GM_lag_zstat'] = np.nan
+                adata.var.loc[cur_g, str(g) + '_GM_lag_pval'] = np.nan
                 
     return adata 
