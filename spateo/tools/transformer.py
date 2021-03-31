@@ -1,4 +1,7 @@
 import numpy as np
+from scipy.spatial import Delaunay
+import math
+from sklearn.decomposition import PCA
 
 def procrustes(X, Y, scaling=True, reflection='best'):
     """ This function will need to be rewritten just with scipy.spatial.procrustes and
@@ -160,3 +163,147 @@ def AffineTrans(x, y, centroid_x, centroid_y, theta):
         trans_xy_coord[cur_ind, :] = res[:2]
 
     return T_t, T_r, trans_xy_coord
+
+
+def add_spatial(adata):
+    adata.obsm['spatial'] = adata.obs.loc[:, ['coor_x', 'coor_y']].values
+    adata.obsm['X_spatial'] = adata.obsm['spatial'].astype(float).copy()
+
+def add_spatial_intron(adata):
+    df = pd.Series(adata.obs.index).str.split(':', expand=True).iloc[:, 1].str.split("_", expand=True)
+    adata.obsm['spatial'] = df.values.astype(float)
+    adata.obsm['X_spatial'] = df.values.astype(float)
+
+def alpha_shape(x, y, alpha):
+    # Start Using SHAPELY
+    try:
+        import shapely.geometry as geometry
+        from shapely.geometry import Polygon, MultiPoint, Point
+        from shapely.ops import triangulate
+        from shapely.ops import cascaded_union, polygonize
+    except ImportError:
+        raise ImportError("If you want to use the tricontourf in plotting function, you need to install `shapely` "
+                          "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
+                          )
+
+    crds = np.array([x.flatten(), y.flatten()]).transpose()
+    points = MultiPoint(crds)
+
+    if len(points) < 4:
+        # When you have a triangle, there is no sense
+        # in computing an alpha shape.
+        return geometry.MultiPoint(list(points)).convex_hull
+
+    def add_edge(edges, edge_points, coords, i, j):
+        """
+        Add a line between the i-th and j-th points,
+        if not in the list already
+        """
+        if (i, j) in edges or (j, i) in edges:
+            # already added
+            return
+        edges.add((i, j))
+        edge_points.append(coords[[i, j]])
+
+    coords = np.array([point.coords[0]
+                       for point in points])
+
+    tri = Delaunay(coords)
+    edges = set()
+    edge_points = []
+
+    # loop over triangles:
+    # ia, ib, ic = indices of corner points of the triangle
+    for ia, ib, ic in tri.vertices:
+        pa = coords[ia]
+        pb = coords[ib]
+        pc = coords[ic]
+
+        # Lengths of sides of triangle
+        a = math.sqrt((pa[0] - pb[0]) ** 2 + (pa[1] - pb[1]) ** 2)
+        b = math.sqrt((pb[0] - pc[0]) ** 2 + (pb[1] - pc[1]) ** 2)
+        c = math.sqrt((pc[0] - pa[0]) ** 2 + (pc[1] - pa[1]) ** 2)
+
+        # Semiperimeter of triangle
+        s = (a + b + c) / 2.0
+
+        # Area of triangle by Heron's formula
+        area = math.sqrt(s * (s - a) * (s - b) * (s - c))
+        circum_r = a * b * c / (4.0 * area)
+
+        # Here's the radius filter.
+        if circum_r < 1.0 / alpha:
+            add_edge(edges, edge_points, coords, ia, ib)
+            add_edge(edges, edge_points, coords, ib, ic)
+            add_edge(edges, edge_points, coords, ic, ia)
+
+    m = geometry.MultiLineString(edge_points)
+    triangles = list(polygonize(m))
+
+    return cascaded_union(triangles), edge_points
+
+def pca_align(X):
+    pca = PCA(n_components=2)
+    pca.fit(X)
+    R = pca.components_
+    Y = (R @ X.T).T
+    
+    return Y, R
+
+def AffineTrans(x, y, centroid_x, centroid_y, R, theta=None):
+    trans_xy_coord = np.zeros((len(x), 2))
+    
+    T_t, T_r = np.zeros((3, 3)), np.zeros((3, 3))
+    np.fill_diagonal(T_t, 1)
+    np.fill_diagonal(T_r, 1)
+
+    T_t[0, 2], T_t[1, 2] = -centroid_x[0], -centroid_y[0]
+    
+    if theta is not None:
+        sin_theta, cos_theta = np.sin(theta), np.cos(theta)
+        T_r[0, 0], T_r[0, 1] = cos_theta, sin_theta
+        T_r[1, 0], T_r[1, 1] = - sin_theta, cos_theta
+    else:
+         T_r[:2, :2] = R
+    
+    for cur_x, cur_y, cur_ind in zip(x, y, np.arange(len(x))):
+        data = np.array([cur_x, cur_y, 1])
+        res = T_t @ data
+        res = T_r @ res
+        trans_xy_coord[cur_ind, :] = res[:2]
+
+    return T_t, T_r, trans_xy_coord
+
+
+def correct_embryo_coord(adata):
+    if 'unspliced' in adata.layers:
+        add_spatial_intron(adata)
+    else:
+        add_spatial(adata)
+    
+    x, y = adata.obsm['X_spatial'][:, 0], adata.obsm['X_spatial'][:, 1]
+
+    adata_concave_hull, _ = alpha_shape(x, y, alpha=1)    
+
+    if type(adata_concave_hull) == shapely.geometry.multipolygon.MultiPolygon:
+        adata_x, adata_y = adata_concave_hull[0].exterior.xy
+    else:
+        adata_x, adata_y = adata_concave_hull.exterior.xy
+
+    adata_centroid_x, adata_centroid_y = adata_concave_hull.centroid.coords.xy
+
+    adata_coords_correct, adata_R = pca_align(adata_coords)
+    adata_spatial_corrected = AffineTrans(adata_coords[:, 0], adata_coords[:, 1], adata_centroid_x, adata_centroid_y, adata_R)
+
+    # rotate 90 degree
+    _, _, adata_coords_correct_2 = AffineTrans(adata_spatial_corrected[:, 0], adata_spatial_corrected[:, 1], [0, 0], [0, 0], None, np.pi/2)
+    # reflect vertically
+    E9_5_coords_correct_2[:, 1] = - adata_coords_correct_2[:, 1]
+    adata.obsm['X_spatial'] = adata_coords_correct_2
+
+    # reflect vertically again: 
+    adata_coords_correct_2[:, 1] = - adata_coords_correct_2[:, 1]
+    
+    # account for the mirror effect when plotting an image
+    adata.obsm['spatial'] = adata_coords_correct_2
+    
