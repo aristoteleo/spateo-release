@@ -11,7 +11,7 @@ def conv(a, ks, circle=False):
 
 	Parameters
     ----------
-    a: a 2d np array
+    a: 2d np array
     	The source array.
 
 	ks: an odd int
