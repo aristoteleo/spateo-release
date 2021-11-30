@@ -2,15 +2,15 @@ import re
 import os
 import time
 import warnings
-import numpy as np
-import torch
+from tqdm import tqdm
 import pandas as pd
-import scanpy as sc
+import numpy as np
+import ot
+import torch
 from scipy.spatial import distance_matrix
 from scipy.sparse.csr import spmatrix
 from scipy.sparse import csr_matrix
-from tqdm import tqdm
-import ot
+
 
 def pairwise_align1(slice1, slice2, alpha=0.1, numItermax=200, numItermaxEmd=100000):
     '''
@@ -27,6 +27,7 @@ def pairwise_align1(slice1, slice2, alpha=0.1, numItermax=200, numItermaxEmd=100
         numItermax: 'int' (default: 200)
             max number of iterations for cg.
         numItermaxEmd: 'int' (default: 100000)
+            Max number of iterations for emd.
 
     Returns
     -------
@@ -227,69 +228,6 @@ def slice_alignment(slicesList=None, alpha=0.1, numItermax=200, numItermaxEmd=10
             slice.write_h5ad(subSave)
 
     _log(f'************ End of registration (It takes {round(time.time() - startTime, 2)} seconds) ************')
-
-    return slicesList
-
-def slice_alignment_hvg(slicesList=None, n_top_genes=2000, numItermax=200, numItermaxEmd=100000,
-                        useGpu=False, device=None, save=None, verbose=True, **kwargs):
-    '''
-    Align the slices after selecting highly variable genes.
-
-    Parameters
-    ----------
-        slicesList: 'list'
-            An AnnData list.
-        n_top_genes: 'int' (default: 2000)
-            Number of highly-variable genes to keep.
-        numItermax: 'int' (default: 200)
-            max number of iterations for cg.
-        numItermaxEmd: 'int' (default: 100000)
-            Max number of iterations for emd.
-        useGpu: 'bool' (default: False)
-            Whether to use GPU.
-        device: 'int'  (default: None)
-            The index of GPU selected.
-        save: 'str' (default: None)
-            Whether to save the data after alignment.
-        verbose: 'bool' (default: True)
-            Whether to print information along alignment.
-        **kwargs : dict
-             Parameters for slice_alignment.
-    Returns
-    -------
-        slicesList: 'list'
-            An AnnData list after alignment.
-    '''
-
-    def _filter_hvg(adata=None, n_top_genes=2000):
-        hvgAdata = adata.copy()
-        hvgAdata.raw = hvgAdata
-        sc.pp.normalize_total(hvgAdata)
-        sc.pp.log1p(hvgAdata)
-        sc.pp.highly_variable_genes(hvgAdata, n_top_genes=n_top_genes)
-        adata.raw = adata
-        return adata[:, hvgAdata.var.highly_variable]
-
-    hvgAdataList = [
-        _filter_hvg(adata=adata, n_top_genes=n_top_genes)
-        for adata in slicesList
-    ]
-
-    regAdataList = slice_alignment(slicesList=hvgAdataList,
-                            numItermax=numItermax,
-                            numItermaxEmd=numItermaxEmd,
-                            useGpu=useGpu,
-                            device=device,
-                            save=save,
-                            verbose=verbose,
-                            **kwargs)
-
-    slicesList = []
-    for adata in regAdataList:
-        newAdata = adata.raw.copy()
-        newAdata.obs = adata.obs
-        newAdata.obsm = adata.obsm
-        slicesList.append(newAdata)
 
     return slicesList
 
