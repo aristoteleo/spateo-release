@@ -27,21 +27,22 @@ class Icell:
 		self.spliced = spliced
 		self.total = total
 		self.xmin, self.xmax, self.ymin, self.ymax = float('inf'), 0, float('inf'), 0
-		self.rawdata = None # np array np.int16
-		self.genenum = None # np array np.int16
-		self.convdata = None # np array np.float64
+		self.rawdata = None # 2d np array np.int16
+		self.genenum = None # 2d np array np.int16
+		self.convdata = None # 2d np array np.float64
 		self.splited = False
-		self.cellMask = None # np array np.uint8  0=>background 255=>cell
-		self.cellLabels = None # a np array represents cell labels of the whole slice np.int32
+		self.cellMask = None # 2d np array np.uint8  0=>background 255=>cell
+		self.cellLabels = None # 2d np array represents cell labels of the whole slice np.int32
 	
 	
-	def readData(self):
+	def readData(self, record_genenum=False):
 		if self.xmax == 0:
 			self.getBor()
 			print(f'xmin, xmax: {self.xmin, self.xmax}  ymin, ymax: {self.ymin, self.ymax}')
 		self.rawdata = np.zeros([self.ymax-self.ymin+1, self.xmax-self.xmin+1], dtype=np.int16)
-		self.genenum = np.zeros([self.ymax-self.ymin+1, self.xmax-self.xmin+1], dtype=np.int16)
-		self.readFile2array()
+		if record_genenum:
+			self.genenum = np.zeros([self.ymax-self.ymin+1, self.xmax-self.xmin+1], dtype=np.int16)
+		self.readFile2array(record_genenum)
 		self.cellMask = np.zeros([self.ymax-self.ymin+1, self.xmax-self.xmin+1], dtype=np.uint8)
 		self.comCellLabels = np.zeros([self.ymax-self.ymin+1, self.xmax-self.xmin+1], dtype=np.int32)
 	
@@ -273,11 +274,11 @@ class Icell:
 				self.ymax = y if y > self.ymax else self.ymax
 
 	
-	# self.data[0,0] => the value in (self.ymin,self.xmin)
-	# self.data[0,1] => the value in (self.ymin,self.xmin + 1)
-	def readFile2array(self):
+	# self.rawdata[0,0] => the value in (self.ymin,self.xmin)
+	# self.rawdata[0,1] => the value in (self.ymin,self.xmin + 1)
+	def readFile2array(self, record_genenum):
 		a = [[0]*(self.xmax-self.xmin+1) for _ in range((self.ymax-self.ymin+1))]
-		g = [[0]*(self.xmax-self.xmin+1) for _ in range((self.ymax-self.ymin+1))]
+		g = [[0]*(self.xmax-self.xmin+1) for _ in range((self.ymax-self.ymin+1))] if record_genenum else 0
 		with open(self.infile, "rt") as f:
 			f.readline()
 			for line in f:
@@ -294,12 +295,11 @@ class Icell:
 				else:
 					a[y][x] += int(lines[5])
 				
-				g[y][x] += 1
+				if record_genenum:
+					g[y][x] += 1
 		self.rawdata = np.array(a, dtype=np.int16)
-		self.genenum = np.array(g, dtype=np.int16)
+		self.genenum = np.array(g, dtype=np.int16) if record_genenum else None
 	
-
-
 
 	def save2tif(self, x, des=""):
 		process.array2img(x, des)
