@@ -2,15 +2,15 @@ import re
 import os
 import time
 import warnings
-import numpy as np
-import torch
+from tqdm import tqdm
 import pandas as pd
-import scanpy as sc
+import numpy as np
+import anndata as ad
+import ot
+import torch
 from scipy.spatial import distance_matrix
 from scipy.sparse.csr import spmatrix
 from scipy.sparse import csr_matrix
-from tqdm import tqdm
-import ot
 
 def pairwise_align1(slice1, slice2, alpha=0.1, numItermax=200, numItermaxEmd=100000):
     '''
@@ -27,6 +27,7 @@ def pairwise_align1(slice1, slice2, alpha=0.1, numItermax=200, numItermaxEmd=100
         numItermax: 'int' (default: 200)
             max number of iterations for cg.
         numItermaxEmd: 'int' (default: 100000)
+            Max number of iterations for emd.
 
     Returns
     -------
@@ -57,12 +58,12 @@ def pairwise_align1(slice1, slice2, alpha=0.1, numItermax=200, numItermaxEmd=100
     a = np.ones((slice1.shape[0],)) / slice1.shape[0]
     b = np.ones((slice2.shape[0],)) / slice2.shape[0]
 
-    # Run OT
+    # Run OT via CPU
     pi = ot.gromov.fused_gromov_wasserstein(M=M, C1=DA, C2=DB, p=a, q=b, loss_fun='square_loss',alpha=alpha,
                                             armijo=False, log=False,numItermax = numItermax, numItermaxEmd=numItermaxEmd)
     return pi
 
-def pairwise_align2(slice1, slice2, alpha=0.1, numItermax=200, numItermaxEmd=100000, device=0):
+def pairwise_align2(slice1, slice2, alpha=0.1, numItermax=200, numItermaxEmd=100000, device=torch.device(f'cuda:0')):
     '''
     Calculates and returns optimal alignment of two slices via GPU.
 
@@ -78,8 +79,8 @@ def pairwise_align2(slice1, slice2, alpha=0.1, numItermax=200, numItermaxEmd=100
             max number of iterations for cg.
         numItermaxEmd: 'int' (default: 100000)
             Max number of iterations for emd.
-        device: 'int'  (default: 0)
-            The index of GPU selected.
+         device: 'torch.device' (default: torch.device(f'cuda:0'))
+            Equipment used to run the program.
 
     Returns
     -------
@@ -111,13 +112,12 @@ def pairwise_align2(slice1, slice2, alpha=0.1, numItermax=200, numItermaxEmd=100
     q = np.ones((slice2.shape[0],)) / slice2.shape[0]
 
     # Run OT via GPU
-    cuda = torch.device(f'cuda:{device}')
     constC, hC1, hC2 = ot.gromov.init_matrix(DA, DB, p, q, loss_fun= 'square_loss')
-    constC = torch.from_numpy(constC).to(device=cuda)
-    hC1, hC2 = torch.from_numpy(hC1).to(device=cuda), torch.from_numpy(hC2).to(device=cuda)
-    DA, DB = torch.from_numpy(DA).to(device=cuda), torch.from_numpy(DB).to(device=cuda)
-    M = torch.from_numpy(np.asarray(D)).to(device=cuda)
-    p, q = torch.from_numpy(p).to(device=cuda), torch.from_numpy(q).to(device=cuda)
+    constC = torch.from_numpy(constC).to(device=device)
+    hC1, hC2 = torch.from_numpy(hC1).to(device=device), torch.from_numpy(hC2).to(device=device)
+    DA, DB = torch.from_numpy(DA).to(device=device), torch.from_numpy(DB).to(device=device)
+    M = torch.from_numpy(np.asarray(D)).to(device=device)
+    p, q = torch.from_numpy(p).to(device=device), torch.from_numpy(q).to(device=device)
     G0 = p[:, None] * q[None, :]
 
     def f(G):
@@ -134,7 +134,7 @@ def pairwise_align2(slice1, slice2, alpha=0.1, numItermax=200, numItermaxEmd=100
     return pi.cpu().numpy()
 
 def slice_alignment(slicesList=None, alpha=0.1, numItermax=200, numItermaxEmd=100000,
-                    useGpu=False, device=None, save=None, verbose=True):
+                    device='cpu', save=None, verbose=True):
     '''
     Align all slice coordinates.
 
@@ -148,10 +148,8 @@ def slice_alignment(slicesList=None, alpha=0.1, numItermax=200, numItermaxEmd=10
             max number of iterations for cg.
         numItermaxEmd: 'int' (default: 100000)
             Max number of iterations for emd.
-        useGpu: 'bool' (default: False)
-            Whether to use GPU.
-        device: 'int'  (default: None)
-            The index of GPU selected.
+        device: 'str' or 'torch.device' (default: 'cpu')
+            Equipment used to run the program.
         save: 'str' (default: None)
             Whether to save the data after alignment.
         verbose: 'bool' (default: True)
@@ -168,22 +166,21 @@ def slice_alignment(slicesList=None, alpha=0.1, numItermax=200, numItermaxEmd=10
         if verbose:
             print(m)
 
-    sc.settings.verbosity = 0
     warnings.filterwarnings('ignore')
     startTime = time.time()
 
-    if not useGpu:
-        _log("************ Begin of Registration via CPU ************")
+    if device == 'cpu':
+        _log("************ Begin of alignment via CPU ************\n")
         piList = [
             pairwise_align1(slicesList[i],
                             slicesList[i + 1],
                             alpha=alpha,
                             numItermax=numItermax,
                             numItermaxEmd=numItermaxEmd)
-            for i in tqdm(range(len(slicesList) - 1), desc=" Registration")
+            for i in tqdm(range(len(slicesList) - 1), desc=" Alignment ")
         ]
     else:
-        _log("************ Begin of Registration via GPU ************")
+        _log("************ Begin of alignment via GPU ************\n")
         piList = [
             pairwise_align2(slicesList[i],
                             slicesList[i + 1],
@@ -191,7 +188,7 @@ def slice_alignment(slicesList=None, alpha=0.1, numItermax=200, numItermaxEmd=10
                             numItermax=numItermax,
                             numItermaxEmd=numItermaxEmd,
                             device=device)
-            for i in tqdm(range(len(slicesList) - 1), desc=" Registration")
+            for i in tqdm(range(len(slicesList) - 1), desc=" Alignment ")
         ]
 
     for i in range(len(slicesList)-1):
@@ -226,75 +223,12 @@ def slice_alignment(slicesList=None, alpha=0.1, numItermax=200, numItermaxEmd=10
             subSave = os.path.join(save, f"{slice.obs['slice_ID'][0]}.h5ad")
             slice.write_h5ad(subSave)
 
-    _log(f'************ End of registration (It takes {round(time.time() - startTime, 2)} seconds) ************')
-
-    return slicesList
-
-def slice_alignment_hvg(slicesList=None, n_top_genes=2000, numItermax=200, numItermaxEmd=100000,
-                        useGpu=False, device=None, save=None, verbose=True, **kwargs):
-    '''
-    Align the slices after selecting highly variable genes.
-
-    Parameters
-    ----------
-        slicesList: 'list'
-            An AnnData list.
-        n_top_genes: 'int' (default: 2000)
-            Number of highly-variable genes to keep.
-        numItermax: 'int' (default: 200)
-            max number of iterations for cg.
-        numItermaxEmd: 'int' (default: 100000)
-            Max number of iterations for emd.
-        useGpu: 'bool' (default: False)
-            Whether to use GPU.
-        device: 'int'  (default: None)
-            The index of GPU selected.
-        save: 'str' (default: None)
-            Whether to save the data after alignment.
-        verbose: 'bool' (default: True)
-            Whether to print information along alignment.
-        **kwargs : dict
-             Parameters for slice_alignment.
-    Returns
-    -------
-        slicesList: 'list'
-            An AnnData list after alignment.
-    '''
-
-    def _filter_hvg(adata=None, n_top_genes=2000):
-        hvgAdata = adata.copy()
-        hvgAdata.raw = hvgAdata
-        sc.pp.normalize_total(hvgAdata)
-        sc.pp.log1p(hvgAdata)
-        sc.pp.highly_variable_genes(hvgAdata, n_top_genes=n_top_genes)
-        adata.raw = adata
-        return adata[:, hvgAdata.var.highly_variable]
-
-    hvgAdataList = [
-        _filter_hvg(adata=adata, n_top_genes=n_top_genes)
-        for adata in slicesList
-    ]
-
-    regAdataList = slice_alignment(slicesList=hvgAdataList,
-                            numItermax=numItermax,
-                            numItermaxEmd=numItermaxEmd,
-                            useGpu=useGpu,
-                            device=device,
-                            save=save,
-                            verbose=verbose,
-                            **kwargs)
-
-    slicesList = []
-    for adata in regAdataList:
-        newAdata = adata.raw.copy()
-        newAdata.obs = adata.obs
-        newAdata.obsm = adata.obsm
-        slicesList.append(newAdata)
+    _log(f'************ End of alignment (It takes {round(time.time() - startTime, 2)} seconds) ************')
 
     return slicesList
 
 def slice_alignment_sample(slicesList=None, frac=0.5, numItermax=200, numItermaxEmd=100000,
-                           useGpu=False, device=None, save=None, verbose=True, **kwargs):
+                           device='cpu', save=None, verbose=True, **kwargs):
     '''
     Align the slices after selecting frac*100 percent of genes.
 
@@ -308,10 +242,8 @@ def slice_alignment_sample(slicesList=None, frac=0.5, numItermax=200, numItermax
             max number of iterations for cg.
         numItermaxEmd: 'int' (default: 100000)
             Max number of iterations for emd.
-        useGpu: 'bool' (default: False)
-            Whether to use GPU.
-        device: 'int'  (default: None)
-            The index of GPU selected.
+        device: 'str' or 'torch.device' (default: 'cpu')
+            Equipment used to run the program.
         save: 'str' (default: None)
             Whether to save the data after alignment.
         verbose: 'bool' (default: True)
@@ -331,7 +263,7 @@ def slice_alignment_sample(slicesList=None, frac=0.5, numItermax=200, numItermax
         data = pd.DataFrame(to_dense_array(adata.X), columns=adata.var_names,index=adata.obs_names)
         sample_data = data.sample(frac=frac, axis=1)
         sample_data_m = csr_matrix(sample_data.values)
-        newAdata = sc.AnnData(sample_data_m)
+        newAdata = ad.AnnData(sample_data_m)
         newAdata.var_names = sample_data.columns
         newAdata.obs = adata.obs
         newAdata.obsm = adata.obsm
@@ -346,7 +278,6 @@ def slice_alignment_sample(slicesList=None, frac=0.5, numItermax=200, numItermax
     regAdataList = slice_alignment(slicesList=sampleAdataList,
                                    numItermax=numItermax,
                                    numItermaxEmd=numItermaxEmd,
-                                   useGpu=useGpu,
                                    device=device,
                                    save=save,
                                    verbose=verbose,
@@ -360,4 +291,8 @@ def slice_alignment_sample(slicesList=None, frac=0.5, numItermax=200, numItermax
         slicesList.append(newAdata)
 
     return slicesList
+
+
+
+
 
