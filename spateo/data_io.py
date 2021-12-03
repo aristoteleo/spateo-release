@@ -1,6 +1,10 @@
 import pandas as pd
 import numpy as np
 from anndata import AnnData
+import cv2
+from skimage import measure
+from shapely.geometry import Point, Polygon, LineString
+import geopandas as gpd
 
 from scipy.sparse import csr_matrix
 
@@ -139,7 +143,7 @@ def readBGI_cells(filename,
         label_path: `str`
             A string that points to the directory and filename of cell segmentation label matrix(Format:`.npy`).
             Will be used when displaying with exact shapes of cells.
-        slice: `str`
+        slice: `str` (default: None)
             Name of the slice. Will be used when displaying multiple slices.
         version: `str`
             The version of technology. Currently not used. But may be useful when the data format changes after we update
@@ -150,8 +154,7 @@ def readBGI_cells(filename,
         adata: :class:`~anndata.AnnData`
             An AnnData object. Each row of the AnnData object correspond to a cell (results of cell segmentation). The
             `spatial` key in the .obsm corresponds to the x, y coordinates of the centroids of all cells. The
-            `cell_label` key in the .obs points to the cell segmentation labels of all cells. The `label_mtx` key in the
-            .uns points to the cell segmentation label matrix of this slice.
+            .obs is a `geopandas.GeoDataFrame` with the geometry `contours`
     """
     data = pd.read_csv(filename, header=0, delimiter='\t')
 
@@ -174,49 +177,120 @@ def readBGI_cells(filename,
                          shape=((len(uniq_cell), len(uniq_gene))))
 
     label_mtx = np.load(label_path)
+    # Measure properties and get contours of labeled cell regions.
+    label_props = _get_cell_props(label_mtx, properties=('label', 'area', 'bbox', 'centroid'))
+    label_props["cell_name"] = uniq_cell
 
-    # Calculate the centroid of cells by cell segmentation label matrix
-    coor = centroid_cells(label_mtx)
+    # Get centroid from label_props
+    coor = label_props[["centroid-0", "centroid-1"]].values
 
     var = pd.DataFrame(
         {"gene_short_name": uniq_gene}
     )
     var.set_index("gene_short_name", inplace=True)
 
-    obs = pd.DataFrame(
-        {"cell_name": uniq_cell, "cell_id": [int(i) for i in uniq_cell]}
-    )
+    # to GeoDataFrame
+    obs = gpd.GeoDataFrame(label_props, geometry="contours")
     obs.set_index("cell_name", inplace=True)
 
     obsm = {
         "spatial": coor
     }
 
-    uns = {
-        "label_mtx": {slice: label_mtx}
-    }
-
-    adata = AnnData(csr_mat, obs=obs.copy(), var=var.copy(), obsm=obsm.copy(), uns=uns.copy())
+    adata = AnnData(csr_mat, obs=obs.copy(), var=var.copy(), obsm=obsm.copy())
 
     return adata
 
 
-def centroid_cells(label_mtx):
-    """Calculate the centroid of cells by cell segmentation label matrix.
+def _get_cell_props(label_mtx,
+                    properties=('label', 'area', 'bbox', 'centroid')):
+    """Measure properties of labeled cell regions.
 
     Parameters
     ----------
         label_mtx: `numpy.ndarray`
-            The cell segmentation label matrix.
+            cell segmentation label matrix
+        properties: `tuple`
+            used properties
 
     Returns
     -------
-        coor : `pandas.DataFrame`
-            The x, y coordinates of the centroids of all cells.
-    """
-    coor = pd.DataFrame(label_mtx.flatten(), columns=['cell'])
-    coor = coor[coor['cell'] > 0]
-    coor[['x_centroid', "y_centroid"]] = np.argwhere(label_mtx > 0)
-    coor = coor.groupby('cell').mean().values
-    return coor
+        props: `pandas.DataFrame`
+            A dataframe with properties and contours
 
+    """
+    def contours(mtx):
+        mtx = np.pad(mtx, 1)
+        mtx[mtx > 0] = 255
+        mtx = mtx.astype(np.uint8)
+        contour = cv2.findContours(mtx, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0][0]
+        contour = contour - np.array([1, 1])
+        return contour
+
+    def contour_to_geo(contour):
+        n = contour.shape[0]
+        contour = np.squeeze(contour)
+        if n >= 3:
+            geo = Polygon(contour)
+        elif n == 2:
+            geo = LineString(contour)
+        else:
+            geo = Point(contour)
+        return geo
+
+    props = measure.regionprops_table(label_mtx, properties=properties, extra_properties=[contours])
+    props = pd.DataFrame(props)
+    props['contours'] = props.apply(lambda x: x['contours'] + x[['bbox-0', 'bbox-1']].to_numpy(), axis=1)
+    props['contours'] = props['contours'].apply(contour_to_geo)
+    return props
+
+
+def read_image(adata: AnnData,
+               filename: str,
+               scale_factor: float,
+               slice: str = None,
+               img_layer: str = None) -> AnnData:
+    """Load an image into the AnnData object.
+
+    Parameters
+    ----------
+        adata: `AnnData`
+            AnnData object
+        filename:  `str`
+            The path of the image
+        scale_factor: `float`
+            The scale factor of the image. Define: pixels/DNBs
+        slice: `str` (default: None)
+            Name of the slice. Will be used when displaying multiple slices.
+        img_layer: `str` (default: None)
+            Name of the image layer.
+
+    Returns
+    -------
+        adata: `AnnData`
+            :attr:`~anndata.AnnData.uns`\\ `['spatial'][slice]['images'][img_layer]`
+                The stored image
+            :attr:`~anndata.AnnData.uns`\\ `['spatial'][slice]['scalefactors'][img_layer]`
+                The scale factor for the spots
+    """
+    img = cv2.imread(filename)
+    if img is None:
+        raise FileNotFoundError(f"Could not find '{filename}'")
+
+    # Create a new dictionary or add to the original slice
+    if 'spatial' not in adata.uns_keys():
+        adata.uns['spatial'] = dict()
+    if slice not in adata.uns['spatial'].keys():
+        adata.uns['spatial'][slice] = dict()
+
+    if 'images' not in adata.uns['spatial'][slice]:
+        adata.uns['spatial'][slice]['images'] = {img_layer: img}
+    else:
+        adata.uns['spatial'][slice]['images'][img_layer] = img
+
+    if 'scalefactors' not in adata.uns['spatial'][slice]:
+        adata.uns['spatial'][slice]['scalefactors'] = {img_layer: scale_factor}
+    else:
+        adata.uns['spatial'][slice]['scalefactors'][img_layer] = scale_factor
+
+    return adata
