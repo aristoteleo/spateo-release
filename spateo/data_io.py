@@ -154,7 +154,8 @@ def readBGI_cells(filename,
         adata: :class:`~anndata.AnnData`
             An AnnData object. Each row of the AnnData object correspond to a cell (results of cell segmentation). The
             `spatial` key in the .obsm corresponds to the x, y coordinates of the centroids of all cells. The
-            .obs is a `geopandas.GeoDataFrame` with the geometry `contours`
+            .obs is a `geopandas.GeoDataFrame` with the geometry `contours`.
+            The columns in .obs are the region properties, including `label`, `area`, `centroid`, `bbox` and `contours`.
     """
     data = pd.read_csv(filename, header=0, delimiter='\t')
 
