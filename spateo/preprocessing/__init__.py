@@ -3,3 +3,4 @@
 
 from .image import *
 from .sequencing import *
+from .filter import *
