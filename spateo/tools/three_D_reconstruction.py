@@ -211,9 +211,8 @@ def slice_alignment(slicesList=None, alpha=0.1, numItermax=200, numItermaxEmd=10
         slicesList[i+1] = slice2
 
     for i, slice in enumerate(slicesList):
-        slice.obs["new_x"] = slice.obsm['spatial']['x']
-        slice.obs["new_y"] = slice.obsm['spatial']['y']
-        slicesList[i] = slice
+        slice.obs["x"] = slice.obsm['spatial'][:, 0]
+        slice.obs["y"] = slice.obsm['spatial'][:, 1]
 
     if save != None:
         if not os.path.exists(save):
