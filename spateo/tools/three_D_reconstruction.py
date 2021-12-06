@@ -211,10 +211,8 @@ def slice_alignment(slicesList=None, alpha=0.1, numItermax=200, numItermaxEmd=10
         slicesList[i+1] = slice2
 
     for i, slice in enumerate(slicesList):
-        z = re.findall(r"_S(\d+)", slice.obs['slice_ID'][0])[0]
         slice.obs["new_x"] = slice.obsm['spatial']['x']
         slice.obs["new_y"] = slice.obsm['spatial']['y']
-        slice.obs["new_z"] = slice.obsm['spatial']['z'] = float(z)
         slicesList[i] = slice
 
     if save != None:
