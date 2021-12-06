@@ -40,14 +40,15 @@ def plot_3D(adata=None, cluster=None, colormap=None, window_size=(1024, 768), of
 
     '''
 
-    plot_color = ["#F56867", "#FEB915", "#C798EE", "#59BE86", "#7495D3", "#D1D1D1", "#6D1A9C", "#15821E", "#3A84E6",
-                  "#997273", "#787878", "#DB4C6C", "#9E7A7A", "#554236", "#AF5F3C", "#93796C", "#F9BD3F", "#DAB370",
-                  "#877F6C", "#268785"]
-    if colormap == None:
-        plot_color = plot_color[:len(adata.obs[cluster].unique())]
-        pass
-    else:
-        plot_color = colormap
+    if colormap is None:
+        cmap = mpl.colors.LinearSegmentedColormap.from_list(
+            "autocmap",["#F56867", "#FEB915", "#C798EE", "#59BE86", "#7495D3", "#D1D1D1", "#6D1A9C", "#15821E", "#3A84E6",
+                        "#997273", "#787878", "#DB4C6C", "#9E7A7A", "#554236", "#AF5F3C", "#93796C", "#F9BD3F", "#DAB370",
+                        "#877F6C", "#268785"]
+        )
+        mpl.cm.register_cmap(cmap=cmap)
+        colormap = sns.color_palette(palette="autocmap", n_colors=len(adata.obs[cluster].unique()), as_cmap=False)
+        colormap = [mpl.colors.to_hex(i, keep_alpha=False) for i in colormap]
 
     points = adata.obsm["spatial"].values
     grid = pv.PolyData(points)
