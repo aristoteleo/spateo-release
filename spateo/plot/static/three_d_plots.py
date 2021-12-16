@@ -105,7 +105,8 @@ def recon_3d(adata: AnnData,
     cluster : `str`
         Column name in .obs DataFrame that stores clustering results.
     save : `str`
-        If a str, save the figure. Infer the file type if ending on {'.pdf', '.png', '.gif', '.mp4'}.
+        If a str, save the figure. Infer the file type if ending on
+        {'.png','.jpeg', '.jpg', '.bmp', '.tif', '.tiff', '.gif', '.mp4'}.
     cluster_show : `str` or `list` (default: `all`)
         Clustering categories that need to be displayed.
     gene_show : `str` or `list` (default: `all`)
@@ -193,7 +194,8 @@ def recon_3d(adata: AnnData,
                    position="upper_left", font="arial", font_size=fsize, color=mpl.colors.to_hex(other_color))
 
     # Save 3D reconstructed image or GIF or video
-    if save.endswith("png"):
+    if save.endswith(".png") or save.endswith(".tif") or save.endswith(".tiff") \
+            or save.endswith(".bmp") or save.endswith(".jpeg") or save.endswith(".jpg"):
         p.show(screenshot=save)
     else:
         path = p.generate_orbital_path(factor=2.0, shift=0, viewup=viewup, n_points=20)
