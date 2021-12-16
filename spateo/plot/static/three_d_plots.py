@@ -1,76 +1,198 @@
+import math
+import pandas as pd
 import pyvista as pv
+import matplotlib as mpl
+import numpy as np
+from anndata import AnnData
+from typing import Union, Optional, List
 
-def plot_3D(adata=None, cluster=None, colormap=None, window_size=(1024, 768), off_screen=True,
-            background_color="black", font_color="white", font_size=12, cpos=("xy", "xz", "yz", "iso"),
-            save=None, framerate=15, viewup=(0.5, 0.5, 1)):
+
+def set_mesh(adata: AnnData,
+             cluster: str = 'cluster',
+             cluster_show: Union[str, list] = "all",
+             gene_show: Union[str, list] = "all"
+             ):
     '''
 
-    Draw a 3D image that integrates all the slices through pyvista, and you can output a png image file, or a gif image
-    file, or an MP4 video file.
+    Create mesh.
 
     Parameters
     ----------
-        adata: 'anndata.AnnData'
-            An Integrate all sliced AnnData object. adata.obsm['spatial'] includes x, y, z axis information, and adata.obs includes various
-            clusters of information
-        cluster: 'str'
-            Cluster column name in adata.obs.
-        colormap: 'list'
-            A list of colors to override an existing colormap with a custom one.
-            For example, to create a three color colormap you might specify ['green', 'red', 'blue'].
-        window_size: 'tuple' (default: (1024, 768))
-            Window size in pixels.
-        off_screen: 'bool' (default: True)
-            Whether to close the pop-up interactive window.
-        background_color: 'str' (default: "black")
-            The background color of the window.
-        font_color: 'str' (default: "white")
-            Set the font color.
-        font_size: 'int' (default: 12)
-            Set the font size.
-        cpos: 'tuple' (default: ("xy", "xz", "yz", "iso"))
-            Tuple of camera position. You can choose 4 perspectives from the following seven perspectives for drawing,
-            and the last one is the main perspective. ("xy", "xz", "yz", "yx", "zx", "zy", "iso")
-        save: 'str'
-            Output file name. Filename should end in png, gif or mp4.
-        framerate: 'int' (default: 15)
-            Frames per second.The larger the framerate, the faster the rotation speed. (Used when the output file is MP4)
-        viewup: 'tuple' (default: (0.5, 0.5, 1))
-            In the process of generating the track path around the data scene, viewup is the normal of the track plane.
+    adata : :class:`~anndata.AnnData`
+        an Annodata object.
+    cluster : `str`
+        Column name in .obs DataFrame that stores clustering results.
+    cluster_show : `str` or `list` (default: `all`)
+        Clustering categories that need to be displayed.
+    gene_show : `str` or `list` (default: `all`)
+        Genes that need to be displayed.
+
+    Returns
+    -------
+    mask_grid:
+        pyvista.PolyData
+        Dataset consisting of undisplayed clustering vertices.(if cluster_show != "all", return the mask_grid.)
+    other_grid:
+        pyvista.PolyData
+        Dataset consisting of displayed clustering vertices.
+    surf:
+        pyvista.PolyData
+        Clipped surface.
 
     '''
 
-    if colormap is None:
-        cmap = mpl.colors.LinearSegmentedColormap.from_list(
-            "autocmap",["#F56867", "#FEB915", "#C798EE", "#59BE86", "#7495D3", "#D1D1D1", "#6D1A9C", "#15821E", "#3A84E6",
-                        "#997273", "#787878", "#DB4C6C", "#9E7A7A", "#554236", "#AF5F3C", "#93796C", "#F9BD3F", "#DAB370",
-                        "#877F6C", "#268785"]
-        )
-        mpl.cm.register_cmap(cmap=cmap)
-        colormap = sns.color_palette(palette="autocmap", n_colors=len(adata.obs[cluster].unique()), as_cmap=False)
-        colormap = [mpl.colors.to_hex(i, keep_alpha=False) for i in colormap]
-
-    points = adata.obsm["spatial"].values
+    points = adata.obs[["x", "y", "z"]].values
     grid = pv.PolyData(points)
-    grid["cluster"] = adata.obs[cluster]
-    volume = grid.delaunay_3d()
-    surf = volume.extract_geometry()
+
+    if cluster_show == "all":
+        grid["cluster"] = adata.obs[cluster]
+    elif isinstance(cluster_show, list) or isinstance(cluster_show, tuple):
+        grid["cluster"] = adata.obs[cluster].map(lambda x: str(x) if x in cluster_show else "mask")
+    else:
+        grid["cluster"] = adata.obs[cluster].map(lambda x: x if x == cluster_show else "mask")
+
+    if gene_show == "all":
+        grid["gene"] = adata.X.sum(axis=1, keepdims=True)
+    else:
+        grid["gene"] = adata[:, gene_show].X.sum(axis=1, keepdims=True)
+
+    surf = grid.delaunay_3d().extract_geometry()
     surf.subdivide(nsub=3, subfilter="loop", inplace=True)
-    clipped = grid.clip_surface(surf)
-    p = pv.Plotter(shape="3|1", off_screen=off_screen, border=True,border_color=font_color,
-                   lighting="light_kit", window_size=list(window_size))
+    clipped_grid = grid.clip_surface(surf)
+    clipped_grid_data = pd.DataFrame(clipped_grid.points)
+    clipped_grid_data["cluster"], clipped_grid_data["gene"] = clipped_grid["cluster"], clipped_grid["gene"]
+
+    other_data = clipped_grid_data[clipped_grid_data["cluster"] != "mask"]
+    other_grid = pv.PolyData(other_data[[0, 1, 2]].values)
+    other_grid["cluster"] = other_data["cluster"]
+    other_grid["gene"] = other_data["gene"]
+    if cluster_show != "all":
+        mask_data = clipped_grid_data[clipped_grid_data["cluster"] == "mask"]
+        mask_grid = pv.PolyData(mask_data[[0, 1, 2]].values)
+        return mask_grid, other_grid, surf
+    else:
+        return other_grid, surf
+
+
+
+def recon_3d(adata: AnnData,
+             cluster: str = 'cluster',
+             save: str = "3d.png",
+             cluster_show: Union[str, list] = "all",
+             gene_show: Union[str, list] = "all",
+             show: str = "cluster",
+             colormap: str = "RdYlBu_r",
+             background_color: str = "black",
+             other_color: str = "white",
+             off_screen: bool = True,
+             window_size: Optional[List[int]] = None,
+             cpos: Optional[list] = None,
+             bar_position: Optional[list] = None,
+             bar_height: float = 0.3,
+             viewup: Optional[list] = None,
+             framerate: int = 15
+             ):
+
+    """
+
+    Draw a 3D image that integrates all the slices through pyvista,
+    and you can output a png image file, or a gif image file, or an MP4 video file.
+
+    Parameters
+    ----------
+    adata : :class:`~anndata.AnnData`
+        an Annodata object.
+    cluster : `str`
+        Column name in .obs DataFrame that stores clustering results.
+    save : `str`
+        If a str, save the figure. Infer the file type if ending on {'.pdf', '.png', '.gif', '.mp4'}.
+    cluster_show : `str` or `list` (default: `all`)
+        Clustering categories that need to be displayed.
+    gene_show : `str` or `list` (default: `all`)
+        Genes that need to be displayed.
+    show : `str` (default: `cluster`)
+        Display gene expression (`gene`) or clustering results (`cluster`).
+    colormap : `str` (default: `RdYlBu_r`)
+        The name of a matplotlib colormap to use for categorical coloring.
+    background_color : `str` (default: `black`)
+        The background color of the active render window.
+    other_color : `str` (default: `white`)
+        The color of the font and border.
+    off_screen : `bool` (default: `True`)
+        Renders off screen when True. Useful for automated screenshots.
+    window_size : `list` (optional, default: `None`)
+        Window size in pixels. Defaults to [1024, 768].
+    cpos : `list` (optional, default: `None`)
+        List of Camera position. Available camera positions are: "xy", "xz", "yz", "yx", "zx", "zy", "iso".
+        Defaults to ["xy", "xz", "yz", "iso"].
+    bar_position : `list` (optional, default: `None`)
+        The percentage (0 to 1) along the windows’s horizontal direction and vertical direction to place the bottom
+        left corner of the colorbar. Defaults to [0.9, 0.1].
+    bar_height : `float` (default: `0.3`)
+        The percentage (0 to 1) height of the window for the colorbar.
+    viewup : `list` (optional, default: `None`)
+        The normal to the orbital plane. Defaults to [0.5, 0.5, 1].
+    framerate : `int` (default: `15`)
+        Frames per second.
+
+    Examples
+    --------
+    #>>> adata
+    AnnData object with n_obs × n_vars = 35145 × 16131
+    obs: 'slice_ID', 'x', 'y', 'z', 'cluster'
+    obsm: 'spatial'
+    #>>> recon_3d(adata=adata, cluster="cluster",cluster_show=["muscle", "testis"],gene_show=["128up", "14-3-3epsilon"],
+    #>>>          show='cluster', save="3d.png", viewup=[0, 0, 0], colormap="RdYlBu_r", bar_height=0.2)
+
+    """
+
+    if window_size is None:
+        window_size = [1024, 768]
+    if cpos is None:
+        cpos = ["xy", "xz", "yz", "iso"]
+    if viewup is None:
+        viewup = [0.5, 0.5, 1]
+    if bar_position is None:
+        bar_position = [0.9, 0.1]
+    if cluster_show != "all":
+        mask_grid, other_grid, surf = set_mesh(adata=adata, cluster=cluster, cluster_show=cluster_show, gene_show=gene_show)
+    else:
+        mask_grid = None
+        other_grid, surf = set_mesh(adata=adata, cluster=cluster, cluster_show=cluster_show, gene_show=gene_show)
+    # Plotting object to display vtk meshes
+    p = pv.Plotter(shape="3|1", off_screen=off_screen, border=True, border_color=other_color,
+                   lighting="light_kit", window_size=window_size)
     p.background_color = background_color
     for i, _cpos in enumerate(cpos):
         p.subplot(i)
-        p.add_mesh(surf, show_scalar_bar=False, show_edges=False, opacity=0.8, color="gray")
-        p.add_mesh(clipped, opacity=0.8, scalars="cluster", colormap=plot_color)
+
+        # Add clipped surface
+        p.add_mesh(surf, show_scalar_bar=False, show_edges=False, opacity=0.2, color='whitesmoke')
+        if mask_grid != None:
+            # Add undisplayed clustering vertices
+            p.add_mesh(mask_grid, opacity=0.02, color="whitesmoke", render_points_as_spheres=True, ambient=0.3)
+        # Add displayed clustering vertices
+        p.add_mesh(other_grid, opacity=0.7, scalars=show, colormap=colormap, render_points_as_spheres=True, ambient=0.3)
+
+        p.show_axes()
         p.remove_scalar_bar()
         p.camera_position = _cpos
-        p.add_text(f" camera_position = '{_cpos}' ", position="upper_left",
-                   font_size=font_size, color=font_color, font="arial")
-        if i == 3:
-            p.add_scalar_bar(title="cluster", title_font_size=font_size+10, label_font_size=font_size, color=font_color,
-                             font_family="arial", vertical=True, fmt="%Id", n_labels=0, use_opacity=True)
+        fsize = math.ceil(window_size[0] / 100)
+        if i == 3 and show == 'cluster':
+            p.add_scalar_bar(title=show, title_font_size=fsize + 5, label_font_size=fsize, fmt="%.2f", n_labels=0,
+                             font_family="arial", color=other_color, vertical=True, use_opacity=True,
+                             position_x=bar_position[0], position_y=bar_position[1],height=bar_height)
+        elif i == 3 and show == 'gene':
+            p.add_scalar_bar(title=show, title_font_size=fsize + 5, label_font_size=fsize, fmt="%.2f",
+                             font_family="arial", color=other_color, vertical=True, use_opacity=True,
+                             position_x=bar_position[0], position_y=bar_position[1],height=bar_height)
+        p.add_text(f"\n "
+                   f" Camera position = '{_cpos}' \n "
+                   f" Cluster(s): {cluster_show} \n "
+                   f" Gene(s): {gene_show} ",
+                   position="upper_left", font="arial", font_size=fsize, color=mpl.colors.to_hex(other_color))
+
+    # Save 3D reconstructed image or GIF or video
     if save.endswith("png"):
         p.show(screenshot=save)
     else:
