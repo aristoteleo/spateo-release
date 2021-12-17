@@ -66,6 +66,7 @@ def set_mesh(adata: AnnData,
     other_grid = pv.PolyData(other_data[[0, 1, 2]].values)
     other_grid["cluster"] = other_data["cluster"]
     other_grid["gene"] = other_data["gene"]
+    
     if cluster_show != "all":
         mask_data = clipped_grid_data[clipped_grid_data["cluster"] == "mask"]
         mask_grid = pv.PolyData(mask_data[[0, 1, 2]].values)
@@ -138,12 +139,12 @@ def recon_3d(adata: AnnData,
 
     Examples
     --------
-    #>>> adata
+    >>> adata
     AnnData object with n_obs × n_vars = 35145 × 16131
     obs: 'slice_ID', 'x', 'y', 'z', 'cluster'
     obsm: 'spatial'
-    #>>> recon_3d(adata=adata, cluster="cluster",cluster_show=["muscle", "testis"],gene_show=["128up", "14-3-3epsilon"],
-    #>>>          show='cluster', save="3d.png", viewup=[0, 0, 0], colormap="RdYlBu_r", bar_height=0.2)
+    >>> recon_3d(adata=adata, cluster="cluster",cluster_show=["muscle", "testis"],gene_show=["128up", "14-3-3epsilon"],
+    >>>          show='cluster', save="3d.png", viewup=[0, 0, 0], colormap="RdYlBu_r", bar_height=0.2)
 
     """
 
@@ -160,6 +161,7 @@ def recon_3d(adata: AnnData,
     else:
         mask_grid = None
         other_grid, surf = set_mesh(adata=adata, cluster=cluster, cluster_show=cluster_show, gene_show=gene_show)
+        
     # Plotting object to display vtk meshes
     p = pv.Plotter(shape="3|1", off_screen=off_screen, border=True, border_color=other_color,
                    lighting="light_kit", window_size=window_size)
@@ -187,6 +189,7 @@ def recon_3d(adata: AnnData,
             p.add_scalar_bar(title=show, title_font_size=fsize + 5, label_font_size=fsize, fmt="%.2f",
                              font_family="arial", color=other_color, vertical=True, use_opacity=True,
                              position_x=bar_position[0], position_y=bar_position[1],height=bar_height)
+                             
         p.add_text(f"\n "
                    f" Camera position = '{_cpos}' \n "
                    f" Cluster(s): {cluster_show} \n "
@@ -199,9 +202,9 @@ def recon_3d(adata: AnnData,
         p.show(screenshot=save)
     else:
         path = p.generate_orbital_path(factor=2.0, shift=0, viewup=viewup, n_points=20)
-        if save.endswith("gif"):
+        if save.endswith(".gif"):
             p.open_gif(save)
-        elif save.endswith("mp4"):
+        elif save.endswith(".mp4"):
             p.open_movie(save, framerate=framerate, quality=5)
         p.orbit_on_path(path, write_frames=True, viewup=(0, 0, 1), step=0.1)
         p.close()
