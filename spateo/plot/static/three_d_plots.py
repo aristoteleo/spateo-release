@@ -2,7 +2,6 @@ import math
 import pandas as pd
 import pyvista as pv
 import matplotlib as mpl
-import numpy as np
 from anndata import AnnData
 from typing import Union, Optional, List
 
@@ -75,7 +74,6 @@ def set_mesh(adata: AnnData,
         return other_grid, surf
 
 
-
 def recon_3d(adata: AnnData,
              cluster: str = 'cluster',
              save: str = "3d.png",
@@ -93,7 +91,6 @@ def recon_3d(adata: AnnData,
              viewup: Optional[list] = None,
              framerate: int = 15
              ):
-
     """
 
     Draw a 3D image that integrates all the slices through pyvista,
@@ -139,12 +136,12 @@ def recon_3d(adata: AnnData,
 
     Examples
     --------
-    >>> adata
+    #>>> adata
     AnnData object with n_obs × n_vars = 35145 × 16131
     obs: 'slice_ID', 'x', 'y', 'z', 'cluster'
     obsm: 'spatial'
-    >>> recon_3d(adata=adata, cluster="cluster",cluster_show=["muscle", "testis"],gene_show=["128up", "14-3-3epsilon"],
-    >>>          show='cluster', save="3d.png", viewup=[0, 0, 0], colormap="RdYlBu_r", bar_height=0.2)
+    #>>> recon_3d(adata=adata, cluster="cluster",cluster_show=["muscle", "testis"],gene_show=["128up", "14-3-3epsilon"],
+    #>>>          show='cluster', save="3d.png", viewup=[0, 0, 0], colormap="RdYlBu_r", bar_height=0.2)
 
     """
 
@@ -157,11 +154,12 @@ def recon_3d(adata: AnnData,
     if bar_position is None:
         bar_position = [0.9, 0.1]
     if cluster_show != "all":
-        mask_grid, other_grid, surf = set_mesh(adata=adata, cluster=cluster, cluster_show=cluster_show, gene_show=gene_show)
+        mask_grid, other_grid, surf = set_mesh(adata=adata, cluster=cluster, cluster_show=cluster_show,
+                                               gene_show=gene_show)
     else:
         mask_grid = None
         other_grid, surf = set_mesh(adata=adata, cluster=cluster, cluster_show=cluster_show, gene_show=gene_show)
-        
+
     # Plotting object to display vtk meshes
     p = pv.Plotter(shape="3|1", off_screen=off_screen, border=True, border_color=other_color,
                    lighting="light_kit", window_size=window_size)
@@ -173,28 +171,26 @@ def recon_3d(adata: AnnData,
         p.add_mesh(surf, show_scalar_bar=False, show_edges=False, opacity=0.2, color='whitesmoke')
         if mask_grid != None:
             # Add undisplayed clustering vertices
-            p.add_mesh(mask_grid, opacity=0.02, color="whitesmoke", render_points_as_spheres=True, ambient=0.3)
+            p.add_mesh(mask_grid, opacity=0.02, color="whitesmoke", render_points_as_spheres=True, ambient=0.5)
         # Add displayed clustering vertices
-        p.add_mesh(other_grid, opacity=0.7, scalars=show, colormap=colormap, render_points_as_spheres=True, ambient=0.3)
+        p.add_mesh(other_grid, opacity=0.7, scalars=show, colormap=colormap, render_points_as_spheres=True, ambient=0.5)
 
         p.show_axes()
         p.remove_scalar_bar()
         p.camera_position = _cpos
-        fsize = math.ceil(window_size[0] / 100)
+
         if i == 3 and show == 'cluster':
-            p.add_scalar_bar(title=show, title_font_size=fsize + 5, label_font_size=fsize, fmt="%.2f", n_labels=0,
-                             font_family="arial", color=other_color, vertical=True, use_opacity=True,
-                             position_x=bar_position[0], position_y=bar_position[1],height=bar_height)
+            p.add_scalar_bar(title=show, fmt="%.2f", n_labels=0,font_family="arial", color=other_color, vertical=True,
+                             use_opacity=True,position_x=bar_position[0], position_y=bar_position[1], height=bar_height)
         elif i == 3 and show == 'gene':
-            p.add_scalar_bar(title=show, title_font_size=fsize + 5, label_font_size=fsize, fmt="%.2f",
-                             font_family="arial", color=other_color, vertical=True, use_opacity=True,
-                             position_x=bar_position[0], position_y=bar_position[1],height=bar_height)
-                             
+            p.add_scalar_bar(title=show, fmt="%.2f", font_family="arial", color=other_color, vertical=True,
+                             use_opacity=True,position_x=bar_position[0], position_y=bar_position[1], height=bar_height)
+        fontsize = math.ceil(window_size[0] / 100)
         p.add_text(f"\n "
                    f" Camera position = '{_cpos}' \n "
                    f" Cluster(s): {cluster_show} \n "
                    f" Gene(s): {gene_show} ",
-                   position="upper_left", font="arial", font_size=fsize, color=mpl.colors.to_hex(other_color))
+                   position="upper_left", font="arial", font_size=fontsize, color=mpl.colors.to_hex(other_color))
 
     # Save 3D reconstructed image or GIF or video
     if save.endswith(".png") or save.endswith(".tif") or save.endswith(".tiff") \
