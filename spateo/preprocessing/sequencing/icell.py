@@ -4,11 +4,11 @@ import numpy as np
 import sys
 import os
 import cv2
-from scipy import signal
+from scipy import signal, stats
 from skimage.feature import peak_local_max
 import matplotlib.pyplot as plt
 import pandas as pd
-from . import tools, watershed, enlarge, nbn, assign
+from . import bp, tools, watershed, enlarge, nbn, assign
 
 
 class Icell:
@@ -22,11 +22,13 @@ class Icell:
 		self.xmin, self.xmax, self.ymin, self.ymax = float('inf'), 0, float('inf'), 0
 		self.rawdata = None # 2d np array np.int16
 		self.genenum = None # 2d np array np.int16
-		self.convdata = None # 2d np array np.float64, storage convolution result or EM result, 0.0 - 255.0
+		self.convdata = None # 2d np array np.float64, storage convolution result, EM result, or BP result 0.0 - 255.0
 		self.cellMask = None # 2d np array np.uint8  0=>background 255=>cell
 		self.cellLabels = None # 2d np array represents cell labels of the whole slice np.int32
-	
-	
+        # EM results. These are needed to use BP.
+        self.em_n = None
+        self.em_p = None
+
 	def readData(self, record_genenum=False):
 		if self.xmax == 0:
 			self.getBor()
@@ -53,7 +55,7 @@ class Icell:
 	def getKneeOfgBlur(self):
 		cutoff = tools.getknee(self.convdata)
 		return cutoff
-	
+
 	def maskCellFromgBlur(self, cutoff=8):
 		self.cellMask = np.where(self.convdata>=cutoff, 255, 0).astype(np.uint8)
 		self.saveCellMask2tif()
@@ -66,7 +68,7 @@ class Icell:
 		kernel = np.ones((kernelSize, kernelSize), np.uint8)
 		self.cellMask = cv2.morphologyEx(self.cellMask, cv2.MORPH_CLOSE, kernel)
 		self.saveCellMask2tif(outFig)
-	
+
 	def mopen(self, kernelSize=3, outFig="adco.tif"):
 		kernel = np.zeros((kernelSize, kernelSize), np.uint8)
 		kernel = cv2.circle(kernel,(int((kernelSize-1)/2),int((kernelSize-1)/2)),int((kernelSize-1)/2),1,-1)
@@ -115,13 +117,13 @@ class Icell:
 		#c = signal.convolve2d(self.rawdata, b, boundary='symm', mode='same')
 		c = tools.conv(self.rawdata, ks=k, circle=True)
 		if usePeaks:
-			#b = cv2.circle(np.zeros([k,k], dtype=np.int16), (int((k-1)/2),int((k-1)/2)), int((k-1)/2), 1, -1)	
+			#b = cv2.circle(np.zeros([k,k], dtype=np.int16), (int((k-1)/2),int((k-1)/2)), int((k-1)/2), 1, -1)
 			#c = signal.convolve2d(self.rawdata, b, boundary='symm', mode='same')
 			peaks, labels = self.getpickclean(c, min_distance=k)
 			#print(peaks)
 			peaks = peaks - 1
 			self.drawHist(peaks)
-			posprob = nbn.nbnEM(peaks, c, w=w, mu=mu, var=var, maxitem=maxitem, precision=precision)
+			w, lam, theta = nbn.nbnEM(peaks, c, w=w, mu=mu, var=var, maxitem=maxitem, precision=precision)
 		else:
 			if isinstance(tissueM, np.ndarray):
 				peaks = c[tissueM==0]
@@ -130,12 +132,26 @@ class Icell:
 			if len(peaks) > 1000000:
 				peaks = np.random.choice(peaks,1000000)
 			self.drawHist(peaks)
-			posprob = nbn.nbnEM(peaks, c, w=w, mu=mu, var=var, maxitem=maxitem, precision=precision)
+			w, lam, theta = nbn.nbnEM(peaks, c, w=w, mu=mu, var=var, maxitem=maxitem, precision=precision)
 
+        self.em_n = -lam/np.log(theta)
+        self.em_p = theta
+        posprob = nbn.posp(w, lam, theta, c)
 		self.convdata = posprob
 		print(f'max posprob: {np.max(posprob)}')
 		tools.scaleTo255(posprob, inplace=True)
 		tools.array2img(posprob, outFig="nbnEM.tif")
+
+    def bp(self, p=0.7, q=0.3, precision=1e-3, max_iter=100, n_threads=1):
+        if self.em_n is None or self.em_p is None:
+            raise Exception('Run EM first')
+
+        background_probs = stats.nbinom(n=self.em_n[0], p=self.em_p[0]).pmf(self.rawdata)
+        cell_probs = stats.nbinom(n=self.em_n[1], p=self.em_p[1]).pmf(self.rawdata)
+        posprob = bp.cell_marginals(cell_probs, background_probs, p, q, precision, max_iter, n_threads)
+        self.convdata = posprob
+        tools.scaleTo255(posprob, inplace=True)
+		tools.array2img(posprob, outFig="BP.tif")
 
 	def drawHist(self, a, zero2one=False):
 		if zero2one:
@@ -144,7 +160,7 @@ class Icell:
 			#plt.hist(a, bins=range(0,int(np.max(a))+1))
 			plt.hist(a, bins=100,range=[0,100])
 			plt.savefig("convDis.png")
-		
+
 	def getpickclean(self, img, min_distance=21):
 		picks = peak_local_max(img,min_distance=min_distance)
 		b = np.zeros(img.shape, dtype=np.uint8)
@@ -158,9 +174,9 @@ class Icell:
 					tmp[labels[y,x]] = 1
 					rs.append(img[y,x])
 		return(np.array(rs), labels)
-		
-		
-	
+
+
+
 
 	# the spot coordinate starts from 0
 	def getBor(self):
@@ -175,7 +191,7 @@ class Icell:
 				self.ymin = y if y < self.ymin else self.ymin
 				self.ymax = y if y > self.ymax else self.ymax
 
-	
+
 	# self.rawdata[0,0] => the value in (self.ymin,self.xmin)
 	# self.rawdata[0,1] => the value in (self.ymin,self.xmin + 1)
 	def readFile2array(self, record_genenum):
@@ -196,12 +212,12 @@ class Icell:
 					a[y][x] += int(lines[4])
 				else:
 					a[y][x] += int(lines[5])
-				
+
 				if record_genenum:
 					g[y][x] += 1
 		self.rawdata = np.array(a, dtype=np.int16)
 		self.genenum = np.array(g, dtype=np.int16) if record_genenum else None
-	
+
 
 	def saveRawAstif(self, outFig="raw.tif"):
 		tools.array2img(self.rawdata, outFig=outFig)
@@ -214,6 +230,3 @@ class Icell:
 		dst = tools.gBlur(x, k, inplace)
 		if not inplace:
 			return(dst)
-
-
-
