@@ -8,7 +8,7 @@ from scipy import signal
 from skimage.feature import peak_local_max
 import matplotlib.pyplot as plt
 import pandas as pd
-from . import tools, watershed, enlarge, nbn
+from . import tools, watershed, enlarge, nbn, assign
 
 
 class Icell:
@@ -102,7 +102,12 @@ class Icell:
 		np.savetxt(outfile, self.cellLabels, fmt='%s')
 
 	def addCellLabelsToMatrix(self, outFile):
-		tools.addCellLabels(self.infile, self.cellLabels, self.xmin, self.ymin, outFile)
+		cens = assign.cal_cell_centriod(self.cellLabels)
+		tools.addCellLabels(self.infile, self.cellLabels, self.xmin, self.ymin, outFile, cens)
+
+	def assignNonCellSpots(self,  long_matrix_file="expressionCellLabels.matrix", radius=1):
+		cens = assign.cal_cell_centriod(self.cellLabels)
+		assign.assign_point(long_matrix_file, self.cellLabels, cens, self.xmin, self.ymin, radius=radius)
 
 	# nbnEM
 	def nbnEM(self, k=11, w=np.array([0.99,0.01]), mu=np.array([10.0,300.0]), var=np.array([20.0,400.0]), maxitem=2000, precision=1e-3, usePeaks=False, tissueM=None):

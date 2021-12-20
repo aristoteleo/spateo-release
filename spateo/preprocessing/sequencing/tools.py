@@ -124,9 +124,9 @@ def getknee(gBlurArray): # np.float 0 - 255
 	return(round(kl.knee))
 
 
-def addCellLabels(inFile, cellMask, x_min, y_min, outFile):
+def addCellLabels(inFile, cellMask, x_min, y_min, outFile, cens):
 	o = open(outFile, "wt")
-	o.write("geneID\tx\ty\tUMICount\tlabel\n")
+	o.write("geneID\tx\ty\tUMICount\tlabel\tcentroid_y\tcentroid_x\n")
 	with open(inFile, "rt") as f:
 		f.readline()
 		for line in f:
@@ -134,5 +134,8 @@ def addCellLabels(inFile, cellMask, x_min, y_min, outFile):
 			x, y = int(lines[0]), int(lines[1])
 			x = x - x_min
 			y = y - y_min
-			o.write(lines[2] + "\t" + lines[0] + "\t" + lines[1] + "\t" + lines[3] + "\t" + str(int(cellMask[y,x]))+"\n")
+			if int(cellMask[y,x]) > 0:
+				o.write(lines[2] + "\t" + lines[0] + "\t" + lines[1] + "\t" + lines[3] + "\t" + str(int(cellMask[y,x]))+"\t" + str(cens[int(cellMask[y,x])][0]+y_min) + "\t" + str(cens[int(cellMask[y,x])][1]+x_min) + "\n")
+			else:
+				o.write(lines[2] + "\t" + lines[0] + "\t" + lines[1] + "\t" + lines[3] + "\t0\t0\t0\n")
 	o.close()

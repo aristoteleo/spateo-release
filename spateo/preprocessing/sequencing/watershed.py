@@ -2,16 +2,16 @@
 
 from scipy import ndimage as ndi
 from skimage import morphology,feature
-from . import process
+from . import tools
 import numpy as np
 import cv2
 from skimage import color
 
 def getCellLabels(cellmask, rawdata, kernelgblur=21, min_distance=5): # cellmask is a np array np.uint8 0=>background 255=>cell
-	gblur = process.gBlur(rawdata.astype(float), kernelgblur, inplace=False)
+	gblur = tools.gBlur(rawdata.astype(float), kernelgblur, inplace=False)
 	#print(gblur.dtype)
 	#print(gblur)
-	process.scaleTo255(gblur)
+	tools.scaleTo255(gblur)
 	#print(gblur.dtype)
 	#print(gblur)
 	#np.savetxt("gblur.txt",gblur)
