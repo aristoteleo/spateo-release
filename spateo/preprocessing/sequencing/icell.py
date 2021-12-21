@@ -142,13 +142,22 @@ class Icell:
         tools.scaleTo255(posprob, inplace=True)
         tools.array2img(posprob, outFig="nbnEM.tif")
 
-    def bp(self, p=0.7, q=0.3, precision=1e-3, max_iter=100, n_threads=1):
+    def bp(self, neighborhood=None, p=0.7, q=0.3, precision=1e-3, max_iter=100, n_threads=1):
         if self.em_n is None or self.em_p is None:
             raise Exception('Run EM first')
 
         background_probs = stats.nbinom(n=self.em_n[0], p=self.em_p[0]).pmf(self.rawdata)
         cell_probs = stats.nbinom(n=self.em_n[1], p=self.em_p[1]).pmf(self.rawdata)
-        posprob = bp.cell_marginals(cell_probs, background_probs, p, q, precision, max_iter, n_threads)
+        posprob = bp.cell_marginals(
+            cell_probs,
+            background_probs,
+            neighborhood=neighborhood,
+            p=p,
+            q=q,
+            precision=precision,
+            max_iter=max_iter,
+            n_threads=n_threads
+        )
         self.convdata = posprob
         tools.scaleTo255(posprob, inplace=True)
         tools.array2img(posprob, outFig="BP.tif")
