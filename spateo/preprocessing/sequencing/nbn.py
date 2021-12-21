@@ -17,7 +17,7 @@ def nbnEMOne(w, lam, theta, x):
 	tau[0,(tau.sum(axis=0)<=1e-9) & (x<mu[0]*2)] = 1
 	tau[1,(tau.sum(axis=0)<=1e-9) & (x>=mu[0]*2)] = 1
 	tau = tau/tau.sum(axis=0)
-	
+
 	beta = 1-1/(1-theta)-1/np.log(theta)
 
 	delta = []
@@ -42,7 +42,7 @@ def posp(w, lam, theta, x):
 	tau.append(w[0] * bp)
 	tau.append(w[1] * cp)
 	tau = np.array(tau)
-	tau = tau/tau.sum(axis=0)	
+	tau = tau/tau.sum(axis=0)
 	return(tau[1]) # the prob of cell
 
 def lam2r(lam, theta):
@@ -83,9 +83,7 @@ def nbnEM(x, realData, w=np.array([0.99,0.01]), mu=np.array([10.0,100.0]), var=n
 		if np.max([np.max(np.fabs(w-wpre)), np.max(np.fabs(lam-lampre)), np.max(np.fabs(theta-thetapre))]) <= precision:
 			print(f"break in {i} item")
 			break
-		
-	posprob = posp(w, lam, theta, realData)
-	return(posprob)
+	return w, lam, theta
 
 def readData(infile):
 	data = []
@@ -97,5 +95,3 @@ def readData(infile):
 
 #x = readData("sim11.txt") # 1d
 #posprob = nbnEM(x, realData) # 2d
-
-

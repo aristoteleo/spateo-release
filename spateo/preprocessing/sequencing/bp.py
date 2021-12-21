@@ -2,7 +2,6 @@ import numpy as np
 from fbgbp import FastBinaryGridBeliefPropagation
 
 def cell_marginals(
-    x: np.ndarray,
     cell_probs: np.ndarray,
     background_probs: np.ndarray,
     p: float = 0.7,
@@ -17,8 +16,6 @@ def cell_marginals(
 
     Parameters
     ----------
-    x : :class:`~numpy.ndarray`
-        The raw pixels (i.e. UMIs).
     cell_probs : :class:`~numpy.ndarray`
         The probability of each pixel being a cell (for instance, computed by
         taking the PDF of the parameters estmiated by EM).
@@ -44,10 +41,10 @@ def cell_marginals(
     marginals : :class:`~numpy.ndarray`
         The marginal probability, at each pixel, of the pixel being a cell.
     """
-    if x.shape != cell_probs.shape or x.shape != background_probs.shape:
-        raise ValueError('`x`, `cell_probs`, `background_probs` must have the same shape')
+    if cell_probs.shape != background_probs.shape:
+        raise ValueError('`cell_probs` and `background_probs` must have the same shape')
 
-    shape = np.array(x.shape, dtype=np.uint32)
+    shape = np.array(cell_probs.shape, dtype=np.uint32)
     potentials0 = background_probs.flatten().astype(np.double)
     potentials1 = cell_probs.flatten().astype(np.double)
     bp = FastBinaryGridBeliefPropagation(
