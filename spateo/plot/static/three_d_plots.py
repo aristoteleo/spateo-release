@@ -65,7 +65,7 @@ def set_mesh(adata: AnnData,
     other_grid = pv.PolyData(other_data[[0, 1, 2]].values)
     other_grid["cluster"] = other_data["cluster"]
     other_grid["gene"] = other_data["gene"]
-    
+
     if cluster_show != "all":
         mask_data = clipped_grid_data[clipped_grid_data["cluster"] == "mask"]
         mask_grid = pv.PolyData(mask_data[[0, 1, 2]].values)
