@@ -28,3 +28,4 @@ fbgbp>=0.0.4
 pyvista
 POT
 nudged
+typing_extensions
