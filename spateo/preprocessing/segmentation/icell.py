@@ -5,6 +5,7 @@ from typing import Optional, Tuple, Union
 
 import cv2
 import numpy as np
+from scipy import stats
 from scipy.sparse import spmatrix
 from typing_extensions import Literal
 
@@ -34,17 +35,12 @@ def mclose_mopen(mask: np.ndarray, k: int) -> np.ndarray:
     return mopen.astype(bool)
 
 
-def gaussian_blur(
-    X: np.ndarray,
-    k: int,
-) -> np.ndarray:
+def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
     """Gaussian blur
 
     Args:
         X: UMI counts per pixel.
         k: Radius of gaussian blur.
-        mk: Kernel size to use for morphological close and open operations.
-        cutoff: Cell cutoff. Knee will be used if not provided.
 
     Returns:
         Blurred array
@@ -61,7 +57,7 @@ def em(
     var: Tuple[float, float] = (20.0, 400.0),
     max_iter: int = 2000,
     precision: float = 1e-3,
-) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
     """EM
 
     Args:
@@ -78,30 +74,36 @@ def em(
         precision: Stop EM algorithm once desired precision has been reached.
 
     Returns:
-        Tuple of negative binomial parameters estimated by the EM algorithm.
-        The first number is the number of successes, and the second is the
-        success probability.
+        Tuple of parameters estimated by the EM algorithm.
     """
     pass
 
 
 def em_confidence(
     X: np.ndarray,
-    background_params: Tuple[float, float],
-    cell_params: Tuple[float, float],
+    w: Tuple[float, float],
+    n: Tuple[float, float],
+    p: Tuple[float, float],
 ) -> np.ndarray:
     """Compute confidence of each pixel being a cell, using the parameters
     estimated by the EM algorithm.
 
     Args:
         X: UMI counts per pixel.
-        background_params: Parameters estimated for background.
-        cell_params: Parameters estimated for cell.
+        w:
+        n:
+        p:
 
     Returns:
         Numpy array of confidence scores within the range [0, 1].
     """
-    pass
+    background_probs = stats.nbinom(n=n[0], p=p[0]).pmf(X)
+    cell_probs = stats.nbinom(n=n[1], p=p[1]).pmf(X)
+    tau = []
+    tau.append(w[0] * background_probs)
+    tau.append(w[1] * cell_probs)
+    tau = np.array(tau)
+    return tau[1] / tau.sum(axis=0)
 
 
 def bp(
