@@ -7,14 +7,14 @@ import nudged
 from scipy.spatial import distance_matrix
 from scipy.sparse.csr import spmatrix
 from anndata import AnnData
-from typing import Union, Optional
+from typing import Union
 
 def pairwise_align(slice1: AnnData,
                    slice2: AnnData,
                    alpha: float = 0.1,
                    numItermax: int = 200,
                    numItermaxEmd: int = 100000,
-                   device: Optional[str, torch.device] = "cpu"
+                   device: Union[str, torch.device] = "cpu"
                    ):
     """
 
@@ -168,7 +168,7 @@ def slice_alignment_bigBin(slices,
                            alpha: float = 0.1,
                            numItermax: int = 200,
                            numItermaxEmd: int = 100000,
-                           device: Optional[str, torch.device] = "cpu",
+                           device: Union[str, torch.device] = "cpu",
                            verbose: bool = True
                            ):
     """
@@ -232,7 +232,3 @@ def slice_alignment_bigBin(slices,
         align_slices.append(align_slice)
 
     return align_slices, align_slices_big
-
-
-
-

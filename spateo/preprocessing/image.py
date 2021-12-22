@@ -4,8 +4,7 @@ import cv2
 from typing import Union, Optional
 from spateo.tools.image_layer import add_img_layer
 
-
-def preprocess(adata: AnnData,
+def remove_background(adata: AnnData,
                threshold: Union[float, str] = 'auto',
                slice:Optional[str] = None,
                used_img_layer: Optional[str] = None,
