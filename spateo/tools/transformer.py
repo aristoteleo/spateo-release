@@ -78,7 +78,7 @@ def procrustes(X, Y, scaling=True, reflection="best"):
     V = Vt.T
     T = np.dot(V, U.T)
 
-    if reflection is not "best":
+    if reflection != "best":
 
         # does the current solution use a reflection?
         have_reflection = np.linalg.det(T) < 0

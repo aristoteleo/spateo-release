@@ -6,7 +6,7 @@ from shapely.geometry import Point, Polygon, LineString
 from skimage import measure
 
 
-def bin_index(coord: float, coord_min: float, binsize: int = 50) -> int:
+def bin_indices(coords: np.ndarray, coord_min: float, binsize: int = 50) -> int:
     """Take a DNB coordinate, the mimimum coordinate and the binsize, calculate the index of bins for the current
     coordinate.
 
@@ -25,11 +25,11 @@ def bin_index(coord: float, coord_min: float, binsize: int = 50) -> int:
         num: `int`
             The bin index for the current coordinate.
     """
-    num = np.floor((coord - coord_min) / binsize)
-    return num.astype(int)
+    num = np.floor((coords - coord_min) / binsize)
+    return num.astype(np.uint32)
 
 
-def centroid(bin_ind: float, coord_min: float, binsize: int = 50) -> float:
+def centroids(bin_indices: np.ndarray, coord_min: float, binsize: int = 50) -> float:
     """Take a bin index, the mimimum coordinate and the binsize, calculate the centroid of the current bin.
 
     Parameters
@@ -47,7 +47,7 @@ def centroid(bin_ind: float, coord_min: float, binsize: int = 50) -> float:
         num: `int`
             The bin index for the current coordinate.
     """
-    coord_centroids = bin_ind * binsize + binsize / 2
+    coord_centroids = bin_indices * binsize + binsize / 2
     return coord_centroids
 
 

@@ -142,7 +142,7 @@ def slice_alignment(
         if verbose:
             print(m)
 
-    if device is not "cpu":
+    if device != "cpu":
         _log(f"\nWhether CUDA is currently available: {torch.cuda.is_available()}")
         _log(f"Device: {torch.cuda.get_device_name(device=device)}")
         _log(

@@ -1,16 +1,69 @@
-from typing import Optional
+import gzip
+from typing import Optional, Tuple
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, spmatrix
 
-from .utils import bin_index, centroid, get_bin_props, get_label_props
+from .utils import bin_indices, centroids, get_bin_props, get_label_props
+
+COUNT_COLUMN_MAPPING = {
+    "total": 3,
+    "spliced": 4,
+    "unspliced": 5,
+}
+
+
+def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
+    """Read a BGI read file as a pandas DataFrame.
+
+    Args:
+        path: Path to read file.
+
+    Returns:
+        Pandas Dataframe with column names `gene`, `x`, `y`, `total` and
+        additionally `spliced` and `unspliced` if splicing counts are present.
+    """
+    return pd.read_csv(
+        path,
+        sep="\t",
+        dtype={
+            0: "category",  # geneID
+            1: np.uint32,  # x
+            2: np.uint32,  # y
+            3: np.uint16,  # total
+            4: np.uint16,  # spliced
+            5: np.uint16,  # unspliced
+        },
+    )
+
+
+def read_bgi_agg(path: str) -> Tuple[spmatrix, Optional[spmatrix], Optional[spmatrix]]:
+    """Read BGI read file to calculate total number of UMIs observed per
+    coordinate.
+
+    Args:
+        path: Path to read file.
+
+    Returns:
+        Tuple containing 3 sparse matrices corresponding to total, spliced,
+        and unspliced counts respectively. If the read file does not contain
+        spliced and unspliced counts, the last two elements are None.
+    """
+    data = read_bgi_as_dataframe(path)
+    matrices = []
+    for name, i in COUNT_COLUMN_MAPPING.items():
+        if i < len(data.columns):
+            matrices.append(csr_matrix((data[data.columns[i]], (data["x"], data["y"]))))
+        else:
+            matrices.append(None)
+    return tuple(matrices)
 
 
 def read_bgi(
-    filename: str,
+    path: str,
     binsize: int = 50,
     slice: Optional[str] = None,
     label_path: Optional[str] = None,
@@ -41,51 +94,33 @@ def read_bgi(
             An AnnData object. Each row of the AnnData object correspond to a spot (aggregated with multiple bins). The
             `spatial` key in the .obsm corresponds to the x, y coordinates of the centroids of all spot.
     """
-
-    data = pd.read_csv(filename, header=0, delimiter="\t")
-    data["geneID"] = data.geneID.astype(str).str.strip('"')
+    data = read_bgi_as_dataframe(path)
+    columns = list(data.columns)
+    gene_column, x_column, y_column = columns[:3]
+    total_column = columns[COUNT_COLUMN_MAPPING["total"]]
 
     # get cell name
     if not label_path:
-        x, y = data["x"], data["y"]
+        x, y = data[x_column].values, data[y_column].values
         x_min, y_min = np.min(x), np.min(y)
 
-        data["x_ind"] = bin_index(data["x"].values, x_min, binsize)
-        data["y_ind"] = bin_index(data["y"].values, y_min, binsize)
+        data["x_ind"] = bin_indices(x, x_min, binsize)
+        data["y_ind"] = bin_indices(y, y_min, binsize)
+        data["x_centroid"] = centroids(data["x_ind"].values, x_min, binsize)
+        data["y_centroid"] = centroids(data["y_ind"].values, y_min, binsize)
 
-        data["x_centroid"] = centroid(data["x_ind"].values, x_min, binsize)
-        data["y_centroid"] = centroid(data["y_ind"].values, y_min, binsize)
-
+        # TODO: This take a long time for many rows! Map each unique x, y pair
+        # to a cell name first.
         data["cell_name"] = data["x_ind"].astype(str) + "_" + data["y_ind"].astype(str)
+
+        # aggregate spots with multiple bins
+        dedup = ~data.duplicated("cell_name")
+        label_props = get_bin_props(data[["x_ind", "y_ind"]][dedup], binsize)
+        coor = data[["x_centroid", "y_centroid"]][dedup].values
     else:
+        # TODO: Get cell names using labels
         data["cell_name"] = data["cell"].astype(str)
 
-    uniq_cell, uniq_gene = data.cell_name.unique(), data.geneID.unique()
-    uniq_cell, uniq_gene = list(uniq_cell), list(uniq_gene)
-
-    cell_dict = dict(zip(uniq_cell, range(0, len(uniq_cell))))
-    gene_dict = dict(zip(uniq_gene, range(0, len(uniq_gene))))
-
-    data["csr_x_ind"] = data["cell_name"].map(cell_dict)
-    data["csr_y_ind"] = data["geneID"].map(gene_dict)
-
-    # !Note that in this version, the column name of the gene count value may be 'UMICount' or 'MIDCounts'.
-    count_name = "UMICount" if "UMICount" in data.columns else "MIDCounts"
-
-    # Important! by default, duplicate entries are summed together in the following which is needed for us!
-    csr_mat = csr_matrix(
-        (data[count_name], (data["csr_x_ind"], data["csr_y_ind"])),
-        shape=((len(uniq_cell), len(uniq_gene))),
-    )
-
-    # get cell
-    if not label_path:
-        # aggregate spots with multiple bins
-        label_props = get_bin_props(
-            data[["x_ind", "y_ind"]].drop_duplicates(inplace=False), binsize
-        )
-        coor = data[["x_centroid", "y_centroid"]].drop_duplicates(inplace=False).values
-    else:
         # Measure properties and get contours of labeled cell regions.
         label_mtx = np.load(label_path)
         label_props = get_label_props(
@@ -93,6 +128,28 @@ def read_bgi(
         )
         # Get centroid from label_props
         coor = label_props[["centroid-0", "centroid-1"]].values
+
+    uniq_cell, uniq_gene = data["cell_name"].unique(), data[gene_column].unique()
+    uniq_cell, uniq_gene = list(uniq_cell), list(uniq_gene)
+
+    cell_dict = dict(zip(uniq_cell, range(0, len(uniq_cell))))
+    gene_dict = dict(zip(uniq_gene, range(0, len(uniq_gene))))
+
+    data["csr_x_ind"] = data["cell_name"].map(cell_dict)
+    data["csr_y_ind"] = data[gene_column].map(gene_dict)
+
+    # Important! by default, duplicate entries are summed together in the following which is needed for us!
+    X = csr_matrix(
+        (data[total_column], (data["csr_x_ind"], data["csr_y_ind"])),
+        shape=(len(uniq_cell), len(uniq_gene)),
+    )
+    layers = {}
+    for name, i in COUNT_COLUMN_MAPPING.items():
+        if name != "total" and i < len(columns):
+            layers[name] = csr_matrix(
+                (data[columns[i]], (data["csr_x_ind"], data["csr_y_ind"])),
+                shape=(len(uniq_cell), len(uniq_gene)),
+            )
 
     label_props["cell_name"] = uniq_cell
     label_props["slice"] = slice
@@ -106,6 +163,6 @@ def read_bgi(
 
     obsm = {"spatial": coor}
 
-    adata = AnnData(csr_mat, obs=obs.copy(), var=var.copy(), obsm=obsm.copy())
+    adata = AnnData(X=X, layers=layers, obs=obs, var=var, obsm=obsm)
 
     return adata

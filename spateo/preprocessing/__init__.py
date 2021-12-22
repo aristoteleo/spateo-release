@@ -1,4 +1,4 @@
 """A complete solution of spatialtemporal dynamics analyses toolkit of single cell spatial transcriptomics
 """
 
-from . import image, sequencing, filter
+from . import image, segmentation, filter
