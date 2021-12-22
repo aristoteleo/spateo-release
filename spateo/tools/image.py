@@ -3,12 +3,7 @@
 from anndata import AnnData
 
 
-def add_image_layer(adata: AnnData,
-                  img,
-                  scale_factor: float,
-                  slice: str = None,
-                  img_layer: str = None
-                  ):
+def add_image_layer(adata: AnnData, img, scale_factor: float, slice: str = None, img_layer: str = None):
     """
     A helper function that add an image layer to AnnData object.
 
@@ -34,19 +29,19 @@ def add_image_layer(adata: AnnData,
                 The scale factor for the spots
     """
     # Create a new dictionary or add to the original slice
-    if 'spatial' not in adata.uns_keys():
-        adata.uns['spatial'] = dict()
-    if slice not in adata.uns['spatial'].keys():
-        adata.uns['spatial'][slice] = dict()
+    if "spatial" not in adata.uns_keys():
+        adata.uns["spatial"] = dict()
+    if slice not in adata.uns["spatial"].keys():
+        adata.uns["spatial"][slice] = dict()
 
-    if 'images' not in adata.uns['spatial'][slice]:
-        adata.uns['spatial'][slice]['images'] = {img_layer: img}
+    if "images" not in adata.uns["spatial"][slice]:
+        adata.uns["spatial"][slice]["images"] = {img_layer: img}
     else:
-        adata.uns['spatial'][slice]['images'][img_layer] = img
+        adata.uns["spatial"][slice]["images"][img_layer] = img
 
-    if 'scalefactors' not in adata.uns['spatial'][slice]:
-        adata.uns['spatial'][slice]['scalefactors'] = {img_layer: scale_factor}
+    if "scalefactors" not in adata.uns["spatial"][slice]:
+        adata.uns["spatial"][slice]["scalefactors"] = {img_layer: scale_factor}
     else:
-        adata.uns['spatial'][slice]['scalefactors'][img_layer] = scale_factor
+        adata.uns["spatial"][slice]["scalefactors"][img_layer] = scale_factor
 
     return adata

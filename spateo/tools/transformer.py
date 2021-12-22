@@ -3,8 +3,9 @@ from scipy.spatial import Delaunay
 import math
 from sklearn.decomposition import PCA
 
-def procrustes(X, Y, scaling=True, reflection='best'):
-    """ This function will need to be rewritten just with scipy.spatial.procrustes and
+
+def procrustes(X, Y, scaling=True, reflection="best"):
+    """This function will need to be rewritten just with scipy.spatial.procrustes and
     scipy.linalg.orthogonal_procrustes later.
 
     A port of MATLAB's `procrustes` function to Numpy.
@@ -57,8 +58,8 @@ def procrustes(X, Y, scaling=True, reflection='best'):
     X0 = X - muX
     Y0 = Y - muY
 
-    ssX = np.linalg.norm(X0, 'fro')**2 #(X0**2.).sum()
-    ssY = np.linalg.norm(Y0, 'fro')**2 #(Y0**2.).sum()
+    ssX = np.linalg.norm(X0, "fro") ** 2  # (X0**2.).sum()
+    ssY = np.linalg.norm(Y0, "fro") ** 2  # (Y0**2.).sum()
 
     # centred Frobenius norm
     normX = np.sqrt(ssX)
@@ -69,7 +70,7 @@ def procrustes(X, Y, scaling=True, reflection='best'):
     Y0 /= normY
 
     if my < m:
-        Y0 = np.concatenate((Y0, np.zeros(n, m-my)),0)
+        Y0 = np.concatenate((Y0, np.zeros(n, m - my)), 0)
 
     # optimum rotation matrix of Y
     A = np.dot(X0.T, Y0)
@@ -77,7 +78,7 @@ def procrustes(X, Y, scaling=True, reflection='best'):
     V = Vt.T
     T = np.dot(V, U.T)
 
-    if reflection is not 'best':
+    if reflection is not "best":
 
         # does the current solution use a reflection?
         have_reflection = np.linalg.det(T) < 0
@@ -96,22 +97,22 @@ def procrustes(X, Y, scaling=True, reflection='best'):
         b = traceTA * normX / normY
 
         # standarised distance between X and b*Y*T + c
-        d = 1 - traceTA**2
+        d = 1 - traceTA ** 2
 
         # transformed coords
-        Z = normX*traceTA*np.dot(Y0, T) + muX
+        Z = normX * traceTA * np.dot(Y0, T) + muX
 
     else:
         b = 1
-        d = 1 + ssY/ssX - 2 * traceTA * normY / normX
-        Z = normY*np.dot(Y0, T) + muX
+        d = 1 + ssY / ssX - 2 * traceTA * normY / normX
+        Z = normY * np.dot(Y0, T) + muX
 
     # transformation matrix
     if my < m:
         T = T[:my, :]
-    c = muX - b*np.dot(muY, T)
+    c = muX - b * np.dot(muY, T)
 
-    tform = {'rotation': T, 'scale': b, 'translation': c}
+    tform = {"rotation": T, "scale": b, "translation": c}
 
     return d, Z, tform
 
@@ -154,7 +155,7 @@ def AffineTrans(x, y, centroid_x, centroid_y, theta):
 
     sin_theta, cos_theta = np.sin(theta), np.cos(theta)
     T_r[0, 0], T_r[0, 1] = cos_theta, sin_theta
-    T_r[1, 0], T_r[1, 1] = - sin_theta, cos_theta
+    T_r[1, 0], T_r[1, 1] = -sin_theta, cos_theta
 
     for cur_x, cur_y, cur_ind in zip(x, y, np.arange(len(x))):
         data = np.array([cur_x, cur_y, 1])
@@ -166,13 +167,15 @@ def AffineTrans(x, y, centroid_x, centroid_y, theta):
 
 
 def add_spatial(adata):
-    adata.obsm['spatial'] = adata.obs.loc[:, ['coor_x', 'coor_y']].values
-    adata.obsm['X_spatial'] = adata.obsm['spatial'].astype(float).copy()
+    adata.obsm["spatial"] = adata.obs.loc[:, ["coor_x", "coor_y"]].values
+    adata.obsm["X_spatial"] = adata.obsm["spatial"].astype(float).copy()
+
 
 def add_spatial_intron(adata):
-    df = pd.Series(adata.obs.index).str.split(':', expand=True).iloc[:, 1].str.split("_", expand=True)
-    adata.obsm['spatial'] = df.values.astype(float)
-    adata.obsm['X_spatial'] = df.values.astype(float)
+    df = pd.Series(adata.obs.index).str.split(":", expand=True).iloc[:, 1].str.split("_", expand=True)
+    adata.obsm["spatial"] = df.values.astype(float)
+    adata.obsm["X_spatial"] = df.values.astype(float)
+
 
 def alpha_shape(x, y, alpha):
     # Start Using SHAPELY
@@ -182,9 +185,10 @@ def alpha_shape(x, y, alpha):
         from shapely.ops import triangulate
         from shapely.ops import cascaded_union, polygonize
     except ImportError:
-        raise ImportError("If you want to use the tricontourf in plotting function, you need to install `shapely` "
-                          "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
-                          )
+        raise ImportError(
+            "If you want to use the tricontourf in plotting function, you need to install `shapely` "
+            "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
+        )
 
     crds = np.array([x.flatten(), y.flatten()]).transpose()
     points = MultiPoint(crds)
@@ -205,8 +209,7 @@ def alpha_shape(x, y, alpha):
         edges.add((i, j))
         edge_points.append(coords[[i, j]])
 
-    coords = np.array([point.coords[0]
-                       for point in points])
+    coords = np.array([point.coords[0] for point in points])
 
     tri = Delaunay(coords)
     edges = set()
@@ -242,30 +245,32 @@ def alpha_shape(x, y, alpha):
 
     return cascaded_union(triangles), edge_points
 
+
 def pca_align(X):
     pca = PCA(n_components=2)
     pca.fit(X)
     R = pca.components_
     Y = (R @ X.T).T
-    
+
     return Y, R
+
 
 def AffineTrans(x, y, centroid_x, centroid_y, R, theta=None):
     trans_xy_coord = np.zeros((len(x), 2))
-    
+
     T_t, T_r = np.zeros((3, 3)), np.zeros((3, 3))
     np.fill_diagonal(T_t, 1)
     np.fill_diagonal(T_r, 1)
 
     T_t[0, 2], T_t[1, 2] = -centroid_x[0], -centroid_y[0]
-    
+
     if theta is not None:
         sin_theta, cos_theta = np.sin(theta), np.cos(theta)
         T_r[0, 0], T_r[0, 1] = cos_theta, sin_theta
-        T_r[1, 0], T_r[1, 1] = - sin_theta, cos_theta
+        T_r[1, 0], T_r[1, 1] = -sin_theta, cos_theta
     else:
-         T_r[:2, :2] = R
-    
+        T_r[:2, :2] = R
+
     for cur_x, cur_y, cur_ind in zip(x, y, np.arange(len(x))):
         data = np.array([cur_x, cur_y, 1])
         res = T_t @ data
@@ -276,14 +281,14 @@ def AffineTrans(x, y, centroid_x, centroid_y, R, theta=None):
 
 
 def correct_embryo_coord(adata):
-    if 'unspliced' in adata.layers:
+    if "unspliced" in adata.layers:
         add_spatial_intron(adata)
     else:
         add_spatial(adata)
-    
-    x, y = adata.obsm['X_spatial'][:, 0], adata.obsm['X_spatial'][:, 1]
 
-    adata_concave_hull, _ = alpha_shape(x, y, alpha=1)    
+    x, y = adata.obsm["X_spatial"][:, 0], adata.obsm["X_spatial"][:, 1]
+
+    adata_concave_hull, _ = alpha_shape(x, y, alpha=1)
 
     if type(adata_concave_hull) == shapely.geometry.multipolygon.MultiPolygon:
         adata_x, adata_y = adata_concave_hull[0].exterior.xy
@@ -293,17 +298,20 @@ def correct_embryo_coord(adata):
     adata_centroid_x, adata_centroid_y = adata_concave_hull.centroid.coords.xy
 
     adata_coords_correct, adata_R = pca_align(adata_coords)
-    adata_spatial_corrected = AffineTrans(adata_coords[:, 0], adata_coords[:, 1], adata_centroid_x, adata_centroid_y, adata_R)
+    adata_spatial_corrected = AffineTrans(
+        adata_coords[:, 0], adata_coords[:, 1], adata_centroid_x, adata_centroid_y, adata_R
+    )
 
     # rotate 90 degree
-    _, _, adata_coords_correct_2 = AffineTrans(adata_spatial_corrected[:, 0], adata_spatial_corrected[:, 1], [0, 0], [0, 0], None, np.pi/2)
+    _, _, adata_coords_correct_2 = AffineTrans(
+        adata_spatial_corrected[:, 0], adata_spatial_corrected[:, 1], [0, 0], [0, 0], None, np.pi / 2
+    )
     # reflect vertically
-    E9_5_coords_correct_2[:, 1] = - adata_coords_correct_2[:, 1]
-    adata.obsm['X_spatial'] = adata_coords_correct_2
+    E9_5_coords_correct_2[:, 1] = -adata_coords_correct_2[:, 1]
+    adata.obsm["X_spatial"] = adata_coords_correct_2
 
-    # reflect vertically again: 
-    adata_coords_correct_2[:, 1] = - adata_coords_correct_2[:, 1]
-    
+    # reflect vertically again:
+    adata_coords_correct_2[:, 1] = -adata_coords_correct_2[:, 1]
+
     # account for the mirror effect when plotting an image
-    adata.obsm['spatial'] = adata_coords_correct_2
-    
+    adata.obsm["spatial"] = adata_coords_correct_2

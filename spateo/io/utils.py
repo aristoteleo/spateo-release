@@ -51,8 +51,9 @@ def centroid(bin_ind: float, coord_min: float, binsize: int = 50) -> float:
     return coord_centroids
 
 
-def get_label_props(label_mtx: np.ndarray,
-                    properties: Tuple[str, ...]=('label', 'area', 'bbox', 'centroid')) -> pd.DataFrame:
+def get_label_props(
+    label_mtx: np.ndarray, properties: Tuple[str, ...] = ("label", "area", "bbox", "centroid")
+) -> pd.DataFrame:
     """Measure properties of labeled cell regions.
 
     Parameters
@@ -68,9 +69,9 @@ def get_label_props(label_mtx: np.ndarray,
             A dataframe with properties and contours
 
     """
+
     def contours(mtx):
-        """Get contours of a cell using `cv2.findContours`.
-        """
+        """Get contours of a cell using `cv2.findContours`."""
         # padding and transfer label mtx to binary mtx
         mtx = np.pad(mtx, 1)
         mtx[mtx > 0] = 255
@@ -82,8 +83,7 @@ def get_label_props(label_mtx: np.ndarray,
         return contour
 
     def contour_to_geo(contour):
-        """Transfer contours to `shapely.geometry`
-        """
+        """Transfer contours to `shapely.geometry`"""
         n = contour.shape[0]
         contour = np.squeeze(contour)
         if n >= 3:
@@ -96,8 +96,8 @@ def get_label_props(label_mtx: np.ndarray,
 
     props = measure.regionprops_table(label_mtx, properties=properties, extra_properties=[contours])
     props = pd.DataFrame(props)
-    props['contours'] = props.apply(lambda x: x['contours'] + x[['bbox-0', 'bbox-1']].to_numpy(), axis=1)
-    props['contours'] = props['contours'].apply(contour_to_geo)
+    props["contours"] = props.apply(lambda x: x["contours"] + x[["bbox-0", "bbox-1"]].to_numpy(), axis=1)
+    props["contours"] = props["contours"].apply(contour_to_geo)
     return props
 
 
@@ -117,17 +117,18 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
             A dataframe with properties and contours
 
     """
+
     def create_geo(row):
-        x, y = row['x_ind'], row['y_ind']
+        x, y = row["x_ind"], row["y_ind"]
         x *= binsize
         y *= binsize
         if binsize > 1:
-            geo = Polygon([(x, y), (x+binsize, y), (x+binsize, y+binsize), (x, y+binsize), (x, y)])
+            geo = Polygon([(x, y), (x + binsize, y), (x + binsize, y + binsize), (x, y + binsize), (x, y)])
         else:
             geo = Point((x, y))
         return geo
 
     contours = data.apply(create_geo, axis=1)
-    props = pd.DataFrame({'contours': contours})
-    props['area'] = binsize**2
+    props = pd.DataFrame({"contours": contours})
+    props["area"] = binsize ** 2
     return props

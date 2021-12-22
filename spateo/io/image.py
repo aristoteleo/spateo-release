@@ -5,11 +5,10 @@ from anndata import AnnData
 
 from ..tools.image import add_image_layer
 
-def read_image(adata: AnnData,
-               filename: str,
-               scale_factor: float,
-               slice: Optional[str] = None,
-               img_layer: Optional[str] = None) -> AnnData:
+
+def read_image(
+    adata: AnnData, filename: str, scale_factor: float, slice: Optional[str] = None, img_layer: Optional[str] = None
+) -> AnnData:
     """Load an image into the AnnData object.
 
     Parameters
@@ -37,13 +36,7 @@ def read_image(adata: AnnData,
     if img is None:
         raise FileNotFoundError(f"Could not find '{filename}'")
 
-    adata = add_image_layer(
-        adata=adata,
-        img=img,
-        scale_factor=scale_factor,
-        slice=slice,
-        img_layer=img_layer
-    )
+    adata = add_image_layer(adata=adata, img=img, scale_factor=scale_factor, slice=slice, img_layer=img_layer)
 
     # TODO: show image
 

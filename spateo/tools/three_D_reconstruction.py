@@ -1,4 +1,3 @@
-
 from tqdm import tqdm
 import numpy as np
 import ot
@@ -9,13 +8,15 @@ from scipy.sparse.csr import spmatrix
 from anndata import AnnData
 from typing import Union
 
-def pairwise_align(slice1: AnnData,
-                   slice2: AnnData,
-                   alpha: float = 0.1,
-                   numItermax: int = 200,
-                   numItermaxEmd: int = 100000,
-                   device: Union[str, torch.device] = "cpu"
-                   ):
+
+def pairwise_align(
+    slice1: AnnData,
+    slice2: AnnData,
+    alpha: float = 0.1,
+    numItermax: int = 200,
+    numItermaxEmd: int = 100000,
+    device: Union[str, torch.device] = "cpu",
+):
     """
 
     Calculates and returns optimal alignment of two slices.
@@ -62,26 +63,40 @@ def pairwise_align(slice1: AnnData,
     q = torch.tensor(np.ones((slice2.shape[0],)) / slice2.shape[0], device=device, dtype=torch.float32)
 
     # Calculate spatial distances
-    DA = torch.tensor(distance_matrix(slice1.obsm['spatial'], slice1.obsm['spatial']),
-                      device=device, dtype=torch.float32)
-    DB = torch.tensor(distance_matrix(slice2.obsm['spatial'], slice2.obsm['spatial']),
-                      device=device, dtype=torch.float32)
+    DA = torch.tensor(
+        distance_matrix(slice1.obsm["spatial"], slice1.obsm["spatial"]), device=device, dtype=torch.float32
+    )
+    DB = torch.tensor(
+        distance_matrix(slice2.obsm["spatial"], slice2.obsm["spatial"]), device=device, dtype=torch.float32
+    )
 
     # Run OT
-    pi = ot.gromov.fused_gromov_wasserstein(M=M, C1=DA, C2=DB, p=p, q=q, loss_fun='square_loss', alpha=alpha,
-                                            armijo=False, log=False, numItermax=numItermax, numItermaxEmd=numItermaxEmd)
+    pi = ot.gromov.fused_gromov_wasserstein(
+        M=M,
+        C1=DA,
+        C2=DB,
+        p=p,
+        q=q,
+        loss_fun="square_loss",
+        alpha=alpha,
+        armijo=False,
+        log=False,
+        numItermax=numItermax,
+        numItermaxEmd=numItermaxEmd,
+    )
     torch.cuda.empty_cache()
 
     return pi.cpu().numpy()
 
 
-def slice_alignment(slices,
-                    alpha: float = 0.1,
-                    numItermax: int = 200,
-                    numItermaxEmd: int = 100000,
-                    device: Union[str, torch.device] = "cpu",
-                    verbose: bool = True
-                    ):
+def slice_alignment(
+    slices,
+    alpha: float = 0.1,
+    numItermax: int = 200,
+    numItermaxEmd: int = 100000,
+    device: Union[str, torch.device] = "cpu",
+    verbose: bool = True,
+):
     """
 
     Align spatial coordinates of slices.
@@ -113,20 +128,14 @@ def slice_alignment(slices,
         if verbose:
             print(m)
 
-    if device is not 'cpu':
-        _log(
-            f"\nWhether CUDA is currently available: {torch.cuda.is_available()}"
-        )
-        _log(
-            f"Device: {torch.cuda.get_device_name(device=device)}"
-        )
+    if device is not "cpu":
+        _log(f"\nWhether CUDA is currently available: {torch.cuda.is_available()}")
+        _log(f"Device: {torch.cuda.get_device_name(device=device)}")
         _log(
             f"GPU total memory: {int(torch.cuda.get_device_properties(device).total_memory / (1024 * 1024 * 1024))} GB"
         )
     else:
-        _log(
-            f"Device: CPU"
-        )
+        _log(f"Device: CPU")
 
     align_slices = []
     for i in tqdm(range(len(slices) - 1), desc=" Alignment "):
@@ -138,8 +147,9 @@ def slice_alignment(slices,
         slice2 = slices[i + 1].copy()
 
         # Calculate and returns optimal alignment of two slices.
-        pi = pairwise_align(slice1, slice2, alpha=alpha, numItermax=numItermax,
-                            numItermaxEmd=numItermaxEmd, device=device)
+        pi = pairwise_align(
+            slice1, slice2, alpha=alpha, numItermax=numItermax, numItermaxEmd=numItermaxEmd, device=device
+        )
 
         # Calculate new coordinates of two slices
         raw_slice1_coords, raw_slice2_coords = slice1.obsm["spatial"], slice2.obsm["spatial"]
@@ -163,14 +173,15 @@ def slice_alignment(slices,
     return align_slices
 
 
-def slice_alignment_bigBin(slices,
-                           slices_big,
-                           alpha: float = 0.1,
-                           numItermax: int = 200,
-                           numItermaxEmd: int = 100000,
-                           device: Union[str, torch.device] = "cpu",
-                           verbose: bool = True
-                           ):
+def slice_alignment_bigBin(
+    slices,
+    slices_big,
+    alpha: float = 0.1,
+    numItermax: int = 200,
+    numItermaxEmd: int = 100000,
+    device: Union[str, torch.device] = "cpu",
+    verbose: bool = True,
+):
     """
 
     Align spatial coordinates of slices.
@@ -207,12 +218,14 @@ def slice_alignment_bigBin(slices,
     """
 
     # Align spatial coordinates of slices with a small number of coordinates.
-    align_slices_big = slice_alignment(slices=slices_big,
-                                       alpha=alpha,
-                                       numItermax=numItermax,
-                                       numItermaxEmd=numItermaxEmd,
-                                       device=device,
-                                       verbose=verbose)
+    align_slices_big = slice_alignment(
+        slices=slices_big,
+        alpha=alpha,
+        numItermax=numItermax,
+        numItermaxEmd=numItermaxEmd,
+        device=device,
+        verbose=verbose,
+    )
 
     align_slices = []
     for slice_big, align_slice_big, slice in zip(slices_big, align_slices_big, slices):

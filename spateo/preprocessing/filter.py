@@ -11,7 +11,7 @@ def filter_cells(
     max_expr_genes: float = np.inf,
     min_area: float = 0,
     max_area: float = np.inf,
-    inplace: bool = False
+    inplace: bool = False,
 ) -> Union[anndata.AnnData, None]:
     """Select valid cells based on a collection of filters.
     This function is partially based on dynamo (https://github.com/aristoteleo/dynamo-release).
@@ -57,7 +57,7 @@ def filter_cells(
             print("`area` is not in the adata.obs")
         else:
             detected_bool = (detected_bool) & (
-                np.array((adata.obs['area'] >= min_area) & (adata.obs['area'] <= max_area)).flatten()
+                np.array((adata.obs["area"] >= min_area) & (adata.obs["area"] <= max_area)).flatten()
             )
             detected_bool = np.array(detected_bool).flatten()
 
@@ -74,16 +74,16 @@ def filter_cells(
 
 
 def filter_genes(
-        adata: anndata.AnnData,
-        filter_bool: Union[np.ndarray, None] = None,
-        keep_filtered: bool = False,
-        min_cells: int = 1,
-        max_cells: float = np.inf,
-        min_avg_exp: float = 0,
-        max_avg_exp: float = np.inf,
-        min_counts: float = 0,
-        max_counts: float = np.inf,
-        inplace: bool = False
+    adata: anndata.AnnData,
+    filter_bool: Union[np.ndarray, None] = None,
+    keep_filtered: bool = False,
+    min_cells: int = 1,
+    max_cells: float = np.inf,
+    min_avg_exp: float = 0,
+    max_avg_exp: float = np.inf,
+    min_counts: float = 0,
+    max_counts: float = np.inf,
+    inplace: bool = False,
 ) -> Union[anndata.AnnData, None]:
     """Select valid genes based on a collection of filters.
     This function is partially based on dynamo (https://github.com/aristoteleo/dynamo-release).
@@ -122,9 +122,12 @@ def filter_genes(
 
     detected_bool = np.ones(adata.shape[1], dtype=bool)
     detected_bool = (detected_bool) & np.array(
-        ((adata.X > 0).sum(0) >= min_cells) & ((adata.X > 0).sum(0) <= max_cells)
-        & (adata.X.mean(0) >= min_avg_exp) & (adata.X.mean(0) <= max_avg_exp)
-        & (adata.X.sum(0) >= min_counts) & (adata.X.sum(0) <= max_counts)
+        ((adata.X > 0).sum(0) >= min_cells)
+        & ((adata.X > 0).sum(0) <= max_cells)
+        & (adata.X.mean(0) >= min_avg_exp)
+        & (adata.X.mean(0) <= max_avg_exp)
+        & (adata.X.sum(0) >= min_counts)
+        & (adata.X.sum(0) <= max_counts)
     ).flatten()
 
     filter_bool = filter_bool & detected_bool if filter_bool is not None else detected_bool
@@ -145,7 +148,7 @@ def filter_by_coordinates(
     keep_filtered: bool = False,
     x_range: Sequence[float] = (-np.inf, np.inf),
     y_range: Sequence[float] = (-np.inf, np.inf),
-    inplace: bool = False
+    inplace: bool = False,
 ) -> Union[anndata.AnnData, None]:
     """Select valid cells by coordinates.
     TODO: lasso tool
@@ -176,8 +179,10 @@ def filter_by_coordinates(
 
     detected_bool = np.ones(adata.X.shape[0], dtype=bool)
     detected_bool = (detected_bool) & (
-        (adata.obsm['spatial'][:, 0] >= x_range[0]) & (adata.obsm['spatial'][:, 0] <= x_range[1])
-        & (adata.obsm['spatial'][:, 1] >= y_range[0]) & (adata.obsm['spatial'][:, 1] <= y_range[1])
+        (adata.obsm["spatial"][:, 0] >= x_range[0])
+        & (adata.obsm["spatial"][:, 0] <= x_range[1])
+        & (adata.obsm["spatial"][:, 1] >= y_range[0])
+        & (adata.obsm["spatial"][:, 1] <= y_range[1])
     ).flatten()
 
     filter_bool = filter_bool & detected_bool if filter_bool is not None else detected_bool

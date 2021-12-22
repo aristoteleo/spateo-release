@@ -1,13 +1,14 @@
 # after cluster(the cluster method contains spatial positions), find spatial
 # different expression genes(DEG).
 
+
 def findmarkers(
     adata,
     test_group,
     neighbor_groups,
-    method: str = 'wilcox_test',
+    method: str = "wilcox_test",
 ):
-    '''Finds markers (differentially expressed genes) for identity clusters for
+    """Finds markers (differentially expressed genes) for identity clusters for
     each cluster, find statistical test different genes between one cluster
     and the rest clusters using wilcox_test or others
     Parameters
@@ -58,12 +59,13 @@ def findmarkers(
     -------
         DEG: 'pd.DataFrame'
             Returns a 'pd.DataFrame', each row of the DataFrame correspond to a
-            gene, columns contains statistic results(e.g gene,p_value, group 
+            gene, columns contains statistic results(e.g gene,p_value, group
             avg_fold_change et.al)
-    '''
+    """
 
 
 # before cluster, detect the highly variable genes(HVG).
+
 
 def moran_i(
     adata,
@@ -72,7 +74,7 @@ def moran_i(
     k=5,
     assumption="permutation",
 ):
-    '''Identify genes with strong spatial autocorrelation with Moran's I test.
+    """Identify genes with strong spatial autocorrelation with Moran's I test.
 
     Parameters
     ----------
@@ -86,42 +88,42 @@ def moran_i(
         weighted: 'matrix'
             A spatial weights matrix.
         assumption: `str`(defult: `permutation` )
-            Monte Carlo test  (a permutation bootstrap test) 
+            Monte Carlo test  (a permutation bootstrap test)
 
     Returns
     -------
         I: `list`
-            The Moran'I for given genes, each elements of list a 'float' 
+            The Moran'I for given genes, each elements of list a 'float'
             between (-1,1)
-    '''
+    """
 
 
 def Findspatialvariablegenes(
     adata,
-    model: str = 'Gaussion Process regression',
+    model: str = "Gaussion Process regression",
 ):
-    ''' Detect the genes which expression highly variable in the whole domains.
+    """Detect the genes which expression highly variable in the whole domains.
 
     Parameters
      ----------
         adata: class:`~anndata.AnnData`
             An Annodata object
-        model: 'str' 
+        model: 'str'
             Denotes which model to use. Available options are:
-            "Gaussion Process regression" : the gene expression profiles 
-                y = (y1, … , yN) for a given gene across spatial coordinates 
-                X = (x1, … , xN) using a multivariate normal model. methods 
+            "Gaussion Process regression" : the gene expression profiles
+                y = (y1, … , yN) for a given gene across spatial coordinates
+                X = (x1, … , xN) using a multivariate normal model. methods
                 contain 'spatialDE'(Svensson et.al 2018),'spatialDE2'
                 (Kats et.al 2021)
 
             "Generalized linear spatial model" : 'Spark'(Sun et.al 2020)
 
             "Regularized negative binomial regression": the sum of all molecules
-                assigned to a cell as a proxy for sequencing depth and use this 
-                cell attribute in a regression model with negative binomial (NB) 
+                assigned to a cell as a proxy for sequencing depth and use this
+                cell attribute in a regression model with negative binomial (NB)
                 error distribution and log link function(Hafemeister et.al 2019)
      Returns
      -------
          HVG: `pd.DataFrame`
              The spatial highly variable genes.
-     '''
+    """
