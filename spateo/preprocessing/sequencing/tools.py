@@ -13,10 +13,10 @@ def conv(a, ks, circle=False):
     Parameters
     ----------
     a: 2d np array
-    The source array.
+        The source array.
 
     ks: an odd int
-    The kernel size of kernel used to perform convolution. The elements of the kernel would be all ones.
+        The kernel size of kernel used to perform convolution. The elements of the kernel would be all ones.
 
     Returns
     -------
@@ -37,11 +37,11 @@ def conv(a, ks, circle=False):
 
     # check if ks is an odd number
     if ks % 2 == 0:
-    print("Please enter an odd int ks")
-    return None
+        print("Please enter an odd int ks")
+        return None
     kernel = np.ones([ks,ks], dtype=np.uint8)
     if circle:
-    kernel = cv2.circle(np.zeros([ks,ks], dtype=np.uint8), (int((ks-1)/2),int((ks-1)/2)), int((ks-1)/2), 1, -1)
+        kernel = cv2.circle(np.zeros([ks,ks], dtype=np.uint8), (int((ks-1)/2),int((ks-1)/2)), int((ks-1)/2), 1, -1)
     c = signal.convolve2d(a, kernel, boundary='symm', mode='same')
     return c
 
@@ -71,10 +71,10 @@ def scaleTo255(x, inplace=True):
     x2 = scaleTo01(x)
     x2 *= 255
     if inplace:
-    x[:] = x2
-    return(None)
+        x[:] = x2
+        return(None)
     else:
-    return(x2)
+        return(x2)
 
 def scaleTo01(array):
     y = (array-np.min(array)) / (np.max(array)-np.min(array))
@@ -84,10 +84,10 @@ def gBlur(array, k, inplace=False):
     dst = cv2.GaussianBlur(src=array, ksize=(k, k), sigmaX=0.0, sigmaY=0.0)
     print(f"gBlur: min:{np.min(dst)} mean:{np.mean(dst)} median:{np.median(dst)} max:{np.max(dst)}")
     if inplace:
-    array[:] = dst
-    return None
+        array[:] = dst
+        return None
     else:
-    return dst
+        return dst
 
 
 def getknee(gBlurArray): # np.float 0 - 255
@@ -102,10 +102,10 @@ def getknee(gBlurArray): # np.float 0 - 255
     y = []
     #s = time.time()
     for i in range(1,250):
-    tmp = len(gBlurArray[gBlurArray<=i])/allSpotNum
-    if tmp>0.5:
-    x.append(i)
-    y.append(tmp)
+        tmp = len(gBlurArray[gBlurArray<=i])/allSpotNum
+        if tmp>0.5:
+            x.append(i)
+            y.append(tmp)
     #e = time.time()
     #print(f'dict: {e-s}')
 
@@ -128,14 +128,14 @@ def addCellLabels(inFile, cellMask, x_min, y_min, outFile, cens):
     o = open(outFile, "wt")
     o.write("geneID\tx\ty\tUMICount\tlabel\tcentroid_y\tcentroid_x\n")
     with open(inFile, "rt") as f:
-    f.readline()
-    for line in f:
-    lines = line.strip().split("\t")
-    x, y = int(lines[0]), int(lines[1])
-    x = x - x_min
-    y = y - y_min
-    if int(cellMask[y,x]) > 0:
-    o.write(lines[2] + "\t" + lines[0] + "\t" + lines[1] + "\t" + lines[3] + "\t" + str(int(cellMask[y,x]))+"\t" + str(cens[int(cellMask[y,x])][0]+y_min) + "\t" + str(cens[int(cellMask[y,x])][1]+x_min) + "\n")
-    else:
-    o.write(lines[2] + "\t" + lines[0] + "\t" + lines[1] + "\t" + lines[3] + "\t0\t0\t0\n")
+        f.readline()
+        for line in f:
+            lines = line.strip().split("\t")
+            x, y = int(lines[0]), int(lines[1])
+            x = x - x_min
+            y = y - y_min
+            if int(cellMask[y,x]) > 0:
+                o.write(lines[2] + "\t" + lines[0] + "\t" + lines[1] + "\t" + lines[3] + "\t" + str(int(cellMask[y,x]))+"\t" + str(cens[int(cellMask[y,x])][0]+y_min) + "\t" + str(cens[int(cellMask[y,x])][1]+x_min) + "\n")
+            else:
+                o.write(lines[2] + "\t" + lines[0] + "\t" + lines[1] + "\t" + lines[3] + "\t0\t0\t0\n")
     o.close()
