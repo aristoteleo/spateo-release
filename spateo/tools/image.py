@@ -3,7 +3,7 @@
 from anndata import AnnData
 
 
-def add_img_layer(adata: AnnData,
+def add_image_layer(adata: AnnData,
                   img,
                   scale_factor: float,
                   slice: str = None,

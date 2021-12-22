@@ -20,7 +20,7 @@ setup(
                     "test": ['sympy>=1.4'],
                     "bigdata_visualization": ["datashader>=0.9.0", "bokeh>=1.4.0", "holoviews>=1.9.2"]
                    },
-    packages=find_packages(),
+    packages=find_packages(exclude=('tests', 'docs')),
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: BSD License",

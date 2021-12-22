@@ -2,7 +2,8 @@ from anndata import AnnData
 import matplotlib.pyplot as plt
 import cv2
 from typing import Union, Optional
-from spateo.tools.image_layer import add_img_layer
+
+from ..tools.image import add_image_layer
 
 def remove_background(adata: AnnData,
                threshold: Union[float, str] = 'auto',
@@ -55,7 +56,7 @@ def remove_background(adata: AnnData,
     _, img = cv2.threshold(img.copy(), threshold, 255, cv2.THRESH_TOZERO)
 
     # add preprocessed img to AnnData object
-    adata = add_img_layer(
+    adata = add_image_layer(
         adata=adata,
         img=img,
         scale_factor=scale_factor,
