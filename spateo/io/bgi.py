@@ -40,12 +40,18 @@ def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
     )
 
 
-def read_bgi_agg(path: str) -> Tuple[spmatrix, Optional[spmatrix], Optional[spmatrix]]:
+def read_bgi_agg(
+    path: str, x_max: Optional[int] = None, y_max: Optional[int] = None
+) -> Tuple[spmatrix, Optional[spmatrix], Optional[spmatrix]]:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
 
     Args:
         path: Path to read file.
+        x_max: Maximum x coordinate. If not provided, the maximum non-zero x
+            will be used.
+        y_max: Maximum y coordinate. If not provided, the maximum non-zero y
+            will be used.
 
     Returns:
         Tuple containing 3 sparse matrices corresponding to total, spliced,
@@ -53,10 +59,18 @@ def read_bgi_agg(path: str) -> Tuple[spmatrix, Optional[spmatrix], Optional[spma
         spliced and unspliced counts, the last two elements are None.
     """
     data = read_bgi_as_dataframe(path)
+    x_max = max(x_max, data["x"].max()) if x_max else data["x"].max()
+    y_max = max(y_max, data["y"].max()) if y_max else data["y"].max()
+
     matrices = []
     for name, i in COUNT_COLUMN_MAPPING.items():
         if i < len(data.columns):
-            matrices.append(csr_matrix((data[data.columns[i]], (data["x"], data["y"]))))
+            matrices.append(
+                csr_matrix(
+                    (data[data.columns[i]], (data["x"], data["y"])),
+                    shape=(x_max, y_max),
+                )
+            )
         else:
             matrices.append(None)
     return tuple(matrices)
