@@ -46,7 +46,9 @@ def pairwise_align(
 
     torch.cuda.init()
     # subset for common genes
-    common_genes = [value for value in slice1.var.index if value in set(slice2.var.index)]
+    common_genes = [
+        value for value in slice1.var.index if value in set(slice2.var.index)
+    ]
     slice1, slice2 = slice1[:, common_genes], slice2[:, common_genes]
 
     # Calculate expression dissimilarity
@@ -59,15 +61,27 @@ def pairwise_align(
     M = torch.tensor(D, device=device, dtype=torch.float32)
 
     # init distributions
-    p = torch.tensor(np.ones((slice1.shape[0],)) / slice1.shape[0], device=device, dtype=torch.float32)
-    q = torch.tensor(np.ones((slice2.shape[0],)) / slice2.shape[0], device=device, dtype=torch.float32)
+    p = torch.tensor(
+        np.ones((slice1.shape[0],)) / slice1.shape[0],
+        device=device,
+        dtype=torch.float32,
+    )
+    q = torch.tensor(
+        np.ones((slice2.shape[0],)) / slice2.shape[0],
+        device=device,
+        dtype=torch.float32,
+    )
 
     # Calculate spatial distances
     DA = torch.tensor(
-        distance_matrix(slice1.obsm["spatial"], slice1.obsm["spatial"]), device=device, dtype=torch.float32
+        distance_matrix(slice1.obsm["spatial"], slice1.obsm["spatial"]),
+        device=device,
+        dtype=torch.float32,
     )
     DB = torch.tensor(
-        distance_matrix(slice2.obsm["spatial"], slice2.obsm["spatial"]), device=device, dtype=torch.float32
+        distance_matrix(slice2.obsm["spatial"], slice2.obsm["spatial"]),
+        device=device,
+        dtype=torch.float32,
     )
 
     # Run OT
@@ -148,11 +162,19 @@ def slice_alignment(
 
         # Calculate and returns optimal alignment of two slices.
         pi = pairwise_align(
-            slice1, slice2, alpha=alpha, numItermax=numItermax, numItermaxEmd=numItermaxEmd, device=device
+            slice1,
+            slice2,
+            alpha=alpha,
+            numItermax=numItermax,
+            numItermaxEmd=numItermaxEmd,
+            device=device,
         )
 
         # Calculate new coordinates of two slices
-        raw_slice1_coords, raw_slice2_coords = slice1.obsm["spatial"], slice2.obsm["spatial"]
+        raw_slice1_coords, raw_slice2_coords = (
+            slice1.obsm["spatial"],
+            slice2.obsm["spatial"],
+        )
         slice1_coords = raw_slice1_coords - pi.sum(axis=1).dot(raw_slice1_coords)
         slice2_coords = raw_slice2_coords - pi.sum(axis=0).dot(raw_slice2_coords)
         H = slice2_coords.T.dot(pi.T.dot(slice1_coords))

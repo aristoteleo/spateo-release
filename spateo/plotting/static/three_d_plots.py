@@ -47,9 +47,13 @@ def set_mesh(
     if cluster_show == "all":
         grid["cluster"] = adata.obs[cluster]
     elif isinstance(cluster_show, list) or isinstance(cluster_show, tuple):
-        grid["cluster"] = adata.obs[cluster].map(lambda x: str(x) if x in cluster_show else "mask")
+        grid["cluster"] = adata.obs[cluster].map(
+            lambda x: str(x) if x in cluster_show else "mask"
+        )
     else:
-        grid["cluster"] = adata.obs[cluster].map(lambda x: x if x == cluster_show else "mask")
+        grid["cluster"] = adata.obs[cluster].map(
+            lambda x: x if x == cluster_show else "mask"
+        )
 
     if gene_show == "all":
         grid["gene"] = adata.X.sum(axis=1, keepdims=True)
@@ -60,7 +64,10 @@ def set_mesh(
     surf.subdivide(nsub=3, subfilter="loop", inplace=True)
     clipped_grid = grid.clip_surface(surf)
     clipped_grid_data = pd.DataFrame(clipped_grid.points)
-    clipped_grid_data["cluster"], clipped_grid_data["gene"] = clipped_grid["cluster"], clipped_grid["gene"]
+    clipped_grid_data["cluster"], clipped_grid_data["gene"] = (
+        clipped_grid["cluster"],
+        clipped_grid["gene"],
+    )
 
     other_data = clipped_grid_data[clipped_grid_data["cluster"] != "mask"]
     other_grid = pv.PolyData(other_data[[0, 1, 2]].values)
@@ -157,11 +164,19 @@ def recon_3d(
         bar_position = [0.9, 0.1]
     if cluster_show != "all":
         mask_grid, other_grid, surf = set_mesh(
-            adata=adata, cluster=cluster, cluster_show=cluster_show, gene_show=gene_show
+            adata=adata,
+            cluster=cluster,
+            cluster_show=cluster_show,
+            gene_show=gene_show,
         )
     else:
         mask_grid = None
-        other_grid, surf = set_mesh(adata=adata, cluster=cluster, cluster_show=cluster_show, gene_show=gene_show)
+        other_grid, surf = set_mesh(
+            adata=adata,
+            cluster=cluster,
+            cluster_show=cluster_show,
+            gene_show=gene_show,
+        )
 
     # Plotting object to display vtk meshes
     p = pv.Plotter(
@@ -177,12 +192,31 @@ def recon_3d(
         p.subplot(i)
 
         # Add clipped surface
-        p.add_mesh(surf, show_scalar_bar=False, show_edges=False, opacity=0.2, color="whitesmoke")
+        p.add_mesh(
+            surf,
+            show_scalar_bar=False,
+            show_edges=False,
+            opacity=0.2,
+            color="whitesmoke",
+        )
         if mask_grid != None:
             # Add undisplayed clustering vertices
-            p.add_mesh(mask_grid, opacity=0.02, color="whitesmoke", render_points_as_spheres=True, ambient=0.5)
+            p.add_mesh(
+                mask_grid,
+                opacity=0.02,
+                color="whitesmoke",
+                render_points_as_spheres=True,
+                ambient=0.5,
+            )
         # Add displayed clustering vertices
-        p.add_mesh(other_grid, opacity=0.7, scalars=show, colormap=colormap, render_points_as_spheres=True, ambient=0.5)
+        p.add_mesh(
+            other_grid,
+            opacity=0.7,
+            scalars=show,
+            colormap=colormap,
+            render_points_as_spheres=True,
+            ambient=0.5,
+        )
 
         p.show_axes()
         p.remove_scalar_bar()
@@ -215,7 +249,10 @@ def recon_3d(
             )
         fontsize = math.ceil(window_size[0] / 100)
         p.add_text(
-            f"\n " f" Camera position = '{_cpos}' \n " f" Cluster(s): {cluster_show} \n " f" Gene(s): {gene_show} ",
+            f"\n "
+            f" Camera position = '{_cpos}' \n "
+            f" Cluster(s): {cluster_show} \n "
+            f" Gene(s): {gene_show} ",
             position="upper_left",
             font="arial",
             font_size=fontsize,

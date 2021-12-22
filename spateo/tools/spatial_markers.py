@@ -28,52 +28,100 @@ def cluster_specific_genes(
 
     db = pandas.DataFrame(adata.obsm["spatial"], columns=["x", "y"])
 
-    adata.var["hotspot_num"], adata.var["hotspot_frac"], adata.var["hotspot_spec"] = (
+    (
+        adata.var["hotspot_num"],
+        adata.var["hotspot_frac"],
+        adata.var["hotspot_spec"],
+    ) = (
         None,
         None,
         None,
     )
-    adata.var["coldspot_num"], adata.var["coldspot_frac"], adata.var["coldspot_spec"] = (
+    (
+        adata.var["coldspot_num"],
+        adata.var["coldspot_frac"],
+        adata.var["coldspot_spec"],
+    ) = (
         None,
         None,
         None,
     )
-    adata.var["doughnut_num"], adata.var["doughnut_frac"], adata.var["doughnut_spec"] = (
+    (
+        adata.var["doughnut_num"],
+        adata.var["doughnut_frac"],
+        adata.var["doughnut_spec"],
+    ) = (
         None,
         None,
         None,
     )
-    adata.var["diamond_num"], adata.var["diamond_frac"], adata.var["diamond_spec"] = (
-        None,
-        None,
-        None,
-    )
-
-    adata.var["hotspot_num_val"], adata.var["hotspot_frac_val"], adata.var["hotspot_spec_val"] = (
-        None,
-        None,
-        None,
-    )
-    adata.var["coldspot_num_val"], adata.var["coldspot_frac_val"], adata.var["coldspot_spec_val"] = (
-        None,
-        None,
-        None,
-    )
-    adata.var["doughnut_num_val"], adata.var["doughnut_frac_val"], adata.var["doughnut_spec_val"] = (
-        None,
-        None,
-        None,
-    )
-    adata.var["diamond_num_val"], adata.var["diamond_frac_val"], adata.var["diamond_spec_val"] = (
+    (
+        adata.var["diamond_num"],
+        adata.var["diamond_frac"],
+        adata.var["diamond_spec"],
+    ) = (
         None,
         None,
         None,
     )
 
-    hotspot_num, hotspot_frac, hotspot_spec = np.zeros(len(uniq_g)), np.zeros(len(uniq_g)), np.zeros(len(uniq_g))
-    coldspot_num, coldspot_frac, coldspot_spec = np.zeros(len(uniq_g)), np.zeros(len(uniq_g)), np.zeros(len(uniq_g))
-    doughnut_num, doughnut_frac, doughnut_spec = np.zeros(len(uniq_g)), np.zeros(len(uniq_g)), np.zeros(len(uniq_g))
-    diamond_num, diamond_frac, diamond_spec = np.zeros(len(uniq_g)), np.zeros(len(uniq_g)), np.zeros(len(uniq_g))
+    (
+        adata.var["hotspot_num_val"],
+        adata.var["hotspot_frac_val"],
+        adata.var["hotspot_spec_val"],
+    ) = (
+        None,
+        None,
+        None,
+    )
+    (
+        adata.var["coldspot_num_val"],
+        adata.var["coldspot_frac_val"],
+        adata.var["coldspot_spec_val"],
+    ) = (
+        None,
+        None,
+        None,
+    )
+    (
+        adata.var["doughnut_num_val"],
+        adata.var["doughnut_frac_val"],
+        adata.var["doughnut_spec_val"],
+    ) = (
+        None,
+        None,
+        None,
+    )
+    (
+        adata.var["diamond_num_val"],
+        adata.var["diamond_frac_val"],
+        adata.var["diamond_spec_val"],
+    ) = (
+        None,
+        None,
+        None,
+    )
+
+    hotspot_num, hotspot_frac, hotspot_spec = (
+        np.zeros(len(uniq_g)),
+        np.zeros(len(uniq_g)),
+        np.zeros(len(uniq_g)),
+    )
+    coldspot_num, coldspot_frac, coldspot_spec = (
+        np.zeros(len(uniq_g)),
+        np.zeros(len(uniq_g)),
+        np.zeros(len(uniq_g)),
+    )
+    doughnut_num, doughnut_frac, doughnut_spec = (
+        np.zeros(len(uniq_g)),
+        np.zeros(len(uniq_g)),
+        np.zeros(len(uniq_g)),
+    )
+    diamond_num, diamond_frac, diamond_spec = (
+        np.zeros(len(uniq_g)),
+        np.zeros(len(uniq_g)),
+        np.zeros(len(uniq_g)),
+    )
 
     valid_inds_list = [np.array(group_name) == g for g in uniq_g]
 
@@ -196,7 +244,11 @@ def GM_lag_model(
     layer=None,
 ):
     group_num = adata.obs[group].value_counts()
-    max_group, min_group, min_group_ncells = group_num.index[0], group_num.index[-1], group_num[-1]
+    max_group, min_group, min_group_ncells = (
+        group_num.index[0],
+        group_num.index[-1],
+        group_num[-1],
+    )
 
     group_name = adata.obs[group]
     db = pd.DataFrame({"group": group_name})
@@ -209,12 +261,17 @@ def GM_lag_model(
         db.iloc[group_inds, :] = "others"
         drop_columns = ["group_others", "group_" + str(drop_dummy)]
     else:
-        raise ValueError(f"drop_dummy, {drop_dummy} you provided is not in the adata.obs[{group}].")
+        raise ValueError(
+            f"drop_dummy, {drop_dummy} you provided is not in the adata.obs[{group}]."
+        )
 
     X = pd.get_dummies(data=db, drop_first=False)
     variable_names = X.columns.difference(drop_columns).to_list()
 
-    uniq_g, group_name = set(group_name).difference([drop_dummy]), group_name.to_list()
+    uniq_g, group_name = (
+        set(group_name).difference([drop_dummy]),
+        group_name.to_list(),
+    )
 
     uniq_g = list(np.sort(list(uniq_g)))  # sort and convert to list
 
@@ -233,7 +290,8 @@ def GM_lag_model(
         adata.var[str(i) + "_GM_lag_pval"] = None
 
     for i, cur_g in tqdm(
-        enumerate(genes), desc="performing GM_lag_model and assign coefficient and p-val to cell type"
+        enumerate(genes),
+        desc="performing GM_lag_model and assign coefficient and p-val to cell type",
     ):
         if layer is None:
             X["log_exp"] = adata[:, cur_g].X.A
@@ -242,11 +300,21 @@ def GM_lag_model(
 
         try:
             model = spreg.GM_Lag(
-                X[["log_exp"]].values, X[variable_names].values, w=knn, name_y="log_exp", name_x=variable_names
+                X[["log_exp"]].values,
+                X[variable_names].values,
+                w=knn,
+                name_y="log_exp",
+                name_x=variable_names,
             )
-            a = pd.DataFrame(model.betas, model.name_x + ["W_log_exp"], columns=["coef"])
+            a = pd.DataFrame(
+                model.betas, model.name_x + ["W_log_exp"], columns=["coef"]
+            )
 
-            b = pd.DataFrame(model.z_stat, model.name_x + ["W_log_exp"], columns=["z_stat", "p_val"])
+            b = pd.DataFrame(
+                model.z_stat,
+                model.name_x + ["W_log_exp"],
+                columns=["z_stat", "p_val"],
+            )
 
             df = a.merge(b, left_index=True, right_index=True)
 

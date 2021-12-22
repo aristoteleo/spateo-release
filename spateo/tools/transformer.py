@@ -172,7 +172,12 @@ def add_spatial(adata):
 
 
 def add_spatial_intron(adata):
-    df = pd.Series(adata.obs.index).str.split(":", expand=True).iloc[:, 1].str.split("_", expand=True)
+    df = (
+        pd.Series(adata.obs.index)
+        .str.split(":", expand=True)
+        .iloc[:, 1]
+        .str.split("_", expand=True)
+    )
     adata.obsm["spatial"] = df.values.astype(float)
     adata.obsm["X_spatial"] = df.values.astype(float)
 
@@ -299,12 +304,21 @@ def correct_embryo_coord(adata):
 
     adata_coords_correct, adata_R = pca_align(adata_coords)
     adata_spatial_corrected = AffineTrans(
-        adata_coords[:, 0], adata_coords[:, 1], adata_centroid_x, adata_centroid_y, adata_R
+        adata_coords[:, 0],
+        adata_coords[:, 1],
+        adata_centroid_x,
+        adata_centroid_y,
+        adata_R,
     )
 
     # rotate 90 degree
     _, _, adata_coords_correct_2 = AffineTrans(
-        adata_spatial_corrected[:, 0], adata_spatial_corrected[:, 1], [0, 0], [0, 0], None, np.pi / 2
+        adata_spatial_corrected[:, 0],
+        adata_spatial_corrected[:, 1],
+        [0, 0],
+        [0, 0],
+        None,
+        np.pi / 2,
     )
     # reflect vertically
     E9_5_coords_correct_2[:, 1] = -adata_coords_correct_2[:, 1]

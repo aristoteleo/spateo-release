@@ -23,7 +23,9 @@ class SineLayer(nn.Module):
     the factor ω0 while leaving gradients w.r.t. the input of the sine neuron unchanged
     """
 
-    def __init__(self, in_features, out_features, bias=True, is_first=False, omega_0=30.0):
+    def __init__(
+        self, in_features, out_features, bias=True, is_first=False, omega_0=30.0
+    ):
         super().__init__()
         self.omega_0 = omega_0
         self.is_first = is_first
@@ -39,7 +41,8 @@ class SineLayer(nn.Module):
                 self.linear.weight.uniform_(-1 / self.in_features, 1 / self.in_features)
             else:
                 self.linear.weight.uniform_(
-                    -np.sqrt(6 / self.in_features) / self.omega_0, np.sqrt(6 / self.in_features) / self.omega_0
+                    -np.sqrt(6 / self.in_features) / self.omega_0,
+                    np.sqrt(6 / self.in_features) / self.omega_0,
                 )
 
     def forward(self, input):
@@ -53,9 +56,19 @@ class SineLayer(nn.Module):
 
 class h(nn.Module):
     def __init__(
-        self, network_dim, hidden_features=256, hidden_layers=3, sirens=True, first_omega_0=30.0, hidden_omega_0=30.0
+        self,
+        network_dim,
+        hidden_features=256,
+        hidden_layers=3,
+        sirens=True,
+        first_omega_0=30.0,
+        hidden_omega_0=30.0,
     ):
-        self.sirens, self.first_omega_0, self.hidden_omega_0 = sirens, first_omega_0, hidden_omega_0
+        self.sirens, self.first_omega_0, self.hidden_omega_0 = (
+            sirens,
+            first_omega_0,
+            hidden_omega_0,
+        )
 
         super(h, self).__init__()  # Call to the super-class is necessary
 
@@ -64,12 +77,19 @@ class h(nn.Module):
 
         self.layer1 = nn.Linear(network_dim, hidden_features)
         if sirens:
-            torch.nn.init.uniform_(self.layer1.weight, -1 / network_dim, 1 / network_dim)
+            torch.nn.init.uniform_(
+                self.layer1.weight, -1 / network_dim, 1 / network_dim
+            )
         self.net = []
         for i in range(hidden_layers):
             if sirens:
                 self.net.append(
-                    SineLayer(hidden_features, hidden_features, is_first=False, omega_0=self.hidden_omega_0)
+                    SineLayer(
+                        hidden_features,
+                        hidden_features,
+                        is_first=False,
+                        omega_0=self.hidden_omega_0,
+                    )
                 )
             else:
                 self.net.append(nn.Linear(hidden_features, hidden_features))
@@ -91,7 +111,11 @@ class h(nn.Module):
             if self.sirens
             else self.f(self.layer1(inp), negative_slope=0.2)
         )  # , negative_slope=0.2
-        out = self.hidden_layers(out) if self.sirens else self.f(self.hidden_layers(out), negative_slope=0.2)  #
+        out = (
+            self.hidden_layers(out)
+            if self.sirens
+            else self.f(self.hidden_layers(out), negative_slope=0.2)
+        )  #
         out = self.outlayer(out)
 
         return out

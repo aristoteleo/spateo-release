@@ -58,7 +58,13 @@ def remove_background(
     _, img = cv2.threshold(img.copy(), threshold, 255, cv2.THRESH_TOZERO)
 
     # add preprocessed img to AnnData object
-    adata = add_image_layer(adata=adata, img=img, scale_factor=scale_factor, slice=slice, img_layer=return_img_layer)
+    adata = add_image_layer(
+        adata=adata,
+        img=img,
+        scale_factor=scale_factor,
+        slice=slice,
+        img_layer=return_img_layer,
+    )
 
     if show:
         plt.figure(figsize=(16, 16))

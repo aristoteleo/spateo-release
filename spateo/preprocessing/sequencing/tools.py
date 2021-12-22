@@ -42,7 +42,11 @@ def conv(a, ks, circle=False):
     kernel = np.ones([ks, ks], dtype=np.uint8)
     if circle:
         kernel = cv2.circle(
-            np.zeros([ks, ks], dtype=np.uint8), (int((ks - 1) / 2), int((ks - 1) / 2)), int((ks - 1) / 2), 1, -1
+            np.zeros([ks, ks], dtype=np.uint8),
+            (int((ks - 1) / 2), int((ks - 1) / 2)),
+            int((ks - 1) / 2),
+            1,
+            -1,
         )
     c = signal.convolve2d(a, kernel, boundary="symm", mode="same")
     return c
@@ -85,7 +89,9 @@ def scaleTo01(array):
 
 def gBlur(array, k, inplace=False):
     dst = cv2.GaussianBlur(src=array, ksize=(k, k), sigmaX=0.0, sigmaY=0.0)
-    print(f"gBlur: min:{np.min(dst)} mean:{np.mean(dst)} median:{np.median(dst)} max:{np.max(dst)}")
+    print(
+        f"gBlur: min:{np.min(dst)} mean:{np.mean(dst)} median:{np.median(dst)} max:{np.max(dst)}"
+    )
     if inplace:
         array[:] = dst
         return None
@@ -154,5 +160,14 @@ def addCellLabels(inFile, cellMask, x_min, y_min, outFile, cens):
                     + "\n"
                 )
             else:
-                o.write(lines[2] + "\t" + lines[0] + "\t" + lines[1] + "\t" + lines[3] + "\t0\t0\t0\n")
+                o.write(
+                    lines[2]
+                    + "\t"
+                    + lines[0]
+                    + "\t"
+                    + lines[1]
+                    + "\t"
+                    + lines[3]
+                    + "\t0\t0\t0\n"
+                )
     o.close()

@@ -20,12 +20,19 @@ class Icell:
         self.infile = infile
         self.spliced = spliced
         self.total = total
-        self.xmin, self.xmax, self.ymin, self.ymax = float("inf"), 0, float("inf"), 0
+        self.xmin, self.xmax, self.ymin, self.ymax = (
+            float("inf"),
+            0,
+            float("inf"),
+            0,
+        )
         self.rawdata = None  # 2d np array np.int16
         self.genenum = None  # 2d np array np.int16
         self.convdata = None  # 2d np array np.float64, storage convolution result, EM result, or BP result 0.0 - 255.0
         self.cellMask = None  # 2d np array np.uint8  0=>background 255=>cell
-        self.cellLabels = None  # 2d np array represents cell labels of the whole slice np.int32
+        self.cellLabels = (
+            None  # 2d np array represents cell labels of the whole slice np.int32
+        )
         # EM results. These are needed to use BP.
         self.em_n = None
         self.em_p = None
@@ -33,20 +40,42 @@ class Icell:
     def readData(self, record_genenum=False):
         if self.xmax == 0:
             self.getBor()
-            print(f"xmin, xmax: {self.xmin, self.xmax}  ymin, ymax: {self.ymin, self.ymax}")
-        self.rawdata = np.zeros([self.ymax - self.ymin + 1, self.xmax - self.xmin + 1], dtype=np.int16)
+            print(
+                f"xmin, xmax: {self.xmin, self.xmax}  ymin, ymax: {self.ymin, self.ymax}"
+            )
+        self.rawdata = np.zeros(
+            [self.ymax - self.ymin + 1, self.xmax - self.xmin + 1],
+            dtype=np.int16,
+        )
         if record_genenum:
-            self.genenum = np.zeros([self.ymax - self.ymin + 1, self.xmax - self.xmin + 1], dtype=np.int16)
+            self.genenum = np.zeros(
+                [self.ymax - self.ymin + 1, self.xmax - self.xmin + 1],
+                dtype=np.int16,
+            )
         self.readFile2array(record_genenum)
-        self.cellMask = np.zeros([self.ymax - self.ymin + 1, self.xmax - self.xmin + 1], dtype=np.uint8)
-        self.comCellLabels = np.zeros([self.ymax - self.ymin + 1, self.xmax - self.xmin + 1], dtype=np.int32)
+        self.cellMask = np.zeros(
+            [self.ymax - self.ymin + 1, self.xmax - self.xmin + 1],
+            dtype=np.uint8,
+        )
+        self.comCellLabels = np.zeros(
+            [self.ymax - self.ymin + 1, self.xmax - self.xmin + 1],
+            dtype=np.int32,
+        )
 
-    def gBlurAndSaveToTif(self, ks=21, outFig="gblur.tif", logDeal=False, usenbnEM=False):
+    def gBlurAndSaveToTif(
+        self, ks=21, outFig="gblur.tif", logDeal=False, usenbnEM=False
+    ):
         if not usenbnEM:
             if not logDeal:
-                self.convdata = self.gBlur(self.rawdata.astype(np.float), k=ks, inplace=False)
+                self.convdata = self.gBlur(
+                    self.rawdata.astype(np.float), k=ks, inplace=False
+                )
             if logDeal:
-                self.convdata = self.gBlur(np.log2((self.rawdata + 1).astype(np.float)), k=ks, inplace=False)
+                self.convdata = self.gBlur(
+                    np.log2((self.rawdata + 1).astype(np.float)),
+                    k=ks,
+                    inplace=False,
+                )
         if usenbnEM:
             self.convdata = self.gBlur(self.convdata, k=ks, inplace=False)
 
@@ -73,14 +102,21 @@ class Icell:
     def mopen(self, kernelSize=3, outFig="adco.tif"):
         kernel = np.zeros((kernelSize, kernelSize), np.uint8)
         kernel = cv2.circle(
-            kernel, (int((kernelSize - 1) / 2), int((kernelSize - 1) / 2)), int((kernelSize - 1) / 2), 1, -1
+            kernel,
+            (int((kernelSize - 1) / 2), int((kernelSize - 1) / 2)),
+            int((kernelSize - 1) / 2),
+            1,
+            -1,
         )
         self.cellMask = cv2.morphologyEx(self.cellMask, cv2.MORPH_OPEN, kernel)
         self.saveCellMask2tif(outFig)
 
     def getCellLabels(self, kernelgblur=21, min_distance=5):
         self.cellLabels = watershed.getCellLabels(
-            self.cellMask, self.rawdata, kernelgblur=kernelgblur, min_distance=min_distance
+            self.cellMask,
+            self.rawdata,
+            kernelgblur=kernelgblur,
+            min_distance=min_distance,
         )
         print(f"cell number: {np.max(self.cellLabels)}")
         self.drawCellLabels()
@@ -111,11 +147,22 @@ class Icell:
 
     def addCellLabelsToMatrix(self, outFile):
         cens = assign.cal_cell_centriod(self.cellLabels)
-        tools.addCellLabels(self.infile, self.cellLabels, self.xmin, self.ymin, outFile, cens)
+        tools.addCellLabels(
+            self.infile, self.cellLabels, self.xmin, self.ymin, outFile, cens
+        )
 
-    def assignNonCellSpots(self, long_matrix_file="expressionCellLabels.matrix", radius=1):
+    def assignNonCellSpots(
+        self, long_matrix_file="expressionCellLabels.matrix", radius=1
+    ):
         cens = assign.cal_cell_centriod(self.cellLabels)
-        assign.assign_point(long_matrix_file, self.cellLabels, cens, self.xmin, self.ymin, radius=radius)
+        assign.assign_point(
+            long_matrix_file,
+            self.cellLabels,
+            cens,
+            self.xmin,
+            self.ymin,
+            radius=radius,
+        )
 
     # nbnEM
     def nbnEM(
@@ -139,7 +186,15 @@ class Icell:
             # print(peaks)
             peaks = peaks - 1
             self.drawHist(peaks)
-            w, lam, theta = nbn.nbnEM(peaks, c, w=w, mu=mu, var=var, maxitem=maxitem, precision=precision)
+            w, lam, theta = nbn.nbnEM(
+                peaks,
+                c,
+                w=w,
+                mu=mu,
+                var=var,
+                maxitem=maxitem,
+                precision=precision,
+            )
         else:
             if isinstance(tissueM, np.ndarray):
                 peaks = c[tissueM == 0]
@@ -148,7 +203,15 @@ class Icell:
             if len(peaks) > 1000000:
                 peaks = np.random.choice(peaks, 1000000)
             self.drawHist(peaks)
-            w, lam, theta = nbn.nbnEM(peaks, c, w=w, mu=mu, var=var, maxitem=maxitem, precision=precision)
+            w, lam, theta = nbn.nbnEM(
+                peaks,
+                c,
+                w=w,
+                mu=mu,
+                var=var,
+                maxitem=maxitem,
+                precision=precision,
+            )
 
         self.em_n = -lam / np.log(theta)
         self.em_p = theta
@@ -158,11 +221,21 @@ class Icell:
         tools.scaleTo255(posprob, inplace=True)
         tools.array2img(posprob, outFig="nbnEM.tif")
 
-    def bp(self, neighborhood=None, p=0.7, q=0.3, precision=1e-3, max_iter=100, n_threads=1):
+    def bp(
+        self,
+        neighborhood=None,
+        p=0.7,
+        q=0.3,
+        precision=1e-3,
+        max_iter=100,
+        n_threads=1,
+    ):
         if self.em_n is None or self.em_p is None:
             raise Exception("Run EM first")
 
-        background_probs = stats.nbinom(n=self.em_n[0], p=self.em_p[0]).pmf(self.rawdata)
+        background_probs = stats.nbinom(n=self.em_n[0], p=self.em_p[0]).pmf(
+            self.rawdata
+        )
         cell_probs = stats.nbinom(n=self.em_n[1], p=self.em_p[1]).pmf(self.rawdata)
         posprob = bp.cell_marginals(
             cell_probs,
@@ -222,8 +295,18 @@ class Icell:
     # self.rawdata[0,0] => the value in (self.ymin,self.xmin)
     # self.rawdata[0,1] => the value in (self.ymin,self.xmin + 1)
     def readFile2array(self, record_genenum):
-        a = [[0] * (self.xmax - self.xmin + 1) for _ in range((self.ymax - self.ymin + 1))]
-        g = [[0] * (self.xmax - self.xmin + 1) for _ in range((self.ymax - self.ymin + 1))] if record_genenum else 0
+        a = [
+            [0] * (self.xmax - self.xmin + 1)
+            for _ in range((self.ymax - self.ymin + 1))
+        ]
+        g = (
+            [
+                [0] * (self.xmax - self.xmin + 1)
+                for _ in range((self.ymax - self.ymin + 1))
+            ]
+            if record_genenum
+            else 0
+        )
         with open(self.infile, "rt") as f:
             f.readline()
             for line in f:

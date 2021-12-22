@@ -48,7 +48,8 @@ def filter_cells(
 
     detected_bool = np.ones(adata.X.shape[0], dtype=bool)
     detected_bool = (detected_bool) & (
-        ((adata.X > 0).sum(1) >= min_expr_genes) & ((adata.X > 0).sum(1) <= max_expr_genes)
+        ((adata.X > 0).sum(1) >= min_expr_genes)
+        & ((adata.X > 0).sum(1) <= max_expr_genes)
     ).flatten()
 
     if (min_area != 0) or (max_area != np.inf):
@@ -57,11 +58,15 @@ def filter_cells(
             print("`area` is not in the adata.obs")
         else:
             detected_bool = (detected_bool) & (
-                np.array((adata.obs["area"] >= min_area) & (adata.obs["area"] <= max_area)).flatten()
+                np.array(
+                    (adata.obs["area"] >= min_area) & (adata.obs["area"] <= max_area)
+                ).flatten()
             )
             detected_bool = np.array(detected_bool).flatten()
 
-    filter_bool = filter_bool & detected_bool if filter_bool is not None else detected_bool
+    filter_bool = (
+        filter_bool & detected_bool if filter_bool is not None else detected_bool
+    )
 
     filter_bool = np.array(filter_bool).flatten()
     if keep_filtered:
@@ -130,7 +135,9 @@ def filter_genes(
         & (adata.X.sum(0) <= max_counts)
     ).flatten()
 
-    filter_bool = filter_bool & detected_bool if filter_bool is not None else detected_bool
+    filter_bool = (
+        filter_bool & detected_bool if filter_bool is not None else detected_bool
+    )
 
     filter_bool = np.array(filter_bool).flatten()
     if keep_filtered:
@@ -185,7 +192,9 @@ def filter_by_coordinates(
         & (adata.obsm["spatial"][:, 1] <= y_range[1])
     ).flatten()
 
-    filter_bool = filter_bool & detected_bool if filter_bool is not None else detected_bool
+    filter_bool = (
+        filter_bool & detected_bool if filter_bool is not None else detected_bool
+    )
 
     filter_bool = np.array(filter_bool).flatten()
     if keep_filtered:

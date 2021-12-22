@@ -10,7 +10,11 @@ from .utils import bin_index, centroid, get_bin_props, get_label_props
 
 
 def read_bgi(
-    filename: str, binsize: int = 50, slice: Optional[str] = None, label_path: Optional[str] = None, version="stereo_v1"
+    filename: str,
+    binsize: int = 50,
+    slice: Optional[str] = None,
+    label_path: Optional[str] = None,
+    version="stereo_v1",
 ) -> AnnData:
     """A helper function that facilitates constructing an AnnData object suitable for downstream spateo analysis
 
@@ -70,18 +74,23 @@ def read_bgi(
 
     # Important! by default, duplicate entries are summed together in the following which is needed for us!
     csr_mat = csr_matrix(
-        (data[count_name], (data["csr_x_ind"], data["csr_y_ind"])), shape=((len(uniq_cell), len(uniq_gene)))
+        (data[count_name], (data["csr_x_ind"], data["csr_y_ind"])),
+        shape=((len(uniq_cell), len(uniq_gene))),
     )
 
     # get cell
     if not label_path:
         # aggregate spots with multiple bins
-        label_props = get_bin_props(data[["x_ind", "y_ind"]].drop_duplicates(inplace=False), binsize)
+        label_props = get_bin_props(
+            data[["x_ind", "y_ind"]].drop_duplicates(inplace=False), binsize
+        )
         coor = data[["x_centroid", "y_centroid"]].drop_duplicates(inplace=False).values
     else:
         # Measure properties and get contours of labeled cell regions.
         label_mtx = np.load(label_path)
-        label_props = get_label_props(label_mtx, properties=("label", "area", "bbox", "centroid"))
+        label_props = get_label_props(
+            label_mtx, properties=("label", "area", "bbox", "centroid")
+        )
         # Get centroid from label_props
         coor = label_props[["centroid-0", "centroid-1"]].values
 

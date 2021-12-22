@@ -30,8 +30,16 @@ def nbnEMOne(w, lam, theta, x):
     w[:] = tmp / tmp.sum()
     lam[:] = (tau * delta).sum(axis=1) / tau.sum(axis=1)
     thetatmp = []
-    thetatmp.append(beta[0] * (tau[0] * delta[0]).sum() / (tau[0] * (x - (1 - beta[0]) * delta[0])).sum())
-    thetatmp.append(beta[1] * (tau[1] * delta[1]).sum() / (tau[1] * (x - (1 - beta[1]) * delta[1])).sum())
+    thetatmp.append(
+        beta[0]
+        * (tau[0] * delta[0]).sum()
+        / (tau[0] * (x - (1 - beta[0]) * delta[0])).sum()
+    )
+    thetatmp.append(
+        beta[1]
+        * (tau[1] * delta[1]).sum()
+        / (tau[1] * (x - (1 - beta[1]) * delta[1])).sum()
+    )
     theta[:] = np.array(thetatmp)
 
 
@@ -93,7 +101,13 @@ def nbnEM(
         print(f"mu: {lamtheta2muvar(lam, theta)[0]}")
         print(f"var: {lamtheta2muvar(lam, theta)[1]}")
         if (
-            np.max([np.max(np.fabs(w - wpre)), np.max(np.fabs(lam - lampre)), np.max(np.fabs(theta - thetapre))])
+            np.max(
+                [
+                    np.max(np.fabs(w - wpre)),
+                    np.max(np.fabs(lam - lampre)),
+                    np.max(np.fabs(theta - thetapre)),
+                ]
+            )
             <= precision
         ):
             print(f"break in {i} item")

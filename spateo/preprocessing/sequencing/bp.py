@@ -53,10 +53,14 @@ def cell_marginals(
     if cell_probs.shape != background_probs.shape:
         raise ValueError("`cell_probs` and `background_probs` must have the same shape")
     neighborhood = (
-        neighborhood > 0 if neighborhood is not None else cv2.circle(np.zeros((3, 3)), (1, 1), 1, 1, -1).astype(bool)
+        neighborhood > 0
+        if neighborhood is not None
+        else cv2.circle(np.zeros((3, 3)), (1, 1), 1, 1, -1).astype(bool)
     )
     if cell_probs.ndim != neighborhood.ndim:
-        raise ValueError("`neighborhood` and `cell_probs` must have the same number of dimensions")
+        raise ValueError(
+            "`neighborhood` and `cell_probs` must have the same number of dimensions"
+        )
     for s in neighborhood.shape:
         if s % 2 == 0:
             raise ValueError("`neighborhood` must have odd dimension sizes")
@@ -70,6 +74,8 @@ def cell_marginals(
     shape = np.array(cell_probs.shape, dtype=np.uint32)
     potentials0 = background_probs.flatten().astype(np.double)
     potentials1 = cell_probs.flatten().astype(np.double)
-    bp = FastBinaryGridBeliefPropagation(shape, neighbor_offsets, potentials0, potentials1, p, q)
+    bp = FastBinaryGridBeliefPropagation(
+        shape, neighbor_offsets, potentials0, potentials1, p, q
+    )
     bp.run(precision=precision, max_iter=max_iter, n_threads=n_threads)
     return bp.marginals()

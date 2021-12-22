@@ -3,7 +3,13 @@
 from anndata import AnnData
 
 
-def add_image_layer(adata: AnnData, img, scale_factor: float, slice: str = None, img_layer: str = None):
+def add_image_layer(
+    adata: AnnData,
+    img,
+    scale_factor: float,
+    slice: str = None,
+    img_layer: str = None,
+):
     """
     A helper function that add an image layer to AnnData object.
 
