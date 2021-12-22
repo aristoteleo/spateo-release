@@ -1,4 +1,3 @@
-
 from tqdm import tqdm
 import numpy as np
 import ot
@@ -9,12 +8,13 @@ from scipy.sparse.csr import spmatrix
 from anndata import AnnData
 from typing import Union, Optional
 
+
 def pairwise_align(slice1: AnnData,
                    slice2: AnnData,
                    alpha: float = 0.1,
                    numItermax: int = 200,
                    numItermaxEmd: int = 100000,
-                   device: Optional[str, torch.device] = "cpu"
+                   device: Union[str, torch.device] = "cpu"
                    ):
     """
 
@@ -168,7 +168,7 @@ def slice_alignment_bigBin(slices,
                            alpha: float = 0.1,
                            numItermax: int = 200,
                            numItermaxEmd: int = 100000,
-                           device: Optional[str, torch.device] = "cpu",
+                           device: Union[str, torch.device] = "cpu",
                            verbose: bool = True
                            ):
     """
@@ -216,7 +216,6 @@ def slice_alignment_bigBin(slices,
 
     align_slices = []
     for slice_big, align_slice_big, slice in zip(slices_big, align_slices_big, slices):
-
         # Calculate the affine transformation matrix through nudged
         slice_big_coords = slice_big.obsm["spatial"].tolist()
         align_slice_big_coords = align_slice_big.obsm["spatial"].tolist()
@@ -232,7 +231,4 @@ def slice_alignment_bigBin(slices,
         align_slices.append(align_slice)
 
     return align_slices, align_slices_big
-
-
-
 
