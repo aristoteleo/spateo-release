@@ -139,7 +139,7 @@ def nbn_em(
     )
 
 
-# @njit
+@njit
 def confidence(
     X: np.ndarray,
     w: Tuple[float, float],
