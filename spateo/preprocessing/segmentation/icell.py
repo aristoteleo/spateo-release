@@ -46,7 +46,7 @@ def run_em(
     mu: Tuple[float, float] = (10.0, 300.0),
     var: Tuple[float, float] = (20.0, 400.0),
     max_iter: int = 2000,
-    precision: float = 1e-3,
+    precision: float = 1e-6,
 ) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
     """EM
 
@@ -67,6 +67,7 @@ def run_em(
         Tuple of parameters estimated by the EM algorithm.
     """
     if use_peaks:
+        # TODO implement
         pass
     else:
         samples = X.flatten()
@@ -87,7 +88,7 @@ def run_bp(
     square: bool = False,
     p: float = 0.7,
     q: float = 0.3,
-    precision: float = 1e-5,
+    precision: float = 1e-6,
     max_iter: int = 100,
     n_threads: int = 1,
 ) -> np.ndarray:
