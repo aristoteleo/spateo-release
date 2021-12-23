@@ -160,7 +160,7 @@ def score_pixels(
         bp_kwargs: Keyword arguments to the :func:`run_bp` function.
 
     Returns:
-        Boolean mask indicating cells.
+        [0, 1] score of each pixel being a cell.
     """
     if method.lower() not in ("gauss", "em", "em+gauss", "em+bp"):
         raise PreprocessingError(f"Unknown method `{method}`")
@@ -203,6 +203,17 @@ def score_pixels(
 
 
 def apply_cutoff(X: np.ndarray, k: int, cutoff: Optional[float] = None) -> np.ndarray:
+    """Apply a cutoff value to the given array and perform morphological close
+    and open operations.
+
+    Args:
+        X: The array to cutoff
+        k: Kernel size of the morphological close and open operations.
+        cutoff: Cutoff to apply. By default, the knee is used.
+
+    Returns:
+        A boolean mask.
+    """
     # Apply cutoff and mclose,mopen
     cutoff = cutoff or utils.knee(X)
     mask = mclose_mopen(X >= cutoff, k)

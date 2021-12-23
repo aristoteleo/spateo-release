@@ -34,7 +34,7 @@ def knee(X: np.ndarray) -> float:
     unique, counts = np.unique(X, return_counts=True)
     argsort = np.argsort(unique)
     x = unique[argsort]
-    y = counts[argsort] / X.size
+    y = np.cumsum(counts[argsort]) / X.size
 
     kl = KneeLocator(x, y, curve="concave")
     return kl.knee
@@ -75,7 +75,7 @@ def conv2d(
     if k < 1 or k % 2 == 0:
         raise PreprocessingError(f"`k` must be odd and greater than 0.")
 
-    if mode == "gaussian":
+    if mode == "gauss":
         return gaussian_blur(X, k)
 
     kernel = np.ones((k, k), dtype=np.uint8) if mode == "square" else circle(k)
@@ -83,4 +83,24 @@ def conv2d(
 
 
 def scale_to_01(X: np.ndarray) -> np.ndarray:
+    """Scale an array to [0, 1].
+
+    Args:
+        X: Array to scale
+
+    Returns:
+        Scaled array
+    """
     return (X - X.min()) / (X.max() - X.min())
+
+
+def scale_to_255(X: np.ndarray) -> np.ndarray:
+    """Scale an array to [0, 255].
+
+    Args:
+        X: Array to scale
+
+    Returns:
+        Scaled array
+    """
+    return scale_to_01(X) * 255
