@@ -47,7 +47,7 @@ def lamtheta_to_muvar(lam: float, theta: float) -> Tuple[float, float]:
     return mu, var
 
 
-# @njit
+@njit
 def nbn_em(
     X: np.ndarray,
     w: Tuple[float, float] = (0.99, 0.01),
