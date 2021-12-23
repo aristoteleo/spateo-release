@@ -4,10 +4,12 @@ import cv2
 import numpy as np
 from fbgbp import FastBinaryGridBeliefPropagation
 
+from .utils import circle
+
 
 def cell_marginals(
-    cell_probs: np.ndarray,
     background_probs: np.ndarray,
+    cell_probs: np.ndarray,
     neighborhood: Optional[np.ndarray] = None,
     p: float = 0.7,
     q: float = 0.3,
@@ -21,11 +23,11 @@ def cell_marginals(
 
     Parameters
     ----------
-    cell_probs : :class:`~numpy.ndarray`
-        The probability of each pixel being a cell (for instance, computed by
-        taking the PDF of the parameters estmiated by EM).
     background_probs : :class:`~numpy.ndarray`
         The probability of each pixel being background (for instance, computed by
+        taking the PDF of the parameters estmiated by EM).
+    cell_probs : :class:`~numpy.ndarray`
+        The probability of each pixel being a cell (for instance, computed by
         taking the PDF of the parameters estmiated by EM).
     neighborhood : :class:`~numpy.ndarray`
         A mask (kernel) indicating the neighborhood of each node to consider. The
@@ -53,9 +55,7 @@ def cell_marginals(
     if cell_probs.shape != background_probs.shape:
         raise ValueError("`cell_probs` and `background_probs` must have the same shape")
     neighborhood = (
-        neighborhood > 0
-        if neighborhood is not None
-        else cv2.circle(np.zeros((3, 3)), (1, 1), 1, 1, -1).astype(bool)
+        neighborhood > 0 if neighborhood is not None else circle(3).astype(bool)
     )
     if cell_probs.ndim != neighborhood.ndim:
         raise ValueError(

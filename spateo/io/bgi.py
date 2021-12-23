@@ -69,6 +69,7 @@ def read_bgi_agg(
                 csr_matrix(
                     (data[data.columns[i]], (data["x"], data["y"])),
                     shape=(x_max + 1, y_max + 1),
+                    dtype=np.uint16,
                 )
             )
         else:

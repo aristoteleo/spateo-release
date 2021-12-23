@@ -6,9 +6,10 @@ from numba import njit, vectorize
 from ._digamma import digamma
 
 
-@vectorize(nopython=True)
-def nb_pmf(k: int, r: int, p: float):
-    """Vectorized fast Negative Binomial PMF.
+@vectorize("float64(float64, float64, float64)", nopython=True)
+def nb_pmf(k: float, r: float, p: float):
+    """Vectorized fast Negative Binomial PMF. Calculations are performed in
+    the log domain to prevent over/underflow.
 
     Args:
         k:
@@ -19,8 +20,10 @@ def nb_pmf(k: int, r: int, p: float):
 
     """
     n = k + r - 1
-    coef = np.prod(np.arange(k)[::-1] + (n - k + 1)) / (np.prod(np.arange(k) + 1))
-    return coef * ((1 - p) ** k) * (p ** r)
+    coef = (
+        np.log(np.arange(k)[::-1] + (n - k + 1)).sum() - np.log(np.arange(k) + 1).sum()
+    )
+    return np.exp(coef + k * np.log(1 - p) + r * np.log(p))
 
 
 @njit
@@ -75,13 +78,13 @@ def nbn_em(
     lam, theta = muvar_to_lamtheta(mu, var)
     tau = np.zeros((2,) + X.shape)
 
-    for _ in range(max_iter):
-        prev_w = w.copy()
-        prev_lam = lam.copy()
-        prev_theta = theta.copy()
+    prev_w = w.copy()
+    prev_lam = lam.copy()
+    prev_theta = theta.copy()
 
+    for _ in range(max_iter):
         # E step
-        r = lamtheta_to_r(lam, theta).reshape(-1, 1)  # column vector
+        r = lamtheta_to_r(lam, theta)
         bp = nb_pmf(X, r[0], theta[0])
         cp = nb_pmf(X, r[1], theta[1])
         tau[0] = w[0] * bp
@@ -95,6 +98,7 @@ def nbn_em(
 
         beta = 1 - 1 / (1 - theta) - 1 / np.log(theta)
 
+        r = r.reshape(-1, 1)
         delta = r * (digamma(r + X) - digamma(r))
 
         tau_sum = tau.sum(axis=1)
@@ -106,6 +110,7 @@ def nbn_em(
             / (tau * (X - (1 - beta).reshape(-1, 1) * delta)).sum(axis=1)
         )
 
+        isnan = np.any(np.isnan(w) | np.isnan(lam) | np.isnan(theta))
         if (
             max(
                 np.abs(w - prev_w).max(),
@@ -113,18 +118,26 @@ def nbn_em(
                 np.abs(theta - prev_theta).max(),
             )
             < precision
-        ):
+        ) or isnan:
             break
 
-    return w, lamtheta_to_r(lam, theta), theta
+        prev_w = w.copy()
+        prev_lam = lam.copy()
+        prev_theta = theta.copy()
+
+    return (
+        (prev_w, lamtheta_to_r(prev_lam, prev_theta), prev_theta)
+        if isnan
+        else (w, lamtheta_to_r(lam, theta), theta)
+    )
 
 
-@njit
+# @njit
 def confidence(
     X: np.ndarray,
-    w: np.ndarray,
-    r: np.ndarray,
-    p: np.ndarray,
+    w: Tuple[float, float],
+    r: Tuple[float, float],
+    p: Tuple[float, float],
 ) -> np.ndarray:
     """Compute confidence of each pixel being a cell, using the parameters
     estimated by the EM algorithm.
@@ -139,8 +152,8 @@ def confidence(
         Numpy array of confidence scores within the range [0, 1].
     """
     tau = np.zeros((2,) + X.shape)
-    bp = stats.nbinom(n=r[0], p=p[0]).pmf(X)
-    cp = stats.nbinom(n=r[1], p=p[1]).pmf(X)
+    bp = nb_pmf(X, r[0], p[0])
+    cp = nb_pmf(X, r[1], p[1])
     tau[0] = w[0] * bp
     tau[1] = w[1] * cp
     return tau[1] / tau.sum(axis=0)

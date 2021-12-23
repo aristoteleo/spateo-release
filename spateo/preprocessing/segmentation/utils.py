@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import cv2
 import numpy as np
 from kneed import KneeLocator
@@ -52,16 +54,20 @@ def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
 
 
 def conv2d(
-    X: np.ndarray, k: int, mode: Literal["gaussian", "circle", "square"]
-) -> np.ndarray:
+    X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"]
+) -> Tuple[np.ndarray, np.ndarray]:
     """Convolve an array with the specified kernel size and mode.
 
     Args:
         X: The array to convolve.
         k: Kernel size. Must be odd.
+        mode: Convolution mode. Supported modes are:
+            gauss:
+            circle:
+            square:
 
     Returns:
-        The convolved array.
+        The convolved array and the kernel that was used.
 
     Raises:
         PreprocessingError: if `k` is even or less than 1
@@ -73,4 +79,8 @@ def conv2d(
         return gaussian_blur(X, k)
 
     kernel = np.ones((k, k), dtype=np.uint8) if mode == "square" else circle(k)
-    return signal.convolve2d(X, kernel, boundary="symm", mode="same")
+    return signal.convolve2d(X, kernel, boundary="symm", mode="same"), kernel
+
+
+def scale_to_01(X: np.ndarray) -> np.ndarray:
+    return (X - X.min()) / (X.max() - X.min())
