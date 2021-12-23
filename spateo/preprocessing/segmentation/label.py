@@ -1,4 +1,6 @@
 """Functions for use when labeling individual cells, after obtaining a cell mask.
+
+Original author @HailinPan, refactored by @Lioscro.
 """
 import numpy as np
 from scipy import ndimage as ndi
