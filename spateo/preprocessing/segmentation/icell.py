@@ -1,5 +1,7 @@
 """Identify cells from RNA signal. Functions in this file are used to
 generate a cell mask, NOT to identify individual cells.
+
+Original author @HailinPan, refactored by @Lioscro.
 """
 import warnings
 from typing import Optional, Tuple, Union

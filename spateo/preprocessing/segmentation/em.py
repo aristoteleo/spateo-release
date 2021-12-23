@@ -1,3 +1,10 @@
+"""Implementation of EM algorithm to identify parameter estimates for a
+Negative Binomial mixture model.
+https://iopscience.iop.org/article/10.1088/1742-6596/1324/1/012093/meta
+
+Written by @HailinPan, optimized by @Lioscro.
+"""
+
 from typing import Tuple
 
 import numpy as np
