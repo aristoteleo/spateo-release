@@ -9,7 +9,7 @@ from scipy import stats
 from scipy.sparse import spmatrix
 from typing_extensions import Literal
 
-from . import utils
+from . import bp, em, utils
 
 
 def mclose_mopen(mask: np.ndarray, k: int) -> np.ndarray:
@@ -35,21 +35,9 @@ def mclose_mopen(mask: np.ndarray, k: int) -> np.ndarray:
     return mopen.astype(bool)
 
 
-def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
-    """Gaussian blur
-
-    Args:
-        X: UMI counts per pixel.
-        k: Radius of gaussian blur.
-
-    Returns:
-        Blurred array
-    """
-    return cv2.GaussianBlur(src=X.astype(float), ksize=(k, k), sigmaX=0, sigmaY=0)
-
-
-def em(
+def run_em(
     X: np.ndarray,
+    k: int,
     use_peaks: bool = False,
     downsample: int = 1e6,
     w: Tuple[float, float] = (0.99, 0.01),
@@ -62,6 +50,7 @@ def em(
 
     Args:
         X: UMI counts per pixel.
+        k:
         use_peaks: Whether to use peaks of convolved image as samples for the
             EM algorithm.
         downsample: Use at most this many samples. If `use_peaks` is False,
@@ -79,34 +68,7 @@ def em(
     pass
 
 
-def em_confidence(
-    X: np.ndarray,
-    w: Tuple[float, float],
-    n: Tuple[float, float],
-    p: Tuple[float, float],
-) -> np.ndarray:
-    """Compute confidence of each pixel being a cell, using the parameters
-    estimated by the EM algorithm.
-
-    Args:
-        X: UMI counts per pixel.
-        w:
-        n:
-        p:
-
-    Returns:
-        Numpy array of confidence scores within the range [0, 1].
-    """
-    background_probs = stats.nbinom(n=n[0], p=p[0]).pmf(X)
-    cell_probs = stats.nbinom(n=n[1], p=p[1]).pmf(X)
-    tau = []
-    tau.append(w[0] * background_probs)
-    tau.append(w[1] * cell_probs)
-    tau = np.array(tau)
-    return tau[1] / tau.sum(axis=0)
-
-
-def bp(
+def run_bp(
     X: np.ndarray,
     background_params: Tuple[float, float],
     cell_params: Tuple[float, float],

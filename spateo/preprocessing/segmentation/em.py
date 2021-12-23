@@ -117,3 +117,30 @@ def nbn_em(
             break
 
     return w, lamtheta_to_r(lam, theta), theta
+
+
+@njit
+def confidence(
+    X: np.ndarray,
+    w: np.ndarray,
+    r: np.ndarray,
+    p: np.ndarray,
+) -> np.ndarray:
+    """Compute confidence of each pixel being a cell, using the parameters
+    estimated by the EM algorithm.
+
+    Args:
+        X: UMI counts per pixel.
+        w:
+        r:
+        p:
+
+    Returns:
+        Numpy array of confidence scores within the range [0, 1].
+    """
+    tau = np.zeros((2,) + X.shape)
+    bp = stats.nbinom(n=r[0], p=p[0]).pmf(X)
+    cp = stats.nbinom(n=r[1], p=p[1]).pmf(X)
+    tau[0] = w[0] * bp
+    tau[1] = w[1] * cp
+    return tau[1] / tau.sum(axis=0)

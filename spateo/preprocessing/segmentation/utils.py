@@ -1,6 +1,10 @@
 import cv2
 import numpy as np
 from kneed import KneeLocator
+from scipy import signal
+from typing_extensions import Literal
+
+from ...errors import PreprocessingError
 
 
 def circle(k: int) -> np.ndarray:
@@ -32,3 +36,41 @@ def knee(X: np.ndarray) -> float:
 
     kl = KneeLocator(x, y, curve="concave")
     return kl.knee
+
+
+def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
+    """Gaussian blur
+
+    Args:
+        X: UMI counts per pixel.
+        k: Radius of gaussian blur.
+
+    Returns:
+        Blurred array
+    """
+    return cv2.GaussianBlur(src=X.astype(float), ksize=(k, k), sigmaX=0, sigmaY=0)
+
+
+def conv2d(
+    X: np.ndarray, k: int, mode: Literal["gaussian", "circle", "square"]
+) -> np.ndarray:
+    """Convolve an array with the specified kernel size and mode.
+
+    Args:
+        X: The array to convolve.
+        k: Kernel size. Must be odd.
+
+    Returns:
+        The convolved array.
+
+    Raises:
+        PreprocessingError: if `k` is even or less than 1
+    """
+    if k < 1 or k % 2 == 0:
+        raise PreprocessingError(f"`k` must be odd and greater than 0.")
+
+    if mode == "gaussian":
+        return gaussian_blur(X, k)
+
+    kernel = np.ones((k, k), dtype=np.uint8) if mode == "square" else circle(k)
+    return signal.convolve2d(X, kernel, boundary="symm", mode="same")
