@@ -93,13 +93,13 @@ def nbnEM(
         lampre = lam.copy()
         thetapre = theta.copy()
         nbnEMOne(w, lam, theta, x)
-        print(f"{i} item")
-        print(f"w: {w}")
-        print(f"lam: {lam}")
-        print(f"r: {lam2r(lam, theta)}")
-        print(f"theta: {theta}")
-        print(f"mu: {lamtheta2muvar(lam, theta)[0]}")
-        print(f"var: {lamtheta2muvar(lam, theta)[1]}")
+        # print(f"{i} item")
+        # print(f"w: {w}")
+        # print(f"lam: {lam}")
+        # print(f"r: {lam2r(lam, theta)}")
+        # print(f"theta: {theta}")
+        # print(f"mu: {lamtheta2muvar(lam, theta)[0]}")
+        # print(f"var: {lamtheta2muvar(lam, theta)[1]}")
         if (
             np.max(
                 [

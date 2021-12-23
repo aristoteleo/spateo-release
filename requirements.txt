@@ -29,3 +29,4 @@ pyvista
 POT
 nudged
 typing_extensions
+spycial
