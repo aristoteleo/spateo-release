@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 from scipy import stats
 from scipy.sparse import issparse, spmatrix
+from skimage import feature
 from typing_extensions import Literal
 
 from . import bp, em, utils
@@ -41,6 +42,7 @@ def mclose_mopen(mask: np.ndarray, k: int) -> np.ndarray:
 def run_em(
     X: np.ndarray,
     use_peaks: bool = False,
+    min_distance: int = 21,
     downsample: int = 1e6,
     w: Tuple[float, float] = (0.99, 0.01),
     mu: Tuple[float, float] = (10.0, 300.0),
@@ -54,6 +56,7 @@ def run_em(
         X: UMI counts per pixel.
         use_peaks: Whether to use peaks of convolved image as samples for the
             EM algorithm.
+        min_distance: Minimum distance between peaks when `use_peaks=True`
         downsample: Use at most this many samples. If `use_peaks` is False,
             samples are chosen uniformly at random to at most this many samples.
             Otherwise, peaks are chosen uniformly at random.
@@ -67,8 +70,19 @@ def run_em(
         Tuple of parameters estimated by the EM algorithm.
     """
     if use_peaks:
-        # TODO implement
-        pass
+        picks = feature.peak_local_max(X, min_distance=min_distance)
+        b = np.zeros(img.shape, dtype=np.uint8)
+        b[picks[:, 0], picks[:, 1]] = 1
+        n_objects, labels = cv2.connectedComponents(b)
+
+        added = set()
+        samples = []
+        for i in range(labels.shape[0]):
+            for j in range(labels.shape[1]):
+                label = labels[i, j]
+                if label > 0 and label not in added:
+                    samples.append(X[i, j])
+                    added.add(label)
     else:
         samples = X.flatten()
     if samples.size > downsample:
