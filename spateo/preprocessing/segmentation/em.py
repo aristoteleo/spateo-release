@@ -89,8 +89,8 @@ def nbn_em(
         mu = lamtheta_to_muvar(lam, theta)[0]
 
         # NOTE: tau changes with each line
-        tau[0, (tau.sum(axis=0) <= 1e-9) & (X < mu[0] * 2)] = 1
-        tau[1, (tau.sum(axis=0) <= 1e-9) & (X >= mu[0] * 2)] = 1
+        tau[0][(tau.sum(axis=0) <= 1e-9) & (X < mu[0] * 2)] = 1
+        tau[1][(tau.sum(axis=0) <= 1e-9) & (X >= mu[0] * 2)] = 1
         tau /= tau.sum(axis=0)
 
         beta = 1 - 1 / (1 - theta) - 1 / np.log(theta)
