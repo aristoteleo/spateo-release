@@ -178,18 +178,14 @@ def score_pixels(
         X = X.A
 
     # All methods require some kind of 2D convolution to start off
-    res, kernel = utils.conv2d(X, k, mode="gauss" if method == "gauss" else "circle")
+    res = utils.conv2d(X, k, mode="gauss" if method == "gauss" else "circle")
 
     # All methods other than gauss requires EM
     if method != "gauss":
         w, r, p = run_em(res, **em_kwargs)
 
         if "bp" in method:
-            # NOTE: bp requires per pixel parameters
-            kernel_size = kernel.sum()
-            res = run_bp(
-                X, (r[0] / kernel_size, p[0]), (r[1] / kernel_size, p[1]), **bp_kwargs
-            )
+            res = run_bp(res, (r[0], p[0]), (r[1], p[1]), **bp_kwargs)
         else:
             res = em.confidence(res, w, r, p)
 

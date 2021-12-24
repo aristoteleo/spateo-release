@@ -55,7 +55,7 @@ def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
 
 def conv2d(
     X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"]
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """Convolve an array with the specified kernel size and mode.
 
     Args:
@@ -67,7 +67,7 @@ def conv2d(
             square:
 
     Returns:
-        The convolved array and the kernel that was used.
+        The convolved array
 
     Raises:
         PreprocessingError: if `k` is even or less than 1
@@ -79,7 +79,7 @@ def conv2d(
         return gaussian_blur(X, k)
 
     kernel = np.ones((k, k), dtype=np.uint8) if mode == "square" else circle(k)
-    return signal.convolve2d(X, kernel, boundary="symm", mode="same"), kernel
+    return signal.convolve2d(X, kernel, boundary="symm", mode="same")
 
 
 def scale_to_01(X: np.ndarray) -> np.ndarray:
