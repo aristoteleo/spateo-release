@@ -24,7 +24,7 @@ opencv-python>=4.5.4.60
 scikit-image>=0.19.0
 Shapely>=1.8.0
 geopandas>=0.10.2
-fbgbp>=0.0.4
+fbgbp>=0.0.6
 pyvista
 POT
 nudged
