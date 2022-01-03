@@ -4,7 +4,7 @@ from typing import List, Optional
 
 import numpy as np
 import pandas as pd
-from anndata import AnnDat
+from anndata import AnnData
 from pysal import explore, lib
 from scipy.sparse import issparse
 from statsmodels.sandbox.stats.multicomp import multipletests

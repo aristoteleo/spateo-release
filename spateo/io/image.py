@@ -22,26 +22,19 @@ def read_image(
 ) -> AnnData:
     """Load an image into the AnnData object.
 
-    Parameters
-    ----------
-        adata: `AnnData`
-            AnnData object
-        filename:  `str`
-            The path of the image
-        scale_factor: `float`
-            The scale factor of the image. Define: pixels/DNBs
-        slice: `str` (default: None)
-            Name of the slice. Will be used when displaying multiple slices.
-        img_layer: `str` (default: None)
-            Name of the image layer.
+    Args:
+        adata: AnnData object
+        filename: The path of the image
+        scale_factor: The scale factor of the image. Define: pixels/DNBs
+        slice: Name of the slice. Will be used when displaying multiple slices.
+        img_layer: Name of the image layer.
 
     Returns
     -------
-        adata: `AnnData`
-            :attr:`~anndata.AnnData.uns`\\ `['spatial'][slice]['images'][img_layer]`
-                The stored image
-            :attr:`~anndata.AnnData.uns`\\ `['spatial'][slice]['scalefactors'][img_layer]`
-                The scale factor for the spots
+        :attr:`~anndata.AnnData.uns`\\ `['spatial'][slice]['images'][img_layer]`
+            The stored image
+        :attr:`~anndata.AnnData.uns`\\ `['spatial'][slice]['scalefactors'][img_layer]`
+            The scale factor for the spots
     """
     img = cv2.imread(filename)
     if img is None:
