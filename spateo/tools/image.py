@@ -1,30 +1,31 @@
 """Helper functions about image layer processing.
+
+Todo:
+    * Does it make sense for `slice` and/or `img_layer` to be None? This will
+        make the key of a dictionary be None, which is usually not good practice.
 """
+from typing import Optional
+
+import numpy as np
 from anndata import AnnData
 
 
 def add_image_layer(
     adata: AnnData,
-    img,
+    img: np.ndarray,
     scale_factor: float,
-    slice: str = None,
-    img_layer: str = None,
-):
+    slice: Optional[str] = None,
+    img_layer: Optional[str] = None,
+) -> AnnData:
     """
     A helper function that add an image layer to AnnData object.
 
-    Parameters
-    ----------
-        adata: :class: `AnnData`
-            AnnData object.
-        img:
-            The image data.
-        scale_factor: `float`
-            The scale factor of the image. Define: pixels/DNBs
-        slice: `str` (default: None)
-            Name of the slice. Will be used when displaying multiple slices.
-        img_layer: `str` (default: None)
-            Name of the image layer.
+    Args:
+        adata: AnnData object.
+        img: The image data.
+        scale_factor: The scale factor of the image. Define: pixels/DNBs
+        slice: Name of the slice. Will be used when displaying multiple slices.
+        img_layer: Name of the image layer.
 
     Returns
     -------

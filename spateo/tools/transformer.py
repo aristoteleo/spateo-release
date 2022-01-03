@@ -1,3 +1,7 @@
+"""
+Todo:
+    * @Xiaojieqiu: update with Google style documentation, function typings, tests
+"""
 import numpy as np
 from scipy.spatial import Delaunay
 import math

@@ -1,12 +1,13 @@
-from tqdm import tqdm
+from typing import List, Optional, Tuple, Union
+
+import nudged
 import numpy as np
 import ot
 import torch
-import nudged
+from anndata import AnnData
 from scipy.spatial import distance_matrix
 from scipy.sparse.csr import spmatrix
-from anndata import AnnData
-from typing import Union, Optional
+from tqdm import tqdm
 
 
 def pairwise_align(
@@ -16,32 +17,20 @@ def pairwise_align(
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
     device: Union[str, torch.device] = "cpu",
-):
-    """
+) -> np.ndarray:
+    """Calculates and returns optimal alignment of two slices.
 
-    Calculates and returns optimal alignment of two slices.
+    Args:
+        slice1: An AnnData object.
+        slice2: An AnnData object.
+        alpha: Trade-off parameter (0 < alpha < 1).
+        numItermax: max number of iterations for cg.
+        numItermaxEmd: Max number of iterations for emd.
+        device: Equipment used to run the program.
+            Can also accept a torch.device. E.g.: torch.device('cuda:0')
 
-    Parameters
-    ----------
-    slice1: :class:`~anndata.AnnData`
-        An AnnData object.
-    slice2: :class:`~anndata.AnnData`
-        An AnnData object.
-    alpha: `float` (default: `0.1`)
-        Trade-off parameter (0 < alpha < 1).
-    numItermax: `int` (default: `200`)
-        max number of iterations for cg.
-    numItermaxEmd: `int` (default: `100000`)
-        Max number of iterations for emd.
-    device: `str` or `torch.device` (default: `cpu`)
-        Equipment used to run the program.
-        Can also accept a torch.device. E.g.: torch.device('cuda:0')
-
-    Returns
-    -------
-    pi: `np.array`
+    Returns:
         Alignment of spots.
-
     """
 
     torch.cuda.init()
@@ -104,38 +93,26 @@ def pairwise_align(
 
 
 def slice_alignment(
-    slices,
+    slices: List[AnnData],
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
     device: Union[str, torch.device] = "cpu",
     verbose: bool = True,
-):
-    """
+) -> List[AnnData]:
+    """Align spatial coordinates of slices.
 
-    Align spatial coordinates of slices.
+    Args:
+        slices: List of slices (AnnData Object).
+        alpha: Trade-off parameter (0 < alpha < 1).
+        numItermax: max number of iterations for cg.
+        numItermaxEmd: Max number of iterations for emd.
+        device: Equipment used to run the program.
+            Can also accept a torch.device. E.g.: torch.device('cuda:0')
+        verbose: Print information along iterations.
 
-    Parameters
-    ----------
-    slices:
-        List of slices (AnnData Object).
-    alpha: `float` (default: `0.1`)
-        Trade-off parameter (0 < alpha < 1).
-    numItermax: `int` (default: `200`)
-        max number of iterations for cg.
-    numItermaxEmd: `int` (default: `100000`)
-        Max number of iterations for emd.
-    device: `str` or `torch.device` (default: `cpu`)
-        Equipment used to run the program.
-        Can also accept a torch.device. E.g.: torch.device('cuda:0')
-    verbose: `bool` (default: `True`)
-        Print information along iterations.
-
-    Returns
-    -------
-    align_slices: `list`
+    Returns:
         List of slices (AnnData Object) after alignment.
-
     """
 
     def _log(m):
@@ -196,47 +173,34 @@ def slice_alignment(
 
 
 def slice_alignment_bigBin(
-    slices,
-    slices_big,
+    slices: List[AnnData],
+    slices_big: List[AnnData],
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
     device: Union[str, torch.device] = "cpu",
     verbose: bool = True,
-):
-    """
-
-    Align spatial coordinates of slices.
+) -> Tuple[List[AnnData], List[AnnData]]:
+    """Align spatial coordinates of slices.
     If there are too many slice coordinates to be aligned, this method can be selected.
 
     First select the slices with fewer coordinates for alignment, and then calculate the affine transformation matrix.
     Secondly, the required slices are aligned through the calculated affine transformation matrix.
 
-    Parameters
-    ----------
-    slices:
-        List of slices (AnnData Object).
-    slices_big:
-        List of slices (AnnData Object) with a small number of coordinates.
-    alpha: `float` (default: `0.1`)
-        Trade-off parameter (0 < alpha < 1).
-    numItermax: `int` (default: `200`)
-        max number of iterations for cg.
-    numItermaxEmd: `int` (default: `100000`)
-        Max number of iterations for emd.
-    device: `str` or `torch.device` (default: `cpu`)
-        Equipment used to run the program.
-        Can also accept a torch.device. E.g.: torch.device('cuda:0')
-    verbose: `bool` (default: `True`)
-        Print information along iterations.
+    Args:
+        slices: List of slices (AnnData Object).
+        slices_big: List of slices (AnnData Object) with a small number of coordinates.
+        alpha: Trade-off parameter (0 < alpha < 1).
+        numItermax: max number of iterations for cg.
+        numItermaxEmd: Max number of iterations for emd.
+        device: Equipment used to run the program.
+            Can also accept a torch.device. E.g.: torch.device('cuda:0')
+        verbose: Print information along iterations.
 
-    Returns
-    -------
-    align_slices: `list`
-        List of slices (AnnData Object) after alignment.
-    align_slices_big: `list`
-        List of slices (AnnData Object) with a small number of coordinates after alignment.
-
+    Returns:
+        Tuple of two elements. The first contains a list of slices after alignment.
+        The second contains a list of slices with a small number of coordinates
+        after alignment.
     """
 
     # Align spatial coordinates of slices with a small number of coordinates.

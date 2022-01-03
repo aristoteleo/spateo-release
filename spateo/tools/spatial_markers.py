@@ -1,3 +1,6 @@
+"""Spatial markers.
+"""
+
 from tqdm import tqdm
 
 
@@ -9,6 +12,11 @@ def cluster_specific_genes(
     layer=None,
     n_neighbors=8,
 ):
+    """
+    TODO: Docstring & typings
+    TODO(Xiaojieqiu): This function is pretty long. Can we make this shorter
+        with iteration?
+    """
     group_num = adata.obs[group].value_counts()
 
     group_name = adata.obs[group]

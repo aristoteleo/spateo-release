@@ -1,6 +1,10 @@
-import torch.nn as nn
-import torch
+"""
+Todo:
+    * @Xiaojieqiu: update with Google style documentation, function typings, tests
+"""
 import numpy as np
+import torch
+import torch.nn as nn
 
 
 class SineLayer(nn.Module):
