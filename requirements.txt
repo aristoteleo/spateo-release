@@ -33,3 +33,4 @@ spycial
 torch
 pysal
 kneed
+numba>=0.53.1
