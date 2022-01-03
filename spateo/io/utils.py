@@ -1,3 +1,6 @@
+"""IO utility functions.
+"""
+
 from typing import Tuple
 
 import numpy as np

@@ -1,3 +1,5 @@
+"""Utility functions for cell segmentation.
+"""
 from typing import Tuple
 
 import cv2

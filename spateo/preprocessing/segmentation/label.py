@@ -34,13 +34,17 @@ def watershed(X: np.ndarray, mask: np.ndarray, k: int, min_distance: int) -> np.
     return labels
 
 
-def label_cells(X: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Assign individual cell labels using total UMIs and a cell mask."""
-    pass
-
-
 def enlarge(labels: np.ndarray, n_iter: int = 5, max_area: int = 400) -> np.ndarray:
-    """?"""
+    """Enlarge cell labels.
+
+    Args:
+        labels: Numpy array containing cell labels.
+        n_iter: Number of iterations.
+        max_area: Maximum area of each cell.
+
+    Returns:
+        A new Numpy array of (enlarged) cell labels.
+    """
     enlarged = labels.copy()
     cell_labels = [l for l in np.unique(labels) if l > 0]
     for _ in range(n_iter):

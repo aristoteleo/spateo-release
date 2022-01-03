@@ -19,12 +19,12 @@ def nb_pmf(k: float, r: float, p: float):
     the log domain to prevent over/underflow.
 
     Args:
-        k:
-        r:
-        p:
+        k: Number of successes.
+        r: Number of failures until stop.
+        p: Success probability.
 
     Returns:
-
+        The negative binomial PMF of the provided parameters.
     """
     n = k + r - 1
     coef = (
@@ -70,14 +70,16 @@ def nbn_em(
     UMIs.
 
     Args:
-        X:
-        w:
-        mu:
-        var:
-        max_iter:
-        precision:
+        X: Numpy array containing mixture counts
+        w: Initial proportions of cell and background as a tuple.
+        mu: Initial means of cell and background negative binomial distributions.
+        var: Initial variances of cell and background negative binomial
+            distributions.
+        max_iter: Maximum number of iterations.
+        precision: Desired precision. Algorithm will stop once this is reached.
+
     Returns:
-        Tuple of (w, r, p)
+        Estimated `w`, `r`, `p`.
     """
     w = np.array(w)
     mu = np.array(mu)
@@ -150,10 +152,10 @@ def confidence(
     estimated by the EM algorithm.
 
     Args:
-        X: UMI counts per pixel.
-        w:
-        r:
-        p:
+        X: Numpy array containing mixture counts.
+        w: Estimated `w` parameters.
+        r: Estimated `r` parameters.
+        p: Estimated `p` parameters
 
     Returns:
         Numpy array of confidence scores within the range [0, 1].

@@ -1,7 +1,10 @@
-from anndata import AnnData
-import matplotlib.pyplot as plt
-import cv2
+"""Image preprocessing.
+"""
 from typing import Union, Optional
+
+import cv2
+import matplotlib.pyplot as plt
+from anndata import AnnData
 
 from ..tools.image import add_image_layer
 
@@ -14,36 +17,26 @@ def remove_background(
     return_img_layer: Optional[str] = None,
     inplace: bool = False,
     show: bool = True,
-):
+) -> Optional[AnnData]:
     """
     Preprocessing of an image. Remove background with the global threshold. Pixel intensity is set to 0, for all the
     pixels intensity, less than the threshold value. If the threshold is not provided, it will be calculated by
     OSTU's method.
 
-    Parameters
-    ----------
-        adata: :class: `AnnData`
-            AnnData object.
-        threshold: `float` or auto
-            Global threshold used. If the threshold is not provided, it will be calculated by OSTU's method.
-        slice: `str` or None (default: None)
-            Name of the slice.
-        used_img_layer: `str` or None (default: None)
-            Name of used image layer.
-        return_img_layer: `str` or None (default: None)
-            Name of output image layer.
-        inplace: `bool` (default: `False`)
-            Perform computation inplace or return result.
-        show: `bool` (default: `True`)
-            Show the preprocessed image or not.
+    Args:
+        adata: AnnData object.
+        threshold: Global threshold used. If the threshold is not provided, it will be calculated by OSTU's method.
+        slice: Name of the slice.
+        used_img_layer: Name of used image layer.
+        return_img_layer: Name of output image layer.
+        inplace: Perform computation inplace or return result.
+        show: Show the preprocessed image or not.
 
-    Returns
-    -------
-        adata: :class: `AnnData`
-            :attr:`AnnData.uns`\\ `['spatial'][slice]['images'][return_img_layer]`
-                The preprocessed image
-            :attr:`AnnData.uns`\\ `['spatial'][slice]['scalefactors'][return_img_layer]`
-                The scale factor for the spots
+    Returns:
+        :attr:`AnnData.uns`\\ `['spatial'][slice]['images'][return_img_layer]`
+            The preprocessed image
+        :attr:`AnnData.uns`\\ `['spatial'][slice]['scalefactors'][return_img_layer]`
+            The scale factor for the spots
     """
     if not inplace:
         adata = adata.copy()

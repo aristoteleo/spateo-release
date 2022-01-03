@@ -62,9 +62,10 @@ def run_em(
         downsample: Use at most this many samples. If `use_peaks` is False,
             samples are chosen uniformly at random to at most this many samples.
             Otherwise, peaks are chosen uniformly at random.
-        w:
-        mu:
-        var:
+        w: Initial proportions of cell and background as a tuple.
+        mu: Initial means of cell and background negative binomial distributions.
+        var: Initial variances of cell and background negative binomial
+            distributions.
         max_iter: Maximum number of EM iterations.
         precision: Stop EM algorithm once desired precision has been reached.
 
@@ -152,10 +153,12 @@ def score_pixels(
         X: UMI counts per pixel as either a sparse or dense array.
         k: Kernel size for convolution.
         method: Method to use. Valid methods are:
-            gauss:
-            EM:
-            EM+gauss:
-            EM+BP:
+            gauss: Gaussian blur
+            EM: EM algorithm to estimate cell and background expression
+                parameters.
+            EM+gauss: EM algorithm followed by Gaussian blur.
+            EM+BP: EM algorithm followed by belief propagation to estimate the
+                marginal probabilities of cell and background.
         em_kwargs: Keyword arguments to the :func:`run_em` function.
         bp_kwargs: Keyword arguments to the :func:`run_bp` function.
 

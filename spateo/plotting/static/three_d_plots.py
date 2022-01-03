@@ -1,9 +1,10 @@
 import math
+from typing import Union, Optional, List
+
 import pandas as pd
 import pyvista as pv
 import matplotlib as mpl
 from anndata import AnnData
-from typing import Union, Optional, List
 
 
 def set_mesh(
@@ -11,34 +12,20 @@ def set_mesh(
     cluster: str = "cluster",
     cluster_show: Union[str, list] = "all",
     gene_show: Union[str, list] = "all",
-):
-    """
+) -> Union[Tuple[pv.PolyData, pv.PolyData, pv.PolyData], Tuple[pv.PolyData, pv.PolyData]]:
+    """Create mesh.
 
-    Create mesh.
-
-    Parameters
-    ----------
-    adata : :class:`~anndata.AnnData`
-        an Annodata object.
-    cluster : `str`
-        Column name in .obs DataFrame that stores clustering results.
-    cluster_show : `str` or `list` (default: `all`)
-        Clustering categories that need to be displayed.
-    gene_show : `str` or `list` (default: `all`)
-        Genes that need to be displayed.
+    Args:
+        adata: an Annodata object.
+        cluster: Column name in .obs DataFrame that stores clustering results.
+        cluster_show: Clustering categories that need to be displayed.
+        gene_show: Genes that need to be displayed.
 
     Returns
-    -------
-    mask_grid:
-        pyvista.PolyData
-        Dataset consisting of undisplayed clustering vertices.(if cluster_show != "all", return the mask_grid.)
-    other_grid:
-        pyvista.PolyData
-        Dataset consisting of displayed clustering vertices.
-    surf:
-        pyvista.PolyData
-        Clipped surface.
-
+        mask_grid: Dataset consisting of undisplayed clustering vertices.
+            (if cluster_show != "all", return the mask_grid.)
+        other_grid: Dataset consisting of displayed clustering vertices.
+        surf: Clipped surface.
     """
 
     points = adata.obs[["x", "y", "z"]].values
@@ -100,58 +87,37 @@ def recon_3d(
     viewup: Optional[list] = None,
     framerate: int = 15,
 ):
-    """
-
-    Draw a 3D image that integrates all the slices through pyvista,
+    """Draw a 3D image that integrates all the slices through pyvista,
     and you can output a png image file, or a gif image file, or an MP4 video file.
 
-    Parameters
-    ----------
-    adata : :class:`~anndata.AnnData`
-        an Annodata object.
-    cluster : `str`
-        Column name in .obs DataFrame that stores clustering results.
-    save : `str`
-        If a str, save the figure. Infer the file type if ending on
-        {'.png','.jpeg', '.jpg', '.bmp', '.tif', '.tiff', '.gif', '.mp4'}.
-    cluster_show : `str` or `list` (default: `all`)
-        Clustering categories that need to be displayed.
-    gene_show : `str` or `list` (default: `all`)
-        Genes that need to be displayed.
-    show : `str` (default: `cluster`)
-        Display gene expression (`gene`) or clustering results (`cluster`).
-    colormap : `str` (default: `RdYlBu_r`)
-        The name of a matplotlib colormap to use for categorical coloring.
-    background_color : `str` (default: `black`)
-        The background color of the active render window.
-    other_color : `str` (default: `white`)
-        The color of the font and border.
-    off_screen : `bool` (default: `True`)
-        Renders off screen when True. Useful for automated screenshots.
-    window_size : `list` (optional, default: `None`)
-        Window size in pixels. Defaults to [1024, 768].
-    cpos : `list` (optional, default: `None`)
-        List of Camera position. Available camera positions are: "xy", "xz", "yz", "yx", "zx", "zy", "iso".
-        Defaults to ["xy", "xz", "yz", "iso"].
-    bar_position : `list` (optional, default: `None`)
-        The percentage (0 to 1) along the windows’s horizontal direction and vertical direction to place the bottom
-        left corner of the colorbar. Defaults to [0.9, 0.1].
-    bar_height : `float` (default: `0.3`)
-        The percentage (0 to 1) height of the window for the colorbar.
-    viewup : `list` (optional, default: `None`)
-        The normal to the orbital plane. Defaults to [0.5, 0.5, 1].
-    framerate : `int` (default: `15`)
-        Frames per second.
+    Args:
+        adata: an Annodata object.
+        cluster: Column name in .obs DataFrame that stores clustering results.
+        save: If a str, save the figure. Infer the file type if ending on
+            {'.png','.jpeg', '.jpg', '.bmp', '.tif', '.tiff', '.gif', '.mp4'}.
+        cluster_show: Clustering categories that need to be displayed.
+        gene_show: Genes that need to be displayed.
+        show: Display gene expression (`gene`) or clustering results (`cluster`).
+        colormap: The name of a matplotlib colormap to use for categorical coloring.
+        background_color: The background color of the active render window.
+        other_color: The color of the font and border.
+        off_screen: Renders off screen when True. Useful for automated screenshots.
+        window_size: Window size in pixels. Defaults to [1024, 768].
+        cpos: List of Camera position. Available camera positions are: "xy", "xz", "yz", "yx", "zx", "zy", "iso".
+            Defaults to ["xy", "xz", "yz", "iso"].
+        bar_position: The percentage (0 to 1) along the windows’s horizontal direction and vertical direction to place the bottom
+            left corner of the colorbar. Defaults to [0.9, 0.1].
+        bar_height: The percentage (0 to 1) height of the window for the colorbar.
+        viewup: The normal to the orbital plane. Defaults to [0.5, 0.5, 1].
+        framerate: Frames per second.
 
-    Examples
-    --------
-    #>>> adata
-    AnnData object with n_obs × n_vars = 35145 × 16131
-    obs: 'slice_ID', 'x', 'y', 'z', 'cluster'
-    obsm: 'spatial'
-    #>>> recon_3d(adata=adata, cluster="cluster",cluster_show=["muscle", "testis"],gene_show=["128up", "14-3-3epsilon"],
-    #>>>          show='cluster', save="3d.png", viewup=[0, 0, 0], colormap="RdYlBu_r", bar_height=0.2)
-
+    Examples:
+        >>> adata
+        AnnData object with n_obs × n_vars = 35145 × 16131
+        obs: 'slice_ID', 'x', 'y', 'z', 'cluster'
+        obsm: 'spatial'
+        >>> recon_3d(adata=adata, cluster="cluster",cluster_show=["muscle", "testis"],gene_show=["128up", "14-3-3epsilon"],
+        >>>          show='cluster', save="3d.png", viewup=[0, 0, 0], colormap="RdYlBu_r", bar_height=0.2)
     """
 
     if window_size is None:
