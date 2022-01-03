@@ -30,3 +30,4 @@ POT
 nudged
 typing_extensions
 spycial
+torch

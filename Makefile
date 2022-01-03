@@ -2,7 +2,7 @@
 
 test:
 	rm -f .coverage
-	nosetests --verbose --with-coverage --cover-package spateo tests/* tests/io/*
+	nosetests --verbose --with-coverage --cover-package spateo tests/* tests/io/* tests/preprocessing/* tests/preprocessing/segmentation/*
 
 check:
 	black spateo tests --check && echo OK
