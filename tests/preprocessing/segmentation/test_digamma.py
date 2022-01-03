@@ -9,6 +9,6 @@ from ...mixins import TestMixin
 
 class TestDigamma(TestMixin, TestCase):
     def test_digamma(self):
-        np.testing.assert_almost_equal(special.digamma(10), _digamma.digamma(10))
-        np.testing.assert_almost_equal(special.digamma(1), _digamma.digamma(1))
-        np.testing.assert_almost_equal(special.digamma(100), _digamma.digamma(100))
+        np.testing.assert_almost_equal(special.digamma(10), _digamma.digamma(10.0))
+        np.testing.assert_almost_equal(special.digamma(1), _digamma.digamma(1.0))
+        np.testing.assert_almost_equal(special.digamma(100), _digamma.digamma(100.0))
