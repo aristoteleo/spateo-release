@@ -12,7 +12,9 @@ def set_mesh(
     cluster: str = "cluster",
     cluster_show: Union[str, list] = "all",
     gene_show: Union[str, list] = "all",
-) -> Union[Tuple[pv.PolyData, pv.PolyData, pv.PolyData], Tuple[pv.PolyData, pv.PolyData]]:
+) -> Union[
+    Tuple[pv.PolyData, pv.PolyData, pv.PolyData], Tuple[pv.PolyData, pv.PolyData]
+]:
     """Create mesh.
 
     Args:

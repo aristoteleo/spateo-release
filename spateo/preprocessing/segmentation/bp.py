@@ -9,6 +9,7 @@ from fbgbp import FastBinaryGridBeliefPropagation
 
 from .utils import circle
 
+
 def create_neighbor_offsets(neighborhood: np.ndarray) -> np.ndarray:
     """Helper function to convert a neighborhood mask to coordinate offsets.
 
