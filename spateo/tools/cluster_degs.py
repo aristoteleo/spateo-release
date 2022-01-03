@@ -331,3 +331,5 @@ def find_all_cluster_degs(
     de_table = pd.concat(de_tables).reset_index().drop(columns=["index"])
     adata.uns["cluster_markers"] = {"deg_table": de_table, "de_genes": de_genes}
     return adata
+
+
