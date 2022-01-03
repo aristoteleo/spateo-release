@@ -6,7 +6,7 @@ import nudged
 from scipy.spatial import distance_matrix
 from scipy.sparse.csr import spmatrix
 from anndata import AnnData
-from typing import Union
+from typing import Union, Optional
 
 
 def pairwise_align(
@@ -251,7 +251,6 @@ def slice_alignment_bigBin(
 
     align_slices = []
     for slice_big, align_slice_big, slice in zip(slices_big, align_slices_big, slices):
-
         # Calculate the affine transformation matrix through nudged
         slice_big_coords = slice_big.obsm["spatial"].tolist()
         align_slice_big_coords = align_slice_big.obsm["spatial"].tolist()
