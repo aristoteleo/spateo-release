@@ -3,9 +3,10 @@
 
 from typing import Tuple
 
+
 import numpy as np
 import pandas as pd
-from shapely.geometry import Point, Polygon, LineString
+from shapely.geometry import Point, LineString, Polygon
 from skimage import measure
 
 
