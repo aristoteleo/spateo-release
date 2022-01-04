@@ -10,7 +10,12 @@ install-all: install install-dev
 
 test:
 	rm -f .coverage
-	nosetests --verbose --with-coverage --cover-package spateo tests/* tests/io/* tests/preprocessing/* tests/preprocessing/segmentation/*
+	nosetests --verbose --with-coverage --cover-package spateo \
+		tests/* \
+		tests/io/* \
+		tests/preprocessing/* \
+		tests/preprocessing/segmentation/* \
+		tests/tools/*
 
 check:
 	black spateo tests --check && echo OK
