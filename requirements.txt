@@ -29,7 +29,6 @@ pyvista
 POT
 nudged
 typing_extensions
-spycial
 torch
 pysal
 kneed
