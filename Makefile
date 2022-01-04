@@ -1,7 +1,7 @@
 .PHONY : install install-dev install-all test check build docs clean push_release
 
 install:
-	pip install --no-build-isolation --no-binary hdbscan -r requirements.txt
+	pip install --no-binary hdbscan -r requirements.txt
 
 install-dev:
 	pip install -r dev-requirements.txt
