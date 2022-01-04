@@ -81,6 +81,7 @@ def nbn_em(
     Returns:
         Estimated `w`, `r`, `p`.
     """
+
     w = np.array(w)
     mu = np.array(mu)
     var = np.array(var)

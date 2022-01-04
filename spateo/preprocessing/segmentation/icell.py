@@ -88,6 +88,7 @@ def run_em(
                     added.add(label)
     else:
         samples = X.flatten()
+    downsample = int(downsample)
     if samples.size > downsample:
         samples = np.random.choice(samples, downsample, replace=False)
 
