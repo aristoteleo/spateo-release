@@ -43,5 +43,5 @@ class TestSegmentationUtils(TestMixin, TestCase):
     def test_scale_to_255(self):
         X = np.array([0, 1, 2, 3, 4])
         np.testing.assert_allclose(
-            np.array([0, 0.25, 0.5, 0.75, 1]) * 255, utils.scale_to_01(X)
+            np.array([0, 0.25, 0.5, 0.75, 1]) * 255, utils.scale_to_255(X)
         )

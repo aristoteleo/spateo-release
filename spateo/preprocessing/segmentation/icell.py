@@ -186,11 +186,13 @@ def score_pixels(
 
     # All methods other than gauss requires EM
     if method != "gauss":
+        start = time.time()
         w, r, p = run_em(res, **em_kwargs)
 
         if "bp" in method:
             res = run_bp(res, (r[0], p[0]), (r[1], p[1]), **bp_kwargs)
         else:
+            start = time.time()
             res = em.confidence(res, w, r, p)
 
         if "gauss" in method:

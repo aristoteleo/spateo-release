@@ -8,38 +8,14 @@ Written by @HailinPan, optimized by @Lioscro.
 from typing import Tuple
 
 import numpy as np
-from numba import njit, vectorize
-
-from ._digamma import digamma
+from scipy import special, stats
 
 
-@vectorize("float64(float64, float64, float64)", nopython=True)
-def nb_pmf(k: float, r: float, p: float) -> float:
-    """Vectorized fast Negative Binomial PMF. Calculations are performed in
-    the log domain to prevent over/underflow.
-
-    Args:
-        k: Number of successes.
-        r: Number of failures until stop.
-        p: Success probability.
-
-    Returns:
-        The negative binomial PMF of the provided parameters.
-    """
-    n = k + r - 1
-    coef = (
-        np.log(np.arange(k)[::-1] + (n - k + 1)).sum() - np.log(np.arange(k) + 1).sum()
-    )
-    return np.exp(coef + k * np.log(1 - p) + r * np.log(p))
-
-
-@njit
 def lamtheta_to_r(lam: float, theta: float) -> float:
     """Convert lambda and theta to r."""
     return -lam / np.log(theta)
 
 
-@njit
 def muvar_to_lamtheta(mu: float, var: float) -> Tuple[float, float]:
     """Convert the mean and variance to lambda and theta."""
     r = mu ** 2 / (var - mu)
@@ -48,7 +24,6 @@ def muvar_to_lamtheta(mu: float, var: float) -> Tuple[float, float]:
     return lam, theta
 
 
-@njit
 def lamtheta_to_muvar(lam: float, theta: float) -> Tuple[float, float]:
     """Convert the lambda and theta to mean and variance."""
     r = lamtheta_to_r(lam, theta)
@@ -57,7 +32,6 @@ def lamtheta_to_muvar(lam: float, theta: float) -> Tuple[float, float]:
     return mu, var
 
 
-@njit
 def nbn_em(
     X: np.ndarray,
     w: Tuple[float, float] = (0.99, 0.01),
@@ -95,8 +69,8 @@ def nbn_em(
     for _ in range(max_iter):
         # E step
         r = lamtheta_to_r(lam, theta)
-        bp = nb_pmf(X, r[0], theta[0])
-        cp = nb_pmf(X, r[1], theta[1])
+        bp = stats.nbinom(n=r[0], p=theta[0]).pmf(X)
+        cp = stats.nbinom(n=r[1], p=theta[1]).pmf(X)
         tau[0] = w[0] * bp
         tau[1] = w[1] * cp
         mu = lamtheta_to_muvar(lam, theta)[0]
@@ -109,7 +83,7 @@ def nbn_em(
         beta = 1 - 1 / (1 - theta) - 1 / np.log(theta)
 
         r = r.reshape(-1, 1)
-        delta = r * (digamma(r + X) - digamma(r))
+        delta = r * (special.digamma(r + X) - special.digamma(r))
 
         tau_sum = tau.sum(axis=1)
         w = tau_sum / tau_sum.sum()
@@ -142,7 +116,6 @@ def nbn_em(
     )
 
 
-@njit
 def confidence(
     X: np.ndarray,
     w: Tuple[float, float],
@@ -162,8 +135,8 @@ def confidence(
         Numpy array of confidence scores within the range [0, 1].
     """
     tau = np.zeros((2,) + X.shape)
-    bp = nb_pmf(X, r[0], p[0])
-    cp = nb_pmf(X, r[1], p[1])
+    bp = stats.nbinom(n=r[0], p=p[0]).pmf(X)
+    cp = stats.nbinom(n=r[1], p=p[1]).pmf(X)
     tau[0] = w[0] * bp
     tau[1] = w[1] * cp
     return tau[1] / tau.sum(axis=0)
