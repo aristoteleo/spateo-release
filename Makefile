@@ -2,7 +2,7 @@
 
 install:
 	# There is a problem with just pip installing hdbscan...
-	# pip install --no-build-isolation --no-binary hdbscan hdbscan>=0.8.26
+	pip install --no-build-isolation --no-binary :all: hdbscan>=0.8.26
 	pip install -r requirements.txt
 
 install-dev:
