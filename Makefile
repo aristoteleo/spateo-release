@@ -6,7 +6,7 @@ install:
 install-dev:
 	pip install -r dev-requirements.txt
 
-install-all: install install-dev
+install-all: install-dev install
 
 test:
 	rm -f .coverage
