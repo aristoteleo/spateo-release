@@ -15,7 +15,7 @@ jobs:
           python-version: '3.7'
           architecture: x64
       - name: Install dependencies
-        run: pip install -r dev-requirements.txt
+        run: make install-dev
       - name: Check code quality
         run: make check
   build:
@@ -34,7 +34,7 @@ jobs:
           python-version: ${{ matrix.python }}
           architecture: x64
       - name: Install dependencies
-        run: pip install --no-compile -r requirements.txt && pip install -r dev-requirements.txt
+        run: make install-all
       - name: Run tests
         run: make test
       # - name: Upload coverage

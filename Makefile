@@ -1,4 +1,12 @@
-.PHONY : test check build docs clean push_release
+.PHONY : install install-dev install-all test check build docs clean push_release
+
+install:
+	pip install --no-build-isolation --no-binary hdbscan -r requirements.txt
+
+install-dev:
+	pip install -r dev-requirements.txt
+
+install-all: install install-dev
 
 test:
 	rm -f .coverage

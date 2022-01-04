@@ -14,7 +14,7 @@ from ._digamma import digamma
 
 
 @vectorize("float64(float64, float64, float64)", nopython=True)
-def nb_pmf(k: float, r: float, p: float):
+def nb_pmf(k: float, r: float, p: float) -> float:
     """Vectorized fast Negative Binomial PMF. Calculations are performed in
     the log domain to prevent over/underflow.
 
