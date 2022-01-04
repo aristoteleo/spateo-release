@@ -1,7 +1,9 @@
 .PHONY : install install-dev install-all test check build docs clean push_release
 
 install:
-	pip install --no-binary hdbscan -r requirements.txt
+	# There is a problem with just pip installing hdbscan...
+	pip install --no-build-isolation --no-binary hdbscan hdbscan>=0.8.26
+	pip install -r requirements.txt
 
 install-dev:
 	pip install -r dev-requirements.txt
