@@ -45,14 +45,14 @@ class TestICell(TestMixin, TestCase):
 
     def test_run_em_peaks(self):
         rng = np.random.default_rng(2021)
-        X = rng.negative_binomial(10, 0.5, (20, 20)) + rng.negative_binomial(
-            100, 0.5, (20, 20)
+        X = rng.negative_binomial(50, 0.5, (100, 100)) + rng.negative_binomial(
+            500, 0.5, (100, 100)
         )
-        w, r, p = icell.run_em(X, use_peaks=True, min_distance=3, seed=2021)
-
-        np.testing.assert_allclose([2.5410080858403237e-98, 1.0], w)
-        np.testing.assert_allclose([240848.71133566636, 2288481.983873496], r)
-        np.testing.assert_allclose([0.9994190606795875, 0.9999388278182301], p)
+        w, r, p = icell.run_em(X, use_peaks=True, min_distance=1, seed=2021)
+        print(w, r, p)
+        np.testing.assert_allclose([3.06e-322, 1.0], w)
+        np.testing.assert_allclose([145.7961865893234, 1552.4287058491911], r)
+        np.testing.assert_allclose([0.19757881931910512, 0.7212333080184193], p)
 
     def test_run_bp(self):
         rng = np.random.default_rng(2021)
