@@ -1,7 +1,6 @@
 from unittest import TestCase
 
 import numpy as np
-from scipy import stats
 
 import spateo.preprocessing.segmentation.utils as utils
 from ...mixins import TestMixin

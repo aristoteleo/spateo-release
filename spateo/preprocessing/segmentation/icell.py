@@ -51,6 +51,7 @@ def run_em(
     var: Tuple[float, float] = (20.0, 400.0),
     max_iter: int = 2000,
     precision: float = 1e-6,
+    seed: Optional[int] = None,
 ) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
     """EM
 
@@ -68,13 +69,14 @@ def run_em(
             distributions.
         max_iter: Maximum number of EM iterations.
         precision: Stop EM algorithm once desired precision has been reached.
+        seed: Random seed.
 
     Returns:
         Tuple of parameters estimated by the EM algorithm.
     """
     if use_peaks:
         picks = feature.peak_local_max(X, min_distance=min_distance)
-        b = np.zeros(img.shape, dtype=np.uint8)
+        b = np.zeros(X.shape, dtype=np.uint8)
         b[picks[:, 0], picks[:, 1]] = 1
         n_objects, labels = cv2.connectedComponents(b)
 
@@ -86,11 +88,13 @@ def run_em(
                 if label > 0 and label not in added:
                     samples.append(X[i, j])
                     added.add(label)
+        samples = np.array(samples)
     else:
         samples = X.flatten()
     downsample = int(downsample)
     if samples.size > downsample:
-        samples = np.random.choice(samples, downsample, replace=False)
+        rng = np.random.default_rng(seed)
+        samples = rng.choice(samples, downsample, replace=False)
 
     w, r, p = em.nbn_em(
         samples, w=w, mu=mu, var=var, max_iter=max_iter, precision=precision
@@ -124,8 +128,10 @@ def run_bp(
     Returns:
         Numpy array of marginal probabilities.
     """
-    background_probs = em.nb_pmf(X, background_params[0], background_params[1])
-    cell_probs = em.nb_pmf(X, cell_params[0], cell_params[1])
+    background_probs = stats.nbinom(n=background_params[0], p=background_params[1]).pmf(
+        X
+    )
+    cell_probs = stats.nbinom(n=cell_params[0], p=cell_params[1]).pmf(X)
     neighborhood = np.ones((k, k)) if square else utils.circle(k)
     marginals = bp.cell_marginals(
         background_probs,
@@ -186,13 +192,11 @@ def score_pixels(
 
     # All methods other than gauss requires EM
     if method != "gauss":
-        start = time.time()
         w, r, p = run_em(res, **em_kwargs)
 
         if "bp" in method:
             res = run_bp(res, (r[0], p[0]), (r[1], p[1]), **bp_kwargs)
         else:
-            start = time.time()
             res = em.confidence(res, w, r, p)
 
         if "gauss" in method:

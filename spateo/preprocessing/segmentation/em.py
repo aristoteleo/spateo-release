@@ -35,8 +35,8 @@ def lamtheta_to_muvar(lam: float, theta: float) -> Tuple[float, float]:
 def nbn_em(
     X: np.ndarray,
     w: Tuple[float, float] = (0.99, 0.01),
-    mu: Tuple[float, float] = (10.0, 100.0),
-    var: Tuple[float, float] = (20.0, 200.0),
+    mu: Tuple[float, float] = (10.0, 300.0),
+    var: Tuple[float, float] = (20.0, 400.0),
     max_iter: int = 2000,
     precision: float = 1e-3,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
