@@ -27,6 +27,9 @@ def circle(k: int) -> np.ndarray:
 def knee(X: np.ndarray) -> float:
     """Find the knee point of an arbitrary array.
 
+    Todo:
+        Bin for float arrays.
+
     Args:
         X: Numpy array of values
 
@@ -106,3 +109,26 @@ def scale_to_255(X: np.ndarray) -> np.ndarray:
         Scaled array
     """
     return scale_to_01(X) * 255
+
+
+def mclose_mopen(mask: np.ndarray, k: int) -> np.ndarray:
+    """Perform morphological close and open operations on a boolean mask.
+
+    Note:
+     The two operations are performed with different kernels. The close operation
+     uses a square kernel, while the mopen operation uses a circular kernel.
+
+    Args:
+        X: Boolean mask
+        k: Kernel size
+
+    Returns:
+        New boolean mask with morphological close and open operations performed.
+    """
+    close_kernel = np.ones((k, k), dtype=np.uint8)
+    mclose = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, close_kernel)
+
+    open_kernel = circle(k)
+    mopen = cv2.morphologyEx(mclose, cv2.MORPH_OPEN, open_kernel)
+
+    return mopen.astype(bool)

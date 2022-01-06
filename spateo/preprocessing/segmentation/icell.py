@@ -8,142 +8,12 @@ from typing import Optional, Tuple, Union
 
 import cv2
 import numpy as np
-from scipy import stats
 from scipy.sparse import issparse, spmatrix
-from skimage import feature
 from typing_extensions import Literal
 
 from . import bp, em, utils
 from ...errors import PreprocessingError
 from ...warnings import PreprocessingWarning
-
-
-def mclose_mopen(mask: np.ndarray, k: int) -> np.ndarray:
-    """Perform morphological close and open operations on a boolean mask.
-
-    Note:
-     The two operations are performed with different kernels. The close operation
-     uses a square kernel, while the mopen operation uses a circular kernel.
-
-    Args:
-        X: Boolean mask
-        k: Kernel size
-
-    Returns:
-        New boolean mask with morphological close and open operations performed.
-    """
-    close_kernel = np.ones((k, k), dtype=np.uint8)
-    mclose = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, close_kernel)
-
-    open_kernel = utils.circle(k)
-    mopen = cv2.morphologyEx(mclose, cv2.MORPH_OPEN, open_kernel)
-
-    return mopen.astype(bool)
-
-
-def run_em(
-    X: np.ndarray,
-    use_peaks: bool = False,
-    min_distance: int = 21,
-    downsample: int = 1e6,
-    w: Tuple[float, float] = (0.99, 0.01),
-    mu: Tuple[float, float] = (10.0, 300.0),
-    var: Tuple[float, float] = (20.0, 400.0),
-    max_iter: int = 2000,
-    precision: float = 1e-6,
-    seed: Optional[int] = None,
-) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
-    """EM
-
-    Args:
-        X: UMI counts per pixel.
-        use_peaks: Whether to use peaks of convolved image as samples for the
-            EM algorithm.
-        min_distance: Minimum distance between peaks when `use_peaks=True`
-        downsample: Use at most this many samples. If `use_peaks` is False,
-            samples are chosen uniformly at random to at most this many samples.
-            Otherwise, peaks are chosen uniformly at random.
-        w: Initial proportions of cell and background as a tuple.
-        mu: Initial means of cell and background negative binomial distributions.
-        var: Initial variances of cell and background negative binomial
-            distributions.
-        max_iter: Maximum number of EM iterations.
-        precision: Stop EM algorithm once desired precision has been reached.
-        seed: Random seed.
-
-    Returns:
-        Tuple of parameters estimated by the EM algorithm.
-    """
-    if use_peaks:
-        picks = feature.peak_local_max(X, min_distance=min_distance)
-        b = np.zeros(X.shape, dtype=np.uint8)
-        b[picks[:, 0], picks[:, 1]] = 1
-        n_objects, labels = cv2.connectedComponents(b)
-
-        added = set()
-        samples = []
-        for i in range(labels.shape[0]):
-            for j in range(labels.shape[1]):
-                label = labels[i, j]
-                if label > 0 and label not in added:
-                    samples.append(X[i, j])
-                    added.add(label)
-        samples = np.array(samples)
-    else:
-        samples = X.flatten()
-    downsample = int(downsample)
-    if samples.size > downsample:
-        rng = np.random.default_rng(seed)
-        samples = rng.choice(samples, downsample, replace=False)
-
-    w, r, p = em.nbn_em(
-        samples, w=w, mu=mu, var=var, max_iter=max_iter, precision=precision
-    )
-    return tuple(w), tuple(r), tuple(p)
-
-
-def run_bp(
-    X: np.ndarray,
-    background_params: Tuple[float, float],
-    cell_params: Tuple[float, float],
-    k: int = 3,
-    square: bool = False,
-    p: float = 0.7,
-    q: float = 0.3,
-    precision: float = 1e-6,
-    max_iter: int = 100,
-    n_threads: int = 1,
-) -> np.ndarray:
-    """Compute the marginal probability of each pixel being a cell, using
-    belief propagation.
-
-    Args:
-        X: UMI counts per pixel.
-        background_params: Parameters estimated (with EM) for background.
-        cell_params: Parameters estimated (with EM) for cell.
-        k: Neighborhood size
-        square: Whether the neighborhood of each node is a square around it.
-            If false, the neighborhood is a circle.
-
-    Returns:
-        Numpy array of marginal probabilities.
-    """
-    background_probs = stats.nbinom(n=background_params[0], p=background_params[1]).pmf(
-        X
-    )
-    cell_probs = stats.nbinom(n=cell_params[0], p=cell_params[1]).pmf(X)
-    neighborhood = np.ones((k, k)) if square else utils.circle(k)
-    marginals = bp.cell_marginals(
-        background_probs,
-        cell_probs,
-        neighborhood=neighborhood,
-        p=p,
-        q=q,
-        precision=precision,
-        max_iter=max_iter,
-        n_threads=n_threads,
-    )
-    return marginals
 
 
 def score_pixels(
@@ -152,6 +22,7 @@ def score_pixels(
     method: Literal["gauss", "EM", "EM+gauss", "EM+BP"],
     em_kwargs: Optional[dict] = None,
     bp_kwargs: Optional[dict] = None,
+    certain_mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Score each pixel by how likely it is a cell. Values returned are in
     [0, 1].
@@ -166,8 +37,11 @@ def score_pixels(
             EM+gauss: EM algorithm followed by Gaussian blur.
             EM+BP: EM algorithm followed by belief propagation to estimate the
                 marginal probabilities of cell and background.
-        em_kwargs: Keyword arguments to the :func:`run_em` function.
-        bp_kwargs: Keyword arguments to the :func:`run_bp` function.
+        em_kwargs: Keyword arguments to the :func:`em.run_em` function.
+        bp_kwargs: Keyword arguments to the :func:`bp.run_bp` function.
+        certain_mask: A boolean Numpy array indicating which pixels are certain
+            to be occupied, a-priori. For example, if nuclei staining is available,
+            this would be the nuclei segmentation mask.
 
     Returns:
         [0, 1] score of each pixel being a cell.
@@ -192,12 +66,16 @@ def score_pixels(
 
     # All methods other than gauss requires EM
     if method != "gauss":
-        w, r, p = run_em(res, **em_kwargs)
+        w, r, p = em.run_em(res, **em_kwargs)
 
         if "bp" in method:
-            res = run_bp(res, (r[0], p[0]), (r[1], p[1]), **bp_kwargs)
+            res = bp.run_bp(
+                res, (r[0], p[0]), (r[1], p[1]), certain_mask=certain_mask, **bp_kwargs
+            )
         else:
             res = em.confidence(res, w, r, p)
+            if certain_mask is not None:
+                res = np.clip(res + certain_mask, 0, 1)
 
         if "gauss" in method:
             res = utils.conv2d(res, k, mode="gauss")
@@ -205,22 +83,26 @@ def score_pixels(
         # For just "gauss" method, we should rescale to [0, 1] because all the
         # other methods eventually produce an array of [0, 1] values.
         res = utils.scale_to_01(res)
+        if certain_mask is not None:
+            res = np.clip(res + certain_mask, 0, 1)
     return res
 
 
-def apply_cutoff(X: np.ndarray, k: int, cutoff: Optional[float] = None) -> np.ndarray:
-    """Apply a cutoff value to the given array and perform morphological close
+def apply_threshold(
+    X: np.ndarray, k: int, threshold: Optional[float] = None
+) -> np.ndarray:
+    """Apply a threshold value to the given array and perform morphological close
     and open operations.
 
     Args:
-        X: The array to cutoff
+        X: The array to threshold
         k: Kernel size of the morphological close and open operations.
-        cutoff: Cutoff to apply. By default, the knee is used.
+        threshold: Threshold to apply. By default, the knee is used.
 
     Returns:
         A boolean mask.
     """
-    # Apply cutoff and mclose,mopen
-    cutoff = cutoff or utils.knee(X)
-    mask = mclose_mopen(X >= cutoff, k)
+    # Apply threshold and mclose,mopen
+    threshold = threshold or utils.knee(X)
+    mask = utils.mclose_mopen(X >= threshold, k)
     return mask

@@ -44,3 +44,17 @@ class TestSegmentationUtils(TestMixin, TestCase):
         np.testing.assert_allclose(
             np.array([0, 0.25, 0.5, 0.75, 1]) * 255, utils.scale_to_255(X)
         )
+
+    def test_mclose_mopen(self):
+        mask = np.zeros((10, 10), dtype=bool)
+        mask[3:7, 3:7] = True
+        mask[5, 5] = False
+        mask[0, 0] = True
+        expected = mask.copy()
+        expected[0, 0] = False
+        expected[3, 3] = False
+        expected[3, 6] = False
+        expected[6, 3] = False
+        expected[6, 6] = False
+        expected[5, 5] = True
+        np.testing.assert_array_equal(expected, utils.mclose_mopen(mask, 3))
