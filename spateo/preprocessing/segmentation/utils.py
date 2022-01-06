@@ -24,22 +24,23 @@ def circle(k: int) -> np.ndarray:
     return cv2.circle(np.zeros((k, k), dtype=np.uint8), (r, r), r, 1, -1)
 
 
-def knee(X: np.ndarray) -> float:
+def knee(X: np.ndarray, n_bins: int = 256) -> float:
     """Find the knee point of an arbitrary array.
-
-    Todo:
-        Bin for float arrays.
 
     Args:
         X: Numpy array of values
+        n_bins: Number of bins to use if `X` is a float array.
 
     Returns:
         Knee
     """
-    unique, counts = np.unique(X, return_counts=True)
-    argsort = np.argsort(unique)
-    x = unique[argsort]
-    y = np.cumsum(counts[argsort]) / X.size
+    # Check if array only contains integers.
+    _X = X.astype(int)
+    if np.array_equal(X, _X):
+        x = np.sort(np.unique(_X))
+    else:
+        x = np.linspace(X.min(), X.max(), n_bins)
+    y = np.array([(X <= val).sum() for val in x]) / X.size
 
     kl = KneeLocator(x, y, curve="concave")
     return kl.knee
