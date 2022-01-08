@@ -89,7 +89,7 @@ def score_pixels(
 
 
 def apply_threshold(
-    X: np.ndarray, k: int, threshold: Optional[float] = None
+    X: np.ndarray, k: int, threshold: Optional[Union[float, np.ndarray]] = None
 ) -> np.ndarray:
     """Apply a threshold value to the given array and perform morphological close
     and open operations.
@@ -103,6 +103,6 @@ def apply_threshold(
         A boolean mask.
     """
     # Apply threshold and mclose,mopen
-    threshold = threshold or utils.knee(X)
+    threshold = threshold if threshold is not None else utils.knee(X)
     mask = utils.mclose_mopen(X >= threshold, k)
     return mask

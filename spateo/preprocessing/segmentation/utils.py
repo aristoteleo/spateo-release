@@ -19,7 +19,13 @@ def circle(k: int) -> np.ndarray:
 
     Returns:
         8-bit unsigned integer Numpy array with 1s and 0s
+
+    Raises:
+        ValueError: if `k` is even or less than 1
     """
+    if k < 1 or k % 2 == 0:
+        raise ValueError(f"`k` must be odd and greater than 0.")
+
     r = (k - 1) // 2
     return cv2.circle(np.zeros((k, k), dtype=np.uint8), (r, r), r, 1, -1)
 
@@ -49,6 +55,9 @@ def knee(X: np.ndarray, n_bins: int = 256) -> float:
 def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
     """Gaussian blur
 
+    This function is not designed to be called directly. Use :func:`conv2d`
+    with `mode="gauss"` instead.
+
     Args:
         X: UMI counts per pixel.
         k: Radius of gaussian blur.
@@ -76,10 +85,13 @@ def conv2d(
         The convolved array
 
     Raises:
-        PreprocessingError: if `k` is even or less than 1
+        ValueError: if `k` is even or less than 1, or if `mode` is not a
+            valid mode
     """
     if k < 1 or k % 2 == 0:
-        raise PreprocessingError(f"`k` must be odd and greater than 0.")
+        raise ValueError(f"`k` must be odd and greater than 0.")
+    if mode not in ("gauss", "circle", "square"):
+        raise ValueError(f'`mode` must be one of "gauss", "circle", "square"')
 
     if mode == "gauss":
         return gaussian_blur(X, k)
@@ -112,24 +124,63 @@ def scale_to_255(X: np.ndarray) -> np.ndarray:
     return scale_to_01(X) * 255
 
 
-def mclose_mopen(mask: np.ndarray, k: int) -> np.ndarray:
+def mclose_mopen(mask: np.ndarray, k: int, square: bool = False) -> np.ndarray:
     """Perform morphological close and open operations on a boolean mask.
-
-    Note:
-     The two operations are performed with different kernels. The close operation
-     uses a square kernel, while the mopen operation uses a circular kernel.
 
     Args:
         X: Boolean mask
         k: Kernel size
+        square: Whether or not the kernel should be square
 
     Returns:
         New boolean mask with morphological close and open operations performed.
-    """
-    close_kernel = np.ones((k, k), dtype=np.uint8)
-    mclose = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, close_kernel)
 
-    open_kernel = circle(k)
-    mopen = cv2.morphologyEx(mclose, cv2.MORPH_OPEN, open_kernel)
+    Raises:
+        ValueError: if `k` is even or less than 1
+    """
+    if k < 1 or k % 2 == 0:
+        raise ValueError(f"`k` must be odd and greater than 0.")
+
+    kernel = np.ones((k, k), dtype=np.uint8) if square else circle(k)
+    mclose = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+    mopen = cv2.morphologyEx(mclose, cv2.MORPH_OPEN, kernel)
 
     return mopen.astype(bool)
+
+
+def erode_safe(
+    mask: np.ndarray, k: int, square: bool = False, min_area: int = 1, n_iter: int = 1
+) -> np.ndarray:
+    """Perform morphological erosion, but don't erode connected regions that
+    have less than the provided area.
+
+    Note:
+        It is possible for this function to miss some small regions due to how
+        erosion works. For instance, a region may have area > `min_area` which
+        may be eroded in its entirety in one iteration. In this case, this
+        region will not be saved.
+
+    Args:
+        mask: Boolean mask to erode.
+        k: Erosion kernel size
+        square: Whether to use a square kernel
+        min_area: Minimum area
+        n_iter: Number of erosions to perform.
+
+    Returns:
+        Eroded boolean mask.
+    """
+    mask = mask.astype(np.uint8)
+    saved = np.zeros_like(mask)
+    kernel = np.ones((k, k), dtype=np.uint8) if square else circle(k)
+
+    for _ in range(n_iter):
+        # Find connected components and save if area <= min_area
+        components = cv2.connectedComponentsWithStats(mask)
+        areas = components[2][:, cv2.CC_STAT_AREA]
+        for label in np.where(areas <= min_area)[0]:
+            saved += components[1] == label
+
+        mask = cv2.erode(mask, kernel)
+
+    return (mask + saved).astype(bool)

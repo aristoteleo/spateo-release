@@ -81,3 +81,12 @@ class TestSegmentationUtils(TestMixin, TestCase):
         expected[6, 6] = False
         expected[5, 5] = True
         np.testing.assert_array_equal(expected, utils.mclose_mopen(mask, 3))
+
+    def test_erode_safe(self):
+        mask = np.zeros((10, 10), dtype=bool)
+        mask[3:7, 3:7] = True
+        expected = np.zeros((10, 10), dtype=bool)
+        expected[4:6, 4:6] = True
+        np.testing.assert_array_equal(
+            expected, utils.erode_safe(mask, 3, min_area=4, n_iter=10)
+        )
