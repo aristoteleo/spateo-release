@@ -1,7 +1,8 @@
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 
 import math
 import numpy as np
+from scipy.sparse import csr_matrix
 from shapely.geometry import Point, MultiPoint, LineString, MultiLineString, Polygon
 from scipy.spatial import Delaunay
 from shapely.ops import unary_union, polygonize
@@ -136,7 +137,7 @@ def get_concave_hull(
     alpha: float = 1,
     buffer: float = 1,
 ) -> Tuple[Polygon, list]:
-    """Return the convex hull of all nanoballs that have non-zero UMI (or at least > x UMI).
+    """Return the convex hull of all nanoballs that have non-zero UMI (or at least > min_agg_umi UMI).
 
     Args:
         path: Path to read file.
@@ -157,3 +158,23 @@ def get_concave_hull(
     i, j = (total_agg > min_agg_umi).nonzero()
 
     return alpha_shape(i, j, alpha, buffer)
+
+
+def rescaling(
+    mat: Union[np.ndarray, csr_matrix], new_shape: Union[List, Tuple]
+) -> Union[np.ndarray, csr_matrix]:
+    """This function rescale the resolution of the input matrix that represents a spatial domain. For example, if you
+    want to decrease the resolution of a matrix by a factor of 2, the new_shape will be `mat.shape / 2`.
+
+    Args:
+        mat: The input matrix of the spatial domain (or an image).
+        new_shape: The rescaled shape of the spatial domain, each dimension must be an factorial of the original
+                    dimension.
+
+    Returns:
+        res: the spatial resolution rescaled matrix.
+    """
+    shape = (new_shape[0], mat.shape[0] // mat[0], new_shape[1], mat.shape[1] // mat[1])
+
+    res = mat.reshape(shape).sum(-1).sum(1)
+    return res
