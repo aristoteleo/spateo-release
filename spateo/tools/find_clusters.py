@@ -1,7 +1,8 @@
+from .find_clusters_utils import *
 import numpy as np
 import random, torch
-import SpaGCN as spg
 import cv2
+
 
 def find_cluster_spagcn(
     adata,
@@ -50,23 +51,26 @@ def find_cluster_spagcn(
     x_pixel=adata.obs["x_pixel"].tolist()
     y_pixel=adata.obs["y_pixel"].tolist()
 
+    s=1
+    b=49
+
     if (his_img_path is None):
         adj=calculate_adj_matrix(x=x_pixel,y=y_pixel, histology=False)
     else:
-        adj=spg.calculate_adj_matrix(x=x_pixel,y=y_pixel, x_pixel=x_pixel, y_pixel=y_pixel, image=img, beta=b, alpha=s, histology=True)
+        adj=calculate_adj_matrix(x=x_pixel,y=y_pixel, x_pixel=x_pixel, y_pixel=y_pixel, image=img, beta=b, alpha=s, histology=True)
     
     if (adj_save is not None):
         np.savetxt(adj_save, adj, delimiter=',')
     
-    l=spg.search_l(p, adj, start=0.01, end=1000, tol=0.01, max_run=100)
+    l=search_l(p, adj, start=0.01, end=1000, tol=0.01, max_run=100)
 
     #Set seed
     r_seed=t_seed=n_seed=100
     
     #Seaech for suitable resolution
-    res=spg.search_res(adata, adj, l, n_clusters, start=0.7, step=0.1, tol=5e-3, lr=0.05, max_epochs=20, r_seed=r_seed, t_seed=t_seed, n_seed=n_seed)
+    res=search_res(adata, adj, l, n_clusters, start=0.7, step=0.1, tol=5e-3, lr=0.05, max_epochs=20, r_seed=r_seed, t_seed=t_seed, n_seed=n_seed)
 
-    clf=spg.SpaGCN()
+    clf=SpaGCN()
     clf.set_l(l)
 
     #Set seed
@@ -81,8 +85,8 @@ def find_cluster_spagcn(
     adata.obs["spagcn_pred"]=adata.obs["spagcn_pred"].astype('category')
 
     #Do cluster refinement(optional)
-    adj_2d=spg.calculate_adj_matrix(x=x_array,y=y_array, histology=False)
-    refined_pred=spg.refine(sample_id=adata.obs.index.tolist(), pred=adata.obs["spagcn_pred"].tolist(), dis=adj_2d, shape=st_shape)
+    adj_2d=calculate_adj_matrix(x=x_array,y=y_array, histology=False)
+    refined_pred=refine(sample_id=adata.obs.index.tolist(), pred=adata.obs["spagcn_pred"].tolist(), dis=adj_2d, shape=st_shape)
     adata.obs["spagcn_pred_refined"]=refined_pred
     adata.obs["spagcn_pred_refined"]=adata.obs["spagcn_pred_refined"].astype('category')
 
