@@ -1,6 +1,6 @@
 """Utility functions for cell segmentation.
 """
-from typing import Tuple
+from typing import Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -148,8 +148,34 @@ def mclose_mopen(mask: np.ndarray, k: int, square: bool = False) -> np.ndarray:
     return mopen.astype(bool)
 
 
-def erode_safe(
-    mask: np.ndarray, k: int, square: bool = False, min_area: int = 1, n_iter: int = 1
+def apply_threshold(
+    X: np.ndarray, k: int, threshold: Optional[Union[float, np.ndarray]] = None
+) -> np.ndarray:
+    """Apply a threshold value to the given array and perform morphological close
+    and open operations.
+
+    Args:
+        X: The array to threshold
+        k: Kernel size of the morphological close and open operations.
+        threshold: Threshold to apply. By default, the knee is used.
+
+    Returns:
+        A boolean mask.
+    """
+    # Apply threshold and mclose,mopen
+    threshold = threshold if threshold is not None else knee(X)
+    mask = mclose_mopen(X >= threshold, k)
+    return mask
+
+
+def safe_erode(
+    X: np.ndarray,
+    k: int,
+    square: bool = False,
+    min_area: int = 1,
+    n_iter: int = 1,
+    float_k: Optional[int] = None,
+    float_threshold: Optional[float] = None,
 ) -> np.ndarray:
     """Perform morphological erosion, but don't erode connected regions that
     have less than the provided area.
@@ -161,26 +187,42 @@ def erode_safe(
         region will not be saved.
 
     Args:
-        mask: Boolean mask to erode.
+        X: Array to erode.
         k: Erosion kernel size
         square: Whether to use a square kernel
         min_area: Minimum area
         n_iter: Number of erosions to perform.
+        float_k: Morphological close and open kernel size when `X` is a
+            float array.
+        float_threshold: Threshold to use to determine connected components
+            when `X` is a float array.
 
     Returns:
-        Eroded boolean mask.
+        Eroded array as a boolean mask
+
+    Raises:
+        ValueError: If `X` has floating point dtype but `float_threshold` is
+            not provided
     """
-    mask = mask.astype(np.uint8)
-    saved = np.zeros_like(mask)
+    if X.dtype == np.dtype(bool):
+        X = X.astype(np.uint8)
+    if np.issubdtype(X.dtype, np.floating) and float_k is None:
+        raise ValueError("`float_k` must be provided for floating point arrays.")
+    saved = np.zeros_like(X, dtype=bool)
     kernel = np.ones((k, k), dtype=np.uint8) if square else circle(k)
 
     for _ in range(n_iter):
         # Find connected components and save if area <= min_area
-        components = cv2.connectedComponentsWithStats(mask)
+        components = cv2.connectedComponentsWithStats(
+            apply_threshold(X, float_k, float_threshold).astype(np.uint8)
+            if float_threshold is not None
+            else X
+        )
         areas = components[2][:, cv2.CC_STAT_AREA]
         for label in np.where(areas <= min_area)[0]:
             saved += components[1] == label
 
-        mask = cv2.erode(mask, kernel)
+        X = cv2.erode(X, kernel)
 
+    mask = X >= float_threshold if float_threshold is not None else X > 0
     return (mask + saved).astype(bool)

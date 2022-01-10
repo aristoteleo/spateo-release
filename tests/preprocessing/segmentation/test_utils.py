@@ -82,11 +82,36 @@ class TestSegmentationUtils(TestMixin, TestCase):
         expected[5, 5] = True
         np.testing.assert_array_equal(expected, utils.mclose_mopen(mask, 3))
 
-    def test_erode_safe(self):
+    def test_apply_threshold(self):
+        with mock.patch(
+            "spateo.preprocessing.segmentation.utils.mclose_mopen"
+        ) as mclose_mopen, mock.patch(
+            "spateo.preprocessing.segmentation.utils.knee"
+        ) as knee:
+            X = np.array([1, 2, 3, 4, 5])
+            self.assertEqual(mclose_mopen.return_value, utils.apply_threshold(X, 3, 4))
+            np.testing.assert_array_equal(X >= 4, mclose_mopen.call_args[0][0])
+            mclose_mopen.assert_called_once_with(mock.ANY, 3)
+            knee.assert_not_called()
+
+    def test_apply_threshold_knee(self):
+        with mock.patch(
+            "spateo.preprocessing.segmentation.utils.mclose_mopen"
+        ) as mclose_mopen, mock.patch(
+            "spateo.preprocessing.segmentation.utils.knee"
+        ) as knee:
+            X = np.array([1, 2, 3, 4, 5])
+            knee.return_value = 4
+            self.assertEqual(mclose_mopen.return_value, utils.apply_threshold(X, 3))
+            np.testing.assert_array_equal(X >= 4, mclose_mopen.call_args[0][0])
+            mclose_mopen.assert_called_once_with(mock.ANY, 3)
+            knee.assert_called_once_with(X)
+
+    def test_safe_erode(self):
         mask = np.zeros((10, 10), dtype=bool)
         mask[3:7, 3:7] = True
         expected = np.zeros((10, 10), dtype=bool)
         expected[4:6, 4:6] = True
         np.testing.assert_array_equal(
-            expected, utils.erode_safe(mask, 3, min_area=4, n_iter=10)
+            expected, utils.safe_erode(mask, 3, min_area=4, n_iter=10)
         )

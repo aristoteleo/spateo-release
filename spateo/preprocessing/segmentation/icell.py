@@ -9,11 +9,44 @@ from typing import Optional, Tuple, Union
 import cv2
 import numpy as np
 from scipy.sparse import issparse, spmatrix
+from skimage import filters
 from typing_extensions import Literal
 
 from . import bp, em, utils
 from ...errors import PreprocessingError
 from ...warnings import PreprocessingWarning
+
+
+def mask_nuclei_from_stain(
+    X: np.ndarray,
+    otsu_classes: int = 3,
+    otsu_index: int = 0,
+    local_k: int = 45,
+    mk: int = 5,
+) -> np.ndarray:
+    """Create a boolean mask indicating nuclei from stained nuclei image.
+
+    Args:
+        X: TIF intensities
+        otsu_classes: Number of classes to assign pixels to for background
+            detection.
+        otsu_index: Which threshold index should be used for background.
+            All pixel intensities less than the value at this index will be
+            classified as background.
+        local_k: The size of the local neighborhood of each pixel to use for
+            local (adaptive) thresholding to identify the foreground (i.e.
+            nuclei).
+        mk: Size of the kernel used for morphological close and open operations
+            applied at the very end.
+
+    Returns:
+        Boolean mask indicating which pixels are nuclei.
+    """
+    thresholds = filters.threshold_multiotsu(X, otsu_classes)
+    background_mask = X < thresholds[otsu_index]
+    local_mask = X > filters.threshold_local(X, local_k)
+    nuclei_mask = utils.mclose_mopen((~background_mask) & local_mask, mk)
+    return nuclei_mask
 
 
 def score_pixels(
@@ -86,23 +119,3 @@ def score_pixels(
         if certain_mask is not None:
             res = np.clip(res + certain_mask, 0, 1)
     return res
-
-
-def apply_threshold(
-    X: np.ndarray, k: int, threshold: Optional[Union[float, np.ndarray]] = None
-) -> np.ndarray:
-    """Apply a threshold value to the given array and perform morphological close
-    and open operations.
-
-    Args:
-        X: The array to threshold
-        k: Kernel size of the morphological close and open operations.
-        threshold: Threshold to apply. By default, the knee is used.
-
-    Returns:
-        A boolean mask.
-    """
-    # Apply threshold and mclose,mopen
-    threshold = threshold if threshold is not None else utils.knee(X)
-    mask = utils.mclose_mopen(X >= threshold, k)
-    return mask
