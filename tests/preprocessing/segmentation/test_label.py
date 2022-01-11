@@ -22,3 +22,13 @@ class TestLabel(TestMixin, TestCase):
         np.testing.assert_array_equal(
             expected, label.watershed(X, mask, marker_mask, 3)
         )
+
+    def test_expand_labels(self):
+        X = np.zeros((10, 10), dtype=int)
+        X[:2, :2] = 1
+        X[7:, 7:] = 2
+        expected = X.copy()
+        expected[:3, :3] = 1
+        expected[3, :2] = 1
+        expected[:2, 3] = 1
+        np.testing.assert_array_equal(expected, label.expand_labels(X, 3, 9))
