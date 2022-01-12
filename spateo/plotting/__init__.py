@@ -3,3 +3,4 @@
 
 from .static import *
 from .interactive import *
+from .bbs import polygon
