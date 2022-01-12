@@ -84,17 +84,19 @@ def read_bgi_agg(
     if binsize != 1:
         data["x"] = bin_indices(x, x_min, binsize)
         data["y"] = bin_indices(y, y_min, binsize)
-
-    x_max = max(x_max, data["x"].max()) if x_max else data["x"].max()
-    y_max = max(y_max, data["y"].max()) if y_max else data["y"].max()
+    else:
+        data["x"] -= x_min
+        data["y"] -= y_min
+    x_delta = max(x_max, max(x)) if x_max else max(x)
+    y_delta = max(y_max, max(y)) if y_max else max(y)
 
     matrices = []
     for name, i in COUNT_COLUMN_MAPPING.items():
         if i < len(data.columns):
             matrices.append(
                 csr_matrix(
-                    (data[data.columns[i]], (data["x"] - x_min, data["y"] - y_min)),
-                    shape=(x_max - x_min + 1, y_max - y_min + 1),
+                    (data[data.columns[i]], (data["x"], data["y"])),
+                    shape=(x_delta + 1, y_delta + 1),
                     dtype=np.uint16,
                 )
             )
