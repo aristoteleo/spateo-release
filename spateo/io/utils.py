@@ -1,16 +1,18 @@
 """IO utility functions.
 """
 
-from typing import Tuple
-
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import cv2
 from shapely.geometry import Point, LineString, Polygon
 from skimage import measure
 
 
-def bin_indices(coords: np.ndarray, coord_min: float, binsize: int = 50) -> int:
+def bin_indices(
+    coords: np.ndarray, coord_min: float, binsize: Optional[int] = 50
+) -> int:
     """Take a DNB coordinate, the mimimum coordinate and the binsize, calculate the index of bins for the current
     coordinate.
 
@@ -33,7 +35,9 @@ def bin_indices(coords: np.ndarray, coord_min: float, binsize: int = 50) -> int:
     return num.astype(np.uint32)
 
 
-def centroids(bin_indices: np.ndarray, coord_min: float, binsize: int = 50) -> float:
+def centroids(
+    bin_indices: np.ndarray, coord_min: Optional[float] = 0, binsize: Optional[int] = 50
+) -> float:
     """Take a bin index, the mimimum coordinate and the binsize, calculate the centroid of the current bin.
 
     Parameters
@@ -51,7 +55,7 @@ def centroids(bin_indices: np.ndarray, coord_min: float, binsize: int = 50) -> f
         num: `int`
             The bin index for the current coordinate.
     """
-    coord_centroids = bin_indices * binsize + binsize / 2
+    coord_centroids = coord_min + bin_indices * binsize + binsize / 2
     return coord_centroids
 
 
