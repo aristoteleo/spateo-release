@@ -26,7 +26,7 @@ def alpha_shape(
     y: np.ndarray,
     alpha: Optional[float] = 1,
     buffer: Optional[float] = 1,
-) -> Tuple[Polygon, list]:
+) -> Tuple[Union[MultiPolygon, Polygon], list]:
     """Compute the alpha shape (concave hull) of a set of points.
     Code adapted from: https://gist.github.com/dwyerk/10561690
 
@@ -43,8 +43,8 @@ def alpha_shape(
         edge_points: The coordinates of the edge of the resultant concave hull.
     """
 
-    crds = np.array([x.flatten(), y.flatten()]).transpose()
-    points = MultiPoint(crds)
+    coords = np.array([x.flatten(), y.flatten()]).transpose()
+    points = MultiPoint(coords)
 
     if len(points) < 4:
         # When you have a triangle, there is no sense
@@ -61,8 +61,6 @@ def alpha_shape(
             return
         edges.add((i, j))
         edge_points.append(coords[[i, j]])
-
-    coords = np.array([point.coords[0] for point in points])
 
     tri = Delaunay(coords)
     edges = set()
