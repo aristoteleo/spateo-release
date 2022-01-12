@@ -102,48 +102,6 @@ def alpha_shape(
     return alpha_hull, edge_points
 
 
-def in_convex_hull(
-    p: np.ndarray, convex_hull: Union[Delaunay, np.ndarray]
-) -> np.ndarray:
-    """Test if points in `p` are in `convex_hull` using scipy.spatial Delaunay's find_simplex.
-
-    Args:
-        p: a `NxK` coordinates of `N` points in `K` dimensions
-        convex_hull: either a scipy.spatial.Delaunay object or the `MxK` array of the coordinates of `M` points in `K`
-              dimensions for which Delaunay triangulation will be computed.
-
-    Returns:
-
-    """
-    assert (
-        p.shape[1] == convex_hull.shape[1]
-    ), "the second dimension of p and hull must be the same."
-
-    if not isinstance(convex_hull, Delaunay):
-        hull = Delaunay(convex_hull)
-
-    return hull.find_simplex(p) >= 0
-
-
-def in_concave_hull(
-    p: np.ndarray, concave_hull: Union[Polygon, MultiPolygon]
-) -> np.ndarray:
-    """Test if points in `p` are in `concave_hull` using scipy.spatial Delaunay's find_simplex.
-
-    Args:
-        p: a `Nx2` coordinates of `N` points in `K` dimensions
-        concave_hull: A polygon returned from the concave_hull function (the first value).
-
-    Returns:
-
-    """
-    assert p.shape[1] == 2, "this function only works for two dimensional data points."
-
-    res = [concave_hull.intersects(Point(i)) for i in p]
-
-    return np.array(res)
-
-
 def get_concave_hull(
     path: str,
     binsize: Optional[int] = 1,

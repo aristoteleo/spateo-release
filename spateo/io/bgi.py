@@ -7,17 +7,22 @@ Todo:
         @Xiaojieqiu
 """
 import gzip
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
-from shapely.geometry import polygon, multipolygon
+from shapely.geometry import Polygon, MultiPolygon
 
-from .utils import bin_indices, centroids, get_bin_props, get_label_props
-from .bbs import in_concave_hull
+from .utils import (
+    bin_indices,
+    centroids,
+    get_bin_props,
+    get_label_props,
+    in_concave_hull,
+)
 
 COUNT_COLUMN_MAPPING = {
     "total": 3,
@@ -73,10 +78,10 @@ def read_bgi_agg(
         spliced and unspliced counts, the last two elements are None.
     """
     data = read_bgi_as_dataframe(path)
-    if binsize != 1:
-        x, y = data["x"].values, data["y"].values
-        x_min, y_min = np.min(x), np.min(y)
+    x, y = data["x"].values, data["y"].values
+    x_min, y_min = np.min(x), np.min(y)
 
+    if binsize != 1:
         data["x"] = bin_indices(x, x_min, binsize)
         data["y"] = bin_indices(y, y_min, binsize)
 
@@ -88,8 +93,8 @@ def read_bgi_agg(
         if i < len(data.columns):
             matrices.append(
                 csr_matrix(
-                    (data[data.columns[i]], (data["x"], data["y"])),
-                    shape=(x_max + 1, y_max + 1),
+                    (data[data.columns[i]], (data["x"] - x_min, data["y"] - y_min)),
+                    shape=(x_max - x_min + 1, y_max - y_min + 1),
                     dtype=np.uint16,
                 )
             )
@@ -103,7 +108,7 @@ def read_bgi(
     binsize: int = 50,
     slice: Optional[str] = None,
     label_path: Optional[str] = None,
-    alpha_hull: Optional[polygon, multipolygon] = None,
+    alpha_hull: Union[Polygon, MultiPolygon] = None,
     version="stereo_v1",
 ) -> AnnData:
     """A helper function that facilitates constructing an AnnData object suitable for downstream spateo analysis
