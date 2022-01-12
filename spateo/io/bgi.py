@@ -49,7 +49,10 @@ def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
 
 
 def read_bgi_agg(
-    path: str, x_max: Optional[int] = None, y_max: Optional[int] = None
+    path: str,
+    x_max: Optional[int] = None,
+    y_max: Optional[int] = None,
+    binsize: Optional[int] = 1,
 ) -> Tuple[spmatrix, Optional[spmatrix], Optional[spmatrix]]:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
@@ -60,6 +63,7 @@ def read_bgi_agg(
             will be used.
         y_max: Maximum y coordinate. If not provided, the maximum non-zero y
             will be used.
+        binsize: The number of spatial bins to aggregate RNAs captured by DNBs in those bins. By default it is 1.
 
     Returns:
         Tuple containing 3 sparse matrices corresponding to total, spliced,
@@ -67,6 +71,13 @@ def read_bgi_agg(
         spliced and unspliced counts, the last two elements are None.
     """
     data = read_bgi_as_dataframe(path)
+    if binsize != 1:
+        x, y = data["x"].values, data["y"].values
+        x_min, y_min = np.min(x), np.min(y)
+
+        data["x"] = bin_indices(x, x_min, binsize)
+        data["y"] = bin_indices(y, y_min, binsize)
+
     x_max = max(x_max, data["x"].max()) if x_max else data["x"].max()
     y_max = max(y_max, data["y"].max()) if y_max else data["y"].max()
 

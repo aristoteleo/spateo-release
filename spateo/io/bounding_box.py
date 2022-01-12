@@ -2,7 +2,7 @@ from typing import Optional, Tuple, Union, List
 
 import math
 import numpy as np
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, spmatrix
 from shapely.geometry import Point, MultiPoint, LineString, MultiLineString, Polygon
 from scipy.spatial import Delaunay
 from shapely.ops import unary_union, polygonize
@@ -161,7 +161,7 @@ def get_concave_hull(
 
 
 def rescaling(
-    mat: Union[np.ndarray, csr_matrix], new_shape: Union[List, Tuple]
+    mat: Union[np.ndarray, spmatrix], new_shape: Union[List, Tuple]
 ) -> Union[np.ndarray, csr_matrix]:
     """This function rescale the resolution of the input matrix that represents a spatial domain. For example, if you
     want to decrease the resolution of a matrix by a factor of 2, the new_shape will be `mat.shape / 2`.
