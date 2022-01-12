@@ -1,25 +1,17 @@
-from .clustering import *
+from .find_clusters import *
 
-def find_clusters(
-    adata,
-    method="spagcn",
-    **kwargs
-):
-    '''Cluster finding for given adata object.
-    Parameters
-    ----------
-        adata: class:`~anndata.AnnData`
-            an Annodata object. 
-        method: `str` (default: "spagcn")
-            supported clustering methods are: 
-            "spagcn".
-        **kwargs: other arguments for chosen clustering method.
-    Returns
-    -------
-        An `~anndata.AnnData` object with cluster info.
 
-    '''
+def find_clusters(adata, method="spagcn", **kwargs):
+    """Find Clusters for given adata object
 
-    if (method=="spagcn"):
+    Args:
+        adata (class:`~anndata.AnnData`): An Annodata object.
+        method (str, optional): supported clustering methods are, "spagcn". Defaults to "spagcn".
+
+    Returns:
+        class:`~anndata.AnnData`: An `~anndata.AnnData` object with cluster info.
+    """
+
+    if method == "spagcn":
         adata = find_cluster_spagcn(adata, kwargs)
         return adata
