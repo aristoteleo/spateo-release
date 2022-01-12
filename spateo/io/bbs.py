@@ -1,20 +1,31 @@
+"""IO functions for calculating the bounding box.
+"""
+
 from typing import Optional, Tuple, Union, List
 
 import math
 import numpy as np
-from scipy.sparse import csr_matrix, spmatrix
-from shapely.geometry import Point, MultiPoint, LineString, MultiLineString, Polygon
+from shapely.geometry import (
+    Point,
+    MultiPoint,
+    LineString,
+    MultiLineString,
+    Polygon,
+    MultiPolygon,
+    multipolygon,
+)
 from scipy.spatial import Delaunay
 from shapely.ops import unary_union, polygonize
 
 from .bgi import read_bgi_agg
+from .utils import centroids
 
 
 def alpha_shape(
     x: np.ndarray,
     y: np.ndarray,
-    alpha: float = 1,
-    buffer: float = 1,
+    alpha: Optional[float] = 1,
+    buffer: Optional[float] = 1,
 ) -> Tuple[Polygon, list]:
     """Compute the alpha shape (concave hull) of a set of points.
     Code adapted from: https://gist.github.com/dwyerk/10561690
@@ -114,7 +125,9 @@ def in_convex_hull(
     return hull.find_simplex(p) >= 0
 
 
-def in_concave_hull(p: np.ndarray, concave_hull: Polygon) -> np.ndarray:
+def in_concave_hull(
+    p: np.ndarray, concave_hull: Union[Polygon, MultiPolygon]
+) -> np.ndarray:
     """Test if points in `p` are in `concave_hull` using scipy.spatial Delaunay's find_simplex.
 
     Args:
@@ -133,14 +146,17 @@ def in_concave_hull(p: np.ndarray, concave_hull: Polygon) -> np.ndarray:
 
 def get_concave_hull(
     path: str,
-    min_agg_umi: int = 0,
-    alpha: float = 1,
-    buffer: float = 1,
+    binsize: Optional[int] = 1,
+    min_agg_umi: Optional[int] = 0,
+    alpha: Optional[float] = 1.0,
+    buffer: Optional[float] = 1.0,
 ) -> Tuple[Polygon, list]:
     """Return the convex hull of all nanoballs that have non-zero UMI (or at least > min_agg_umi UMI).
 
     Args:
         path: Path to read file.
+        binsize: The number of spatial bins to aggregate RNAs captured by DNBs in those bins. By default it is 1. If
+                    stereo-seq chip used is bigger than 1 x 1 mm, you may need to increase the binsize.
         min_agg_umi: the minimal aggregated UMI number for the bucket.
         alpha: alpha value to influence the gooeyness of the border. Smaller
                   numbers don't fall inward as much as larger numbers. Too large,
@@ -151,30 +167,12 @@ def get_concave_hull(
         alpha_hull: The computed concave hull.
         edge_points: The coordinates of the edge of the resultant concave hull.
     """
-    total_agg = read_bgi_agg(path)[0]
+    total_agg = read_bgi_agg(path, binsize=binsize)[0]
 
-    # We may need to use the true coordinates (instead of the indices) from the bgi data input.
-    # So read_bgi_agg may be need to return those values.
     i, j = (total_agg > min_agg_umi).nonzero()
 
+    # We use centroids function to get the true stereo-seq chip coordinates.
+    if binsize != 1:
+        i, j = centroids(i, binsize=binsize), centroids(j, binsize=binsize)
+
     return alpha_shape(i, j, alpha, buffer)
-
-
-def rescaling(
-    mat: Union[np.ndarray, spmatrix], new_shape: Union[List, Tuple]
-) -> Union[np.ndarray, csr_matrix]:
-    """This function rescale the resolution of the input matrix that represents a spatial domain. For example, if you
-    want to decrease the resolution of a matrix by a factor of 2, the new_shape will be `mat.shape / 2`.
-
-    Args:
-        mat: The input matrix of the spatial domain (or an image).
-        new_shape: The rescaled shape of the spatial domain, each dimension must be an factorial of the original
-                    dimension.
-
-    Returns:
-        res: the spatial resolution rescaled matrix.
-    """
-    shape = (new_shape[0], mat.shape[0] // mat[0], new_shape[1], mat.shape[1] // mat[1])
-
-    res = mat.reshape(shape).sum(-1).sum(1)
-    return res

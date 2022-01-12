@@ -14,8 +14,10 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
+from shapely.geometry import polygon, multipolygon
 
 from .utils import bin_indices, centroids, get_bin_props, get_label_props
+from .bbs import in_concave_hull
 
 COUNT_COLUMN_MAPPING = {
     "total": 3,
@@ -101,6 +103,7 @@ def read_bgi(
     binsize: int = 50,
     slice: Optional[str] = None,
     label_path: Optional[str] = None,
+    alpha_hull: Optional[polygon, multipolygon] = None,
     version="stereo_v1",
 ) -> AnnData:
     """A helper function that facilitates constructing an AnnData object suitable for downstream spateo analysis
@@ -138,6 +141,12 @@ def read_bgi(
         x, y = data[x_column].values, data[y_column].values
         x_min, y_min = np.min(x), np.min(y)
 
+        if alpha_hull is not None:
+            is_inside = in_concave_hull(
+                data.loc[:, [x_column, y_column]].values, alpha_hull
+            )
+            data = data.loc[is_inside, :]
+
         data["x_ind"] = bin_indices(x, x_min, binsize)
         data["y_ind"] = bin_indices(y, y_min, binsize)
         data["x_centroid"] = centroids(data["x_ind"].values, x_min, binsize)
@@ -161,6 +170,12 @@ def read_bgi(
             label_mtx, properties=("label", "area", "bbox", "centroid")
         )
         # Get centroid from label_props
+        if alpha_hull is not None:
+            is_inside = in_concave_hull(
+                label_props.loc[:, ["centroid-0", "centroid-1"]].values, alpha_hull
+            )
+            label_props = label_props.loc[is_inside, :]
+
         coor = label_props[["centroid-0", "centroid-1"]].values
 
     uniq_cell, uniq_gene = data["cell_name"].unique(), data[gene_column].unique()
