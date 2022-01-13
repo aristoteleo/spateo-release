@@ -26,6 +26,7 @@ def alpha_shape(
     y: np.ndarray,
     alpha: Optional[float] = 1,
     buffer: Optional[float] = 1,
+    vectorize: bool = True,
 ) -> Tuple[Union[MultiPolygon, Polygon], list]:
     """Compute the alpha shape (concave hull) of a set of points.
     Code adapted from: https://gist.github.com/dwyerk/10561690
@@ -37,6 +38,7 @@ def alpha_shape(
                   numbers don't fall inward as much as larger numbers. Too large,
                   and you lose everything!
         buffer: the buffer used to smooth and clean up the shapley identified concave hull polygon.
+        vectorize: Whether to vectorize the alpha-shape calculation instead of looping through.
 
     Returns:
         alpha_hull: The computed concave hull.
@@ -51,45 +53,78 @@ def alpha_shape(
         # in computing an alpha shape.
         return MultiPoint(list(points)).convex_hull
 
-    def add_edge(edges, edge_points, coords, i, j):
-        """
-        Add a line between the i-th and j-th points,
-        if not in the list already
-        """
-        if (i, j) in edges or (j, i) in edges:
-            # already added
-            return
-        edges.add((i, j))
-        edge_points.append(coords[[i, j]])
-
     tri = Delaunay(coords)
-    edges = set()
-    edge_points = []
-
-    # loop over triangles:
-    # ia, ib, ic = indices of corner points of the triangle
-    for ia, ib, ic in tri.vertices:
-        pa = coords[ia]
-        pb = coords[ib]
-        pc = coords[ic]
+    if vectorize:
+        # ia, ib, ic = indices of corner points of the triangle
+        triangles = coords[tri.vertices]
 
         # Lengths of sides of triangle
-        a = math.sqrt((pa[0] - pb[0]) ** 2 + (pa[1] - pb[1]) ** 2)
-        b = math.sqrt((pb[0] - pc[0]) ** 2 + (pb[1] - pc[1]) ** 2)
-        c = math.sqrt((pc[0] - pa[0]) ** 2 + (pc[1] - pa[1]) ** 2)
+        a = (
+            (triangles[:, 0, 0] - triangles[:, 1, 0]) ** 2
+            + (triangles[:, 0, 1] - triangles[:, 1, 1]) ** 2
+        ) ** 0.5
+        b = (
+            (triangles[:, 1, 0] - triangles[:, 2, 0]) ** 2
+            + (triangles[:, 1, 1] - triangles[:, 2, 1]) ** 2
+        ) ** 0.5
+        c = (
+            (triangles[:, 2, 0] - triangles[:, 0, 0]) ** 2
+            + (triangles[:, 2, 1] - triangles[:, 0, 1]) ** 2
+        ) ** 0.5
 
         # Semiperimeter of triangle
         s = (a + b + c) / 2.0
 
         # Area of triangle by Heron's formula
-        area = math.sqrt(s * (s - a) * (s - b) * (s - c))
-        circum_r = a * b * c / (4.0 * area)
+        areas = (s * (s - a) * (s - b) * (s - c)) ** 0.5
+        circums = a * b * c / (4.0 * areas)
 
         # Here's the radius filter.
-        if circum_r < 1.0 / alpha:
-            add_edge(edges, edge_points, coords, ia, ib)
-            add_edge(edges, edge_points, coords, ib, ic)
-            add_edge(edges, edge_points, coords, ic, ia)
+        filtered = triangles[circums < (1.0 / alpha)]
+        edge1 = filtered[:, (0, 1)]
+        edge2 = filtered[:, (1, 2)]
+        edge3 = filtered[:, (2, 0)]
+        edge_points = np.unique(np.concatenate((edge1, edge2, edge3)), axis=0).tolist()
+    else:
+
+        def add_edge(edges, edge_points, coords, i, j):
+            """
+            Add a line between the i-th and j-th points,
+            if not in the list already
+            """
+            if (i, j) in edges or (j, i) in edges:
+                # already added
+                return
+            edges.add((i, j))
+            edge_points.append(coords[[i, j]])
+
+        edges = set()
+        edge_points = []
+
+        # loop over triangles:
+        # ia, ib, ic = indices of corner points of the triangle
+        for ia, ib, ic in tri.vertices:
+            pa = coords[ia]
+            pb = coords[ib]
+            pc = coords[ic]
+
+            # Lengths of sides of triangle
+            a = math.sqrt((pa[0] - pb[0]) ** 2 + (pa[1] - pb[1]) ** 2)
+            b = math.sqrt((pb[0] - pc[0]) ** 2 + (pb[1] - pc[1]) ** 2)
+            c = math.sqrt((pc[0] - pa[0]) ** 2 + (pc[1] - pa[1]) ** 2)
+
+            # Semiperimeter of triangle
+            s = (a + b + c) / 2.0
+
+            # Area of triangle by Heron's formula
+            area = math.sqrt(s * (s - a) * (s - b) * (s - c))
+            circum_r = a * b * c / (4.0 * area)
+
+            # Here's the radius filter.
+            if circum_r < 1.0 / alpha:
+                add_edge(edges, edge_points, coords, ia, ib)
+                add_edge(edges, edge_points, coords, ib, ic)
+                add_edge(edges, edge_points, coords, ic, ia)
 
     triangles = list(polygonize(edge_points))
     alpha_hull = unary_union(triangles)
@@ -131,4 +166,4 @@ def get_concave_hull(
     if binsize != 1:
         i, j = centroids(i, binsize=binsize), centroids(j, binsize=binsize)
 
-    return alpha_shape(i, j, alpha, buffer)
+    return alpha_shape(i, j, alpha, buffer, vectorize=True)
