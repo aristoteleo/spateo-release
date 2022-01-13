@@ -1,6 +1,7 @@
-"""A complete solution of spatialtemporal dynamics analyses toolkit of single cell spatial transcriptomics
+"""Spatialtemporal modeling of spatial transcriptomics
 """
 
-from .static import *
-from .interactive import *
+from .static.three_d_plots import set_mesh, recon_3d
+
+# from .interactive import *
 from .bbs import polygon, delaunay

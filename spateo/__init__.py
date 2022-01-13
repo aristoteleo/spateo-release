@@ -6,8 +6,7 @@ from .get_version import get_version
 __version__ = get_version(__file__)
 del get_version
 
-from .io import *
+from . import io
 from . import pp
 from . import tl
 from . import pl
-from . import io

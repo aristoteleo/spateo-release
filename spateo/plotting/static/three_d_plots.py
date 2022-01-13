@@ -1,5 +1,5 @@
 import math
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Tuple
 
 import pandas as pd
 import pyvista as pv
