@@ -60,7 +60,9 @@ def read_bgi_agg(
     x_max: Optional[int] = None,
     y_max: Optional[int] = None,
     binsize: Optional[int] = 1,
-) -> Tuple[spmatrix, Optional[spmatrix], Optional[spmatrix]]:
+) -> Tuple[
+    spmatrix, Optional[spmatrix], Optional[spmatrix], Optional[float], Optional[float]
+]:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
 
@@ -75,8 +77,10 @@ def read_bgi_agg(
     Returns:
         Tuple containing 3 sparse matrices corresponding to total, spliced,
         and unspliced counts respectively. If the read file does not contain
-        spliced and unspliced counts, the last two elements are None.
+        spliced and unspliced counts, the last two elements are None. When the data is just part of a chip (x, y
+        coordinates don't start from (0, 0), x_min, y_min will be also returned.
     """
+
     data = read_bgi_as_dataframe(path)
     x, y = data["x"].values, data["y"].values
     x_min, y_min = np.min(x), np.min(y)
@@ -102,7 +106,11 @@ def read_bgi_agg(
             )
         else:
             matrices.append(None)
-    return tuple(matrices)
+
+    if x_min != 0 and y_min != 0:
+        return tuple(matrices)
+    else:
+        return tuple(matrices, x_min, y_min)
 
 
 def read_bgi(
