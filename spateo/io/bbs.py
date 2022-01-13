@@ -158,18 +158,19 @@ def get_concave_hull(
         alpha_hull: The computed concave hull.
         edge_points: The coordinates of the edge of the resultant concave hull.
     """
-    total_agg_tuple = read_bgi_agg(path, binsize=binsize)[0]
+    total_agg_tuple = read_bgi_agg(path, binsize=binsize)
 
     i, j = (total_agg_tuple[0] > min_agg_umi).nonzero()
 
     if len(total_agg_tuple) == 5:
-        x_min, y_min = total_agg_tuple[3], total_agg_tuple[4]
+        x_min, y_min = total_agg_tuple[-2], total_agg_tuple[-1]
 
     # We use centroids function to get the true stereo-seq chip coordinates.
     if binsize != 1:
-        i, j = centroids(i, coord_min=x_min, binsize=binsize), centroids(
-            j, coord_min=y_min, binsize=binsize
-        )
+        i = centroids(i, coord_min=x_min, binsize=binsize)
+        j = centroids(j, coord_min=y_min, binsize=binsize)
+    else:
+        i, j = i + x_min, j + y_min
 
     # TODO: give warnings when alpha_shape returns nothing and ask the users to set alpha to be smaller.
     return alpha_shape(i, j, alpha, buffer, vectorize=True)
