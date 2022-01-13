@@ -166,4 +166,5 @@ def get_concave_hull(
     if binsize != 1:
         i, j = centroids(i, binsize=binsize), centroids(j, binsize=binsize)
 
+    # TODO: give warnings when alpha_shape returns nothing and ask the users to set alpha to be smaller.
     return alpha_shape(i, j, alpha, buffer, vectorize=True)

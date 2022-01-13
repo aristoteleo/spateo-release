@@ -3,4 +3,4 @@
 
 from .static import *
 from .interactive import *
-from .bbs import polygon
+from .bbs import polygon, delaunay
