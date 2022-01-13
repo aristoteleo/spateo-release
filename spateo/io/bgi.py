@@ -107,10 +107,10 @@ def read_bgi_agg(
         else:
             matrices.append(None)
 
-    if x_min != 0 and y_min != 0:
+    if x_min == 0 and y_min == 0:
         return tuple(matrices)
     else:
-        return tuple(matrices, x_min, y_min)
+        return tuple(matrices + [x_min, y_min])
 
 
 def read_bgi(
@@ -118,7 +118,7 @@ def read_bgi(
     binsize: int = 50,
     slice: Optional[str] = None,
     label_path: Optional[str] = None,
-    alpha_hull: Union[Polygon, MultiPolygon] = None,
+    alpha_hull: Optional[Polygon] = None,
     version="stereo_v1",
 ) -> AnnData:
     """A helper function that facilitates constructing an AnnData object suitable for downstream spateo analysis
@@ -136,6 +136,9 @@ def read_bgi(
         label_path: `str` or None (default: None)
             A string that points to the directory and filename of cell segmentation label matrix(Format:`.npy`).
             If not None, the results of cell segmentation will be used, and param `binsize` will be ignored.
+        alpha_hull: `Polygon` or None (default: None)
+            The computed concave hull. It must be a Polygon and thus you may need to take one of the Polygon from the
+            MultiPolygon object returned from `get_concave_hull` function.
         version: `str`
             The version of technology. Currently not used. But may be useful when the data format changes after we update
             the stero-seq techlogy in future.
@@ -161,6 +164,7 @@ def read_bgi(
                 data.loc[:, [x_column, y_column]].values, alpha_hull
             )
             data = data.loc[is_inside, :]
+            x, y = data[x_column].values, data[y_column].values
 
         data["x_ind"] = bin_indices(x, x_min, binsize)
         data["y_ind"] = bin_indices(y, y_min, binsize)
