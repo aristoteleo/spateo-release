@@ -9,10 +9,10 @@ Todo:
 import gzip
 from typing import Optional, Tuple, Union
 
+from anndata import AnnData
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
 from shapely.geometry import Polygon, MultiPolygon
 
@@ -59,7 +59,7 @@ def read_bgi_agg(
     path: str,
     x_max: Optional[int] = None,
     y_max: Optional[int] = None,
-    binsize: Optional[int] = 1,
+    binsize: int = 1,
 ) -> Tuple[
     spmatrix, Optional[spmatrix], Optional[spmatrix], Optional[float], Optional[float]
 ]:

@@ -1,10 +1,12 @@
 """IO functions for calculating the bounding box.
 """
 
+import math
+
 from typing import Optional, Tuple, Union, List
 
-import math
 import numpy as np
+from scipy.spatial import Delaunay
 from shapely.geometry import (
     Point,
     MultiPoint,
@@ -14,7 +16,6 @@ from shapely.geometry import (
     MultiPolygon,
     multipolygon,
 )
-from scipy.spatial import Delaunay
 from shapely.ops import unary_union, polygonize
 
 from .bgi import read_bgi_agg
@@ -24,10 +25,10 @@ from .utils import centroids
 def alpha_shape(
     x: np.ndarray,
     y: np.ndarray,
-    alpha: Optional[float] = 1,
-    buffer: Optional[float] = 1,
+    alpha: float = 1,
+    buffer: float = 1,
     vectorize: bool = True,
-) -> Tuple[Union[MultiPolygon, Polygon], list]:
+) -> Tuple[Union[MultiPolygon, Polygon], List]:
     """Compute the alpha shape (concave hull) of a set of points.
     Code adapted from: https://gist.github.com/dwyerk/10561690
 
@@ -137,11 +138,11 @@ def alpha_shape(
 
 def get_concave_hull(
     path: str,
-    binsize: Optional[int] = 1,
-    min_agg_umi: Optional[int] = 0,
-    alpha: Optional[float] = 1.0,
-    buffer: Optional[float] = 1.0,
-) -> Tuple[Polygon, list]:
+    binsize: int = 1,
+    min_agg_umi: int = 0,
+    alpha: float = 1.0,
+    buffer: float = 1.0,
+) -> Tuple[Polygon, List]:
     """Return the convex hull of all nanoballs that have non-zero UMI (or at least > min_agg_umi UMI).
 
     Args:
@@ -149,9 +150,8 @@ def get_concave_hull(
         binsize: The number of spatial bins to aggregate RNAs captured by DNBs in those bins. By default it is 1. If
                     stereo-seq chip used is bigger than 1 x 1 mm, you may need to increase the binsize.
         min_agg_umi: the minimal aggregated UMI number for the bucket.
-        alpha: alpha value to influence the gooeyness of the border. Smaller
-                  numbers don't fall inward as much as larger numbers. Too large,
-                  and you lose everything!
+        alpha: alpha value to influence the gooeyness of the border. Smaller numbers don't fall inward as much as
+                larger numbers. Too large, and you lose everything!
         buffer: the buffer used to smooth and clean up the shapley identified concave hull polygon.
 
     Returns:
