@@ -1,206 +1,190 @@
+import re
 import math
+import warnings
+import numpy as np
 import pandas as pd
+import anndata as ad
 import pyvista as pv
+import PVGeo
 import matplotlib as mpl
+import seaborn as sns
 from anndata import AnnData
-from typing import Union, Optional, List
+from typing import Union, Optional, Sequence, List
 
 
-def set_mesh(adata: AnnData,
-             cluster: str = 'cluster',
-             cluster_show: Union[str, list] = "all",
-             gene_show: Union[str, list] = "all"
-             ):
-    '''
+def clip_3d_coords(adata: AnnData,
+                   coordsby: Optional[List] = None
+                   ):
 
-    Create mesh.
-
-    Parameters
-    ----------
-    adata : :class:`~anndata.AnnData`
-        an Annodata object.
-    cluster : `str`
-        Column name in .obs DataFrame that stores clustering results.
-    cluster_show : `str` or `list` (default: `all`)
-        Clustering categories that need to be displayed.
-    gene_show : `str` or `list` (default: `all`)
-        Genes that need to be displayed.
-
-    Returns
-    -------
-    mask_grid:
-        pyvista.PolyData
-        Dataset consisting of undisplayed clustering vertices.(if cluster_show != "all", return the mask_grid.)
-    other_grid:
-        pyvista.PolyData
-        Dataset consisting of displayed clustering vertices.
-    surf:
-        pyvista.PolyData
-        Clipped surface.
-
-    '''
-
-    points = adata.obs[["x", "y", "z"]].values
-    grid = pv.PolyData(points)
-
-    if cluster_show == "all":
-        grid["cluster"] = adata.obs[cluster]
-    elif isinstance(cluster_show, list) or isinstance(cluster_show, tuple):
-        grid["cluster"] = adata.obs[cluster].map(lambda x: str(x) if x in cluster_show else "mask")
-    else:
-        grid["cluster"] = adata.obs[cluster].map(lambda x: x if x == cluster_show else "mask")
-
-    if gene_show == "all":
-        grid["gene"] = adata.X.sum(axis=1, keepdims=True)
-    else:
-        grid["gene"] = adata[:, gene_show].X.sum(axis=1, keepdims=True)
-
+    if coordsby is None:
+        coordsby = ["x", "y", "z"]
+    points_data = adata.obs[coordsby]
+    points_arr = points_data.values.astype(float)
+    grid = pv.PolyData(points_arr)
+    grid["index"] = adata.obs_names.tolist()
+    # Clip mesh using a pyvista.PolyData surface mesh.
     surf = grid.delaunay_3d().extract_geometry()
     surf.subdivide(nsub=3, subfilter="loop", inplace=True)
     clipped_grid = grid.clip_surface(surf)
-    clipped_grid_data = pd.DataFrame(clipped_grid.points)
-    clipped_grid_data["cluster"], clipped_grid_data["gene"] = clipped_grid["cluster"], clipped_grid["gene"]
+    clipped_adata = adata[adata.obs.index.isin(clipped_grid["index"].tolist()), :]
 
-    other_data = clipped_grid_data[clipped_grid_data["cluster"] != "mask"]
-    other_grid = pv.PolyData(other_data[[0, 1, 2]].values)
-    other_grid["cluster"] = other_data["cluster"]
-    other_grid["gene"] = other_data["gene"]
+    clipped_points = pd.DataFrame()
+    clipped_points[0] = list(map(tuple, clipped_grid.points))
+    surf_points = list(map(tuple, surf.points.round(1)))
+    clipped_points[1] = clipped_points[0].isin(surf_points)
+    clipped_adata = clipped_adata[~clipped_points[1].values, :]
 
-    if cluster_show != "all":
-        mask_data = clipped_grid_data[clipped_grid_data["cluster"] == "mask"]
-        mask_grid = pv.PolyData(mask_data[[0, 1, 2]].values)
-        return mask_grid, other_grid, surf
+    return clipped_adata, surf
+
+
+def groups_color(groups,
+                 colormap: Union[str, list, dict] = "viridis",
+                 alphamap: Union[float, list, dict] = 1.0,
+                 mask_color: Optional[str] = "whitesmoke",
+                 mask_alpha: Optional[float] = 0.5
+                 ):
+
+    color_groups = groups.unique().tolist()
+    color_groups.sort()
+    colordict = {}
+    if "mask" in color_groups:
+        color_groups.remove("mask")
+        rgb_color = mpl.colors.to_rgb(mask_color)
+        colordict["mask"] = [rgb_color[0], rgb_color[1], rgb_color[2], mask_alpha]
+
+    # Set group color
+    if isinstance(alphamap, float) or isinstance(alphamap, int):
+        alphamap = {group: alphamap for group in color_groups}
+    elif isinstance(alphamap, list):
+        alphamap = {group: alpha for group, alpha in zip(color_groups, alphamap)}
+    if isinstance(colormap, str):
+        colormap = [mpl.colors.to_hex(i, keep_alpha=False) for i in
+                    sns.color_palette(palette=colormap, n_colors=len(color_groups), as_cmap=False)]
+    if isinstance(colormap, list):
+        colormap = {group: color for group, color in zip(color_groups, colormap)}
+    for group in color_groups:
+        rgb_color = mpl.colors.to_rgb(colormap[group])
+        colordict[group] = [rgb_color[0], rgb_color[1], rgb_color[2], alphamap[group]]
+
+    return colordict
+
+
+def genes_color(genes_exp,
+                colormap: Union[str, list, dict] = "hot_r",
+                alphamap: Union[float, list, dict] = 1.0,
+                mask_color: Optional[str] = "whitesmoke",
+                mask_alpha: Optional[float] = 0.5):
+
+
+    color_genes = genes_exp.unique().tolist()
+    color_genes.sort()
+    colordict = {}
+
+    # Set gene color
+    if isinstance(colormap, str):
+        colormap = [mpl.colors.to_hex(i, keep_alpha=False) for i in
+                    sns.color_palette(palette=colormap, n_colors=len(color_genes), as_cmap=False)]
+    if isinstance(colormap, list):
+        colormap = {group: color for group, color in zip(color_genes, colormap)}
+    for gene in color_genes:
+        rgb_color = mpl.colors.to_rgb(colormap[gene])
+        colordict[gene] = [rgb_color[0], rgb_color[1], rgb_color[2], alphamap]
+    mask_rgb_color = mpl.colors.to_rgb(mask_color)
+    colordict[float(0)] = [mask_rgb_color[0], mask_rgb_color[1], mask_rgb_color[2], mask_alpha]
+    return colordict
+
+
+def build_3Dmodel(adata: AnnData,
+                  coordsby: Optional[list] = None,
+                  groupby: Optional[str] = "cluster",
+                  group_show: Union[str, list] = "all",
+                  group_cmap: Union[str, list, dict] = "viridis",
+                  group_amap: Union[float, list, dict] = 1.0,
+                  gene_show: Union[str, list] = "all",
+                  gene_cmap: Union[str, list, dict] = "hot_r",
+                  gene_amap: Union[float, list, dict] = 1.0,
+                  mask_color: Optional[str] = "gainsboro",
+                  mask_alpha: Optional[float] = 0.5,
+                  smoothing: Optional[bool] = True,
+                  voxelize: Optional[bool] = False,
+                  voxel_size: Optional[list] = None,
+                  unstructure: Optional[bool] = False
+                  ):
+
+    # Clip mesh using a pyvista.PolyData surface mesh.
+    if smoothing:
+        _adata, _ = clip_3d_coords(adata=adata, coordsby=coordsby)
     else:
-        return other_grid, surf
+        _adata = adata
 
-
-def recon_3d(adata: AnnData,
-             cluster: str = 'cluster',
-             save: str = "3d.png",
-             cluster_show: Union[str, list] = "all",
-             gene_show: Union[str, list] = "all",
-             show: str = "cluster",
-             colormap: str = "RdYlBu_r",
-             background_color: str = "black",
-             other_color: str = "white",
-             off_screen: bool = True,
-             window_size: Optional[List[int]] = None,
-             cpos: Optional[list] = None,
-             bar_position: Optional[list] = None,
-             bar_height: float = 0.3,
-             viewup: Optional[list] = None,
-             framerate: int = 15
-             ):
-    """
-
-    Draw a 3D image that integrates all the slices through pyvista,
-    and you can output a png image file, or a gif image file, or an MP4 video file.
-
-    Parameters
-    ----------
-    adata : :class:`~anndata.AnnData`
-        an Annodata object.
-    cluster : `str`
-        Column name in .obs DataFrame that stores clustering results.
-    save : `str`
-        If a str, save the figure. Infer the file type if ending on
-        {'.png','.jpeg', '.jpg', '.bmp', '.tif', '.tiff', '.gif', '.mp4'}.
-    cluster_show : `str` or `list` (default: `all`)
-        Clustering categories that need to be displayed.
-    gene_show : `str` or `list` (default: `all`)
-        Genes that need to be displayed.
-    show : `str` (default: `cluster`)
-        Display gene expression (`gene`) or clustering results (`cluster`).
-    colormap : `str` (default: `RdYlBu_r`)
-        The name of a matplotlib colormap to use for categorical coloring.
-    background_color : `str` (default: `black`)
-        The background color of the active render window.
-    other_color : `str` (default: `white`)
-        The color of the font and border.
-    off_screen : `bool` (default: `True`)
-        Renders off screen when True. Useful for automated screenshots.
-    window_size : `list` (optional, default: `None`)
-        Window size in pixels. Defaults to [1024, 768].
-    cpos : `list` (optional, default: `None`)
-        List of Camera position. Available camera positions are: "xy", "xz", "yz", "yx", "zx", "zy", "iso".
-        Defaults to ["xy", "xz", "yz", "iso"].
-    bar_position : `list` (optional, default: `None`)
-        The percentage (0 to 1) along the windows’s horizontal direction and vertical direction to place the bottom
-        left corner of the colorbar. Defaults to [0.9, 0.1].
-    bar_height : `float` (default: `0.3`)
-        The percentage (0 to 1) height of the window for the colorbar.
-    viewup : `list` (optional, default: `None`)
-        The normal to the orbital plane. Defaults to [0.5, 0.5, 1].
-    framerate : `int` (default: `15`)
-        Frames per second.
-
-    Examples
-    --------
-    #>>> adata
-    AnnData object with n_obs × n_vars = 35145 × 16131
-    obs: 'slice_ID', 'x', 'y', 'z', 'cluster'
-    obsm: 'spatial'
-    #>>> recon_3d(adata=adata, cluster="cluster",cluster_show=["muscle", "testis"],gene_show=["128up", "14-3-3epsilon"],
-    #>>>          show='cluster', save="3d.png", viewup=[0, 0, 0], colormap="RdYlBu_r", bar_height=0.2)
-
-    """
-
-    if window_size is None:
-        window_size = [1024, 768]
-    if cpos is None:
-        cpos = ["xy", "xz", "yz", "iso"]
-    if viewup is None:
-        viewup = [0.5, 0.5, 1]
-    if bar_position is None:
-        bar_position = [0.9, 0.1]
-    if cluster_show != "all":
-        mask_grid, other_grid, surf = set_mesh(adata=adata, cluster=cluster, cluster_show=cluster_show,
-                                               gene_show=gene_show)
+    # filter group info
+    if isinstance(group_show, str) and group_show is "all":
+        groups = _adata.obs[groupby]
+    elif isinstance(group_show, str) and group_show is not "all":
+        groups = _adata.obs[groupby].map(lambda x: str(x) if x == group_show else "mask")
+    elif isinstance(group_show, list) or isinstance(group_show, tuple):
+        groups = _adata.obs[groupby].map(lambda x: str(x) if x in group_show else "mask")
     else:
-        mask_grid = None
-        other_grid, surf = set_mesh(adata=adata, cluster=cluster, cluster_show=cluster_show, gene_show=gene_show)
+        raise ValueError("`group_show` value is wrong.")
+    # Set group color(rgba)
+    groups_rgba = groups_color(groups=groups, colormap=group_cmap, alphamap=group_amap,
+                               mask_color=mask_color, mask_alpha=mask_alpha)
 
-    # Plotting object to display vtk meshes
-    p = pv.Plotter(shape="3|1", off_screen=off_screen, border=True, border_color=other_color,
-                   lighting="light_kit", window_size=window_size)
-    p.background_color = background_color
-    for i, _cpos in enumerate(cpos):
-        p.subplot(i)
+    # filter gene info
+    genes_exp = _adata.X.sum(axis=1) if gene_show == "all" else _adata[:, gene_show].X.sum(axis=1)
+    genes_data = pd.DataFrame([groups.values.tolist(), genes_exp.tolist()]).stack().unstack(0)
+    genes_data.columns = ["group", "genes_exp"]
+    genes_data["filter"] = genes_data[["group", "genes_exp"]].apply(
+        lambda x: 0 if x["group"] is "mask" else x["genes_exp"], axis=1).astype(float)
+    new_genes_exp = genes_data["filter"].round(5)
+    # Set gene color(rgba)
+    genes_rgba = genes_color(genes_exp=new_genes_exp, colormap=gene_cmap, alphamap=gene_amap,
+                             mask_color=mask_color, mask_alpha=mask_alpha)
 
-        # Add clipped surface
-        p.add_mesh(surf, show_scalar_bar=False, show_edges=False, opacity=0.2, color='whitesmoke')
-        if mask_grid != None:
-            # Add undisplayed clustering vertices
-            p.add_mesh(mask_grid, opacity=0.02, color="whitesmoke", render_points_as_spheres=True, ambient=0.5)
-        # Add displayed clustering vertices
-        p.add_mesh(other_grid, opacity=0.7, scalars=show, colormap=colormap, render_points_as_spheres=True, ambient=0.5)
+    # Create a point cloud(pyvista.PolyData) or a voxelized volume(pyvista.UnstructuredGrid).
+    if coordsby is None:
+        coordsby = ["x", "y", "z"]
+    points_data = _adata.obs[coordsby]
+    points_data = points_data.astype(float)
+    points = PVGeo.points_to_poly_data(points_data)
+    surface = points.delaunay_3d().extract_geometry()
 
-        p.show_axes()
-        p.remove_scalar_bar()
-        p.camera_position = _cpos
-
-        if i == 3 and show == 'cluster':
-            p.add_scalar_bar(title=show, fmt="%.2f", n_labels=0,font_family="arial", color=other_color, vertical=True,
-                             use_opacity=True,position_x=bar_position[0], position_y=bar_position[1], height=bar_height)
-        elif i == 3 and show == 'gene':
-            p.add_scalar_bar(title=show, fmt="%.2f", font_family="arial", color=other_color, vertical=True,
-                             use_opacity=True,position_x=bar_position[0], position_y=bar_position[1], height=bar_height)
-        fontsize = math.ceil(window_size[0] / 100)
-        p.add_text(f"\n "
-                   f" Camera position = '{_cpos}' \n "
-                   f" Cluster(s): {cluster_show} \n "
-                   f" Gene(s): {gene_show} ",
-                   position="upper_left", font="arial", font_size=fontsize, color=mpl.colors.to_hex(other_color))
-
-    # Save 3D reconstructed image or GIF or video
-    if save.endswith(".png") or save.endswith(".tif") or save.endswith(".tiff") \
-            or save.endswith(".bmp") or save.endswith(".jpeg") or save.endswith(".jpg"):
-        p.show(screenshot=save)
+    if voxelize is True:
+        voxelizer = PVGeo.filters.VoxelizePoints()
+        voxel_size = [1, 1, 1] if voxel_size is None else voxel_size
+        voxelizer.set_deltas(voxel_size[0], voxel_size[1], voxel_size[2])
+        voxelizer.set_estimate_grid(False)
+        mesh = voxelizer.apply(points)
     else:
-        path = p.generate_orbital_path(factor=2.0, shift=0, viewup=viewup, n_points=20)
-        if save.endswith(".gif"):
-            p.open_gif(save)
-        elif save.endswith(".mp4"):
-            p.open_movie(save, framerate=framerate, quality=5)
-        p.orbit_on_path(path, write_frames=True, viewup=(0, 0, 1), step=0.1)
-        p.close()
+        mesh = points.cast_to_unstructured_grid() if unstructure else points
+
+    mesh["points_coords"] = points_data
+    mesh["genes_exp"] = new_genes_exp.values
+    mesh["genes_rgba"] = np.array([genes_rgba[g] for g in new_genes_exp.tolist()])
+    mesh["groups"] = groups.values
+    mesh["groups_rgba"] = np.array([groups_rgba[g] for g in groups.tolist()])
+
+    return mesh, surface
+
+
+def threeDslicing(mesh,
+                  axis: Union[str, int] = "x",
+                  n_slices: Union[str, int] = 10,
+                  center: Optional[Sequence[float]] = None):
+
+    if isinstance(mesh, pv.core.pointset.UnstructuredGrid) is False:
+        warnings.warn("The model should be a pyvista.UnstructuredGrid (voxelized) object.")
+        mesh = mesh.cast_to_unstructured_grid()
+
+    if n_slices is "orthogonal":
+        # Create three orthogonal slices through the dataset on the three cartesian planes.
+        if center is None:
+            return mesh.slice_orthogonal(x=None, y=None, z=None)
+        else:
+            return mesh.slice_orthogonal(x=center[0], y=center[1], z=center[2])
+    elif n_slices == 1:
+        # Slice a dataset by a plane at the specified origin and normal vector orientation.
+        return mesh.slice(normal=axis, origin=center, contour=True)
+    else:
+        # Create many slices of the input dataset along a specified axis.
+        return mesh.slice_along_axis(n=n_slices, axis=axis, center=center)
