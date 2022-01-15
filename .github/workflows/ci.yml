@@ -33,12 +33,11 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           architecture: x64
-      - name: Cache dependencies
+      - name: Cache pip
         uses: actions/cache@v2
         with:
-          path: ${{ env.pythonLocation }}
-          key: ${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('setup.py') }}-${{ hashFiles('dev-requirements.txt') }}
-
+          path: ~/.cache/pip
+          key: ${{ hashFiles('setup.py') }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('dev-requirements.txt') }}
       - name: Install dependencies
         run: make install-all
       - name: Run tests
