@@ -34,7 +34,7 @@ def pairwise_align(
     """
 
     torch.cuda.init()
-    # subset for common genes
+    # Subset for common genes
     common_genes = [
         value for value in slice1.var.index if value in set(slice2.var.index)
     ]
@@ -42,14 +42,23 @@ def pairwise_align(
 
     # Calculate expression dissimilarity
     to_dense_array = lambda X: np.array(X.todense()) if isinstance(X, spmatrix) else X
-    X, Y = to_dense_array(slice1.X) + 0.01, to_dense_array(slice2.X) + 0.01
-    X, Y = X / X.sum(axis=1, keepdims=True), Y / Y.sum(axis=1, keepdims=True)
-    logX, logY = np.log(X), np.log(Y)
-    X_log_X = np.matrix([np.dot(X[i], logX[i].T) for i in range(X.shape[0])])
-    D = X_log_X.T - np.dot(X, logY.T)
-    M = torch.tensor(D, device=device, dtype=torch.float32)
+    slice1_x, slice2_x = (
+        to_dense_array(slice1.X) + 0.0000000001,
+        to_dense_array(slice2.X) + 0.0000000001,
+    )
+    slice1_x, slice2_x = (
+        slice1_x / slice1_x.sum(axis=1, keepdims=True),
+        slice2_x / slice2_x.sum(axis=1, keepdims=True),
+    )
+    slice1_logx_slice1 = np.array(
+        [np.apply_along_axis(lambda x: np.dot(x, np.log(x).T), 1, slice1_x)]
+    )
+    slice1_logx_slice2 = np.dot(slice1_x, np.log(slice2_x).T)
+    M = torch.tensor(
+        slice1_logx_slice1.T - slice1_logx_slice2, device=device, dtype=torch.float32
+    )
 
-    # init distributions
+    # Weight of spots
     p = torch.tensor(
         np.ones((slice1.shape[0],)) / slice1.shape[0],
         device=device,
@@ -73,7 +82,7 @@ def pairwise_align(
         dtype=torch.float32,
     )
 
-    # Run OT
+    # Computes the FGW transport between two slides
     pi = ot.gromov.fused_gromov_wasserstein(
         M=M,
         C1=DA,
