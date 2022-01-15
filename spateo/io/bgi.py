@@ -38,9 +38,9 @@ def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
         path,
         sep="\t",
         dtype={
-            0: "category",  # geneID
-            1: np.uint32,  # x
-            2: np.uint32,  # y
+            "geneID": "category",  # geneID
+            "x": np.uint32,  # x
+            "y": np.uint32,  # y
             3: np.uint16,  # total
             4: np.uint16,  # spliced
             5: np.uint16,  # unspliced
@@ -119,12 +119,11 @@ def read_bgi(
     """
     data = read_bgi_as_dataframe(path)
     columns = list(data.columns)
-    gene_column, x_column, y_column = columns[:3]
     total_column = columns[COUNT_COLUMN_MAPPING["total"]]
 
     # get cell name
     if not label_path:
-        x, y = data[x_column].values, data[y_column].values
+        x, y = data["x"].values, data["y"].values
         x_min, y_min = np.min(x), np.min(y)
 
         data["x_ind"] = bin_indices(x, x_min, binsize)
@@ -152,7 +151,7 @@ def read_bgi(
         # Get centroid from label_props
         coor = label_props[["centroid-0", "centroid-1"]].values
 
-    uniq_cell, uniq_gene = data["cell_name"].unique(), data[gene_column].unique()
+    uniq_cell, uniq_gene = data["cell_name"].unique(), data["geneID"].unique()
     uniq_cell, uniq_gene = list(uniq_cell), list(uniq_gene)
 
     cell_dict = dict(zip(uniq_cell, range(0, len(uniq_cell))))

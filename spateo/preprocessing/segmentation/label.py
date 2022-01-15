@@ -1,73 +1,74 @@
-"""Functions for use when labeling individual cells, after obtaining a cell mask.
-
-Original author @HailinPan, refactored by @Lioscro.
+"""Functions for use when labeling individual nuclei/cells, after obtaining a
+mask.
 """
+from typing import Union
+
+import cv2
 import numpy as np
-from scipy import ndimage as ndi
-from skimage import feature, segmentation
+from scipy.sparse import issparse, spmatrix
+from skimage import segmentation
 
 from . import utils
 
 
-def watershed(X: np.ndarray, mask: np.ndarray, k: int, min_distance: int) -> np.ndarray:
-    """Label cells using the Watershed algorithm.
+def watershed(
+    X: Union[spmatrix, np.ndarray],
+    mask: np.ndarray,
+    markers: np.ndarray,
+    k: int,
+) -> np.ndarray:
+    """Assign individual nuclei/cells using the Watershed algorithm.
 
     Args:
-        X: UMI counts
-        mask: Cell mask
-        k: Kernel size for gaussian blur
-        min_distance: Minimum distance between center of cells
+        X: Data array. This array will be Gaussian blurred and used as the
+            input values to Watershed.
+        mask: Nucleus/cell mask.
+        markers: Numpy array indicating where the Watershed markers are. May
+            either be a boolean or integer array. If this is a boolean array,
+            the markers are identified by calling `cv2.connectedComponents`.
+        k: Size of the kernel to use for Gaussian blur.
 
     Returns:
-        Numpy array of the same shape as `X` containing integer cell labels.
+        Watershed labels.
     """
+    if issparse(X):
+        X = X.A
+
     blur = utils.conv2d(X, k, mode="gauss")
-    blur = utils.scale_to_255(blur)
-    blur[~mask] = 0
-    peak_idx = feature.peak_local_max(
-        image=blur, min_distance=min_distance, labels=mask
-    )
-    local_maxi = np.zeros_like(blur, dtype=bool)
-    local_maxi[tuple(peak_idx.T)] = True
-    markers = ndi.label(local_maxi)[0]
-    labels = segmentation.watershed(-blur, markers, mask=mask)
-    return labels
+    if markers.dtype == np.dtype(bool):
+        markers = cv2.connectedComponents(markers.astype(np.uint8))[1]
+    watershed = segmentation.watershed(-blur, markers, mask=mask)
+    return watershed
 
 
-def enlarge(labels: np.ndarray, n_iter: int = 5, max_area: int = 400) -> np.ndarray:
-    """Enlarge cell labels.
+def expand_labels(labels: np.ndarray, distance: int, max_area: int) -> np.ndarray:
+    """Expand labels up to a certain distance, while ignoring labels that are
+    above a certain size.
 
     Args:
-        labels: Numpy array containing cell labels.
-        n_iter: Number of iterations.
-        max_area: Maximum area of each cell.
+        labels: Numpy array containing integer labels.
+        distance: Distance to expand. Internally, this is used as the number
+            of iterations of distance 1 dilations.
+        max_area: Maximum area of each label.
 
     Returns:
-        A new Numpy array of (enlarged) cell labels.
+        New label array with expanded labels.
     """
-    enlarged = labels.copy()
-    cell_labels = [l for l in np.unique(labels) if l > 0]
-    for _ in range(n_iter):
-        aexp = np.zeros([enlarged.shape[0] + 2, enlarged.shape[1] + 2], dtype=np.int32)
-        aexp[1:-1, 1:-1] = enlarged
-        top = aexp[0:-2, 1:-1]
-        left = aexp[1:-1, 0:-2]
-        right = aexp[1:-1, 2:]
-        bottom = aexp[2:, 1:-1]
+    expanded = labels.copy()
+    saved = {}
+    for _ in range(distance):
+        for label in (np.bincount(expanded.flatten()) >= max_area).nonzero()[0]:
+            if label > 0:
+                where = np.where(expanded == label)
+                saved[label] = where
+                # Remove labels that reached max area
+                expanded[where] = 0
 
-        cellArea = np.bincount(enlarged.flatten())
-        cWithmaxA = np.argwhere(cellArea >= max_area)
-        cWithmaxA = cWithmaxA[cWithmaxA > 0]
+        # Expand
+        expanded = segmentation.expand_labels(expanded, distance=1)
 
-        top[np.isin(top, cWithmaxA)] = 0
-        left[np.isin(left, cWithmaxA)] = 0
-        right[np.isin(right, cWithmaxA)] = 0
-        bottom[np.isin(bottom, cWithmaxA)] = 0
+    # Replace with saved labels
+    for label, where in saved.items():
+        expanded[where] = label
 
-        enlarged[(enlarged == 0) & (top > 0)] = top[(enlarged == 0) & (top > 0)]
-        enlarged[(enlarged == 0) & (left > 0)] = left[(enlarged == 0) & (left > 0)]
-        enlarged[(enlarged == 0) & (right > 0)] = right[(enlarged == 0) & (right > 0)]
-        enlarged[(enlarged == 0) & (bottom > 0)] = bottom[
-            (enlarged == 0) & (bottom > 0)
-        ]
-    return enlarged
+    return expanded
