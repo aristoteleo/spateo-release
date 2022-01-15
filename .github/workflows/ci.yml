@@ -33,15 +33,15 @@ jobs:
       - name: Checkout branch
         uses: actions/checkout@master
       - name: Setup python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python }}
           architecture: x64
-      - name: Cache pip
-        uses: actions/cache@v2
-        with:
-          path: ~/.cache/pip
-          key: ${{ env.pythonLocation }}-${{ hashFiles('setup.py') }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('dev-requirements.txt') }}
+          cache: 'pip'
+          cache-dependency-path: |
+            setup.py
+            requirements.txt
+            dev-requirements.txt
       - name: Install dependencies
         run: make install-all
       - name: Run tests
