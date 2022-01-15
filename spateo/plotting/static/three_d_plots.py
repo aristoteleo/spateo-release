@@ -12,9 +12,7 @@ def set_mesh(
     cluster: str = "cluster",
     cluster_show: Union[str, list] = "all",
     gene_show: Union[str, list] = "all",
-) -> Union[
-    Tuple[pv.PolyData, pv.PolyData, pv.PolyData], Tuple[pv.PolyData, pv.PolyData]
-]:
+) -> Union[Tuple[pv.PolyData, pv.PolyData, pv.PolyData], Tuple[pv.PolyData, pv.PolyData]]:
     """Create mesh.
 
     Args:
@@ -36,13 +34,9 @@ def set_mesh(
     if cluster_show == "all":
         grid["cluster"] = adata.obs[cluster]
     elif isinstance(cluster_show, list) or isinstance(cluster_show, tuple):
-        grid["cluster"] = adata.obs[cluster].map(
-            lambda x: str(x) if x in cluster_show else "mask"
-        )
+        grid["cluster"] = adata.obs[cluster].map(lambda x: str(x) if x in cluster_show else "mask")
     else:
-        grid["cluster"] = adata.obs[cluster].map(
-            lambda x: x if x == cluster_show else "mask"
-        )
+        grid["cluster"] = adata.obs[cluster].map(lambda x: x if x == cluster_show else "mask")
 
     if gene_show == "all":
         grid["gene"] = adata.X.sum(axis=1, keepdims=True)
@@ -217,10 +211,7 @@ def recon_3d(
             )
         fontsize = math.ceil(window_size[0] / 100)
         p.add_text(
-            f"\n "
-            f" Camera position = '{_cpos}' \n "
-            f" Cluster(s): {cluster_show} \n "
-            f" Gene(s): {gene_show} ",
+            f"\n " f" Camera position = '{_cpos}' \n " f" Cluster(s): {cluster_show} \n " f" Gene(s): {gene_show} ",
             position="upper_left",
             font="arial",
             font_size=fontsize,

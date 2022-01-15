@@ -30,6 +30,4 @@ class TestBP(TestMixin, TestCase):
         X[5:15, 5:15] = rng.negative_binomial(100, 0.5, (10, 10))
         expected = np.zeros((20, 20))
         expected[5:15, 5:15] = 1
-        np.testing.assert_allclose(
-            expected, bp.run_bp(X, (10, 0.5), (100, 0.5), square=True), atol=1e-3
-        )
+        np.testing.assert_allclose(expected, bp.run_bp(X, (10, 0.5), (100, 0.5), square=True), atol=1e-3)

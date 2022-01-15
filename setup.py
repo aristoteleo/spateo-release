@@ -11,9 +11,7 @@ setup(
     name="spateo-release",
     version="0.0.0",
     python_requires=">=3.7",
-    install_requires=[
-        l.strip() for l in Path("requirements.txt").read_text("utf-8").splitlines()
-    ],  # 'yt>=3.5.1',
+    install_requires=[l.strip() for l in Path("requirements.txt").read_text("utf-8").splitlines()],  # 'yt>=3.5.1',
     extras_require={
         "spatial": ["pysal>2.0.0"],
         "interactive_plots": ["plotly"],

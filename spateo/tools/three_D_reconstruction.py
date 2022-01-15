@@ -35,9 +35,7 @@ def pairwise_align(
 
     torch.cuda.init()
     # Subset for common genes
-    common_genes = [
-        value for value in slice1.var.index if value in set(slice2.var.index)
-    ]
+    common_genes = [value for value in slice1.var.index if value in set(slice2.var.index)]
     slice1, slice2 = slice1[:, common_genes], slice2[:, common_genes]
 
     # Calculate expression dissimilarity
@@ -50,13 +48,9 @@ def pairwise_align(
         slice1_x / slice1_x.sum(axis=1, keepdims=True),
         slice2_x / slice2_x.sum(axis=1, keepdims=True),
     )
-    slice1_logx_slice1 = np.array(
-        [np.apply_along_axis(lambda x: np.dot(x, np.log(x).T), 1, slice1_x)]
-    )
+    slice1_logx_slice1 = np.array([np.apply_along_axis(lambda x: np.dot(x, np.log(x).T), 1, slice1_x)])
     slice1_logx_slice2 = np.dot(slice1_x, np.log(slice2_x).T)
-    M = torch.tensor(
-        slice1_logx_slice1.T - slice1_logx_slice2, device=device, dtype=torch.float32
-    )
+    M = torch.tensor(slice1_logx_slice1.T - slice1_logx_slice2, device=device, dtype=torch.float32)
 
     # Weight of spots
     p = torch.tensor(

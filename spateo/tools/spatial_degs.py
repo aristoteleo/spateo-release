@@ -91,14 +91,8 @@ def moran_i(
         [0] * gene_num,
         [0] * gene_num,
     )
-    for i_gene, gene in tqdm(
-        enumerate(genes), desc="Moran's I Global Autocorrelation Statistic"
-    ):
-        cur_X = (
-            X_data[:, adata.var.index == gene].A
-            if sparse
-            else X_data[:, adata.var.index == gene]
-        )
+    for i_gene, gene in tqdm(enumerate(genes), desc="Moran's I Global Autocorrelation Statistic"):
+        cur_X = X_data[:, adata.var.index == gene].A if sparse else X_data[:, adata.var.index == gene]
         mbi = explore.esda.moran.Moran(cur_X, W, permutations=999, two_tailed=False)
         Moran_I[i_gene] = mbi.I
         p_value[i_gene] = mbi.p_sim

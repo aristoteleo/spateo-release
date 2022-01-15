@@ -27,12 +27,8 @@ class TestICell(TestMixin, TestCase):
             X[1, 0] = 2
             filters.threshold_multiotsu.return_value = [1, 2]
             filters.threshold_local.return_value = 0
-            self.assertEqual(
-                self.utils.mclose_mopen.return_value, icell.mask_nuclei_from_stain(X)
-            )
-            np.testing.assert_array_equal(
-                [[False, False], [True, True]], self.utils.mclose_mopen.call_args[0][0]
-            )
+            self.assertEqual(self.utils.mclose_mopen.return_value, icell.mask_nuclei_from_stain(X))
+            np.testing.assert_array_equal([[False, False], [True, True]], self.utils.mclose_mopen.call_args[0][0])
             self.utils.mclose_mopen.assert_called_once_with(mock.ANY, 5)
 
     def test_score_pixels_gauss(self):
@@ -54,13 +50,9 @@ class TestICell(TestMixin, TestCase):
         self.em.run_em.return_value = w, r, p
         result = icell.score_pixels(X, k=3, method="EM", em_kwargs=em_kwargs)
         self.utils.conv2d.assert_called_once_with(X, 3, mode="circle")
-        self.em.run_em.assert_called_once_with(
-            self.utils.conv2d.return_value, **em_kwargs
-        )
+        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, **em_kwargs)
         self.bp.run_bp.assert_not_called()
-        self.em.confidence.assert_called_once_with(
-            self.utils.conv2d.return_value, w, r, p
-        )
+        self.em.confidence.assert_called_once_with(self.utils.conv2d.return_value, w, r, p)
         self.utils.scale_to_01.assert_not_called()
         self.assertEqual(result, self.em.confidence.return_value)
 
@@ -78,13 +70,9 @@ class TestICell(TestMixin, TestCase):
                 mock.call(self.em.confidence.return_value, 3, mode="gauss"),
             ]
         )
-        self.em.run_em.assert_called_once_with(
-            self.utils.conv2d.return_value, **em_kwargs
-        )
+        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, **em_kwargs)
         self.bp.run_bp.assert_not_called()
-        self.em.confidence.assert_called_once_with(
-            self.utils.conv2d.return_value, w, r, p
-        )
+        self.em.confidence.assert_called_once_with(self.utils.conv2d.return_value, w, r, p)
         self.utils.scale_to_01.assert_not_called()
         self.assertEqual(result, self.utils.conv2d.return_value)
 
@@ -96,19 +84,11 @@ class TestICell(TestMixin, TestCase):
         r = mock.MagicMock()
         p = mock.MagicMock()
         self.em.run_em.return_value = w, r, p
-        result = icell.score_pixels(
-            X, k=3, method="EM+BP", em_kwargs=em_kwargs, bp_kwargs=bp_kwargs
-        )
+        result = icell.score_pixels(X, k=3, method="EM+BP", em_kwargs=em_kwargs, bp_kwargs=bp_kwargs)
         self.utils.conv2d.assert_called_once_with(X, 3, mode="circle")
-        self.em.run_em.assert_called_once_with(
-            self.utils.conv2d.return_value, **em_kwargs
-        )
+        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, **em_kwargs)
         self.bp.run_bp.assert_called_once_with(
-            self.utils.conv2d.return_value,
-            (r[0], p[0]),
-            (r[1], p[1]),
-            certain_mask=None,
-            **bp_kwargs
+            self.utils.conv2d.return_value, (r[0], p[0]), (r[1], p[1]), certain_mask=None, **bp_kwargs
         )
         self.em.confidence.assert_not_called()
         self.utils.scale_to_01.assert_not_called()

@@ -145,9 +145,7 @@ def read_bgi(
 
         # Measure properties and get contours of labeled cell regions.
         label_mtx = np.load(label_path)
-        label_props = get_label_props(
-            label_mtx, properties=("label", "area", "bbox", "centroid")
-        )
+        label_props = get_label_props(label_mtx, properties=("label", "area", "bbox", "centroid"))
         # Get centroid from label_props
         coor = label_props[["centroid-0", "centroid-1"]].values
 

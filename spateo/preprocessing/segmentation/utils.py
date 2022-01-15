@@ -68,9 +68,7 @@ def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
     return cv2.GaussianBlur(src=X.astype(float), ksize=(k, k), sigmaX=0, sigmaY=0)
 
 
-def conv2d(
-    X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"]
-) -> np.ndarray:
+def conv2d(X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"]) -> np.ndarray:
     """Convolve an array with the specified kernel size and mode.
 
     Args:
@@ -148,9 +146,7 @@ def mclose_mopen(mask: np.ndarray, k: int, square: bool = False) -> np.ndarray:
     return mopen.astype(bool)
 
 
-def apply_threshold(
-    X: np.ndarray, k: int, threshold: Optional[Union[float, np.ndarray]] = None
-) -> np.ndarray:
+def apply_threshold(X: np.ndarray, k: int, threshold: Optional[Union[float, np.ndarray]] = None) -> np.ndarray:
     """Apply a threshold value to the given array and perform morphological close
     and open operations.
 
@@ -214,9 +210,7 @@ def safe_erode(
     for _ in range(n_iter):
         # Find connected components and save if area <= min_area
         components = cv2.connectedComponentsWithStats(
-            apply_threshold(X, float_k, float_threshold).astype(np.uint8)
-            if float_threshold is not None
-            else X
+            apply_threshold(X, float_k, float_threshold).astype(np.uint8) if float_threshold is not None else X
         )
         areas = components[2][:, cv2.CC_STAT_AREA]
         for label in np.where(areas <= min_area)[0]:

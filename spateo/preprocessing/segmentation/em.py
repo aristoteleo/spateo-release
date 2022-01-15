@@ -90,11 +90,7 @@ def nbn_em(
         tau_sum = tau.sum(axis=1)
         w = tau_sum / tau_sum.sum()
         lam = (tau * delta).sum(axis=1) / tau_sum
-        theta = (
-            beta
-            * (tau * delta).sum(axis=1)
-            / (tau * (X - (1 - beta).reshape(-1, 1) * delta)).sum(axis=1)
-        )
+        theta = beta * (tau * delta).sum(axis=1) / (tau * (X - (1 - beta).reshape(-1, 1) * delta)).sum(axis=1)
 
         isnan = np.any(np.isnan(w) | np.isnan(lam) | np.isnan(theta))
         if (
@@ -111,11 +107,7 @@ def nbn_em(
         prev_lam = lam.copy()
         prev_theta = theta.copy()
 
-    return (
-        (prev_w, lamtheta_to_r(prev_lam, prev_theta), prev_theta)
-        if isnan
-        else (w, lamtheta_to_r(lam, theta), theta)
-    )
+    return (prev_w, lamtheta_to_r(prev_lam, prev_theta), prev_theta) if isnan else (w, lamtheta_to_r(lam, theta), theta)
 
 
 def confidence(
@@ -199,7 +191,5 @@ def run_em(
         rng = np.random.default_rng(seed)
         samples = rng.choice(samples, downsample, replace=False)
 
-    w, r, p = nbn_em(
-        samples, w=w, mu=mu, var=var, max_iter=max_iter, precision=precision
-    )
+    w, r, p = nbn_em(samples, w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
     return tuple(w), tuple(r), tuple(p)

@@ -76,20 +76,14 @@ def cell_marginals(
     """
     if cell_probs.shape != background_probs.shape:
         raise ValueError("`cell_probs` and `background_probs` must have the same shape")
-    neighborhood = (
-        neighborhood > 0 if neighborhood is not None else utils.circle(3).astype(bool)
-    )
+    neighborhood = neighborhood > 0 if neighborhood is not None else utils.circle(3).astype(bool)
     if cell_probs.ndim != neighborhood.ndim:
-        raise ValueError(
-            "`neighborhood` and `cell_probs` must have the same number of dimensions"
-        )
+        raise ValueError("`neighborhood` and `cell_probs` must have the same number of dimensions")
     neighbor_offsets = create_neighbor_offsets(neighborhood)
     shape = np.array(cell_probs.shape, dtype=np.uint32)
     potentials0 = background_probs.flatten().astype(np.double)
     potentials1 = cell_probs.flatten().astype(np.double)
-    bp = FastBinaryGridBeliefPropagation(
-        shape, neighbor_offsets, potentials0, potentials1, p, q
-    )
+    bp = FastBinaryGridBeliefPropagation(shape, neighbor_offsets, potentials0, potentials1, p, q)
     bp.run(precision=precision, max_iter=max_iter, n_threads=n_threads)
     return bp.marginals()
 
@@ -132,9 +126,7 @@ def run_bp(
     Returns:
         Numpy array of marginal probabilities.
     """
-    background_probs = stats.nbinom(n=background_params[0], p=background_params[1]).pmf(
-        X
-    )
+    background_probs = stats.nbinom(n=background_params[0], p=background_params[1]).pmf(X)
     cell_probs = stats.nbinom(n=cell_params[0], p=cell_params[1]).pmf(X)
     if certain_mask is not None:
         background_probs = np.clip(background_probs - certain_mask, 0, 1)

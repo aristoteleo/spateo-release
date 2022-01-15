@@ -176,12 +176,7 @@ def add_spatial(adata):
 
 
 def add_spatial_intron(adata):
-    df = (
-        pd.Series(adata.obs.index)
-        .str.split(":", expand=True)
-        .iloc[:, 1]
-        .str.split("_", expand=True)
-    )
+    df = pd.Series(adata.obs.index).str.split(":", expand=True).iloc[:, 1].str.split("_", expand=True)
     adata.obsm["spatial"] = df.values.astype(float)
     adata.obsm["X_spatial"] = df.values.astype(float)
 

@@ -81,9 +81,7 @@ def get_label_props(
         mtx[mtx > 0] = 255
         mtx = mtx.astype(np.uint8)
         # get contours
-        contour = cv2.findContours(mtx, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0][
-            0
-        ]
+        contour = cv2.findContours(mtx, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0][0]
         # shift back coordinates
         contour = contour - np.array([1, 1])
         return contour
@@ -100,13 +98,9 @@ def get_label_props(
             geo = Point(contour)
         return geo
 
-    props = measure.regionprops_table(
-        label_mtx, properties=properties, extra_properties=[contours]
-    )
+    props = measure.regionprops_table(label_mtx, properties=properties, extra_properties=[contours])
     props = pd.DataFrame(props)
-    props["contours"] = props.apply(
-        lambda x: x["contours"] + x[["bbox-0", "bbox-1"]].to_numpy(), axis=1
-    )
+    props["contours"] = props.apply(lambda x: x["contours"] + x[["bbox-0", "bbox-1"]].to_numpy(), axis=1)
     props["contours"] = props["contours"].apply(contour_to_geo)
     return props
 

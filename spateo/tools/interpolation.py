@@ -8,9 +8,7 @@ from dynamo.vectorfield.scVectorField import SparseVFC
 from .interpolation_utils import *
 
 
-def interpolation_SparseVFC(
-    adata, genes=None, grid_num=50, lambda_=0.02, lstsq_method="scipy", **kwargs
-):
+def interpolation_SparseVFC(adata, genes=None, grid_num=50, lambda_=0.02, lstsq_method="scipy", **kwargs):
     """
     predict missing location’s gene expression and learn a continuous gene expression pattern over space
 
@@ -65,9 +63,7 @@ def interpolation_SparseVFC(
     )
     min_vec = min_vec - 0.01 * np.abs(max_vec - min_vec)
     max_vec = max_vec + 0.01 * np.abs(max_vec - min_vec)
-    Grid_list = np.meshgrid(
-        *[np.linspace(i, j, grid_num) for i, j in zip(min_vec, max_vec)]
-    )
+    Grid_list = np.meshgrid(*[np.linspace(i, j, grid_num) for i, j in zip(min_vec, max_vec)])
     Grid = np.array([i.flatten() for i in Grid_list]).T
 
     res = SparseVFC(X, V, Grid, lambda_=lambda_, lstsq_method=lstsq_method, **kwargs)

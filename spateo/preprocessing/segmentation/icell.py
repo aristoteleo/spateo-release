@@ -102,9 +102,7 @@ def score_pixels(
         w, r, p = em.run_em(res, **em_kwargs)
 
         if "bp" in method:
-            res = bp.run_bp(
-                res, (r[0], p[0]), (r[1], p[1]), certain_mask=certain_mask, **bp_kwargs
-            )
+            res = bp.run_bp(res, (r[0], p[0]), (r[1], p[1]), certain_mask=certain_mask, **bp_kwargs)
         else:
             res = em.confidence(res, w, r, p)
             if certain_mask is not None:

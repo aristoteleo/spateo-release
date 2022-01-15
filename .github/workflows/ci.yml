@@ -33,6 +33,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           architecture: x64
+      - name: Cache dependencies
+        uses: actions/cache@v2
+        with:
+          path: ${{ env.pythonLocation }}
+          key: ${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('setup.py') }}-${{ hashFiles('dev-requirements.txt') }}
+
       - name: Install dependencies
         run: make install-all
       - name: Run tests

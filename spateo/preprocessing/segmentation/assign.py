@@ -93,9 +93,7 @@ def assign_point(
                         if gene not in assigns[cell]:
                             assigns[cell][gene] = 0
                         assigns[cell][gene] += cell_labels_per_dict[cell] * umi
-            elif (
-                cell_label > 0 and y == cens[cell_label][0] and x == cens[cell_label][1]
-            ):
+            elif cell_label > 0 and y == cens[cell_label][0] and x == cens[cell_label][1]:
                 if cell_label not in assigns:
                     assigns[cell_label] = {}
                 if gene not in assigns[cell_label]:

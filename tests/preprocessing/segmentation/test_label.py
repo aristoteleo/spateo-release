@@ -19,9 +19,7 @@ class TestLabel(TestMixin, TestCase):
         expected = np.zeros((10, 10), dtype=int)
         expected[:3, :3] = 1
         expected[7:, 7:] = 2
-        np.testing.assert_array_equal(
-            expected, label.watershed(X, mask, marker_mask, 3)
-        )
+        np.testing.assert_array_equal(expected, label.watershed(X, mask, marker_mask, 3))
 
     def test_expand_labels(self):
         X = np.zeros((10, 10), dtype=int)
