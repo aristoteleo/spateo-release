@@ -15,7 +15,16 @@ from typing import Optional, Sequence, Tuple, Union
 
 
 def clip_3d_coords(adata: AnnData, coordsby: str = "spatial") -> AnnData:
-    """Coordinate Preprocessing of 3D Models."""
+    """
+    Coordinate Preprocessing of 3D Models.
+
+    Args:
+        adata: AnnData object.
+        coordsby: The key from adata.obsm whose value will be used to reconstruct the 3D structure.
+
+    Returns:
+        clipped_adata: AnnData object that is clipped.
+    """
 
     bucket_xyz = adata.obsm[coordsby].astype(float)
     if isinstance(bucket_xyz, DataFrame):
@@ -45,7 +54,19 @@ def three_d_color(
     mask_color: Optional[str] = None,
     mask_alpha: Optional[float] = None,
 ) -> np.ndarray:
-    """Set the color of groups or gene expression."""
+    """
+    Set the color of groups or gene expression.
+
+    Args:
+        series: Pandas sereis (e.g. cell groups or gene names).
+        colormap: Colors to use for plotting data.
+        alphamap: The opacity of the color to use for plotting data.
+        mask_color: Colors to use for plotting mask information.
+        mask_alpha: The opacity of the color to use for plotting mask information.
+
+    Returns:
+        rgba: The rgba values mapped to groups or gene expression.
+    """
 
     color_types = series.unique().tolist()
     colordict = {}
@@ -67,9 +88,7 @@ def three_d_color(
     if isinstance(colormap, str):
         colormap = [
             mpl.colors.to_hex(i, keep_alpha=False)
-            for i in sns.color_palette(
-                palette=colormap, n_colors=len(color_types), as_cmap=False
-            )
+            for i in sns.color_palette(palette=colormap, n_colors=len(color_types), as_cmap=False)
         ]
     if isinstance(colormap, list):
         colormap = {t: color for t, color in zip(color_types, colormap)}
@@ -137,22 +156,14 @@ def build_three_d_model(
     if isinstance(group_show, str) and group_show is "all":
         groups = _adata.obs[groupby]
     elif isinstance(group_show, str) and group_show is not "all":
-        groups = _adata.obs[groupby].map(
-            lambda x: str(x) if x == group_show else "mask"
-        )
+        groups = _adata.obs[groupby].map(lambda x: str(x) if x == group_show else "mask")
     elif isinstance(group_show, list) or isinstance(group_show, tuple):
-        groups = _adata.obs[groupby].map(
-            lambda x: str(x) if x in group_show else "mask"
-        )
+        groups = _adata.obs[groupby].map(lambda x: str(x) if x in group_show else "mask")
     else:
         raise ValueError("`group_show` value is wrong.")
 
     # filter gene expression info
-    genes_exp = (
-        _adata.X.sum(axis=1)
-        if gene_show == "all"
-        else _adata[:, gene_show].X.sum(axis=1)
-    )
+    genes_exp = _adata.X.sum(axis=1) if gene_show == "all" else _adata[:, gene_show].X.sum(axis=1)
     genes_exp = pd.Series(genes_exp, index=groups.index)
     genes_data = pd.concat([groups, genes_exp], axis=1)
     genes_data.columns = ["groups", "genes_exp"]
@@ -225,9 +236,7 @@ def three_d_slicing(
     """
 
     if isinstance(mesh, pv.core.pointset.UnstructuredGrid) is False:
-        warnings.warn(
-            "The model should be a pyvista.UnstructuredGrid (voxelized) object."
-        )
+        warnings.warn("The model should be a pyvista.UnstructuredGrid (voxelized) object.")
         mesh = mesh.cast_to_unstructured_grid()
 
     if n_slices is "orthogonal":
@@ -352,9 +361,7 @@ def easy_three_d_plot(
         cpos = [cpos]
 
     if len(cpos) != len(subplot_indices):
-        raise ValueError(
-            "The number of cpos does not match the number of subplots drawn."
-        )
+        raise ValueError("The number of cpos does not match the number of subplots drawn.")
 
     # Create a plotting object to display pyvista/vtk mesh.
     p = pv.Plotter(
@@ -373,9 +380,7 @@ def easy_three_d_plot(
 
         if mesh is not None:
             # Add a reconstructed 3D structure.
-            mesh[f"{scalar}_rgba"] = np.array(
-                [mpl.colors.to_rgba(i) for i in mesh[f"{scalar}_color"]]
-            )
+            mesh[f"{scalar}_rgba"] = np.array([mpl.colors.to_rgba(i) for i in mesh[f"{scalar}_color"]])
             p.add_mesh(
                 mesh,
                 scalars=f"{scalar}_rgba",
@@ -385,22 +390,15 @@ def easy_three_d_plot(
             )
 
             # Add a legend to render window.
-            _data = pd.concat(
-                [pd.Series(mesh[scalar]), pd.Series(mesh[f"{scalar}_color"])], axis=1
-            )
+            _data = pd.concat([pd.Series(mesh[scalar]), pd.Series(mesh[f"{scalar}_color"])], axis=1)
             _data.columns = ["label", "color"]
             _data = _data[_data["label"] != "mask"]
             _data.drop_duplicates(inplace=True)
             _data.sort_values(by=["label", "color"], inplace=True)
             gap = math.ceil(len(_data.index) / 5) if scalar is "genes" else 1
-            legend_entries = [
-                [_data["label"].iloc[i], _data["color"].iloc[i]]
-                for i in range(0, len(_data.index), gap)
-            ]
+            legend_entries = [[_data["label"].iloc[i], _data["color"].iloc[i]] for i in range(0, len(_data.index), gap)]
             if scalar is "genes":
-                legend_entries.append(
-                    [_data["label"].iloc[-1], _data["color"].iloc[-1]]
-                )
+                legend_entries.append([_data["label"].iloc[-1], _data["color"].iloc[-1]])
 
             legend_size = (0.1, 0.1) if legend_size is None else legend_size
             p.add_legend(
