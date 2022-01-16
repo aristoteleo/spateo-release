@@ -1,0 +1,2 @@
+class PreprocessingWarning(UserWarning):
+    pass

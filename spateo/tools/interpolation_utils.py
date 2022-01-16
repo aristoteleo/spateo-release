@@ -1,6 +1,10 @@
-import torch.nn as nn
-import torch
+"""
+Todo:
+    * @Xiaojieqiu: update with Google style documentation, function typings, tests
+"""
 import numpy as np
+import torch
+import torch.nn as nn
 
 
 class SineLayer(nn.Module):
@@ -39,7 +43,8 @@ class SineLayer(nn.Module):
                 self.linear.weight.uniform_(-1 / self.in_features, 1 / self.in_features)
             else:
                 self.linear.weight.uniform_(
-                    -np.sqrt(6 / self.in_features) / self.omega_0, np.sqrt(6 / self.in_features) / self.omega_0
+                    -np.sqrt(6 / self.in_features) / self.omega_0,
+                    np.sqrt(6 / self.in_features) / self.omega_0,
                 )
 
     def forward(self, input):
@@ -53,9 +58,19 @@ class SineLayer(nn.Module):
 
 class h(nn.Module):
     def __init__(
-        self, network_dim, hidden_features=256, hidden_layers=3, sirens=True, first_omega_0=30.0, hidden_omega_0=30.0
+        self,
+        network_dim,
+        hidden_features=256,
+        hidden_layers=3,
+        sirens=True,
+        first_omega_0=30.0,
+        hidden_omega_0=30.0,
     ):
-        self.sirens, self.first_omega_0, self.hidden_omega_0 = sirens, first_omega_0, hidden_omega_0
+        self.sirens, self.first_omega_0, self.hidden_omega_0 = (
+            sirens,
+            first_omega_0,
+            hidden_omega_0,
+        )
 
         super(h, self).__init__()  # Call to the super-class is necessary
 
@@ -69,7 +84,12 @@ class h(nn.Module):
         for i in range(hidden_layers):
             if sirens:
                 self.net.append(
-                    SineLayer(hidden_features, hidden_features, is_first=False, omega_0=self.hidden_omega_0)
+                    SineLayer(
+                        hidden_features,
+                        hidden_features,
+                        is_first=False,
+                        omega_0=self.hidden_omega_0,
+                    )
                 )
             else:
                 self.net.append(nn.Linear(hidden_features, hidden_features))
