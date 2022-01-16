@@ -14,20 +14,20 @@ from pandas.core.frame import DataFrame
 from typing import Optional, Sequence, Tuple, Union
 
 
-def clip_3d_coords(adata: AnnData, coordsby: str = 'spatial') -> AnnData:
+def clip_3d_coords(adata: AnnData, coordsby: str = "spatial") -> AnnData:
     """Coordinate Preprocessing of 3D Models."""
 
     bucket_xyz = adata.obsm[coordsby].astype(float)
     if isinstance(bucket_xyz, DataFrame):
         bucket_xyz = bucket_xyz.values
     grid = pv.PolyData(bucket_xyz)
-    grid['index'] = adata.obs_names.to_numpy()
+    grid["index"] = adata.obs_names.to_numpy()
     surf = grid.delaunay_3d().extract_geometry()
-    surf.subdivide(nsub=3, subfilter='loop', inplace=True)
+    surf.subdivide(nsub=3, subfilter="loop", inplace=True)
 
     # Clip mesh using a pyvista.PolyData surface mesh.
     clipped_grid = grid.clip_surface(surf)
-    clipped_adata = adata[clipped_grid['index'], :]
+    clipped_adata = adata[clipped_grid["index"], :]
 
     clipped_points = pd.DataFrame()
     clipped_points[0] = list(map(tuple, clipped_grid.points))
@@ -51,10 +51,10 @@ def three_d_color(
     colordict = {}
 
     # set mask rgba
-    if 'mask' in color_types:
-        color_types.remove('mask')
+    if "mask" in color_types:
+        color_types.remove("mask")
         rgba_color = mpl.colors.to_rgba(mask_color, alpha=mask_alpha)
-        colordict['mask'] = mpl.colors.to_hex(rgba_color, keep_alpha=True)
+        colordict["mask"] = mpl.colors.to_hex(rgba_color, keep_alpha=True)
     color_types.sort()
 
     # set alpha
@@ -85,15 +85,15 @@ def three_d_color(
 
 def build_three_d_model(
     adata: AnnData,
-    coordsby: str = 'spatial',
+    coordsby: str = "spatial",
     groupby: Optional[str] = None,
-    group_show: Union[str, list] = 'all',
-    group_cmap: Union[str, list, dict] = 'rainbow',
+    group_show: Union[str, list] = "all",
+    group_cmap: Union[str, list, dict] = "rainbow",
     group_amap: Union[float, list, dict] = 1.0,
-    gene_show: Union[str, list] = 'all',
-    gene_cmap: str = 'hot_r',
+    gene_show: Union[str, list] = "all",
+    gene_cmap: str = "hot_r",
     gene_amap: float = 1.0,
-    mask_color: str = 'gainsboro',
+    mask_color: str = "gainsboro",
     mask_alpha: float = 0.1,
     smoothing: bool = True,
     voxelize: bool = False,
@@ -134,30 +134,30 @@ def build_three_d_model(
     _adata = clip_3d_coords(adata=adata, coordsby=coordsby) if smoothing else adata
 
     # filter group info
-    if isinstance(group_show, str) and group_show is 'all':
+    if isinstance(group_show, str) and group_show is "all":
         groups = _adata.obs[groupby]
-    elif isinstance(group_show, str) and group_show is not 'all':
+    elif isinstance(group_show, str) and group_show is not "all":
         groups = _adata.obs[groupby].map(
-            lambda x: str(x) if x == group_show else 'mask'
+            lambda x: str(x) if x == group_show else "mask"
         )
     elif isinstance(group_show, list) or isinstance(group_show, tuple):
         groups = _adata.obs[groupby].map(
-            lambda x: str(x) if x in group_show else 'mask'
+            lambda x: str(x) if x in group_show else "mask"
         )
     else:
-        raise ValueError('`group_show` value is wrong.')
+        raise ValueError("`group_show` value is wrong.")
 
     # filter gene expression info
     genes_exp = (
         _adata.X.sum(axis=1)
-        if gene_show == 'all'
+        if gene_show == "all"
         else _adata[:, gene_show].X.sum(axis=1)
     )
     genes_exp = pd.Series(genes_exp, index=groups.index)
     genes_data = pd.concat([groups, genes_exp], axis=1)
-    genes_data.columns = ['group', 'genes_exp']
-    new_genes_exp = genes_data[['group', 'genes_exp']].apply(
-        lambda x: 'mask' if x['group'] is 'mask' else round(x['genes_exp'], 2), axis=1
+    genes_data.columns = ["group", "genes_exp"]
+    new_genes_exp = genes_data[["group", "genes_exp"]].apply(
+        lambda x: "mask" if x["group"] is "mask" else round(x["genes_exp"], 2), axis=1
     )
 
     # Create a point cloud(pyvista.PolyData) and its surface.
@@ -179,17 +179,17 @@ def build_three_d_model(
         mesh = points.cast_to_unstructured_grid() if unstructure else points
 
     # Add some properties of the 3D model
-    mesh['points_coords'] = bucket_xyz.values
-    mesh['groups'] = groups.values
-    mesh['genes'] = new_genes_exp.values
-    mesh['groups_color'] = three_d_color(
+    mesh["points_coords"] = bucket_xyz.values
+    mesh["groups"] = groups.values
+    mesh["genes"] = new_genes_exp.values
+    mesh["groups_color"] = three_d_color(
         series=groups,
         colormap=group_cmap,
         alphamap=group_amap,
         mask_color=mask_color,
         mask_alpha=mask_alpha,
     )
-    mesh['genes_color'] = three_d_color(
+    mesh["genes_color"] = three_d_color(
         series=new_genes_exp,
         colormap=gene_cmap,
         alphamap=gene_amap,
@@ -202,7 +202,7 @@ def build_three_d_model(
 
 def three_d_slicing(
     mesh: pv.DataSet,
-    axis: Union[str, int] = 'x',
+    axis: Union[str, int] = "x",
     n_slices: Union[str, int] = 10,
     center: Optional[Sequence[float]] = None,
 ) -> pv.PolyData:
@@ -226,11 +226,11 @@ def three_d_slicing(
 
     if isinstance(mesh, pv.core.pointset.UnstructuredGrid) is False:
         warnings.warn(
-            'The model should be a pyvista.UnstructuredGrid (voxelized) object.'
+            "The model should be a pyvista.UnstructuredGrid (voxelized) object."
         )
         mesh = mesh.cast_to_unstructured_grid()
 
-    if n_slices is 'orthogonal':
+    if n_slices is "orthogonal":
         # Create three orthogonal slices through the dataset on the three cartesian planes.
         if center is None:
             return mesh.slice_orthogonal(x=None, y=None, z=None)
@@ -245,25 +245,25 @@ def three_d_slicing(
 
 
 def easy_three_d_plot(
-        mesh: Optional[pv.DataSet] = None,
-        surface: Optional[pv.DataSet] = None,
-        scalar: str = 'groups',
-        surface_color: str = 'gainsboro',
-        surface_opacity: float = 0.5,
-        outline: bool = True,
-        background: str = 'white',
-        background_r: str = 'black',
-        save: Optional[str] = None,
-        notebook: bool = False,
-        shape: Optional[list] = None,
-        off_screen: bool = False,
-        window_size: Optional[list] = None,
-        cpos: Union[str, tuple,list] = 'iso',
-        legend_loc: str = 'lower right',
-        legend_size: Optional[Sequence] = None,
-        view_up: Optional[list] = None,
-        framerate: int = 15
-        ):
+    mesh: Optional[pv.DataSet] = None,
+    surface: Optional[pv.DataSet] = None,
+    scalar: str = "groups",
+    surface_color: str = "gainsboro",
+    surface_opacity: float = 0.5,
+    outline: bool = True,
+    background: str = "white",
+    background_r: str = "black",
+    save: Optional[str] = None,
+    notebook: bool = False,
+    shape: Optional[list] = None,
+    off_screen: bool = False,
+    window_size: Optional[list] = None,
+    cpos: Union[str, tuple, list] = "iso",
+    legend_loc: str = "lower right",
+    legend_size: Optional[Sequence] = None,
+    view_up: Optional[list] = None,
+    framerate: int = 15,
+):
     """
     Create a plotting object to display pyvista/vtk mesh.
 
@@ -309,7 +309,7 @@ def easy_three_d_plot(
         shape = (1, 1)
 
     if isinstance(shape, str):
-        n = re.split('[|/]', shape)
+        n = re.split("[|/]", shape)
         subplot_indices = [i for i in range(int(n[0]) + int(n[1]))]
     else:
         subplot_indices = [[i, j] for i in range(shape[0]) for j in range(shape[1])]
@@ -321,11 +321,20 @@ def easy_three_d_plot(
         cpos = [cpos]
 
     if len(cpos) != len(subplot_indices):
-        raise ValueError('The number of cpos does not match the number of subplots drawn.')
+        raise ValueError(
+            "The number of cpos does not match the number of subplots drawn."
+        )
 
     # Create a plotting object to display pyvista/vtk mesh.
-    p = pv.Plotter(shape=shape, off_screen=off_screen, lighting='light_kit', window_size=window_size, notebook=notebook,
-                   border=True, border_color=background_r)
+    p = pv.Plotter(
+        shape=shape,
+        off_screen=off_screen,
+        lighting="light_kit",
+        window_size=window_size,
+        notebook=notebook,
+        border=True,
+        border_color=background_r,
+    )
     for subplot_index, cpo in zip(subplot_indices, cpos):
         if surface is not None:
             # Add the surface of reconstructed 3D structure.
@@ -333,22 +342,43 @@ def easy_three_d_plot(
 
         if mesh is not None:
             # Add a reconstructed 3D structure.
-            mesh[f'{scalar}_rgba'] = np.array([mpl.colors.to_rgba(i) for i in mesh[f'{scalar}_color']])
-            p.add_mesh(mesh, scalars=f'{scalar}_rgba', rgba=True, render_points_as_spheres=True, ambient=0.5)
+            mesh[f"{scalar}_rgba"] = np.array(
+                [mpl.colors.to_rgba(i) for i in mesh[f"{scalar}_color"]]
+            )
+            p.add_mesh(
+                mesh,
+                scalars=f"{scalar}_rgba",
+                rgba=True,
+                render_points_as_spheres=True,
+                ambient=0.5,
+            )
 
             # Add a legend to render window.
-            _data = pd.concat([pd.Series(mesh[scalar]), pd.Series(mesh[f'{scalar}_color'])], axis=1)
-            _data.columns = ['label', 'color']
-            _data = _data[_data['label'] != 'mask']
+            _data = pd.concat(
+                [pd.Series(mesh[scalar]), pd.Series(mesh[f"{scalar}_color"])], axis=1
+            )
+            _data.columns = ["label", "color"]
+            _data = _data[_data["label"] != "mask"]
             _data.drop_duplicates(inplace=True)
-            _data.sort_values(by=['label', 'color'], inplace=True)
-            gap = math.ceil(len(_data.index) / 5) if scalar is 'genes' else 1
-            legend_entries = [[_data['label'].iloc[i], _data['color'].iloc[i]] for i in range(0, len(_data.index), gap)]
-            if scalar is 'genes':
-                legend_entries.append([_data['label'].iloc[-1], _data['color'].iloc[-1]])
+            _data.sort_values(by=["label", "color"], inplace=True)
+            gap = math.ceil(len(_data.index) / 5) if scalar is "genes" else 1
+            legend_entries = [
+                [_data["label"].iloc[i], _data["color"].iloc[i]]
+                for i in range(0, len(_data.index), gap)
+            ]
+            if scalar is "genes":
+                legend_entries.append(
+                    [_data["label"].iloc[-1], _data["color"].iloc[-1]]
+                )
 
             legend_size = (0.1, 0.1) if legend_size is None else legend_size
-            p.add_legend(legend_entries, face='circle', bcolor=None, loc=legend_loc, size=legend_size)
+            p.add_legend(
+                legend_entries,
+                face="circle",
+                bcolor=None,
+                loc=legend_loc,
+                size=legend_size,
+            )
 
         if outline:
             outline_mesh = surface.outline() if surface is not None else mesh.outline()
@@ -359,16 +389,17 @@ def easy_three_d_plot(
         p.show_axes()
 
     # Save as image or gif or mp4
-    save = 'three_d_structure.jpg' if save is None else save
-    save_format = save.split('.')[-1]
-    if save_format in ['png', 'tif', 'tiff', 'bmp', 'jpeg', 'jpg']:
+    save = "three_d_structure.jpg" if save is None else save
+    save_format = save.split(".")[-1]
+    if save_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
         p.show(screenshot=save)
     else:
         view_up = [0.5, 0.5, 1] if view_up is None else view_up
         path = p.generate_orbital_path(factor=2.0, shift=0, viewup=view_up, n_points=20)
-        if save.endswith('.gif'):
+        if save.endswith(".gif"):
             p.open_gif(save)
-        elif save.endswith('.mp4'):
+        elif save.endswith(".mp4"):
             p.open_movie(save, framerate=framerate, quality=5)
         p.orbit_on_path(path, write_frames=True, viewup=(0, 0, 1), step=0.1)
         p.close()
+
