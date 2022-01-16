@@ -155,9 +155,9 @@ def build_three_d_model(
     )
     genes_exp = pd.Series(genes_exp, index=groups.index)
     genes_data = pd.concat([groups, genes_exp], axis=1)
-    genes_data.columns = ["group", "genes_exp"]
-    new_genes_exp = genes_data[["group", "genes_exp"]].apply(
-        lambda x: "mask" if x["group"] is "mask" else round(x["genes_exp"], 2), axis=1
+    genes_data.columns = ["groups", "genes_exp"]
+    new_genes_exp = genes_data[["groups", "genes_exp"]].apply(
+        lambda x: "mask" if x["groups"] is "mask" else round(x["genes_exp"], 2), axis=1
     )
 
     # Create a point cloud(pyvista.PolyData) and its surface.
@@ -242,6 +242,37 @@ def three_d_slicing(
     else:
         # Create many slices of the input dataset along a specified axis.
         return mesh.slice_along_axis(n=n_slices, axis=axis, center=center)
+
+
+def compute_volume(
+    mesh: Optional[pv.DataSet] = None,
+    group_show: Union[str, list] = "all",
+) -> float:
+    """
+    Calculate the volume of the reconstructed 3D structure.
+
+    Args:
+        mesh: Reconstructed 3D structure.
+        group_show: Subset of groups used for calculation, e.g. [`'g1'`, `'g2'`, `'g3'`]. The default group_show is `'all'`, for all groups.
+
+    Returns:
+        volume_size: The volume of the reconstructed 3D structure.
+    """
+
+    mesh = mesh.compute_cell_sizes(length=False, area=False, volume=True)
+    volume_data = pd.concat(
+        [pd.Series(mesh.cell_data["groups"]), pd.Series(mesh.cell_data["Volume"])],
+        axis=1,
+    )
+
+    if group_show is not "all":
+        group_show = [group_show] if isinstance(group_show, str) else group_show
+        volume_data = volume_data[volume_data[0].isin(group_show)]
+
+    volume_size = float(np.sum(volume_data[1]))
+    print(f"{group_show} volume: {volume_size}")
+
+    return volume_size
 
 
 def easy_three_d_plot(
@@ -402,4 +433,3 @@ def easy_three_d_plot(
             p.open_movie(save, framerate=framerate, quality=5)
         p.orbit_on_path(path, write_frames=True, viewup=(0, 0, 1), step=0.1)
         p.close()
-
