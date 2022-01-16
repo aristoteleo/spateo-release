@@ -1,3 +1,4 @@
+
 import math
 import re
 import warnings
@@ -246,7 +247,9 @@ def three_d_slicing(
     """
 
     if isinstance(mesh, pv.core.pointset.UnstructuredGrid) is False:
-        warnings.warn("The model should be a pyvista.UnstructuredGrid (voxelized) object.")
+        warnings.warn(
+            "The model should be a pyvista.UnstructuredGrid (voxelized) object."
+        )
         mesh = mesh.cast_to_unstructured_grid()
 
     if n_slices is "orthogonal":
@@ -371,7 +374,9 @@ def easy_three_d_plot(
         cpos = [cpos]
 
     if len(cpos) != len(subplot_indices):
-        raise ValueError("The number of cpos does not match the number of subplots drawn.")
+        raise ValueError(
+            "The number of cpos does not match the number of subplots drawn."
+        )
 
     # Create a plotting object to display pyvista/vtk mesh.
     p = pv.Plotter(
