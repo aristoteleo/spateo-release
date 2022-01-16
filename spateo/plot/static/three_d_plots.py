@@ -211,7 +211,7 @@ def three_d_slicing(
     create three orthogonal slices through the dataset on the three cartesian planes.
 
     Args:
-        mesh: UnstructuredGrid object.
+        mesh: Reconstructed 3D structure (voxelized object).
         axis: The axis to generate the slices along. Available axes are:
                 * `'x'` or `0`
                 * `'y'` or `1`
@@ -252,7 +252,7 @@ def compute_volume(
     Calculate the volume of the reconstructed 3D structure.
 
     Args:
-        mesh: Reconstructed 3D structure.
+        mesh: Reconstructed 3D structure (voxelized object).
         group_show: Subset of groups used for calculation, e.g. [`'g1'`, `'g2'`, `'g3'`]. The default group_show is `'all'`, for all groups.
 
     Returns:
