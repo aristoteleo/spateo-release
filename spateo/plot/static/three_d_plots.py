@@ -74,8 +74,7 @@ def three_d_color(
     # set mask rgba
     if "mask" in color_types:
         color_types.remove("mask")
-        rgba_color = mpl.colors.to_rgba(mask_color, alpha=mask_alpha)
-        colordict["mask"] = mpl.colors.to_hex(rgba_color, keep_alpha=True)
+        colordict["mask"] = mpl.colors.to_rgba(mask_color, alpha=mask_alpha)
     color_types.sort()
 
     # set alpha
@@ -95,8 +94,7 @@ def three_d_color(
 
     # set rgba
     for t in color_types:
-        rgba_color = mpl.colors.to_rgba(colormap[t], alpha=alphamap[t])
-        colordict[t] = mpl.colors.to_hex(rgba_color, keep_alpha=True)
+        colordict[t] = mpl.colors.to_rgba(colormap[t], alpha=alphamap[t])
     rgba = np.array([colordict[g] for g in series.tolist()])
 
     return rgba
@@ -144,8 +142,8 @@ def build_three_d_model(
             points_coords: `mesh['points_coords']`, coordinates of all points.
             groups: `mesh['groups']`, the mask and the groups used for display.
             genes_exp: `mesh['genes']`, the gene expression.
-            groups_rgba: `mesh['groups_color']`, the colors for plotting groups and mask.
-            genes_rgba: `mesh['genes_color']`, the colors for plotting genes and mask.
+            groups_rgba: `mesh['groups_rgba']`, the rgba colors for plotting groups and mask.
+            genes_rgba: `mesh['genes_rgbar']`, the rgba colors for plotting genes and mask.
         surface: Surface of reconstructed 3D structure.
     """
 
@@ -191,16 +189,18 @@ def build_three_d_model(
 
     # Add some properties of the 3D model
     mesh["points_coords"] = bucket_xyz.values
+
     mesh["groups"] = groups.values
-    mesh["genes"] = new_genes_exp.values
-    mesh["groups_color"] = three_d_color(
+    mesh["groups_rgba"] = three_d_color(
         series=groups,
         colormap=group_cmap,
         alphamap=group_amap,
         mask_color=mask_color,
         mask_alpha=mask_alpha,
     )
-    mesh["genes_color"] = three_d_color(
+
+    mesh["genes"] = new_genes_exp.values
+    mesh["genes_rgba"] = three_d_color(
         series=new_genes_exp,
         colormap=gene_cmap,
         alphamap=gene_amap,
@@ -380,7 +380,6 @@ def easy_three_d_plot(
 
         if mesh is not None:
             # Add a reconstructed 3D structure.
-            mesh[f"{scalar}_rgba"] = np.array([mpl.colors.to_rgba(i) for i in mesh[f"{scalar}_color"]])
             p.add_mesh(
                 mesh,
                 scalars=f"{scalar}_rgba",
@@ -390,15 +389,16 @@ def easy_three_d_plot(
             )
 
             # Add a legend to render window.
-            _data = pd.concat([pd.Series(mesh[scalar]), pd.Series(mesh[f"{scalar}_color"])], axis=1)
-            _data.columns = ["label", "color"]
+            mesh[f"{scalar}_hex"] = np.array([mpl.colors.to_hex(i) for i in mesh[f"{scalar}_rgba"]])
+            _data = pd.concat([pd.Series(mesh[scalar]), pd.Series(mesh[f"{scalar}_hex"])], axis=1)
+            _data.columns = ["label", "hex"]
             _data = _data[_data["label"] != "mask"]
             _data.drop_duplicates(inplace=True)
-            _data.sort_values(by=["label", "color"], inplace=True)
+            _data.sort_values(by=["label", "hex"], inplace=True)
             gap = math.ceil(len(_data.index) / 5) if scalar is "genes" else 1
-            legend_entries = [[_data["label"].iloc[i], _data["color"].iloc[i]] for i in range(0, len(_data.index), gap)]
+            legend_entries = [[_data["label"].iloc[i], _data["hex"].iloc[i]] for i in range(0, len(_data.index), gap)]
             if scalar is "genes":
-                legend_entries.append([_data["label"].iloc[-1], _data["color"].iloc[-1]])
+                legend_entries.append([_data["label"].iloc[-1], _data["hex"].iloc[-1]])
 
             legend_size = (0.1, 0.1) if legend_size is None else legend_size
             p.add_legend(
