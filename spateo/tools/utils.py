@@ -89,7 +89,7 @@ def compute_smallest_distance(coords: list, leaf_size: int = 40, sample_num=None
     if len(coords.shape) != 2:
         raise ValueError("Coordinates should be a NxM array.")
     if use_unique_coords:
-        #main_info("using unique coordinates for computing smallest distance")
+        # main_info("using unique coordinates for computing smallest distance")
         coords = [tuple(coord) for coord in coords]
         coords = np.array(list(set(coords)))
     # use cKDTree which is implmented in C++ and is much faster than KDTree

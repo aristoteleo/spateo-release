@@ -31,6 +31,7 @@ from .utils import (
     save_fig,
     _get_adata_color_vec,
 )
+
 # from ...tools.transformer import (
 #     gen_rotation_2d,
 #     affine_transform,
@@ -43,6 +44,7 @@ from ...tools.utils import (
     gen_rotation_2d,
     affine_transform,
 )
+
 # from ..tools.moments import calc_1nd_moment
 # from ..docrep import DocstringProcessor
 
@@ -513,7 +515,7 @@ def scatters(
             _stack_background_adata_indices = np.ones(len(adata), dtype=bool)
 
         for cur_c in color:
-            #main_debug("coloring scatter of cur_c: %s" % str(cur_c))
+            # main_debug("coloring scatter of cur_c: %s" % str(cur_c))
             if not stack_colors:
                 cur_title = cur_c
             else:
@@ -553,7 +555,7 @@ def scatters(
                     z = list(z)
 
             for cur_x, cur_y, cur_z in zip(x, y, z):  # here x / y are arrays
-                #main_debug("handling coordinates, cur_x: %s, cur_y: %s" % (cur_x, cur_y))
+                # main_debug("handling coordinates, cur_x: %s, cur_y: %s" % (cur_x, cur_y))
                 if type(cur_x) is int and type(cur_y) is int:
                     x_col_name = cur_b + "_0"
                     y_col_name = cur_b + "_1"
@@ -712,7 +714,7 @@ def scatters(
 
                 _cmap = _themes[_theme_]["cmap"] if cmap is None else cmap
                 if stack_colors:
-                    #main_debug("stack colors: changing cmap")
+                    # main_debug("stack colors: changing cmap")
                     _cmap = stack_colors_cmaps[ax_index % len(stack_colors_cmaps)]
                     max_color = matplotlib.cm.get_cmap(_cmap)(float("inf"))
                     legend_circle = Line2D(
