@@ -395,6 +395,7 @@ def easy_three_d_plot(
             _data = _data[_data["label"] != "mask"]
             _data.drop_duplicates(inplace=True)
             _data.sort_values(by=["label", "hex"], inplace=True)
+            _data = _data.astype(str)
             gap = math.ceil(len(_data.index) / 5) if scalar is "genes" else 1
             legend_entries = [[_data["label"].iloc[i], _data["hex"].iloc[i]] for i in range(0, len(_data.index), gap)]
             if scalar is "genes":
