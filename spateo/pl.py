@@ -1,3 +1,1 @@
-"""Mapping Vector Field of Single Cells
-"""
-from spateo.plot import *
+from .plotting import *

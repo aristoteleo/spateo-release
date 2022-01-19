@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-code:
+    name: Check code quality
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@master
+      - name: Setup python
+        uses: actions/setup-python@v1
+        with:
+          python-version: '3.8'
+          architecture: x64
+      - name: Install dependencies
+        run: make install-dev
+      - name: Check code quality
+        run: make check
+  build:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python: [3.7, 3.8, 3.9]
+        os: [ubuntu-20.04]
+    name: Test on Python ${{ matrix.python }}
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@master
+      - name: Setup python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: x64
+          cache: 'pip'
+          cache-dependency-path: |
+            setup.py
+            requirements.txt
+            dev-requirements.txt
+      - name: Install dependencies
+        run: make install-all
+      - name: Run tests
+        run: make test
+      # - name: Upload coverage
+      #   run: bash <(curl -s https://codecov.io/bash)
+      #   env:
+      #     CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

@@ -1,3 +1,4 @@
+spateo_release.egg-info/
 *.html
 # vscode related
 .vscode/
@@ -55,3 +56,5 @@ test.py
 node_modules/
 package-lock.json
 public/*.js
+
+.pytest_cache

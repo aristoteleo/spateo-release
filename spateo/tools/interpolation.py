@@ -1,5 +1,10 @@
+"""
+Todo:
+    * @Xiaojieqiu: update with Google style documentation, function typings, tests
+"""
 import numpy as np
 from dynamo.vectorfield.scVectorField import SparseVFC
+
 from .interpolation_utils import *
 
 
