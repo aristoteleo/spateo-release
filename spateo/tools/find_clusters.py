@@ -19,6 +19,7 @@ def find_cluster_spagcn(
     x_array="x_array",
     y_array="y_array",
     seed=100,
+    copy=False,
 ):
     """Function to find clusters with spagcn.
 
@@ -37,6 +38,7 @@ def find_cluster_spagcn(
         x_array (str, optional): The key(colname) in `adata.obs` which contains corresponding x-coordinates. Defaults to "x_array".
         y_array (str, optional): The key(colname) in `adata.obs` which contains corresponding y-coordinates. Defaults to "y_array".
         seed (int, optional): Global seed for `random`, `torch`, `numpy`. Defaults to 100.
+        copy (bool): Whether to return a new deep copy of `adata` instead of updating `adata` object passed in arguments. Defaults to False.
 
     Returns:
         class:`~anndata.AnnData`: An `~anndata.AnnData` object with cluster info in "spagcn_pred", and in "spagcn_pred_refined" if `refine_shape` is set.
@@ -141,4 +143,6 @@ def find_cluster_spagcn(
         adata.obs["spagcn_pred_refined"] = refined_pred
         adata.obs["spagcn_pred_refined"] = adata.obs["spagcn_pred_refined"].astype("category")
 
-    return adata
+    if copy:
+        return adata
+    return None
