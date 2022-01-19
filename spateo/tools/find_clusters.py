@@ -1,5 +1,6 @@
 from .find_clusters_utils import *
 import numpy as np
+import pandas as pd
 import random, torch
 import cv2
 
@@ -12,6 +13,7 @@ def find_cluster_spagcn(
     b=49,
     refine_shape=None,
     his_img_path=None,
+    total_umi=None,
     x_pixel="x_pixel",
     y_pixel="y_pixel",
     x_array="x_array",
@@ -28,6 +30,8 @@ def find_cluster_spagcn(
         b (int, optional): beta to control the range of neighbourhood when calculate grey value for one spot in calculating adjacent matrix. Defaults to 49.
         refine_shape (str, optional): Smooth the spatial domains with given spatial topology, "hexagon" for Visium data, "square" for ST data. Defaults to None.
         his_img_path (str, optional): The file path of histology image used to calculate adjacent matrix in spagcn algorithm. Defaults to None.
+        total_umi (str, optional): By providing the key(colname) in `adata.obs` which contains total UMIs(counts) for each spot, the function use the total counts as
+                                a grayscale image when histology image is not provided. Ignored if his_img_path is not `None`. Defaults to "total_umi".
         x_pixel (str, optional): The key(colname) in `adata.obs` which contains corresponding x-pixels in histology image. Defaults to "x_pixel".
         y_pixel (str, optional): The key(colname) in `adata.obs` which contains corresponding y-pixels in histology image. Defaults to "y_pixel".
         x_array (str, optional): The key(colname) in `adata.obs` which contains corresponding x-coordinates. Defaults to "x_array".
@@ -39,7 +43,6 @@ def find_cluster_spagcn(
                                 The adjacent matrix used in spagcn algorithm is saved in `adata.uns["adj_spagcn"]`.
     """
 
-    img = cv2.imread(his_img_path)
     x_array = adata.obs[x_array].tolist()
     y_array = adata.obs[y_array].tolist()
     x_pixel = adata.obs[x_pixel].tolist()
@@ -49,11 +52,29 @@ def find_cluster_spagcn(
     b = 49
 
     if his_img_path is None:
-        adj = calculate_adj_matrix(x=x_pixel, y=y_pixel, histology=False)
+        if total_umi is None:
+            adj = calculate_adj_matrix(x=x_array, y=y_array, histology=False)
+        else:
+            total_umi = adata.obs[total_umi].tolist()
+            total_umi = [x / max(total_umi) * 255 for x in total_umi]
+            total_umi_mtx = pd.DataFrame({"x_pos": x_array, "y_pos": y_array, "n_umis": total_umi})
+            total_umi_mtx = total_umi_mtx.pivot(index="x_pos", columns="y_pos", values="n_umis").fillna(0).to_numpy()
+            umi_gs_img = np.dstack((total_umi_mtx, total_umi_mtx, total_umi_mtx))
+            adj = calculate_adj_matrix(
+                x=x_array,
+                y=y_array,
+                x_pixel=x_array,
+                y_pixel=y_array,
+                image=umi_gs_img,
+                beta=b,
+                alpha=s,
+                histology=True,
+            )
     else:
+        img = cv2.imread(his_img_path)
         adj = calculate_adj_matrix(
-            x=x_pixel,
-            y=y_pixel,
+            x=x_array,
+            y=y_array,
             x_pixel=x_pixel,
             y_pixel=y_pixel,
             image=img,

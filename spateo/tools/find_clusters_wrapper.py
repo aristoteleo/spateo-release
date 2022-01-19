@@ -13,5 +13,5 @@ def find_clusters(adata, method="spagcn", **kwargs):
     """
 
     if method == "spagcn":
-        adata = find_cluster_spagcn(adata, kwargs)
+        find_cluster_spagcn(adata, kwargs)
         return adata
