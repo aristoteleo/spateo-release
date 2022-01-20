@@ -10,7 +10,7 @@ from typing import Optional
 import cv2
 from anndata import AnnData
 
-from ..tools.image import add_image_layer
+from .image_utils import add_image_layer
 
 
 def read_image(

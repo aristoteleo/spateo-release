@@ -16,7 +16,7 @@ from scipy.spatial import Delaunay
 from warnings import warn
 import copy
 
-from ...configuration import _themes
+from spateo.configuration import _themes
 
 # from ...tools.utils import integrate_vf  # integrate_vf_ivp
 
