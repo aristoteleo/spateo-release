@@ -60,18 +60,9 @@ def alpha_shape(
         triangles = coords[tri.vertices]
 
         # Lengths of sides of triangle
-        a = (
-            (triangles[:, 0, 0] - triangles[:, 1, 0]) ** 2
-            + (triangles[:, 0, 1] - triangles[:, 1, 1]) ** 2
-        ) ** 0.5
-        b = (
-            (triangles[:, 1, 0] - triangles[:, 2, 0]) ** 2
-            + (triangles[:, 1, 1] - triangles[:, 2, 1]) ** 2
-        ) ** 0.5
-        c = (
-            (triangles[:, 2, 0] - triangles[:, 0, 0]) ** 2
-            + (triangles[:, 2, 1] - triangles[:, 0, 1]) ** 2
-        ) ** 0.5
+        a = ((triangles[:, 0, 0] - triangles[:, 1, 0]) ** 2 + (triangles[:, 0, 1] - triangles[:, 1, 1]) ** 2) ** 0.5
+        b = ((triangles[:, 1, 0] - triangles[:, 2, 0]) ** 2 + (triangles[:, 1, 1] - triangles[:, 2, 1]) ** 2) ** 0.5
+        c = ((triangles[:, 2, 0] - triangles[:, 0, 0]) ** 2 + (triangles[:, 2, 1] - triangles[:, 0, 1]) ** 2) ** 0.5
 
         # Semiperimeter of triangle
         s = (a + b + c) / 2.0
