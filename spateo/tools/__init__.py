@@ -10,7 +10,9 @@ from .interpolation import interpolation_SparseVFC
 from .spatial_degs import moran_i
 
 # from .spatial_markers import *
-
-# export the following
-# from .three_d_reconstruction import pairwise_align, slice_alignment, slice_alignment_bigBin
 # from .transformer import *
+from .three_d_reconstruction import (
+    pairwise_align,
+    slice_alignment,
+    slice_alignment_bigBin,
+)

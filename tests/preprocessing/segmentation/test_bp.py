@@ -23,3 +23,11 @@ class TestBP(TestMixin, TestCase):
         cell_probs = np.full((10, 10), 0.9)
         marginals = bp.cell_marginals(background_probs, cell_probs)
         np.testing.assert_allclose(np.ones((10, 10)), marginals, atol=0.05)
+
+    def test_run_bp(self):
+        rng = np.random.default_rng(2021)
+        X = rng.negative_binomial(10, 0.5, (20, 20))
+        X[5:15, 5:15] = rng.negative_binomial(100, 0.5, (10, 10))
+        expected = np.zeros((20, 20))
+        expected[5:15, 5:15] = 1
+        np.testing.assert_allclose(expected, bp.run_bp(X, (10, 0.5), (100, 0.5), square=True), atol=1e-3)

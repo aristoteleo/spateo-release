@@ -59,9 +59,7 @@ def find_spatial_cluster_degs(
 
     # KNN
     xymap = pd.DataFrame({"x": x, "y": y})
-    xynbrs = NearestNeighbors(n_neighbors=k, algorithm="auto", metric="euclidean").fit(
-        xymap
-    )
+    xynbrs = NearestNeighbors(n_neighbors=k, algorithm="auto", metric="euclidean").fit(xymap)
     _, xyindices = xynbrs.kneighbors(xymap)
     nbr_id = xyindices[test_df.index]
     # neighbor count
@@ -161,9 +159,7 @@ def find_cluster_degs(
     num_test_cells = test_cells.sum()
     num_control_cells = control_cells.sum()
     de = []
-    for i_gene, gene in tqdm(
-        enumerate(genes), desc="identifying top markers for each group"
-    ):
+    for i_gene, gene in tqdm(enumerate(genes), desc="identifying top markers for each group"):
         all_vals = X_data[:, i_gene].A if sparse else X_data[:, i_gene]
         test_vals = all_vals[test_cells]
         control_vals = all_vals[control_cells]
@@ -182,9 +178,7 @@ def find_cluster_degs(
             else:
                 pvals = 1
             # diff_ratio_expr
-            diff_ratio_expr = (
-                ratio_expr - len(control_vals.nonzero()[0]) / num_control_cells
-            )
+            diff_ratio_expr = ratio_expr - len(control_vals.nonzero()[0]) / num_control_cells
             de.append(
                 (
                     gene,
@@ -207,9 +201,7 @@ def find_cluster_degs(
                 else:
                     pvals = 1
                 # diff_ratio_expr
-                diff_ratio_expr = ratio_expr - len(control_vals.nonzero()[0]) / len(
-                    control_vals
-                )
+                diff_ratio_expr = ratio_expr - len(control_vals.nonzero()[0]) / len(control_vals)
                 de.append(
                     (
                         gene,
@@ -250,9 +242,7 @@ def find_cluster_degs(
     ]
     de = de[out_order].sort_values(by="qval")
     de = de[
-        (de.qval < qval_thresh)
-        & (de.diff_ratio_expr > diff_ratio_expr_thresh)
-        & (de.log2fc > log2fc_thresh)
+        (de.qval < qval_thresh) & (de.diff_ratio_expr > diff_ratio_expr_thresh) & (de.log2fc > log2fc_thresh)
     ].reset_index(drop=True)
     return de
 
@@ -294,16 +284,12 @@ def find_all_cluster_degs(
     else:
         genes = adata.var_names
     if group not in adata.obs.keys():
-        raise ValueError(
-            f"group {group} is not a valid key for .obs in your adata object."
-        )
+        raise ValueError(f"group {group} is not a valid key for .obs in your adata object.")
     else:
         adata.obs[group] = adata.obs[group].astype("str")
         cluster_set = np.sort(adata.obs[group].unique())
     if len(cluster_set) < 2:
-        raise ValueError(
-            f"the number of groups for the argument {group} must be at least two."
-        )
+        raise ValueError(f"the number of groups for the argument {group} must be at least two.")
     de_tables = [None] * len(cluster_set)
     de_genes = {}
     if len(cluster_set) > 2:

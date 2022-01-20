@@ -45,9 +45,9 @@ def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
         path,
         sep="\t",
         dtype={
-            0: "category",  # geneID
-            1: np.uint32,  # x
-            2: np.uint32,  # y
+            "geneID": "category",  # geneID
+            "x": np.uint32,  # x
+            "y": np.uint32,  # y
             3: np.uint16,  # total
             4: np.uint16,  # spliced
             5: np.uint16,  # unspliced
@@ -60,9 +60,7 @@ def read_bgi_agg(
     x_max: Optional[int] = None,
     y_max: Optional[int] = None,
     binsize: int = 1,
-) -> Tuple[
-    spmatrix, Optional[spmatrix], Optional[spmatrix], Optional[float], Optional[float]
-]:
+) -> Tuple[spmatrix, Optional[spmatrix], Optional[spmatrix], Optional[float], Optional[float]]:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
 
@@ -151,18 +149,15 @@ def read_bgi(
     """
     data = read_bgi_as_dataframe(path)
     columns = list(data.columns)
-    gene_column, x_column, y_column = columns[:3]
     total_column = columns[COUNT_COLUMN_MAPPING["total"]]
 
     # get cell name
     if not label_path:
-        x, y = data[x_column].values, data[y_column].values
+        x, y = data["x"].values, data["y"].values
         x_min, y_min = np.min(x), np.min(y)
 
         if alpha_hull is not None:
-            is_inside = in_concave_hull(
-                data.loc[:, [x_column, y_column]].values, alpha_hull
-            )
+            is_inside = in_concave_hull(data.loc[:, [x_column, y_column]].values, alpha_hull)
             data = data.loc[is_inside, :]
             x, y = data[x_column].values, data[y_column].values
 
@@ -185,19 +180,15 @@ def read_bgi(
 
         # Measure properties and get contours of labeled cell regions.
         label_mtx = np.load(label_path)
-        label_props = get_label_props(
-            label_mtx, properties=("label", "area", "bbox", "centroid")
-        )
+        label_props = get_label_props(label_mtx, properties=("label", "area", "bbox", "centroid"))
         # Get centroid from label_props
         if alpha_hull is not None:
-            is_inside = in_concave_hull(
-                label_props.loc[:, ["centroid-0", "centroid-1"]].values, alpha_hull
-            )
+            is_inside = in_concave_hull(label_props.loc[:, ["centroid-0", "centroid-1"]].values, alpha_hull)
             label_props = label_props.loc[is_inside, :]
 
         coor = label_props[["centroid-0", "centroid-1"]].values
 
-    uniq_cell, uniq_gene = data["cell_name"].unique(), data[gene_column].unique()
+    uniq_cell, uniq_gene = data["cell_name"].unique(), data["geneID"].unique()
     uniq_cell, uniq_gene = list(uniq_cell), list(uniq_gene)
 
     cell_dict = dict(zip(uniq_cell, range(0, len(uniq_cell))))

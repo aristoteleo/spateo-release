@@ -5,10 +5,12 @@ https://iopscience.iop.org/article/10.1088/1742-6596/1324/1/012093/meta
 Written by @HailinPan, optimized by @Lioscro.
 """
 
-from typing import Tuple
+from typing import Optional, Tuple
 
+import cv2
 import numpy as np
 from scipy import special, stats
+from skimage import feature
 
 
 def lamtheta_to_r(lam: float, theta: float) -> float:
@@ -88,11 +90,7 @@ def nbn_em(
         tau_sum = tau.sum(axis=1)
         w = tau_sum / tau_sum.sum()
         lam = (tau * delta).sum(axis=1) / tau_sum
-        theta = (
-            beta
-            * (tau * delta).sum(axis=1)
-            / (tau * (X - (1 - beta).reshape(-1, 1) * delta)).sum(axis=1)
-        )
+        theta = beta * (tau * delta).sum(axis=1) / (tau * (X - (1 - beta).reshape(-1, 1) * delta)).sum(axis=1)
 
         isnan = np.any(np.isnan(w) | np.isnan(lam) | np.isnan(theta))
         if (
@@ -109,11 +107,7 @@ def nbn_em(
         prev_lam = lam.copy()
         prev_theta = theta.copy()
 
-    return (
-        (prev_w, lamtheta_to_r(prev_lam, prev_theta), prev_theta)
-        if isnan
-        else (w, lamtheta_to_r(lam, theta), theta)
-    )
+    return (prev_w, lamtheta_to_r(prev_lam, prev_theta), prev_theta) if isnan else (w, lamtheta_to_r(lam, theta), theta)
 
 
 def confidence(
@@ -140,3 +134,62 @@ def confidence(
     tau[0] = w[0] * bp
     tau[1] = w[1] * cp
     return tau[1] / tau.sum(axis=0)
+
+
+def run_em(
+    X: np.ndarray,
+    use_peaks: bool = False,
+    min_distance: int = 21,
+    downsample: int = 1e6,
+    w: Tuple[float, float] = (0.99, 0.01),
+    mu: Tuple[float, float] = (10.0, 300.0),
+    var: Tuple[float, float] = (20.0, 400.0),
+    max_iter: int = 2000,
+    precision: float = 1e-6,
+    seed: Optional[int] = None,
+) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
+    """EM
+
+    Args:
+        X: UMI counts per pixel.
+        use_peaks: Whether to use peaks of convolved image as samples for the
+            EM algorithm.
+        min_distance: Minimum distance between peaks when `use_peaks=True`
+        downsample: Use at most this many samples. If `use_peaks` is False,
+            samples are chosen uniformly at random to at most this many samples.
+            Otherwise, peaks are chosen uniformly at random.
+        w: Initial proportions of cell and background as a tuple.
+        mu: Initial means of cell and background negative binomial distributions.
+        var: Initial variances of cell and background negative binomial
+            distributions.
+        max_iter: Maximum number of EM iterations.
+        precision: Stop EM algorithm once desired precision has been reached.
+        seed: Random seed.
+
+    Returns:
+        Tuple of parameters estimated by the EM algorithm.
+    """
+    if use_peaks:
+        picks = feature.peak_local_max(X, min_distance=min_distance)
+        b = np.zeros(X.shape, dtype=np.uint8)
+        b[picks[:, 0], picks[:, 1]] = 1
+        n_objects, labels = cv2.connectedComponents(b)
+
+        added = set()
+        samples = []
+        for i in range(labels.shape[0]):
+            for j in range(labels.shape[1]):
+                label = labels[i, j]
+                if label > 0 and label not in added:
+                    samples.append(X[i, j])
+                    added.add(label)
+        samples = np.array(samples)
+    else:
+        samples = X.flatten()
+    downsample = int(downsample)
+    if samples.size > downsample:
+        rng = np.random.default_rng(seed)
+        samples = rng.choice(samples, downsample, replace=False)
+
+    w, r, p = nbn_em(samples, w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
+    return tuple(w), tuple(r), tuple(p)

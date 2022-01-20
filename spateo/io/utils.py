@@ -34,9 +34,7 @@ def bin_indices(coords: np.ndarray, coord_min: float, binsize: int = 50) -> int:
     return num.astype(np.uint32)
 
 
-def centroids(
-    bin_indices: np.ndarray, coord_min: float = 0, binsize: int = 50
-) -> float:
+def centroids(bin_indices: np.ndarray, coord_min: float = 0, binsize: int = 50) -> float:
     """Take a bin index, the mimimum coordinate and the binsize, calculate the centroid of the current bin.
 
     Parameters
@@ -85,9 +83,7 @@ def get_label_props(
         mtx[mtx > 0] = 255
         mtx = mtx.astype(np.uint8)
         # get contours
-        contour = cv2.findContours(mtx, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0][
-            0
-        ]
+        contour = cv2.findContours(mtx, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0][0]
         # shift back coordinates
         contour = contour - np.array([1, 1])
         return contour
@@ -104,13 +100,9 @@ def get_label_props(
             geo = Point(contour)
         return geo
 
-    props = measure.regionprops_table(
-        label_mtx, properties=properties, extra_properties=[contours]
-    )
+    props = measure.regionprops_table(label_mtx, properties=properties, extra_properties=[contours])
     props = pd.DataFrame(props)
-    props["contours"] = props.apply(
-        lambda x: x["contours"] + x[["bbox-0", "bbox-1"]].to_numpy(), axis=1
-    )
+    props["contours"] = props.apply(lambda x: x["contours"] + x[["bbox-0", "bbox-1"]].to_numpy(), axis=1)
     props["contours"] = props["contours"].apply(contour_to_geo)
     return props
 
@@ -156,9 +148,7 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
     return props
 
 
-def in_concave_hull(
-    p: np.ndarray, concave_hull: Union[Polygon, MultiPolygon]
-) -> np.ndarray:
+def in_concave_hull(p: np.ndarray, concave_hull: Union[Polygon, MultiPolygon]) -> np.ndarray:
     """Test if points in `p` are in `concave_hull` using scipy.spatial Delaunay's find_simplex.
 
     Args:
@@ -175,9 +165,7 @@ def in_concave_hull(
     return np.array(res)
 
 
-def in_convex_hull(
-    p: np.ndarray, convex_hull: Union[Delaunay, np.ndarray]
-) -> np.ndarray:
+def in_convex_hull(p: np.ndarray, convex_hull: Union[Delaunay, np.ndarray]) -> np.ndarray:
     """Test if points in `p` are in `convex_hull` using scipy.spatial Delaunay's find_simplex.
 
     Args:
@@ -188,9 +176,7 @@ def in_convex_hull(
     Returns:
 
     """
-    assert (
-        p.shape[1] == convex_hull.shape[1]
-    ), "the second dimension of p and hull must be the same."
+    assert p.shape[1] == convex_hull.shape[1], "the second dimension of p and hull must be the same."
 
     if not isinstance(convex_hull, Delaunay):
         hull = Delaunay(convex_hull)

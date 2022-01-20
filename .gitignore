@@ -1,4 +1,4 @@
-spateo_release.egg-info
+spateo_release.egg-info/
 *.html
 # vscode related
 .vscode/

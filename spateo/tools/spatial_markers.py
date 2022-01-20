@@ -36,75 +36,43 @@ def cluster_specific_genes(
 
     db = pandas.DataFrame(adata.obsm["spatial"], columns=["x", "y"])
 
-    (
-        adata.var["hotspot_num"],
-        adata.var["hotspot_frac"],
-        adata.var["hotspot_spec"],
-    ) = (
+    (adata.var["hotspot_num"], adata.var["hotspot_frac"], adata.var["hotspot_spec"],) = (
         None,
         None,
         None,
     )
-    (
-        adata.var["coldspot_num"],
-        adata.var["coldspot_frac"],
-        adata.var["coldspot_spec"],
-    ) = (
+    (adata.var["coldspot_num"], adata.var["coldspot_frac"], adata.var["coldspot_spec"],) = (
         None,
         None,
         None,
     )
-    (
-        adata.var["doughnut_num"],
-        adata.var["doughnut_frac"],
-        adata.var["doughnut_spec"],
-    ) = (
+    (adata.var["doughnut_num"], adata.var["doughnut_frac"], adata.var["doughnut_spec"],) = (
         None,
         None,
         None,
     )
-    (
-        adata.var["diamond_num"],
-        adata.var["diamond_frac"],
-        adata.var["diamond_spec"],
-    ) = (
+    (adata.var["diamond_num"], adata.var["diamond_frac"], adata.var["diamond_spec"],) = (
         None,
         None,
         None,
     )
 
-    (
-        adata.var["hotspot_num_val"],
-        adata.var["hotspot_frac_val"],
-        adata.var["hotspot_spec_val"],
-    ) = (
+    (adata.var["hotspot_num_val"], adata.var["hotspot_frac_val"], adata.var["hotspot_spec_val"],) = (
         None,
         None,
         None,
     )
-    (
-        adata.var["coldspot_num_val"],
-        adata.var["coldspot_frac_val"],
-        adata.var["coldspot_spec_val"],
-    ) = (
+    (adata.var["coldspot_num_val"], adata.var["coldspot_frac_val"], adata.var["coldspot_spec_val"],) = (
         None,
         None,
         None,
     )
-    (
-        adata.var["doughnut_num_val"],
-        adata.var["doughnut_frac_val"],
-        adata.var["doughnut_spec_val"],
-    ) = (
+    (adata.var["doughnut_num_val"], adata.var["doughnut_frac_val"], adata.var["doughnut_spec_val"],) = (
         None,
         None,
         None,
     )
-    (
-        adata.var["diamond_num_val"],
-        adata.var["diamond_frac_val"],
-        adata.var["diamond_spec_val"],
-    ) = (
+    (adata.var["diamond_num_val"], adata.var["diamond_frac_val"], adata.var["diamond_spec_val"],) = (
         None,
         None,
         None,
@@ -269,9 +237,7 @@ def GM_lag_model(
         db.iloc[group_inds, :] = "others"
         drop_columns = ["group_others", "group_" + str(drop_dummy)]
     else:
-        raise ValueError(
-            f"drop_dummy, {drop_dummy} you provided is not in the adata.obs[{group}]."
-        )
+        raise ValueError(f"drop_dummy, {drop_dummy} you provided is not in the adata.obs[{group}].")
 
     X = pd.get_dummies(data=db, drop_first=False)
     variable_names = X.columns.difference(drop_columns).to_list()
@@ -314,9 +280,7 @@ def GM_lag_model(
                 name_y="log_exp",
                 name_x=variable_names,
             )
-            a = pd.DataFrame(
-                model.betas, model.name_x + ["W_log_exp"], columns=["coef"]
-            )
+            a = pd.DataFrame(model.betas, model.name_x + ["W_log_exp"], columns=["coef"])
 
             b = pd.DataFrame(
                 model.z_stat,
