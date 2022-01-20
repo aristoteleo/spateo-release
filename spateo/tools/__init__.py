@@ -16,3 +16,5 @@ from .three_d_reconstruction import (
     slice_alignment,
     slice_alignment_bigBin,
 )
+
+from .volumetric_analyses import compute_volume

@@ -77,9 +77,7 @@ def delaunay(
     if ax is None:
         ax = fig.add_subplot(111)
 
-    lines = LineCollection(
-        [[tuple(i[0]), tuple(i[1])] for i in edge_points], color="blue"
-    )
+    lines = LineCollection([[tuple(i[0]), tuple(i[1])] for i in edge_points], color="blue")
     ax.add_collection(lines)
     delaunay_points = np.vstack([point for point in edge_points])
     ax.plot(delaunay_points[:, 0], delaunay_points[:, 1], "o", color=pc)
