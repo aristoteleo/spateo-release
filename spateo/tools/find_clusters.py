@@ -1,44 +1,50 @@
-from .find_clusters_utils import *
+import anndata
+import cv2
+import dynamo as dyn
 import numpy as np
 import pandas as pd
-import random, torch
-import cv2
+import random
+import torch
+
+from typing import Optional, Tuple
+
+from .find_clusters_utils import *
 
 
 def find_cluster_spagcn(
-    adata,
-    n_clusters,
-    p=0.5,
-    s=1,
-    b=49,
-    refine_shape=None,
-    his_img_path=None,
-    total_umi=None,
-    x_pixel="x_pixel",
-    y_pixel="y_pixel",
-    x_array="x_array",
-    y_array="y_array",
-    seed=100,
-    copy=False,
-):
+    adata: anndata.AnnData,
+    n_clusters: int,
+    p: float = 0.5,
+    s: int = 1,
+    b: int = 49,
+    refine_shape: Optional[str] = None,
+    his_img_path: Optional[str] = None,
+    total_umi: Optional[str] = None,
+    x_pixel: str = "x_pixel",
+    y_pixel: str = "y_pixel",
+    x_array: str = "x_array",
+    y_array: str = "y_array",
+    seed: int = 100,
+    copy: bool = False,
+) -> Optional[anndata.AnnData]:
     """Function to find clusters with spagcn.
 
     Args:
-        adata (class:`~anndata.AnnData`): an Anndata object, after normalization.
-        n_clusters (int): Desired number of clusters.
-        p (float, optional): parameter `p` in spagcn algorithm. See `SpaGCN` for details. Defaults to 0.5.
-        s (int, optional): alpha to control the color scale in calculating adjacent matrix. Defaults to 1.
-        b (int, optional): beta to control the range of neighbourhood when calculate grey value for one spot in calculating adjacent matrix. Defaults to 49.
-        refine_shape (str, optional): Smooth the spatial domains with given spatial topology, "hexagon" for Visium data, "square" for ST data. Defaults to None.
-        his_img_path (str, optional): The file path of histology image used to calculate adjacent matrix in spagcn algorithm. Defaults to None.
-        total_umi (str, optional): By providing the key(colname) in `adata.obs` which contains total UMIs(counts) for each spot, the function use the total counts as
+        adata: an Anndata object, after normalization.
+        n_clusters: Desired number of clusters.
+        p: parameter `p` in spagcn algorithm. See `SpaGCN` for details. Defaults to 0.5.
+        s: alpha to control the color scale in calculating adjacent matrix. Defaults to 1.
+        b: beta to control the range of neighbourhood when calculate grey value for one spot in calculating adjacent matrix. Defaults to 49.
+        refine_shape: Smooth the spatial domains with given spatial topology, "hexagon" for Visium data, "square" for ST data. Defaults to None.
+        his_img_path: The file path of histology image used to calculate adjacent matrix in spagcn algorithm. Defaults to None.
+        total_umi: By providing the key(colname) in `adata.obs` which contains total UMIs(counts) for each spot, the function use the total counts as
                                 a grayscale image when histology image is not provided. Ignored if his_img_path is not `None`. Defaults to "total_umi".
-        x_pixel (str, optional): The key(colname) in `adata.obs` which contains corresponding x-pixels in histology image. Defaults to "x_pixel".
-        y_pixel (str, optional): The key(colname) in `adata.obs` which contains corresponding y-pixels in histology image. Defaults to "y_pixel".
-        x_array (str, optional): The key(colname) in `adata.obs` which contains corresponding x-coordinates. Defaults to "x_array".
-        y_array (str, optional): The key(colname) in `adata.obs` which contains corresponding y-coordinates. Defaults to "y_array".
-        seed (int, optional): Global seed for `random`, `torch`, `numpy`. Defaults to 100.
-        copy (bool): Whether to return a new deep copy of `adata` instead of updating `adata` object passed in arguments. Defaults to False.
+        x_pixel: The key(colname) in `adata.obs` which contains corresponding x-pixels in histology image. Defaults to "x_pixel".
+        y_pixel: The key(colname) in `adata.obs` which contains corresponding y-pixels in histology image. Defaults to "y_pixel".
+        x_array: The key(colname) in `adata.obs` which contains corresponding x-coordinates. Defaults to "x_array".
+        y_array: The key(colname) in `adata.obs` which contains corresponding y-coordinates. Defaults to "y_array".
+        seed: Global seed for `random`, `torch`, `numpy`. Defaults to 100.
+        copy: Whether to return a new deep copy of `adata` instead of updating `adata` object passed in arguments. Defaults to False.
 
     Returns:
         class:`~anndata.AnnData`: An `~anndata.AnnData` object with cluster info in "spagcn_pred", and in "spagcn_pred_refined" if `refine_shape` is set.
@@ -142,6 +148,51 @@ def find_cluster_spagcn(
         )
         adata.obs["spagcn_pred_refined"] = refined_pred
         adata.obs["spagcn_pred_refined"] = adata.obs["spagcn_pred_refined"].astype("category")
+
+    if copy:
+        return adata
+    return None
+
+
+def scc(
+    adata: anndata.AnnData,
+    min_cells: int = 100,
+    spatial_key: str = "spatial",
+    e_neigh: int = 30,
+    s_neigh: int = 6,
+    resolution: Optional[float] = None,
+    copy: bool = False,
+) -> Optional[anndata.AnnData]:
+    """Spatially constrained clustering (scc) to identify continuous tissue domains.
+
+    Args:
+        adata: an Anndata object, after normalization.
+        min_cells: minimal number of cells the gene expressed.
+        spatial_key: the key in `.obsm` that corresponds to the spatial coordinate of each bucket.
+        e_neigh: the number of nearest neighbor in gene expression space.
+        s_neigh: the number of nearest neighbor in physical space.
+        resolution: the resolution parameter of the leiden clustering algorithm.
+        copy: Whether to return a new deep copy of `adata` instead of updating `adata` object passed in arguments.
+            Defaults to False.
+
+    Returns:
+        Depends on the argument `copy` return either an `~anndata.AnnData` object with cluster info in "scc_e_{a}_s{b}"
+        or None.
+    """
+
+    # if
+    dyn.pp.filter_genes(adata, min_cells=min_cells)
+    dyn.pp.normalize_total(adata)
+    dyn.pp.log1p(adata)
+    dyn.pp.pca(adata, n_comps=30)
+
+    dyn.tl.neighbors(adata, n_neighbors=e_neigh)
+    dyn.tl.neighbors(adata, n_neighs=s_neigh, basis=spatial_key)
+    conn = adata.obsp["connectivities"].copy()
+    conn.data[conn.data > 0] = 1
+    adj = conn + adata.obsp["spatial_connectivities"]
+    adj.data[adj.data > 0] = 1
+    dyn.tl.leiden(adata, adjacency=adj, resolution=resolution, result_key="scc_e" + str(e_neigh) + "_s" + str(s_neigh))
 
     if copy:
         return adata

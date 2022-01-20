@@ -6,14 +6,14 @@ Todo:
     * Figure out how to appropriately deal with bounding boxes and offsets.
         @Xiaojieqiu
 """
-import gzip
-from typing import Optional, Tuple
 
+from anndata import AnnData
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from anndata import AnnData
+
 from scipy.sparse import csr_matrix, spmatrix
+from typing import Optional, Tuple
 
 from .utils import bin_indices, centroids, get_bin_props, get_label_props
 
