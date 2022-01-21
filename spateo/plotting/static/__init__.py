@@ -6,6 +6,7 @@ from .bbs import (
     polygon,
 )
 from .space import space
+from .geo import geo
 from .three_d_plots import (
     clip_3d_coords,
     three_d_color,
