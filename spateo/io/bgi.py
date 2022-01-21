@@ -195,7 +195,8 @@ def read_bgi(
     gene_dict = dict(zip(uniq_gene, range(0, len(uniq_gene))))
 
     data["csr_x_ind"] = data["cell_name"].map(cell_dict)
-    data["csr_y_ind"] = data[gene_column].map(gene_dict)
+    # data["csr_y_ind"] = data[gene_column].map(gene_dict)
+    data["csr_y_ind"] = data["geneID"].map(gene_dict)
 
     # Important! by default, duplicate entries are summed together in the following which is needed for us!
     X = csr_matrix(
