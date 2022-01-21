@@ -129,17 +129,18 @@ def alpha_shape(
 
 def get_concave_hull(
     path: str,
-    binsize: int = 1,
+    binsize: int = 20,
     min_agg_umi: int = 0,
     alpha: float = 1.0,
-    buffer: float = 1.0,
+    buffer: Optional[float] = None,
 ) -> Tuple[Polygon, List]:
     """Return the convex hull of all nanoballs that have non-zero UMI (or at least > min_agg_umi UMI).
 
     Args:
         path: Path to read file.
-        binsize: The number of spatial bins to aggregate RNAs captured by DNBs in those bins. By default it is 1. If
-                    stereo-seq chip used is bigger than 1 x 1 mm, you may need to increase the binsize.
+        binsize: The number of spatial bins to aggregate RNAs captured by DNBs in those bins. By default it is 20, which
+                    is close to the size of a single cell. If stereo-seq chip used is bigger than 1 x 1 mm, you may need
+                    to increase the binsize.
         min_agg_umi: the minimal aggregated UMI number for the bucket.
         alpha: alpha value to influence the gooeyness of the border. Smaller numbers don't fall inward as much as
                 larger numbers. Too large, and you lose everything!
@@ -164,4 +165,7 @@ def get_concave_hull(
         i, j = i + x_min, j + y_min
 
     # TODO: give warnings when alpha_shape returns nothing and ask the users to set alpha to be smaller.
+    if buffer is None:
+        buffer = binsize
+
     return alpha_shape(i, j, alpha, buffer, vectorize=True)
