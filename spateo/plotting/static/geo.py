@@ -1,10 +1,13 @@
 """Plotting functions for spatial geometry plots.
 """
 
-import geopandas as gpd
-from typing import Union
 import anndata
+import geopandas as gpd
+import lack
+from typing import Union
 from .scatters import scatters
+
+slog = lack.LoggerManager(namespace="spateo")
 
 # from .scatters import (
 #     scatters,
@@ -35,23 +38,24 @@ def geo(
     **kwargs
 ):
     """\
-    Scatter plot for physical coordinates of each cell.
-    Parameters
-    ----------
+    Geometry plot for cell segmentation on physical space.
+
+    Args:
         adata:
             an Annodata object that contain the physical coordinates for each bin/cell, etc.
         genes:
-            The gene list that will be used to plot the gene expression on the same scatter plot. Each gene will have a
+            The gene list that will be used to plot the gene expression on the same geometry plot. Each gene will have a
             different color. Can be a single gene name string and we will convert it to a list.
         color: `string` (default: `ntr`)
             Any or any list of column names or gene name, etc. that will be used for coloring cells.
-            If `color` is not None, stack_genes will be disabled automatically because `color` can contain non numerical values.
+            If `color` is not None, stack_genes will be disabled automatically because `color` can contain non numerical
+            values.
         stack_genes:
-            whether to show all gene plots on the same plot
+            whether to show all gene plots on the same plot.
         stack_genes_threshold:
             lower bound of gene values that will be drawn on the plot.
         stack_colors_legend_size:
-            control the size of legend when stacking genes
+            control the size of legend when stacking genes.
         alpha: `float`
             The alpha value of the cells.
         boundary_width: `float`, (default: 0.2)
@@ -72,25 +76,28 @@ def geo(
             by @ImportanceOfBeingErnest:
             https://stackoverflow.com/questions/47633546/relationship-between-dpi-and-figure-size
         aspect: `str`
-            Set the aspect of the axis scaling, i.e. the ratio of y-unit to x-unit. In physical spatial plot, the
+            Set the aspect of the axis scaling, i.e. the ratio of y-unit to x-unit. In physical spatial plots, the
             default is 'equal'. See more details at:
             https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_aspect.html
         %(scatters.parameters.no_adata|basis|figsize)s
-    Returns
-    -------
-        plots gene or cell feature of the adata object on the physical spatial coordinates.
+
+        Args:
+            plots gene or cell feature of the adata object on the physical spatial coordinates with cell segmentations.
     """
-    # main_info("Plotting geometry info on adata")
-    # main_log_time()
+    slog.main_info("Plotting geometry info on adata")
+    slog.main_log_time()
     if not isinstance(adata.obs, gpd.GeoDataFrame):
-        # main_critical("The obs of your adata is not a `geopandas.GeoDataFrame`. Please check your argument passed in.")
-        print("The obs of your adata is not a `geopandas.GeoDataFrame`. Please check your argument passed in.")
+        slog.main_critical(
+            "The obs of your adata is not a `geopandas.GeoDataFrame`. Please check your argument passed " "in."
+        )
         return
 
     if color is not None and stack_genes:
-        # main_warning(
-        #     "Set `stack_genes` to False because `color` argument cannot be used with stack_genes. If you would like to stack genes (or other numeical values), please pass gene expression like column names into `gene` argument."
-        # )
+        slog.main_warning(
+            "Set `stack_genes` to False because `color` argument cannot be used with stack_genes. If you would like to"
+            "stack genes (or other numerical values), please pass gene expression like column names into `gene` "
+            "argument."
+        )
         stack_genes = False
 
     genes = [genes] if type(genes) is str else list(genes)
@@ -101,12 +108,15 @@ def geo(
 
     show_colorbar = True
     if stack_genes:
-        # main_warning("disable side colorbar due to colorbar scale (numeric tick) related issue.")
+        slog.main_warning("disable side colorbar due to colorbar scale (numeric tick) related issue.")
         show_colorbar = False
 
     if genes is None or (len(genes) == 0):
-        # main_critical("No genes provided. Please check your argument passed in.")
-        return
+        if color is not None:
+            genes = color
+        else:
+            slog.main_critical("No genes provided. Please check your argument passed in.")
+            return
 
     res = scatters(
         adata,
@@ -128,5 +138,5 @@ def geo(
         **kwargs,
     )
 
-    # main_finish_progress("space plot")
+    slog.main_finish_progress("geometry plot")
     return res

@@ -1,3 +1,4 @@
-"""Mapping Vector Field of Single Cells
+"""Spatialtemporal modeling of spatial transcriptomics
 """
-from spateo.plotting import *
+
+from .plotting import *

@@ -1,21 +1,22 @@
 # code adapted from https://github.com/aristoteleo/dynamo-release/blob/master/dynamo/plot/utils.py
+import copy
+import math
 import os
+import warnings
+import geopandas as gpd
+import matplotlib
+import matplotlib.patheffects as PathEffects
+import matplotlib.pyplot as plt
+import numba
 import numpy as np
 import pandas as pd
-import math
-import numba
-import matplotlib
-import matplotlib.pyplot as plt
+
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
-import matplotlib.patheffects as PathEffects
-import geopandas as gpd
 
 # import matplotlib.tri as tri
-import warnings
 from scipy.spatial import Delaunay
 from warnings import warn
-import copy
 
 from spateo.configuration import _themes
 
@@ -160,12 +161,11 @@ def _scatter_projection(ax, points, projection, **kwargs):
 
 
 def _geo_projection(ax, points, **kwargs):
-    linecolor = kwargs["linecolor"]
-    del kwargs["linecolor"]
+    linecolor = kwargs.pop("linecolor")
+
     if "values" in kwargs:
         # using value
-        gdf = gpd.GeoDataFrame(data={"values": kwargs["values"], "points": points}, geometry="points")
-        del kwargs["values"]
+        gdf = gpd.GeoDataFrame(data={"values": kwargs.pop("values"), "points": points}, geometry="points")
         ax = gdf.plot("values", ax=ax, **kwargs)
     else:
         # using color
@@ -274,7 +274,6 @@ def _matplotlib_points(
                         points.loc[highlight_ids, :],
                     )
                 ).values
-                # labels = points[:, 2]
                 labels = points["label"]
 
         # WARNING: do not change the following line to "elif" during refactor

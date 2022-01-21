@@ -14,14 +14,14 @@ from .scatters import scatters
 def pca(adata: AnnData, *args, **kwargs):
     """\
     Scatter plot with pca basis.
-    Parameters
-    ----------
+
+    Args:
         adata: :class:`~anndata.AnnData`
             an Annodata object.
         %(scatters.parameters.no_adata|basis)s
-    Returns
-    -------
-    Nothing but plots the pca embedding of the adata object.
+
+    Returns:
+        Nothing but plots the pca embedding of the adata object.
 
     """
 
@@ -32,15 +32,14 @@ def pca(adata: AnnData, *args, **kwargs):
 def umap(adata: AnnData, *args, **kwargs):
     """\
     Scatter plot with umap basis.
-    Parameters
-    ----------
+
+    Args:
         adata: :class:`~anndata.AnnData`
             an Annodata object.
         %(scatters.parameters.no_adata|basis)s
-    Returns
-    -------
-    Nothing but plots the umap embedding of the adata object.
 
+    Returns:
+        Nothing but plots the umap embedding of the adata object.
     """
 
     return scatters(adata, "umap", *args, **kwargs)
@@ -50,14 +49,14 @@ def umap(adata: AnnData, *args, **kwargs):
 def trimap(adata: AnnData, *args, **kwargs):
     """\
     Scatter plot with trimap basis.
-    Parameters
-    ----------
+
+    Args:
         adata: :class:`~anndata.AnnData`
             an Annodata object.
         %(scatters.parameters.no_adata|basis)s
-    Returns
-    -------
-    Nothing but plots the pca embedding of the adata object.
+
+    Returns:
+        Nothing but plots the pca embedding of the adata object.
 
     """
     return scatters(adata, "trimap", *args, **kwargs)
@@ -67,14 +66,14 @@ def trimap(adata: AnnData, *args, **kwargs):
 def tsne(adata: AnnData, *args, **kwargs):
     """\
     Scatter plot with tsne basis.
-    Parameters
-    ----------
+
+    Args:
         adata: :class:`~anndata.AnnData`
             an Annodata object.
         %(scatters.parameters.no_adata|basis)s
-    Returns
-    -------
-    Nothing but plots the tsne embedding of the adata object.
+
+    Returns:
+        Nothing but plots the tsne embedding of the adata object.
 
     """
     return scatters(adata, "tsne", *args, **kwargs)
