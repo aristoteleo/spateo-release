@@ -9,6 +9,7 @@ import pandas as pd
 from scipy.spatial import Delaunay
 from shapely.geometry import Point, LineString, Polygon, MultiPolygon
 from skimage import measure
+import cv2
 
 
 def bin_indices(coords: np.ndarray, coord_min: float, binsize: int = 50) -> int:
