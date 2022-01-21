@@ -150,6 +150,7 @@ def read_bgi(
     data = read_bgi_as_dataframe(path)
     columns = list(data.columns)
     total_column = columns[COUNT_COLUMN_MAPPING["total"]]
+    gene_column, x_column, y_column = columns[:3]
 
     # get cell name
     if not label_path:
