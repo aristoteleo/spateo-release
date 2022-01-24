@@ -47,11 +47,11 @@ def find_spatial_cluster_degs(
     if x is not None:
         x = x
     else:
-        x = adata.obs["x_array"].tolist()
+        x = adata.obsm['spatial'][:,0].tolist()
     if y is not None:
         y = y
     else:
-        y = adata.obs["y_array"].tolist()
+        y = adata.obsm['spatial'][:,1].tolist()
     group = adata.obs[group].tolist()
 
     df = pd.DataFrame({"x": x, "y": y, "group": group})
@@ -100,7 +100,7 @@ def find_cluster_degs(
     ratio_expr_thresh: float = 0.1,
     diff_ratio_expr_thresh: float = 0,
     log2fc_thresh: float = 0,
-    method: Literal["all", "one"] = "all",
+    method: Literal["multiple", "pairwise"] = "multiple",
 ) -> pd.DataFrame:
     """Find marker genes between one group to other groups based on gene
     expression.Test each gene for differential expression between buckets in
@@ -133,14 +133,14 @@ def find_cluster_degs(
         log2fc: The minimum expression log2 fold change.
         method: This method is to choose the difference expression genes between
             test group and other groups one by one or combine them together
-            (default: 'all'). Valid values are "all" and "one".
+            (default: 'multiple'). Valid values are "multiple" and "pairwise".
 
     Returns:
         A pandas DataFrame of the differential expression analysis result between
         the two groups.
 
     Raises:
-        ValueError: If the `method` is not one of "one" or "all".
+        ValueError: If the `method` is not one of "pairwise" or "multiple".
     """
     if X_data is not None:
         X_data = X_data
@@ -168,7 +168,7 @@ def find_cluster_degs(
         ratio_expr = len(test_vals.nonzero()[0]) / num_test_cells
         if ratio_expr < ratio_expr_thresh:
             continue
-        if method == "all":
+        if method == "multiple":
             # log2fc
             control_mean = control_vals.mean() + 1e-9
             log2fc = np.log2(test_mean / control_mean + 10e-5)
@@ -189,7 +189,7 @@ def find_cluster_degs(
                     diff_ratio_expr,
                 )
             )
-        elif method == "one":
+        elif method == "pairwise":
             for i in range(num_groups):
                 control_vals = all_vals[adata.obs[group] == control_groups[i]]
                 # log2fc
@@ -213,7 +213,7 @@ def find_cluster_degs(
                     )
                 )
         else:
-            raise ValueError(f'`method` must be one of "all" or "one"')
+            raise ValueError(f'`method` must be one of "multiple" or "pairwise"')
     de = pd.DataFrame(
         de,
         columns=[
@@ -253,6 +253,7 @@ def find_all_cluster_degs(
     genes: Optional[List[str]] = None,
     layer: Optional[str] = None,
     X_data: Optional[np.ndarray] = None,
+    copy: bool = True,
 ) -> AnnData:
     """Find marker genes for each group of buckets based on gene expression.
 
@@ -266,13 +267,15 @@ def find_all_cluster_degs(
             example, clusters that correspond to different cell types) of
             buckets.This will be used for calculating group-specific genes.
         test_group: The group name from `group` for which markers has to be found.
-        control_groups: The list of group name(s) from `group` for which markers has to be
-            tested against.
+        control_groups: The list of group name(s) from `group` for which markers 
+            has to be tested against.
         X_data: The user supplied data that will be used for marker gene detection
             directly.
+        copy: If True (default) a new copy of the adata object will be returned, 
+            otherwise if False, the adata will be updated inplace.
 
     Returns:
-        An updated `~anndata.AnnData` with a new property `cluster_markers` in
+        An `~anndata.AnnData` with a new property `cluster_markers` in
         the .uns attribute, which includes a concated pandas DataFrame
         of the differential expression analysis result for all groups and a
         dictionary where keys are cluster numbers and values are lists of
@@ -317,5 +320,10 @@ def find_all_cluster_degs(
         de_tables[0] = de.copy()
         de_genes[0] = [k for k, v in Counter(de["gene"]).items() if v >= 1]
     de_table = pd.concat(de_tables).reset_index().drop(columns=["index"])
-    adata.uns["cluster_markers"] = {"deg_table": de_table, "de_genes": de_genes}
-    return adata
+    if copy:
+        adata_1 = adata.copy()
+        adata_1.uns["cluster_markers"] = {"deg_table": de_table, "de_genes": de_genes}
+        return adata_1
+    else:
+        adata.uns["cluster_markers"] = {"deg_table": de_table, "de_genes": de_genes}
+        return adata
