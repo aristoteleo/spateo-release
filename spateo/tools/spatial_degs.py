@@ -62,11 +62,11 @@ def moran_i(
     else:
         genes = genes
     if x is None:
-        x = adata.obsm['spatial'][:,0].tolist()
+        x = adata.obsm["spatial"][:, 0].tolist()
     else:
         x = x
     if y is None:
-        y = adata.obsm['spatial'][:,1].tolist()
+        y = adata.obsm["spatial"][:, 1].tolist()
     else:
         y = y
     gene_num = len(genes)
@@ -88,7 +88,7 @@ def moran_i(
     )
     for i_gene, gene in tqdm(enumerate(genes), desc="Moran's I Global Autocorrelation Statistic"):
         cur_X = X_data[:, adata.var.index == gene].A if sparse else X_data[:, adata.var.index == gene]
-        mbi = explore.esda.moran.Moran(cur_X, W, permutations = permutations, two_tailed=False)
+        mbi = explore.esda.moran.Moran(cur_X, W, permutations=permutations, two_tailed=False)
         Moran_I[i_gene] = mbi.I
         p_value[i_gene] = mbi.p_sim
         statistics[i_gene] = mbi.z_sim

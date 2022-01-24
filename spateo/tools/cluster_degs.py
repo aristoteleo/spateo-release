@@ -47,11 +47,11 @@ def find_spatial_cluster_degs(
     if x is not None:
         x = x
     else:
-        x = adata.obsm['spatial'][:,0].tolist()
+        x = adata.obsm["spatial"][:, 0].tolist()
     if y is not None:
         y = y
     else:
-        y = adata.obsm['spatial'][:,1].tolist()
+        y = adata.obsm["spatial"][:, 1].tolist()
     group = adata.obs[group].tolist()
 
     df = pd.DataFrame({"x": x, "y": y, "group": group})
@@ -267,11 +267,11 @@ def find_all_cluster_degs(
             example, clusters that correspond to different cell types) of
             buckets.This will be used for calculating group-specific genes.
         test_group: The group name from `group` for which markers has to be found.
-        control_groups: The list of group name(s) from `group` for which markers 
+        control_groups: The list of group name(s) from `group` for which markers
             has to be tested against.
         X_data: The user supplied data that will be used for marker gene detection
             directly.
-        copy: If True (default) a new copy of the adata object will be returned, 
+        copy: If True (default) a new copy of the adata object will be returned,
             otherwise if False, the adata will be updated inplace.
 
     Returns:
