@@ -17,5 +17,5 @@ class TestIOBGI(TestMixin, TestCase):
         total, spliced, unspliced, x_min, y_min = bgi.read_bgi_agg(self.bgi_counts_path)
         self.assertIsNone(spliced)
         self.assertIsNone(unspliced)
-        self.assertEqual((299, 300), total.shape)
         self.assertEqual([9600, 12600], [x_min, y_min])
+        self.assertEqual((299, 300), total.shape)
