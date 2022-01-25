@@ -26,7 +26,7 @@ def compute_volume(
         axis=1,
     )
 
-    if group_show is not "all":
+    if group_show != "all":
         group_show = [group_show] if isinstance(group_show, str) else group_show
         volume_data = volume_data[volume_data[0].isin(group_show)]
 
