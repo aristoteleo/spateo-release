@@ -7,15 +7,22 @@ Todo:
         @Xiaojieqiu
 """
 import gzip
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
+from anndata import AnnData
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
+from shapely.geometry import Polygon, MultiPolygon
 
-from .utils import bin_indices, centroids, get_bin_props, get_label_props
+from .utils import (
+    bin_indices,
+    centroids,
+    get_bin_props,
+    get_label_props,
+    in_concave_hull,
+)
 
 COUNT_COLUMN_MAPPING = {
     "total": 3,
@@ -49,8 +56,11 @@ def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
 
 
 def read_bgi_agg(
-    path: str, x_max: Optional[int] = None, y_max: Optional[int] = None
-) -> Tuple[spmatrix, Optional[spmatrix], Optional[spmatrix]]:
+    path: str,
+    x_max: Optional[int] = None,
+    y_max: Optional[int] = None,
+    binsize: int = 1,
+) -> Tuple[spmatrix, Optional[spmatrix], Optional[spmatrix], Optional[float], Optional[float]]:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
 
@@ -60,15 +70,27 @@ def read_bgi_agg(
             will be used.
         y_max: Maximum y coordinate. If not provided, the maximum non-zero y
             will be used.
+        binsize: The number of spatial bins to aggregate RNAs captured by DNBs in those bins. By default it is 1.
 
     Returns:
         Tuple containing 3 sparse matrices corresponding to total, spliced,
         and unspliced counts respectively. If the read file does not contain
-        spliced and unspliced counts, the last two elements are None.
+        spliced and unspliced counts, the last two elements are None. When the data is just part of a chip (x, y
+        coordinates don't start from (0, 0), x_min, y_min will be also returned.
     """
+
     data = read_bgi_as_dataframe(path)
-    x_max = max(x_max, data["x"].max()) if x_max else data["x"].max()
-    y_max = max(y_max, data["y"].max()) if y_max else data["y"].max()
+    x, y = data["x"].values, data["y"].values
+    x_min, y_min = np.min(x), np.min(y)
+
+    if binsize != 1:
+        data["x"] = bin_indices(x, x_min, binsize)
+        data["y"] = bin_indices(y, y_min, binsize)
+    else:
+        data["x"] -= x_min
+        data["y"] -= y_min
+    x_delta = max(x_max, max(x)) if x_max else max(x)
+    y_delta = max(y_max, max(y)) if y_max else max(y)
 
     matrices = []
     for name, i in COUNT_COLUMN_MAPPING.items():
@@ -76,13 +98,17 @@ def read_bgi_agg(
             matrices.append(
                 csr_matrix(
                     (data[data.columns[i]], (data["x"], data["y"])),
-                    shape=(x_max + 1, y_max + 1),
+                    shape=(x_delta + 1, y_delta + 1),
                     dtype=np.uint16,
                 )
             )
         else:
             matrices.append(None)
-    return tuple(matrices)
+
+    if x_min == 0 and y_min == 0:
+        return tuple(matrices)
+    else:
+        return tuple(matrices + [x_min, y_min])
 
 
 def read_bgi(
@@ -90,6 +116,7 @@ def read_bgi(
     binsize: int = 50,
     slice: Optional[str] = None,
     label_path: Optional[str] = None,
+    alpha_hull: Optional[Polygon] = None,
     version="stereo_v1",
 ) -> AnnData:
     """A helper function that facilitates constructing an AnnData object suitable for downstream spateo analysis
@@ -107,6 +134,9 @@ def read_bgi(
         label_path: `str` or None (default: None)
             A string that points to the directory and filename of cell segmentation label matrix(Format:`.npy`).
             If not None, the results of cell segmentation will be used, and param `binsize` will be ignored.
+        alpha_hull: `Polygon` or None (default: None)
+            The computed concave hull. It must be a Polygon and thus you may need to take one of the Polygon from the
+            MultiPolygon object returned from `get_concave_hull` function.
         version: `str`
             The version of technology. Currently not used. But may be useful when the data format changes after we update
             the stero-seq techlogy in future.
@@ -120,11 +150,17 @@ def read_bgi(
     data = read_bgi_as_dataframe(path)
     columns = list(data.columns)
     total_column = columns[COUNT_COLUMN_MAPPING["total"]]
+    gene_column, x_column, y_column = columns[:3]
 
     # get cell name
     if not label_path:
         x, y = data["x"].values, data["y"].values
         x_min, y_min = np.min(x), np.min(y)
+
+        if alpha_hull is not None:
+            is_inside = in_concave_hull(data.loc[:, [x_column, y_column]].values, alpha_hull)
+            data = data.loc[is_inside, :]
+            x, y = data[x_column].values, data[y_column].values
 
         data["x_ind"] = bin_indices(x, x_min, binsize)
         data["y_ind"] = bin_indices(y, y_min, binsize)
@@ -147,6 +183,10 @@ def read_bgi(
         label_mtx = np.load(label_path)
         label_props = get_label_props(label_mtx, properties=("label", "area", "bbox", "centroid"))
         # Get centroid from label_props
+        if alpha_hull is not None:
+            is_inside = in_concave_hull(label_props.loc[:, ["centroid-0", "centroid-1"]].values, alpha_hull)
+            label_props = label_props.loc[is_inside, :]
+
         coor = label_props[["centroid-0", "centroid-1"]].values
 
     uniq_cell, uniq_gene = data["cell_name"].unique(), data["geneID"].unique()

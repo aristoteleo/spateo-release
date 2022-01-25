@@ -151,9 +151,9 @@ def build_three_d_model(
     _adata = clip_3d_coords(adata=adata, coordsby=coordsby) if smoothing else adata
 
     # filter group info
-    if isinstance(group_show, str) and group_show is "all":
+    if isinstance(group_show, str) and group_show == "all":
         groups = _adata.obs[groupby]
-    elif isinstance(group_show, str) and group_show is not "all":
+    elif isinstance(group_show, str) and group_show != "all":
         groups = _adata.obs[groupby].map(lambda x: str(x) if x == group_show else "mask")
     elif isinstance(group_show, list) or isinstance(group_show, tuple):
         groups = _adata.obs[groupby].map(lambda x: str(x) if x in group_show else "mask")
@@ -166,7 +166,7 @@ def build_three_d_model(
     genes_data = pd.concat([groups, genes_exp], axis=1)
     genes_data.columns = ["groups", "genes_exp"]
     new_genes_exp = genes_data[["groups", "genes_exp"]].apply(
-        lambda x: "mask" if x["groups"] is "mask" else round(x["genes_exp"], 2), axis=1
+        lambda x: "mask" if x["groups"] == "mask" else round(x["genes_exp"], 2), axis=1
     )
 
     # Create a point cloud(pyvista.PolyData) and its surface.
@@ -239,7 +239,7 @@ def three_d_slicing(
         warnings.warn("The model should be a pyvista.UnstructuredGrid (voxelized) object.")
         mesh = mesh.cast_to_unstructured_grid()
 
-    if n_slices is "orthogonal":
+    if n_slices == "orthogonal":
         # Create three orthogonal slices through the dataset on the three cartesian planes.
         if center is None:
             return mesh.slice_orthogonal(x=None, y=None, z=None)
@@ -251,37 +251,6 @@ def three_d_slicing(
     else:
         # Create many slices of the input dataset along a specified axis.
         return mesh.slice_along_axis(n=n_slices, axis=axis, center=center)
-
-
-def compute_volume(
-    mesh: Optional[pv.DataSet] = None,
-    group_show: Union[str, list] = "all",
-) -> float:
-    """
-    Calculate the volume of the reconstructed 3D structure.
-
-    Args:
-        mesh: Reconstructed 3D structure (voxelized object).
-        group_show: Subset of groups used for calculation, e.g. [`'g1'`, `'g2'`, `'g3'`]. The default group_show is `'all'`, for all groups.
-
-    Returns:
-        volume_size: The volume of the reconstructed 3D structure.
-    """
-
-    mesh = mesh.compute_cell_sizes(length=False, area=False, volume=True)
-    volume_data = pd.concat(
-        [pd.Series(mesh.cell_data["groups"]), pd.Series(mesh.cell_data["Volume"])],
-        axis=1,
-    )
-
-    if group_show is not "all":
-        group_show = [group_show] if isinstance(group_show, str) else group_show
-        volume_data = volume_data[volume_data[0].isin(group_show)]
-
-    volume_size = float(np.sum(volume_data[1]))
-    print(f"{group_show} volume: {volume_size}")
-
-    return volume_size
 
 
 def easy_three_d_plot(
@@ -395,9 +364,10 @@ def easy_three_d_plot(
             _data = _data[_data["label"] != "mask"]
             _data.drop_duplicates(inplace=True)
             _data.sort_values(by=["label", "hex"], inplace=True)
-            gap = math.ceil(len(_data.index) / 5) if scalar is "genes" else 1
+            _data = _data.astype(str)
+            gap = math.ceil(len(_data.index) / 5) if scalar == "genes" else 1
             legend_entries = [[_data["label"].iloc[i], _data["hex"].iloc[i]] for i in range(0, len(_data.index), gap)]
-            if scalar is "genes":
+            if scalar == "genes":
                 legend_entries.append([_data["label"].iloc[-1], _data["hex"].iloc[-1]])
 
             legend_size = (0.1, 0.1) if legend_size is None else legend_size
