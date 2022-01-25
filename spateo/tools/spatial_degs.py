@@ -20,14 +20,11 @@ def moran_i(
     y: Optional[List[int]] = None,
     k: int = 5,
     weighted: str = "kernel",
-    assumption: str = "permutation",
-):
+    permutations: int = 999,
+) -> pd.DataFrame:
     """Identify genes with strong spatial autocorrelation with Moran's I test.
     This can be used to identify genes that are
     potentially related to cluster.
-
-    TODO: `assumption` argument is never used.
-    TODO: `weighted` argument should be Literal type.
 
     Parameters
     ----------
@@ -50,13 +47,11 @@ def moran_i(
             Number of neighbors to use by default for kneighbors queries.
         weighted : 'str'(defult='kernel')
             Spatial weights, defult is based on kernel functions.
-        assumption: `str` (default: `permutation`)
-            Monte Carlo approach(a permutation bootstrap test) to estimating
-            significance.
+        permutations: `int` (default=999)
+            Number of random permutations for calculation of pseudo-p_values.
     Returns
     -------
-        Returns an updated `~anndata.AnnData` with a new key `'Moran_' + type`
-        in the .uns attribute, storing the Moran' I test results.
+        A pandas DataFrame of the Moran' I test results.
     """
     if X_data is None:
         X_data = adata.X
@@ -67,11 +62,11 @@ def moran_i(
     else:
         genes = genes
     if x is None:
-        x = adata.obs["x_array"].tolist()
+        x = adata.obsm["spatial"][:, 0].tolist()
     else:
         x = x
     if y is None:
-        y = adata.obs["y_array"].tolist()
+        y = adata.obsm["spatial"][:, 1].tolist()
     else:
         y = y
     gene_num = len(genes)
@@ -93,7 +88,7 @@ def moran_i(
     )
     for i_gene, gene in tqdm(enumerate(genes), desc="Moran's I Global Autocorrelation Statistic"):
         cur_X = X_data[:, adata.var.index == gene].A if sparse else X_data[:, adata.var.index == gene]
-        mbi = explore.esda.moran.Moran(cur_X, W, permutations=999, two_tailed=False)
+        mbi = explore.esda.moran.Moran(cur_X, W, permutations=permutations, two_tailed=False)
         Moran_I[i_gene] = mbi.I
         p_value[i_gene] = mbi.p_sim
         statistics[i_gene] = mbi.z_sim
