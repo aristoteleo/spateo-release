@@ -89,6 +89,9 @@ def read_bgi_agg(
     else:
         data["x"] -= x_min
         data["y"] -= y_min
+
+    # use x, y after re-indexing
+    x, y = data["x"].values, data["y"].values
     x_delta = max(x_max, max(x)) if x_max else max(x)
     y_delta = max(y_max, max(y)) if y_max else max(y)
 
