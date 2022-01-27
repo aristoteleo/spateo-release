@@ -30,8 +30,13 @@ def circle(k: int) -> np.ndarray:
     return cv2.circle(np.zeros((k, k), dtype=np.uint8), (r, r), r, 1, -1)
 
 
-def knee(X: np.ndarray, n_bins: int = 256) -> float:
-    """Find the knee point of an arbitrary array.
+def knee_threshold(X: np.ndarray, n_bins: int = 256) -> float:
+    """Find the knee thresholding point of an arbitrary array.
+
+    Note:
+        This function does not find the actual knee of X. It computes a
+        value to be used to threshold the elements of X by finding the knee of
+        the cumulative counts.
 
     Args:
         X: Numpy array of values
@@ -159,7 +164,7 @@ def apply_threshold(X: np.ndarray, k: int, threshold: Optional[Union[float, np.n
         A boolean mask.
     """
     # Apply threshold and mclose,mopen
-    threshold = threshold if threshold is not None else knee(X)
+    threshold = threshold if threshold is not None else knee_threshold(X)
     mask = mclose_mopen(X >= threshold, k)
     return mask
 

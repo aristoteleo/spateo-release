@@ -15,10 +15,10 @@ class TestSegmentationUtils(TestMixin, TestCase):
         circle[2, 2] = 0
         np.testing.assert_array_equal(circle, utils.circle(3))
 
-    def test_knee(self):
+    def test_knee_threshold(self):
         with mock.patch("spateo.preprocessing.segmentation.utils.KneeLocator") as KneeLocator:
             X = np.array([0, 0, 0, 0, 1, 1, 1, 2, 3, 4, 4, 4, 5, 5, 5, 5])
-            self.assertEqual(KneeLocator.return_value.knee, utils.knee(X))
+            self.assertEqual(KneeLocator.return_value.knee, utils.knee_threshold(X))
             np.testing.assert_array_equal([0, 1, 2, 3, 4, 5], KneeLocator.call_args[0][0])
             np.testing.assert_allclose(
                 [4 / 16, 7 / 16, 8 / 16, 9 / 16, 12 / 16, 1],
@@ -26,10 +26,10 @@ class TestSegmentationUtils(TestMixin, TestCase):
             )
             KneeLocator.assert_called_once_with(mock.ANY, mock.ANY, curve="concave")
 
-    def test_knee_float(self):
+    def test_knee_threshold_float(self):
         with mock.patch("spateo.preprocessing.segmentation.utils.KneeLocator") as KneeLocator:
             X = np.array([0.1, 0.1, 0.1, 0.2, 0.2, 0.3, 0.5, 0.7, 0.8, 0.8, 0.9, 0.9, 0.9])
-            self.assertEqual(KneeLocator.return_value.knee, utils.knee(X, n_bins=3))
+            self.assertEqual(KneeLocator.return_value.knee, utils.knee_threshold(X, n_bins=3))
             np.testing.assert_array_equal([0.1, 0.5, 0.9], KneeLocator.call_args[0][0])
             np.testing.assert_allclose([3 / 13, 7 / 13, 1], KneeLocator.call_args[0][1])
             KneeLocator.assert_called_once_with(mock.ANY, mock.ANY, curve="concave")
@@ -74,7 +74,7 @@ class TestSegmentationUtils(TestMixin, TestCase):
 
     def test_apply_threshold(self):
         with mock.patch("spateo.preprocessing.segmentation.utils.mclose_mopen") as mclose_mopen, mock.patch(
-            "spateo.preprocessing.segmentation.utils.knee"
+            "spateo.preprocessing.segmentation.utils.knee_threshold"
         ) as knee:
             X = np.array([1, 2, 3, 4, 5])
             self.assertEqual(mclose_mopen.return_value, utils.apply_threshold(X, 3, 4))
@@ -84,7 +84,7 @@ class TestSegmentationUtils(TestMixin, TestCase):
 
     def test_apply_threshold_knee(self):
         with mock.patch("spateo.preprocessing.segmentation.utils.mclose_mopen") as mclose_mopen, mock.patch(
-            "spateo.preprocessing.segmentation.utils.knee"
+            "spateo.preprocessing.segmentation.utils.knee_threshold"
         ) as knee:
             X = np.array([1, 2, 3, 4, 5])
             knee.return_value = 4

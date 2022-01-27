@@ -153,7 +153,6 @@ def read_bgi(
     data = read_bgi_as_dataframe(path)
     columns = list(data.columns)
     total_column = columns[COUNT_COLUMN_MAPPING["total"]]
-    gene_column, x_column, y_column = columns[:3]
 
     # get cell name
     if not label_path:
@@ -161,9 +160,9 @@ def read_bgi(
         x_min, y_min = np.min(x), np.min(y)
 
         if alpha_hull is not None:
-            is_inside = in_concave_hull(data.loc[:, [x_column, y_column]].values, alpha_hull)
+            is_inside = in_concave_hull(data.loc[:, ["x", "y"]].values, alpha_hull)
             data = data.loc[is_inside, :]
-            x, y = data[x_column].values, data[y_column].values
+            x, y = data["x"].values, data["y"].values
 
         data["x_ind"] = bin_indices(x, x_min, binsize)
         data["y_ind"] = bin_indices(y, y_min, binsize)
@@ -199,7 +198,7 @@ def read_bgi(
     gene_dict = dict(zip(uniq_gene, range(0, len(uniq_gene))))
 
     data["csr_x_ind"] = data["cell_name"].map(cell_dict)
-    data["csr_y_ind"] = data[gene_column].map(gene_dict)
+    data["csr_y_ind"] = data["geneID"].map(gene_dict)
 
     # Important! by default, duplicate entries are summed together in the following which is needed for us!
     X = csr_matrix(
