@@ -9,6 +9,7 @@ import torch
 from typing import Optional, Tuple
 
 from .find_clusters_utils import *
+from ..preprocessing.filter import filter_cells, filter_genes
 
 
 def find_cluster_spagcn(
@@ -180,19 +181,19 @@ def scc(
         or None.
     """
 
-    # if
-    dyn.pp.filter_genes(adata, min_cells=min_cells)
-    dyn.pp.normalize_total(adata)
+    filter_genes(adata, min_cells=min_cells)
+    adata.uns["pp"] = {}
+    dyn.pp.normalize_cell_expr_by_size_factors(adata, layers="X")
     dyn.pp.log1p(adata)
-    dyn.pp.pca(adata, n_comps=30)
+    dyn.pp.pca_monocle(adata, n_pca_components=30, pca_key="X_pca")
 
     dyn.tl.neighbors(adata, n_neighbors=e_neigh)
-    dyn.tl.neighbors(adata, n_neighs=s_neigh, basis=spatial_key)
+    dyn.tl.neighbors(adata, n_neighbors=s_neigh, basis=spatial_key, result_prefix="spatial")
     conn = adata.obsp["connectivities"].copy()
     conn.data[conn.data > 0] = 1
     adj = conn + adata.obsp["spatial_connectivities"]
     adj.data[adj.data > 0] = 1
-    dyn.tl.leiden(adata, adjacency=adj, resolution=resolution, result_key="scc_e" + str(e_neigh) + "_s" + str(s_neigh))
+    dyn.tl.leiden(adata, adj_matrix=adj, resolution=resolution, result_key="scc_e" + str(e_neigh) + "_s" + str(s_neigh))
 
     if copy:
         return adata

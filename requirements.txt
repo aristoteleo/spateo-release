@@ -32,4 +32,5 @@ pyvista
 setuptools
 tqdm
 torch
+torch-sparse
 typing_extensions
