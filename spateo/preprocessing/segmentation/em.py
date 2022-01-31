@@ -5,7 +5,7 @@ https://iopscience.iop.org/article/10.1088/1742-6596/1324/1/012093/meta
 Written by @HailinPan, optimized by @Lioscro.
 """
 
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -146,8 +146,12 @@ def run_em(
     var: Tuple[float, float] = (20.0, 400.0),
     max_iter: int = 2000,
     precision: float = 1e-6,
+    bins: Optional[np.ndarray] = None,
     seed: Optional[int] = None,
-) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
+) -> Union[
+    Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
+    Dict[int, Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]],
+]:
     """EM
 
     Args:
@@ -157,39 +161,49 @@ def run_em(
         min_distance: Minimum distance between peaks when `use_peaks=True`
         downsample: Use at most this many samples. If `use_peaks` is False,
             samples are chosen uniformly at random to at most this many samples.
-            Otherwise, peaks are chosen uniformly at random.
+            Otherwise, peaks are chosen uniformly at random. When `bins` is
+            provided, this specifies the number of samples to choose per bin.
         w: Initial proportions of cell and background as a tuple.
         mu: Initial means of cell and background negative binomial distributions.
         var: Initial variances of cell and background negative binomial
             distributions.
         max_iter: Maximum number of EM iterations.
         precision: Stop EM algorithm once desired precision has been reached.
+        bins: Bins of pixels to estimate separately, such as those obtained by
+            density segmentation.
         seed: Random seed.
 
     Returns:
-        Tuple of parameters estimated by the EM algorithm.
+        Tuple of parameters estimated by the EM algorithm if `bins` is not provided.
+        Otherwise, a dictionary of tuple of parameters, with bin labels as keys.
     """
+    samples = {}  # key 0 when bins = None
     if use_peaks:
-        picks = feature.peak_local_max(X, min_distance=min_distance)
+        picks = feature.peak_local_max(X, min_distance=min_distance, labels=bins)
         b = np.zeros(X.shape, dtype=np.uint8)
         b[picks[:, 0], picks[:, 1]] = 1
         n_objects, labels = cv2.connectedComponents(b)
 
         added = set()
-        samples = []
         for i in range(labels.shape[0]):
             for j in range(labels.shape[1]):
                 label = labels[i, j]
                 if label > 0 and label not in added:
-                    samples.append(X[i, j])
+                    samples.setdefault(bins[i, j] if bins is not None else 0, []).append(X[i, j])
                     added.add(label)
-        samples = np.array(samples)
+    elif bins is not None:
+        for label in np.unique(bins):
+            samples[label] = X[np.where(bins == label)].flatten()
     else:
-        samples = X.flatten()
-    downsample = int(downsample)
-    if samples.size > downsample:
-        rng = np.random.default_rng(seed)
-        samples = rng.choice(samples, downsample, replace=False)
+        samples[0] = X.flatten()
 
-    w, r, p = nbn_em(samples, w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
-    return tuple(w), tuple(r), tuple(p)
+    downsample = int(downsample)
+    rng = np.random.default_rng(seed)
+    results = {}
+    for label, _samples in samples.items():
+        if len(_samples) > downsample:
+            _samples = rng.choice(_samples, downsample, replace=False)
+
+        w, r, p = nbn_em(np.array(_samples), w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
+        results[label] = (tuple(w), tuple(r), tuple(p))
+    return results if bins is not None else results[0]

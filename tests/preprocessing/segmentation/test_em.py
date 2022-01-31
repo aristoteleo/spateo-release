@@ -52,3 +52,6 @@ class TestEM(TestMixin, TestCase):
         np.testing.assert_allclose([3.06e-322, 1.0], w)
         np.testing.assert_allclose([145.7961865893234, 1552.4287058491911], r)
         np.testing.assert_allclose([0.19757881931910512, 0.7212333080184193], p)
+
+    def test_run_em_bins(self):
+        pass
