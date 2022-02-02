@@ -25,6 +25,7 @@ kneed
 nudged
 POT
 PVGeo
+pyacvd
 pysal
 pyvista
 setuptools

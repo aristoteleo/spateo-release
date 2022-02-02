@@ -5,46 +5,62 @@ import warnings
 import matplotlib as mpl
 import numpy as np
 import pandas as pd
-import pyvista as pv
 import PVGeo
+import pyacvd
+import pyvista as pv
 import seaborn as sns
 
 from anndata import AnnData
 from pandas.core.frame import DataFrame
+from pyvista.core.pointset import PolyData, UnstructuredGrid
 from typing import Optional, Sequence, Tuple, Union
 
 
-def clip_3d_coords(adata: AnnData, coordsby: str = "spatial") -> AnnData:
+def smoothing_mesh(
+    adata: AnnData,
+    coordsby: str = "spatial",
+    n_surf: int = 10000,
+) -> Tuple[AnnData, PolyData]:
     """
-    Coordinate Preprocessing of 3D Models.
+    Takes a uniformly meshed surface using voronoi clustering and clip the original mesh using the reconstructed surface.
 
     Args:
         adata: AnnData object.
         coordsby: The key from adata.obsm whose value will be used to reconstruct the 3D structure.
+        n_surf: The number of faces obtained using voronoi clustering. The larger the number, the smoother the surface.
 
     Returns:
         clipped_adata: AnnData object that is clipped.
+        uniform_surf: A uniformly meshed surface.
     """
 
-    bucket_xyz = adata.obsm[coordsby].astype(float)
+    float_type = np.float64
+
+    bucket_xyz = adata.obsm[coordsby].astype(float_type)
     if isinstance(bucket_xyz, DataFrame):
         bucket_xyz = bucket_xyz.values
     grid = pv.PolyData(bucket_xyz)
     grid["index"] = adata.obs_names.to_numpy()
+
+    # takes a surface mesh and returns a uniformly meshed surface using voronoi clustering.
     surf = grid.delaunay_3d().extract_geometry()
     surf.subdivide(nsub=3, subfilter="loop", inplace=True)
+    clustered = pyacvd.Clustering(surf)
+    # clustered.subdivide(3)
+    clustered.cluster(n_surf)
+    uniform_surf = clustered.create_mesh()
 
-    # Clip mesh using a pyvista.PolyData surface mesh.
-    clipped_grid = grid.clip_surface(surf)
+    # Clip the original mesh using the reconstructed surface.
+    clipped_grid = grid.clip_surface(uniform_surf)
     clipped_adata = adata[clipped_grid["index"], :]
 
     clipped_points = pd.DataFrame()
-    clipped_points[0] = list(map(tuple, clipped_grid.points))
-    surf_points = list(map(tuple, surf.points.round(1)))
+    clipped_points[0] = list(map(tuple, clipped_grid.points.round(5)))
+    surf_points = list(map(tuple, uniform_surf.points.round(5)))
     clipped_points[1] = clipped_points[0].isin(surf_points)
     clipped_adata = clipped_adata[~clipped_points[1].values, :]
 
-    return clipped_adata
+    return clipped_adata, uniform_surf
 
 
 def three_d_color(
@@ -56,14 +72,12 @@ def three_d_color(
 ) -> np.ndarray:
     """
     Set the color of groups or gene expression.
-
     Args:
         series: Pandas sereis (e.g. cell groups or gene names).
         colormap: Colors to use for plotting data.
         alphamap: The opacity of the color to use for plotting data.
         mask_color: Colors to use for plotting mask information.
         mask_alpha: The opacity of the color to use for plotting mask information.
-
     Returns:
         rgba: The rgba values mapped to groups or gene expression.
     """
@@ -111,15 +125,16 @@ def build_three_d_model(
     gene_cmap: str = "hot_r",
     gene_amap: float = 1.0,
     mask_color: str = "gainsboro",
-    mask_alpha: float = 0.1,
+    mask_alpha: float = 0,
+    surf_alpha: float = 0.5,
     smoothing: bool = True,
-    voxelize: bool = False,
+    n_surf: int = 10000,
+    voxelize: bool = True,
     voxel_size: Optional[list] = None,
-    unstructure: bool = False,
-) -> Tuple[pv.PolyData or pv.UnstructuredGrid, pv.PolyData]:
+    voxel_smooth: Optional[int] = 200,
+) -> UnstructuredGrid:
     """
-    Reconstruct 3D structure.
-
+    Reconstruct a voxelized 3D model.
     Args:
         adata: AnnData object.
         coordsby: The key from adata.obsm whose value will be used to reconstruct the 3D structure.
@@ -131,98 +146,119 @@ def build_three_d_model(
         gene_cmap: Colors to use for plotting genes. The default gene_cmap is `'hot_r'`.
         gene_amap: The opacity of the colors to use for plotting genes. The default gene_amap is `1.0`.
         mask_color: Color to use for plotting mask. The default mask_color is `'gainsboro'`.
-        mask_alpha: The opacity of the color to use for plotting mask. The default mask_alpha is `0.1`.
+        mask_alpha: The opacity of the color to use for plotting mask. The default mask_alpha is `0.0`.
+        surf_alpha: The opacity of the color to use for surface. The default mask_alpha is `0.5`.
         smoothing: Smoothing the surface of the reconstructed 3D structure.
+        n_surf: The number of faces obtained using voronoi clustering. The larger the n_surf, the smoother the surface. Only valid when smoothing is True.
         voxelize: Voxelize the reconstructed 3D structure.
-        voxel_size: Voxel size.
-        unstructure: Convert pyvista.PolyData object to pyvista.UnstructuredGrid object.
-
+        voxel_size: The size of the voxelized points. A list of three elements.
+        voxel_smooth: The smoothness of the voxelized surface. Only valid when voxelize is True.
     Returns:
         mesh: Reconstructed 3D structure, which contains the following properties:
-            points_coords: `mesh['points_coords']`, coordinates of all points.
             groups: `mesh['groups']`, the mask and the groups used for display.
             genes_exp: `mesh['genes']`, the gene expression.
             groups_rgba: `mesh['groups_rgba']`, the rgba colors for plotting groups and mask.
-            genes_rgba: `mesh['genes_rgbar']`, the rgba colors for plotting genes and mask.
-        surface: Surface of reconstructed 3D structure.
+            genes_rgba: `mesh['genes_rgba']`, the rgba colors for plotting genes and mask.
     """
 
-    # Clip mesh using a pyvista.PolyData surface mesh.
-    _adata = clip_3d_coords(adata=adata, coordsby=coordsby) if smoothing else adata
+    float_type = np.float64
+
+    # takes a uniformly meshed surface and clip the original mesh using the reconstructed surface if smoothing is True.
+    _adata, uniform_surf = smoothing_mesh(adata=adata, coordsby=coordsby, n_surf=n_surf) if smoothing else (adata, None)
 
     # filter group info
-    if isinstance(group_show, str) and group_show == "all":
-        groups = _adata.obs[groupby]
-    elif isinstance(group_show, str) and group_show != "all":
-        groups = _adata.obs[groupby].map(lambda x: str(x) if x == group_show else "mask")
-    elif isinstance(group_show, list) or isinstance(group_show, tuple):
-        groups = _adata.obs[groupby].map(lambda x: str(x) if x in group_show else "mask")
+    if groupby is None:
+        n_points = _adata.obs.shape[0]
+        groups = pd.Series(["same"] * n_points, index=_adata.obs.index, dtype=str)
     else:
-        raise ValueError("`group_show` value is wrong.")
+        if isinstance(group_show, str) and group_show is "all":
+            groups = _adata.obs[groupby]
+        elif isinstance(group_show, str) and group_show is not "all":
+            groups = _adata.obs[groupby].map(lambda x: str(x) if x == group_show else "mask")
+        elif isinstance(group_show, list) or isinstance(group_show, tuple):
+            groups = _adata.obs[groupby].map(lambda x: str(x) if x in group_show else "mask")
+        else:
+            raise ValueError("`group_show` value is wrong.")
 
     # filter gene expression info
     genes_exp = _adata.X.sum(axis=1) if gene_show == "all" else _adata[:, gene_show].X.sum(axis=1)
-    genes_exp = pd.Series(genes_exp, index=groups.index)
+    genes_exp = pd.DataFrame(genes_exp, index=groups.index, dtype=float_type)
     genes_data = pd.concat([groups, genes_exp], axis=1)
     genes_data.columns = ["groups", "genes_exp"]
-    new_genes_exp = genes_data[["groups", "genes_exp"]].apply(
-        lambda x: "mask" if x["groups"] == "mask" else round(x["genes_exp"], 2), axis=1
+    new_genes_exp = (
+        genes_data[["groups", "genes_exp"]]
+        .apply(lambda x: 0 if x["groups"] is "mask" else round(x["genes_exp"], 2), axis=1)
+        .astype(float_type)
     )
 
-    # Create a point cloud(pyvista.PolyData) and its surface.
-    bucket_xyz = _adata.obsm[coordsby].astype(float)
-    if isinstance(bucket_xyz, DataFrame) is False:
-        bucket_xyz = pd.DataFrame(bucket_xyz)
-    points = PVGeo.points_to_poly_data(bucket_xyz)
-    surface = points.delaunay_3d().extract_geometry()
+    # Create a point cloud(Unstructured) and its surface.
+    bucket_xyz = _adata.obsm[coordsby].astype(float_type)
+    if isinstance(bucket_xyz, DataFrame):
+        bucket_xyz = bucket_xyz.values
+    points = pv.PolyData(bucket_xyz).cast_to_unstructured_grid()
+    surface = points.delaunay_3d().extract_geometry() if uniform_surf is None else uniform_surf
 
-    if voxelize is True:
-        # Create a voxelized volume(pyvista.UnstructuredGrid).
+    # Voxelize the cloud and the surface
+    if voxelize:
         voxelizer = PVGeo.filters.VoxelizePoints()
         voxel_size = [1, 1, 1] if voxel_size is None else voxel_size
         voxelizer.set_deltas(voxel_size[0], voxel_size[1], voxel_size[2])
         voxelizer.set_estimate_grid(False)
-        mesh = voxelizer.apply(points)
-    else:
-        # Convert pyvista.PolyData object to pyvista.UnstructuredGrid object.
-        mesh = points.cast_to_unstructured_grid() if unstructure else points
+        points = voxelizer.apply(points)
+
+        density = surface.length / voxel_smooth
+        surface = pv.voxelize(surface, density=density, check_surface=False)
 
     # Add some properties of the 3D model
-    mesh["points_coords"] = bucket_xyz.values
-
-    mesh["groups"] = groups.values
-    mesh["groups_rgba"] = three_d_color(
+    points.cell_data["groups"] = groups.astype(str).values
+    points.cell_data["groups_rgba"] = three_d_color(
         series=groups,
         colormap=group_cmap,
         alphamap=group_amap,
         mask_color=mask_color,
         mask_alpha=mask_alpha,
-    )
+    ).astype(float_type)
 
-    mesh["genes"] = new_genes_exp.values
-    mesh["genes_rgba"] = three_d_color(
+    points.cell_data["genes"] = new_genes_exp.values
+    points.cell_data["genes_rgba"] = three_d_color(
         series=new_genes_exp,
         colormap=gene_cmap,
         alphamap=gene_amap,
         mask_color=mask_color,
         mask_alpha=mask_alpha,
-    )
+    ).astype(float_type)
 
-    return mesh, surface
+    surface.cell_data["groups"] = np.array(["mask"] * surface.n_cells).astype(str)
+    surface.cell_data["groups_rgba"] = np.array(
+        [mpl.colors.to_rgba(mask_color, alpha=surf_alpha)] * surface.n_cells
+    ).astype(float_type)
+
+    surface.cell_data["genes"] = np.array([0] * surface.n_cells).astype(float_type)
+    surface.cell_data["genes_rgba"] = np.array(
+        [mpl.colors.to_rgba(mask_color, alpha=surf_alpha)] * surface.n_cells
+    ).astype(float_type)
+
+    # Merge points and surface into a single mesh.
+    mesh = surface.merge(points)
+
+    return mesh
 
 
 def three_d_slicing(
-    mesh: pv.DataSet,
+    mesh: UnstructuredGrid,
+    scalar: str = "groups",
     axis: Union[str, int] = "x",
     n_slices: Union[str, int] = 10,
     center: Optional[Sequence[float]] = None,
-) -> pv.PolyData:
+) -> PolyData:
     """
     Create many slices of the input dataset along a specified axis or
     create three orthogonal slices through the dataset on the three cartesian planes.
-
     Args:
         mesh: Reconstructed 3D structure (voxelized object).
+        scalar: Types used to “color” the mesh. Available scalars are:
+                * `'groups'`
+                * `'genes'`
         axis: The axis to generate the slices along. Available axes are:
                 * `'x'` or `0`
                 * `'y'` or `1`
@@ -230,7 +266,6 @@ def three_d_slicing(
         n_slices: The number of slices to create along a specified axis.
                   If n_slices is `"orthogonal"`, create three orthogonal slices.
         center: A 3-length sequence specifying the position which slices are taken. Defaults to the center of the mesh.
-
     Returns:
         Sliced dataset.
     """
@@ -239,7 +274,9 @@ def three_d_slicing(
         warnings.warn("The model should be a pyvista.UnstructuredGrid (voxelized) object.")
         mesh = mesh.cast_to_unstructured_grid()
 
-    if n_slices == "orthogonal":
+    mesh.set_active_scalars(f"{scalar}_rgba")
+
+    if n_slices is "orthogonal":
         # Create three orthogonal slices through the dataset on the three cartesian planes.
         if center is None:
             return mesh.slice_orthogonal(x=None, y=None, z=None)
@@ -255,13 +292,12 @@ def three_d_slicing(
 
 def easy_three_d_plot(
     mesh: Optional[pv.DataSet] = None,
-    surface: Optional[pv.DataSet] = None,
     scalar: str = "groups",
-    surface_color: str = "gainsboro",
-    surface_opacity: float = 0.5,
-    outline: bool = True,
-    background: str = "white",
-    background_r: str = "black",
+    outline: bool = False,
+    ambient: float = 0.3,
+    opacity: float = 0.5,
+    background: str = "black",
+    background_r: str = "white",
     save: Optional[str] = None,
     notebook: bool = False,
     shape: Optional[list] = None,
@@ -275,16 +311,18 @@ def easy_three_d_plot(
 ):
     """
     Create a plotting object to display pyvista/vtk mesh.
-
     Args:
         mesh: Reconstructed 3D structure.
-        surface: Surface of the reconstructed 3D structure
         scalar: Types used to “color” the mesh. Available scalars are:
                 * `'groups'`
                 * `'genes'`
-        surface_color: Color to use for plotting surface. The default surface_color is `'gainsboro'`.
-        surface_opacity: The opacity of the color to use for plotting surface. The default surface_opacity is `0.5`.
         outline: Produce an outline of the full extent for the input dataset.
+        ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
+                 the actor when not directed at the light source emitted from the viewer.
+        opacity: Opacity of the mesh. If a single float value is given, it will be the global opacity of the mesh and
+                 uniformly applied everywhere - should be between 0 and 1.
+                 A string can also be specified to map the scalars range to a predefined opacity transfer function
+                 (options include: 'linear', 'linear_r', 'geom', 'geom_r').
         background: The background color of the window.
         background_r: A color that is clearly different from the background color.
         save: If a str, save the figure. Infer the file type if ending on
@@ -343,45 +381,43 @@ def easy_three_d_plot(
         border_color=background_r,
     )
     for subplot_index, cpo in zip(subplot_indices, cpos):
-        if surface is not None:
-            # Add the surface of reconstructed 3D structure.
-            p.add_mesh(surface, color=surface_color, opacity=surface_opacity)
 
-        if mesh is not None:
-            # Add a reconstructed 3D structure.
-            p.add_mesh(
-                mesh,
-                scalars=f"{scalar}_rgba",
-                rgba=True,
-                render_points_as_spheres=True,
-                ambient=0.5,
-            )
+        # Add a reconstructed 3D structure.
+        p.add_mesh(
+            mesh,
+            scalars=f"{scalar}_rgba",
+            rgba=True,
+            render_points_as_spheres=True,
+            ambient=ambient,
+            opacity=opacity,
+        )
 
-            # Add a legend to render window.
-            mesh[f"{scalar}_hex"] = np.array([mpl.colors.to_hex(i) for i in mesh[f"{scalar}_rgba"]])
-            _data = pd.concat([pd.Series(mesh[scalar]), pd.Series(mesh[f"{scalar}_hex"])], axis=1)
-            _data.columns = ["label", "hex"]
-            _data = _data[_data["label"] != "mask"]
-            _data.drop_duplicates(inplace=True)
-            _data.sort_values(by=["label", "hex"], inplace=True)
-            _data = _data.astype(str)
-            gap = math.ceil(len(_data.index) / 5) if scalar == "genes" else 1
-            legend_entries = [[_data["label"].iloc[i], _data["hex"].iloc[i]] for i in range(0, len(_data.index), gap)]
-            if scalar == "genes":
-                legend_entries.append([_data["label"].iloc[-1], _data["hex"].iloc[-1]])
+        # Add a legend to render window.
+        mesh[f"{scalar}_hex"] = np.array([mpl.colors.to_hex(i) for i in mesh[f"{scalar}_rgba"]])
+        _data = pd.concat([pd.Series(mesh[scalar]), pd.Series(mesh[f"{scalar}_hex"])], axis=1)
+        _data.columns = ["label", "hex"]
+        _data = _data[_data["label"] != "mask"]
+        _data.drop_duplicates(inplace=True)
+        _data.sort_values(by=["label", "hex"], inplace=True)
+        _data = _data.astype(str)
 
-            legend_size = (0.1, 0.1) if legend_size is None else legend_size
-            p.add_legend(
-                legend_entries,
-                face="circle",
-                bcolor=None,
-                loc=legend_loc,
-                size=legend_size,
-            )
+        gap = math.ceil(len(_data.index) / 5) if scalar is "genes" else 1
+        legend_entries = [[_data["label"].iloc[i], _data["hex"].iloc[i]] for i in range(0, len(_data.index), gap)]
+        if scalar is "genes":
+            legend_entries.append([_data["label"].iloc[-1], _data["hex"].iloc[-1]])
+
+        legend_size = (0.1, 0.1) if legend_size is None else legend_size
+
+        p.add_legend(
+            legend_entries,
+            face="circle",
+            bcolor=None,
+            loc=legend_loc,
+            size=legend_size,
+        )
 
         if outline:
-            outline_mesh = surface.outline() if surface is not None else mesh.outline()
-            p.add_mesh(outline_mesh, color=background_r, line_width=3)
+            p.add_mesh(mesh.outline(), color=background_r, line_width=3)
 
         p.camera_position = cpo
         p.background_color = background
