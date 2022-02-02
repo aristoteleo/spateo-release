@@ -161,13 +161,13 @@ def build_three_d_model(
     _adata, uniform_surf = smoothing_mesh(adata=adata, coordsby=coordsby, n_surf=n_surf) if smoothing else (adata, None)
 
     # filter group info
-    if groupby is None:
+    if groupby == None:
         n_points = _adata.obs.shape[0]
         groups = pd.Series(["same"] * n_points, index=_adata.obs.index, dtype=str)
     else:
-        if isinstance(group_show, str) and group_show is "all":
+        if isinstance(group_show, str) and group_show == "all":
             groups = _adata.obs[groupby]
-        elif isinstance(group_show, str) and group_show is not "all":
+        elif isinstance(group_show, str) and group_show != "all":
             groups = _adata.obs[groupby].map(lambda x: str(x) if x == group_show else "mask")
         elif isinstance(group_show, list) or isinstance(group_show, tuple):
             groups = _adata.obs[groupby].map(lambda x: str(x) if x in group_show else "mask")
@@ -181,21 +181,20 @@ def build_three_d_model(
     genes_data.columns = ["groups", "genes_exp"]
     new_genes_exp = (
         genes_data[["groups", "genes_exp"]]
-        .apply(lambda x: 0 if x["groups"] is "mask" else round(x["genes_exp"], 2), axis=1)
+        .apply(lambda x: 0 if x["groups"] == "mask" else round(x["genes_exp"], 2), axis=1)
         .astype(float_type)
-    )
 
     # Create a point cloud(Unstructured) and its surface.
     bucket_xyz = _adata.obsm[coordsby].astype(float_type)
     if isinstance(bucket_xyz, DataFrame):
         bucket_xyz = bucket_xyz.values
     points = pv.PolyData(bucket_xyz).cast_to_unstructured_grid()
-    surface = points.delaunay_3d().extract_geometry() if uniform_surf is None else uniform_surf
+    surface = points.delaunay_3d().extract_geometry() if uniform_surf == None else uniform_surf
 
     # Voxelize the cloud and the surface
     if voxelize:
         voxelizer = PVGeo.filters.VoxelizePoints()
-        voxel_size = [1, 1, 1] if voxel_size is None else voxel_size
+        voxel_size = [1, 1, 1] if voxel_size == None else voxel_size
         voxelizer.set_deltas(voxel_size[0], voxel_size[1], voxel_size[2])
         voxelizer.set_estimate_grid(False)
         points = voxelizer.apply(points)
@@ -264,15 +263,15 @@ def three_d_slicing(
         Sliced dataset.
     """
 
-    if isinstance(mesh, pv.core.pointset.UnstructuredGrid) is False:
+    if not isinstance(mesh, pv.core.pointset.UnstructuredGrid):
         warnings.warn("The model should be a pyvista.UnstructuredGrid (voxelized) object.")
         mesh = mesh.cast_to_unstructured_grid()
 
     mesh.set_active_scalars(f"{scalar}_rgba")
 
-    if n_slices is "orthogonal":
+    if n_slices == "orthogonal":
         # Create three orthogonal slices through the dataset on the three cartesian planes.
-        if center is None:
+        if center == None:
             return mesh.slice_orthogonal(x=None, y=None, z=None)
         else:
             return mesh.slice_orthogonal(x=center[0], y=center[1], z=center[2])
@@ -346,7 +345,7 @@ def easy_three_d_plot(
         framerate: Frames per second.
     """
 
-    if shape is None:
+    if shape == None:
         shape = (1, 1)
 
     if isinstance(shape, str):
@@ -355,7 +354,7 @@ def easy_three_d_plot(
     else:
         subplot_indices = [[i, j] for i in range(shape[0]) for j in range(shape[1])]
 
-    if window_size is None:
+    if window_size == None:
         window_size = (1024, 768)
 
     if type(cpos) in [str, tuple]:
@@ -398,11 +397,14 @@ def easy_three_d_plot(
         _data.drop_duplicates(inplace=True)
         _data.sort_values(by=["label", "hex"], inplace=True)
         _data = _data.astype(str)
-        gap = math.ceil(len(_data.index) / 5) if scalar is "genes" else 1
+      
+        gap = math.ceil(len(_data.index) / 5) if scalar == "genes" else 1
         legend_entries = [[_data["label"].iloc[i], _data["hex"].iloc[i]] for i in range(0, len(_data.index), gap)]
-        if scalar is "genes":
+        if scalar == "genes":
             legend_entries.append([_data["label"].iloc[-1], _data["hex"].iloc[-1]])
-        legend_size = (0.1, 0.1) if legend_size is None else legend_size
+      
+        legend_size = (0.1, 0.1) if legend_size == None else legend_size
+      
         p.add_legend(
             legend_entries,
             face="circle",
@@ -416,12 +418,12 @@ def easy_three_d_plot(
             p.add_mesh(mesh.outline(), color=background_r, line_width=3)
 
     # Save as image or gif or mp4
-    save = "three_d_structure.jpg" if save is None else save
+    save = "three_d_structure.jpg" if save == None else save
     save_format = save.split(".")[-1]
     if save_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
         p.show(screenshot=save)
     else:
-        view_up = [0.5, 0.5, 1] if view_up is None else view_up
+        view_up = [0.5, 0.5, 1] if view_up == None else view_up
         path = p.generate_orbital_path(factor=2.0, shift=0, viewup=view_up, n_points=20)
         if save.endswith(".gif"):
             p.open_gif(save)
