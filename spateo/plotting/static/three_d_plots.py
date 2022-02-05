@@ -46,7 +46,6 @@ def smoothing_mesh(
     surf = grid.delaunay_3d().extract_geometry()
     surf.subdivide(nsub=3, subfilter="loop", inplace=True)
     clustered = pyacvd.Clustering(surf)
-    # clustered.subdivide(3)
     clustered.cluster(n_surf)
     uniform_surf = clustered.create_mesh()
 
