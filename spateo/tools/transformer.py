@@ -106,7 +106,7 @@ def procrustes(X, Y, scaling=True, reflection="best"):
         b = traceTA * normX / normY
 
         # standarised distance between X and b*Y*T + c
-        d = 1 - traceTA ** 2
+        d = 1 - traceTA**2
 
         # transformed coords
         Z = normX * traceTA * np.dot(Y0, T) + muX

@@ -20,7 +20,7 @@ def lamtheta_to_r(lam: float, theta: float) -> float:
 
 def muvar_to_lamtheta(mu: float, var: float) -> Tuple[float, float]:
     """Convert the mean and variance to lambda and theta."""
-    r = mu ** 2 / (var - mu)
+    r = mu**2 / (var - mu)
     theta = mu / var
     lam = -r * np.log(theta)
     return lam, theta
@@ -30,7 +30,7 @@ def lamtheta_to_muvar(lam: float, theta: float) -> Tuple[float, float]:
     """Convert the lambda and theta to mean and variance."""
     r = lamtheta_to_r(lam, theta)
     mu = r / theta - r
-    var = mu + mu ** 2 / r
+    var = mu + mu**2 / r
     return mu, var
 
 

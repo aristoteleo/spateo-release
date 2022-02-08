@@ -144,7 +144,7 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
 
     contours = data.apply(create_geo, axis=1)
     props = pd.DataFrame({"contours": contours})
-    props["area"] = binsize ** 2
+    props["area"] = binsize**2
     return props
 
 
