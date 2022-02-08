@@ -7,7 +7,7 @@ from .bbs import (
 )
 from .space import space
 from .three_d_plots import (
-    clip_3d_coords,
+    smoothing_mesh,
     three_d_color,
     build_three_d_model,
     three_d_slicing,
