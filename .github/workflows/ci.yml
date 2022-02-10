@@ -43,7 +43,9 @@ jobs:
             requirements.txt
             dev-requirements.txt
       - name: Install dependencies
-        run: make install-all
+        run: |
+          pip install --upgrade pip
+          make install-all
       - name: Run tests
         run: make test
       # - name: Upload coverage
