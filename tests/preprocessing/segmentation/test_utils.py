@@ -50,6 +50,20 @@ class TestSegmentationUtils(TestMixin, TestCase):
             utils.conv2d(X, 3, "square"),
         )
 
+    def test_conv2d_bins(self):
+        X = np.array([[0, 1, 0, 1], [1, 0, 1, 0], [0, 1, 0, 1], [1, 0, 1, 0]])
+        bins = np.zeros(X.shape, dtype=int)
+        bins[:2, :2] = 1
+        bins[2:, 2:] = 2
+        np.testing.assert_array_equal(
+            [[0.5, 0.375, 0, 0], [0.375, 0.25, 0, 0], [0, 0, 0.25, 0.375], [0, 0, 0.375, 0.5]],
+            utils.conv2d(X, 3, "gauss", bins=bins),
+        )
+        np.testing.assert_array_equal(2 * (bins > 0), utils.conv2d(X, 3, "circle", bins=bins))
+        np.testing.assert_array_equal(
+            [[4, 3, 0, 0], [3, 2, 0, 0], [0, 0, 2, 3], [0, 0, 3, 4]], utils.conv2d(X, 3, "square", bins=bins)
+        )
+
     def test_scale_to_01(self):
         X = np.array([0, 1, 2, 3, 4])
         np.testing.assert_allclose([0, 0.25, 0.5, 0.75, 1], utils.scale_to_01(X))

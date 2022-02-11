@@ -56,6 +56,7 @@ def score_pixels(
     em_kwargs: Optional[dict] = None,
     bp_kwargs: Optional[dict] = None,
     certain_mask: Optional[np.ndarray] = None,
+    bins: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Score each pixel by how likely it is a cell. Values returned are in
     [0, 1].
@@ -75,12 +76,23 @@ def score_pixels(
         certain_mask: A boolean Numpy array indicating which pixels are certain
             to be occupied, a-priori. For example, if nuclei staining is available,
             this would be the nuclei segmentation mask.
+        bins: Pixel bins to segment separately. Only takes effect when the EM
+            algorithm is run.
 
     Returns:
         [0, 1] score of each pixel being a cell.
+
+    Raises:
+        PreprocessingError: If `bins` and/or `certain_mask` was provided but
+            their sizes do not match `X`
     """
     if method.lower() not in ("gauss", "em", "em+gauss", "em+bp"):
         raise PreprocessingError(f"Unknown method `{method}`")
+    if certain_mask is not None and X.shape != certain_mask.shape:
+        raise PreprocessingError("`certain_mask` does not have the same shape as `X`")
+    if bins is not None and X.shape != bins.shape:
+        raise PreprocessingError("`bins` does not have the same shape as `X`")
+
     method = method.lower()
     em_kwargs = em_kwargs or {}
     bp_kwargs = bp_kwargs or {}
@@ -95,21 +107,22 @@ def score_pixels(
         X = X.A
 
     # All methods require some kind of 2D convolution to start off
-    res = utils.conv2d(X, k, mode="gauss" if method == "gauss" else "circle")
+    res = utils.conv2d(X, k, mode="gauss" if method == "gauss" else "circle", bins=bins)
 
     # All methods other than gauss requires EM
     if method != "gauss":
-        w, r, p = em.run_em(res, **em_kwargs)
+        em_results = em.run_em(res, bins=bins, **em_kwargs)
 
         if "bp" in method:
-            res = bp.run_bp(res, (r[0], p[0]), (r[1], p[1]), certain_mask=certain_mask, **bp_kwargs)
+            background_cond, cell_cond = em.conditionals(res, em_results=em_results, bins=bins)
+            res = bp.run_bp(res, background_cond, cell_cond, certain_mask=certain_mask, **bp_kwargs)
         else:
-            res = em.confidence(res, w, r, p)
+            res = em.confidence(res, em_results=em_results, bins=bins)
             if certain_mask is not None:
                 res = np.clip(res + certain_mask, 0, 1)
 
         if "gauss" in method:
-            res = utils.conv2d(res, k, mode="gauss")
+            res = utils.conv2d(res, k, mode="gauss", bins=bins)
     else:
         # For just "gauss" method, we should rescale to [0, 1] because all the
         # other methods eventually produce an array of [0, 1] values.

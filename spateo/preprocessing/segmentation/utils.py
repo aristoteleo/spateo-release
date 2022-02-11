@@ -73,7 +73,9 @@ def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
     return cv2.GaussianBlur(src=X.astype(float), ksize=(k, k), sigmaX=0, sigmaY=0)
 
 
-def conv2d(X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"]) -> np.ndarray:
+def conv2d(
+    X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"], bins: Optional[np.ndarray] = None
+) -> np.ndarray:
     """Convolve an array with the specified kernel size and mode.
 
     Args:
@@ -83,24 +85,37 @@ def conv2d(X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"]) ->
             gauss:
             circle:
             square:
+        bins: Convolve per bin. Zeros are ignored.
 
     Returns:
         The convolved array
 
     Raises:
         ValueError: if `k` is even or less than 1, or if `mode` is not a
-            valid mode
+            valid mode, or if `bins` does not have the same shape as `X`
     """
     if k < 1 or k % 2 == 0:
         raise ValueError(f"`k` must be odd and greater than 0.")
     if mode not in ("gauss", "circle", "square"):
         raise ValueError(f'`mode` must be one of "gauss", "circle", "square"')
+    if bins is not None and X.shape != bins.shape:
+        raise ValueError("`bins` must have the same shape as `X`")
 
-    if mode == "gauss":
-        return gaussian_blur(X, k)
+    def _conv(_X):
+        if mode == "gauss":
+            return gaussian_blur(_X, k)
+        kernel = np.ones((k, k), dtype=np.uint8) if mode == "square" else circle(k)
+        return signal.convolve2d(_X, kernel, boundary="symm", mode="same")
 
-    kernel = np.ones((k, k), dtype=np.uint8) if mode == "square" else circle(k)
-    return signal.convolve2d(X, kernel, boundary="symm", mode="same")
+    if bins is not None:
+        conv = np.zeros(X.shape)
+        for label in np.unique(bins):
+            if label > 0:
+                mask = bins == label
+                indices = np.where(mask)
+                conv[indices] = _conv(X * mask)[indices]
+        return conv
+    return _conv(X)
 
 
 def scale_to_01(X: np.ndarray) -> np.ndarray:

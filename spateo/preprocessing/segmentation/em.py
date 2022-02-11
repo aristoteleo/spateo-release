@@ -12,6 +12,8 @@ import numpy as np
 from scipy import special, stats
 from skimage import feature
 
+from ...errors import PreprocessingError
+
 
 def lamtheta_to_r(lam: float, theta: float) -> float:
     """Convert lambda and theta to r."""
@@ -57,7 +59,6 @@ def nbn_em(
     Returns:
         Estimated `w`, `r`, `p`.
     """
-
     w = np.array(w)
     mu = np.array(mu)
     var = np.array(var)
@@ -110,30 +111,79 @@ def nbn_em(
     return (prev_w, lamtheta_to_r(prev_lam, prev_theta), prev_theta) if isnan else (w, lamtheta_to_r(lam, theta), theta)
 
 
+def conditionals(
+    X: np.ndarray,
+    em_results: Union[
+        Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
+        Dict[int, Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]],
+    ],
+    bins: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute the conditional probabilities, for each pixel, of observing the
+    observed number of UMIs given that the pixel is background/foreground.
+
+    Args:
+        X: UMI counts per pixel
+        em_results: Return value of :func:`run_em`.
+        bins: Pixel bins, as was passed to :func:`run_em`.
+
+    Returns:
+        Two Numpy arrays, the first corresponding to the background conditional
+        probabilities, and the second to the foreground conditional probabilities
+
+    Raises:
+        PreprocessingError: If `em_results` is a dictionary but `bins` was not
+            provided.
+    """
+    if isinstance(em_results, dict):
+        if bins is None:
+            raise PreprocessingError("`em_results` indicate binning was used, but `bins` was not provided")
+        background_cond = np.zeros(X.shape)
+        cell_cond = np.zeros(X.shape)
+        for label, (_, r, p) in em_results.items():
+            indices = np.where(bins == label)
+            background_cond[indices] = stats.nbinom(n=r[0], p=p[0]).pmf(X[indices])
+            cell_cond[indices] = stats.nbinom(n=r[1], p=p[1]).pmf(X[indices])
+    else:
+        _, r, p = em_results
+        background_cond = stats.nbinom(n=r[0], p=p[0]).pmf(X)
+        cell_cond = stats.nbinom(n=r[1], p=p[1]).pmf(X)
+
+    return background_cond, cell_cond
+
+
 def confidence(
     X: np.ndarray,
-    w: Tuple[float, float],
-    r: Tuple[float, float],
-    p: Tuple[float, float],
+    em_results: Union[
+        Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
+        Dict[int, Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]],
+    ],
+    bins: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Compute confidence of each pixel being a cell, using the parameters
     estimated by the EM algorithm.
 
     Args:
         X: Numpy array containing mixture counts.
-        w: Estimated `w` parameters.
-        r: Estimated `r` parameters.
-        p: Estimated `p` parameters
+        em_results: Return value of :func:`run_em`.
+        bins: Pixel bins, as was passed to :func:`run_em`.
 
     Returns:
         Numpy array of confidence scores within the range [0, 1].
     """
-    tau = np.zeros((2,) + X.shape)
-    bp = stats.nbinom(n=r[0], p=p[0]).pmf(X)
-    cp = stats.nbinom(n=r[1], p=p[1]).pmf(X)
-    tau[0] = w[0] * bp
-    tau[1] = w[1] * cp
-    return tau[1] / tau.sum(axis=0)
+    bp, cp = conditionals(X, em_results, bins)
+    tau0 = np.zeros(X.shape)
+    tau1 = np.zeros(X.shape)
+    if isinstance(em_results, dict):
+        for label, (w, _, _) in em_results.items():
+            indices = np.where(bins == label)
+            tau0[indices] = w[0] * bp[indices]
+            tau1[indices] = w[1] * cp[indices]
+    else:
+        w, _, _ = em_results
+        tau0 = w[0] * bp
+        tau1 = w[1] * cp
+    return tau1 / (tau0 + tau1)
 
 
 def run_em(
@@ -141,7 +191,7 @@ def run_em(
     use_peaks: bool = False,
     min_distance: int = 21,
     downsample: int = 1e6,
-    w: Tuple[float, float] = (0.99, 0.01),
+    w: Tuple[float, float] = (0.9, 0.1),
     mu: Tuple[float, float] = (10.0, 300.0),
     var: Tuple[float, float] = (20.0, 400.0),
     max_iter: int = 2000,
@@ -170,7 +220,7 @@ def run_em(
         max_iter: Maximum number of EM iterations.
         precision: Stop EM algorithm once desired precision has been reached.
         bins: Bins of pixels to estimate separately, such as those obtained by
-            density segmentation.
+            density segmentation. Zeros are ignored.
         seed: Random seed.
 
     Returns:
@@ -193,17 +243,19 @@ def run_em(
                     added.add(label)
     elif bins is not None:
         for label in np.unique(bins):
-            samples[label] = X[np.where(bins == label)].flatten()
+            if label > 0:
+                samples[label] = X[np.where(bins == label)].flatten()
     else:
         samples[0] = X.flatten()
 
     downsample = int(downsample)
     rng = np.random.default_rng(seed)
     results = {}
+    # TODO: Parallelize?
     for label, _samples in samples.items():
         if len(_samples) > downsample:
             _samples = rng.choice(_samples, downsample, replace=False)
 
-        w, r, p = nbn_em(np.array(_samples), w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
-        results[label] = (tuple(w), tuple(r), tuple(p))
+        res_w, res_r, res_p = nbn_em(np.array(_samples), w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
+        results[label] = (tuple(res_w), tuple(res_r), tuple(res_p))
     return results if bins is not None else results[0]

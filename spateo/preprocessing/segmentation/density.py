@@ -62,7 +62,7 @@ def schc(X: np.ndarray, distance_threshold: Optional[float] = None) -> np.ndarra
 
     Returns:
         Clustering result as a Numpy array of same shape, where clusters are
-        indicated by positive integers.
+        indicated by integers.
     """
     adjacency = create_spatial_adjacency(X.shape)
     X_flattened = X.flatten()
@@ -116,4 +116,5 @@ def segment_densities(
     X = X / X.max()
 
     X = utils.conv2d(X, k, mode="gauss")
-    return schc(X, distance_threshold=distance_threshold)
+    # Add 1 because 0 should indicate background!
+    return schc(X, distance_threshold=distance_threshold) + 1
