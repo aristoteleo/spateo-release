@@ -69,7 +69,7 @@ def nbn_em(
     prev_lam = lam.copy()
     prev_theta = theta.copy()
 
-    for _ in range(max_iter):
+    for i in range(max_iter):
         # E step
         r = lamtheta_to_r(lam, theta)
         bp = stats.nbinom(n=r[0], p=theta[0]).pmf(X)
@@ -210,9 +210,9 @@ def run_em(
             EM algorithm.
         min_distance: Minimum distance between peaks when `use_peaks=True`
         downsample: Use at most this many samples. If `use_peaks` is False,
-            samples are chosen uniformly at random to at most this many samples.
-            Otherwise, peaks are chosen uniformly at random. When `bins` is
-            provided, this specifies the number of samples to choose per bin.
+            samples are chosen randomly with probability proportional to the
+            log UMI counts. When `bins` is provided, the size of each bin is
+            used as a scaling factor.
         w: Initial proportions of cell and background as a tuple.
         mu: Initial means of cell and background negative binomial distributions.
         var: Initial variances of cell and background negative binomial
@@ -244,17 +244,21 @@ def run_em(
     elif bins is not None:
         for label in np.unique(bins):
             if label > 0:
-                samples[label] = X[np.where(bins == label)].flatten()
+                _samples = X[np.where(bins == label)]
+                samples[label] = _samples[(_samples > 0) & (_samples <= np.quantile(_samples, 0.999))]
     else:
-        samples[0] = X.flatten()
+        samples[0] = X[np.where((X > 0) & (X <= np.quantile(X, 0.999)))]
 
     downsample = int(downsample)
     rng = np.random.default_rng(seed)
     results = {}
     # TODO: Parallelize?
+    total = sum(len(_samples) for _samples in samples.values())
     for label, _samples in samples.items():
-        if len(_samples) > downsample:
-            _samples = rng.choice(_samples, downsample, replace=False)
+        _downsample = int(downsample * (len(_samples) / total))
+        if len(_samples) > _downsample:
+            log = np.log(_samples)
+            _samples = rng.choice(_samples, _downsample, replace=False, p=log / log.sum())
 
         res_w, res_r, res_p = nbn_em(np.array(_samples), w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
         results[label] = (tuple(res_w), tuple(res_r), tuple(res_p))

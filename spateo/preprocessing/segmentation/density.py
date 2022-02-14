@@ -3,6 +3,7 @@
 import warnings
 from typing import Optional, Tuple, Union
 
+import cv2
 import numpy as np
 from kneed import KneeLocator
 from scipy.sparse import csr_matrix, issparse, lil_matrix, spmatrix
@@ -86,9 +87,7 @@ def schc(X: np.ndarray, distance_threshold: Optional[float] = None) -> np.ndarra
 
 
 def segment_densities(
-    X: Union[spmatrix, np.ndarray],
-    k: int,
-    distance_threshold: Optional[float] = None,
+    X: Union[spmatrix, np.ndarray], k: int, distance_threshold: Optional[float] = None, dk: int = 3
 ) -> np.ndarray:
     """Segment a matrix containing UMI counts into regions by UMI density.
 
@@ -98,6 +97,7 @@ def segment_densities(
         distance_threshold: Distance threshold for the Ward linkage
             such that clusters will not be merged if they have
             greater than this distance.
+        dk: Kernel size for final dilation
 
     Returns:
         Clustering result as a Numpy array of same shape, where clusters are
@@ -116,5 +116,15 @@ def segment_densities(
     X = X / X.max()
 
     X = utils.conv2d(X, k, mode="gauss")
+
     # Add 1 because 0 should indicate background!
-    return schc(X, distance_threshold=distance_threshold) + 1
+    bins = schc(X, distance_threshold=distance_threshold) + 1
+
+    dilated = np.zeros_like(bins)
+    labels = np.unique(bins)
+    for label in sorted(labels, key=lambda label: X[np.where(bins == label)].mean()):
+        mask = bins == label
+        dilate = cv2.dilate(mask.astype(np.uint8), utils.circle(dk))
+        where = np.where(utils.mclose_mopen(dilate, dk) > 0)
+        dilated[where] = label
+    return dilated

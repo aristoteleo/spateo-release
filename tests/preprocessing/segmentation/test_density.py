@@ -29,9 +29,9 @@ class TestDensity(TestMixin, TestCase):
         with mock.patch("spateo.preprocessing.segmentation.density.utils.conv2d") as conv2d, mock.patch(
             "spateo.preprocessing.segmentation.density.schc"
         ) as schc:
-            schc.return_value = 1
+            schc.return_value = np.zeros((3, 3), dtype=int)
             X = sparse.csr_matrix(np.random.random((3, 3)))
-            self.assertEqual(2, density.segment_densities(X, 5))
+            np.testing.assert_array_equal(np.ones((3, 3), dtype=int), density.segment_densities(X, 5))
             np.testing.assert_array_equal(conv2d.call_args[0][0], X.A / X.max())
             conv2d.assert_called_once_with(mock.ANY, 5, mode="gauss")
             schc.assert_called_once_with(conv2d.return_value, distance_threshold=None)

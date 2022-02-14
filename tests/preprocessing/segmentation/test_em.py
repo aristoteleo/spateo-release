@@ -46,27 +46,27 @@ class TestEM(TestMixin, TestCase):
         rng = np.random.default_rng(2021)
         X = rng.negative_binomial(10, 0.5, (10, 10)) + rng.negative_binomial(100, 0.5, (10, 10))
 
-        w, r, p = em.run_em(X, w=(0.99, 0.01))
-        np.testing.assert_allclose([0.41884403, 0.58115597], w)
-        np.testing.assert_allclose([53.75074877, 286.70262741], r)
-        np.testing.assert_allclose([0.33038823, 0.72543857], p)
+        w, r, p = em.run_em(X, w=(0.99, 0.01), max_iter=100)
+        np.testing.assert_allclose([0.2383495042266562, 0.7616504957733438], w)
+        np.testing.assert_allclose([33.82400850536949, 600.8543296460896], r)
+        np.testing.assert_allclose([0.24796212737976334, 0.8454343821517696], p)
 
     def test_run_em_downsample(self):
         rng = np.random.default_rng(2021)
         X = rng.negative_binomial(10, 0.5, (20, 20)) + rng.negative_binomial(100, 0.5, (20, 20))
 
-        w, r, p = em.run_em(X, downsample=100, seed=2021, w=(0.99, 0.01))
-        np.testing.assert_allclose([0.3591019654794112, 0.6408980345205889], w)
-        np.testing.assert_allclose([174.5511759619999, 701.1016921390545], r)
-        np.testing.assert_allclose([0.5981170046608679, 0.8692063871420153], p)
+        w, r, p = em.run_em(X, downsample=100, seed=2021, w=(0.99, 0.01), max_iter=100)
+        np.testing.assert_allclose([0.13265334244385113, 0.8673466575561488], w)
+        np.testing.assert_allclose([26.374527039240963, 559.0179953067875], r)
+        np.testing.assert_allclose([0.1909250367173723, 0.8367866538310141], p)
 
     def test_run_em_peaks(self):
         rng = np.random.default_rng(2021)
         X = rng.negative_binomial(50, 0.5, (100, 100)) + rng.negative_binomial(500, 0.5, (100, 100))
-        w, r, p = em.run_em(X, use_peaks=True, min_distance=1, seed=2021, w=(0.99, 0.01))
-        np.testing.assert_allclose([3.06e-322, 1.0], w)
-        np.testing.assert_allclose([145.7961865893234, 1552.4287058491911], r)
-        np.testing.assert_allclose([0.19757881931910512, 0.7212333080184193], p)
+        w, r, p = em.run_em(X, use_peaks=True, min_distance=1, seed=2021, w=(0.99, 0.01), max_iter=100)
+        np.testing.assert_allclose([3.847497690531427e-204, 1.0], w)
+        np.testing.assert_allclose([30.091059744937105, 1031.3178918176766], r)
+        np.testing.assert_allclose([0.04729785407753589, 0.6321837694765489], p)
 
     def test_run_em_bins(self):
         rng = np.random.default_rng(2021)
@@ -74,14 +74,14 @@ class TestEM(TestMixin, TestCase):
         bins = np.zeros(X.shape, dtype=int)
         bins[:50, :50] = 1
         bins[50:, 50:] = 2
-        results = em.run_em(X, bins=bins, w=(0.99, 0.01))
+        results = em.run_em(X, bins=bins, w=(0.99, 0.01), max_iter=100)
         self.assertEqual(2, len(results))
-        np.testing.assert_allclose([2.530692668538722e-17, 1.0], results[1][0])
-        np.testing.assert_allclose([125.03182337051366, 579.3267180798008], results[1][1])
-        np.testing.assert_allclose([0.1875301858442373, 0.5132143853468611], results[1][2])
-        np.testing.assert_allclose([5.352472e-110, 1.0], results[2][0])
-        np.testing.assert_allclose([145.71536692587122, 621.2737389848536], results[2][1])
-        np.testing.assert_allclose([0.20654202869582633, 0.5300051124652111], results[2][2])
+        np.testing.assert_allclose([1.6359410595079348e-111, 1.0], results[1][0])
+        np.testing.assert_allclose([25.45447008445437, 881.3329952146362], results[1][1])
+        np.testing.assert_allclose([0.049578513664564734, 0.6160205873806845], results[1][2])
+        np.testing.assert_allclose([3.08767945236589e-131, 1.0], results[2][0])
+        np.testing.assert_allclose([25.748715118551672, 888.9653114044754], results[2][1])
+        np.testing.assert_allclose([0.04636794899451994, 0.6174397965275665], results[2][2])
 
     def test_conditionals(self):
         X = np.array([[1, 2, 3]])
