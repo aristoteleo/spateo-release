@@ -30,8 +30,13 @@ def circle(k: int) -> np.ndarray:
     return cv2.circle(np.zeros((k, k), dtype=np.uint8), (r, r), r, 1, -1)
 
 
-def knee(X: np.ndarray, n_bins: int = 256) -> float:
-    """Find the knee point of an arbitrary array.
+def knee_threshold(X: np.ndarray, n_bins: int = 256) -> float:
+    """Find the knee thresholding point of an arbitrary array.
+
+    Note:
+        This function does not find the actual knee of X. It computes a
+        value to be used to threshold the elements of X by finding the knee of
+        the cumulative counts.
 
     Args:
         X: Numpy array of values
@@ -68,7 +73,9 @@ def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
     return cv2.GaussianBlur(src=X.astype(float), ksize=(k, k), sigmaX=0, sigmaY=0)
 
 
-def conv2d(X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"]) -> np.ndarray:
+def conv2d(
+    X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"], bins: Optional[np.ndarray] = None
+) -> np.ndarray:
     """Convolve an array with the specified kernel size and mode.
 
     Args:
@@ -78,24 +85,37 @@ def conv2d(X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"]) ->
             gauss:
             circle:
             square:
+        bins: Convolve per bin. Zeros are ignored.
 
     Returns:
         The convolved array
 
     Raises:
         ValueError: if `k` is even or less than 1, or if `mode` is not a
-            valid mode
+            valid mode, or if `bins` does not have the same shape as `X`
     """
     if k < 1 or k % 2 == 0:
         raise ValueError(f"`k` must be odd and greater than 0.")
     if mode not in ("gauss", "circle", "square"):
         raise ValueError(f'`mode` must be one of "gauss", "circle", "square"')
+    if bins is not None and X.shape != bins.shape:
+        raise ValueError("`bins` must have the same shape as `X`")
 
-    if mode == "gauss":
-        return gaussian_blur(X, k)
+    def _conv(_X):
+        if mode == "gauss":
+            return gaussian_blur(_X, k)
+        kernel = np.ones((k, k), dtype=np.uint8) if mode == "square" else circle(k)
+        return signal.convolve2d(_X, kernel, boundary="symm", mode="same")
 
-    kernel = np.ones((k, k), dtype=np.uint8) if mode == "square" else circle(k)
-    return signal.convolve2d(X, kernel, boundary="symm", mode="same")
+    if bins is not None:
+        conv = np.zeros(X.shape)
+        for label in np.unique(bins):
+            if label > 0:
+                mask = bins == label
+                indices = np.where(mask)
+                conv[indices] = _conv(X * mask)[indices]
+        return conv
+    return _conv(X)
 
 
 def scale_to_01(X: np.ndarray) -> np.ndarray:
@@ -159,7 +179,7 @@ def apply_threshold(X: np.ndarray, k: int, threshold: Optional[Union[float, np.n
         A boolean mask.
     """
     # Apply threshold and mclose,mopen
-    threshold = threshold if threshold is not None else knee(X)
+    threshold = threshold if threshold is not None else knee_threshold(X)
     mask = mclose_mopen(X >= threshold, k)
     return mask
 

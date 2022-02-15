@@ -1,6 +1,7 @@
 from unittest import TestCase
 
 import numpy as np
+from scipy import stats
 
 import spateo.preprocessing.segmentation.bp as bp
 from ...mixins import TestMixin
@@ -28,6 +29,11 @@ class TestBP(TestMixin, TestCase):
         rng = np.random.default_rng(2021)
         X = rng.negative_binomial(10, 0.5, (20, 20))
         X[5:15, 5:15] = rng.negative_binomial(100, 0.5, (10, 10))
+
         expected = np.zeros((20, 20))
         expected[5:15, 5:15] = 1
-        np.testing.assert_allclose(expected, bp.run_bp(X, (10, 0.5), (100, 0.5), square=True), atol=1e-3)
+        np.testing.assert_allclose(
+            expected,
+            bp.run_bp(X, stats.nbinom(n=10, p=0.5).pmf(X), stats.nbinom(n=100, p=0.5).pmf(X), square=True),
+            atol=1e-3,
+        )

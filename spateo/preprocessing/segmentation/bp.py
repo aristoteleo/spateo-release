@@ -90,8 +90,8 @@ def cell_marginals(
 
 def run_bp(
     X: np.ndarray,
-    background_params: Tuple[float, float],
-    cell_params: Tuple[float, float],
+    background_cond: np.ndarray,
+    cell_cond: np.ndarray,
     k: int = 3,
     square: bool = False,
     p: float = 0.7,
@@ -106,8 +106,8 @@ def run_bp(
 
     Args:
         X: UMI counts per pixel.
-        background_params: Parameters estimated (with EM) for background.
-        cell_params: Parameters estimated (with EM) for cell.
+        background_cond: Probability of observing UMIs conditioned on background.
+        cell_cond: Probability of observing UMIs conditioned on cell.
         k: Neighborhood size
         square: Whether the neighborhood of each node is a square around it.
             If false, the neighborhood is a circle.
@@ -126,16 +126,14 @@ def run_bp(
     Returns:
         Numpy array of marginal probabilities.
     """
-    background_probs = stats.nbinom(n=background_params[0], p=background_params[1]).pmf(X)
-    cell_probs = stats.nbinom(n=cell_params[0], p=cell_params[1]).pmf(X)
     if certain_mask is not None:
-        background_probs = np.clip(background_probs - certain_mask, 0, 1)
-        cell_probs = np.clip(cell_probs + certain_mask, 0, 1)
+        background_cond = np.clip(background_cond - certain_mask, 0, 1)
+        cell_cond = np.clip(cell_cond + certain_mask, 0, 1)
 
     neighborhood = np.ones((k, k)) if square else utils.circle(k)
     marginals = cell_marginals(
-        background_probs,
-        cell_probs,
+        background_cond,
+        cell_cond,
         neighborhood=neighborhood,
         p=p,
         q=q,
