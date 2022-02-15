@@ -34,8 +34,9 @@ class TestICell(TestMixin, TestCase):
     def test_score_pixels_gauss(self):
         X = mock.MagicMock()
         result = icell.score_pixels(X, k=3, method="gauss")
-        self.utils.conv2d.assert_called_once_with(X, 3, mode="gauss")
+        self.utils.conv2d.assert_called_once_with(X, 3, mode="gauss", bins=None)
         self.em.run_em.assert_not_called()
+        self.em.conditional.assert_not_called()
         self.bp.run_bp.assert_not_called()
         self.em.confidence.assert_not_called()
         self.utils.scale_to_01.assert_called_once_with(self.utils.conv2d.return_value)
@@ -44,35 +45,39 @@ class TestICell(TestMixin, TestCase):
     def test_score_pixels_em(self):
         X = mock.MagicMock()
         em_kwargs = mock.MagicMock()
-        w = mock.MagicMock()
-        r = mock.MagicMock()
-        p = mock.MagicMock()
-        self.em.run_em.return_value = w, r, p
+        background_cond = mock.MagicMock()
+        cell_cond = mock.MagicMock()
+        self.em.conditionals.return_value = background_cond, cell_cond
         result = icell.score_pixels(X, k=3, method="EM", em_kwargs=em_kwargs)
-        self.utils.conv2d.assert_called_once_with(X, 3, mode="circle")
-        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, **em_kwargs)
+        self.utils.conv2d.assert_called_once_with(X, 3, mode="circle", bins=None)
+        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, bins=None, **em_kwargs)
+        self.em.conditional.assert_not_called()
         self.bp.run_bp.assert_not_called()
-        self.em.confidence.assert_called_once_with(self.utils.conv2d.return_value, w, r, p)
+        self.em.confidence.assert_called_once_with(
+            self.utils.conv2d.return_value, em_results=self.em.run_em.return_value, bins=None
+        )
         self.utils.scale_to_01.assert_not_called()
         self.assertEqual(result, self.em.confidence.return_value)
 
     def test_score_pixels_em_gauss(self):
         X = mock.MagicMock()
         em_kwargs = mock.MagicMock()
-        w = mock.MagicMock()
-        r = mock.MagicMock()
-        p = mock.MagicMock()
-        self.em.run_em.return_value = w, r, p
+        background_cond = mock.MagicMock()
+        cell_cond = mock.MagicMock()
+        self.em.conditionals.return_value = background_cond, cell_cond
         result = icell.score_pixels(X, k=3, method="EM+gauss", em_kwargs=em_kwargs)
         self.utils.conv2d.assert_has_calls(
             [
-                mock.call(X, 3, mode="circle"),
-                mock.call(self.em.confidence.return_value, 3, mode="gauss"),
+                mock.call(X, 3, mode="circle", bins=None),
+                mock.call(self.em.confidence.return_value, 3, mode="gauss", bins=None),
             ]
         )
-        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, **em_kwargs)
+        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, bins=None, **em_kwargs)
+        self.em.conditional.assert_not_called()
         self.bp.run_bp.assert_not_called()
-        self.em.confidence.assert_called_once_with(self.utils.conv2d.return_value, w, r, p)
+        self.em.confidence.assert_called_once_with(
+            self.utils.conv2d.return_value, em_results=self.em.run_em.return_value, bins=None
+        )
         self.utils.scale_to_01.assert_not_called()
         self.assertEqual(result, self.utils.conv2d.return_value)
 
@@ -80,15 +85,17 @@ class TestICell(TestMixin, TestCase):
         X = mock.MagicMock()
         em_kwargs = mock.MagicMock()
         bp_kwargs = mock.MagicMock()
-        w = mock.MagicMock()
-        r = mock.MagicMock()
-        p = mock.MagicMock()
-        self.em.run_em.return_value = w, r, p
+        background_cond = mock.MagicMock()
+        cell_cond = mock.MagicMock()
+        self.em.conditionals.return_value = background_cond, cell_cond
         result = icell.score_pixels(X, k=3, method="EM+BP", em_kwargs=em_kwargs, bp_kwargs=bp_kwargs)
-        self.utils.conv2d.assert_called_once_with(X, 3, mode="circle")
-        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, **em_kwargs)
+        self.utils.conv2d.assert_called_once_with(X, 3, mode="circle", bins=None)
+        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, bins=None, **em_kwargs)
+        self.em.conditionals.assert_called_once_with(
+            self.utils.conv2d.return_value, em_results=self.em.run_em.return_value, bins=None
+        )
         self.bp.run_bp.assert_called_once_with(
-            self.utils.conv2d.return_value, (r[0], p[0]), (r[1], p[1]), certain_mask=None, **bp_kwargs
+            self.utils.conv2d.return_value, background_cond, cell_cond, certain_mask=None, **bp_kwargs
         )
         self.em.confidence.assert_not_called()
         self.utils.scale_to_01.assert_not_called()

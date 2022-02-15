@@ -77,7 +77,7 @@ def calculate_adj_matrix(x, y, x_pixel=None, y_pixel=None, image=None, beta=49, 
 
 
 def calculate_p(adj, l):
-    adj_exp = np.exp(-1 * (adj ** 2) / (2 * (l ** 2)))
+    adj_exp = np.exp(-1 * (adj**2) / (2 * (l**2)))
     return np.mean(np.sum(adj_exp, 1)) - 1
 
 
@@ -231,7 +231,7 @@ def search_res(
     slog.main_info(f"Res = {res} Num of clusters = {old_num}")
     run = 0
     while old_num != target_num:
-        old_sign = 1 if (old_num < target_num) else -1
+        old_sign = -1 if (old_num < target_num) else 1
         new_num = get_cluster_num(
             adata,
             adj,
@@ -249,7 +249,7 @@ def search_res(
             res = res + step * old_sign
             slog.main_info(f"recommended res = {res}")
             return res
-        new_sign = 1 if (new_num < target_num) else -1
+        new_sign = -1 if (new_num < target_num) else 1
         if new_sign == old_sign:
             res = res + step * old_sign
             slog.main_info(f"Res changed to res")
@@ -365,7 +365,7 @@ class simple_GC_DEC(nn.Module):
     def target_distribution(self, q):
         # weight = q ** 2 / q.sum(0)
         # return torch.transpose((torch.transpose(weight,0,1) / weight.sum(1)),0,1)e
-        p = q ** 2 / torch.sum(q, dim=0)
+        p = q**2 / torch.sum(q, dim=0)
         p = p / torch.sum(p, dim=1, keepdim=True)
         return p
 
@@ -410,7 +410,7 @@ class simple_GC_DEC(nn.Module):
                 adata = ad.AnnData(features.detach().numpy())
             else:
                 adata = ad.AnnData(X)
-            dyn.tl.neighbors(adata, n_neighbors=n_neighbors)
+            dyn.tl.neighbors(adata, n_neighbors=n_neighbors, X_data=adata.X)
             dyn.tl.louvain(adata, resolution=res)
             y_pred = adata.obs["louvain"].astype(int).to_numpy()
             self.n_clusters = len(np.unique(y_pred))
@@ -632,7 +632,7 @@ class SpaGCN(object):
         ###------------------------------------------###
         if self.l is None:
             raise ValueError("l should be set before fitting the model!")
-        adj_exp = np.exp(-1 * (adj ** 2) / (2 * (self.l ** 2)))
+        adj_exp = np.exp(-1 * (adj**2) / (2 * (self.l**2)))
         # ----------Train model----------
         self.model = simple_GC_DEC(embed.shape[1], embed.shape[1])
         self.model.fit(

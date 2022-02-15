@@ -2,10 +2,15 @@
 Todo:
     * @Xiaojieqiu: update with Google style documentation, function typings, tests
 """
-import numpy as np
-from scipy.spatial import Delaunay
 import math
+import shapely
+import numpy as np
+import pandas as pd
 from sklearn.decomposition import PCA
+from scipy.spatial import Delaunay
+import shapely.geometry as geometry
+from shapely.geometry import MultiPoint, MultiLineString
+from shapely.ops import cascaded_union, polygonize
 
 
 def procrustes(X, Y, scaling=True, reflection="best"):
@@ -101,7 +106,7 @@ def procrustes(X, Y, scaling=True, reflection="best"):
         b = traceTA * normX / normY
 
         # standarised distance between X and b*Y*T + c
-        d = 1 - traceTA ** 2
+        d = 1 - traceTA**2
 
         # transformed coords
         Z = normX * traceTA * np.dot(Y0, T) + muX
@@ -182,25 +187,13 @@ def add_spatial_intron(adata):
 
 
 def alpha_shape(x, y, alpha):
-    # Start Using SHAPELY
-    try:
-        import shapely.geometry as geometry
-        from shapely.geometry import Polygon, MultiPoint, Point
-        from shapely.ops import triangulate
-        from shapely.ops import cascaded_union, polygonize
-    except ImportError:
-        raise ImportError(
-            "If you want to use the tricontourf in plotting function, you need to install `shapely` "
-            "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
-        )
-
     crds = np.array([x.flatten(), y.flatten()]).transpose()
     points = MultiPoint(crds)
 
     if len(points) < 4:
         # When you have a triangle, there is no sense
         # in computing an alpha shape.
-        return geometry.MultiPoint(list(points)).convex_hull
+        return MultiPoint(list(points)).convex_hull
 
     def add_edge(edges, edge_points, coords, i, j):
         """
@@ -244,7 +237,7 @@ def alpha_shape(x, y, alpha):
             add_edge(edges, edge_points, coords, ib, ic)
             add_edge(edges, edge_points, coords, ic, ia)
 
-    m = geometry.MultiLineString(edge_points)
+    m = MultiLineString(edge_points)
     triangles = list(polygonize(m))
 
     return cascaded_union(triangles), edge_points
@@ -285,12 +278,22 @@ def AffineTrans(x, y, centroid_x, centroid_y, R, theta=None):
 
 
 def correct_embryo_coord(adata):
+    """
+
+    Args:
+        adata:
+
+    Returns:
+
+    """
+
     if "unspliced" in adata.layers:
         add_spatial_intron(adata)
     else:
         add_spatial(adata)
 
-    x, y = adata.obsm["X_spatial"][:, 0], adata.obsm["X_spatial"][:, 1]
+    adata_coords = adata.obsm["X_spatial"]
+    x, y = adata_coords[:, 0], adata_coords[:, 1]
 
     adata_concave_hull, _ = alpha_shape(x, y, alpha=1)
 
@@ -320,7 +323,7 @@ def correct_embryo_coord(adata):
         np.pi / 2,
     )
     # reflect vertically
-    E9_5_coords_correct_2[:, 1] = -adata_coords_correct_2[:, 1]
+    adata_coords_correct_2[:, 1] = -adata_coords_correct_2[:, 1]
     adata.obsm["X_spatial"] = adata_coords_correct_2
 
     # reflect vertically again:

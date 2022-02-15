@@ -14,7 +14,7 @@ jobs:
       - name: Checkout branch
         uses: actions/checkout@master
       - name: Setup python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: '3.8'
           architecture: x64
@@ -43,7 +43,9 @@ jobs:
             requirements.txt
             dev-requirements.txt
       - name: Install dependencies
-        run: make install-all
+        run: |
+          pip install --upgrade pip
+          make install-all
       - name: Run tests
         run: make test
       # - name: Upload coverage

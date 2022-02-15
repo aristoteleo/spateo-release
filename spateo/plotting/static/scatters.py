@@ -16,7 +16,7 @@ from anndata import AnnData
 from typing import Union, Optional, List
 
 
-from ...configuration import _themes, reset_rcParams
+from spateo.configuration import _themes, reset_rcParams
 from .utils import (
     despline_all,
     deaxis_all,
@@ -36,7 +36,7 @@ from .utils import (
 #     gen_rotation_2d,
 #     affine_transform,
 # )
-from ...tools.utils import (
+from spateo.tools.utils import (
     update_dict,
     get_mapper,
     flatten,
@@ -752,7 +752,7 @@ def scatters(
                     values = (
                         calc_1nd_moment(values, knn)[0]
                         if smooth in [1, True]
-                        else calc_1nd_moment(values, knn ** smooth)[0]
+                        else calc_1nd_moment(values, knn**smooth)[0]
                     )
 
                 if affine_transform_A is None or affine_transform_b is None:
