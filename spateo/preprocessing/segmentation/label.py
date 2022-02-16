@@ -159,4 +159,4 @@ def expand_labels(adata: AnnData, layer: str, distance: int = 5, max_area: int =
     label_layer = SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
     labels = SKM.select_layer_data(adata, label_layer)
     expanded = _expand_labels(labels, distance, max_area)
-    SKM.set_layer_data(adata, label_layer, expanded)
+    SKM.set_layer_data(adata, label_layer, expanded, replace=True)

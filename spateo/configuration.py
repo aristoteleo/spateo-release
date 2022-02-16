@@ -65,7 +65,14 @@ class SpateoAdataKeyManager:
             return res_data.copy()
         return res_data
 
-    def set_layer_data(adata: AnnData, layer: str, vals: np.ndarray, var_indices: Optional[np.ndarray] = None):
+    def set_layer_data(
+        adata: AnnData, layer: str, vals: np.ndarray, var_indices: Optional[np.ndarray] = None, replace: bool = False
+    ):
+        # Mostly for testing
+        if replace:
+            adata.layers[layer] = vals
+            return
+
         if var_indices is None:
             var_indices = slice(None)
         if layer == SpateoAdataKeyManager.X_LAYER:

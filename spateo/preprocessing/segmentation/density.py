@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from . import utils
 from ...configuration import SKM
+from ...io.utils import bin_matrix
 from ...warnings import PreprocessingWarning
 
 
@@ -135,6 +136,7 @@ def _segment_densities(
 def segment_densities(
     adata: AnnData,
     layer: str,
+    binsize: int,
     k: int = 11,
     distance_threshold: Optional[float] = None,
     dk: int = 5,
@@ -145,6 +147,10 @@ def segment_densities(
     Args:
         adata: Input Anndata
         layer: Layer that contains UMI counts to segment based on.
+        binsize: Size of bins to use. For density segmentation, pixels are binned
+            to reduce runtime. 10 is usually a good starting point. Note that this
+            value is relative to the original binsize used to read in the
+            AnnData.
         k: Kernel size for Gaussian blur
         distance_threshold: Distance threshold for the Ward linkage
             such that clusters will not be merged if they have
@@ -152,7 +158,14 @@ def segment_densities(
         dk: Kernel size for final dilation
         out_layer: Lyaer to put resulting bins. Defaults to `{layer}_bins`.
     """
-    X = SKM.select_layer_data(adata, layer, make_dense=True)
+    X = SKM.select_layer_data(adata, layer, make_dense=binsize == 1)
+    if binsize > 1:
+        X = bin_matrix(X, binsize)
+        if issparse(X):
+            X = X.A
     bins = _segment_densities(X, k, distance_threshold, dk)
+    if binsize > 1:
+        # Expand back
+        bins = cv2.resize(bins, adata.shape, interpolation=cv2.INTER_NEAREST)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.BINS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, bins)

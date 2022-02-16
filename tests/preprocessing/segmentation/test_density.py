@@ -2,10 +2,11 @@ from unittest import mock, TestCase
 
 import networkx as nx
 import numpy as np
+from anndata import AnnData
 from scipy import sparse
 
 import spateo.preprocessing.segmentation.density as density
-from ...mixins import TestMixin
+from ...mixins import create_random_adata, TestMixin
 
 
 class TestDensity(TestMixin, TestCase):
@@ -35,3 +36,19 @@ class TestDensity(TestMixin, TestCase):
             np.testing.assert_array_equal(conv2d.call_args[0][0], X.A / X.max())
             conv2d.assert_called_once_with(mock.ANY, 5, mode="gauss")
             schc.assert_called_once_with(conv2d.return_value, distance_threshold=None)
+
+    def test_segment_densities_adata(self):
+        with mock.patch(
+            "spateo.preprocessing.segmentation.density._segment_densities"
+        ) as _segment_densities, mock.patch("spateo.preprocessing.segmentation.density.bin_matrix") as bin_matrix:
+            adata = create_random_adata(shape=(3, 3))
+            _segment_densities.return_value = np.random.random((3, 3))
+            bin_matrix.return_value = np.random.random((3, 3))
+            k = mock.MagicMock()
+            distance_threshold = mock.MagicMock()
+            dk = mock.MagicMock()
+            density.segment_densities(adata, "X", 1, k, distance_threshold, dk)
+            np.testing.assert_array_equal(adata.layers["X_bins"], _segment_densities.return_value)
+            _segment_densities.assert_called_once_with(mock.ANY, k, distance_threshold, dk)
+            np.testing.assert_array_equal(adata.X, _segment_densities.call_args[0][0])
+            bin_matrix.assert_not_called()

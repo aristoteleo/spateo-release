@@ -1,12 +1,13 @@
 """IO utility functions.
 """
-
+import math
 from typing import Optional, Tuple, Union
 
 import cv2
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from scipy.sparse import csr_matrix, issparse, spmatrix
 from scipy.spatial import Delaunay
 from shapely.geometry import Point, LineString, Polygon, MultiPolygon
 from skimage import measure
@@ -183,3 +184,37 @@ def in_convex_hull(p: np.ndarray, convex_hull: Union[Delaunay, np.ndarray]) -> n
         hull = Delaunay(convex_hull)
 
     return hull.find_simplex(p) >= 0
+
+
+def bin_matrix(X: Union[np.ndarray, spmatrix], binsize: int) -> Union[np.ndarray, csr_matrix]:
+    """Bin a matrix.
+
+    Args:
+        X: Dense or sparse matrix.
+        binsize: Bin size
+
+    Returns:
+        Dense or spares matrix, depending on what the input was.
+    """
+    shape = (math.ceil(X.shape[0] / binsize), math.ceil(X.shape[1] / binsize))
+
+    def _bin_sparse(X):
+        nz = X.nonzero()
+        x, y = nz
+        data = X[nz].A.flatten()
+        x_bin = bin_indices(x, 0, binsize)
+        y_bin = bin_indices(y, 0, binsize)
+        return csr_matrix((data, (x_bin, y_bin)), shape=shape, dtype=X.dtype)
+
+    def _bin_dense(X):
+        binned = np.zeros(shape, dtype=X.dtype)
+        for x in range(X.shape[0]):
+            x_bin = bin_indices(x, 0, binsize)
+            for y in range(X.shape[1]):
+                y_bin = bin_indices(y, 0, binsize)
+                binned[x_bin, y_bin] += X[x, y]
+        return binned
+
+    if issparse(X):
+        return _bin_sparse(X)
+    return _bin_dense(X)
