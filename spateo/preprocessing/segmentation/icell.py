@@ -8,16 +8,18 @@ from typing import Optional, Tuple, Union
 
 import cv2
 import numpy as np
+from anndata import AnnData
 from scipy.sparse import issparse, spmatrix
 from skimage import filters
 from typing_extensions import Literal
 
 from . import bp, em, utils
+from ...configuration import SKM
 from ...errors import PreprocessingError
 from ...warnings import PreprocessingWarning
 
 
-def mask_nuclei_from_stain(
+def _mask_nuclei_from_stain(
     X: np.ndarray,
     otsu_classes: int = 3,
     otsu_index: int = 0,
@@ -25,9 +27,29 @@ def mask_nuclei_from_stain(
     mk: int = 5,
 ) -> np.ndarray:
     """Create a boolean mask indicating nuclei from stained nuclei image.
+    See :func:`mask_nuclei_from_stain` for arguments.
+    """
+    thresholds = filters.threshold_multiotsu(X, otsu_classes)
+    background_mask = X < thresholds[otsu_index]
+    local_mask = X > filters.threshold_local(X, local_k)
+    nuclei_mask = utils.mclose_mopen((~background_mask) & local_mask, mk)
+    return nuclei_mask
+
+
+def mask_nuclei_from_stain(
+    adata: AnnData,
+    otsu_classes: int = 3,
+    otsu_index: int = 0,
+    local_k: int = 45,
+    mk: int = 5,
+    layer: str = SKM.NUCLEI_LAYER_KEY,
+    out_layer: Optional[str] = None,
+):
+    """Create a boolean mask indicating nuclei from stained nuclei image, and
+    save this mask in the AnnData as an additional layer.
 
     Args:
-        X: TIF intensities
+        adata: Input Anndata
         otsu_classes: Number of classes to assign pixels to for background
             detection.
         otsu_index: Which threshold index should be used for background.
@@ -38,18 +60,19 @@ def mask_nuclei_from_stain(
             nuclei).
         mk: Size of the kernel used for morphological close and open operations
             applied at the very end.
+        layer: Layer containing nuclei staining
+        out_layer: Layer to put resulting nuclei mask. Defaults to `{layer}_mask`.
 
     Returns:
         Boolean mask indicating which pixels are nuclei.
     """
-    thresholds = filters.threshold_multiotsu(X, otsu_classes)
-    background_mask = X < thresholds[otsu_index]
-    local_mask = X > filters.threshold_local(X, local_k)
-    nuclei_mask = utils.mclose_mopen((~background_mask) & local_mask, mk)
-    return nuclei_mask
+    X = SKM.select_layer_data(adata, layer, make_dense=True)
+    mask = _mask_nuclei_from_stain(X, otsu_classes, otsu_index, local_k, mk)
+    out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
+    SKM.set_layer_data(adata, out_layer, mask)
 
 
-def score_pixels(
+def _score_pixels(
     X: Union[spmatrix, np.ndarray],
     k: int,
     method: Literal["gauss", "EM", "EM+gauss", "EM+BP"],
@@ -130,3 +153,67 @@ def score_pixels(
         if certain_mask is not None:
             res = np.clip(res + certain_mask, 0, 1)
     return res
+
+
+def score_and_mask_pixels(
+    adata: AnnData,
+    layer: str,
+    k: int,
+    method: Literal["gauss", "EM", "EM+gauss", "EM+BP"],
+    em_kwargs: Optional[dict] = None,
+    bp_kwargs: Optional[dict] = None,
+    threshold: Optional[float] = None,
+    mk: int = 7,
+    bins_layer: Optional[Union[Literal[False], str]] = None,
+    certain_layer: Optional[str] = None,
+    scores_layer: Optional[str] = None,
+    mask_layer: Optional[str] = None,
+):
+    """Score and mask pixels by how likely it is occupied.
+
+    Args:
+        adata: Input Anndata
+        layer: Layer that contains UMI counts to use
+        k: Kernel size for convolution
+        method: Method to use. Valid methods are:
+            gauss: Gaussian blur
+            EM: EM algorithm to estimate cell and background expression
+                parameters.
+            EM+gauss: EM algorithm followed by Gaussian blur.
+            EM+BP: EM algorithm followed by belief propagation to estimate the
+                marginal probabilities of cell and background.
+        em_kwargs: Keyword arguments to the :func:`em.run_em` function.
+        bp_kwargs: Keyword arguments to the :func:`bp.run_bp` function.
+        threshold: Score cutoff, above which pixels are considered occupied.
+            By default, a threshold is automatically determined by using
+            the first value of the 3-class Multiotsu method.
+        mk: Kernel size of morphological open and close operations to reduce
+            noise in the mask.
+        bins_layer: Layer containing assignment of pixels into bins. Each bin
+            is considered separately. Defaults to `{layer}_bins`. This can be
+            set to `False` to disable binning, even if the layer exists.
+        certain_layer: Layer containing a boolean mask indicating which pixels are
+            certain to be occupied.
+        scores_layer: Layer to save pixel scores before thresholding. Defaults
+            to `{layer}_scores`.
+        mask_layer: Layer to save the final mask. Defaults to `{layer}_mask`.
+    """
+    X = SKM.select_layer_data(adata, layer, make_dense=True)
+    certain_mask = None
+    if certain_layer:
+        certain_mask = SKM.select_layer_data(adata, certain_layer)
+    bins = None
+    if bins_layer is not False:
+        bins_layer = bins_layer or SKM.gen_new_layer_key(layer, SKM.BINS_SUFFIX)
+        bins = SKM.select_layer_data(adata, bins_layer)
+    scores = _score_pixels(X, k, method, em_kwargs, bp_kwargs, certain_mask, bins)
+    scores_layer = scores_layer or SKM.gen_new_layer_key(layer, SKM.SCORES_SUFFIX)
+    SKM.set_layer_data(adata, scores_layer, scores)
+
+    if not threshold:
+        thresholds = filters.threshold_multiotsu(scores, classes=3)
+        threshold = thresholds[0]
+
+    mask = utils.apply_threshold(scores, mk, threshold)
+    mask_layer = mask_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
+    SKM.set_layer_data(adata, mask_layer, mask)

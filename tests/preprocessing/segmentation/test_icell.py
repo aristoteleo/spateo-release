@@ -27,13 +27,13 @@ class TestICell(TestMixin, TestCase):
             X[1, 0] = 2
             filters.threshold_multiotsu.return_value = [1, 2]
             filters.threshold_local.return_value = 0
-            self.assertEqual(self.utils.mclose_mopen.return_value, icell.mask_nuclei_from_stain(X))
+            self.assertEqual(self.utils.mclose_mopen.return_value, icell._mask_nuclei_from_stain(X))
             np.testing.assert_array_equal([[False, False], [True, True]], self.utils.mclose_mopen.call_args[0][0])
             self.utils.mclose_mopen.assert_called_once_with(mock.ANY, 5)
 
     def test_score_pixels_gauss(self):
         X = mock.MagicMock()
-        result = icell.score_pixels(X, k=3, method="gauss")
+        result = icell._score_pixels(X, k=3, method="gauss")
         self.utils.conv2d.assert_called_once_with(X, 3, mode="gauss", bins=None)
         self.em.run_em.assert_not_called()
         self.em.conditional.assert_not_called()
@@ -48,7 +48,7 @@ class TestICell(TestMixin, TestCase):
         background_cond = mock.MagicMock()
         cell_cond = mock.MagicMock()
         self.em.conditionals.return_value = background_cond, cell_cond
-        result = icell.score_pixels(X, k=3, method="EM", em_kwargs=em_kwargs)
+        result = icell._score_pixels(X, k=3, method="EM", em_kwargs=em_kwargs)
         self.utils.conv2d.assert_called_once_with(X, 3, mode="circle", bins=None)
         self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, bins=None, **em_kwargs)
         self.em.conditional.assert_not_called()
@@ -65,7 +65,7 @@ class TestICell(TestMixin, TestCase):
         background_cond = mock.MagicMock()
         cell_cond = mock.MagicMock()
         self.em.conditionals.return_value = background_cond, cell_cond
-        result = icell.score_pixels(X, k=3, method="EM+gauss", em_kwargs=em_kwargs)
+        result = icell._score_pixels(X, k=3, method="EM+gauss", em_kwargs=em_kwargs)
         self.utils.conv2d.assert_has_calls(
             [
                 mock.call(X, 3, mode="circle", bins=None),
@@ -88,7 +88,7 @@ class TestICell(TestMixin, TestCase):
         background_cond = mock.MagicMock()
         cell_cond = mock.MagicMock()
         self.em.conditionals.return_value = background_cond, cell_cond
-        result = icell.score_pixels(X, k=3, method="EM+BP", em_kwargs=em_kwargs, bp_kwargs=bp_kwargs)
+        result = icell._score_pixels(X, k=3, method="EM+BP", em_kwargs=em_kwargs, bp_kwargs=bp_kwargs)
         self.utils.conv2d.assert_called_once_with(X, 3, mode="circle", bins=None)
         self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, bins=None, **em_kwargs)
         self.em.conditionals.assert_called_once_with(

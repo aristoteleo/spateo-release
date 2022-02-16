@@ -14,8 +14,11 @@ class TestIOBGI(TestMixin, TestCase):
         self.assertEqual(77634, df.shape[0])
 
     def test_read_bgi_agg(self):
-        total, spliced, unspliced, x_min, y_min = bgi.read_bgi_agg(self.bgi_counts_path)
-        self.assertIsNone(spliced)
-        self.assertIsNone(unspliced)
-        self.assertEqual([9600, 12600], [x_min, y_min])
-        self.assertEqual((299, 300), total.shape)
+        adata = bgi.read_bgi_agg(self.bgi_counts_path, scale=1, scale_unit="a")
+        self.assertNotIn("spliced", adata.layers)
+        self.assertNotIn("unspliced", adata.layers)
+        self.assertIn("spatial", adata.uns)
+        self.assertEqual(1, adata.uns["spatial"]["scale"])
+        self.assertEqual("a", adata.uns["spatial"]["scale_unit"])
+        self.assertIn("pp", adata.uns)
+        self.assertEqual((9899, 12900), adata.shape)

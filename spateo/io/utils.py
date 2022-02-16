@@ -6,6 +6,7 @@ from typing import Optional, Tuple, Union
 import cv2
 import numpy as np
 import pandas as pd
+from anndata import AnnData
 from scipy.spatial import Delaunay
 from shapely.geometry import Point, LineString, Polygon, MultiPolygon
 from skimage import measure

@@ -222,15 +222,16 @@ def safe_erode(
     """
     if X.dtype == np.dtype(bool):
         X = X.astype(np.uint8)
-    if np.issubdtype(X.dtype, np.floating) and float_k is None:
-        raise ValueError("`float_k` must be provided for floating point arrays.")
+    is_float = np.issubdtype(X.dtype, np.floating)
+    if is_float and (float_k is None or float_threshold is None):
+        raise ValueError("`float_k` and `float_threshold` must be provided for floating point arrays.")
     saved = np.zeros_like(X, dtype=bool)
     kernel = np.ones((k, k), dtype=np.uint8) if square else circle(k)
 
     for _ in range(n_iter):
         # Find connected components and save if area <= min_area
         components = cv2.connectedComponentsWithStats(
-            apply_threshold(X, float_k, float_threshold).astype(np.uint8) if float_threshold is not None else X
+            apply_threshold(X, float_k, float_threshold).astype(np.uint8) if is_float else X
         )
         areas = components[2][:, cv2.CC_STAT_AREA]
         for label in np.where(areas <= min_area)[0]:
@@ -238,5 +239,5 @@ def safe_erode(
 
         X = cv2.erode(X, kernel)
 
-    mask = X >= float_threshold if float_threshold is not None else X > 0
+    mask = (X >= float_threshold) if is_float else (X > 0)
     return (mask + saved).astype(bool)
