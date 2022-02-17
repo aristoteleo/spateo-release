@@ -161,14 +161,16 @@ def expand_labels(adata: AnnData, layer: str, distance: int = 5, max_area: int =
     Args:
         adata: Input Anndata
         layer: Layer from which the labels were derived. Then, `{layer}_labels`
-            is used as the labels.
+            is used as the labels. If not present, it is taken as a literal.
         distance: Distance to expand. Internally, this is used as the number
             of iterations of distance 1 dilations.
         max_area: Maximum area of each label.
-        out_layer: Layer to save results. By default, overwrites the existing
-            labels.
+        out_layer: Layer to save results. By default, uses `{layer}_labels_expanded`.
     """
     label_layer = SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
+    if label_layer not in adata.layers:
+        label_layer = layer
     labels = SKM.select_layer_data(adata, label_layer)
     expanded = _expand_labels(labels, distance, max_area)
-    SKM.set_layer_data(adata, label_layer, expanded, replace=True)
+    out_layer = out_layer or SKM.gen_new_layer_key(label_layer, SKM.EXPANDED_SUFFIX)
+    SKM.set_layer_data(adata, out_layer, expanded, replace=True)
