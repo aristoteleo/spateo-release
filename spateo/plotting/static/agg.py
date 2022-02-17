@@ -4,8 +4,8 @@ from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 from anndata import AnnData
-from matplotlib.figure import Figure
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from scipy.sparse import issparse
 from skimage.color import label2rgb
 
@@ -21,7 +21,7 @@ def imshow(
     use_scale: bool = True,
     labels: bool = False,
     **kwargs
-) -> Tuple[Figure, Axes]:
+) -> Optional[Tuple[Figure, Axes]]:
     """Display raw data within an AnnData.
 
     Args:
@@ -34,12 +34,14 @@ def imshow(
             integers.
 
     Returns:
-        The figure and axis
+        The figure and axis if `ax` is not provided.
     """
     if SKM.get_adata_type(adata) != SKM.ADATA_AGG_TYPE:
         raise PlottingError("Only `AGG` type AnnDatas are supported.")
 
+    return_fig_ax = False
     if ax is None:
+        return_fig_ax = True
         fig, ax = plt.subplots(figsize=(4, 4), tight_layout=True)
     else:
         fig = ax.get_figure()
@@ -48,17 +50,17 @@ def imshow(
     if labels:
         mtx = label2rgb(mtx)
 
-    im = ax.imshow(mtx, interpolation="none", **kwargs)
+    kwargs.update({"interpolation": "none"})
+    im = ax.imshow(mtx, **kwargs)
+    ax.set_title(layer)
     if show_cbar:
         fig.colorbar(im)
     if use_scale and SKM.has_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY):
-        xticks = ax.get_xticks()
-        yticks = ax.get_yticks()
         scale = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY)
         unit = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY)
-        ax.set_xticklabels(xticks * scale)
-        ax.set_yticklabels(yticks * scale)
+        im.set_extent((0, (mtx.shape[1] - 1) * scale, (mtx.shape[0] - 1) * scale, 0))
         ax.set_xlabel(unit)
         ax.set_ylabel(unit)
 
-    return fig, ax
+    if return_fig_ax:
+        return fig, ax

@@ -11,6 +11,7 @@ from skimage import segmentation, filters
 
 from . import utils
 from ...configuration import SKM
+from ...errors import PreprocessingError
 
 
 def _watershed(
@@ -56,7 +57,8 @@ def watershed_markers(
     Args:
         adata: Input Anndata
         layer: Layer that was used to create scores or masks. If `{layer}_scores`
-            is present, that is used. Otherwise, `{layer}_mask` is used.
+            is present, that is used. Otherwise if `{layer}_mask` is present,
+            that is used. Otherwise, the layer is taken as a literal.
         k: Erosion kernel size
         square: Whether to use a square kernel
         min_area: Minimum area
@@ -68,9 +70,19 @@ def watershed_markers(
             determined by using Otsu method.
         out_layer: Layer to save results. By default, this will be `{layer}_markers`.
     """
-    _layer = SKM.gen_new_layer_key(layer, SKM.SCORES_SUFFIX)
-    if _layer not in adata.layers:
-        _layer = SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
+    _layer1 = SKM.gen_new_layer_key(layer, SKM.SCORES_SUFFIX)
+    _layer2 = SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
+    if _layer1 not in adata.layers and _layer2 not in adata.layers and layer not in adata.layers:
+        raise PreprocessingError(
+            f'Neither "{_layer1}", "{_layer2}", nor "{layer}" are present in AnnData. '
+            "Please run either `st.pp.segmentation.icell.mask_nuclei_from_stain` "
+            "or `st.pp.segmentation.score_and_mask_pixels` first."
+        )
+    _layer = layer
+    if _layer1 in adata.layers:
+        _layer = _layer1
+    elif _layer2 in adata.layers:
+        _layer = _layer2
     X = SKM.select_layer_data(adata, _layer, make_dense=True)
     if np.issubdtype(X.dtype, np.floating) and not float_threshold:
         float_threshold = filters.threshold_otsu(X)

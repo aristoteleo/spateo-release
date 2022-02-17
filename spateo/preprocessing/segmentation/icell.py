@@ -66,6 +66,12 @@ def mask_nuclei_from_stain(
     Returns:
         Boolean mask indicating which pixels are nuclei.
     """
+    if layer not in adata.layers:
+        raise PreprocessingError(
+            f'Layer "{layer}" does not exist in AnnData. '
+            "Please import nuclei staining results either manually or "
+            "with the `nuclei_path` argument to `st.io.read_bgi_agg`."
+        )
     X = SKM.select_layer_data(adata, layer, make_dense=True)
     mask = _mask_nuclei_from_stain(X, otsu_classes, otsu_index, local_k, mk)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
@@ -193,7 +199,8 @@ def score_and_mask_pixels(
             is considered separately. Defaults to `{layer}_bins`. This can be
             set to `False` to disable binning, even if the layer exists.
         certain_layer: Layer containing a boolean mask indicating which pixels are
-            certain to be occupied.
+            certain to be occupied. If the array is not a boolean array, it is
+            casted to boolean.
         scores_layer: Layer to save pixel scores before thresholding. Defaults
             to `{layer}_scores`.
         mask_layer: Layer to save the final mask. Defaults to `{layer}_mask`.
@@ -201,11 +208,12 @@ def score_and_mask_pixels(
     X = SKM.select_layer_data(adata, layer, make_dense=True)
     certain_mask = None
     if certain_layer:
-        certain_mask = SKM.select_layer_data(adata, certain_layer)
+        certain_mask = SKM.select_layer_data(adata, certain_layer).astype(bool)
     bins = None
     if bins_layer is not False:
         bins_layer = bins_layer or SKM.gen_new_layer_key(layer, SKM.BINS_SUFFIX)
-        bins = SKM.select_layer_data(adata, bins_layer)
+        if bins_layer in adata.layers:
+            bins = SKM.select_layer_data(adata, bins_layer)
     scores = _score_pixels(X, k, method, em_kwargs, bp_kwargs, certain_mask, bins)
     scores_layer = scores_layer or SKM.gen_new_layer_key(layer, SKM.SCORES_SUFFIX)
     SKM.set_layer_data(adata, scores_layer, scores)
