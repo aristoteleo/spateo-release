@@ -61,7 +61,7 @@ def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
 
 def read_bgi_agg(
     path: str,
-    nuclei_path: Optional[str] = None,
+    stain_path: Optional[str] = None,
     scale: Optional[float] = None,
     scale_unit: Optional[str] = "um",
     binsize: int = 1,
@@ -71,7 +71,7 @@ def read_bgi_agg(
 
     Args:
         path: Path to read file.
-        nuclei_path: Path to nuclei staining image. Must have the same coordinate
+        stain_path: Path to nuclei staining image. Must have the same coordinate
             system as the read file.
         scale: Physical length per coordinate, in um. For visualization only.
         scale_unit: Scale unit. Defaults to um.
@@ -95,8 +95,8 @@ def read_bgi_agg(
 
     # Read image and update x,y max if appropriate
     layers = {}
-    if nuclei_path:
-        image = skimage.io.imread(nuclei_path)[x_min:, y_min:]
+    if stain_path:
+        image = skimage.io.imread(stain_path)[x_min:, y_min:]
         x_max = max(x_max, image.shape[0])
         y_max = max(y_max, image.shape[1])
         shape = (x_max + 1, y_max + 1)
@@ -104,7 +104,7 @@ def read_bgi_agg(
         if image.shape != shape:
             image = np.pad(image, ((0, shape[0] - image.shape[0]), (0, shape[1] - image.shape[1])))
         # Resize image to match bins
-        layers[SKM.NUCLEI_LAYER_KEY] = image
+        layers[SKM.STAIN_LAYER_KEY] = image
 
     if binsize > 1:
         shape = (math.ceil(shape[0] / binsize), math.ceil(shape[1] / binsize))
@@ -112,8 +112,8 @@ def read_bgi_agg(
         y = bin_indices(y, 0, binsize)
 
         # Resize image if necessary
-        if nuclei_path:
-            layers[SKM.NUCLEI_LAYER_KEY] = cv2.resize(image, shape)
+        if stain_path:
+            layers[SKM.STAIN_LAYER_KEY] = cv2.resize(image, shape)
 
         if scale is not None:
             scale *= binsize

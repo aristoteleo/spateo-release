@@ -19,6 +19,12 @@ from ...errors import PreprocessingError
 from ...warnings import PreprocessingWarning
 
 
+def _mask_cells_from_stain(X: np.ndarray, otsu_classes: int = 3, otsu_index: int = 0, mk: int = 7) -> np.ndarray:
+    """Create a boolean mask indicating cells from stained image."""
+    thresholds = filters.threshold_multiotsu(X, otsu_classes)
+    return utils.mclose_mopen(X >= thresholds[otsu_index], mk)
+
+
 def _mask_nuclei_from_stain(
     X: np.ndarray,
     otsu_classes: int = 3,
@@ -31,9 +37,42 @@ def _mask_nuclei_from_stain(
     """
     thresholds = filters.threshold_multiotsu(X, otsu_classes)
     background_mask = X < thresholds[otsu_index]
+    # local_mask = X >= filters.rank.otsu(X, utils.circle(local_k))
     local_mask = X > filters.threshold_local(X, local_k)
     nuclei_mask = utils.mclose_mopen((~background_mask) & local_mask, mk)
     return nuclei_mask
+
+
+def mask_cells_from_stain(
+    adata: AnnData,
+    otsu_classes: int = 3,
+    otsu_index: int = 0,
+    mk: int = 7,
+    layer: str = SKM.STAIN_LAYER_KEY,
+    out_layer: Optional[str] = None,
+):
+    """Create a boolean mask indicating cells from stained image.
+
+    Args:
+        adata: Input Anndata
+        otsu_classes: Number of classes to assign pixels to for cell detection
+        otsu_index: Which threshold index should be used for classifying
+            cells. All pixel intensities >= the value at this index will be
+            classified as cell.
+        mk: Size of the kernel used for morphological close and open operations
+            applied at the very end.
+        out_layer: Layer to put resulting nuclei mask. Defaults to `{layer}_mask`.
+    """
+    if layer not in adata.layers:
+        raise PreprocessingError(
+            f'Layer "{layer}" does not exist in AnnData. '
+            "Please import nuclei staining results either manually or "
+            "with the `nuclei_path` argument to `st.io.read_bgi_agg`."
+        )
+    X = SKM.select_layer_data(adata, layer, make_dense=True)
+    mask = _mask_cells_from_stain(X, otsu_classes, otsu_index, mk)
+    out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
+    SKM.set_layer_data(adata, out_layer, mask)
 
 
 def mask_nuclei_from_stain(
@@ -41,8 +80,8 @@ def mask_nuclei_from_stain(
     otsu_classes: int = 3,
     otsu_index: int = 0,
     local_k: int = 45,
-    mk: int = 5,
-    layer: str = SKM.NUCLEI_LAYER_KEY,
+    mk: int = 7,
+    layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
 ):
     """Create a boolean mask indicating nuclei from stained nuclei image, and
@@ -62,9 +101,6 @@ def mask_nuclei_from_stain(
             applied at the very end.
         layer: Layer containing nuclei staining
         out_layer: Layer to put resulting nuclei mask. Defaults to `{layer}_mask`.
-
-    Returns:
-        Boolean mask indicating which pixels are nuclei.
     """
     if layer not in adata.layers:
         raise PreprocessingError(

@@ -85,3 +85,9 @@ class TestLabel(TestMixin, TestCase):
             np.testing.assert_array_equal(adata.layers["nuclei_labels_expanded"], _expand_labels.return_value)
             _expand_labels.assert_called_once_with(mock.ANY, distance, max_area)
             np.testing.assert_array_equal(adata.layers["nuclei_labels"], _expand_labels.call_args[0][0])
+
+    def test_label_connected_components(self):
+        pass
+
+    def test_label_connected_components_adata(self):
+        pass

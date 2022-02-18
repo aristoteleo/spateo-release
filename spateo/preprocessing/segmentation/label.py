@@ -43,11 +43,11 @@ def _watershed(
 
 def watershed_markers(
     adata: AnnData,
-    layer: str,
+    layer: str = SKM.STAIN_LAYER_KEY,
     k: int = 3,
     square: bool = False,
     min_area: int = 100,
-    n_iter: int = 15,
+    n_iter: int = -1,
     float_k: int = 5,
     float_threshold: Optional[float] = None,
     out_layer: Optional[str] = None,
@@ -93,8 +93,8 @@ def watershed_markers(
 
 def watershed(
     adata: AnnData,
-    layer: str,
-    k: int = 11,
+    layer: str = SKM.STAIN_LAYER_KEY,
+    k: int = 3,
     mask_layer: Optional[str] = None,
     markers_layer: Optional[str] = None,
     out_layer: Optional[str] = None,
