@@ -219,8 +219,7 @@ def score_and_mask_pixels(
     SKM.set_layer_data(adata, scores_layer, scores)
 
     if not threshold:
-        thresholds = filters.threshold_multiotsu(scores, classes=3)
-        threshold = thresholds[0]
+        threshold = filters.threshold_otsu(scores)
 
     mask = utils.apply_threshold(scores, mk, threshold)
     mask_layer = mask_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
