@@ -1,11 +1,4 @@
 """Assign spots to individual cells.
-
-Todo:
-    * Instead of writing a new matrix file with the assigned cell labels,
-        the `cell_labels` and `cens` should be used directly by an IO function
-        to create an AnnData. In this sense, this file is probably going to be
-        removed, and its functionality split across `pp.segmentation.label`
-        and `io`.
 """
 from collections import Counter
 from typing import Dict, Tuple
