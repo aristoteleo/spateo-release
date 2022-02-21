@@ -8,7 +8,7 @@ Todo:
 """
 import gzip
 import math
-from typing import Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import cv2
 import geopandas as gpd
@@ -65,6 +65,7 @@ def read_bgi_agg(
     scale: Optional[float] = None,
     scale_unit: Optional[str] = "um",
     binsize: int = 1,
+    gene_agg: Optional[Dict[str, Union[List[str], Callable[[str], bool]]]] = None,
 ) -> AnnData:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
@@ -76,6 +77,10 @@ def read_bgi_agg(
         scale: Physical length per coordinate, in um. For visualization only.
         scale_unit: Scale unit. Defaults to um.
         binsize: Size of pixel bins.
+        gene_agg: Dictionary of layer keys to gene names to aggregate. For
+            example, `{'mito': ['list', 'of', 'mitochondrial', 'genes']}` will
+            yield an AnnData with a layer named "mito" with the aggregate total
+            UMIs of the provided gene list.
 
     Returns:
         An AnnData object containing the UMIs per coordinate and the nucleus
@@ -85,11 +90,10 @@ def read_bgi_agg(
         The nuclei image is stored as a Numpy array in `.layers['nuclei']`.
     """
     data = read_bgi_as_dataframe(path)
-    x = data["x"].values
-    y = data["y"].values
-    x_min, y_min = x.min(), y.min()
-    x -= x_min
-    y -= y_min
+    x_min, y_min = data["x"].min(), data["y"].min()
+    data["x"] -= x_min
+    data["y"] -= y_min
+    x, y = data["x"].values, data["y"].values
     x_max, y_max = x.max(), y.max()
     shape = (x_max + 1, y_max + 1)
 
@@ -113,7 +117,7 @@ def read_bgi_agg(
 
         # Resize image if necessary
         if stain_path:
-            layers[SKM.STAIN_LAYER_KEY] = cv2.resize(image, shape)
+            layers[SKM.STAIN_LAYER_KEY] = cv2.resize(image, shape[::-1])
 
         if scale is not None:
             scale *= binsize
@@ -124,6 +128,18 @@ def read_bgi_agg(
     for name, i in COUNT_COLUMN_MAPPING.items():
         if name != SKM.X_LAYER and i < len(data.columns):
             layers[name] = csr_matrix((data[data.columns[i]].values, (x, y)), shape=shape, dtype=np.uint16)
+
+    # Aggregate gene lists
+    if gene_agg:
+        for name, genes in gene_agg.items():
+            mask = data["geneID"].isin(genes) if isinstance(genes, list) else data["geneID"].map(genes)
+            data_genes = data[mask]
+            _x, _y = data_genes["x"].values, data_genes["y"].values
+            layers[name] = csr_matrix(
+                (data_genes[data.columns[COUNT_COLUMN_MAPPING[SKM.X_LAYER]]].values, (_x, _y)),
+                shape=shape,
+                dtype=np.uint16,
+            )
 
     adata = AnnData(X=X, layers=layers)
 
