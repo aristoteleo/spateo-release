@@ -127,7 +127,7 @@ def refine_alignment(
     if transform_layers:
         for layer in transform_layers:
             data = SKM.select_layer_data(adata, layer)
-            transformed = model.transform(data)
+            transformed = aligner.transform(data)
             if data.dtype == np.dtype(bool):
                 transformed = transformed > 0.5
             SKM.set_layer_data(adata, layer, transformed)
