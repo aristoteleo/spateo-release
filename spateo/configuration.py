@@ -30,6 +30,7 @@ class SpateoAdataKeyManager:
     UNS_SPATIAL_SCALE_KEY = "scale"
     UNS_SPATIAL_SCALE_UNIT_KEY = "scale_unit"
     UNS_SPATIAL_SEGMENTATION_KEY = "segmentation"
+    UNS_SPATIAL_ALIGNMENT_KEY = "alignment"
 
     SPLICED_LAYER_KEY = "spliced"
     UNSPLICED_LAYER_KEY = "unspliced"

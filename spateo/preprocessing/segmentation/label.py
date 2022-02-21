@@ -46,7 +46,7 @@ def watershed_markers(
     layer: str = SKM.STAIN_LAYER_KEY,
     k: int = 3,
     square: bool = False,
-    min_area: int = 100,
+    min_area: int = 80,
     n_iter: int = -1,
     float_k: int = 5,
     float_threshold: Optional[float] = None,
