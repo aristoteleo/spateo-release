@@ -18,7 +18,7 @@ class AlignmentRefiner(nn.Module):
     Performs Autograd on the affine transformation matrix.
     """
 
-    def __init__(self, reference: np.ndarray, to_align: np.ndarray):
+    def __init__(self, reference: np.ndarray, to_align: np.ndarray, theta: Optional[np.ndarray] = None):
         if reference.dtype != np.dtype(bool) or to_align.dtype != np.dtype(bool):
             raise PreprocessingError("`AlignmentRefiner` only supports boolean arrays.")
 
@@ -31,23 +31,23 @@ class AlignmentRefiner(nn.Module):
         )[None][None]
 
         # Affine matrix
-        self.theta = nn.Parameter(
-            torch.tensor(
-                [
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                ]
+        if theta is not None:
+            self.theta = nn.Parameter(torch.tensor(theta))
+        else:
+            self.theta = nn.Parameter(
+                torch.tensor(
+                    [
+                        [1.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0],
+                    ]
+                )
             )
-        )
 
         self.__optimizer = None
         self.history = {}
 
-    def forward(self, x=None):
-        if x is None:
-            x = self.to_align
-        grid = F.affine_grid(self.theta.unsqueeze(0), x.size(), align_corners=False)
-        return F.grid_sample(x, grid, align_corners=False)
+    def forward(self):
+        return self.transform(self.theta, self.to_align, train=True)
 
     def loss(self, pred):
         return torch.sum(self.weight * (pred - self.reference) ** 2) / self.weight.numel()
@@ -73,12 +73,17 @@ class AlignmentRefiner(nn.Module):
                 loss.backward()
                 optimizer.step()
 
-    def transform(self, x=None):
-        if x is None:
-            x = self.to_align
-        else:
+    @staticmethod
+    def transform(theta, x, train=False):
+        """This method should be used when applying the learned affine
+        transformation to an arbitrary image.
+        """
+        if not train:
+            theta = torch.tensor(theta).float()
             x = torch.tensor(x)[None][None].float()
-        return self.forward(x).detach().numpy().squeeze()
+        grid = F.affine_grid(theta.unsqueeze(0), x.size(), align_corners=False)
+        t = F.grid_sample(x, grid, align_corners=False)
+        return t if train else t.detach().numpy()
 
     def affine(self):
         return self.theta.detach().numpy()
@@ -127,7 +132,7 @@ def refine_alignment(
     if transform_layers:
         for layer in transform_layers:
             data = SKM.select_layer_data(adata, layer)
-            transformed = aligner.transform(data)
+            transformed = aligner.transform(theta, data)
             if data.dtype == np.dtype(bool):
                 transformed = transformed > 0.5
             SKM.set_layer_data(adata, layer, transformed)
