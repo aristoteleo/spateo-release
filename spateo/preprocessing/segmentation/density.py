@@ -166,6 +166,6 @@ def segment_densities(
     bins = _segment_densities(X, k, distance_threshold, dk)
     if binsize > 1:
         # Expand back
-        bins = cv2.resize(bins, adata.shape, interpolation=cv2.INTER_NEAREST)
+        bins = cv2.resize(bins, adata.shape[::-1], interpolation=cv2.INTER_NEAREST)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.BINS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, bins)

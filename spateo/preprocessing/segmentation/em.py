@@ -190,7 +190,7 @@ def run_em(
     X: np.ndarray,
     use_peaks: bool = False,
     min_distance: int = 21,
-    downsample: Union[int, float] = 1e6,
+    downsample: Union[int, float] = 0.001,
     w: Tuple[float, float] = (0.5, 0.5),
     mu: Tuple[float, float] = (10.0, 300.0),
     var: Tuple[float, float] = (20.0, 400.0),
