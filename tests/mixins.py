@@ -3,6 +3,17 @@ import shutil
 import tempfile
 from unittest import TestCase
 
+import numpy as np
+from anndata import AnnData
+
+
+def create_random_adata(layers=None, shape=(3, 3)):
+    adata = AnnData(X=np.random.random(shape))
+    if layers:
+        for layer in layers:
+            adata.layers[layer] = np.random.random(shape)
+    return adata
+
 
 class TestMixin(TestCase):
     def setUp(self):

@@ -73,8 +73,24 @@ def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
     return cv2.GaussianBlur(src=X.astype(float), ksize=(k, k), sigmaX=0, sigmaY=0)
 
 
+def median_blur(X: np.ndarray, k: int) -> np.ndarray:
+    """Median blur
+
+    This function is not designed to be called directly. Use :func:`conv2d`
+    with `mode="median"` instead.
+
+    Args:
+        X: UMI counts per pixel.
+        k: Radius of median blur.
+
+    Returns:
+        Blurred array
+    """
+    return cv2.medianBlur(src=X.astype(np.uint8), ksize=k)
+
+
 def conv2d(
-    X: np.ndarray, k: int, mode: Literal["gauss", "circle", "square"], bins: Optional[np.ndarray] = None
+    X: np.ndarray, k: int, mode: Literal["gauss", "median", "circle", "square"], bins: Optional[np.ndarray] = None
 ) -> np.ndarray:
     """Convolve an array with the specified kernel size and mode.
 
@@ -96,14 +112,16 @@ def conv2d(
     """
     if k < 1 or k % 2 == 0:
         raise ValueError(f"`k` must be odd and greater than 0.")
-    if mode not in ("gauss", "circle", "square"):
-        raise ValueError(f'`mode` must be one of "gauss", "circle", "square"')
+    if mode not in ("median", "gauss", "circle", "square"):
+        raise ValueError(f'`mode` must be one of "median", "gauss", "circle", "square"')
     if bins is not None and X.shape != bins.shape:
         raise ValueError("`bins` must have the same shape as `X`")
 
     def _conv(_X):
         if mode == "gauss":
             return gaussian_blur(_X, k)
+        if mode == "median":
+            return median_blur(_X, k)
         kernel = np.ones((k, k), dtype=np.uint8) if mode == "square" else circle(k)
         return signal.convolve2d(_X, kernel, boundary="symm", mode="same")
 
@@ -189,7 +207,7 @@ def safe_erode(
     k: int,
     square: bool = False,
     min_area: int = 1,
-    n_iter: int = 1,
+    n_iter: int = -1,
     float_k: Optional[int] = None,
     float_threshold: Optional[float] = None,
 ) -> np.ndarray:
@@ -207,7 +225,8 @@ def safe_erode(
         k: Erosion kernel size
         square: Whether to use a square kernel
         min_area: Minimum area
-        n_iter: Number of erosions to perform.
+        n_iter: Number of erosions to perform. If -1, then erosion is continued
+            until every connected component is <= `min_area`.
         float_k: Morphological close and open kernel size when `X` is a
             float array.
         float_threshold: Threshold to use to determine connected components
@@ -222,21 +241,29 @@ def safe_erode(
     """
     if X.dtype == np.dtype(bool):
         X = X.astype(np.uint8)
-    if np.issubdtype(X.dtype, np.floating) and float_k is None:
-        raise ValueError("`float_k` must be provided for floating point arrays.")
+    is_float = np.issubdtype(X.dtype, np.floating)
+    if is_float and (float_k is None or float_threshold is None):
+        raise ValueError("`float_k` and `float_threshold` must be provided for floating point arrays.")
     saved = np.zeros_like(X, dtype=bool)
     kernel = np.ones((k, k), dtype=np.uint8) if square else circle(k)
 
-    for _ in range(n_iter):
+    i = 0
+    while True:
         # Find connected components and save if area <= min_area
         components = cv2.connectedComponentsWithStats(
-            apply_threshold(X, float_k, float_threshold).astype(np.uint8) if float_threshold is not None else X
+            apply_threshold(X, float_k, float_threshold).astype(np.uint8) if is_float else X
         )
         areas = components[2][:, cv2.CC_STAT_AREA]
         for label in np.where(areas <= min_area)[0]:
-            saved += components[1] == label
+            if label > 0:
+                saved += components[1] == label
 
+        prev_X = X.copy()
         X = cv2.erode(X, kernel)
 
-    mask = X >= float_threshold if float_threshold is not None else X > 0
+        i += 1
+        if (areas > min_area).sum() == 1 or (n_iter > 0 and n_iter == i):
+            break
+
+    mask = (X >= float_threshold) if is_float else (X > 0)
     return (mask + saved).astype(bool)

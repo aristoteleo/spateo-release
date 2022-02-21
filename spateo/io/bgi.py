@@ -7,15 +7,19 @@ Todo:
         @Xiaojieqiu
 """
 import gzip
+import math
 from typing import Optional, Tuple, Union
 
-from anndata import AnnData
+import cv2
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import skimage.io
+from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
 from shapely.geometry import Polygon, MultiPolygon
 
+from ..configuration import SKM
 from .utils import (
     bin_indices,
     centroids,
@@ -25,9 +29,9 @@ from .utils import (
 )
 
 COUNT_COLUMN_MAPPING = {
-    "total": 3,
-    "spliced": 4,
-    "unspliced": 5,
+    SKM.X_LAYER: 3,
+    SKM.SPLICED_LAYER_KEY: 4,
+    SKM.UNSPLICED_LAYER_KEY: 5,
 }
 
 
@@ -57,61 +61,83 @@ def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
 
 def read_bgi_agg(
     path: str,
-    x_max: Optional[int] = None,
-    y_max: Optional[int] = None,
+    stain_path: Optional[str] = None,
+    scale: Optional[float] = None,
+    scale_unit: Optional[str] = "um",
     binsize: int = 1,
-) -> Tuple[spmatrix, Optional[spmatrix], Optional[spmatrix], Optional[float], Optional[float]]:
+) -> AnnData:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
 
     Args:
         path: Path to read file.
-        x_max: Maximum x coordinate. If not provided, the maximum non-zero x
-            will be used.
-        y_max: Maximum y coordinate. If not provided, the maximum non-zero y
-            will be used.
-        binsize: The number of spatial bins to aggregate RNAs captured by DNBs in those bins. By default it is 1.
+        stain_path: Path to nuclei staining image. Must have the same coordinate
+            system as the read file.
+        scale: Physical length per coordinate, in um. For visualization only.
+        scale_unit: Scale unit. Defaults to um.
+        binsize: Size of pixel bins.
 
     Returns:
-        Tuple containing 3 sparse matrices corresponding to total, spliced,
-        and unspliced counts respectively. If the read file does not contain
-        spliced and unspliced counts, the last two elements are None. When the data is just part of a chip (x, y
-        coordinates don't start from (0, 0), x_min, y_min will be also returned.
+        An AnnData object containing the UMIs per coordinate and the nucleus
+        staining image, if provided. The total UMIs are stored as a sparse matrix in
+        `.X`, and spliced and unspliced counts (if present) are stored in
+        `.layers['spliced']` and `.layers['unspliced']` respectively.
+        The nuclei image is stored as a Numpy array in `.layers['nuclei']`.
     """
-
     data = read_bgi_as_dataframe(path)
-    x, y = data["x"].values, data["y"].values
-    x_min, y_min = np.min(x), np.min(y)
+    x = data["x"].values
+    y = data["y"].values
+    x_min, y_min = x.min(), y.min()
+    x -= x_min
+    y -= y_min
+    x_max, y_max = x.max(), y.max()
+    shape = (x_max + 1, y_max + 1)
 
-    if binsize != 1:
-        data["x"] = bin_indices(x, x_min, binsize)
-        data["y"] = bin_indices(y, y_min, binsize)
-    else:
-        data["x"] -= x_min
-        data["y"] -= y_min
+    # Read image and update x,y max if appropriate
+    layers = {}
+    if stain_path:
+        image = skimage.io.imread(stain_path)[x_min:, y_min:]
+        x_max = max(x_max, image.shape[0])
+        y_max = max(y_max, image.shape[1])
+        shape = (x_max + 1, y_max + 1)
+        # Reshape image to match new x,y max
+        if image.shape != shape:
+            image = np.pad(image, ((0, shape[0] - image.shape[0]), (0, shape[1] - image.shape[1])))
+        # Resize image to match bins
+        layers[SKM.STAIN_LAYER_KEY] = image
 
-    # use x, y after re-indexing
-    x, y = data["x"].values, data["y"].values
-    x_delta = max(x_max, max(x)) if x_max else max(x)
-    y_delta = max(y_max, max(y)) if y_max else max(y)
+    if binsize > 1:
+        shape = (math.ceil(shape[0] / binsize), math.ceil(shape[1] / binsize))
+        x = bin_indices(x, 0, binsize)
+        y = bin_indices(y, 0, binsize)
 
-    matrices = []
+        # Resize image if necessary
+        if stain_path:
+            layers[SKM.STAIN_LAYER_KEY] = cv2.resize(image, shape)
+
+        if scale is not None:
+            scale *= binsize
+
+    # Put total in X
+    X = csr_matrix((data[data.columns[COUNT_COLUMN_MAPPING[SKM.X_LAYER]]].values, (x, y)), shape=shape, dtype=np.uint16)
+
     for name, i in COUNT_COLUMN_MAPPING.items():
-        if i < len(data.columns):
-            matrices.append(
-                csr_matrix(
-                    (data[data.columns[i]], (data["x"], data["y"])),
-                    shape=(x_delta + 1, y_delta + 1),
-                    dtype=np.uint16,
-                )
-            )
-        else:
-            matrices.append(None)
+        if name != SKM.X_LAYER and i < len(data.columns):
+            layers[name] = csr_matrix((data[data.columns[i]].values, (x, y)), shape=shape, dtype=np.uint16)
 
-    if x_min == 0 and y_min == 0:
-        return tuple(matrices)
-    else:
-        return tuple(matrices + [x_min, y_min])
+    adata = AnnData(X=X, layers=layers)
+
+    # Set uns
+    SKM.init_adata_type(adata, SKM.ADATA_AGG_TYPE)
+    SKM.init_uns_pp_namespace(adata)
+    SKM.init_uns_spatial_namespace(adata)
+    SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_BINSIZE_KEY, binsize)
+    SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_XMIN_KEY, x_min)
+    SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_YMIN_KEY, y_min)
+    if scale:
+        SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY, scale)
+        SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY, scale_unit)
+    return adata
 
 
 def read_bgi(

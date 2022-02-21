@@ -1,9 +1,9 @@
-from unittest import TestCase
+from unittest import mock, TestCase
 
 import numpy as np
 
 import spateo.preprocessing.segmentation.label as label
-from ...mixins import TestMixin
+from ...mixins import create_random_adata, TestMixin
 
 
 class TestLabel(TestMixin, TestCase):
@@ -19,7 +19,7 @@ class TestLabel(TestMixin, TestCase):
         expected = np.zeros((10, 10), dtype=int)
         expected[:3, :3] = 1
         expected[7:, 7:] = 2
-        np.testing.assert_array_equal(expected, label.watershed(X, mask, marker_mask, 3))
+        np.testing.assert_array_equal(expected, label._watershed(X, mask, marker_mask, 3))
 
     def test_expand_labels(self):
         X = np.zeros((10, 10), dtype=int)
@@ -29,4 +29,65 @@ class TestLabel(TestMixin, TestCase):
         expected[:3, :3] = 1
         expected[3, :2] = 1
         expected[:2, 3] = 1
-        np.testing.assert_array_equal(expected, label.expand_labels(X, 3, 9))
+        np.testing.assert_array_equal(expected, label._expand_labels(X, 3, 9))
+
+    def test_watershed_markers_with_scores(self):
+        with mock.patch("spateo.preprocessing.segmentation.label.utils.safe_erode") as safe_erode:
+            safe_erode.return_value = np.random.random((3, 3))
+            adata = create_random_adata(["unspliced_scores", "unspliced_mask"], (3, 3))
+            k = mock.MagicMock()
+            square = mock.MagicMock()
+            min_area = mock.MagicMock()
+            n_iter = mock.MagicMock()
+            float_k = mock.MagicMock()
+            float_threshold = mock.MagicMock()
+            label.watershed_markers(adata, "unspliced", k, square, min_area, n_iter, float_k, float_threshold)
+            np.testing.assert_array_equal(adata.layers["unspliced_markers"], safe_erode.return_value)
+
+            safe_erode.assert_called_once_with(mock.ANY, k, square, min_area, n_iter, float_k, float_threshold)
+            np.testing.assert_array_equal(adata.layers["unspliced_scores"], safe_erode.call_args[0][0])
+
+    def test_watershed_markers_with_mask(self):
+        with mock.patch("spateo.preprocessing.segmentation.label.utils.safe_erode") as safe_erode:
+            safe_erode.return_value = np.random.random((3, 3))
+            adata = create_random_adata(["unspliced_mask"], (3, 3))
+            k = mock.MagicMock()
+            square = mock.MagicMock()
+            min_area = mock.MagicMock()
+            n_iter = mock.MagicMock()
+            float_k = mock.MagicMock()
+            float_threshold = mock.MagicMock()
+            label.watershed_markers(adata, "unspliced", k, square, min_area, n_iter, float_k, float_threshold)
+            np.testing.assert_array_equal(adata.layers["unspliced_markers"], safe_erode.return_value)
+
+            safe_erode.assert_called_once_with(mock.ANY, k, square, min_area, n_iter, float_k, float_threshold)
+            np.testing.assert_array_equal(adata.layers["unspliced_mask"], safe_erode.call_args[0][0])
+
+    def test_watershed_adata(self):
+        with mock.patch("spateo.preprocessing.segmentation.label._watershed") as _watershed:
+            _watershed.return_value = np.random.random((3, 3))
+            adata = create_random_adata(["nuclei", "nuclei_mask", "nuclei_markers"], (3, 3))
+            k = mock.MagicMock()
+            label.watershed(adata, "nuclei", k)
+            np.testing.assert_array_equal(adata.layers["nuclei_labels"], _watershed.return_value)
+            _watershed.assert_called_once_with(mock.ANY, mock.ANY, mock.ANY, k)
+            np.testing.assert_array_equal(adata.layers["nuclei"], _watershed.call_args[0][0])
+            np.testing.assert_array_equal(adata.layers["nuclei_mask"], _watershed.call_args[0][1])
+            np.testing.assert_array_equal(adata.layers["nuclei_markers"], _watershed.call_args[0][2])
+
+    def test_expand_labels_adata(self):
+        with mock.patch("spateo.preprocessing.segmentation.label._expand_labels") as _expand_labels:
+            _expand_labels.return_value = np.random.random((3, 3))
+            adata = create_random_adata(["nuclei_labels"], (3, 3))
+            distance = mock.MagicMock()
+            max_area = mock.MagicMock()
+            label.expand_labels(adata, "nuclei", distance, max_area)
+            np.testing.assert_array_equal(adata.layers["nuclei_labels_expanded"], _expand_labels.return_value)
+            _expand_labels.assert_called_once_with(mock.ANY, distance, max_area)
+            np.testing.assert_array_equal(adata.layers["nuclei_labels"], _expand_labels.call_args[0][0])
+
+    def test_label_connected_components(self):
+        pass
+
+    def test_label_connected_components_adata(self):
+        pass

@@ -47,18 +47,18 @@ class TestEM(TestMixin, TestCase):
         X = rng.negative_binomial(10, 0.5, (10, 10)) + rng.negative_binomial(100, 0.5, (10, 10))
 
         w, r, p = em.run_em(X, w=(0.99, 0.01), max_iter=100)
-        np.testing.assert_allclose([0.2383495042266562, 0.7616504957733438], w)
-        np.testing.assert_allclose([33.82400850536949, 600.8543296460896], r)
-        np.testing.assert_allclose([0.24796212737976334, 0.8454343821517696], p)
+        np.testing.assert_allclose([0.22986291449828194, 0.770137085501718], w)
+        np.testing.assert_allclose([22.612072509754206, 665.8608166342448], r)
+        np.testing.assert_allclose([0.1730657448451262, 0.8594447707151015], p)
 
     def test_run_em_downsample(self):
         rng = np.random.default_rng(2021)
         X = rng.negative_binomial(10, 0.5, (20, 20)) + rng.negative_binomial(100, 0.5, (20, 20))
 
         w, r, p = em.run_em(X, downsample=100, seed=2021, w=(0.99, 0.01), max_iter=100)
-        np.testing.assert_allclose([0.13265334244385113, 0.8673466575561488], w)
-        np.testing.assert_allclose([26.374527039240963, 559.0179953067875], r)
-        np.testing.assert_allclose([0.1909250367173723, 0.8367866538310141], p)
+        np.testing.assert_allclose([0.07933234411996691, 0.9206676558800331], w)
+        np.testing.assert_allclose([23.990499915230924, 740.2223695491173], r)
+        np.testing.assert_allclose([0.1631365477471769, 0.8734818488242497], p)
 
     def test_run_em_peaks(self):
         rng = np.random.default_rng(2021)
@@ -76,12 +76,13 @@ class TestEM(TestMixin, TestCase):
         bins[50:, 50:] = 2
         results = em.run_em(X, bins=bins, w=(0.99, 0.01), max_iter=100)
         self.assertEqual(2, len(results))
-        np.testing.assert_allclose([1.6359410595079348e-111, 1.0], results[1][0])
-        np.testing.assert_allclose([25.45447008445437, 881.3329952146362], results[1][1])
-        np.testing.assert_allclose([0.049578513664564734, 0.6160205873806845], results[1][2])
-        np.testing.assert_allclose([3.08767945236589e-131, 1.0], results[2][0])
-        np.testing.assert_allclose([25.748715118551672, 888.9653114044754], results[2][1])
-        np.testing.assert_allclose([0.04636794899451994, 0.6174397965275665], results[2][2])
+        print(results)
+        np.testing.assert_allclose([1.6120561765343201e-108, 1.0], results[1][0])
+        np.testing.assert_allclose([23.100084326864582, 878.7901287669895], results[1][1])
+        np.testing.assert_allclose([0.04332046694964168, 0.6152784261563431], results[1][2])
+        np.testing.assert_allclose([9.432967710450355e-126, 1.0], results[2][0])
+        np.testing.assert_allclose([24.349175570483077, 886.542518924474], results[2][1])
+        np.testing.assert_allclose([0.0420157787402099, 0.6167383056305975], results[2][2])
 
     def test_conditionals(self):
         X = np.array([[1, 2, 3]])

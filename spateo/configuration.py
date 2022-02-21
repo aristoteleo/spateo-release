@@ -1,11 +1,119 @@
 # code adapted from https://github.com/aristoteleo/dynamo-release/blob/master/dynamo/configuration.py
 
+from typing import Optional, Union
+
 import colorcet
 import matplotlib
+import numpy as np
+import pandas as pd
+from anndata import AnnData
 from matplotlib import rcParams, colors
+from scipy import sparse
 
 # from cycler import cycler
 import matplotlib.pyplot as plt
+
+
+class SpateoAdataKeyManager:
+    # This key will be present in the .uns of the AnnData to indicate the type of
+    # information the AnnData holds..
+    ADATA_TYPE_KEY = "__type"
+    ADATA_DEFAULT_TYPE = None
+    ADATA_AGG_TYPE = "AGG"  # This is an AnnData containing aggregated UMI counts
+    ADATA_UMI_TYPE = "UMI"  # This is an obs x genes AnnData (canonical)
+
+    UNS_PP_KEY = "pp"
+    UNS_SPATIAL_KEY = "spatial"
+    UNS_SPATIAL_XMIN_KEY = "x_min"
+    UNS_SPATIAL_YMIN_KEY = "y_min"
+    UNS_SPATIAL_BINSIZE_KEY = "binsize"
+    UNS_SPATIAL_SCALE_KEY = "scale"
+    UNS_SPATIAL_SCALE_UNIT_KEY = "scale_unit"
+    UNS_SPATIAL_SEGMENTATION_KEY = "segmentation"
+
+    SPLICED_LAYER_KEY = "spliced"
+    UNSPLICED_LAYER_KEY = "unspliced"
+    STAIN_LAYER_KEY = "stain"
+    MASK_SUFFIX = "mask"
+    MARKERS_SUFFIX = "markers"
+    BINS_SUFFIX = "bins"
+    LABELS_SUFFIX = "labels"
+    SCORES_SUFFIX = "scores"
+    EXPANDED_SUFFIX = "expanded"
+
+    X_LAYER = "X"
+
+    def gen_new_layer_key(layer_name, key, sep="_") -> str:
+        if layer_name == "":
+            return key
+        if layer_name[-1] == sep:
+            return layer_name + key
+        return sep.join([layer_name, key])
+
+    def select_layer_data(
+        adata: AnnData, layer: str, copy: bool = False, make_dense: bool = False
+    ) -> Union[np.ndarray, sparse.spmatrix]:
+        if layer is None:
+            layer = SpateoAdataKeyManager.X_LAYER
+        res_data = None
+        if layer == SpateoAdataKeyManager.X_LAYER:
+            res_data = adata.X
+        else:
+            res_data = adata.layers[layer]
+        if make_dense and sparse.issparse(res_data):
+            return res_data.A
+        if copy:
+            return res_data.copy()
+        return res_data
+
+    def set_layer_data(
+        adata: AnnData, layer: str, vals: np.ndarray, var_indices: Optional[np.ndarray] = None, replace: bool = False
+    ):
+        # Mostly for testing
+        if replace:
+            adata.layers[layer] = vals
+            return
+
+        if var_indices is None:
+            var_indices = slice(None)
+        if layer == SpateoAdataKeyManager.X_LAYER:
+            adata.X[:, var_indices] = vals
+        elif layer in adata.layers:
+            adata.layers[layer][:, var_indices] = vals
+        else:
+            # layer does not exist in adata
+            # ignore var_indices and set values as a new layer
+            adata.layers[layer] = vals
+
+    def get_adata_type(adata: AnnData) -> str:
+        return adata.uns[SpateoAdataKeyManager.ADATA_TYPE_KEY]
+
+    def init_adata_type(adata: AnnData, t: Optional[str] = None):
+        if t is None:
+            t = SpateoAdataKeyManager.ADATA_DEFAULT_TYPE
+        adata.uns[SpateoAdataKeyManager.ADATA_TYPE_KEY] = t
+
+    def init_uns_pp_namespace(adata: AnnData):
+        if SpateoAdataKeyManager.UNS_PP_KEY not in adata.uns:
+            adata.uns[SpateoAdataKeyManager.UNS_PP_KEY] = {}
+
+    def init_uns_spatial_namespace(adata: AnnData):
+        if SpateoAdataKeyManager.UNS_SPATIAL_KEY not in adata.uns:
+            adata.uns[SpateoAdataKeyManager.UNS_SPATIAL_KEY] = {}
+
+    def set_uns_spatial_attribute(adata: AnnData, key: str, value: object):
+        if SpateoAdataKeyManager.UNS_SPATIAL_KEY not in adata.uns:
+            SpateoAdataKeyManager.init_uns_spatial_namespace(adata)
+        adata.uns[SpateoAdataKeyManager.UNS_SPATIAL_KEY][key] = value
+
+    def get_uns_spatial_attribute(adata: AnnData, key: str) -> object:
+        return adata.uns[SpateoAdataKeyManager.UNS_SPATIAL_KEY][key]
+
+    def has_uns_spatial_attribute(adata: AnnData, key: str) -> bool:
+        return key in adata.uns[SpateoAdataKeyManager.UNS_SPATIAL_KEY]
+
+
+SKM = SpateoAdataKeyManager
 
 fire_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("fire", colorcet.fire)
 darkblue_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("darkblue", colorcet.kbc)
