@@ -258,8 +258,7 @@ def safe_erode(
             if label > 0:
                 saved += components[1] == label
 
-        prev_X = X.copy()
-        X = cv2.erode(X, kernel)
+        X = cv2.erode(X * (~saved), kernel)
 
         i += 1
         if (areas > min_area).sum() == 1 or (n_iter > 0 and n_iter == i):
