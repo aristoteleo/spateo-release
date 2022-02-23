@@ -20,14 +20,7 @@ from scipy.sparse import csr_matrix, spmatrix
 from shapely.geometry import Polygon, MultiPolygon
 
 from ..configuration import SKM
-from .utils import (
-    bin_indices,
-    centroids,
-    get_bin_props,
-    get_label_props,
-    in_concave_hull,
-    mapping_label
-)
+from .utils import bin_indices, centroids, get_bin_props, get_label_props, in_concave_hull, mapping_label
 
 COUNT_COLUMN_MAPPING = {
     SKM.X_LAYER: 3,

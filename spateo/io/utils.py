@@ -59,8 +59,8 @@ def centroids(bin_indices: np.ndarray, coord_min: float = 0, binsize: int = 50) 
 
 
 def get_label_props(
-        label_mtx: np.ndarray,
-        properties: Tuple[str, ...] = ("label", "area", "bbox", "centroid"),
+    label_mtx: np.ndarray,
+    properties: Tuple[str, ...] = ("label", "area", "bbox", "centroid"),
 ) -> pd.DataFrame:
     """Measure properties of labeled cell regions.
 
@@ -146,7 +146,7 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
 
     contours = data.apply(create_geo, axis=1)
     props = pd.DataFrame({"contours": contours})
-    props["area"] = binsize ** 2
+    props["area"] = binsize**2
     return props
 
 
@@ -233,7 +233,7 @@ def mapping_label(data: pd.DataFrame, label: np.ndarray, shifts: Optional[tuple]
 
     cell_coor = []
     if not shifts:
-        shifts = (data['x'].min(), data['y'].min())
+        shifts = (data["x"].min(), data["y"].min())
 
     # slow
     for i in range(label.shape[0]):
@@ -242,9 +242,9 @@ def mapping_label(data: pd.DataFrame, label: np.ndarray, shifts: Optional[tuple]
             # background will be removed
             if c:
                 cell_coor.append([i + shifts[0], j + shifts[1], c])
-    cell_coor = pd.DataFrame(cell_coor, columns=['x', 'y', 'cell_name'])
-    cell_data = pd.merge(data, cell_coor, how='left', on=['x', 'y'])
+    cell_coor = pd.DataFrame(cell_coor, columns=["x", "y", "cell_name"])
+    cell_data = pd.merge(data, cell_coor, how="left", on=["x", "y"])
     cell_data = cell_data.dropna()
-    cell_data['cell_name'] = cell_data['cell_name'].astype(str)
+    cell_data["cell_name"] = cell_data["cell_name"].astype(str)
 
     return cell_data
