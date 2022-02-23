@@ -222,6 +222,7 @@ def bin_matrix(X: Union[np.ndarray, spmatrix], binsize: int) -> Union[np.ndarray
 
 def mapping_label(data: pd.DataFrame, label: np.ndarray, shifts: Optional[tuple] = None) -> pd.Series:
     """Mapping labels to data.
+
     Args:
         data: a data frame with columns 'x' and 'y'.
         label: cell segmentation label matrix.
