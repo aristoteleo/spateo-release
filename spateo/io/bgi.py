@@ -20,13 +20,7 @@ from scipy.sparse import csr_matrix, spmatrix
 from shapely.geometry import Polygon, MultiPolygon
 
 from ..configuration import SKM
-from .utils import (
-    bin_indices,
-    centroids,
-    get_bin_props,
-    get_label_props,
-    in_concave_hull,
-)
+from .utils import bin_indices, centroids, get_bin_props, get_label_props, in_concave_hull, mapping_label
 
 COUNT_COLUMN_MAPPING = {
     SKM.X_LAYER: 3,
@@ -168,7 +162,7 @@ def read_bgi(
 
     Parameters
     ----------
-        filename: `str`
+        path: `str`
             A string that points to the directory and filename of spatial transcriptomics dataset, produced by the
             stereo-seq method from BGI.
         binsize: `int` (default: 50)
@@ -177,7 +171,7 @@ def read_bgi(
         slice: `str` or None (default: None)
             Name of the slice. Will be used when displaying multiple slices.
         label_path: `str` or None (default: None)
-            A string that points to the directory and filename of cell segmentation label matrix(Format:`.npy`).
+            A string that points to the path of cell segmentation label matrix(Format:`.npy` or '.npz').
             If not None, the results of cell segmentation will be used, and param `binsize` will be ignored.
         alpha_hull: `Polygon` or None (default: None)
             The computed concave hull. It must be a Polygon and thus you may need to take one of the Polygon from the
@@ -220,11 +214,18 @@ def read_bgi(
         label_props = get_bin_props(data[["x_ind", "y_ind"]][dedup], binsize)
         coor = data[["x_centroid", "y_centroid"]][dedup].values
     else:
-        # TODO: Get cell names using labels
-        data["cell_name"] = data["cell"].astype(str)
+        # load label file
+        label_file = np.load(label_path)
+        shifts = None
+        # npy (just labels) or npz (['x_min', 'y_min', 'labels'])
+        if isinstance(label_file, np.lib.npyio.NpzFile):
+            shifts = (label_file["x_min"], label_file["y_min"])
+            label_mtx = label_file["labels"]
+        else:
+            label_mtx = label_file
+        data = mapping_label(data, label_mtx, shifts=shifts)
 
         # Measure properties and get contours of labeled cell regions.
-        label_mtx = np.load(label_path)
         label_props = get_label_props(label_mtx, properties=("label", "area", "bbox", "centroid"))
         # Get centroid from label_props
         if alpha_hull is not None:

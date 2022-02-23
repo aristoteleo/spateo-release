@@ -218,3 +218,34 @@ def bin_matrix(X: Union[np.ndarray, spmatrix], binsize: int) -> Union[np.ndarray
     if issparse(X):
         return _bin_sparse(X)
     return _bin_dense(X)
+
+
+def mapping_label(data: pd.DataFrame, label: np.ndarray, shifts: Optional[tuple] = None) -> pd.Series:
+    """Mapping labels to data.
+
+    Args:
+        data: a data frame with columns 'x' and 'y'.
+        label: cell segmentation label matrix.
+        shifts: shifts of x and y. if not, will be calculated automatically.
+
+    Returns:
+        a pandas.Series
+    """
+
+    cell_coor = []
+    if not shifts:
+        shifts = (data["x"].min(), data["y"].min())
+
+    # slow
+    for i in range(label.shape[0]):
+        for j in range(label.shape[1]):
+            c = label[i, j]
+            # background will be removed
+            if c:
+                cell_coor.append([i + shifts[0], j + shifts[1], c])
+    cell_coor = pd.DataFrame(cell_coor, columns=["x", "y", "cell_name"])
+    cell_data = pd.merge(data, cell_coor, how="left", on=["x", "y"])
+    cell_data = cell_data.dropna()
+    cell_data["cell_name"] = cell_data["cell_name"].astype(str)
+
+    return cell_data
