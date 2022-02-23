@@ -1,6 +1,7 @@
 """Functions to segment regions of a slice by UMI density.
 """
 import warnings
+from collections import Counter
 from typing import Optional, Tuple, Union
 
 import cv2
@@ -10,6 +11,7 @@ from kneed import KneeLocator
 from scipy.sparse import csr_matrix, issparse, lil_matrix, spmatrix
 from sklearn import cluster
 from tqdm import tqdm
+from typing_extensions import Literal
 
 from . import utils
 from ...configuration import SKM
@@ -140,6 +142,7 @@ def segment_densities(
     k: int = 11,
     distance_threshold: Optional[float] = None,
     dk: int = 5,
+    background: Optional[Union[Tuple[int, int], Literal[False]]] = None,
     out_layer: Optional[str] = None,
 ):
     """Segment into regions by UMI density.
@@ -156,7 +159,10 @@ def segment_densities(
             such that clusters will not be merged if they have
             greater than this distance.
         dk: Kernel size for final dilation
-        out_layer: Lyaer to put resulting bins. Defaults to `{layer}_bins`.
+        background: Pixel that should be categorized as background. By
+            default, the bin that is most assigned to the outermost pixels are
+            categorized as background. Set to False to turn off background detection.
+        out_layer: Layer to put resulting bins. Defaults to `{layer}_bins`.
     """
     X = SKM.select_layer_data(adata, layer, make_dense=binsize == 1)
     if binsize > 1:
@@ -164,6 +170,15 @@ def segment_densities(
         if issparse(X):
             X = X.A
     bins = _segment_densities(X, k, distance_threshold, dk)
+    if background is not False:
+        if background is not None:
+            x, y = background
+            background_label = bins[x, y]
+        else:
+            counts = Counter(bins[0]) + Counter(bins[-1]) + Counter(bins[:, 0]) + Counter(bins[:, -1])
+            background_label = counts.most_common(1)[0][0]
+        bins[np.where(bins == background_label)] = 0
+        bins[np.where(bins > background_label)] -= 1
     if binsize > 1:
         # Expand back
         bins = cv2.resize(bins, adata.shape[::-1], interpolation=cv2.INTER_NEAREST)

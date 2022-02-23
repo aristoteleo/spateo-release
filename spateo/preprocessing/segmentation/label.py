@@ -6,6 +6,7 @@ from typing import Optional, Union
 import cv2
 import numpy as np
 from anndata import AnnData
+from numba import njit
 from scipy.sparse import issparse, spmatrix
 from skimage import segmentation, filters
 
@@ -136,26 +137,45 @@ def _expand_labels(labels: np.ndarray, distance: int, max_area: int, mask: Optio
     Returns:
         New label array with expanded labels.
     """
-    expanded = labels.copy()
-    saved = {}
-    for _ in range(distance):
-        for label in (np.bincount(expanded.flatten()) >= max_area).nonzero()[0]:
-            if label > 0:
-                where = np.where(expanded == label)
-                saved[label] = where
-                # Remove labels that reached max area
-                expanded[where] = 0
 
-        # Expand
-        expanded = segmentation.expand_labels(expanded, distance=1)
-        if mask is not None:
-            expanded *= mask
+    @njit
+    def _expand(X, areas, kernel, max_area, n_iter, mask):
+        pad = kernel.shape[0] // 2
+        expanded = np.zeros((X.shape[0] + 2 * pad, X.shape[1] + 2 * pad), dtype=X.dtype)
+        expanded[pad:-pad, pad:-pad] = X
+        for _ in range(n_iter):
+            new_areas = np.zeros_like(areas)
+            _expanded = np.zeros_like(expanded)
+            for _i in range(X.shape[0]):
+                i = _i + pad
+                for _j in range(X.shape[1]):
+                    j = _j + pad
+                    if expanded[i, j] > 0:
+                        _expanded[i, j] = expanded[i, j]
+                        continue
+                    if not mask[_i, _j]:
+                        continue
 
-    # Replace with saved labels
-    for label, where in saved.items():
-        expanded[where] = label
+                    neighbors = expanded[i - pad : i + pad + 1, j - pad : j + pad + 1]
+                    unique = np.unique(neighbors * kernel)
+                    unique_labels = unique[unique > 0]
+                    if len(unique_labels) == 1:
+                        label = unique_labels[0]
+                        if areas[label] < max_area:
+                            _expanded[i, j] = label
+                            new_areas[label] += 1
+            expanded = _expanded
+            areas += new_areas
+        return expanded[pad:-pad, pad:-pad]
 
-    return expanded
+    return _expand(
+        labels,
+        np.bincount(labels.flatten()),
+        utils.circle(3),
+        max_area,
+        distance,
+        np.ones(labels.shape, dtype=bool) if mask is None else mask,
+    )
 
 
 def expand_labels(
@@ -183,7 +203,7 @@ def expand_labels(
     labels = SKM.select_layer_data(adata, label_layer)
     expanded = _expand_labels(labels, distance, max_area)
     out_layer = out_layer or SKM.gen_new_layer_key(label_layer, SKM.EXPANDED_SUFFIX)
-    SKM.set_layer_data(adata, out_layer, expanded, replace=True)
+    SKM.set_layer_data(adata, out_layer, expanded)
 
 
 def _label_connected_components(
@@ -211,27 +231,26 @@ def _label_connected_components(
     components = cv2.connectedComponentsWithStats(X.astype(np.uint8))
     areas = components[2][:, cv2.CC_STAT_AREA]
     subset = np.zeros(X.shape, dtype=bool)
-    subset_labels = []
+    subset_labels = cv2.connectedComponents(subset.astype(np.uint8))[1]
     for label in np.where(areas > max_area)[0]:
         if label > 0:
-            subset += components[1] == label
-            subset_labels.append(label)
+            stats = components[2][label]
+            left, top, width, height = (
+                stats[cv2.CC_STAT_LEFT],
+                stats[cv2.CC_STAT_TOP],
+                stats[cv2.CC_STAT_WIDTH],
+                stats[cv2.CC_STAT_HEIGHT],
+            )
+            subset[top : top + height, left : left + width] += (
+                components[1][top : top + height, left : left + width] == label
+            )
     max_label = components[1].max()
 
     eroded = utils.safe_erode(subset, k=k, min_area=min_area, n_iter=n_iter)
     labels = cv2.connectedComponents(eroded.astype(np.uint8))[1]
     expanded = _expand_labels(labels, distance=distance, max_area=max_area, mask=subset)
-    # Fix labels
-    fixed = expanded.copy()
-    for label in np.unique(expanded):
-        if label > 0:
-            fixed[np.where(expanded == label)] = (
-                subset_labels[label - 1] if label <= len(subset_labels) else max_label + label - len(subset_labels)
-            )
-
-    where = np.where(~subset)
-    fixed[where] = components[1][where]
-    return fixed
+    expanded[np.where(expanded > 0)] += subset_labels.max()
+    return subset_labels + expanded
 
 
 def label_connected_components(

@@ -155,8 +155,7 @@ def get_concave_hull(
 
     i, j = (adata.X > min_agg_umi).nonzero()
 
-    x_min = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_XMIN_KEY)
-    y_min = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_YMIN_KEY)
+    x_min, y_min = int(adata.obs_names[0]), int(adata.var_names[0])
 
     # We use centroids function to get the true stereo-seq chip coordinates.
     if binsize != 1:

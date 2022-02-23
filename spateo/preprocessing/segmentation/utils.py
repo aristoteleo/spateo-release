@@ -253,12 +253,21 @@ def safe_erode(
         components = cv2.connectedComponentsWithStats(
             apply_threshold(X, float_k, float_threshold).astype(np.uint8) if is_float else X
         )
+
         areas = components[2][:, cv2.CC_STAT_AREA]
         for label in np.where(areas <= min_area)[0]:
             if label > 0:
-                saved += components[1] == label
+                stats = components[2][label]
+                left, top, width, height = (
+                    stats[cv2.CC_STAT_LEFT],
+                    stats[cv2.CC_STAT_TOP],
+                    stats[cv2.CC_STAT_WIDTH],
+                    stats[cv2.CC_STAT_HEIGHT],
+                )
+                saved[top : top + height, left : left + width] += (
+                    components[1][top : top + height, left : left + width] == label
+                )
 
-        prev_X = X.copy()
         X = cv2.erode(X, kernel)
 
         i += 1

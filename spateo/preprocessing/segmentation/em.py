@@ -138,7 +138,7 @@ def conditionals(
     if isinstance(em_results, dict):
         if bins is None:
             raise PreprocessingError("`em_results` indicate binning was used, but `bins` was not provided")
-        background_cond = np.zeros(X.shape)
+        background_cond = np.ones(X.shape)
         cell_cond = np.zeros(X.shape)
         for label, (_, r, p) in em_results.items():
             indices = np.where(bins == label)
