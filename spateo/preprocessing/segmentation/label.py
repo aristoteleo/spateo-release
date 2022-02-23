@@ -211,7 +211,7 @@ def _label_connected_components(
     k: int = 3,
     min_area: int = 100,
     n_iter: int = -1,
-    distance: int = 5,
+    distance: int = 10,
     max_area: int = 400,
 ) -> np.ndarray:
     """Label connected components while splitting components that are too large.
@@ -231,8 +231,9 @@ def _label_connected_components(
     components = cv2.connectedComponentsWithStats(X.astype(np.uint8))
     areas = components[2][:, cv2.CC_STAT_AREA]
     subset = np.zeros(X.shape, dtype=bool)
-    subset_labels = cv2.connectedComponents(subset.astype(np.uint8))[1]
-    for label in np.where(areas > max_area)[0]:
+    saved = np.zeros(X.shape, dtype=int)
+    saved_i = 1
+    for label, area in enumerate(areas):
         if label > 0:
             stats = components[2][label]
             left, top, width, height = (
@@ -241,16 +242,17 @@ def _label_connected_components(
                 stats[cv2.CC_STAT_WIDTH],
                 stats[cv2.CC_STAT_HEIGHT],
             )
-            subset[top : top + height, left : left + width] += (
-                components[1][top : top + height, left : left + width] == label
-            )
-    max_label = components[1].max()
-
+            label_mask = components[1][top : top + height, left : left + width] == label
+            if area <= max_area:
+                saved[top : top + height, left : left + width] += label_mask * saved_i
+                saved_i += 1
+            else:
+                subset[top : top + height, left : left + width] += label_mask
     eroded = utils.safe_erode(subset, k=k, min_area=min_area, n_iter=n_iter)
     labels = cv2.connectedComponents(eroded.astype(np.uint8))[1]
     expanded = _expand_labels(labels, distance=distance, max_area=max_area, mask=subset)
-    expanded[np.where(expanded > 0)] += subset_labels.max()
-    return subset_labels + expanded
+    expanded[np.where(expanded > 0)] += saved_i - 1
+    return saved + expanded
 
 
 def label_connected_components(
@@ -259,7 +261,7 @@ def label_connected_components(
     k: int = 3,
     min_area: int = 100,
     n_iter: int = -1,
-    distance: int = 5,
+    distance: int = 10,
     max_area: int = 400,
     out_layer: Optional[str] = None,
 ):
