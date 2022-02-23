@@ -2,7 +2,7 @@
 """
 import warnings
 from collections import Counter
-from typing import Literal, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -11,6 +11,7 @@ from kneed import KneeLocator
 from scipy.sparse import csr_matrix, issparse, lil_matrix, spmatrix
 from sklearn import cluster
 from tqdm import tqdm
+from typing_extensions import Literal
 
 from . import utils
 from ...configuration import SKM
