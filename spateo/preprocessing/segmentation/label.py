@@ -150,8 +150,8 @@ def _expand_labels(labels: np.ndarray, distance: int, max_area: int, mask: Optio
                 i = _i + pad
                 for _j in range(X.shape[1]):
                     j = _j + pad
-                    if X[_i, _j] > 0:
-                        _expanded[i, j] = X[_i, _j]
+                    if expanded[i, j] > 0:
+                        _expanded[i, j] = expanded[i, j]
                         continue
                     if not mask[_i, _j]:
                         continue
@@ -231,27 +231,26 @@ def _label_connected_components(
     components = cv2.connectedComponentsWithStats(X.astype(np.uint8))
     areas = components[2][:, cv2.CC_STAT_AREA]
     subset = np.zeros(X.shape, dtype=bool)
-    subset_labels = []
+    subset_labels = cv2.connectedComponents(subset.astype(np.uint8))[1]
     for label in np.where(areas > max_area)[0]:
         if label > 0:
-            subset += components[1] == label
-            subset_labels.append(label)
+            stats = components[2][label]
+            left, top, width, height = (
+                stats[cv2.CC_STAT_LEFT],
+                stats[cv2.CC_STAT_TOP],
+                stats[cv2.CC_STAT_WIDTH],
+                stats[cv2.CC_STAT_HEIGHT],
+            )
+            subset[top : top + height, left : left + width] += (
+                components[1][top : top + height, left : left + width] == label
+            )
     max_label = components[1].max()
 
     eroded = utils.safe_erode(subset, k=k, min_area=min_area, n_iter=n_iter)
     labels = cv2.connectedComponents(eroded.astype(np.uint8))[1]
     expanded = _expand_labels(labels, distance=distance, max_area=max_area, mask=subset)
-    # Fix labels
-    fixed = expanded.copy()
-    for label in np.unique(expanded):
-        if label > 0:
-            fixed[np.where(expanded == label)] = (
-                subset_labels[label - 1] if label <= len(subset_labels) else max_label + label - len(subset_labels)
-            )
-
-    where = np.where(~subset)
-    fixed[where] = components[1][where]
-    return fixed
+    expanded[np.where(expanded > 0)] += subset_labels.max()
+    return subset_labels + expanded
 
 
 def label_connected_components(

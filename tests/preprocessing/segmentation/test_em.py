@@ -99,5 +99,5 @@ class TestEM(TestMixin, TestCase):
         }
         bins = np.array([[0, 1, 2]], dtype=int)
         results = em.conditionals(X, em_results, bins=bins)
-        np.testing.assert_allclose([[0, stats.nbinom(n=4, p=0.5).pmf(2), stats.nbinom(n=6, p=0.7).pmf(3)]], results[0])
+        np.testing.assert_allclose([[1, stats.nbinom(n=4, p=0.5).pmf(2), stats.nbinom(n=6, p=0.7).pmf(3)]], results[0])
         np.testing.assert_allclose([[0, stats.nbinom(n=5, p=0.6).pmf(2), stats.nbinom(n=7, p=0.8).pmf(3)]], results[1])
