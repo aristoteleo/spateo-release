@@ -55,9 +55,10 @@ def imshow(
     ax.set_title(layer)
     if show_cbar:
         fig.colorbar(im)
-    if use_scale and SKM.has_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY):
-        scale = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY)
-        unit = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY)
+    unit = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY)
+    if use_scale and unit is not None:
+        binsize = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_BINSIZE_KEY)
+        scale = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY) * binsize
         im.set_extent((0, (mtx.shape[1] - 1) * scale, (mtx.shape[0] - 1) * scale, 0))
         ax.set_xlabel(unit)
         ax.set_ylabel(unit)

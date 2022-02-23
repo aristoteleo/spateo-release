@@ -62,8 +62,8 @@ def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
 def read_bgi_agg(
     path: str,
     stain_path: Optional[str] = None,
-    scale: Optional[float] = None,
-    scale_unit: Optional[str] = "um",
+    scale: Optional[float] = 1.0,
+    scale_unit: Optional[str] = None,
     binsize: int = 1,
     gene_agg: Optional[Dict[str, Union[List[str], Callable[[str], bool]]]] = None,
 ) -> AnnData:
@@ -74,8 +74,8 @@ def read_bgi_agg(
         path: Path to read file.
         stain_path: Path to nuclei staining image. Must have the same coordinate
             system as the read file.
-        scale: Physical length per coordinate, in um. For visualization only.
-        scale_unit: Scale unit. Defaults to um.
+        scale: Physical length per coordinate. For visualization only.
+        scale_unit: Scale unit.
         binsize: Size of pixel bins.
         gene_agg: Dictionary of layer keys to gene names to aggregate. For
             example, `{'mito': ['list', 'of', 'mitochondrial', 'genes']}` will
@@ -91,8 +91,6 @@ def read_bgi_agg(
     """
     data = read_bgi_as_dataframe(path)
     x_min, y_min = data["x"].min(), data["y"].min()
-    data["x"] -= x_min
-    data["y"] -= y_min
     x, y = data["x"].values, data["y"].values
     x_max, y_max = x.max(), y.max()
     shape = (x_max + 1, y_max + 1)
@@ -100,27 +98,24 @@ def read_bgi_agg(
     # Read image and update x,y max if appropriate
     layers = {}
     if stain_path:
-        image = skimage.io.imread(stain_path)[x_min:, y_min:]
+        image = skimage.io.imread(stain_path)
         x_max = max(x_max, image.shape[0])
         y_max = max(y_max, image.shape[1])
         shape = (x_max + 1, y_max + 1)
         # Reshape image to match new x,y max
         if image.shape != shape:
             image = np.pad(image, ((0, shape[0] - image.shape[0]), (0, shape[1] - image.shape[1])))
-        # Resize image to match bins
         layers[SKM.STAIN_LAYER_KEY] = image
 
     if binsize > 1:
         shape = (math.ceil(shape[0] / binsize), math.ceil(shape[1] / binsize))
         x = bin_indices(x, 0, binsize)
         y = bin_indices(y, 0, binsize)
+        x_min, y_min = x.min(), y.min()
 
         # Resize image if necessary
         if stain_path:
             layers[SKM.STAIN_LAYER_KEY] = cv2.resize(image, shape[::-1])
-
-        if scale is not None:
-            scale *= binsize
 
     # Put total in X
     X = csr_matrix((data[data.columns[COUNT_COLUMN_MAPPING[SKM.X_LAYER]]].values, (x, y)), shape=shape, dtype=np.uint16)
@@ -141,18 +136,15 @@ def read_bgi_agg(
                 dtype=np.uint16,
             )
 
-    adata = AnnData(X=X, layers=layers)
+    adata = AnnData(X=X, layers=layers)[x_min:, y_min:].copy()
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_AGG_TYPE)
     SKM.init_uns_pp_namespace(adata)
     SKM.init_uns_spatial_namespace(adata)
     SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_BINSIZE_KEY, binsize)
-    SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_XMIN_KEY, x_min)
-    SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_YMIN_KEY, y_min)
-    if scale:
-        SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY, scale)
-        SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY, scale_unit)
+    SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY, scale)
+    SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY, scale_unit)
     return adata
 
 

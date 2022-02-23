@@ -24,8 +24,6 @@ class SpateoAdataKeyManager:
 
     UNS_PP_KEY = "pp"
     UNS_SPATIAL_KEY = "spatial"
-    UNS_SPATIAL_XMIN_KEY = "x_min"
-    UNS_SPATIAL_YMIN_KEY = "y_min"
     UNS_SPATIAL_BINSIZE_KEY = "binsize"
     UNS_SPATIAL_SCALE_KEY = "scale"
     UNS_SPATIAL_SCALE_UNIT_KEY = "scale_unit"
