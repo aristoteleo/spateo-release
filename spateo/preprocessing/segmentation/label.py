@@ -250,8 +250,8 @@ def _label_connected_components(
                 subset[top : top + height, left : left + width] += label_mask
     eroded = utils.safe_erode(subset, k=k, min_area=min_area, n_iter=n_iter)
     labels = cv2.connectedComponents(eroded.astype(np.uint8))[1]
+    labels[np.where(labels > 0)] += saved_i - 1
     expanded = _expand_labels(labels, distance=distance, max_area=max_area, mask=subset)
-    expanded[np.where(expanded > 0)] += saved_i - 1
     return saved + expanded
 
 
