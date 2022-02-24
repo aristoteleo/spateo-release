@@ -67,12 +67,15 @@ class TestLabel(TestMixin, TestCase):
         with mock.patch("spateo.preprocessing.segmentation.label._watershed") as _watershed:
             _watershed.return_value = np.random.random((3, 3))
             adata = create_random_adata(["nuclei", "nuclei_mask", "nuclei_markers"], (3, 3))
+            adata.layers["nuclei_mask"] = adata.layers["nuclei_mask"] > 0.5
             k = mock.MagicMock()
             label.watershed(adata, "nuclei", k)
             np.testing.assert_array_equal(adata.layers["nuclei_labels"], _watershed.return_value)
             _watershed.assert_called_once_with(mock.ANY, mock.ANY, mock.ANY, k)
             np.testing.assert_array_equal(adata.layers["nuclei"], _watershed.call_args[0][0])
-            np.testing.assert_array_equal(adata.layers["nuclei_mask"], _watershed.call_args[0][1])
+            np.testing.assert_array_equal(
+                adata.layers["nuclei_mask"] | (adata.layers["nuclei_markers"] > 0), _watershed.call_args[0][1]
+            )
             np.testing.assert_array_equal(adata.layers["nuclei_markers"], _watershed.call_args[0][2])
 
     def test_expand_labels_adata(self):

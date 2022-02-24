@@ -118,7 +118,8 @@ def watershed(
     mask = SKM.select_layer_data(adata, mask_layer)
     markers_layer = markers_layer or SKM.gen_new_layer_key(layer, SKM.MARKERS_SUFFIX)
     markers = SKM.select_layer_data(adata, markers_layer)
-    labels = _watershed(X, mask, markers, k)
+    # Markers should always be included in the mask.
+    labels = _watershed(X, mask | (markers > 0), markers, k)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, labels)
 
