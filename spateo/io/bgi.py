@@ -8,6 +8,7 @@ Todo:
 """
 import gzip
 import math
+import warnings
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import cv2
@@ -19,8 +20,9 @@ from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
 from shapely.geometry import Polygon, MultiPolygon
 
+from .utils import bin_indices, centroids, get_bin_props, get_label_props, get_label_coordinates, in_concave_hull
 from ..configuration import SKM
-from .utils import bin_indices, centroids, get_bin_props, get_label_props, in_concave_hull, mapping_label
+from ..warnings import IOWarning
 
 COUNT_COLUMN_MAPPING = {
     SKM.X_LAYER: 3,
@@ -144,122 +146,119 @@ def read_bgi_agg(
 
 def read_bgi(
     path: str,
-    binsize: int = 50,
-    slice: Optional[str] = None,
-    label_path: Optional[str] = None,
-    alpha_hull: Optional[Polygon] = None,
-    version="stereo_v1",
+    scale: float = 1.0,
+    scale_unit: Optional[str] = None,
+    binsize: int = 1,
+    segmentation_adata: Optional[AnnData] = None,
+    labels_layer: Optional[str] = None,
+    labels: Optional[Union[np.ndarray, str]] = None,
 ) -> AnnData:
-    """A helper function that facilitates constructing an AnnData object suitable for downstream spateo analysis
+    """Read BGI read file as AnnData.
 
-    Parameters
-    ----------
-        path: `str`
-            A string that points to the directory and filename of spatial transcriptomics dataset, produced by the
-            stereo-seq method from BGI.
-        binsize: `int` (default: 50)
-            The number of spatial bins to aggregate RNAs captured by DNBs in those bins. Usually this is 50, which is
-            close to 25 uM.
-        slice: `str` or None (default: None)
-            Name of the slice. Will be used when displaying multiple slices.
-        label_path: `str` or None (default: None)
-            A string that points to the path of cell segmentation label matrix(Format:`.npy` or '.npz').
-            If not None, the results of cell segmentation will be used, and param `binsize` will be ignored.
-        alpha_hull: `Polygon` or None (default: None)
-            The computed concave hull. It must be a Polygon and thus you may need to take one of the Polygon from the
-            MultiPolygon object returned from `get_concave_hull` function.
-        version: `str`
-            The version of technology. Currently not used. But may be useful when the data format changes after we update
-            the stero-seq techlogy in future.
+    Args:
+        path: Path to read file.
+        scale: Physical length per coordinate. For visualization only.
+        scale_unit: Scale unit.
+        binsize: Size of pixel bins. Should only be provided when labels
+            (i.e. the `segmentation_adata` and `labels` arguments) are not used
+        segmentation_adata: AnnData containing segmentation results
+        labels_layer: Layer name in `segmentation_adata` containing labels
+        labels: Numpy array or path to numpy array saved with `np.save` that
+            contains labels
 
-    Returns
-    -------
-        adata: :class:`~anndata.AnnData`
-            An AnnData object. Each row of the AnnData object correspond to a spot (aggregated with multiple bins). The
-            `spatial` key in the .obsm corresponds to the x, y coordinates of the centroids of all spot.
+    Returns:
+        Bins x genes or labels x genes AnnData.
     """
+    # Check inputs
+    if (segmentation_adata is None) ^ (labels_layer is None):
+        raise IOError("Both `segmentation_adata` and `labels_layer` must be provided")
+    if segmentation_adata is not None:
+        if labels is not None:
+            raise IOError("Only one of `segmentation_adata` or `labels` may be provided")
+        if binsize > 1:
+            raise IOError("`binsize` argument is not supported when `segmentation_adata` is provided")
+        if SKM.get_adata_type(segmentation_adata) != SKM.ADATA_AGG_TYPE:
+            raise IOError("Only `AGG` type AnnDatas are supported")
+    elif abs(int(binsize)) != binsize:
+        raise IOError("Positive integer `binsize` must be provided when `segmentation_adata` is not provided")
+    if isinstance(labels, str):
+        labels = np.load(labels)
+
     data = read_bgi_as_dataframe(path)
-    columns = list(data.columns)
-    total_column = columns[COUNT_COLUMN_MAPPING["total"]]
 
-    # get cell name
-    if not label_path:
-        x, y = data["x"].values, data["y"].values
-        x_min, y_min = np.min(x), np.min(y)
+    # Only binning supported in this case
+    if segmentation_adata is None and labels is None:
+        if binsize < 2:
+            warnings.warn("Using binsize of 1. Please consider using a larger bin size.", IOWarning)
 
-        if alpha_hull is not None:
-            is_inside = in_concave_hull(data.loc[:, ["x", "y"]].values, alpha_hull)
-            data = data.loc[is_inside, :]
-            x, y = data["x"].values, data["y"].values
+        if binsize > 1:
+            x_bin = bin_indices(data["x"].values, 0, binsize)
+            y_bin = bin_indices(data["y"].values, 0, binsize)
+            data["x"], data["y"] = x_bin, y_bin
 
-        data["x_ind"] = bin_indices(x, x_min, binsize)
-        data["y_ind"] = bin_indices(y, y_min, binsize)
-        data["x_centroid"] = centroids(data["x_ind"].values, x_min, binsize)
-        data["y_centroid"] = centroids(data["y_ind"].values, y_min, binsize)
+        data["label"] = data["x"].astype(str) + "-" + data["y"].astype(str)
+        props = get_bin_props(data[["x", "y", "label"]].drop_duplicates(), binsize)
 
-        # TODO: This take a long time for many rows! Map each unique x, y pair
-        # to a cell name first.
-        data["cell_name"] = data["x_ind"].astype(str) + "_" + data["y_ind"].astype(str)
-
-        # aggregate spots with multiple bins
-        dedup = ~data.duplicated("cell_name")
-        label_props = get_bin_props(data[["x_ind", "y_ind"]][dedup], binsize)
-        coor = data[["x_centroid", "y_centroid"]][dedup].values
+    # Use labels.
     else:
-        # load label file
-        label_file = np.load(label_path)
-        shifts = None
-        # npy (just labels) or npz (['x_min', 'y_min', 'labels'])
-        if isinstance(label_file, np.lib.npyio.NpzFile):
-            shifts = (label_file["x_min"], label_file["y_min"])
-            label_mtx = label_file["labels"]
+        shape = (data["x"].max(), data["y"].max())
+        if labels is not None:
+            if labels.shape != shape:
+                warnings.warn(f"Labels matrix {labels.shape} has different shape as data matrix {shape}", IOWarning)
         else:
-            label_mtx = label_file
-        data = mapping_label(data, label_mtx, shifts=shifts)
+            labels = SKM.select_layer_data(segmentation_adata, labels_layer)
+        label_coords = get_label_coordinates(labels)
 
-        # Measure properties and get contours of labeled cell regions.
-        label_props = get_label_props(label_mtx, properties=("label", "area", "bbox", "centroid"))
-        # Get centroid from label_props
-        if alpha_hull is not None:
-            is_inside = in_concave_hull(label_props.loc[:, ["centroid-0", "centroid-1"]].values, alpha_hull)
-            label_props = label_props.loc[is_inside, :]
+        if labels_layer is not None:
+            seg_binsize = SKM.get_uns_spatial_attribute(segmentation_adata, SKM.UNS_SPATIAL_BINSIZE_KEY)
+            x_min, y_min = (
+                int(segmentation_adata.obs_names[0]) * seg_binsize,
+                int(segmentation_adata.var_names[0]) * seg_binsize,
+            )
+            label_coords["x"] += x_min
+            label_coords["y"] += y_min
 
-        coor = label_props[["centroid-0", "centroid-1"]].values
+        # When binning was used for segmentation, need to expand indices to cover
+        # every binned pixel.
+        if seg_binsize > 1:
+            coords_dfs = [label_coords]
+            for i in range(1, seg_binsize):
+                coords = label_coords.copy()
+                coords["x"] += i
+                coords["y"] += i
+                coords_dfs.append(coords)
+            label_coords = pd.concat(coords_dfs, ignore_index=True)
+        data = pd.merge(data, label_coords, on=["x", "y"], how="inner")
+        props = get_label_props(labels)
 
-    uniq_cell, uniq_gene = data["cell_name"].unique(), data["geneID"].unique()
-    uniq_cell, uniq_gene = list(uniq_cell), list(uniq_gene)
+    uniq_cell, uniq_gene = sorted(data["label"].unique()), sorted(data["geneID"].unique())
+    shape = (len(uniq_cell), len(uniq_gene))
+    cell_dict = dict(zip(uniq_cell, range(len(uniq_cell))))
+    gene_dict = dict(zip(uniq_gene, range(len(uniq_gene))))
+    x_ind = data["label"].map(cell_dict).astype(int).values
+    y_ind = data["geneID"].map(gene_dict).astype(int).values
 
-    cell_dict = dict(zip(uniq_cell, range(0, len(uniq_cell))))
-    gene_dict = dict(zip(uniq_gene, range(0, len(uniq_gene))))
-
-    data["csr_x_ind"] = data["cell_name"].map(cell_dict)
-    data["csr_y_ind"] = data["geneID"].map(gene_dict)
-
-    # Important! by default, duplicate entries are summed together in the following which is needed for us!
-    X = csr_matrix(
-        (data[total_column], (data["csr_x_ind"], data["csr_y_ind"])),
-        shape=(len(uniq_cell), len(uniq_gene)),
-    )
+    X = csr_matrix((data[data.columns[COUNT_COLUMN_MAPPING[SKM.X_LAYER]]].values, (x_ind, y_ind)), shape=shape)
     layers = {}
     for name, i in COUNT_COLUMN_MAPPING.items():
-        if name != "total" and i < len(columns):
-            layers[name] = csr_matrix(
-                (data[columns[i]], (data["csr_x_ind"], data["csr_y_ind"])),
-                shape=(len(uniq_cell), len(uniq_gene)),
-            )
+        if name != SKM.X_LAYER and i < len(data.columns):
+            layers[name] = csr_matrix((data[data.columns[i]].values, (x_ind, y_ind)), shape=shape)
 
-    label_props["cell_name"] = uniq_cell
-    label_props["slice"] = slice
+    obs = pd.DataFrame(index=uniq_cell)
+    var = pd.DataFrame(index=uniq_gene)
+    adata = AnnData(X=X, obs=obs, var=var, layers=layers)
+    ordered_props = props.loc[adata.obs_names]
+    adata.obs["area"] = ordered_props["area"].values
+    adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
+    adata.obsm["contours"] = ordered_props["contours"].values
+    if segmentation_adata is not None:
+        adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
 
-    var = pd.DataFrame({"gene_short_name": uniq_gene})
-    var.set_index("gene_short_name", inplace=True)
-
-    # to GeoDataFrame
-    obs = gpd.GeoDataFrame(label_props, geometry="contours")
-    obs.set_index("cell_name", inplace=True)
-
-    obsm = {"spatial": coor}
-
-    adata = AnnData(X=X, layers=layers, obs=obs, var=var, obsm=obsm)
-
+    # Set uns
+    SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)
+    SKM.init_uns_pp_namespace(adata)
+    SKM.init_uns_spatial_namespace(adata)
+    SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_BINSIZE_KEY, binsize)
+    SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY, scale)
+    SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY, scale_unit)
     return adata
