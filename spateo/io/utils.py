@@ -68,7 +68,7 @@ def get_label_props(labels: np.ndarray) -> pd.DataFrame:
         A dataframe with properties and contours indexed by label
     """
 
-    def contours(mtx):
+    def contour(mtx):
         """Get contours of a cell using `cv2.findContours`."""
         mtx = mtx.astype(np.uint8)
         mtx[mtx > 0] = 255
@@ -88,10 +88,10 @@ def get_label_props(labels: np.ndarray) -> pd.DataFrame:
     #     return geo
 
     props = measure.regionprops_table(
-        labels, properties=("label", "area", "bbox", "centroid"), extra_properties=[contours]
+        labels, properties=("label", "area", "bbox", "centroid"), extra_properties=[contour]
     )
     props = pd.DataFrame(props)
-    props["contours"] = props.apply(lambda x: x["contours"] + x[["bbox-0", "bbox-1"]].to_numpy(), axis=1)
+    props["contour"] = props.apply(lambda x: x["contour"] + x[["bbox-0", "bbox-1"]].to_numpy(), axis=1)
     # props["contours"] = props["contours"].apply(contour_to_geo)
     return props.set_index(props["label"].astype(str)).drop(columns="label")
 
@@ -125,14 +125,14 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
     #     else:
     #         geo = Point((x, y))
     #     return geo
-    def contours(row):
+    def contour(row):
         x, y = row["x"] * binsize, row["y"] * binsize
         return np.array([[x, y], [x + binsize, y], [x + binsize, y + binsize], [x, y + binsize]], dtype=int)
 
     props = pd.DataFrame(
         {
             "label": data["label"].copy(),
-            "contours": data.apply(contours, axis=1),
+            "contour": data.apply(contour, axis=1),
             "centroid-0": centroids(data["x"], 0, binsize),
             "centroid-1": centroids(data["y"], 0, binsize),
         }
