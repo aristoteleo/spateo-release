@@ -20,7 +20,7 @@ from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
 from shapely.geometry import Polygon, MultiPolygon
 
-from .utils import bin_indices, centroids, get_bin_props, get_label_props, get_label_coordinates, in_concave_hull
+from .utils import bin_indices, centroids, get_bin_props, get_label_props, get_coords_labels, in_concave_hull
 from ..configuration import SKM
 from ..warnings import IOWarning
 
@@ -207,7 +207,7 @@ def read_bgi(
                 warnings.warn(f"Labels matrix {labels.shape} has different shape as data matrix {shape}", IOWarning)
         else:
             labels = SKM.select_layer_data(segmentation_adata, labels_layer)
-        label_coords = get_label_coordinates(labels)
+        label_coords = get_coords_labels(labels)
 
         if labels_layer is not None:
             seg_binsize = SKM.get_uns_spatial_attribute(segmentation_adata, SKM.UNS_SPATIAL_BINSIZE_KEY)

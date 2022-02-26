@@ -211,7 +211,7 @@ def bin_matrix(X: Union[np.ndarray, spmatrix], binsize: int) -> Union[np.ndarray
     return _bin_dense(X)
 
 
-def get_label_coordinates(labels: np.ndarray) -> pd.DataFrame:
+def get_coords_labels(labels: np.ndarray) -> pd.DataFrame:
     """Convert labels into sparse-format dataframe.
 
     Args:
