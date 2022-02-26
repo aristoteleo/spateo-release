@@ -58,96 +58,87 @@ def centroids(bin_indices: np.ndarray, coord_min: float = 0, binsize: int = 50) 
     return coord_centroids
 
 
-def get_label_props(
-    label_mtx: np.ndarray,
-    properties: Tuple[str, ...] = ("label", "area", "bbox", "centroid"),
-) -> pd.DataFrame:
+def get_label_props(labels: np.ndarray) -> pd.DataFrame:
     """Measure properties of labeled cell regions.
 
-    Parameters
-    ----------
-        label_mtx: `numpy.ndarray`
-            cell segmentation label matrix
-        properties: `tuple`
-            used properties
+    Args:
+        labels: cell segmentation label matrix
 
-    Returns
-    -------
-        props: `pandas.DataFrame`
-            A dataframe with properties and contours
-
+    Returns:
+        A dataframe with properties and contours indexed by label
     """
 
-    def contours(mtx):
+    def contour(mtx):
         """Get contours of a cell using `cv2.findContours`."""
-        # padding and transfer label mtx to binary mtx
-        mtx = np.pad(mtx, 1)
-        mtx[mtx > 0] = 255
         mtx = mtx.astype(np.uint8)
-        # get contours
+        mtx[mtx > 0] = 255
         contour = cv2.findContours(mtx, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0][0]
-        # shift back coordinates
-        contour = contour - np.array([1, 1])
-        return contour
+        return contour.squeeze()
 
-    def contour_to_geo(contour):
-        """Transfer contours to `shapely.geometry`"""
-        n = contour.shape[0]
-        contour = np.squeeze(contour)
-        if n >= 3:
-            geo = Polygon(contour)
-        elif n == 2:
-            geo = LineString(contour)
-        else:
-            geo = Point(contour)
-        return geo
+    # def contour_to_geo(contour):
+    #     """Transfer contours to `shapely.geometry`"""
+    #     n = contour.shape[0]
+    #     contour = np.squeeze(contour)
+    #     if n >= 3:
+    #         geo = Polygon(contour)
+    #     elif n == 2:
+    #         geo = LineString(contour)
+    #     else:
+    #         geo = Point(contour)
+    #     return geo
 
-    props = measure.regionprops_table(label_mtx, properties=properties, extra_properties=[contours])
+    props = measure.regionprops_table(
+        labels, properties=("label", "area", "bbox", "centroid"), extra_properties=[contour]
+    )
     props = pd.DataFrame(props)
-    props["contours"] = props.apply(lambda x: x["contours"] + x[["bbox-0", "bbox-1"]].to_numpy(), axis=1)
-    props["contours"] = props["contours"].apply(contour_to_geo)
-    return props
+    props["contour"] = props.apply(lambda x: x["contour"] + x[["bbox-0", "bbox-1"]].to_numpy(), axis=1)
+    # props["contours"] = props["contours"].apply(contour_to_geo)
+    return props.set_index(props["label"].astype(str)).drop(columns="label")
 
 
 def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
     """Simulate properties of bin regions.
 
-    Parameters
-    ----------
-        data :
-            The index of coordinates.
-        binsize :
-            The number of spatial bins to aggregate RNAs captured by DNBs in those bins.
+    Args:
+        data: Pandas dataframe containing binned x, y, and cell labels.
+            There should not be any duplicate cell labels.
+        binsize: Bin size used
 
-    Returns
-    -------
-        props: `pandas.DataFrame`
-            A dataframe with properties and contours
-
+    Returns:
+        A dataframe with properties and contours indexed by cell label
     """
 
-    def create_geo(row):
-        x, y = row["x_ind"], row["y_ind"]
-        x *= binsize
-        y *= binsize
-        if binsize > 1:
-            geo = Polygon(
-                [
-                    (x, y),
-                    (x + binsize, y),
-                    (x + binsize, y + binsize),
-                    (x, y + binsize),
-                    (x, y),
-                ]
-            )
-        else:
-            geo = Point((x, y))
-        return geo
+    # def create_geo(row):
+    #     x, y = row["x_ind"], row["y_ind"]
+    #     x *= binsize
+    #     y *= binsize
+    #     if binsize > 1:
+    #         geo = Polygon(
+    #             [
+    #                 (x, y),
+    #                 (x + binsize, y),
+    #                 (x + binsize, y + binsize),
+    #                 (x, y + binsize),
+    #                 (x, y),
+    #             ]
+    #         )
+    #     else:
+    #         geo = Point((x, y))
+    #     return geo
+    def contour(row):
+        x, y = row["x"] * binsize, row["y"] * binsize
+        return np.array([[x, y], [x + binsize, y], [x + binsize, y + binsize], [x, y + binsize]], dtype=int)
 
-    contours = data.apply(create_geo, axis=1)
-    props = pd.DataFrame({"contours": contours})
+    props = pd.DataFrame(
+        {
+            "label": data["label"].copy(),
+            "contour": data.apply(contour, axis=1),
+            "centroid-0": centroids(data["x"], 0, binsize),
+            "centroid-1": centroids(data["y"], 0, binsize),
+        }
+    )
     props["area"] = binsize**2
-    return props
+    return props.set_index("label")
 
 
 def in_concave_hull(p: np.ndarray, concave_hull: Union[Polygon, MultiPolygon]) -> np.ndarray:
@@ -220,32 +211,18 @@ def bin_matrix(X: Union[np.ndarray, spmatrix], binsize: int) -> Union[np.ndarray
     return _bin_dense(X)
 
 
-def mapping_label(data: pd.DataFrame, label: np.ndarray, shifts: Optional[tuple] = None) -> pd.Series:
-    """Mapping labels to data.
+def get_coords_labels(labels: np.ndarray) -> pd.DataFrame:
+    """Convert labels into sparse-format dataframe.
 
     Args:
-        data: a data frame with columns 'x' and 'y'.
-        label: cell segmentation label matrix.
-        shifts: shifts of x and y. if not, will be calculated automatically.
+        labels: cell segmentation labels matrix.
 
     Returns:
-        a pandas.Series
+        A DataFrame of columns "x", "y", and "label". The coordinates are
+        relative to the labels matrix.
     """
-
-    cell_coor = []
-    if not shifts:
-        shifts = (data["x"].min(), data["y"].min())
-
-    # slow
-    for i in range(label.shape[0]):
-        for j in range(label.shape[1]):
-            c = label[i, j]
-            # background will be removed
-            if c:
-                cell_coor.append([i + shifts[0], j + shifts[1], c])
-    cell_coor = pd.DataFrame(cell_coor, columns=["x", "y", "cell_name"])
-    cell_data = pd.merge(data, cell_coor, how="left", on=["x", "y"])
-    cell_data = cell_data.dropna()
-    cell_data["cell_name"] = cell_data["cell_name"].astype(str)
-
-    return cell_data
+    nz = labels.nonzero()
+    x, y = nz
+    data = labels[nz]
+    values = np.vstack((x, y, data)).T
+    return pd.DataFrame(values, columns=["x", "y", "label"])
