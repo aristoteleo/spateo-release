@@ -138,7 +138,7 @@ def conditionals(
     if isinstance(em_results, dict):
         if bins is None:
             raise PreprocessingError("`em_results` indicate binning was used, but `bins` was not provided")
-        background_cond = np.zeros(X.shape)
+        background_cond = np.ones(X.shape)
         cell_cond = np.zeros(X.shape)
         for label, (_, r, p) in em_results.items():
             indices = np.where(bins == label)
@@ -190,8 +190,8 @@ def run_em(
     X: np.ndarray,
     use_peaks: bool = False,
     min_distance: int = 21,
-    downsample: int = 1e6,
-    w: Tuple[float, float] = (0.9, 0.1),
+    downsample: Union[int, float] = 0.001,
+    w: Tuple[float, float] = (0.5, 0.5),
     mu: Tuple[float, float] = (10.0, 300.0),
     var: Tuple[float, float] = (20.0, 400.0),
     max_iter: int = 2000,
@@ -212,7 +212,8 @@ def run_em(
         downsample: Use at most this many samples. If `use_peaks` is False,
             samples are chosen randomly with probability proportional to the
             log UMI counts. When `bins` is provided, the size of each bin is
-            used as a scaling factor.
+            used as a scaling factor. If this is a float, then samples are
+            downsampled by this fraction.
         w: Initial proportions of cell and background as a tuple.
         mu: Initial means of cell and background negative binomial distributions.
         var: Initial variances of cell and background negative binomial
@@ -245,17 +246,19 @@ def run_em(
         for label in np.unique(bins):
             if label > 0:
                 _samples = X[np.where(bins == label)]
-                samples[label] = _samples[(_samples > 0) & (_samples <= np.quantile(_samples, 0.999))]
+                samples[label] = _samples[_samples > 0]
     else:
-        samples[0] = X[np.where((X > 0) & (X <= np.quantile(X, 0.999)))]
+        samples[0] = X[np.where(X > 0)]
 
-    downsample = int(downsample)
+    downsample_scale = True
+    if downsample == int(downsample):
+        downsample_scale = False
     rng = np.random.default_rng(seed)
     results = {}
     # TODO: Parallelize?
     total = sum(len(_samples) for _samples in samples.values())
     for label, _samples in samples.items():
-        _downsample = int(downsample * (len(_samples) / total))
+        _downsample = int(len(_samples) * downsample) if downsample_scale else int(downsample * (len(_samples) / total))
         if len(_samples) > _downsample:
             log = np.log(_samples)
             _samples = rng.choice(_samples, _downsample, replace=False, p=log / log.sum())

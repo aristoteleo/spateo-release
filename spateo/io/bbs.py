@@ -20,6 +20,7 @@ from shapely.ops import unary_union, polygonize
 
 from .bgi import read_bgi_agg
 from .utils import centroids
+from ..configuration import SKM
 
 
 def alpha_shape(
@@ -150,12 +151,11 @@ def get_concave_hull(
         alpha_hull: The computed concave hull.
         edge_points: The coordinates of the edge of the resultant concave hull.
     """
-    total_agg_tuple = read_bgi_agg(path, binsize=binsize)
+    adata = read_bgi_agg(path, binsize=binsize)
 
-    i, j = (total_agg_tuple[0] > min_agg_umi).nonzero()
+    i, j = (adata.X > min_agg_umi).nonzero()
 
-    if len(total_agg_tuple) == 5:
-        x_min, y_min = total_agg_tuple[-2], total_agg_tuple[-1]
+    x_min, y_min = int(adata.obs_names[0]), int(adata.var_names[0])
 
     # We use centroids function to get the true stereo-seq chip coordinates.
     if binsize != 1:
