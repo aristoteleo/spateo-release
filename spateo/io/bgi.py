@@ -221,7 +221,7 @@ def read_bgi(
         # When binning was used for segmentation, need to expand indices to cover
         # every binned pixel.
         if seg_binsize > 1:
-            coords_dfs = [label_coords]
+            coords_dfs = []
             for i in range(seg_binsize):
                 for j in range(seg_binsize):
                     coords = label_coords.copy()
