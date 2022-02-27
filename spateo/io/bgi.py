@@ -222,11 +222,12 @@ def read_bgi(
         # every binned pixel.
         if seg_binsize > 1:
             coords_dfs = [label_coords]
-            for i in range(1, seg_binsize):
-                coords = label_coords.copy()
-                coords["x"] += i
-                coords["y"] += i
-                coords_dfs.append(coords)
+            for i in range(seg_binsize):
+                for j in range(seg_binsize):
+                    coords = label_coords.copy()
+                    coords["x"] += i
+                    coords["y"] += j
+                    coords_dfs.append(coords)
             label_coords = pd.concat(coords_dfs, ignore_index=True)
         data = pd.merge(data, label_coords, on=["x", "y"], how="inner")
         props = get_label_props(labels)
