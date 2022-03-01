@@ -15,6 +15,9 @@ import cv2
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+
+from scipy.sparse import csr_matrix, spmatrix
+from typing import Optional, Tuple
 import skimage.io
 from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
