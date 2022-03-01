@@ -155,6 +155,7 @@ def read_bgi(
     segmentation_adata: Optional[AnnData] = None,
     labels_layer: Optional[str] = None,
     labels: Optional[Union[np.ndarray, str]] = None,
+    seg_binsize: int = 1,
 ) -> AnnData:
     """Read BGI read file as AnnData.
 
@@ -163,11 +164,14 @@ def read_bgi(
         scale: Physical length per coordinate. For visualization only.
         scale_unit: Scale unit.
         binsize: Size of pixel bins. Should only be provided when labels
-            (i.e. the `segmentation_adata` and `labels` arguments) are not used
-        segmentation_adata: AnnData containing segmentation results
-        labels_layer: Layer name in `segmentation_adata` containing labels
+            (i.e. the `segmentation_adata` and `labels` arguments) are not used.
+        segmentation_adata: AnnData containing segmentation results.
+        labels_layer: Layer name in `segmentation_adata` containing labels.
         labels: Numpy array or path to numpy array saved with `np.save` that
-            contains labels
+            contains labels.
+        seg_binsize: the bin size used in cell segmentation, used in conjunction
+            with `labels` and will be overwritten when `labels_layer` and
+            `segmentation_adata` are not None.
 
     Returns:
         Bins x genes or labels x genes AnnData.
