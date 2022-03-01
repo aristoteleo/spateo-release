@@ -21,10 +21,10 @@ def find_cluster_spagcn(
     refine_shape: Optional[str] = None,
     his_img_path: Optional[str] = None,
     total_umi: Optional[str] = None,
-    x_pixel: str = "x_pixel",
-    y_pixel: str = "y_pixel",
-    x_array: str = "x_array",
-    y_array: str = "y_array",
+    x_pixel: str = None,
+    y_pixel: str = None,
+    x_array: str = None,
+    y_array: str = None,
     seed: int = 100,
     copy: bool = False,
 ) -> Optional[anndata.AnnData]:
@@ -40,10 +40,10 @@ def find_cluster_spagcn(
         his_img_path: The file path of histology image used to calculate adjacent matrix in spagcn algorithm. Defaults to None.
         total_umi: By providing the key(colname) in `adata.obs` which contains total UMIs(counts) for each spot, the function use the total counts as
                                 a grayscale image when histology image is not provided. Ignored if his_img_path is not `None`. Defaults to "total_umi".
-        x_pixel: The key(colname) in `adata.obs` which contains corresponding x-pixels in histology image. Defaults to "x_pixel".
-        y_pixel: The key(colname) in `adata.obs` which contains corresponding y-pixels in histology image. Defaults to "y_pixel".
-        x_array: The key(colname) in `adata.obs` which contains corresponding x-coordinates. Defaults to "x_array".
-        y_array: The key(colname) in `adata.obs` which contains corresponding y-coordinates. Defaults to "y_array".
+        x_pixel: The key(colname) in `adata.obs` which contains corresponding x-pixels in histology image. Defaults to None.
+        y_pixel: The key(colname) in `adata.obs` which contains corresponding y-pixels in histology image. Defaults to None.
+        x_array: The key(colname) in `adata.obs` which contains corresponding x-coordinates. Defaults to None.
+        y_array: The key(colname) in `adata.obs` which contains corresponding y-coordinates. Defaults to None.
         seed: Global seed for `random`, `torch`, `numpy`. Defaults to 100.
         copy: Whether to return a new deep copy of `adata` instead of updating `adata` object passed in arguments. Defaults to False.
 
@@ -52,10 +52,25 @@ def find_cluster_spagcn(
                                 The adjacent matrix used in spagcn algorithm is saved in `adata.uns["adj_spagcn"]`.
     """
 
-    x_array = adata.obs[x_array].tolist()
-    y_array = adata.obs[y_array].tolist()
-    x_pixel = adata.obs[x_pixel].tolist()
-    y_pixel = adata.obs[y_pixel].tolist()
+    if x_array is None:
+        x_array = [i[0] for i in adata.obsm["X_spatial"]]
+    else:
+        x_array = adata.obs[x_array].tolist()
+
+    if y_array is None:
+        y_array = [i[1] for i in adata.obsm["X_spatial"]]
+    else:
+        y_array = adata.obs[y_array].tolist()
+
+    if x_pixel is None:
+        x_pixel = [int(i) for i in x_array]
+    else:
+        x_pixel = adata.obs[x_pixel].tolist()
+
+    if y_pixel is None:
+        y_pixel = [int(i) for i in y_array]
+    else:
+        y_pixel = adata.obs[y_pixel].tolist()
 
     s = 1
     b = 49
@@ -65,15 +80,15 @@ def find_cluster_spagcn(
             adj = calculate_adj_matrix(x=x_array, y=y_array, histology=False)
         else:
             total_umi = adata.obs[total_umi].tolist()
-            total_umi = [x / max(total_umi) * 255 for x in total_umi]
-            total_umi_mtx = pd.DataFrame({"x_pos": x_array, "y_pos": y_array, "n_umis": total_umi})
-            total_umi_mtx = total_umi_mtx.pivot(index="x_pos", columns="y_pos", values="n_umis").fillna(0).to_numpy()
-            umi_gs_img = np.dstack((total_umi_mtx, total_umi_mtx, total_umi_mtx))
+            total_umi = [int(x / max(total_umi) * 254 + 1) for x in total_umi]
+            total_umi_mtx = pd.DataFrame({"x_pos": x_pixel, "y_pos": y_pixel, "n_umis": total_umi})
+            total_umi_mtx = total_umi_mtx.pivot(index="x_pos", columns="y_pos", values="n_umis").fillna(1).to_numpy()
+            umi_gs_img = np.dstack((total_umi_mtx, total_umi_mtx, total_umi_mtx)).astype(int)
             adj = calculate_adj_matrix(
                 x=x_array,
                 y=y_array,
-                x_pixel=x_array,
-                y_pixel=y_array,
+                x_pixel=x_pixel,
+                y_pixel=y_pixel,
                 image=umi_gs_img,
                 beta=b,
                 alpha=s,
@@ -137,6 +152,7 @@ def find_cluster_spagcn(
     y_pred, prob = clf.predict()
     adata.obs["spagcn_pred"] = y_pred
     adata.obs["spagcn_pred"] = adata.obs["spagcn_pred"].astype("category")
+    adata.obs["spagcn_pred"] = [str(i) for i in adata.obs["spagcn_pred"]]
 
     if refine_shape is not None:
         # Do cluster refinement(optional)
@@ -155,7 +171,7 @@ def find_cluster_spagcn(
     return None
 
 
-def scc(
+def find_cluster_scc(
     adata: anndata.AnnData,
     min_cells: int = 100,
     spatial_key: str = "spatial",
