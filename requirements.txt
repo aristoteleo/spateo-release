@@ -22,7 +22,6 @@ seaborn>=0.9.0
 Shapely>=1.8.0
 statsmodels>=0.9.0
 umap-learn>=0.5.1
-
 kneed
 nudged
 POT
@@ -33,5 +32,4 @@ pyvista
 setuptools
 tqdm
 torch
-torch-sparse
 typing_extensions
