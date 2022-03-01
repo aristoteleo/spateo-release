@@ -13,7 +13,6 @@ import torch.nn as nn
 from scipy.sparse import issparse
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
-from torch_geometric.nn import GCNConv
 
 slog = lack.LoggerManager(namespace="spateo")
 
@@ -463,6 +462,28 @@ class simple_GC_DEC_PyG(simple_GC_DEC):
 
     def __init__(self, nfeat, nhid, alpha=0.2):
         super(simple_GC_DEC_PyG, self).__init__()
+
+        # torch geometric
+        try:
+            from torch_geometric.nn import GCNConv
+        except ModuleNotFoundError:
+            # Installing torch geometric packages with specific CUDA+PyTorch version.
+            # See https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html for details
+            ImportError(
+                """
+            TORCH = torch.__version__.split('+')[0]
+            CUDA = 'cu' + torch.version.cuda.replace('.','')
+
+            !pip install torch-scatter     -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+            !pip install torch-sparse      -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+            !pip install torch-cluster     -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+            !pip install torch-spline-conv -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
+            !pip install torch-geometric"
+            """
+            )
+
+            from torch_geometric.nn import GCNConv
+
         self.gc = GCNConv(nfeat, nhid)
         self.nhid = nhid
         # self.mu determined by the init method
