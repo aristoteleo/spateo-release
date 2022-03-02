@@ -192,6 +192,7 @@ def read_bgi(
         labels = np.load(labels)
 
     data = read_bgi_as_dataframe(path)
+    n_columns = data.shape[1]
 
     # Only binning supported in this case
     if segmentation_adata is None and labels is None:
@@ -249,7 +250,7 @@ def read_bgi(
     X = csr_matrix((data[data.columns[COUNT_COLUMN_MAPPING[SKM.X_LAYER]]].values, (x_ind, y_ind)), shape=shape)
     layers = {}
     for name, i in COUNT_COLUMN_MAPPING.items():
-        if name != SKM.X_LAYER and i < len(data.columns):
+        if name != SKM.X_LAYER and i < n_columns:
             layers[name] = csr_matrix((data[data.columns[i]].values, (x_ind, y_ind)), shape=shape)
 
     obs = pd.DataFrame(index=uniq_cell)
