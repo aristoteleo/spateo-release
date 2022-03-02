@@ -65,6 +65,7 @@ def read_bgi_agg(
     scale_unit: Optional[str] = None,
     binsize: int = 1,
     gene_agg: Optional[Dict[str, Union[List[str], Callable[[str], bool]]]] = None,
+    prealigned: bool = False,
 ) -> AnnData:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
@@ -80,6 +81,8 @@ def read_bgi_agg(
             example, `{'mito': ['list', 'of', 'mitochondrial', 'genes']}` will
             yield an AnnData with a layer named "mito" with the aggregate total
             UMIs of the provided gene list.
+        prealigned: Whether the stain image is already aligned with the minimum
+            x and y RNA coordinates.
 
     Returns:
         An AnnData object containing the UMIs per coordinate and the nucleus
@@ -98,6 +101,8 @@ def read_bgi_agg(
     layers = {}
     if stain_path:
         image = skimage.io.imread(stain_path)
+        if prealigned:
+            image = np.pad(image, ((x_min, 0), (y_min, 0)))
         x_max = max(x_max, image.shape[0])
         y_max = max(y_max, image.shape[1])
         shape = (x_max + 1, y_max + 1)
