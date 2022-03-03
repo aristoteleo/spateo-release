@@ -55,6 +55,7 @@ def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
             4: np.uint16,  # spliced
             5: np.uint16,  # unspliced
         },
+        comment="#",
     )
 
 
