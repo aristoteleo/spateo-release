@@ -33,7 +33,8 @@ def pairwise_align(
         Alignment of spots.
     """
 
-    torch.cuda.init()
+    if device != "cpu":
+        torch.cuda.init()
     # Subset for common genes
     common_genes = [value for value in slice1.var.index if value in set(slice2.var.index)]
     slice1, slice2 = slice1[:, common_genes], slice2[:, common_genes]
@@ -90,7 +91,8 @@ def pairwise_align(
         numItermax=numItermax,
         numItermaxEmd=numItermaxEmd,
     )
-    torch.cuda.empty_cache()
+    if device != "cpu":
+        torch.cuda.empty_cache()
 
     return pi.cpu().numpy()
 

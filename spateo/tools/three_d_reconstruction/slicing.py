@@ -1,7 +1,8 @@
 import warnings
+import pyvista as pv
 
 from pyvista import PolyData, UnstructuredGrid
-from typing import List, Optional, Sequence, Union
+from typing import List, Union
 
 try:
     from typing import Literal
@@ -66,7 +67,11 @@ def three_d_slice(
     else:
         mesh.set_active_scalars(f"{key}_rgba")
         if slice_method == "axis":
-            slices_blocks = mesh.slice_along_axis(n=n_slices, axis=axis, center=_slice_method_args["center"])
+            slices_blocks = mesh.slice_along_axis(
+                n=_slice_method_args["n_slices"],
+                axis=_slice_method_args["axis"],
+                center=_slice_method_args["center"],
+            )
         elif slice_method == "orthogonal":
             # Create three orthogonal slices through the dataset on the three cartesian planes.
             center = (None, None, None) if _slice_method_args["center"] is None else _slice_method_args["center"]

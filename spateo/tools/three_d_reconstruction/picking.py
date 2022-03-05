@@ -1,12 +1,11 @@
 import warnings
 
 import numpy as np
-import pandas as pd
 import pyvista as pv
 import vtk
 
 from pyvista import PolyData, UnstructuredGrid
-from typing import List, Union
+from typing import List
 
 try:
     from typing import Literal
@@ -17,12 +16,12 @@ from .reconstruct_mesh import merge_mesh
 
 
 def three_d_pick(
-    mesh: Union[PolyData, UnstructuredGrid],
+    mesh: PolyData or UnstructuredGrid,
     key: str = "groups",
     pick_method: Literal["rectangle", "box"] = "rectangle",
     invert: bool = False,
     merge: bool = True,
-) -> List[PolyData or UnstructuredGrid]:
+) -> List[PolyData or UnstructuredGrid] or UnstructuredGrid:
     """
     Pick the interested part of a reconstructed 3D mesh by interactive approach.
     Args:
@@ -71,13 +70,15 @@ def three_d_pick(
             # track the picked meshes and label them
             original_mesh["picked_index"] = np.ones(original_mesh.n_points) * len(picked_meshes)
             picked_meshes.append(original_mesh)
+            invert_meshes.append(mesh)
 
         p.enable_cell_picking(
             mesh=mesh,
             callback=split_mesh,
             show=False,
             font_size=12,
-            show_message="Press `r` to enable retangle based selection. Press `r` again to turn it off. ",
+            show_message="Press `r` to enable retangle based selection. Press `r` again to turn it off. \n"
+            "Press `q` to exit the interactive window. ",
         )
         p.show()
         picked_meshes = [invert_meshes[0]] if invert else picked_meshes
@@ -86,6 +87,9 @@ def three_d_pick(
         p.add_mesh_clip_box(mesh, invert=invert, scalars=f"{key}_rgba", rgba=True)
         p.show()
         picked_meshes = p.box_clipped_meshes
+
+    # plot final picked meshes
+    pv.plot(picked_meshes)
 
     if merge:
         return merge_mesh(picked_meshes) if len(picked_meshes) > 1 else picked_meshes[0]

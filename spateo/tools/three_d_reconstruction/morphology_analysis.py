@@ -1,10 +1,6 @@
-import numpy as np
-import pandas as pd
-import pyvista as pv
-
 from pyvista import PolyData, UnstructuredGrid
 from sklearn.neighbors import KernelDensity
-from typing import Optional, Union, Tuple
+from typing import Union, Tuple
 
 
 def _log(m):
