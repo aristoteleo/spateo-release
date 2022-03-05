@@ -6,4 +6,4 @@ from .bbs import (
     polygon,
 )
 from .space import space
-from .three_d_plots import create_plotter, output_plotter, save_plotter, three_d_plot
+from .three_d_plots import *
