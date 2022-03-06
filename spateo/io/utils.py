@@ -128,6 +128,7 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
             geo = Point((x, y))
         geo = dumps(geo, hex=True)  # geometry object to hex
         return geo
+
     # def contour(row):
     #     x, y = row["x"] * binsize, row["y"] * binsize
     #     return np.array([[x, y], [x + binsize, y], [x + binsize, y + binsize], [x, y + binsize]], dtype=int)

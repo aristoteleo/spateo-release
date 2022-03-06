@@ -12,7 +12,7 @@ from .utils import _convert_to_geo_dataframe
 
 def geo(
     adata: anndata.AnnData,
-    basis: str = 'contour',
+    basis: str = "contour",
     color: Union[list, str, None] = None,
     genes: Union[list, None] = [],
     gene_cmaps=None,
@@ -25,8 +25,8 @@ def geo(
     stack_colors_legend_size: int = 10,
     figsize=(6, 6),
     aspect: str = "equal",
-    slices = None,
-    img_layers = None,
+    slices=None,
+    img_layers=None,
     *args,
     **kwargs
 ):

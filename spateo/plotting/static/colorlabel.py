@@ -8,8 +8,7 @@ from .utils import _convert_to_geo_dataframe
 
 # DEFAULT COLORS from
 # https://github.com/scikit-image/scikit-image/blob/8faf62d677e73f5911cfc5232d5de02f1da7486b/skimage/color/colorlabel.py
-DEFAULT_COLORS = ('red', 'blue', 'yellow', 'magenta', 'green',
-                  'indigo', 'darkorange', 'cyan', 'pink', 'yellowgreen')
+DEFAULT_COLORS = ("red", "blue", "yellow", "magenta", "green", "indigo", "darkorange", "cyan", "pink", "yellowgreen")
 
 
 def color_label(
@@ -86,5 +85,3 @@ def color_label(
 
     # main_finish_progress("color label plot")
     return res
-
-

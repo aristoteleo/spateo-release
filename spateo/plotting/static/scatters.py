@@ -786,7 +786,7 @@ def scatters(
                     values = (
                         calc_1nd_moment(values, knn)[0]
                         if smooth in [1, True]
-                        else calc_1nd_moment(values, knn ** smooth)[0]
+                        else calc_1nd_moment(values, knn**smooth)[0]
                     )
 
                 # TODO: shapely.affinity.rotate of geoplot
@@ -965,10 +965,10 @@ def scatters(
 
         # add image as background
         if img_layers:
-            img = adata.uns['spatial'][slices]['images'][img_layers].copy()
-            scale_factor = adata.uns['spatial'][slices]['scalefactors'][img_layers]
+            img = adata.uns["spatial"][slices]["images"][img_layers].copy()
+            scale_factor = adata.uns["spatial"][slices]["scalefactors"][img_layers]
             w, h = img.shape[:2]
-            img = cv2.resize(img, (int(h//scale_factor), int(w//scale_factor)))
+            img = cv2.resize(img, (int(h // scale_factor), int(w // scale_factor)))
             img = np.rot90(img)
             img = np.flipud(img)
             if img.ndim == 2:
