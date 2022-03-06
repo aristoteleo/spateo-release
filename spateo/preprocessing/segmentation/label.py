@@ -209,22 +209,26 @@ def expand_labels(
 
 def _label_connected_components(
     X: np.ndarray,
+    area_threshold: int = 500,
     k: int = 3,
     min_area: int = 100,
     n_iter: int = -1,
-    distance: int = 10,
+    distance: int = 8,
     max_area: int = 400,
 ) -> np.ndarray:
     """Label connected components while splitting components that are too large.
 
     Args:
         X: Boolean mask to compute connected components from.
+        area_threshold: Connected components with area greater than this value
+            will be split into smaller portions by first eroding and then
+            expanding.
         k: Kernel size for erosion.
         min_area: Don't erode labels smaller than this area.
         n_iter: Number of erosion operations. -1 means continue eroding until
             every label is less than `min_area`.
         distance: Distance to expand eroded labels.
-        max_area: Only operate on labels greater than this area.
+        max_area: Maximum area when expanding labels.
 
     Returns:
         New label array
@@ -244,14 +248,14 @@ def _label_connected_components(
                 stats[cv2.CC_STAT_HEIGHT],
             )
             label_mask = components[1][top : top + height, left : left + width] == label
-            if area <= max_area:
+            if area <= area_threshold:
                 saved[top : top + height, left : left + width] += label_mask * saved_i
                 saved_i += 1
             else:
                 subset[top : top + height, left : left + width] += label_mask
     eroded = utils.safe_erode(subset, k=k, min_area=min_area, n_iter=n_iter)
     labels = cv2.connectedComponents(eroded.astype(np.uint8))[1]
-    labels[np.where(labels > 0)] += saved_i - 1
+    labels[labels > 0] += saved_i - 1
     expanded = _expand_labels(labels, distance=distance, max_area=max_area, mask=subset)
     return saved + expanded
 
@@ -259,10 +263,11 @@ def _label_connected_components(
 def label_connected_components(
     adata: AnnData,
     layer: str,
+    area_threshold: int = 500,
     k: int = 3,
     min_area: int = 100,
     n_iter: int = -1,
-    distance: int = 10,
+    distance: int = 8,
     max_area: int = 400,
     out_layer: Optional[str] = None,
 ):
@@ -272,12 +277,15 @@ def label_connected_components(
         adata: Input Anndata
         layer: Data layer that was used to generate the mask. First, will look
             for `{layer}_mask`. Otherwise, this will be use as a literal.
+        area_threshold: Connected components with area greater than this value
+            will be split into smaller portions by first eroding and then
+            expanding.
         k: Kernel size for erosion.
         min_area: Don't erode labels smaller than this area.
         n_iter: Number of erosion operations. -1 means continue eroding until
             every label is less than `min_area`.
         distance: Distance to expand eroded labels.
-        max_area: Only operate on labels greater than this area.
+        max_area: Maximum area when expanding labels.
         out_layer: Layer to save results. Defaults to `{layer}_labels`.
 
     Returns:
@@ -287,6 +295,6 @@ def label_connected_components(
     if mask_layer not in adata.layers:
         mask_layer = layer
     mask = SKM.select_layer_data(adata, mask_layer)
-    labels = _label_connected_components(mask, k, min_area, n_iter, distance, max_area)
+    labels = _label_connected_components(mask, area_threshold, k, min_area, n_iter, distance, max_area)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, labels)

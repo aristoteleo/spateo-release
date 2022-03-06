@@ -141,9 +141,9 @@ def conditionals(
         background_cond = np.ones(X.shape)
         cell_cond = np.zeros(X.shape)
         for label, (_, r, p) in em_results.items():
-            indices = np.where(bins == label)
-            background_cond[indices] = stats.nbinom(n=r[0], p=p[0]).pmf(X[indices])
-            cell_cond[indices] = stats.nbinom(n=r[1], p=p[1]).pmf(X[indices])
+            mask = bins == label
+            background_cond[mask] = stats.nbinom(n=r[0], p=p[0]).pmf(X[mask])
+            cell_cond[mask] = stats.nbinom(n=r[1], p=p[1]).pmf(X[mask])
     else:
         _, r, p = em_results
         background_cond = stats.nbinom(n=r[0], p=p[0]).pmf(X)
@@ -176,9 +176,9 @@ def confidence(
     tau1 = np.zeros(X.shape)
     if isinstance(em_results, dict):
         for label, (w, _, _) in em_results.items():
-            indices = np.where(bins == label)
-            tau0[indices] = w[0] * bp[indices]
-            tau1[indices] = w[1] * cp[indices]
+            mask = bins == label
+            tau0[mask] = w[0] * bp[mask]
+            tau1[mask] = w[1] * cp[mask]
     else:
         w, _, _ = em_results
         tau0 = w[0] * bp
@@ -245,10 +245,10 @@ def run_em(
     elif bins is not None:
         for label in np.unique(bins):
             if label > 0:
-                _samples = X[np.where(bins == label)]
+                _samples = X[bins == label]
                 samples[label] = _samples[_samples > 0]
     else:
-        samples[0] = X[np.where(X > 0)]
+        samples[0] = X[X > 0]
 
     downsample_scale = True
     if downsample == int(downsample):

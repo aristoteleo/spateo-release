@@ -127,11 +127,10 @@ def _segment_densities(
 
     dilated = np.zeros_like(bins)
     labels = np.unique(bins)
-    for label in sorted(labels, key=lambda label: X[np.where(bins == label)].mean()):
+    for label in sorted(labels, key=lambda label: X[bins == label].mean()):
         mask = bins == label
         dilate = cv2.dilate(mask.astype(np.uint8), utils.circle(dk))
-        where = np.where(utils.mclose_mopen(dilate, dk) > 0)
-        dilated[where] = label
+        dilated[utils.mclose_mopen(dilate, dk) > 0] = label
     return dilated
 
 
@@ -177,8 +176,8 @@ def segment_densities(
         else:
             counts = Counter(bins[0]) + Counter(bins[-1]) + Counter(bins[:, 0]) + Counter(bins[:, -1])
             background_label = counts.most_common(1)[0][0]
-        bins[np.where(bins == background_label)] = 0
-        bins[np.where(bins > background_label)] -= 1
+        bins[bins == background_label] = 0
+        bins[bins > background_label] -= 1
     if binsize > 1:
         # Expand back
         bins = cv2.resize(bins, adata.shape[::-1], interpolation=cv2.INTER_NEAREST)

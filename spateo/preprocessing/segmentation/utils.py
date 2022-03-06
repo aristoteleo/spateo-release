@@ -130,8 +130,7 @@ def conv2d(
         for label in np.unique(bins):
             if label > 0:
                 mask = bins == label
-                indices = np.where(mask)
-                conv[indices] = _conv(X * mask)[indices]
+                conv[mask] = _conv(X * mask)[mask]
         return conv
     return _conv(X)
 
