@@ -2,19 +2,18 @@
 # and https://github.com/lmcinnes/umap/blob/7e051d8f3c4adca90ca81eb45f6a9d1372c076cf/umap/plot.py
 
 import warnings
-from matplotlib.lines import Line2D
-import numpy as np
-import pandas as pd
-from pandas.api.types import is_categorical_dtype
-
-import anndata
-from numbers import Number
-
-import matplotlib.cm
-from matplotlib.axes import Axes
-from anndata import AnnData
 from typing import Union, Optional, List
 
+import anndata
+import cv2
+import matplotlib.cm
+import numpy as np
+import pandas as pd
+from anndata import AnnData
+from matplotlib.axes import Axes
+from matplotlib.lines import Line2D
+from numbers import Number
+from pandas.api.types import is_categorical_dtype
 
 from spateo.configuration import _themes, reset_rcParams
 from .utils import (
@@ -31,11 +30,6 @@ from .utils import (
     save_fig,
     _get_adata_color_vec,
 )
-
-# from ...tools.transformer import (
-#     gen_rotation_2d,
-#     affine_transform,
-# )
 from spateo.tools.utils import (
     update_dict,
     get_mapper,
@@ -54,12 +48,12 @@ from spateo.tools.utils import (
 # @docstrings.get_sectionsf("scatters")
 def scatters(
     adata: AnnData,
-    basis: str = "umap",
+    basis: Union[str, list] = "umap",
     x: int = 0,
     y: int = 1,
     z: int = 2,
-    color: str = "ntr",
-    layer: str = "X",
+    color: Union[str, list] = "ntr",
+    layer: Union[str, list] = "X",
     highlights: Optional[list] = None,
     labels: Optional[list] = None,
     values: Optional[list] = None,
@@ -105,6 +99,12 @@ def scatters(
     deaxis: bool = True,
     despline_sides: Union[None, List[str]] = None,
     projection="2d",
+    geo=False,
+    boundary_width=0.2,
+    boundary_color="black",
+    aspect="auto",
+    slices=None,
+    img_layers=None,
     **kwargs,
 ) -> Union[None, Axes]:
     """Plot an embedding as points. Currently this only works
@@ -116,12 +116,12 @@ def scatters(
     colour points by a categorical labelling or numeric values.
     This method is intended to be used within a Jupyter
     notebook with ``%matplotlib inline``.
-    Parameters
-    ----------
+
+    Args:
         adata: :class:`~anndata.AnnData`
             an Annodata object
         basis: `str`
-            The reduced dimension.
+            c
         x: `int` (default: `0`)
             The column index of the low dimensional embedding for the x-axis.
         y: `int` (default: `1`)
@@ -300,10 +300,16 @@ def scatters(
             Which side of splines should be removed. Can be any combination of `["bottom", "right", "top", "left"]`.
         deaxis:
             Whether to remove axis ticks of the figure.
+        geo: `bool` (default: `False`)
+            Use geometry info or not.
+        boundary_width: `float`, (default: 0.2)
+            The line width of boundary.
+        boundary_color: (default: "black")
+            The color value of boundary.
         kwargs:
             Additional arguments passed to plt.scatters.
-    Returns
-    -------
+
+    Returns:
         result:
             Either None or a matplotlib axis with the relevant plot displayed.
             If you are using a notbooks and have ``%matplotlib inline`` set
@@ -329,9 +335,17 @@ def scatters(
         )
     group_colors = ["b", "g", "r", "c", "m", "y", "k", "w"]
 
+    if geo and (frontier or contour):
+        # warning geoplot not has `frontier` or `contour`. Please use `boundary_width`
+        frontier = False
+        contour = False
+
+    if geo and projection == "3d":
+        # warning geoplot not has 3d projection.
+        projection = None
+
     if stack_colors and stack_colors_cmaps is None:
         # main_info("using default stack colors")
-        print("using default stack colors")
         stack_colors_cmaps = [
             "Greys",
             "Purples",
@@ -377,6 +391,14 @@ def scatters(
     if type(z) in [int, str]:
         z = [z]
 
+    # check color, layer, basis -> convert to list
+    if type(color) is str:
+        color = [color]
+    if type(layer) is str:
+        layer = [layer]
+    if type(basis) is str:
+        basis = [basis]
+
     if all([is_gene_name(adata, i) for i in basis]):
         if x[0] not in ["M_s", "X_spliced", "M_t", "X_total", "spliced", "total"] and y[0] not in [
             "M_u",
@@ -408,14 +430,6 @@ def scatters(
 
     if use_smoothed:
         mapper = get_mapper()
-
-    # check color, layer, basis -> convert to list
-    if type(color) is str:
-        color = [color]
-    if type(layer) is str:
-        layer = [layer]
-    if type(basis) is str:
-        basis = [basis]
 
     if stack_colors and len(color) > len(stack_colors_cmaps):
         print(
@@ -455,6 +469,17 @@ def scatters(
     if kwargs is not None:
         scatter_kwargs.update(kwargs)
 
+    # kwargs of geoplot
+    if geo:
+        geo_kwargs = dict(
+            alpha=alpha,
+            linewidth=boundary_width,
+            linecolor=boundary_color,
+            rasterized=True,
+        )
+        if kwargs is not None:
+            geo_kwargs.update(kwargs)
+
     font_color = _select_font_color(_background)
 
     total_panels, ncols = (
@@ -463,11 +488,12 @@ def scatters(
     )
     nrow, ncol = int(np.ceil(total_panels / ncols)), ncols
     if figsize is None:
-        figsize = plt.rcParams["figsize"]
+        figsize = plt.rcParams["figure.figsize"]
 
     figure = None  # possible as argument in future
 
-    # if #total_panel is 1, `_matplotlib_points` will create a figure. No need to create a figure here and generate a blank figure.
+    # if #total_panel is 1, `_matplotlib_points` will create a figure.
+    # No need to create a figure here and generate a blank figure.
     if total_panels > 1 and ax is None:
         figure = plt.figure(
             None,
@@ -501,7 +527,12 @@ def scatters(
                 if cur_l.startswith("velocity"):
                     cmap, sym_c = "bwr", True
 
-        prefix = cur_l + "_" if any([key == cur_l + "_" + cur_b for key in adata.obsm.keys()]) else "X_"
+        if cur_b == "spatial":  # space plot don't need "X_spatial"
+            prefix = ""
+        elif any([key == cur_l + "_" + cur_b for key in adata.obsm.keys()]):
+            prefix = cur_l + "_"
+        else:
+            prefix = "X_"
 
         # if prefix + cur_b in adata.obsm.keys():
         #     if type(x) != str and type(y) != str:
@@ -540,23 +571,26 @@ def scatters(
             else:
                 _adata = adata
 
-            if (
-                type(x) in [anndata._core.views.ArrayView, np.ndarray]
-                and type(y) in [anndata._core.views.ArrayView, np.ndarray]
-                and len(x) == _adata.n_obs
-                and len(y) == _adata.n_obs
-            ):
-                x, y = [x], [y]
-                if projection == "3d":
-                    z = [z]
-            elif hasattr(x, "__len__") and hasattr(y, "__len__"):
-                x, y = list(x), list(y)
-                if projection == "3d":
-                    z = list(z)
+            if not geo:
+                if (
+                    type(x) in [anndata._core.views.ArrayView, np.ndarray]
+                    and type(y) in [anndata._core.views.ArrayView, np.ndarray]
+                    and len(x) == _adata.n_obs
+                    and len(y) == _adata.n_obs
+                ):
+                    x, y = [x], [y]
+                    if projection == "3d":
+                        z = [z]
+                elif hasattr(x, "__len__") and hasattr(y, "__len__"):
+                    x, y = list(x), list(y)
+                    if projection == "3d":
+                        z = list(z)
 
             for cur_x, cur_y, cur_z in zip(x, y, z):  # here x / y are arrays
                 # main_debug("handling coordinates, cur_x: %s, cur_y: %s" % (cur_x, cur_y))
-                if type(cur_x) is int and type(cur_y) is int:
+                if geo:
+                    points = _adata.obs.geometry
+                elif type(cur_x) is int and type(cur_y) is int:
                     x_col_name = cur_b + "_0"
                     y_col_name = cur_b + "_1"
                     z_col_name = cur_b + "_2"
@@ -752,15 +786,49 @@ def scatters(
                     values = (
                         calc_1nd_moment(values, knn)[0]
                         if smooth in [1, True]
-                        else calc_1nd_moment(values, knn**smooth)[0]
+                        else calc_1nd_moment(values, knn ** smooth)[0]
                     )
 
+                # TODO: shapely.affinity.rotate of geoplot
                 if affine_transform_A is None or affine_transform_b is None:
                     point_coords = points.values
                 else:
                     point_coords = affine_transform(points.values, affine_transform_A, affine_transform_b)
 
-                if points.shape[0] <= figsize[0] * figsize[1] * 100000:
+                if geo:
+                    # geoplot using matplotlib
+                    # main_debug("drawing with _matplotlib_points function - geoplot")
+                    ax, color_out = _matplotlib_points(
+                        point_coords,
+                        ax,
+                        labels,
+                        _values,
+                        highlights,
+                        _cmap,
+                        color_key,
+                        _color_key_cmap,
+                        _background,
+                        figsize[0],
+                        figsize[1],
+                        show_legend,
+                        sort=sort,
+                        frontier=frontier,
+                        ccmap=ccmap,
+                        calpha=calpha,
+                        sym_c=sym_c,
+                        inset_dict=inset_dict,
+                        geo=True,
+                        **geo_kwargs,
+                    )
+                    if labels is not None:
+                        color_dict = {}
+                        colors = [rgb2hex(i) for i in color_out]
+                        for i, j in zip(labels, colors):
+                            color_dict[i] = j
+
+                        adata.uns[cur_title + "_colors"] = color_dict
+                elif points.shape[0] <= figsize[0] * figsize[1] * 100000:
+                    # scatter plot using matplotlib
                     # main_debug("drawing with _matplotlib_points function")
                     ax, color_out = _matplotlib_points(
                         # points.values,
@@ -794,6 +862,7 @@ def scatters(
 
                         adata.uns[cur_title + "_colors"] = color_dict
                 else:
+                    # scatter plot using datashader
                     # main_debug("drawing with _datashade_points function")
                     ax = _datashade_points(
                         # points.values,
@@ -827,6 +896,7 @@ def scatters(
                         deaxis_all(ax)
 
                 ax.set_title(cur_title)
+                ax.set_aspect(aspect)
 
                 axes_list.append(ax)
                 color_list.append(color_out)
@@ -892,6 +962,20 @@ def scatters(
         # collected during for loop above
         if stack_colors:
             ax.legend(handles=stack_legend_handles, loc="upper right", prop={"size": stack_colors_legend_size})
+
+        # add image as background
+        if img_layers:
+            img = adata.uns['spatial'][slices]['images'][img_layers].copy()
+            scale_factor = adata.uns['spatial'][slices]['scalefactors'][img_layers]
+            w, h = img.shape[:2]
+            img = cv2.resize(img, (int(h//scale_factor), int(w//scale_factor)))
+            img = np.rot90(img)
+            img = np.flipud(img)
+            if img.ndim == 2:
+                ax.imshow(img, cmap="gray")
+            else:
+                ax.imshow(img)
+            ax.invert_yaxis()
 
     for cur_b in basis:
         for cur_l in layer:

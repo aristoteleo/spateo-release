@@ -10,6 +10,7 @@ from anndata import AnnData
 from scipy.sparse import csr_matrix, issparse, spmatrix
 from scipy.spatial import Delaunay
 from shapely.geometry import Point, LineString, Polygon, MultiPolygon
+from shapely.wkb import dumps
 from skimage import measure
 
 
@@ -75,24 +76,25 @@ def get_label_props(labels: np.ndarray) -> pd.DataFrame:
         contour = cv2.findContours(mtx, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0][0]
         return contour.squeeze()
 
-    # def contour_to_geo(contour):
-    #     """Transfer contours to `shapely.geometry`"""
-    #     n = contour.shape[0]
-    #     contour = np.squeeze(contour)
-    #     if n >= 3:
-    #         geo = Polygon(contour)
-    #     elif n == 2:
-    #         geo = LineString(contour)
-    #     else:
-    #         geo = Point(contour)
-    #     return geo
+    def contour_to_geo(contour):
+        """Transfer contours to `shapely.geometry`"""
+        n = contour.shape[0]
+        contour = np.squeeze(contour)
+        if n >= 3:
+            geo = Polygon(contour)
+        elif n == 2:
+            geo = LineString(contour)
+        else:
+            geo = Point(contour)
+        geo = dumps(geo, hex=True)  # geometry object to hex
+        return geo
 
     props = measure.regionprops_table(
         labels, properties=("label", "area", "bbox", "centroid"), extra_properties=[contour]
     )
     props = pd.DataFrame(props)
     props["contour"] = props.apply(lambda x: x["contour"] + x[["bbox-0", "bbox-1"]].to_numpy(), axis=1)
-    # props["contours"] = props["contours"].apply(contour_to_geo)
+    props["contour"] = props["contour"].apply(contour_to_geo)
     return props.set_index(props["label"].astype(str)).drop(columns="label")
 
 
@@ -108,31 +110,32 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
         A dataframe with properties and contours indexed by cell label
     """
 
-    # def create_geo(row):
-    #     x, y = row["x_ind"], row["y_ind"]
-    #     x *= binsize
-    #     y *= binsize
-    #     if binsize > 1:
-    #         geo = Polygon(
-    #             [
-    #                 (x, y),
-    #                 (x + binsize, y),
-    #                 (x + binsize, y + binsize),
-    #                 (x, y + binsize),
-    #                 (x, y),
-    #             ]
-    #         )
-    #     else:
-    #         geo = Point((x, y))
-    #     return geo
-    def contour(row):
-        x, y = row["x"] * binsize, row["y"] * binsize
-        return np.array([[x, y], [x + binsize, y], [x + binsize, y + binsize], [x, y + binsize]], dtype=int)
+    def create_geo(row):
+        x, y = row["x_ind"], row["y_ind"]
+        x *= binsize
+        y *= binsize
+        if binsize > 1:
+            geo = Polygon(
+                [
+                    (x, y),
+                    (x + binsize, y),
+                    (x + binsize, y + binsize),
+                    (x, y + binsize),
+                    (x, y),
+                ]
+            )
+        else:
+            geo = Point((x, y))
+        geo = dumps(geo, hex=True)  # geometry object to hex
+        return geo
+    # def contour(row):
+    #     x, y = row["x"] * binsize, row["y"] * binsize
+    #     return np.array([[x, y], [x + binsize, y], [x + binsize, y + binsize], [x, y + binsize]], dtype=int)
 
     props = pd.DataFrame(
         {
             "label": data["label"].copy(),
-            "contour": data.apply(contour, axis=1),
+            "contour": data.apply(create_geo, axis=1),
             "centroid-0": centroids(data["x"], 0, binsize),
             "centroid-1": centroids(data["y"], 0, binsize),
         }
