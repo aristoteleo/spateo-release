@@ -92,17 +92,17 @@ def _schc(X: np.ndarray, distance_threshold: Optional[float] = None) -> np.ndarr
 
 
 def _segment_densities(
-    X: Union[spmatrix, np.ndarray], k: int, distance_threshold: Optional[float] = None, dk: int = 3
+    X: Union[spmatrix, np.ndarray], k: int, dk: int, distance_threshold: Optional[float] = None
 ) -> np.ndarray:
     """Segment a matrix containing UMI counts into regions by UMI density.
 
     Args:
         X: UMI counts per pixel
         k: Kernel size for Gaussian blur
+        dk: Kernel size for final dilation
         distance_threshold: Distance threshold for the Ward linkage
             such that clusters will not be merged if they have
             greater than this distance.
-        dk: Kernel size for final dilation
 
     Returns:
         Clustering result as a Numpy array of same shape, where clusters are
@@ -138,9 +138,9 @@ def segment_densities(
     adata: AnnData,
     layer: str,
     binsize: int,
-    k: int = 11,
+    k: int,
+    dk: int,
     distance_threshold: Optional[float] = None,
-    dk: int = 5,
     background: Optional[Union[Tuple[int, int], Literal[False]]] = None,
     out_layer: Optional[str] = None,
 ):
@@ -150,14 +150,14 @@ def segment_densities(
         adata: Input Anndata
         layer: Layer that contains UMI counts to segment based on.
         binsize: Size of bins to use. For density segmentation, pixels are binned
-            to reduce runtime. 10 is usually a good starting point. Note that this
+            to reduce runtime. 20 is usually a good starting point. Note that this
             value is relative to the original binsize used to read in the
             AnnData.
-        k: Kernel size for Gaussian blur
+        k: Kernel size for Gaussian blur, in bins
+        dk: Kernel size for final dilation, in bins
         distance_threshold: Distance threshold for the Ward linkage
             such that clusters will not be merged if they have
             greater than this distance.
-        dk: Kernel size for final dilation
         background: Pixel that should be categorized as background. By
             default, the bin that is most assigned to the outermost pixels are
             categorized as background. Set to False to turn off background detection.
@@ -168,7 +168,7 @@ def segment_densities(
         X = bin_matrix(X, binsize)
         if issparse(X):
             X = X.A
-    bins = _segment_densities(X, k, distance_threshold, dk)
+    bins = _segment_densities(X, k, dk, distance_threshold)
     if background is not False:
         if background is not None:
             x, y = background
