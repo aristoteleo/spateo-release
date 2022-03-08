@@ -30,6 +30,7 @@ def _mask_nuclei_from_stain(
     otsu_classes: int = 3,
     otsu_index: int = 0,
     local_k: int = 45,
+    offset_factor: float = 1.1,
     mk: int = 5,
 ) -> np.ndarray:
     """Create a boolean mask indicating nuclei from stained nuclei image.
@@ -38,7 +39,7 @@ def _mask_nuclei_from_stain(
     thresholds = filters.threshold_multiotsu(X, otsu_classes)
     background_mask = X < thresholds[otsu_index]
     # local_mask = X >= filters.rank.otsu(X, utils.circle(local_k))
-    local_mask = X > filters.threshold_local(X, local_k)
+    local_mask = X > (filters.threshold_local(X, local_k) * offset_factor)
     nuclei_mask = utils.mclose_mopen((~background_mask) & local_mask, mk)
     return nuclei_mask
 
@@ -80,6 +81,7 @@ def mask_nuclei_from_stain(
     otsu_classes: int = 3,
     otsu_index: int = 0,
     local_k: int = 45,
+    offset_factor: float = 1.1,
     mk: int = 7,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
@@ -97,6 +99,9 @@ def mask_nuclei_from_stain(
         local_k: The size of the local neighborhood of each pixel to use for
             local (adaptive) thresholding to identify the foreground (i.e.
             nuclei).
+        offset_factor: Factor to multiply the local thresholding values before
+            applying the threshold. Values > 1 lead to more "strict" thresholding,
+            and therefore may be helpful in distinguishing nuclei in dense regions.
         mk: Size of the kernel used for morphological close and open operations
             applied at the very end.
         layer: Layer containing nuclei staining
@@ -109,7 +114,7 @@ def mask_nuclei_from_stain(
             "with the `nuclei_path` argument to `st.io.read_bgi_agg`."
         )
     X = SKM.select_layer_data(adata, layer, make_dense=True)
-    mask = _mask_nuclei_from_stain(X, otsu_classes, otsu_index, local_k, mk)
+    mask = _mask_nuclei_from_stain(X, otsu_classes, otsu_index, local_k, offset_factor, mk)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
     SKM.set_layer_data(adata, out_layer, mask)
 
