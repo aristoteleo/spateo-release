@@ -205,7 +205,7 @@ def score_and_mask_pixels(
     em_kwargs: Optional[dict] = None,
     bp_kwargs: Optional[dict] = None,
     threshold: Optional[float] = None,
-    mk: int = 7,
+    mk: int = 11,
     bins_layer: Optional[Union[Literal[False], str]] = None,
     certain_layer: Optional[str] = None,
     scores_layer: Optional[str] = None,
