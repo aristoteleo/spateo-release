@@ -147,6 +147,28 @@ def segment_densities(
 ):
     """Segment into regions by UMI density.
 
+    The tissue is segmented into UMI density bins according to the following
+    procedure.
+    1. The UMI matrix is binned according to `binsize` (recommended >= 20).
+    2. The binned UMI matrix (from the previous step) is Gaussian blurred with
+        kernel size `k`. Note that `k` is in terms of bins, not pixels.
+    3. The elements of the blurred, binned UMI matrix is hierarchically clustered
+        with Ward linkage, distance threshold `distance_threshold`, and spatial
+        constraints (immediate neighbors). This yields pixel density bins
+        (a.k.a. labels) the same shape as the binned matrix.
+    4. Each density bin is diluted with kernel size `dk`, starting from the
+        bin with the smallest mean UMI (a.k.a. least dense) and going to
+        the bin with the largest mean UMI (a.k.a. most dense). This is done in
+        an effort to mitigate RNA diffusion and "choppy" borders in subsequent
+        steps.
+    5. If `background` is not provided, the density bin that is most common in the
+        perimeter of the matrix is selected to be background, and thus its label
+        is changed to take a value of 0. A pixel can be manually selected to be
+        background by providing a `(x, y)` tuple instead. This feature can be
+        turned off by providing `False`.
+    6. The density bin matrix is resized to be the same size as the original UMI
+        matrix.
+
     Args:
         adata: Input Anndata
         layer: Layer that contains UMI counts to segment based on.
