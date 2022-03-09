@@ -1,7 +1,7 @@
 """Functions for use when labeling individual nuclei/cells, after obtaining a
 mask.
 """
-from typing import Optional, Union
+from typing import Dict, Optional, Union
 
 import cv2
 import numpy as np
@@ -13,6 +13,40 @@ from skimage import segmentation, filters
 from . import utils
 from ...configuration import SKM
 from ...errors import PreprocessingError
+
+
+def _replace_labels(labels: np.ndarray, mapping: Dict[int, int]) -> np.ndarray:
+    """Replace labels according to mapping.
+
+    Args:
+        labels: Numpy array containing integer labels.
+        mapping: Dictionary mapping from labels to labels.
+
+    Returns:
+        Replaced labels
+    """
+    new_labels = labels.copy()
+    for i in range(labels.shape[0]):
+        for j in range(labels.shape[1]):
+            label = labels[i, j]
+            if label in mapping:
+                new_labels[i, j] = mapping[label]
+    return new_labels
+
+
+def replace_labels(adata: AnnData, layer: str, mapping: Dict[int, int], out_layer: Optional[str] = None):
+    """Replace labels according to mapping.
+
+    Args:
+        adata: Input Anndata
+        layer: Layer containing labels to replace
+        mapping: Dictionary mapping that defines label replacement.
+        out_layer: Layer to save results. By default, the input layer is
+            overridden.
+    """
+    labels = SKM.select_layer_data(adata, layer)
+    new_labels = _replace_labels(labels, mapping)
+    SKM.set_layer_data(adata, out_layer or layer, new_labels)
 
 
 def _watershed(

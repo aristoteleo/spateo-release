@@ -25,6 +25,7 @@ def imshow(
     """Display raw data within an AnnData.
 
     Args:
+        adata: Anndata containing aggregated UMI counts.
         layer: Layer to display. Defaults to X.
         ax: Axes to plot.
         show_cbar: Whether or not to show a colorbar next to the plot.

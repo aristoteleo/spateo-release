@@ -2,7 +2,7 @@
 """
 import warnings
 from collections import Counter
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -14,6 +14,7 @@ from tqdm import tqdm
 from typing_extensions import Literal
 
 from . import utils
+from .label import _replace_labels
 from ...configuration import SKM
 from ...io.utils import bin_matrix
 from ...warnings import PreprocessingWarning
@@ -183,3 +184,28 @@ def segment_densities(
         bins = cv2.resize(bins, adata.shape[::-1], interpolation=cv2.INTER_NEAREST)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.BINS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, bins)
+
+
+def merge_densities(
+    adata: AnnData,
+    layer: str,
+    mapping: Optional[Dict[int, int]] = None,
+    out_layer: Optional[str] = None,
+):
+    """Merge density bins either using an explicit mapping or in a semi-supervised
+    way.
+
+    Args:
+        adata: Input Anndata
+        layer: Layer that was used to generate density bins. Defaults to
+            using `{layer}_bins`. If not present, will be taken as a literal.
+        mapping: Mapping to use to transform bins
+        out_layer: Layer to store results. Defaults to same layer as input.
+    """
+    # TODO: implement semi-supervised way of merging density bins
+    _layer = SKM.gen_new_layer_key(layer, SKM.BINS_SUFFIX)
+    if _layer not in adata.layers:
+        _layer = layer
+    bins = SKM.select_layer_data(adata, _layer)
+    replaced = _replace_labels(bins, mapping)
+    SKM.set_layer_data(adata, out_layer or _layer, replaced)
