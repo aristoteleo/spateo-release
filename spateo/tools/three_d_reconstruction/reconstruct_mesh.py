@@ -34,20 +34,20 @@ def mesh_type(
 def construct_pcd(
     adata: AnnData,
     coordsby: str = "spatial",
-    groupby: Optional[str] = None,
+    groupby: Union[str, list] = None,
     key_added: str = "groups",
     mask: Union[str, int, float, list] = None,
     colormap: Union[str, list, dict] = "rainbow",
     alphamap: Union[float, list, dict] = 1.0,
     coodtype: type = np.float64,
-) -> PolyData or UnstructuredGrid:
+) -> PolyData:
     """
     Construct a point cloud model based on 3D coordinate information.
 
     Args:
         adata: AnnData object.
         coordsby: The key that stores 3D coordinate information in adata.obsm.
-        groupby: The key that stores clustering or annotation information in adata.obs, or a gene name in adata.var.
+        groupby: The key that stores clustering or annotation information in adata.obs, a gene's name or a list of genes' name in adata.var.
         key_added: The key under which to add the labels.
         mask: The part that you don't want to be displayed.
         colormap: Colors to use for plotting pcd. The default pcd_cmap is `'rainbow'`.
@@ -70,15 +70,19 @@ def construct_pcd(
     # The`groupby` array in original adata.obs or adata.X
     mask_list = mask if isinstance(mask, list) else [mask]
 
-    if groupby in adata.obs.columns:
+    obs_names = set(adata.obs_keys())
+    gene_names = set(adata.var_names.tolist())
+    if groupby in obs_names:
         groups = adata.obs[groupby].map(lambda x: "mask" if x in mask_list else x).values
-    elif groupby in adata.var.index:
-        groups = adata[:, groupby].X.flatten()
+    elif groupby in gene_names or set(groupby) <= gene_names:
+        groups = adata[:, groupby].X.sum(axis=1).flatten()
     elif groupby is None:
         groups = np.array(["same"] * adata.obs.shape[0])
     else:
         raise ValueError(
-            "\n`groupby` value is wrong." "\n`groupby` should be one of adata.obs.columns, or one of adata.var.index"
+            "\n`groupby` value is wrong." 
+            "\n`groupby` can be a string and one of adata.obs_names or adata.var_names. "
+            "\n`groupby` can also be a list and is a subset of adata.var_names"
         )
 
     pcd = add_mesh_labels(
@@ -204,21 +208,21 @@ def construct_surface(
         _pcd.points = o3d.utility.Vector3dVector(pcd.points)
 
         if cs_method == "alpha_shape":
-            alpha = _cs_method_args["al_alpha"]
-            mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(_pcd, alpha)
+            al_alpha = _cs_method_args["al_alpha"]
+            mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(_pcd, al_alpha)
 
         elif cs_method == "ball_pivoting":
-            radii = _cs_method_args["ba_radii"]
+            ba_radii = _cs_method_args["ba_radii"]
 
             _pcd.normals = o3d.utility.Vector3dVector(np.zeros((1, 3)))  # invalidate existing normals
             _pcd.estimate_normals()
 
             mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
-                _pcd, o3d.utility.DoubleVector(radii)
+                _pcd, o3d.utility.DoubleVector(ba_radii)
             )
 
         else:
-            depth, density_threshold = (
+            po_depth, po_density_threshold = (
                 _cs_method_args["po_depth"],
                 _cs_method_args["po_threshold"],
             )
@@ -230,8 +234,8 @@ def construct_surface(
                 (
                     mesh,
                     densities,
-                ) = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(_pcd, depth=depth)
-            mesh.remove_vertices_by_mask(np.asarray(densities) < np.quantile(densities, density_threshold))
+                ) = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(_pcd, depth=po_depth)
+            mesh.remove_vertices_by_mask(np.asarray(densities) < np.quantile(densities, po_density_threshold))
 
         _vertices = np.asarray(mesh.vertices)
         _faces = np.asarray(mesh.triangles)
@@ -386,83 +390,3 @@ def add_mesh_labels(
         mesh.cell_data[f"{key_added}_rgba"] = np.array([cu_dict[g] for g in labels]).astype(np.float64)
 
     return mesh
-
-
-def merge_mesh(
-    meshes: List[PolyData or UnstructuredGrid],
-) -> PolyData or UnstructuredGrid:
-    """Merge all meshes in the `meshes` list. The format of all meshes must be the same."""
-
-    merged_mesh = meshes[0]
-    for mesh in meshes[1:]:
-        merged_mesh.merge(mesh, inplace=True)
-
-    return merged_mesh
-
-
-def collect_mesh(
-    meshes: List[PolyData or UnstructuredGrid],
-    meshes_name: Optional[List[str]] = None,
-) -> MultiBlock:
-    """
-    A composite class to hold many data sets which can be iterated over.
-    You can think of MultiBlock like lists or dictionaries as we can iterate over this data structure by index
-    and we can also access blocks by their string name.
-
-    If the input is a dictionary, it can be iterated in the following ways:
-        >>> blocks = collect_mesh(meshes, meshes_name)
-        >>> for name in blocks.keys():
-        ...     print(blocks[name])
-
-    If the input is a list, it can be iterated in the following ways:
-        >>> blocks = collect_mesh(meshes)
-        >>> for block in blocks:
-        ...    print(block)
-    """
-
-    if meshes_name is not None:
-        meshes = {name: mesh for mesh, name in zip(meshes, meshes_name)}
-
-    return pv.MultiBlock(meshes)
-
-
-def save_mesh(
-    mesh: DataSet,
-    filename: str,
-    binary: bool = True,
-    texture: Union[str, np.ndarray] = None,
-):
-    """
-    Save the pvvista/vtk mesh to vtk files.
-    Args:
-        mesh: A reconstructed mesh.
-        filename: Filename of output file. Writer type is inferred from the extension of the filename.
-        binary: If True, write as binary. Otherwise, write as ASCII.
-                Binary files write much faster than ASCII and have a smaller file size.
-        texture: Write a single texture array to file when using a PLY file.
-                 Texture array must be a 3 or 4 component array with the datatype np.uint8.
-                 Array may be a cell array or a point array,
-                 and may also be a string if the array already exists in the PolyData.
-                 If a string is provided, the texture array will be saved to disk as that name.
-                 If an array is provided, the texture array will be saved as 'RGBA'
-    """
-
-    if filename.endswith(".vtk"):
-        mesh.save(filename=filename, binary=binary, texture=texture)
-    else:
-        raise ValueError(
-            "\nFilename is wrong. This function is only available when saving vtk files."
-            "\nPlease enter a filename ending with `.vtk`."
-        )
-
-
-def read_vtk(filename: str) -> DataSet:
-    """
-    Read vtk file.
-    Args:
-        filename: The string path to the file to read.
-    Returns:
-        Wrapped PyVista dataset.
-    """
-
-    return pv.read(filename)

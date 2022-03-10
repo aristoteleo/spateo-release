@@ -1,86 +1,47 @@
-import warnings
-import pyvista as pv
 
-from pyvista import PolyData, UnstructuredGrid
-from typing import List, Union
+from pyvista import PolyData, UnstructuredGrid, MultiBlock
+from typing import Optional, Union
 
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
 
+from .utils import _MultiBlock
+
 
 def three_d_slice(
     mesh: Union[PolyData, UnstructuredGrid],
     key: str = "groups",
-    slice_method: Literal["axis", "orthogonal"] = "axis",
-    slice_method_args: dict = None,
-    interactive: bool = True,
-) -> List[PolyData]:
+    method: Literal["axis", "orthogonal"] = "axis",
+    n_slices: int = 10,
+    axis: Literal["x", "y", "z"] = "x",
+    center: Optional[tuple] = None
+):
     """
     Create many slices of the input dataset along a specified axis or
     create three orthogonal slices through the dataset on the three cartesian planes.
     Args:
         mesh: Reconstructed 3D mesh.
         key: The key under which are the labels.
-        slice_method: The methods of slicing a mesh. Available `slice_method` are:
+        method: The methods of slicing a mesh. Available `method` are:
                 * `'axis'`: Create many slices of the input dataset along a specified axis.
-                * `'orthogonal'`: Create three orthogonal slices through the dataset on the three cartesian planes. This method is usually used interactively without entering a position which slices are taken.
-        slice_method_args: Parameters for various slicing methods. Available `slice_method_args` are:
-                * `'axis'` method: {"n_slices": 10, "axis": "x", center: None}
-                        n_slices: The number of slices to create along a specified axis. Only works when `interactive` is False.
-                        axis: The axis to generate the slices along.
-                        center: A 3-length sequence specifying the position which slices are taken. Defaults to the center of the mesh.
-                * `'orthogonal'`method: {center: None}
-                        center: A 3-length sequence specifying the position which slices are taken. Defaults to the center of the mesh.
-        interactive: Whether to slice interactively.
+                * `'orthogonal'`: Create three orthogonal slices through the dataset on the three cartesian planes.
+                                  This method is usually used interactively without entering a position which slices are taken.
+        n_slices: The number of slices to create along a specified axis. Only works when `method` is 'axis'.
+        axis: The axis to generate the slices along. Only works when `method` is 'axis'.
+        center: A 3-length sequence specifying the position which slices are taken. Defaults to the center of the mesh.
     Returns:
-        A list of slices
+        A MultiBlock that contains all meshes you sliced.
     """
+    # Check input mesh.
+    mesh = _MultiBlock(mesh=mesh, message="slicing") if isinstance(mesh, MultiBlock) else mesh
 
-    if isinstance(mesh, UnstructuredGrid) is False:
-        warnings.warn("The mesh should be a pyvista.UnstructuredGrid object.")
-        mesh = mesh.cast_to_unstructured_grid()
-
-    _slice_method_args = {"n_slices": 10, "axis": "x", "center": None}
-    if slice_method_args is not None:
-        _slice_method_args.update(slice_method_args)
-
-    if interactive:
-        p = pv.Plotter()
-        if slice_method == "axis":
-            p.add_mesh_slice(
-                mesh,
-                normal=_slice_method_args["axis"],
-                scalars=f"{key}_rgba",
-                rgba=True,
-                tubing=True,
-            )
-        elif slice_method == "orthogonal":
-            p.add_mesh_slice_orthogonal(mesh, scalars=f"{key}_rgba", rgba=True, tubing=True)
-        else:
-            raise ValueError(
-                "\n`slice_method` value is wrong." "\nAvailable `slice_method` are: `'axis'`, `'orthogonal'`."
-            )
-        p.show()
-        slices = p.plane_sliced_meshes
+    mesh.set_active_scalars(f"{key}_rgba")
+    if method == "axis":
+        # Create many slices of the input dataset along a specified axis.
+        return mesh.slice_along_axis(n=n_slices, axis=axis, center=center)
     else:
-        mesh.set_active_scalars(f"{key}_rgba")
-        if slice_method == "axis":
-            slices_blocks = mesh.slice_along_axis(
-                n=_slice_method_args["n_slices"],
-                axis=_slice_method_args["axis"],
-                center=_slice_method_args["center"],
-            )
-        elif slice_method == "orthogonal":
-            # Create three orthogonal slices through the dataset on the three cartesian planes.
-            center = (None, None, None) if _slice_method_args["center"] is None else _slice_method_args["center"]
-            slices_blocks = mesh.slice_orthogonal(x=center[0], y=center[1], z=center[2])
-        else:
-            raise ValueError(
-                "\n`slice_method` value is wrong." "\nAvailable `slice_method` are: `'axis'`, `'orthogonal'`."
-            )
-
-        slices = [_slice for _slice in slices_blocks]
-
-    return slices
+        # Create three orthogonal slices through the dataset on the three cartesian planes.
+        center = (None, None, None) if center is None else center
+        return mesh.slice_orthogonal(x=center[0], y=center[1], z=center[2])
