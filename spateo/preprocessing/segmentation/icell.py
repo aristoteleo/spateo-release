@@ -19,7 +19,7 @@ from ...errors import PreprocessingError
 from ...warnings import PreprocessingWarning
 
 
-def _mask_cells_from_stain(X: np.ndarray, otsu_classes: int = 5, otsu_index: int = 0, mk: int = 7) -> np.ndarray:
+def _mask_cells_from_stain(X: np.ndarray, otsu_classes: int = 4, otsu_index: int = 0, mk: int = 7) -> np.ndarray:
     """Create a boolean mask indicating cells from stained image."""
     thresholds = filters.threshold_multiotsu(X, otsu_classes)
     return utils.mclose_mopen(X >= thresholds[otsu_index], mk)
@@ -46,7 +46,7 @@ def _mask_nuclei_from_stain(
 
 def mask_cells_from_stain(
     adata: AnnData,
-    otsu_classes: int = 5,
+    otsu_classes: int = 4,
     otsu_index: int = 0,
     mk: int = 7,
     layer: str = SKM.STAIN_LAYER_KEY,
