@@ -1,4 +1,3 @@
-
 from pyvista import PolyData, UnstructuredGrid, MultiBlock
 from typing import Optional, Union
 
@@ -16,7 +15,7 @@ def three_d_slice(
     method: Literal["axis", "orthogonal"] = "axis",
     n_slices: int = 10,
     axis: Literal["x", "y", "z"] = "x",
-    center: Optional[tuple] = None
+    center: Optional[tuple] = None,
 ):
     """
     Create many slices of the input dataset along a specified axis or
