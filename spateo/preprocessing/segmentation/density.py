@@ -2,7 +2,7 @@
 """
 import warnings
 from collections import Counter
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -14,6 +14,7 @@ from tqdm import tqdm
 from typing_extensions import Literal
 
 from . import utils
+from .label import _replace_labels
 from ...configuration import SKM
 from ...io.utils import bin_matrix
 from ...warnings import PreprocessingWarning
@@ -92,17 +93,17 @@ def _schc(X: np.ndarray, distance_threshold: Optional[float] = None) -> np.ndarr
 
 
 def _segment_densities(
-    X: Union[spmatrix, np.ndarray], k: int, distance_threshold: Optional[float] = None, dk: int = 3
+    X: Union[spmatrix, np.ndarray], k: int, dk: int, distance_threshold: Optional[float] = None
 ) -> np.ndarray:
     """Segment a matrix containing UMI counts into regions by UMI density.
 
     Args:
         X: UMI counts per pixel
         k: Kernel size for Gaussian blur
+        dk: Kernel size for final dilation
         distance_threshold: Distance threshold for the Ward linkage
             such that clusters will not be merged if they have
             greater than this distance.
-        dk: Kernel size for final dilation
 
     Returns:
         Clustering result as a Numpy array of same shape, where clusters are
@@ -127,11 +128,10 @@ def _segment_densities(
 
     dilated = np.zeros_like(bins)
     labels = np.unique(bins)
-    for label in sorted(labels, key=lambda label: X[np.where(bins == label)].mean()):
+    for label in sorted(labels, key=lambda label: X[bins == label].mean()):
         mask = bins == label
         dilate = cv2.dilate(mask.astype(np.uint8), utils.circle(dk))
-        where = np.where(utils.mclose_mopen(dilate, dk) > 0)
-        dilated[where] = label
+        dilated[utils.mclose_mopen(dilate, dk) > 0] = label
     return dilated
 
 
@@ -139,26 +139,48 @@ def segment_densities(
     adata: AnnData,
     layer: str,
     binsize: int,
-    k: int = 11,
+    k: int,
+    dk: int,
     distance_threshold: Optional[float] = None,
-    dk: int = 5,
     background: Optional[Union[Tuple[int, int], Literal[False]]] = None,
     out_layer: Optional[str] = None,
 ):
     """Segment into regions by UMI density.
 
+    The tissue is segmented into UMI density bins according to the following
+    procedure.
+    1. The UMI matrix is binned according to `binsize` (recommended >= 20).
+    2. The binned UMI matrix (from the previous step) is Gaussian blurred with
+        kernel size `k`. Note that `k` is in terms of bins, not pixels.
+    3. The elements of the blurred, binned UMI matrix is hierarchically clustered
+        with Ward linkage, distance threshold `distance_threshold`, and spatial
+        constraints (immediate neighbors). This yields pixel density bins
+        (a.k.a. labels) the same shape as the binned matrix.
+    4. Each density bin is diluted with kernel size `dk`, starting from the
+        bin with the smallest mean UMI (a.k.a. least dense) and going to
+        the bin with the largest mean UMI (a.k.a. most dense). This is done in
+        an effort to mitigate RNA diffusion and "choppy" borders in subsequent
+        steps.
+    5. If `background` is not provided, the density bin that is most common in the
+        perimeter of the matrix is selected to be background, and thus its label
+        is changed to take a value of 0. A pixel can be manually selected to be
+        background by providing a `(x, y)` tuple instead. This feature can be
+        turned off by providing `False`.
+    6. The density bin matrix is resized to be the same size as the original UMI
+        matrix.
+
     Args:
         adata: Input Anndata
         layer: Layer that contains UMI counts to segment based on.
         binsize: Size of bins to use. For density segmentation, pixels are binned
-            to reduce runtime. 10 is usually a good starting point. Note that this
+            to reduce runtime. 20 is usually a good starting point. Note that this
             value is relative to the original binsize used to read in the
             AnnData.
-        k: Kernel size for Gaussian blur
+        k: Kernel size for Gaussian blur, in bins
+        dk: Kernel size for final dilation, in bins
         distance_threshold: Distance threshold for the Ward linkage
             such that clusters will not be merged if they have
             greater than this distance.
-        dk: Kernel size for final dilation
         background: Pixel that should be categorized as background. By
             default, the bin that is most assigned to the outermost pixels are
             categorized as background. Set to False to turn off background detection.
@@ -169,7 +191,7 @@ def segment_densities(
         X = bin_matrix(X, binsize)
         if issparse(X):
             X = X.A
-    bins = _segment_densities(X, k, distance_threshold, dk)
+    bins = _segment_densities(X, k, dk, distance_threshold)
     if background is not False:
         if background is not None:
             x, y = background
@@ -177,10 +199,35 @@ def segment_densities(
         else:
             counts = Counter(bins[0]) + Counter(bins[-1]) + Counter(bins[:, 0]) + Counter(bins[:, -1])
             background_label = counts.most_common(1)[0][0]
-        bins[np.where(bins == background_label)] = 0
-        bins[np.where(bins > background_label)] -= 1
+        bins[bins == background_label] = 0
+        bins[bins > background_label] -= 1
     if binsize > 1:
         # Expand back
         bins = cv2.resize(bins, adata.shape[::-1], interpolation=cv2.INTER_NEAREST)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.BINS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, bins)
+
+
+def merge_densities(
+    adata: AnnData,
+    layer: str,
+    mapping: Optional[Dict[int, int]] = None,
+    out_layer: Optional[str] = None,
+):
+    """Merge density bins either using an explicit mapping or in a semi-supervised
+    way.
+
+    Args:
+        adata: Input Anndata
+        layer: Layer that was used to generate density bins. Defaults to
+            using `{layer}_bins`. If not present, will be taken as a literal.
+        mapping: Mapping to use to transform bins
+        out_layer: Layer to store results. Defaults to same layer as input.
+    """
+    # TODO: implement semi-supervised way of merging density bins
+    _layer = SKM.gen_new_layer_key(layer, SKM.BINS_SUFFIX)
+    if _layer not in adata.layers:
+        _layer = layer
+    bins = SKM.select_layer_data(adata, _layer)
+    replaced = _replace_labels(bins, mapping)
+    SKM.set_layer_data(adata, out_layer or _layer, replaced)

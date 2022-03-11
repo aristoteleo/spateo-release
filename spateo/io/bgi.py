@@ -15,6 +15,9 @@ import cv2
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+
+from scipy.sparse import csr_matrix, spmatrix
+from typing import Optional, Tuple
 import skimage.io
 from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
@@ -52,6 +55,7 @@ def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
             4: np.uint16,  # spliced
             5: np.uint16,  # unspliced
         },
+        comment="#",
     )
 
 
@@ -62,6 +66,7 @@ def read_bgi_agg(
     scale_unit: Optional[str] = None,
     binsize: int = 1,
     gene_agg: Optional[Dict[str, Union[List[str], Callable[[str], bool]]]] = None,
+    prealigned: bool = False,
 ) -> AnnData:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
@@ -77,6 +82,8 @@ def read_bgi_agg(
             example, `{'mito': ['list', 'of', 'mitochondrial', 'genes']}` will
             yield an AnnData with a layer named "mito" with the aggregate total
             UMIs of the provided gene list.
+        prealigned: Whether the stain image is already aligned with the minimum
+            x and y RNA coordinates.
 
     Returns:
         An AnnData object containing the UMIs per coordinate and the nucleus
@@ -95,6 +102,8 @@ def read_bgi_agg(
     layers = {}
     if stain_path:
         image = skimage.io.imread(stain_path)
+        if prealigned:
+            image = np.pad(image, ((x_min, 0), (y_min, 0)))
         x_max = max(x_max, image.shape[0])
         y_max = max(y_max, image.shape[1])
         shape = (x_max + 1, y_max + 1)
@@ -152,6 +161,7 @@ def read_bgi(
     segmentation_adata: Optional[AnnData] = None,
     labels_layer: Optional[str] = None,
     labels: Optional[Union[np.ndarray, str]] = None,
+    seg_binsize: int = 1,
 ) -> AnnData:
     """Read BGI read file as AnnData.
 
@@ -160,11 +170,14 @@ def read_bgi(
         scale: Physical length per coordinate. For visualization only.
         scale_unit: Scale unit.
         binsize: Size of pixel bins. Should only be provided when labels
-            (i.e. the `segmentation_adata` and `labels` arguments) are not used
-        segmentation_adata: AnnData containing segmentation results
-        labels_layer: Layer name in `segmentation_adata` containing labels
+            (i.e. the `segmentation_adata` and `labels` arguments) are not used.
+        segmentation_adata: AnnData containing segmentation results.
+        labels_layer: Layer name in `segmentation_adata` containing labels.
         labels: Numpy array or path to numpy array saved with `np.save` that
-            contains labels
+            contains labels.
+        seg_binsize: the bin size used in cell segmentation, used in conjunction
+            with `labels` and will be overwritten when `labels_layer` and
+            `segmentation_adata` are not None.
 
     Returns:
         Bins x genes or labels x genes AnnData.
@@ -185,6 +198,7 @@ def read_bgi(
         labels = np.load(labels)
 
     data = read_bgi_as_dataframe(path)
+    n_columns = data.shape[1]
 
     # Only binning supported in this case
     if segmentation_adata is None and labels is None:
@@ -242,7 +256,7 @@ def read_bgi(
     X = csr_matrix((data[data.columns[COUNT_COLUMN_MAPPING[SKM.X_LAYER]]].values, (x_ind, y_ind)), shape=shape)
     layers = {}
     for name, i in COUNT_COLUMN_MAPPING.items():
-        if name != SKM.X_LAYER and i < len(data.columns):
+        if name != SKM.X_LAYER and i < n_columns:
             layers[name] = csr_matrix((data[data.columns[i]].values, (x_ind, y_ind)), shape=shape)
 
     obs = pd.DataFrame(index=uniq_cell)

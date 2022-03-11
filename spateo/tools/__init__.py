@@ -4,6 +4,11 @@ from .cluster_degs import (
     find_all_cluster_degs,
 )
 
+from .find_clusters import (
+    find_cluster_spagcn,
+    find_cluster_scc,
+)
+
 # from .image import add_image_layer
 # from .interpolation_utils import *
 from .interpolation import interpolation_SparseVFC

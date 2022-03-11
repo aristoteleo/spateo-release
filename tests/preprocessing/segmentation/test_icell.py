@@ -34,7 +34,7 @@ class TestICell(TestMixin, TestCase):
             X[1, 0] = 2
             filters.threshold_multiotsu.return_value = [1, 2]
             filters.threshold_local.return_value = 0
-            self.assertEqual(self.utils.mclose_mopen.return_value, icell._mask_nuclei_from_stain(X))
+            self.assertEqual(self.utils.mclose_mopen.return_value, icell._mask_nuclei_from_stain(X, offset_factor=1))
             np.testing.assert_array_equal([[False, False], [True, True]], self.utils.mclose_mopen.call_args[0][0])
             self.utils.mclose_mopen.assert_called_once_with(mock.ANY, 5)
 
@@ -45,10 +45,13 @@ class TestICell(TestMixin, TestCase):
             otsu_classes = mock.MagicMock()
             otsu_index = mock.MagicMock()
             local_k = mock.MagicMock()
+            offset_factor = mock.MagicMock()
             mk = mock.MagicMock()
-            icell.mask_nuclei_from_stain(adata, otsu_classes, otsu_index, local_k, mk)
+            icell.mask_nuclei_from_stain(adata, otsu_classes, otsu_index, local_k, offset_factor, mk)
             np.testing.assert_array_equal(adata.layers["stain_mask"], _mask_nuclei_from_stain.return_value)
-            _mask_nuclei_from_stain.assert_called_once_with(mock.ANY, otsu_classes, otsu_index, local_k, mk)
+            _mask_nuclei_from_stain.assert_called_once_with(
+                mock.ANY, otsu_classes, otsu_index, local_k, offset_factor, mk
+            )
             np.testing.assert_array_equal(adata.layers["stain"], _mask_nuclei_from_stain.call_args[0][0])
 
     def test_score_pixels_gauss(self):
