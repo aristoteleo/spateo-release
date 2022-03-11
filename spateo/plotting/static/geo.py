@@ -1,7 +1,7 @@
 """Plotting functions for spatial geometry plots.
 """
 
-from typing import Union
+from typing import Union, Optional, Tuple
 
 import anndata
 import geopandas as gpd
@@ -15,7 +15,7 @@ def geo(
     basis: str = "contour",
     color: Union[list, str, None] = None,
     genes: Union[list, None] = [],
-    gene_cmaps=None,
+    gene_cmaps: Optional[str] = None,
     dpi: int = 100,
     alpha: float = 0.8,
     boundary_width: float = 0.2,
@@ -23,10 +23,10 @@ def geo(
     stack_genes: bool = False,
     stack_genes_threshold: float = 0.01,
     stack_colors_legend_size: int = 10,
-    figsize=(6, 6),
+    figsize: Tuple[float, float] = (6, 6),
     aspect: str = "equal",
-    slices=None,
-    img_layers=None,
+    slices: Optional[int] = None,
+    img_layers: Optional[int] = None,
     *args,
     **kwargs
 ):
@@ -34,28 +34,17 @@ def geo(
     Geometry plot for physical coordinates of each cell.
 
     Args:
-        adata:
-            an Annodata object that contain the physical coordinates for each bin/cell, etc.
-        genes:
-            The gene list that will be used to plot the gene expression on the same scatter plot. Each gene will have a
-            different color. Can be a single gene name string and we will convert it to a list.
-        color: `string` (default: `ntr`)
-            Any or any list of column names or gene name, etc. that will be used for coloring cells.
-            If `color` is not None, stack_genes will be disabled automatically because `color` can contain non numerical values.
-        stack_genes:
-            whether to show all gene plots on the same plot
-        stack_genes_threshold:
-            lower bound of gene values that will be drawn on the plot.
-        stack_colors_legend_size:
-            control the size of legend when stacking genes
-        alpha: `float`
-            The alpha value of the cells.
-        boundary_width: `float`, (default: 0.2)
-            The line width of boundary.
-        boundary_color: (default: "black")
-            The color value of boundary.
-        dpi: `float`, (default: 100.0)
-            The resolution of the figure in dots-per-inch. Dots per inches (dpi) determines how many pixels the figure
+        adata: an Annodata object that contain the physical coordinates for each bin/cell, etc.
+        basis: The key to the column in the adata.obs, from which the contour of the cell segmentation will be
+            generated.
+        color: Any or any list of column names or gene name, etc. that will be used for coloring cells.
+            If `color` is not None, stack_genes will be disabled automatically because `color` can contain non numerical
+            values.
+        genes: The gene list that will be used to plot the gene expression on the same scatter plot. Each gene will have
+            a different color. Can be a single gene name string and we will convert it to a list.
+        gene_cmaps:
+            The colormap used to stack different genes in a single plot.
+        dpi: The resolution of the figure in dots-per-inch. Dots per inches (dpi) determines how many pixels the figure
             comprises. dpi is different from ppi or points per inches. Note that most elements like lines, markers,
             texts have a size given in points so you can convert the points to inches. Matplotlib figures use Points per
             inch (ppi) of 72. A line with thickness 1 point will be 1./72. inch wide. A text with fontsize 12 points
@@ -67,11 +56,20 @@ def geo(
             magnifying glass. All elements are scaled by the magnifying power of the lens. see more details at answer 2
             by @ImportanceOfBeingErnest:
             https://stackoverflow.com/questions/47633546/relationship-between-dpi-and-figure-size
-        aspect: `str`
-            Set the aspect of the axis scaling, i.e. the ratio of y-unit to x-unit. In physical spatial plot, the
+        alpha: The alpha value of the cells.
+        boundary_width: The line width of boundary.
+        boundary_color: The color value of boundary.
+        stack_genes: whether to show all gene plots on the same plot
+        stack_genes_threshold: lower bound of gene values that will be drawn on the plot.
+        stack_colors_legend_size: control the size of legend when stacking genes
+        figuresize: size of the figure.
+        aspect: Set the aspect of the axis scaling, i.e. the ratio of y-unit to x-unit. In physical spatial plot, the
             default is 'equal'. See more details at:
             https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_aspect.html
-        %(scatters.parameters.no_adata|basis|figsize)s
+        slices: The index to the tissue slice, will used in adata.uns["spatial"][slices].
+        img_layers: The index to the (staining) image of a tissue slice, will be used in
+            adata.uns["spatial"][slices]["images"].
+
     Returns
     -------
         plots gene or cell feature of the adata object on the physical spatial coordinates.

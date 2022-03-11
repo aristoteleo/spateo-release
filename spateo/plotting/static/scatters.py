@@ -86,25 +86,25 @@ def scatters(
     inset_dict: dict = {},
     marker: str = None,
     group: str = None,
-    add_group_gamma_fit=False,
+    add_group_gamma_fit: bool = False,
     affine_transform_degree: int = None,
-    affine_transform_A=None,
-    affine_transform_b=None,
-    stack_colors=False,
-    stack_colors_threshold=0.001,
-    stack_colors_title="stacked colors",
-    stack_colors_legend_size=2,
-    stack_colors_cmaps=None,
+    affine_transform_A: Optional[np.ndarray] = None,
+    affine_transform_b: Optional[np.ndarray] = None,
+    stack_colors: bool = False,
+    stack_colors_threshold: float = 0.001,
+    stack_colors_title: str = "stacked colors",
+    stack_colors_legend_size: int = 2,
+    stack_colors_cmaps: Optional[str] = None,
     despline: bool = True,
     deaxis: bool = True,
     despline_sides: Union[None, List[str]] = None,
-    projection="2d",
-    geo=False,
-    boundary_width=0.2,
-    boundary_color="black",
-    aspect="auto",
-    slices=None,
-    img_layers=None,
+    projection: str = "2d",
+    geo: bool = False,
+    boundary_width: float = 0.2,
+    boundary_color: str = "black",
+    aspect: str = "auto",
+    slices: Optional[int] = None,
+    img_layers: Optional[int] = None,
     **kwargs,
 ) -> Union[None, Axes]:
     """Plot an embedding as points. Currently this only works
@@ -121,7 +121,7 @@ def scatters(
         adata: :class:`~anndata.AnnData`
             an Annodata object
         basis: `str`
-            c
+            The reduced dimension.
         x: `int` (default: `0`)
             The column index of the low dimensional embedding for the x-axis.
         y: `int` (default: `1`)
@@ -277,6 +277,11 @@ def scatters(
         marker: `str` (default: None)
             The marker style. marker can be either an instance of the class or the text shorthand for a particular
             marker. See matplotlib.markers for more information about marker styles.
+        group:
+            The key to the column in adata.obs that points to cell groups that will be used to include the gamma
+            fittings.
+        add_group_gamma_fit:
+            Whether or not to add the gamma fitting line for each cell group.
         affine_transform_degree:
             Transform coordinates of points according to some degree.
         affine_transform_A:
@@ -294,18 +299,28 @@ def scatters(
             The title for the stack_color plot.
         stack_colors_legend_size:
             Control the legend size in stack color plot.
+        stack_colors_cmaps:
+            The colormap used to stack different genes in a single plot.
         despline:
             Whether to remove splines of the figure.
         despline_sides:
             Which side of splines should be removed. Can be any combination of `["bottom", "right", "top", "left"]`.
         deaxis:
             Whether to remove axis ticks of the figure.
+        projection:
+            The projection of the figure. Can be "2d", "3d", "polar", etc.
         geo: `bool` (default: `False`)
             Use geometry info or not.
         boundary_width: `float`, (default: 0.2)
             The line width of boundary.
         boundary_color: (default: "black")
             The color value of boundary.
+        aspect: Set the aspect of the axis scaling, i.e. the ratio of y-unit to x-unit. In physical spatial plot, the
+            default is 'equal'. See more details at:
+            https://matplotlib.org/stable/api/_as_gen/matplotlib.axes.Axes.set_aspect.html
+        slices: The index to the tissue slice, will used in adata.uns["spatial"][slices].
+        img_layers: The index to the (staining) image of a tissue slice, will be used in
+            adata.uns["spatial"][slices]["images"].
         kwargs:
             Additional arguments passed to plt.scatters.
 

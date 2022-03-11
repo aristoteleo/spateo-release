@@ -27,15 +27,11 @@ def color_label(
 
     Args:
         adata: ~anndata.AnnData
-            an Annodata object.
+            An Annodata object.
+        basis: str
+            The key to the column in the adata.obs, from which the contour of the cell segmentation will be generated.
         color_key: list
             List of colors. If the number of labels exceeds the number of colors, then the colors are cycled.
-                boundary_width: `float`, (default: 0.2)
-            The line width of boundary.
-        boundary_width: `float`, (default: 0.2)
-            The line width of boundary.
-        boundary_color: (default: "black")
-            The color value of boundary.
         dpi: `float`, (default: 100.0)
             The resolution of the figure in dots-per-inch. Dots per inches (dpi) determines how many pixels the figure
             comprises. dpi is different from ppi or points per inches. Note that most elements like lines, markers,
@@ -49,6 +45,12 @@ def color_label(
             magnifying glass. All elements are scaled by the magnifying power of the lens. see more details at answer 2
             by @ImportanceOfBeingErnest:
             https://stackoverflow.com/questions/47633546/relationship-between-dpi-and-figure-size
+        boundary_width: `float`, (default: 0.2)
+            The line width of boundary.
+        boundary_color: (default: "black")
+            The color value of boundary.
+        figsize: `tuple`
+            The size of the figure in inches.
         aspect: `str`
             Set the aspect of the axis scaling, i.e. the ratio of y-unit to x-unit. In physical spatial plot, the
             default is 'equal'. See more details at:
