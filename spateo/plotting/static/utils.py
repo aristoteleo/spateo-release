@@ -1,24 +1,23 @@
 # code adapted from https://github.com/aristoteleo/dynamo-release/blob/master/dynamo/plot/utils.py
+import copy
+import math
 import os
+import warnings
+from warnings import warn
+
+import geopandas as gpd
+import matplotlib
+import matplotlib.patheffects as PathEffects
+import matplotlib.pyplot as plt
+import numba
 import numpy as np
 import pandas as pd
-import math
-import numba
-import matplotlib
-import matplotlib.pyplot as plt
+from shapely.wkb import loads
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
-import matplotlib.patheffects as PathEffects
-
-# import matplotlib.tri as tri
-import warnings
-from scipy.spatial import Delaunay
-from warnings import warn
-import copy
 
 from spateo.configuration import _themes
 
-# from ...tools.utils import integrate_vf  # integrate_vf_ivp
 
 # ---------------------------------------------------------------------------------------------------
 # variable checking utilities
@@ -157,6 +156,25 @@ def _scatter_projection(ax, points, projection, **kwargs):
         ax.scatter(points[:, 0], points[:, 1], **kwargs)
 
 
+def _geo_projection(ax, points, **kwargs):
+    linecolor = kwargs.pop("linecolor")
+    if "values" in kwargs:
+        # using value
+        gdf = gpd.GeoDataFrame(data={"values": kwargs.pop("values"), "points": points}, geometry="points")
+        ax = gdf.plot("values", ax=ax, **kwargs)
+    else:
+        # using color
+        gdf = gpd.GeoDataFrame(geometry=points)
+        ax = gdf.plot(ax=ax, **kwargs)
+
+    # clean args for boundary plotting
+    if "color" in kwargs:
+        kwargs.pop("color")
+    if "cmap" in kwargs:
+        kwargs.pop("cmap")
+    gdf.boundary.plot(ax=ax, color=linecolor, **kwargs)
+
+
 def _matplotlib_points(
     points,
     ax=None,
@@ -181,6 +199,7 @@ def _matplotlib_points(
     inset_dict={},
     show_colorbar=True,
     projection=None,  # default in matplotlib
+    geo=False,
     **kwargs,
 ):
     import matplotlib.pyplot as plt
@@ -250,7 +269,8 @@ def _matplotlib_points(
                         points.loc[highlight_ids, :],
                     )
                 ).values
-                labels = points[:, 2]
+                # labels = points[:, 2]
+                labels = points["label"]
 
         # WARNING: do not change the following line to "elif" during refactor
         # This if-else branch is not logically parallel to the previous one. The following branch sets `colors`.
@@ -378,14 +398,22 @@ def _matplotlib_points(
             )
         else:
             # main_debug("drawing without frontiers and contour")
-            _scatter_projection(
-                ax,
-                points,
-                projection,
-                c=colors,
-                plotnonfinite=True,
-                **kwargs,
-            )
+            if geo:
+                _geo_projection(
+                    ax,
+                    points,
+                    color=colors,
+                    **kwargs,
+                )
+            else:
+                _scatter_projection(
+                    ax,
+                    points,
+                    projection,
+                    c=colors,
+                    plotnonfinite=True,
+                    **kwargs,
+                )
 
     # Color by values
     elif values is not None:
@@ -406,7 +434,7 @@ def _matplotlib_points(
         sorted_id = (
             np.argsort(abs(values)) if sort == "abs" else np.argsort(-values) if sort == "neg" else np.argsort(values)
         )
-        values, points = values[sorted_id], points[sorted_id, :]
+        values, points = values[sorted_id], points[sorted_id]
 
         # if there are very few cells have expression, set the vmin/vmax only based on positive values to
         # get rid of outliers
@@ -544,17 +572,27 @@ def _matplotlib_points(
         else:
             # main_debug("drawing without frontiers and contour")
             # main_debug("using cmap: %s" % (str(cmap)))
-            _scatter_projection(
-                ax,
-                points,
-                projection,
-                c=values,
-                cmap=cmap,
-                vmin=_vmin,
-                vmax=_vmax,
-                plotnonfinite=True,
-                **kwargs,
-            )
+            if geo:
+                _geo_projection(
+                    ax,
+                    points,
+                    values=values,
+                    cmap=cmap,
+                    vmin=_vmin,
+                    vmax=_vmax,
+                    **kwargs,
+                )
+            else:
+                _scatter_projection(
+                    ax,
+                    points,
+                    projection,
+                    c=values,
+                    cmap=cmap,
+                    vmin=_vmin,
+                    vmax=_vmax,
+                    **kwargs,
+                )
 
         if "norm" in kwargs:
             norm = kwargs["norm"]
@@ -576,7 +614,10 @@ def _matplotlib_points(
     else:
         # main_debug("drawing points without color passed in args, using midpoint of the cmap")
         colors = plt.get_cmap(cmap)(0.5)
-        _scatter_projection(ax, points, projection, c=colors, **kwargs)
+        if geo:
+            _geo_projection(ax, points, color=colors, **kwargs)
+        else:
+            _scatter_projection(ax, points, projection, c=colors, **kwargs)
 
     if show_legend and legend_elements is not None:
         if len(unique_labels) == 1 and show_legend == "on data":
@@ -591,10 +632,14 @@ def _matplotlib_points(
             for i in unique_labels:
                 if i == "other":
                     continue
-                color_cnt = np.nanmedian(points[np.where(labels == i)[0], :2].astype("float"), 0)
+                if not geo:
+                    color_cnt_x, color_cnt_y = np.nanmedian(points[np.where(labels == i)[0], :2].astype("float"), 0)
+                else:
+                    color_cnt_x = np.nanmedian(points[np.where(labels == i)[0]].centroid.x.astype("float"), 0)
+                    color_cnt_y = np.nanmedian(points[np.where(labels == i)[0]].centroid.x.astype("float"), 0)
                 txt = plt.text(
-                    color_cnt[0],
-                    color_cnt[1],
+                    color_cnt_x,
+                    color_cnt_y,
                     str(i),
                     color=_select_font_color(font_color),
                     zorder=1000,
@@ -609,10 +654,11 @@ def _matplotlib_points(
                     ]
                 )
         else:
+            show_legend = "best" if show_legend == "on data" else show_legend
             ax.legend(
                 handles=legend_elements,
                 bbox_to_anchor=(1.04, 1),
-                # loc=show_legend,
+                loc=show_legend,
                 ncol=len(unique_labels) // 15 + 1,
             )
     else:
@@ -1406,7 +1452,7 @@ def save_fig(
     if directory == "":
         directory = "."
     if filename == "":
-        filename = "dyn_savefig"
+        filename = "spateo_savefig"
 
     # If the directory does not exist, create it
     if not os.path.exists(directory):
@@ -1625,3 +1671,10 @@ class Loess(object):
             a = mean_y - b * mean_x
             y = a + b * n_x
         return self.denormalize_y(y)
+
+
+def _convert_to_geo_dataframe(adata, basis):
+    # convert to AnnData with GeoDataFrame as obs
+    adata.obs[basis] = pd.Series(adata.obsm[basis]).apply(loads, hex=True).values
+    adata.obs = gpd.GeoDataFrame(adata.obs, geometry=basis)
+    return adata

@@ -5,6 +5,8 @@ from .bbs import (
     delaunay,
     polygon,
 )
+from .colorlabel import color_label
+from .geo import geo
 from .space import space
 from .three_d_plots import (
     smoothing_mesh,

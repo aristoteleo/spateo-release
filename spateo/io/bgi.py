@@ -265,7 +265,7 @@ def read_bgi(
     ordered_props = props.loc[adata.obs_names]
     adata.obs["area"] = ordered_props["area"].values
     adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
-    # adata.obsm["contour"] = ordered_props["contour"].values
+    adata.obsm["contour"] = ordered_props["contour"].values
     if segmentation_adata is not None:
         adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
 
