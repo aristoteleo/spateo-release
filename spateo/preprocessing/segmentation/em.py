@@ -8,7 +8,9 @@ Written by @HailinPan, optimized by @Lioscro.
 from typing import Dict, Optional, Tuple, Union
 
 import cv2
+import ngs_tools as ngs
 import numpy as np
+from joblib import delayed
 from scipy import special, stats
 from skimage import feature
 
@@ -69,18 +71,19 @@ def nbn_em(
     prev_lam = lam.copy()
     prev_theta = theta.copy()
 
+    r = lamtheta_to_r(lam, theta)
     for i in range(max_iter):
         # E step
-        r = lamtheta_to_r(lam, theta)
         bp = stats.nbinom(n=r[0], p=theta[0]).pmf(X)
         cp = stats.nbinom(n=r[1], p=theta[1]).pmf(X)
         tau[0] = w[0] * bp
         tau[1] = w[1] * cp
-        mu = lamtheta_to_muvar(lam, theta)[0]
+        # mu = lamtheta_to_muvar(lam, theta)[0]
 
         # NOTE: tau changes with each line
-        tau[0][(tau.sum(axis=0) <= 1e-9) & (X < mu[0] * 2)] = 1
-        tau[1][(tau.sum(axis=0) <= 1e-9) & (X >= mu[0] * 2)] = 1
+        # tau[0][(tau.sum(axis=0) <= 1e-9) & (X < mu[0])] = 1
+        # tau[1][(tau.sum(axis=0) <= 1e-9) & (X > mu[1])] = 1
+        tau = np.clip(tau, 1e-10, 1e10)
         tau /= tau.sum(axis=0)
 
         beta = 1 - 1 / (1 - theta) - 1 / np.log(theta)
@@ -93,7 +96,12 @@ def nbn_em(
         lam = (tau * delta).sum(axis=1) / tau_sum
         theta = beta * (tau * delta).sum(axis=1) / (tau * (X - (1 - beta).reshape(-1, 1) * delta)).sum(axis=1)
 
-        isnan = np.any(np.isnan(w) | np.isnan(lam) | np.isnan(theta))
+        r = lamtheta_to_r(lam, theta)
+        isnan = np.any(np.isnan(r) | np.isnan(w) | np.isnan(theta))
+        isinf = np.any(np.isinf(r) | np.isinf(w) | np.isinf(theta))
+        isinvalid = np.any((r <= 0) | (theta > 1) | (theta < 0) | (w < 0) | (w > 1))
+        use_prev = isnan or isinf or isinvalid
+
         if (
             max(
                 np.abs(w - prev_w).max(),
@@ -101,14 +109,14 @@ def nbn_em(
                 np.abs(theta - prev_theta).max(),
             )
             < precision
-        ) or isnan:
+        ) or use_prev:
             break
 
         prev_w = w.copy()
         prev_lam = lam.copy()
         prev_theta = theta.copy()
 
-    return (prev_w, lamtheta_to_r(prev_lam, prev_theta), prev_theta) if isnan else (w, lamtheta_to_r(lam, theta), theta)
+    return (prev_w, lamtheta_to_r(prev_lam, prev_theta), prev_theta) if use_prev else (w, r, theta)
 
 
 def conditionals(
@@ -198,6 +206,7 @@ def run_em(
     precision: float = 1e-6,
     bins: Optional[np.ndarray] = None,
     seed: Optional[int] = None,
+    n_threads: int = 1,
 ) -> Union[
     Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
     Dict[int, Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]],
@@ -223,6 +232,7 @@ def run_em(
         bins: Bins of pixels to estimate separately, such as those obtained by
             density segmentation. Zeros are ignored.
         seed: Random seed.
+        n_threads: Number of threads to use.
 
     Returns:
         Tuple of parameters estimated by the EM algorithm if `bins` is not provided.
@@ -245,24 +255,32 @@ def run_em(
     elif bins is not None:
         for label in np.unique(bins):
             if label > 0:
-                _samples = X[bins == label]
-                samples[label] = _samples[_samples > 0]
+                samples[label] = X[bins == label]
     else:
-        samples[0] = X[X > 0]
+        samples[0] = X.flatten()
 
     downsample_scale = True
     if downsample == int(downsample):
         downsample_scale = False
     rng = np.random.default_rng(seed)
-    results = {}
-    # TODO: Parallelize?
+    final_samples = {}
     total = sum(len(_samples) for _samples in samples.values())
     for label, _samples in samples.items():
         _downsample = int(len(_samples) * downsample) if downsample_scale else int(downsample * (len(_samples) / total))
         if len(_samples) > _downsample:
-            log = np.log(_samples)
+            log = np.log1p(_samples)
             _samples = rng.choice(_samples, _downsample, replace=False, p=log / log.sum())
+        final_samples[label] = np.array(_samples)
 
-        res_w, res_r, res_p = nbn_em(np.array(_samples), w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
+    # Run in parallel
+    results = {}
+    for label, (res_w, res_r, res_p) in zip(
+        final_samples.keys(),
+        ngs.utils.ParallelWithProgress(n_jobs=n_threads, total=len(final_samples), desc="Running EM")(
+            delayed(nbn_em)(_samples, w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
+            for _samples in final_samples.values()
+        ),
+    ):
         results[label] = (tuple(res_w), tuple(res_r), tuple(res_p))
+
     return results if bins is not None else results[0]
