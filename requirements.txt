@@ -9,6 +9,7 @@ loompy>=3.0.5
 logging-release>=0.0.4
 mapclassify
 matplotlib>=3.1.0
+ngs_tools>=1.5.13
 numba>=0.46.0
 numpy>=1.18.1
 opencv-python>=4.5.4.60
