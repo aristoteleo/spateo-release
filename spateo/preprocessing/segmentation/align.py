@@ -18,19 +18,17 @@ from ...errors import PreprocessingError
 
 class AlignmentRefiner(nn.Module):
     def __init__(self, reference: np.ndarray, to_align: np.ndarray):
-        if reference.dtype != np.dtype(bool) or to_align.dtype != np.dtype(bool):
-            raise PreprocessingError("`AlignmentRefiner` only supports boolean arrays.")
         super().__init__()
+        reference = reference.astype(float) / reference.max()
+        to_align = to_align.astype(float) / to_align.max()
         self.reference = torch.tensor(reference)[None][None].float()
         self.to_align = torch.tensor(to_align)[None][None].float()
-        self.weight = torch.tensor(
-            np.where(reference, reference.size / (2 * reference.sum()), reference.size / (2 * (~reference).sum()))
-        )[None][None]
         self.__optimizer = None
+        self.weight = self.reference + 1
         self.history = {}
 
     def loss(self, pred):
-        return torch.sum(self.weight * (pred - self.reference) ** 2) / self.weight.numel()
+        return -torch.mean(self.weight * (pred * self.reference))
 
     def optimizer(self):
         if self.__optimizer is None:
@@ -49,7 +47,7 @@ class AlignmentRefiner(nn.Module):
                 loss = self.loss(pred)
                 self.history.setdefault("loss", []).append(loss.item())
 
-                pbar.set_description(f"Loss {loss.item():.4f}")
+                pbar.set_description(f"Loss {loss.item():.4e}")
                 pbar.update(1)
 
                 optimizer.zero_grad()
@@ -107,9 +105,6 @@ class RigidAlignmentRefiner(AlignmentRefiner):
 
     def __init__(self, reference: np.ndarray, to_align: np.ndarray, theta: Optional[np.ndarray] = None):
         super().__init__(reference, to_align)
-        self.reference = torch.tensor(reference)[None][None].float()
-        self.to_align = torch.tensor(to_align)[None][None].float()
-
         # Affine matrix
         if theta is not None:
             self.theta = nn.Parameter(torch.tensor(theta))
@@ -183,15 +178,8 @@ def refine_alignment(
     if mode not in MODULES.keys():
         raise PreprocessingError('`mode` must be one of "rigid" and "non-rigid"')
 
-    layer = SKM.gen_new_layer_key(stain_layer, SKM.MASK_SUFFIX)
-    if layer not in adata.layers:
-        layer = stain_layer
-    stain_mask = SKM.select_layer_data(adata, layer)
-
-    layer = SKM.gen_new_layer_key(rna_layer, SKM.MASK_SUFFIX)
-    if layer not in adata.layers:
-        layer = rna_layer
-    rna_mask = SKM.select_layer_data(adata, layer)
+    stain_mask = SKM.select_layer_data(adata, stain_layer, make_dense=True)
+    rna_mask = SKM.select_layer_data(adata, rna_layer, make_dense=True)
 
     module = MODULES[mode]
     aligner = module(rna_mask, stain_mask, **kwargs)
