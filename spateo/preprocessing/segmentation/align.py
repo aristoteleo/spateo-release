@@ -168,6 +168,14 @@ def refine_alignment(
             `{stain_layer}_mask`. Otherwise, this will be taken as a literal.
         rna_layer: Layer containing (unspliced) RNA. First, will look for layer
             `{rna_layer}_mask`. Otherwise, this will be taken as a literal.
+        mode: The alignment mode. Two modes are supported:
+            * rigid: A global alignment method that finds a rigid (affine)
+                transformation matrix
+            * non-rigid: A semi-local alignment method that finds a thin-plate-spline
+                with a mesh of certain size. By default, each cell in the mesh
+                consists of 1000 x 1000 pixels. This value can be modified
+                by providing a `binsize` argument to this function (specifically,
+                as part of additional **kwargs).
         n_epochs: Number of epochs to run optimization
         transform_layers: Layers to transform and overwrite inplace.
         **kwargs: Additional keyword arguments to pass to the Pytorch module.
