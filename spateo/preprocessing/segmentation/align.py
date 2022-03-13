@@ -69,7 +69,8 @@ class NonRigidAlignmentRefiner(AlignmentRefiner):
     points.
     """
 
-    def __init__(self, reference: np.ndarray, to_align: np.ndarray, meshsize: int = 1000):
+    def __init__(self, reference: np.ndarray, to_align: np.ndarray, meshsize: Optional[int] = None):
+        meshsize = meshsize or min(to_align.shape) // 3
         meshes = (math.ceil(to_align.shape[0] / meshsize), math.ceil(to_align.shape[1] / meshsize))
         if meshes[0] <= 1 or meshes[1] <= 1:
             raise PreprocessingError(
