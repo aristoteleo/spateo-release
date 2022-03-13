@@ -5,6 +5,7 @@ dynamo-release>=0.9.2
 fbgbp>=0.2.0
 folium
 geopandas>=0.10.2
+kornia
 loompy>=3.0.5
 logging-release>=0.0.4
 mapclassify
