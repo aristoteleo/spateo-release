@@ -1,6 +1,7 @@
 """Functions to refine staining and RNA alignments.
 """
 import math
+import warnings
 from typing import List, Optional
 
 import cv2
@@ -16,6 +17,7 @@ from typing_extensions import Literal
 from . import utils
 from ...configuration import SKM
 from ...errors import PreprocessingError
+from ...warnings import PreprocessingWarning
 
 
 class AlignmentRefiner(nn.Module):
@@ -187,6 +189,14 @@ def refine_alignment(
     """
     if mode not in MODULES.keys():
         raise PreprocessingError('`mode` must be one of "rigid" and "non-rigid"')
+    if adata.shape[0] > 10000 or adata.shape[1] > 10000:
+        warnings.warn(
+            (
+                "Input has dimension > 10000. This may take a while and a lot of memory. "
+                "Consider downscaling using the `downscale` option."
+            ),
+            PreprocessingWarning,
+        )
 
     stain = SKM.select_layer_data(adata, stain_layer, make_dense=True)
     rna = SKM.select_layer_data(adata, rna_layer, make_dense=True)
