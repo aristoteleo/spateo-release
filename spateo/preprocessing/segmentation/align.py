@@ -189,7 +189,7 @@ def refine_alignment(
     """
     if mode not in MODULES.keys():
         raise PreprocessingError('`mode` must be one of "rigid" and "non-rigid"')
-    if adata.shape[0] > 10000 or adata.shape[1] > 10000:
+    if adata.shape[0] * downscale > 10000 or adata.shape[1] * downscale > 10000:
         warnings.warn(
             (
                 "Input has dimension > 10000. This may take a while and a lot of memory. "
