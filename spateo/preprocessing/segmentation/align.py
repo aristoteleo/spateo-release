@@ -3,6 +3,7 @@
 import math
 from typing import List, Optional
 
+import cv2
 import numpy as np
 import torch
 import torch.nn as nn
@@ -12,6 +13,7 @@ from kornia.geometry.transform import thin_plate_spline as tps
 from tqdm import tqdm
 from typing_extensions import Literal
 
+from . import utils
 from ...configuration import SKM
 from ...errors import PreprocessingError
 
@@ -65,11 +67,17 @@ class NonRigidAlignmentRefiner(AlignmentRefiner):
     points.
     """
 
-    def __init__(self, reference: np.ndarray, to_align: np.ndarray, binsize: int = 1000):
+    def __init__(self, reference: np.ndarray, to_align: np.ndarray, meshsize: int = 1000):
+        meshes = (math.ceil(to_align.shape[0] / meshsize), math.ceil(to_align.shape[1] / meshsize))
+        if meshes[0] <= 1 or meshes[1] <= 1:
+            raise PreprocessingError(
+                f"Using `meshsize` {meshsize} for image of shape {to_align.shape} "
+                f"results in {meshes} meshes. Please reduce `meshsize`."
+            )
         super().__init__(reference, to_align)
         self.src_points = torch.cartesian_prod(
-            torch.linspace(-1, 1, math.ceil(to_align.shape[1] / binsize)),
-            torch.linspace(-1, 1, math.ceil(to_align.shape[0] / binsize)),
+            torch.linspace(-1, 1, meshes[1]),
+            torch.linspace(-1, 1, meshes[0]),
         )
         self.displacement = nn.Parameter(torch.zeros(self.src_points.shape))
 
@@ -146,6 +154,8 @@ def refine_alignment(
     stain_layer: str = SKM.STAIN_LAYER_KEY,
     rna_layer: str = SKM.UNSPLICED_LAYER_KEY,
     mode: Literal["rigid", "non-rigid"] = "rigid",
+    downscale: float = 1,
+    k: int = 5,
     n_epochs: int = 100,
     transform_layers: Optional[List[str]] = None,
     **kwargs,
@@ -159,10 +169,8 @@ def refine_alignment(
 
     Args:
         adata: Input Anndata
-        stain_layer: Layer containing staining image. First will look for layer
-            `{stain_layer}_mask`. Otherwise, this will be taken as a literal.
-        rna_layer: Layer containing (unspliced) RNA. First, will look for layer
-            `{rna_layer}_mask`. Otherwise, this will be taken as a literal.
+        stain_layer: Layer containing staining image.
+        rna_layer: Layer containing (unspliced) RNA.
         mode: The alignment mode. Two modes are supported:
             * rigid: A global alignment method that finds a rigid (affine)
                 transformation matrix
@@ -171,6 +179,8 @@ def refine_alignment(
                 consists of 1000 x 1000 pixels. This value can be modified
                 by providing a `binsize` argument to this function (specifically,
                 as part of additional **kwargs).
+        downscale: Downscale matrices by this factor to reduce memory and runtime.
+        k: Kernel size for Gaussian blur of the RNA matrix.
         n_epochs: Number of epochs to run optimization
         transform_layers: Layers to transform and overwrite inplace.
         **kwargs: Additional keyword arguments to pass to the Pytorch module.
@@ -178,11 +188,17 @@ def refine_alignment(
     if mode not in MODULES.keys():
         raise PreprocessingError('`mode` must be one of "rigid" and "non-rigid"')
 
-    stain_mask = SKM.select_layer_data(adata, stain_layer, make_dense=True)
-    rna_mask = SKM.select_layer_data(adata, rna_layer, make_dense=True)
+    stain = SKM.select_layer_data(adata, stain_layer, make_dense=True)
+    rna = SKM.select_layer_data(adata, rna_layer, make_dense=True)
+    if k > 1 and rna.dtype != np.dtype(bool):
+        rna = utils.conv2d(rna, k, mode="gauss")
+    if downscale < 1:
+        stain = cv2.resize(stain.astype(float), (0, 0), fx=downscale, fy=downscale)
+        rna = cv2.resize(rna.astype(float), (0, 0), fx=downscale, fy=downscale)
 
     module = MODULES[mode]
-    aligner = module(rna_mask, stain_mask, **kwargs)
+    # NOTE: we find a transformation FROM the stain coordinates TO the RNA coordinates
+    aligner = module(rna, stain, **kwargs)
     aligner.train(n_epochs)
 
     params = aligner.get_params()
