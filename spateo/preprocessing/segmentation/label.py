@@ -25,12 +25,16 @@ def _replace_labels(labels: np.ndarray, mapping: Dict[int, int]) -> np.ndarray:
     Returns:
         Replaced labels
     """
+    replacement = np.full(labels.max() + 1, -1, dtype=int)
+    for from_label, to_label in mapping.items():
+        replacement[from_label] = to_label
+
     new_labels = labels.copy()
     for i in range(labels.shape[0]):
         for j in range(labels.shape[1]):
-            label = labels[i, j]
-            if label in mapping:
-                new_labels[i, j] = mapping[label]
+            new_label = replacement[labels[i, j]]
+            if new_label >= 0:
+                new_labels[i, j] = new_label
     return new_labels
 
 
