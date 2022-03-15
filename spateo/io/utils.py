@@ -79,7 +79,6 @@ def get_label_props(labels: np.ndarray) -> pd.DataFrame:
     def contour_to_geo(contour):
         """Transfer contours to `shapely.geometry`"""
         n = contour.shape[0]
-        contour = np.squeeze(contour)
         if n >= 3:
             geo = Polygon(contour)
         elif n == 2:
