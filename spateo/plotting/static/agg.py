@@ -105,22 +105,22 @@ def qc_regions(
         xmin, xmax, ymin, ymax = region
         if (
             str(xmin) not in adata.obs_names
-            or str(xmax) not in adata.obs_names
+            or str(xmax - 1) not in adata.obs_names
             or str(ymin) not in adata.var_names
-            or str(ymax) not in adata.var_names
+            or str(ymax - 1) not in adata.var_names
         ):
             warnings.warn(f"Region {region} not in AnnData bounds.", PlottingWarning)
             continue
         imshow(
             adata[
-                adata.obs_names.get_loc(str(xmin)) : adata.obs_names.get_loc(str(xmax)),
-                adata.obs_names.get_loc(str(ymin)) : adata.obs_names.get_loc(str(ymax)),
+                adata.obs_names.get_loc(str(xmin)) : adata.obs_names.get_loc(str(xmax - 1)) + 1,
+                adata.obs_names.get_loc(str(ymin)) : adata.obs_names.get_loc(str(ymax - 1)) + 1,
             ],
             layer,
             ax=ax,
             **kwargs,
         )
-        ax.set_title(f"{layer} [{xmin},{xmax}:{ymin},{ymax}]")
+        ax.set_title(f"{layer} [{xmin}:{xmax},{ymin}:{ymax}]")
 
     if return_fig_axes:
         return fig, axes

@@ -34,9 +34,9 @@ def select_qc_regions(
     _regions = np.zeros((n, 4), dtype=int)
     if not regions:
         # Construct grid indices
-        indices = np.dstack(np.meshgrid(np.arange(0, adata.n_obs, size), np.arange(0, adata.n_vars, size))).reshape(
-            -1, 2
-        )
+        indices = np.dstack(
+            np.meshgrid(np.arange(0, adata.n_obs - size, size), np.arange(0, adata.n_vars - size, size))
+        ).reshape(-1, 2)
 
         rng = np.random.default_rng(seed)
         choices = indices[rng.choice(np.arange(indices.shape[0]), n, replace=False)]
