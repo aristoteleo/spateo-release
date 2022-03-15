@@ -114,7 +114,7 @@ def qc_regions(
         imshow(
             adata[
                 adata.obs_names.get_loc(str(xmin)) : adata.obs_names.get_loc(str(xmax - 1)) + 1,
-                adata.obs_names.get_loc(str(ymin)) : adata.obs_names.get_loc(str(ymax - 1)) + 1,
+                adata.var_names.get_loc(str(ymin)) : adata.var_names.get_loc(str(ymax - 1)) + 1,
             ],
             layer,
             ax=ax,
