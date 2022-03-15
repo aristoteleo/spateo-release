@@ -1,8 +1,11 @@
 """Plotting functions for aggregated UMI counts.
 """
+import math
+import warnings
 from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
+import numpy as np
 from anndata import AnnData
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -11,6 +14,7 @@ from skimage.color import label2rgb
 
 from ...configuration import SKM
 from ...errors import PlottingError
+from ...warnings import PlottingWarning
 
 
 def imshow(
@@ -20,7 +24,7 @@ def imshow(
     show_cbar: bool = False,
     use_scale: bool = True,
     labels: bool = False,
-    **kwargs
+    **kwargs,
 ) -> Optional[Tuple[Figure, Axes]]:
     """Display raw data within an AnnData.
 
@@ -66,3 +70,44 @@ def imshow(
 
     if return_fig_ax:
         return fig, ax
+
+
+def qc_regions(
+    adata: AnnData, layer: str = SKM.X_LAYER, axes: Optional[np.ndarray] = None, ncols: int = 1, **kwargs
+) -> Optional[Tuple[Figure, np.ndarray]]:
+    if SKM.get_adata_type(adata) != SKM.ADATA_AGG_TYPE:
+        raise PlottingError("Only `AGG` type AnnDatas are supported.")
+
+    regions = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_QC_KEY)
+    n_regions = regions.shape[0]
+    return_fig_axes = False
+    if axes is None:
+        return_fig_axes = True
+        nrows = math.ceil(n_regions / ncols)
+        fig, axes = plt.subplots(figsize=(4 * ncols, 4 * nrows), ncols=ncols, nrows=nrows, tight_layout=True)
+    elif axes.size < n_regions:
+        raise PlottingError(f"`fig` must have at least {n_regions} axes.")
+
+    for ax, region in zip(axes.flatten(), regions):
+        xmin, xmax, ymin, ymax = region
+        if (
+            str(xmin) not in adata.obs_names
+            or str(xmax) not in adata.obs_names
+            or str(ymin) not in adata.var_names
+            or str(ymax) not in adata.var_names
+        ):
+            warnings.warn(f"Region {region} not in AnnData bounds.", PlottingWarning)
+            continue
+        imshow(
+            adata[
+                adata.obs_names.get_loc(str(xmin)) : adata.obs_names.get_loc(str(xmax)),
+                adata.obs_names.get_loc(str(ymin)) : adata.obs_names.get_loc(str(ymax)),
+            ],
+            layer,
+            ax=ax,
+            **kwargs,
+        )
+        ax.set_title(f"{layer} [{xmin},{xmax}:{ymin},{ymax}]")
+
+    if return_fig_axes:
+        return fig, axes

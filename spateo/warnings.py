@@ -4,3 +4,7 @@ class PreprocessingWarning(UserWarning):
 
 class IOWarning(UserWarning):
     pass
+
+
+class PlottingWarning(UserWarning):
+    pass
