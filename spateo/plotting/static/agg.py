@@ -75,6 +75,19 @@ def imshow(
 def qc_regions(
     adata: AnnData, layer: str = SKM.X_LAYER, axes: Optional[np.ndarray] = None, ncols: int = 1, **kwargs
 ) -> Optional[Tuple[Figure, np.ndarray]]:
+    """Display QC regions.
+
+    Args:
+        adata: Input Anndata
+        layer: Layer to display
+        axes: Numpy array (possibly 2D) of Matplotlib axes to plot each region.
+            This option is useful when trying to overlay multiple layers together.
+        ncols: Number of columns when displaying multiple panels.
+        **kwargs: Additional keyword arguments are all passed to :func:`imshow`.
+
+    Returns:
+        The figure and axes if `axes` is not provided.
+    """
     if SKM.get_adata_type(adata) != SKM.ADATA_AGG_TYPE:
         raise PlottingError("Only `AGG` type AnnDatas are supported.")
 
