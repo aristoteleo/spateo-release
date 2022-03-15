@@ -40,7 +40,7 @@ def contours(adata: AnnData, layer: str, colors: Optional[List] = None, scale: f
             mtx[mtx > 0] = 255
             contours = cv2.findContours(mtx, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
             for contour in contours:
-                contour = contour.squeeze()
+                contour = contour.squeeze(1)
                 figure.add_trace(
                     go.Scatter(
                         x=contour[:, 0],
