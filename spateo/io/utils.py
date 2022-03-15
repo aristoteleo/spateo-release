@@ -85,7 +85,7 @@ def get_label_props(labels: np.ndarray) -> pd.DataFrame:
         elif n == 2:
             geo = LineString(contour)
         else:
-            geo = Point(contour)
+            geo = Point(contour[0])
         geo = dumps(geo, hex=True)  # geometry object to hex
         return geo
 
