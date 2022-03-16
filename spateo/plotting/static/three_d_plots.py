@@ -54,9 +54,6 @@ def create_plotter(
     bg_rgb = mpl.colors.to_rgb(background)
     cbg_rgb = (1 - bg_rgb[0], 1 - bg_rgb[1], 1 - bg_rgb[2])
 
-    # Add an interactive axes widget in the bottom left corner.
-    plotter.add_axes(color=cbg_rgb)
-
     if jupyter is True:
         # Description of control 3D images in jupyter notebook.
         plotter.add_text(
@@ -76,25 +73,14 @@ def create_plotter(
     return plotter
 
 
-def add_plotter(
+def add_mesh(
     plotter: Plotter,
     mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
-    key: str = None,
+    key: Optional[str] = None,
     ambient: float = 0.2,
     opacity: float = 1.0,
     style: Literal["points", "surface", "volume"] = "surface",
     point_size: float = 5.0,
-    legend_loc: Literal[
-        "upper right",
-        "upper left",
-        "lower left",
-        "lower right",
-        "center left",
-        "lower center",
-        "upper center",
-        "center",
-    ] = "lower right",
-    legend_size: tuple = (0.1, 0.1),
 ):
     """
     Add mesh(es) to the plotter.
@@ -111,19 +97,6 @@ def add_plotter(
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
         style: Visualization style of the mesh. One of the following: style='surface', style='volume', style='points'.
         point_size: Point size of any nodes in the dataset plotted.
-        legend_loc: The location of the legend in the window. Available `legend_loc` are:
-                * `'upper right'`
-                * `'upper left'`
-                * `'lower left'`
-                * `'lower right'`
-                * `'center left'`
-                * `'lower center'`
-                * `'upper center'`
-                * `'center'`
-        legend_size: The size of the legend in the window. Two float sequence, each float between 0 and 1.
-                     E.g.: (0.1, 0.1) would make the legend 10% the size of the entire figure window.
-    Returns:
-        plotter: The plotting object to display pyvista/vtk mesh.
     """
 
     def _add_mesh(_p, _mesh):
@@ -148,50 +121,85 @@ def add_plotter(
     else:
         _add_mesh(_p=plotter, _mesh=mesh)
 
-    # Add a legend to the plotter.
-    if key is not None:
-        if isinstance(mesh, MultiBlock):
-            legends = pd.DataFrame()
-            for sub_mesh in mesh:
-                sub_labels = pd.Series(sub_mesh[key])
-                sub_labels_hex = pd.Series([mpl.colors.to_hex(i) for i in sub_mesh[f"{key}_rgba"]])
-                sub_legends = pd.concat([sub_labels, sub_labels_hex], axis=1)
-                legends = pd.concat([legends, sub_legends])
-        else:
-            labels = pd.Series(mesh[key])
-            labels_hex = pd.Series([mpl.colors.to_hex(i) for i in mesh[f"{key}_rgba"]])
-            legends = pd.concat([labels, labels_hex], axis=1)
 
-        legends.columns = ["label", "hex"]
-        legends.drop_duplicates(inplace=True)
+def add_legend(
+    plotter: Plotter,
+    mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
+    key: Optional[str] = None,
+    legend_loc: Literal[
+        "upper right",
+        "upper left",
+        "lower left",
+        "lower right",
+        "center left",
+        "lower center",
+        "upper center",
+        "center",
+        ] = "lower right",
+):
+    """
+    Add a legend to the plotter.
 
-        legends = legends[legends["label"] != "mask"]
-        if len(legends.index) != 0:
-            legends.sort_values(by=["label", "hex"], inplace=True)
-            legends.index = range(len(legends.index))
-            legends = legends.astype(str)
+    Args:
+        plotter: The plotting object to display pyvista/vtk mesh.
+        mesh: A reconstructed mesh.
+        key: The key under which are the labels.
+        legend_loc: The location of the legend in the window. Available `legend_loc` are:
+                * `'upper right'`
+                * `'upper left'`
+                * `'lower left'`
+                * `'lower right'`
+                * `'center left'`
+                * `'lower center'`
+                * `'upper center'`
+                * `'center'`
+    """
 
-            try:
-                _try = legends["label"].copy()
-                _try = _try.astype(float)
-                label_type = "float"
-            except:
-                label_type = "str"
+    if isinstance(mesh, MultiBlock):
+        legends = pd.DataFrame()
+        for sub_mesh in mesh:
+            sub_labels = pd.Series(sub_mesh[key])
+            sub_labels_hex = pd.Series([mpl.colors.to_hex(i) for i in sub_mesh[f"{key}_rgba"]])
+            sub_legends = pd.concat([sub_labels, sub_labels_hex], axis=1)
+            legends = pd.concat([legends, sub_legends])
+    else:
+        labels = pd.Series(mesh[key])
+        labels_hex = pd.Series([mpl.colors.to_hex(i) for i in mesh[f"{key}_rgba"]])
+        legends = pd.concat([labels, labels_hex], axis=1)
 
-            gap = math.ceil(len(legends.index) / 5) if label_type == "float" else 1
-            legend_entries = [
-                [legends["label"].iloc[i], legends["hex"].iloc[i]] for i in range(0, len(legends.index), gap)
-            ]
-            if label_type == "float":
-                legend_entries.append([legends["label"].iloc[-1], legends["hex"].iloc[-1]])
+    legends.columns = ["label", "hex"]
+    legends.drop_duplicates(inplace=True)
 
-            plotter.add_legend(
-                legend_entries,
-                face="circle",
-                bcolor=None,
-                loc=legend_loc,
-                size=legend_size,
-            )
+    legends = legends[legends["label"] != "mask"]
+    if len(legends.index) != 0:
+        legends.sort_values(by=["label", "hex"], inplace=True)
+        legends.index = range(len(legends.index))
+        legends = legends.astype(str)
+
+        try:
+            _try = legends["label"].copy()
+            _try = _try.astype(float)
+            label_type = "float"
+        except:
+            label_type = "str"
+
+        gap = math.ceil(len(legends.index) / 5) if label_type == "float" else 1
+        legend_entries = [
+            [legends["label"].iloc[i], legends["hex"].iloc[i]] for i in range(0, len(legends.index), gap)
+        ]
+        if label_type == "float":
+            legend_entries.append([legends["label"].iloc[-1], legends["hex"].iloc[-1]])
+
+        legend_num = len(legend_entries)
+        legend_size = (0.1 + 0.01 * legend_num, 0.1 + 0.012 * legend_num)
+
+        plotter.add_legend(
+            legend_entries,
+            face="circle",
+            bcolor="w",
+            loc=legend_loc,
+            size=legend_size,
+        )
 
 
 def output_plotter(
@@ -290,7 +298,7 @@ def save_plotter(
 
 def three_d_plot(
     mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
-    key: str = None,
+    key: Optional[str] = None,
     filename: Optional[str] = None,
     jupyter: bool = False,
     off_screen: bool = False,
@@ -311,7 +319,6 @@ def three_d_plot(
         "upper center",
         "center",
     ] = "lower right",
-    legend_size: tuple = (0.1, 0.1),
     view_up: tuple = (0.5, 0.5, 1),
     framerate: int = 15,
     plotter_filename: Optional[str] = None,
@@ -351,8 +358,6 @@ def three_d_plot(
                 * `'lower center'`
                 * `'upper center'`
                 * `'center'`
-        legend_size: The size of the legend in the window. Two float sequence, each float between 0 and 1.
-                     E.g.: (0.1, 0.1) would make the legend 10% the size of the entire figure window.
         view_up: The normal to the orbital plane. Only available when filename ending with `.mp4` or `.gif`.
         framerate: Frames per second. Only available when filename ending with `.mp4` or `.gif`.
         plotter_filename: The filename of the file where the plotter is saved.
@@ -374,7 +379,7 @@ def three_d_plot(
         background=background,
         initial_cpo=initial_cpo,
     )
-    add_plotter(
+    add_mesh(
         plotter=p1,
         mesh=mesh,
         key=key,
@@ -382,8 +387,12 @@ def three_d_plot(
         opacity=opacity,
         style=style,
         point_size=point_size,
+    )
+    add_legend(
+        plotter=p1,
+        mesh=mesh,
+        key=key,
         legend_loc=legend_loc,
-        legend_size=legend_size,
     )
     jupyter_backend = "panel" if jupyter is True else None
     cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend)
@@ -396,7 +405,7 @@ def three_d_plot(
         background=background,
         initial_cpo=cpo,
     )
-    p2 = add_plotter(
+    add_mesh(
         plotter=p2,
         mesh=mesh,
         key=key,
@@ -404,10 +413,13 @@ def three_d_plot(
         opacity=opacity,
         style=style,
         point_size=point_size,
-        legend_loc=legend_loc,
-        legend_size=legend_size,
     )
-
+    add_legend(
+        plotter=p2,
+        mesh=mesh,
+        key=key,
+        legend_loc=legend_loc,
+    )
     # Save the plotting object.
     if plotter_filename is not None:
         save_plotter(p2, filename=plotter_filename)
