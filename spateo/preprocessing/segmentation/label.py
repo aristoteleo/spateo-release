@@ -277,7 +277,7 @@ def _label_connected_components(
     areas = components[2][:, cv2.CC_STAT_AREA]
     to_erode = np.zeros(X.shape, dtype=bool)
     saved = np.zeros(X.shape, dtype=int)
-    saved_i = seed_labels.max() if seed_labels is not None else 1
+    saved_i = (seed_labels.max() + 1) if seed_labels is not None else 1
 
     for label, area in enumerate(areas):
         if label > 0:
