@@ -1,4 +1,3 @@
-
 import matplotlib as mpl
 import numpy as np
 import open3d as o3d
@@ -81,7 +80,7 @@ def construct_pcd(
         groups = np.array(["same"] * adata.obs.shape[0])
     else:
         raise ValueError(
-            "\n`groupby` value is wrong." 
+            "\n`groupby` value is wrong."
             "\n`groupby` can be a string and one of adata.obs_names or adata.var_names. "
             "\n`groupby` can also be a list and is a subset of adata.var_names"
         )

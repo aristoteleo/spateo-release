@@ -16,8 +16,7 @@ from .utils import collect_mesh, _MultiBlock
 
 
 def _create_plotter(message=True) -> Plotter:
-    """Create an interactive window for using widgets.
-    """
+    """Create an interactive window for using widgets."""
 
     plotter = pv.Plotter(
         off_screen=False,
@@ -32,15 +31,16 @@ def _create_plotter(message=True) -> Plotter:
     if message is True:
         plotter.add_text(
             "Please double-click the camera orientation widget in the upper right corner first.",
-            font_size=15, color="black", font="arial",
+            font_size=15,
+            color="black",
+            font="arial",
         )
 
     return plotter
 
 
 def _show_final(mesh, key, legend=None, message=True):
-    """Create a presentation window to display the modified model results through the interactive window.
-    """
+    """Create a presentation window to display the modified model results through the interactive window."""
     pf = _create_plotter(message=message)
     pf.add_mesh(mesh, scalars=f"{key}_rgba", rgba=True, render_points_as_spheres=True, point_size=10)
 
@@ -56,14 +56,12 @@ def _interactive_rectangle_clip(
     picking_list,
     picking_r_list,
 ):
-    """Add a 2D rectangle widget to the scene.
-    """
+    """Add a 2D rectangle widget to the scene."""
 
     legend = []
 
     def _split_mesh(original_mesh):
-        """Adds a new mesh to the plotter each time cells are picked, and removes them from the original mesh
-        """
+        """Adds a new mesh to the plotter each time cells are picked, and removes them from the original mesh"""
 
         # If nothing selected.
         if not original_mesh.n_cells:
@@ -86,26 +84,20 @@ def _interactive_rectangle_clip(
         picking_list.append(original_mesh)
         picking_r_list.append(mesh)
 
-    plotter.enable_cell_picking(
-        mesh=mesh,
-        callback=_split_mesh,
-        show=False,
-        color="black"
-    )
+    plotter.enable_cell_picking(mesh=mesh, callback=_split_mesh, show=False, color="black")
 
     plotter.add_text(
         "Please double-click the camera orientation widget in the upper right corner first."
         "\nPress `r` to enable retangle based selection. Press `r` again to turn it off."
         "\nPress `q` to exit the interactive window. ",
-        font_size=12, color="black", font="arial",
+        font_size=12,
+        color="black",
+        font="arial",
     )
 
 
 def interactive_rectangle_clip(
-    mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
-    key: str = "groups",
-    invert: bool = False,
-    bg_mesh=None
+    mesh: Union[PolyData, UnstructuredGrid, MultiBlock], key: str = "groups", invert: bool = False, bg_mesh=None
 ) -> MultiBlock:
     """
     Pick the interested part of a mesh using a 2D rectangle widget.
@@ -140,8 +132,8 @@ def interactive_rectangle_clip(
                 plotter=p,
                 mesh=label_mesh,
                 key=key,
-                checkbox_color=label_mesh[f'{key}_rgba'][0][:3],
-                checkbox_position=(5.0, checkbox_start_pos)
+                checkbox_color=label_mesh[f"{key}_rgba"][0][:3],
+                checkbox_position=(5.0, checkbox_start_pos),
             )
             checkbox_start_pos = checkbox_start_pos + checkbox_size + (checkbox_size // 10)
 
@@ -181,7 +173,15 @@ def interactive_box_clip(
     p = _create_plotter(message=True)
 
     # Clip a mesh using a 3D box widget.
-    p.add_mesh_clip_box(mesh, invert=invert, scalars=f"{key}_rgba", rgba=True, render_points_as_spheres=True, point_size=10, widget_color="black")
+    p.add_mesh_clip_box(
+        mesh,
+        invert=invert,
+        scalars=f"{key}_rgba",
+        rgba=True,
+        render_points_as_spheres=True,
+        point_size=10,
+        widget_color="black",
+    )
     p.show()
 
     # obtain amd plot final picked meshes
@@ -239,10 +239,10 @@ def _interactive_checkbox_pick(
     label_size: int = 12,
     checkbox_size: int = 27,
     checkbox_color: Union[str, tuple] = "blue",
-    checkbox_position: tuple = (5.0, 5.0)
+    checkbox_position: tuple = (5.0, 5.0),
 ):
-    """Add a checkbox button widget to the scene.
-    """
+    """Add a checkbox button widget to the scene."""
+
     def toggle_vis(flag):
         actor.SetVisibility(flag)
         if picking_list is not None:
@@ -254,21 +254,18 @@ def _interactive_checkbox_pick(
     # Make a separate callback for each widget
     actor = plotter.add_mesh(mesh, scalars=f"{key}_rgba", rgba=True, render_points_as_spheres=True, point_size=10)
     plotter.add_checkbox_button_widget(
-        toggle_vis, value=True,
+        toggle_vis,
+        value=True,
         position=checkbox_position,
         size=checkbox_size,
         border_size=3,
         color_on=checkbox_color,
-        color_off='white',
+        color_off="white",
         background_color=checkbox_color,
     )
 
     plotter.add_text(
-        f"\n     {mesh[key][0]}",
-        position=checkbox_position,
-        font_size=label_size,
-        color="black",
-        font="arial"
+        f"\n     {mesh[key][0]}", position=checkbox_position, font_size=label_size, color="black", font="arial"
     )
 
 
@@ -276,7 +273,7 @@ def interactive_checkbox_pick(
     mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
     key: str = "groups",
     checkbox_size: int = 27,
-    label_size: int = 12
+    label_size: int = 12,
 ) -> MultiBlock:
     """
     Add a checkbox button widget to pick the desired groups through the interactive window and output the pick groups.
@@ -310,12 +307,10 @@ def interactive_checkbox_pick(
             key=key,
             label_size=label_size,
             checkbox_size=checkbox_size,
-            checkbox_color=label_mesh[f'{key}_rgba'][0][:3],
-            checkbox_position=(5.0, checkbox_start_pos)
+            checkbox_color=label_mesh[f"{key}_rgba"][0][:3],
+            checkbox_position=(5.0, checkbox_start_pos),
         )
         checkbox_start_pos = checkbox_start_pos + checkbox_size + (checkbox_size // 10)
     p.show()
 
     return collect_mesh(picked_meshes)
-
-

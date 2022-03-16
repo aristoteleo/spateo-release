@@ -66,8 +66,7 @@ def save_mesh(
 def merge_mesh(
     meshes: List[PolyData or UnstructuredGrid],
 ) -> PolyData or UnstructuredGrid:
-    """Merge all meshes in the `meshes` list. The format of all meshes must be the same.
-    """
+    """Merge all meshes in the `meshes` list. The format of all meshes must be the same."""
 
     merged_mesh = meshes[0]
     for mesh in meshes[1:]:
@@ -110,4 +109,3 @@ def _MultiBlock(mesh, message=None):
         )
     meshes = [mesh[name] for name in mesh.keys()]
     return merge_mesh(meshes=meshes)
-

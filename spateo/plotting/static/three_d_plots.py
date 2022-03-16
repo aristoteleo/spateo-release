@@ -135,7 +135,7 @@ def add_legend(
         "lower center",
         "upper center",
         "center",
-        ] = "lower right",
+    ] = "lower right",
 ):
     """
     Add a legend to the plotter.
@@ -184,9 +184,7 @@ def add_legend(
             label_type = "str"
 
         gap = math.ceil(len(legends.index) / 5) if label_type == "float" else 1
-        legend_entries = [
-            [legends["label"].iloc[i], legends["hex"].iloc[i]] for i in range(0, len(legends.index), gap)
-        ]
+        legend_entries = [[legends["label"].iloc[i], legends["hex"].iloc[i]] for i in range(0, len(legends.index), gap)]
         if label_type == "float":
             legend_entries.append([legends["label"].iloc[-1], legends["hex"].iloc[-1]])
 
