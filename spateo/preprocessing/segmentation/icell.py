@@ -29,7 +29,7 @@ def _mask_nuclei_from_stain(
     X: np.ndarray,
     otsu_classes: int = 3,
     otsu_index: int = 0,
-    local_k: int = 45,
+    local_k: int = 55,
     offset: int = 5,
     mk: int = 5,
 ) -> np.ndarray:
@@ -82,7 +82,7 @@ def mask_nuclei_from_stain(
     adata: AnnData,
     otsu_classes: int = 3,
     otsu_index: int = 0,
-    local_k: int = 45,
+    local_k: int = 55,
     offset: int = 5,
     mk: int = 5,
     layer: str = SKM.STAIN_LAYER_KEY,
