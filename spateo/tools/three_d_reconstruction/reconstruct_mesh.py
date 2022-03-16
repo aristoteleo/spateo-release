@@ -9,8 +9,8 @@ import PVGeo
 
 from anndata import AnnData
 from pandas.core.frame import DataFrame
-from pyvista import PolyData, UnstructuredGrid, MultiBlock, DataSet
-from typing import Optional, Tuple, Union, List
+from pyvista import PolyData, UnstructuredGrid
+from typing import Optional, Tuple, Union
 
 try:
     from typing import Literal
@@ -33,7 +33,7 @@ def mesh_type(
 
 def construct_pcd(
     adata: AnnData,
-    coordsby: str = "spatial",
+    spatial_key: str = "spatial",
     groupby: Union[str, list] = None,
     key_added: str = "groups",
     mask: Union[str, int, float, list] = None,
@@ -46,7 +46,7 @@ def construct_pcd(
 
     Args:
         adata: AnnData object.
-        coordsby: The key that stores 3D coordinate information in adata.obsm.
+        spatial_key: The key in `.obsm` that corresponds to the spatial coordinate of each bucket.
         groupby: The key that stores clustering or annotation information in adata.obs, a gene's name or a list of genes' name in adata.var.
         key_added: The key under which to add the labels.
         mask: The part that you don't want to be displayed.
@@ -62,7 +62,7 @@ def construct_pcd(
     """
 
     # create an initial pcd.
-    bucket_xyz = adata.obsm[coordsby].astype(coodtype)
+    bucket_xyz = adata.obsm[spatial_key].astype(coodtype)
     if isinstance(bucket_xyz, DataFrame):
         bucket_xyz = bucket_xyz.values
     pcd = pv.PolyData(bucket_xyz)
