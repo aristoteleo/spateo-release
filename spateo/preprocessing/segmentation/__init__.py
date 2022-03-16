@@ -5,3 +5,4 @@ from .align import refine_alignment
 from .density import merge_densities, segment_densities
 from .icell import mask_cells_from_stain, mask_nuclei_from_stain, score_and_mask_pixels
 from .label import expand_labels, label_connected_components, watershed, watershed_markers
+from .qc import select_qc_regions

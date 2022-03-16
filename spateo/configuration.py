@@ -1,6 +1,6 @@
 # code adapted from https://github.com/aristoteleo/dynamo-release/blob/master/dynamo/configuration.py
 
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 import colorcet
 import matplotlib
@@ -12,6 +12,8 @@ from scipy import sparse
 
 # from cycler import cycler
 import matplotlib.pyplot as plt
+
+from .errors import ConfigurationError
 
 
 class SpateoAdataKeyManager:
@@ -29,6 +31,7 @@ class SpateoAdataKeyManager:
     UNS_SPATIAL_SCALE_UNIT_KEY = "scale_unit"
     UNS_SPATIAL_SEGMENTATION_KEY = "segmentation"
     UNS_SPATIAL_ALIGNMENT_KEY = "alignment"
+    UNS_SPATIAL_QC_KEY = "qc"
 
     SPLICED_LAYER_KEY = "spliced"
     UNSPLICED_LAYER_KEY = "unspliced"
@@ -110,6 +113,12 @@ class SpateoAdataKeyManager:
 
     def has_uns_spatial_attribute(adata: AnnData, key: str) -> bool:
         return key in adata.uns[SpateoAdataKeyManager.UNS_SPATIAL_KEY]
+
+    def get_agg_bounds(adata: AnnData) -> Tuple[int, int, int, int]:
+        """Get (xmin, xmax, ymin, ymax) for AGG type anndatas."""
+        if SpateoAdataKeyManager.get_adata_type(adata) != SpateoAdataKeyManager.ADATA_AGG_TYPE:
+            raise ConfigurationError(f"AnnData has incorrect type.")
+        return int(adata.obs_names[0]), int(adata.obs_names[-1]), int(adata.var_names[0]), int(adata.var_names[-1])
 
 
 SKM = SpateoAdataKeyManager
