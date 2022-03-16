@@ -111,7 +111,7 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
     """
 
     def create_geo(row):
-        x, y = row["x_ind"], row["y_ind"]
+        x, y = row["x"], row["y"]
         x *= binsize
         y *= binsize
         if binsize > 1:
