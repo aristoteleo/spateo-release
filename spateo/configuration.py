@@ -36,6 +36,7 @@ class SpateoAdataKeyManager:
     SPLICED_LAYER_KEY = "spliced"
     UNSPLICED_LAYER_KEY = "unspliced"
     STAIN_LAYER_KEY = "stain"
+    LABELS_LAYER_KEY = "labels"
     MASK_SUFFIX = "mask"
     MARKERS_SUFFIX = "markers"
     BINS_SUFFIX = "bins"

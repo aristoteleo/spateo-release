@@ -34,29 +34,61 @@ COUNT_COLUMN_MAPPING = {
 }
 
 
-def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
+def read_bgi_as_dataframe(path: str, label_column: Optional[str] = None) -> pd.DataFrame:
     """Read a BGI read file as a pandas DataFrame.
 
     Args:
         path: Path to read file.
+        label_columns: Column name containing positive cell labels.
 
     Returns:
         Pandas Dataframe with column names `gene`, `x`, `y`, `total` and
         additionally `spliced` and `unspliced` if splicing counts are present.
     """
+    dtype = {
+        "geneID": "category",  # geneID
+        "x": np.uint32,  # x
+        "y": np.uint32,  # y
+        3: np.uint16,  # total
+        4: np.uint16,  # spliced
+        5: np.uint16,  # unspliced,
+    }
+    if label_column:
+        dtype.update({label_column: np.uint32})
     return pd.read_csv(
         path,
         sep="\t",
-        dtype={
-            "geneID": "category",  # geneID
-            "x": np.uint32,  # x
-            "y": np.uint32,  # y
-            3: np.uint16,  # total
-            4: np.uint16,  # spliced
-            5: np.uint16,  # unspliced
-        },
+        dtype=dtype,
         comment="#",
     )
+
+
+def dataframe_to_labels(df: pd.DataFrame, column: str = "cell", shape: Optional[Tuple[int, int]] = None) -> np.ndarray:
+    """Convert a BGI dataframe that contains cell labels to a labels matrix.
+
+    Args:
+        df: Read dataframe, as returned by :func:`read_bgi_as_dataframe`.
+        columns: Column that contains cell labels as positive integers. Any labels
+            that are non-positive are ignored.
+
+    Returns:
+        Labels matrix
+    """
+    shape = shape or (df["x"].max() + 1, df["y"].max() + 1)
+    labels = np.zeros(shape, dtype=int)
+    for label, _df in df.drop_duplicates(subset=[column, "x", "y"]).groupby(column):
+        if label <= 0:
+            continue
+        points = _df[["x", "y"]].values.astype(int)
+        min_offset = points.min(axis=0)
+        max_offset = points.max(axis=0)
+        xmin, ymin = min_offset
+        xmax, ymax = max_offset
+        points -= min_offset
+        hull = cv2.convexHull(points, returnPoints=True)
+        mask = cv2.fillConvexPoly(np.zeros((max_offset - min_offset + 1)[::-1], dtype=np.uint8), hull, color=1).T
+        labels[xmin : xmax + 1, ymin : ymax + 1][mask == 1] = label
+    return labels
 
 
 def read_bgi_agg(
@@ -67,6 +99,7 @@ def read_bgi_agg(
     binsize: int = 1,
     gene_agg: Optional[Dict[str, Union[List[str], Callable[[str], bool]]]] = None,
     prealigned: bool = False,
+    label_column: str = "cell",
 ) -> AnnData:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
@@ -84,6 +117,7 @@ def read_bgi_agg(
             UMIs of the provided gene list.
         prealigned: Whether the stain image is already aligned with the minimum
             x and y RNA coordinates.
+        label_column: Column that contains already-segmented cell labels.
 
     Returns:
         An AnnData object containing the UMIs per coordinate and the nucleus
@@ -92,7 +126,7 @@ def read_bgi_agg(
         `.layers['spliced']` and `.layers['unspliced']` respectively.
         The nuclei image is stored as a Numpy array in `.layers['nuclei']`.
     """
-    data = read_bgi_as_dataframe(path)
+    data = read_bgi_as_dataframe(path, label_column)
     x_min, y_min = data["x"].min(), data["y"].min()
     x, y = data["x"].values, data["y"].values
     x_max, y_max = x.max(), y.max()
@@ -112,6 +146,12 @@ def read_bgi_agg(
             image = np.pad(image, ((0, shape[0] - image.shape[0]), (0, shape[1] - image.shape[1])))
         layers[SKM.STAIN_LAYER_KEY] = image
 
+    # Construct labels matrix if present
+    labels = None
+    if label_column in data.columns:
+        labels = dataframe_to_labels(data, label_column, shape)
+        layers[SKM.LABELS_LAYER_KEY] = labels
+
     if binsize > 1:
         shape = (math.ceil(shape[0] / binsize), math.ceil(shape[1] / binsize))
         x = bin_indices(x, 0, binsize)
@@ -121,6 +161,12 @@ def read_bgi_agg(
         # Resize image if necessary
         if stain_path:
             layers[SKM.STAIN_LAYER_KEY] = cv2.resize(image, shape[::-1])
+
+        if labels is not None:
+            warnings.warn(
+                ("Cell labels were provided, but `binsize` > 1. " "There may be slight inconsistencies."), IOWarning
+            )
+            layers[SKM.LABELS_LAYER_KEY] = labels[::binsize, ::binsize]
 
     # Put total in X
     X = csr_matrix((data[data.columns[COUNT_COLUMN_MAPPING[SKM.X_LAYER]]].values, (x, y)), shape=shape, dtype=np.uint16)
