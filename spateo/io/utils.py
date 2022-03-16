@@ -72,7 +72,6 @@ def get_label_props(labels: np.ndarray) -> pd.DataFrame:
     def contour(mtx):
         """Get contours of a cell using `cv2.findContours`."""
         mtx = mtx.astype(np.uint8)
-        mtx[mtx > 0] = 255
         contours = cv2.findContours(mtx, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
         assert len(contours) == 1
         return contours[0].squeeze(1)
