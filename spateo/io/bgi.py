@@ -251,6 +251,8 @@ def read_bgi(
 
     props = None
     if label_column in data.columns:
+        data = data[data[label_column] > 0]
+
         # TODO: support properties
         data.rename(columns={label_column: "label"}, inplace=True)
 
