@@ -34,28 +34,31 @@ COUNT_COLUMN_MAPPING = {
 }
 
 
-def read_bgi_as_dataframe(path: str) -> pd.DataFrame:
+def read_bgi_as_dataframe(path: str, label_column: Optional[str] = None) -> pd.DataFrame:
     """Read a BGI read file as a pandas DataFrame.
 
     Args:
         path: Path to read file.
+        label_columns: Column name containing positive cell labels.
 
     Returns:
         Pandas Dataframe with column names `gene`, `x`, `y`, `total` and
         additionally `spliced` and `unspliced` if splicing counts are present.
     """
+    dtype = {
+        "geneID": "category",  # geneID
+        "x": np.uint32,  # x
+        "y": np.uint32,  # y
+        3: np.uint16,  # total
+        4: np.uint16,  # spliced
+        5: np.uint16,  # unspliced,
+    }
+    if label_column:
+        dtype.update({label_column: np.uint32})
     return pd.read_csv(
         path,
         sep="\t",
-        dtype={
-            "geneID": "category",  # geneID
-            "x": np.uint32,  # x
-            "y": np.uint32,  # y
-            3: np.uint16,  # total
-            4: np.uint16,  # spliced
-            5: np.uint16,  # unspliced,
-            "cell": np.uint32,  # cell label
-        },
+        dtype=dtype,
         comment="#",
     )
 
@@ -123,7 +126,7 @@ def read_bgi_agg(
         `.layers['spliced']` and `.layers['unspliced']` respectively.
         The nuclei image is stored as a Numpy array in `.layers['nuclei']`.
     """
-    data = read_bgi_as_dataframe(path)
+    data = read_bgi_as_dataframe(path, label_column)
     x_min, y_min = data["x"].min(), data["y"].min()
     x, y = data["x"].values, data["y"].values
     x_max, y_max = x.max(), y.max()
