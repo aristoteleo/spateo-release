@@ -27,9 +27,7 @@ def spatial_adj_dyn(
     dyn.tl.neighbors(adata, n_neighbors=e_neigh, basis=pca_key)
 
     # Compute a neighborhood graph of physical space.
-    dyn.tl.neighbors(
-        adata, n_neighbors=s_neigh, basis=spatial_key, result_prefix="spatial"
-    )
+    dyn.tl.neighbors(adata, n_neighbors=s_neigh, basis=spatial_key, result_prefix="spatial")
 
     # Calculate the adjacent matrix.
     conn = adata.obsp["connectivities"].copy()
@@ -110,13 +108,9 @@ def cluster_dyn(
     # Run cluster.
     if cluster_method is "leiden":
         # Leiden's Clustering method.
-        dyn.tl.leiden(
-            adata, adj_matrix=adj, resolution=resolution, result_key=key_added
-        )
+        dyn.tl.leiden(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
     elif cluster_method is "louvain":
         # Louvain's Clustering method.
-        dyn.tl.louvain(
-            adata, adj_matrix=adj, resolution=resolution, result_key=key_added
-        )
+        dyn.tl.louvain(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
 
     return adata if copy else None

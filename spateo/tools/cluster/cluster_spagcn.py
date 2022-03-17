@@ -130,8 +130,6 @@ def cluster_spagcn(
         shape=refine_shape,
     )
     adata.obs[f"{key_added}_refined"] = refined_pred
-    adata.obs[f"{key_added}_refined"] = adata.obs[f"{key_added}_refined"].astype(
-        "category"
-    )
+    adata.obs[f"{key_added}_refined"] = adata.obs[f"{key_added}_refined"].astype("category")
 
     return adata if copy else None

@@ -42,13 +42,9 @@ def compute_pca_components(
     raw_n_components = np.arange(1, raw_components_ratio.shape[0] + 1)
 
     # Calculate the inflection point of the PCA curve.
-    kl = KneeLocator(
-        raw_n_components, raw_components_ratio, curve="convex", direction="decreasing"
-    )
+    kl = KneeLocator(raw_n_components, raw_components_ratio, curve="convex", direction="decreasing")
     new_n_components = int(kl.knee)
-    new_components_stored = round(
-        float(np.sum(raw_components_ratio[:new_n_components])), 3
-    )
+    new_components_stored = round(float(np.sum(raw_components_ratio[:new_n_components])), 3)
 
     # Whether to save the image of PCA curve and inflection point.
     if save_curve_img is not None:
@@ -132,9 +128,7 @@ def sctransform(
 
     # Highly variable genes' expression matrix.
     residuals = residuals.reindex(columns=adata.var_names.tolist())
-    hvgs_matrix = (
-        csr_matrix(residuals.values) if isspmatrix(adata.X) else residuals.values
-    )
+    hvgs_matrix = csr_matrix(residuals.values) if isspmatrix(adata.X) else residuals.values
     adata.X = hvgs_matrix
 
     return adata if copy else None
@@ -154,9 +148,7 @@ def integrate(
         integrated_adata: The concatenated AnnData, where adata.obs[batch_key] stores a categorical variable labeling the batch.
     """
     batch_ca = [adata.obs[batch_key][0] for adata in adatas]
-    integrated_adata = adatas[0].concatenate(
-        adatas[1:], batch_key=batch_key, batch_categories=batch_ca, join="outer"
-    )
+    integrated_adata = adatas[0].concatenate(adatas[1:], batch_key=batch_key, batch_categories=batch_ca, join="outer")
     return integrated_adata
 
 
@@ -196,9 +188,7 @@ def harmony_debatch(
     matrix = to_dense_matrix(adata.obsm[basis])
 
     # Use Harmony to adjust the PCs.
-    harmony_out = harmonypy.run_harmony(
-        matrix, adata.obs, key, max_iter_harmony=max_iter_harmony
-    )
+    harmony_out = harmonypy.run_harmony(matrix, adata.obs, key, max_iter_harmony=max_iter_harmony)
     adjusted_matrix = harmony_out.Z_corr.T
 
     # Convert dense matrix to sparse matrix.
