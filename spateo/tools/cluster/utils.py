@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import scanpy as sc
 
 from anndata import AnnData
 from kneed import KneeLocator
@@ -80,11 +79,9 @@ def sctransform(
 
     Examples:
     1.In pycharm:
-        >>> adata = ad.read_h5ad("./E16_18_S01.h5ad")
         >>> sctransform(adata=adata, save_sct_img_1="sct10.png", save_sct_img_2="sct20.png")
     2.In remote server:
         >>> os.environ['R_HOME'] = '/hwfssz1/ST_SUPERCELLS/P21Z10200N0090/tuzhencheng/software/anaconda3/envs/SCT-SpaGCN/lib/R' # Specify the R environment
-        >>> qc_scanpy(adata=adata, mt_counts_threshold=5, save_qc_img="qc0.png")
         >>> sctransform(adata=adata, save_sct_img_1="sct10.png", save_sct_img_2="sct20.png")
 
     Args:
