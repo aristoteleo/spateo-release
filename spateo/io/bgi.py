@@ -73,13 +73,24 @@ def read_bgi_as_dataframe(path: str, label_column: Optional[str] = None) -> pd.D
         "EXONIC": "spliced",
         "INTRONIC": "unspliced",
     }
+    # Use first 10 rows for validation.
+    df = pd.read_csv(path, sep="\t", dtype=dtype, comment="#", nrows=10)
+
     if label_column:
         dtype.update({label_column: np.uint32})
         rename.update({label_column: "label"})
 
-        df = pd.read_csv(path, sep="\t", dtype=dtype, comment="#", nrows=10)
         if label_column not in df.columns:
             raise IOError(f"Column `{label_column}` is not present.")
+
+    # If duplicate columns are provided, we don't know which to use!
+    rename_inverse = {}
+    for _from, _to in rename.items():
+        rename_inverse.setdefault(_to, []).append(_from)
+    for _to, _cols in rename_inverse.items():
+        if sum(_from in df.columns for _from in _cols) > 1:
+            raise IOError(f"Found multiple columns mapping to `{_to}`.")
+
     return pd.read_csv(
         path,
         sep="\t",
