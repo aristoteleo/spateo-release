@@ -47,7 +47,7 @@ def read_bgi_as_dataframe(path: str, label_column: Optional[str] = None) -> pd.D
 
     Args:
         path: Path to read file.
-        label_columns: Column name containing positive cell labels.
+        label_column: Column name containing positive cell labels.
 
     Returns:
         Pandas Dataframe with column names `gene`, `x`, `y`, `total` and
@@ -57,21 +57,38 @@ def read_bgi_as_dataframe(path: str, label_column: Optional[str] = None) -> pd.D
         "geneID": "category",  # geneID
         "x": np.uint32,  # x
         "y": np.uint32,  # y
-        3: np.uint16,  # total
-        4: np.uint16,  # spliced
-        5: np.uint16,  # unspliced,
+        # Multiple different names for total counts
+        "MIDCounts": np.uint16,
+        "MIDCount": np.uint16,
+        "UMICount": np.uint16,
+        "UMICounts": np.uint16,
+        "EXONIC": np.uint16,  # spliced
+        "INTRONIC": np.uint16,  # unspliced,
+    }
+    rename = {
+        "MIDCounts": "total",
+        "MIDCount": "total",
+        "UMICount": "total",
+        "UMICounts": "total",
+        "EXONIC": "spliced",
+        "INTRONIC": "unspliced",
     }
     if label_column:
         dtype.update({label_column: np.uint32})
+        rename.update({label_column: "label"})
+
+        df = pd.read_csv(path, sep="\t", dtype=dtype, comment="#", nrows=10)
+        if label_column not in df.columns:
+            raise IOError(f"Column `{label_column}` is not present.")
     return pd.read_csv(
         path,
         sep="\t",
         dtype=dtype,
         comment="#",
-    )
+    ).rename(columns=rename)
 
 
-def dataframe_to_labels(df: pd.DataFrame, column: str = "cell", shape: Optional[Tuple[int, int]] = None) -> np.ndarray:
+def dataframe_to_labels(df: pd.DataFrame, column: str, shape: Optional[Tuple[int, int]] = None) -> np.ndarray:
     """Convert a BGI dataframe that contains cell labels to a labels matrix.
 
     Args:
@@ -135,8 +152,6 @@ def read_bgi_agg(
         The nuclei image is stored as a Numpy array in `.layers['nuclei']`.
     """
     data = read_bgi_as_dataframe(path, label_column)
-    if label_column is not None and label_column not in data:
-        raise IOError(f"Column `{label_column}` is not present.")
     x_min, y_min = data["x"].min(), data["y"].min()
     x, y = data["x"].values, data["y"].values
     x_max, y_max = x.max(), y.max()
@@ -158,8 +173,8 @@ def read_bgi_agg(
 
     # Construct labels matrix if present
     labels = None
-    if label_column in data.columns:
-        labels = dataframe_to_labels(data, label_column, shape)
+    if "label" in data.columns:
+        labels = dataframe_to_labels(data, "label", shape)
         layers[SKM.LABELS_LAYER_KEY] = labels
 
     if binsize > 1:
@@ -178,12 +193,12 @@ def read_bgi_agg(
             )
             layers[SKM.LABELS_LAYER_KEY] = labels[::binsize, ::binsize]
 
-    # Put total in X
-    X = csr_matrix((data[data.columns[COUNT_COLUMN_MAPPING[SKM.X_LAYER]]].values, (x, y)), shape=shape, dtype=np.uint16)
-
-    for name, i in COUNT_COLUMN_MAPPING.items():
-        if name != SKM.X_LAYER and i < len(data.columns):
-            layers[name] = csr_matrix((data[data.columns[i]].values, (x, y)), shape=shape, dtype=np.uint16)
+    # See read_bgi_as_dataframe for standardized column names
+    X = csr_matrix((data["total"].values, (x, y)), shape=shape, dtype=np.uint16)
+    if "spliced" in data.columns:
+        layers[SKM.SPLICED_LAYER_KEY] = csr_matrix((data["spliced"].values, (x, y)), shape=shape, dtype=np.uint16)
+    if "unspliced" in data.columns:
+        layers[SKM.UNSPLICED_LAYER_KEY] = csr_matrix((data["unspliced"].values, (x, y)), shape=shape, dtype=np.uint16)
 
     # Aggregate gene lists
     if gene_agg:
@@ -192,7 +207,7 @@ def read_bgi_agg(
             data_genes = data[mask]
             _x, _y = data_genes["x"].values, data_genes["y"].values
             layers[name] = csr_matrix(
-                (data_genes[data.columns[COUNT_COLUMN_MAPPING[SKM.X_LAYER]]].values, (_x, _y)),
+                (data_genes["total"].values, (_x, _y)),
                 shape=shape,
                 dtype=np.uint16,
             )
@@ -258,12 +273,8 @@ def read_bgi(
     n_columns = data.shape[1]
 
     if label_column is not None:
-        if label_column not in data.columns:
-            raise IOError(f"Column `{label_column}` is not present.")
         binsize = 1
-        data = data[data[label_column] > 0]
-
-        data.rename(columns={label_column: "label"}, inplace=True)
+        data = data[data["label"] > 0]
         props = get_points_props(data)
 
     elif binsize is not None:
@@ -319,11 +330,13 @@ def read_bgi(
     x_ind = data["label"].map(cell_dict).astype(int).values
     y_ind = data["geneID"].map(gene_dict).astype(int).values
 
-    X = csr_matrix((data[data.columns[COUNT_COLUMN_MAPPING[SKM.X_LAYER]]].values, (x_ind, y_ind)), shape=shape)
+    # See read_bgi_as_dataframe for standardized column names
+    X = csr_matrix((data["total"].values, (x_ind, y_ind)), shape=shape)
     layers = {}
-    for name, i in COUNT_COLUMN_MAPPING.items():
-        if name != SKM.X_LAYER and i < n_columns:
-            layers[name] = csr_matrix((data[data.columns[i]].values, (x_ind, y_ind)), shape=shape)
+    if "spliced" in data.columns:
+        layers[SKM.SPLICED_LAYER_KEY] = csr_matrix((data["spliced"].values, (x_ind, y_ind)), shape=shape)
+    if "unspliced" in data.columns:
+        layers[SKM.UNSPLICED_LAYER_KEY] = csr_matrix((data["unspliced"].values, (x_ind, y_ind)), shape=shape)
 
     obs = pd.DataFrame(index=uniq_cell)
     var = pd.DataFrame(index=uniq_gene)
