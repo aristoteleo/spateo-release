@@ -23,7 +23,15 @@ from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
 from shapely.geometry import Polygon, MultiPolygon
 
-from .utils import bin_indices, centroids, get_bin_props, get_label_props, get_coords_labels, in_concave_hull
+from .utils import (
+    bin_indices,
+    centroids,
+    get_bin_props,
+    get_coords_labels,
+    get_label_props,
+    get_points_props,
+    in_concave_hull,
+)
 from ..configuration import SKM
 from ..warnings import IOWarning
 
@@ -99,7 +107,7 @@ def read_bgi_agg(
     binsize: int = 1,
     gene_agg: Optional[Dict[str, Union[List[str], Callable[[str], bool]]]] = None,
     prealigned: bool = False,
-    label_column: str = "cell",
+    label_column: Optional[str] = None,
 ) -> AnnData:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
@@ -127,6 +135,8 @@ def read_bgi_agg(
         The nuclei image is stored as a Numpy array in `.layers['nuclei']`.
     """
     data = read_bgi_as_dataframe(path, label_column)
+    if label_column is not None and label_column not in data:
+        raise IOError(f"Column `{label_column}` is not present.")
     x_min, y_min = data["x"].min(), data["y"].min()
     x, y = data["x"].values, data["y"].values
     x_max, y_max = x.max(), y.max()
@@ -203,12 +213,12 @@ def read_bgi(
     path: str,
     scale: float = 1.0,
     scale_unit: Optional[str] = None,
-    binsize: int = 1,
+    binsize: Optional[int] = None,
     segmentation_adata: Optional[AnnData] = None,
     labels_layer: Optional[str] = None,
     labels: Optional[Union[np.ndarray, str]] = None,
     seg_binsize: int = 1,
-    label_column: str = "cell",
+    label_column: Optional[str] = None,
 ) -> AnnData:
     """Read BGI read file as AnnData.
 
@@ -232,16 +242,14 @@ def read_bgi(
         Bins x genes or labels x genes AnnData.
     """
     # Check inputs
+    if sum([binsize is not None, segmentation_adata is not None, labels is not None, label_column is not None]) != 1:
+        raise IOError("Exactly one of `segmentation_adata`, `binsize`, `labels`, `label_column` must be provided.")
     if (segmentation_adata is None) ^ (labels_layer is None):
         raise IOError("Both `segmentation_adata` and `labels_layer` must be provided")
     if segmentation_adata is not None:
-        if labels is not None:
-            raise IOError("Only one of `segmentation_adata` or `labels` may be provided")
-        if binsize > 1:
-            raise IOError("`binsize` argument is not supported when `segmentation_adata` is provided")
         if SKM.get_adata_type(segmentation_adata) != SKM.ADATA_AGG_TYPE:
             raise IOError("Only `AGG` type AnnDatas are supported")
-    elif abs(int(binsize)) != binsize:
+    if binsize is not None and abs(int(binsize)) != binsize:
         raise IOError("Positive integer `binsize` must be provided when `segmentation_adata` is not provided")
     if isinstance(labels, str):
         labels = np.load(labels)
@@ -249,15 +257,16 @@ def read_bgi(
     data = read_bgi_as_dataframe(path, label_column)
     n_columns = data.shape[1]
 
-    props = None
-    if label_column in data.columns:
+    if label_column is not None:
+        if label_column not in data.columns:
+            raise IOError(f"Column `{label_column}` is not present.")
+        binsize = 1
         data = data[data[label_column] > 0]
 
-        # TODO: support properties
         data.rename(columns={label_column: "label"}, inplace=True)
+        props = get_points_props(data)
 
-    # Only binning supported in this case
-    elif segmentation_adata is None and labels is None:
+    elif binsize is not None:
         if binsize < 2:
             warnings.warn("Using binsize of 1. Please consider using a larger bin size.", IOWarning)
 
@@ -271,6 +280,7 @@ def read_bgi(
 
     # Use labels.
     else:
+        binsize = 1
         shape = (data["x"].max(), data["y"].max())
         if labels is not None:
             if labels.shape != shape:
@@ -318,13 +328,11 @@ def read_bgi(
     obs = pd.DataFrame(index=uniq_cell)
     var = pd.DataFrame(index=uniq_gene)
     adata = AnnData(X=X, obs=obs, var=var, layers=layers)
-    if props is not None:
-        ordered_props = props.loc[adata.obs_names]
-        adata.obs["area"] = ordered_props["area"].values
-        adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
-        adata.obsm["contour"] = ordered_props["contour"].values
-        if segmentation_adata is not None:
-            adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
+    ordered_props = props.loc[adata.obs_names]
+    adata.obs["area"] = ordered_props["area"].values
+    adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
+    adata.obsm["contour"] = ordered_props["contour"].values
+    adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)
