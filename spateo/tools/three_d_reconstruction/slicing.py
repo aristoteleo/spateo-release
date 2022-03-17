@@ -36,7 +36,6 @@ def three_d_slice(
     # Check input mesh.
     mesh = _MultiBlock(mesh=mesh, message="slicing") if isinstance(mesh, MultiBlock) else mesh
 
-    mesh.set_active_scalars(f"{key}_rgba")
     if method == "axis":
         # Create many slices of the input dataset along a specified axis.
         return mesh.slice_along_axis(n=n_slices, axis=axis, center=center)

@@ -1,4 +1,5 @@
 import math
+import numpy as np
 
 import matplotlib as mpl
 import pandas as pd
@@ -178,15 +179,13 @@ def add_legend(
 
         try:
             _try = legends["label"].copy()
-            _try = _try.astype(float)
+            _try = _try.astype(np.float64)
             label_type = "float"
         except:
             label_type = "str"
 
-        gap = math.ceil(len(legends.index) / 5) if label_type == "float" else 1
+        gap = math.ceil(len(legends.index) / 10) - 1 if label_type == "float" else 1
         legend_entries = [[legends["label"].iloc[i], legends["hex"].iloc[i]] for i in range(0, len(legends.index), gap)]
-        if label_type == "float":
-            legend_entries.append([legends["label"].iloc[-1], legends["hex"].iloc[-1]])
 
         legend_num = len(legend_entries)
         legend_size = (0.1 + 0.01 * legend_num, 0.1 + 0.012 * legend_num)
@@ -194,7 +193,7 @@ def add_legend(
         plotter.add_legend(
             legend_entries,
             face="circle",
-            bcolor="w",
+            bcolor=None,
             loc=legend_loc,
             size=legend_size,
         )

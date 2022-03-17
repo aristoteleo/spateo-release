@@ -75,7 +75,7 @@ def construct_pcd(
     if groupby in obs_names:
         groups = adata.obs[groupby].map(lambda x: "mask" if x in mask_list else x).values
     elif groupby in gene_names or set(groupby) <= gene_names:
-        groups = adata[:, groupby].X.sum(axis=1).flatten()
+        groups = adata[:, groupby].X.sum(axis=1).flatten().round(2)
     elif groupby is None:
         groups = np.array(["same"] * adata.obs.shape[0])
     else:
