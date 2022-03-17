@@ -208,6 +208,7 @@ def read_bgi(
     labels_layer: Optional[str] = None,
     labels: Optional[Union[np.ndarray, str]] = None,
     seg_binsize: int = 1,
+    label_column: str = "cell",
 ) -> AnnData:
     """Read BGI read file as AnnData.
 
@@ -224,6 +225,8 @@ def read_bgi(
         seg_binsize: the bin size used in cell segmentation, used in conjunction
             with `labels` and will be overwritten when `labels_layer` and
             `segmentation_adata` are not None.
+        label_column: Column that contains already-segmented cell labels. If this
+            column is present, this takes prescedence.
 
     Returns:
         Bins x genes or labels x genes AnnData.
@@ -243,11 +246,18 @@ def read_bgi(
     if isinstance(labels, str):
         labels = np.load(labels)
 
-    data = read_bgi_as_dataframe(path)
+    data = read_bgi_as_dataframe(path, label_column)
     n_columns = data.shape[1]
 
+    props = None
+    if label_column in data.columns:
+        data = data[data[label_column] > 0]
+
+        # TODO: support properties
+        data.rename(columns={label_column: "label"}, inplace=True)
+
     # Only binning supported in this case
-    if segmentation_adata is None and labels is None:
+    elif segmentation_adata is None and labels is None:
         if binsize < 2:
             warnings.warn("Using binsize of 1. Please consider using a larger bin size.", IOWarning)
 
@@ -308,12 +318,13 @@ def read_bgi(
     obs = pd.DataFrame(index=uniq_cell)
     var = pd.DataFrame(index=uniq_gene)
     adata = AnnData(X=X, obs=obs, var=var, layers=layers)
-    ordered_props = props.loc[adata.obs_names]
-    adata.obs["area"] = ordered_props["area"].values
-    adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
-    adata.obsm["contour"] = ordered_props["contour"].values
-    if segmentation_adata is not None:
-        adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
+    if props is not None:
+        ordered_props = props.loc[adata.obs_names]
+        adata.obs["area"] = ordered_props["area"].values
+        adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
+        adata.obsm["contour"] = ordered_props["contour"].values
+        if segmentation_adata is not None:
+            adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)
