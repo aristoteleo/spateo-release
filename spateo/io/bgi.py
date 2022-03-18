@@ -245,6 +245,7 @@ def read_bgi(
     labels: Optional[Union[np.ndarray, str]] = None,
     seg_binsize: int = 1,
     label_column: Optional[str] = None,
+    add_props: bool = True,
 ) -> AnnData:
     """Read BGI read file as AnnData.
 
@@ -263,6 +264,8 @@ def read_bgi(
             `segmentation_adata` are not None.
         label_column: Column that contains already-segmented cell labels. If this
             column is present, this takes prescedence.
+        add_props: Whether or not to compute label properties, such as area,
+            bounding box, centroid, etc.
 
     Returns:
         Bins x genes or labels x genes AnnData.
@@ -283,10 +286,12 @@ def read_bgi(
     data = read_bgi_as_dataframe(path, label_column)
     n_columns = data.shape[1]
 
+    props = None
     if label_column is not None:
         binsize = 1
         data = data[data["label"] > 0]
-        props = get_points_props(data)
+        if add_props:
+            props = get_points_props(data)
 
     elif binsize is not None:
         if binsize < 2:
@@ -298,7 +303,8 @@ def read_bgi(
             data["x"], data["y"] = x_bin, y_bin
 
         data["label"] = data["x"].astype(str) + "-" + data["y"].astype(str)
-        props = get_bin_props(data[["x", "y", "label"]].drop_duplicates(), binsize)
+        if add_props:
+            props = get_bin_props(data[["x", "y", "label"]].drop_duplicates(), binsize)
 
     # Use labels.
     else:
@@ -332,7 +338,8 @@ def read_bgi(
                     coords_dfs.append(coords)
             label_coords = pd.concat(coords_dfs, ignore_index=True)
         data = pd.merge(data, label_coords, on=["x", "y"], how="inner")
-        props = get_label_props(labels)
+        if add_props:
+            props = get_label_props(labels)
 
     uniq_cell, uniq_gene = sorted(data["label"].unique()), sorted(data["geneID"].unique())
     shape = (len(uniq_cell), len(uniq_gene))
@@ -352,11 +359,12 @@ def read_bgi(
     obs = pd.DataFrame(index=uniq_cell)
     var = pd.DataFrame(index=uniq_gene)
     adata = AnnData(X=X, obs=obs, var=var, layers=layers)
-    ordered_props = props.loc[adata.obs_names]
-    adata.obs["area"] = ordered_props["area"].values
-    adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
-    adata.obsm["contour"] = ordered_props["contour"].values
-    adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
+    if props is not None:
+        ordered_props = props.loc[adata.obs_names]
+        adata.obs["area"] = ordered_props["area"].values
+        adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
+        adata.obsm["contour"] = ordered_props["contour"].values
+        adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)
