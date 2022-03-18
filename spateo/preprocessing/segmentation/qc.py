@@ -1,5 +1,5 @@
 import warnings
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
@@ -70,3 +70,37 @@ def select_qc_regions(
 
     _regions = _regions.astype(int)
     SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_QC_KEY, _regions)
+
+
+def _generate_random_labels(shape: Tuple[int, int], areas: List[int], seed: Optional[int] = None) -> np.ndarray:
+    n = np.prod(shape)
+    if sum(areas) > n:
+        raise PreprocessingError("Sum of `areas` exceeds to total area")
+
+    rng = np.random.default_rng(seed)
+    labels = np.zeros(n, dtype=int)
+    indices = np.arange(n)
+    rng.shuffle(indices)
+    for i, area in enumerate(areas):
+        label = i + 1
+        labels[indices[:area]] = label
+        indices = indices[area:]
+    return labels.reshape(shape)
+
+
+def generate_random_labels(
+    adata: AnnData,
+    areas: List[int],
+    seed: Optional[int] = None,
+    out_layer: str = "random_labels",
+):
+    """Create random labels, usually for benchmarking and QC purposes.
+
+    Args:
+        adata: Input Anndata
+        areas: List of desired areas.
+        seed: Random seed.
+        out_layer: Layer to save results.
+    """
+    labels = _generate_random_labels(adata.shape, areas, seed)
+    SKM.set_layer_data(adata, out_layer, labels)
