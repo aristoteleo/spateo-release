@@ -175,16 +175,9 @@ def add_legend(
     if len(legends.index) != 0:
         legends.sort_values(by=["label", "hex"], inplace=True)
         legends.index = range(len(legends.index))
-        legends = legends.astype(str)
 
-        try:
-            _try = legends["label"].copy()
-            _try = _try.astype(np.float64)
-            label_type = "float"
-        except:
-            label_type = "str"
-
-        gap = math.ceil(len(legends.index) / 10) - 1 if label_type == "float" else 1
+        gene_dtypes = ["float16", "float32", "float64", "int16", "int32", "int64"]
+        gap = math.ceil(len(legends.index) / 10) - 1 if legends["label"].dtype in gene_dtypes else 1
         legend_entries = [[legends["label"].iloc[i], legends["hex"].iloc[i]] for i in range(0, len(legends.index), gap)]
 
         legend_num = len(legend_entries)
