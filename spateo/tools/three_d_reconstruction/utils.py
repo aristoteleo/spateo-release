@@ -28,7 +28,7 @@ def read_vtk(filename: str):
         Wrapped PyVista dataset.
     """
     mesh = pv.read(filename)
-    del mesh.cell_data["orig_extract_id"]
+    # del mesh.cell_data["orig_extract_id"]
 
     return mesh
 
