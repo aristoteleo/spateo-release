@@ -10,5 +10,5 @@ from .reconstruct_mesh import (
 )
 from .slicing import three_d_slice
 from .three_d_alignment import pairwise_align, slice_alignment, slice_alignment_bigBin
-from .utils import read_vtk, save_mesh, collect_mesh, merge_mesh
+from .utils import read_mesh, save_mesh, collect_mesh, merge_mesh
 from .weights import interactive_box_clip, interactive_rectangle_clip, interactive_slice, interactive_checkbox_pick

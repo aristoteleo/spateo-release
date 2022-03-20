@@ -330,10 +330,10 @@ def add_mesh_labels(
     labels: np.ndarray,
     key_added: str = "groups",
     where: Literal["point_data", "cell_data"] = "cell_data",
-    colormap: Union[str, list] = None,
-    alphamap: Union[float, list] = None,
+    colormap: Union[str, list, dict, np.ndarray] = None,
+    alphamap: Union[float, list, dict, np.ndarray] = None,
     mask_color: Optional[str] = "gainsboro",
-    mask_alpha: Optional[float] = 0,
+    mask_alpha: Optional[float] = 0.0,
 ) -> PolyData or UnstructuredGrid:
     """
     Add rgba color to each point of mesh based on labels.
@@ -353,40 +353,53 @@ def add_mesh_labels(
             `mesh.cell_data[f'{key_added}_rgba']` or `mesh.point_data[f'{key_added}_rgba']`, the rgba colors of the labels.
     """
 
-    cu_arr = np.unique(labels)
+    new_labels = labels.copy().astype(object)
+    raw_labels_hex = new_labels.copy()
+    raw_labels_alpha = new_labels.copy()
+    cu_arr = np.unique(new_labels)
     cu_arr = np.sort(cu_arr, axis=0)
-    cu_dict = {}
 
-    # Set mask rgba.
-    mask_ind = np.argwhere(cu_arr == "mask")
-    if len(mask_ind) != 0:
-        cu_arr = np.delete(cu_arr, mask_ind[0])
-        cu_dict["mask"] = mpl.colors.to_rgba(mask_color, alpha=mask_alpha)
+    raw_labels_hex[raw_labels_hex == "mask"] = mpl.colors.to_hex(mask_color)
+    raw_labels_alpha[raw_labels_alpha == "mask"] = mask_alpha
 
-    cu_arr_num = cu_arr.shape[0]
-    if cu_arr_num != (0,):
-        # Set alpha.
-        alpha_list = alphamap if isinstance(alphamap, list) else [alphamap] * cu_arr_num
-
-        # Set raw rgba.
-        if isinstance(colormap, list):
-            raw_rgba_list = [mpl.colors.to_rgba(color) for color in colormap]
-        elif colormap in list(mpl.colormaps):
+    # Set raw hex.
+    if isinstance(colormap, str):
+        if colormap in list(mpl.colormaps):
             lscmap = mpl.cm.get_cmap(colormap)
-            raw_rgba_list = [lscmap(i) for i in np.linspace(0, 1, cu_arr_num)]
+            raw_hex_list = [mpl.colors.to_hex(lscmap(i)) for i in np.linspace(0, 1, len(cu_arr))]
+            for label, color in zip(cu_arr, raw_hex_list):
+                raw_labels_hex[raw_labels_hex == label] = color
         else:
-            raw_rgba_list = [mpl.colors.to_rgba(colormap)] * cu_arr_num
+            raw_labels_hex[raw_labels_hex != "mask"] = mpl.colors.to_hex(colormap)
+    elif isinstance(colormap, dict):
+        for label, color in colormap.items():
+            raw_labels_hex[raw_labels_hex == label] = mpl.colors.to_hex(color)
+    elif isinstance(colormap, list) or isinstance(colormap, np.ndarray):
+        raw_labels_hex = np.array([mpl.colors.to_hex(color) for color in colormap]).astype(object)
+    else:
+        raise ValueError("\n`colormap` value is wrong." "\nAvailable `colormap` types are: `str`, `list` and `dict`.")
 
-        # Set new rgba.
-        for t, c, a in zip(cu_arr, raw_rgba_list, alpha_list):
-            cu_dict[t] = mpl.colors.to_rgba(c, alpha=a)
+    # Set raw alpha.
+    if isinstance(alphamap, float):
+        raw_labels_alpha[raw_labels_alpha != "mask"] = alphamap
+    elif isinstance(alphamap, dict):
+        for label, alpha in alphamap.items():
+            raw_labels_alpha[raw_labels_alpha == label] = alpha
+    elif isinstance(alphamap, list) or isinstance(alphamap, np.ndarray):
+        raw_labels_alpha = np.asarray(alphamap).astype(object)
+    else:
+        raise ValueError("\n`alphamap` value is wrong." "\nAvailable `alphamap` types are: `float`, `list` and `dict`.")
+
+    # Set rgba.
+    labels_rgba = [mpl.colors.to_rgba(c, alpha=a) for c, a in zip(raw_labels_hex, raw_labels_alpha)]
+    labels_rgba = np.array(labels_rgba).astype(np.float64)
 
     # Added labels and rgba of the labels
     if where == "point_data":
         mesh.point_data[key_added] = labels
-        mesh.point_data[f"{key_added}_rgba"] = np.array([cu_dict[g] for g in labels]).astype(np.float64)
+        mesh.point_data[f"{key_added}_rgba"] = labels_rgba
     else:
         mesh.cell_data[key_added] = labels
-        mesh.cell_data[f"{key_added}_rgba"] = np.array([cu_dict[g] for g in labels]).astype(np.float64)
+        mesh.cell_data[f"{key_added}_rgba"] = labels_rgba
 
     return mesh

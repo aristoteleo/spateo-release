@@ -1,17 +1,9 @@
-import matplotlib as mpl
 import numpy as np
-import open3d as o3d
-import pandas as pd
-import pyacvd
-import pymeshfix as mf
 import pyvista as pv
-import PVGeo
 import warnings
 
-from anndata import AnnData
-from pandas.core.frame import DataFrame
 from pyvista import PolyData, UnstructuredGrid, MultiBlock, DataSet
-from typing import Optional, Tuple, Union, List
+from typing import Optional, Union, List
 
 try:
     from typing import Literal
@@ -19,31 +11,33 @@ except ImportError:
     from typing_extensions import Literal
 
 
-def read_vtk(filename: str):
+def read_mesh(filename: str):
     """
-    Read vtk file.
+    Read any file type supported by vtk or meshio.
     Args:
         filename: The string path to the file to read.
     Returns:
         Wrapped PyVista dataset.
     """
     mesh = pv.read(filename)
-    del mesh.cell_data["orig_extract_id"]
+    # del mesh.cell_data["orig_extract_id"]
 
     return mesh
 
 
 def save_mesh(
-    mesh: DataSet,
+    mesh: Union[DataSet, MultiBlock],
     filename: str,
     binary: bool = True,
     texture: Union[str, np.ndarray] = None,
 ):
     """
-    Save the pvvista/vtk mesh to vtk files.
+    Save the pvvista/vtk mesh to vtk/vtm file.
     Args:
         mesh: A reconstructed mesh.
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
+                  If mesh is a pyvista.MultiBlock object, please enter a filename ending with `.vtm`;
+                  else please enter a filename ending with `.vtk`.
         binary: If True, write as binary. Otherwise, write as ASCII.
                 Binary files write much faster than ASCII and have a smaller file size.
         texture: Write a single texture array to file when using a PLY file.
@@ -54,12 +48,13 @@ def save_mesh(
                  If an array is provided, the texture array will be saved as 'RGBA'
     """
 
-    if filename.endswith(".vtk"):
+    if filename.endswith(".vtk") or filename.endswith(".vtm"):
         mesh.save(filename=filename, binary=binary, texture=texture)
     else:
         raise ValueError(
-            "\nFilename is wrong. This function is only available when saving vtk files."
-            "\nPlease enter a filename ending with `.vtk`."
+            "\nFilename is wrong. This function is only available when saving vtk or vtm files."
+            "\nIf mesh is a pyvista.MultiBlock object, please enter a filename ending with `.vtm`;"
+            "else please enter a filename ending with `.vtk`."
         )
 
 

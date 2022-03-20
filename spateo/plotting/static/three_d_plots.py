@@ -80,7 +80,6 @@ def add_mesh(
     key: Optional[str] = None,
     ambient: float = 0.2,
     opacity: float = 1.0,
-    style: Literal["points", "surface", "volume"] = "surface",
     point_size: float = 5.0,
 ):
     """
@@ -96,17 +95,18 @@ def add_mesh(
                  uniformly applied everywhere - should be between 0 and 1.
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
-        style: Visualization style of the mesh. One of the following: style='surface', style='volume', style='points'.
         point_size: Point size of any nodes in the dataset plotted.
     """
 
     def _add_mesh(_p, _mesh):
         """Add any PyVista/VTK mesh to the scene."""
 
-        mesh_style = "points" if style == "points" else None
+        scalars = f"{key}_rgba" if key in _mesh.array_names else _mesh.active_scalars_name
+        mesh_style = "points" if scalars in _mesh.point_data.keys() else "surface"
+
         _p.add_mesh(
             _mesh,
-            scalars=f"{key}_rgba",
+            scalars=scalars,
             rgba=True,
             render_points_as_spheres=True,
             style=mesh_style,
@@ -159,10 +159,11 @@ def add_legend(
     if isinstance(mesh, MultiBlock):
         legends = pd.DataFrame()
         for sub_mesh in mesh:
-            sub_labels = pd.Series(sub_mesh[key])
-            sub_labels_hex = pd.Series([mpl.colors.to_hex(i) for i in sub_mesh[f"{key}_rgba"]])
-            sub_legends = pd.concat([sub_labels, sub_labels_hex], axis=1)
-            legends = pd.concat([legends, sub_legends])
+            if key in sub_mesh.array_names:
+                sub_labels = pd.Series(sub_mesh[key])
+                sub_labels_hex = pd.Series([mpl.colors.to_hex(i) for i in sub_mesh[f"{key}_rgba"]])
+                sub_legends = pd.concat([sub_labels, sub_labels_hex], axis=1)
+                legends = pd.concat([legends, sub_legends])
     else:
         labels = pd.Series(mesh[key])
         labels_hex = pd.Series([mpl.colors.to_hex(i) for i in mesh[f"{key}_rgba"]])
@@ -175,16 +176,13 @@ def add_legend(
     if len(legends.index) != 0:
         legends.sort_values(by=["label", "hex"], inplace=True)
         legends.index = range(len(legends.index))
-        legends = legends.astype(str)
 
-        try:
-            _try = legends["label"].copy()
-            _try = _try.astype(np.float64)
-            label_type = "float"
-        except:
-            label_type = "str"
+        gap = 1
+        gene_dtypes = ["float16", "float32", "float64", "int16", "int32", "int64"]
+        if legends["label"].dtype in gene_dtypes:
+            legends["label"] = legends["label"].round(2).astype(np.str)
+            gap = math.ceil(len(legends.index) / 10) - 1
 
-        gap = math.ceil(len(legends.index) / 10) - 1 if label_type == "float" else 1
         legend_entries = [[legends["label"].iloc[i], legends["hex"].iloc[i]] for i in range(0, len(legends.index), gap)]
 
         legend_num = len(legend_entries)
@@ -303,7 +301,6 @@ def three_d_plot(
     background: str = "white",
     ambient: float = 0.2,
     opacity: float = 1.0,
-    style: Literal["points", "surface", "volume"] = "surface",
     point_size: float = 5.0,
     initial_cpo: Union[str, tuple] = "iso",
     legend_loc: Literal[
@@ -341,7 +338,6 @@ def three_d_plot(
                  uniformly applied everywhere - should be between 0 and 1.
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
-        style: Visualization style of the mesh. One of the following: style='surface', style='volume', style='points'.
         point_size: Point size of any nodes in the dataset plotted.
         initial_cpo: Camera position of the window. Available `initial_cpo` are:
                 * `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
@@ -382,7 +378,6 @@ def three_d_plot(
         key=key,
         ambient=ambient,
         opacity=opacity,
-        style=style,
         point_size=point_size,
     )
     add_legend(
@@ -408,7 +403,6 @@ def three_d_plot(
         key=key,
         ambient=ambient,
         opacity=opacity,
-        style=style,
         point_size=point_size,
     )
     add_legend(
