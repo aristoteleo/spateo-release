@@ -333,7 +333,7 @@ def add_mesh_labels(
     colormap: Union[str, list, dict, np.ndarray] = None,
     alphamap: Union[float, list, dict, np.ndarray] = None,
     mask_color: Optional[str] = "gainsboro",
-    mask_alpha: Optional[float] = .0,
+    mask_alpha: Optional[float] = 0.0,
 ) -> PolyData or UnstructuredGrid:
     """
     Add rgba color to each point of mesh based on labels.
@@ -352,13 +352,13 @@ def add_mesh_labels(
             `mesh.cell_data[key_added]` or `mesh.point_data[key_added]`, the labels array;
             `mesh.cell_data[f'{key_added}_rgba']` or `mesh.point_data[f'{key_added}_rgba']`, the rgba colors of the labels.
     """
-    
+
     new_labels = labels.copy().astype(object)
     raw_labels_hex = new_labels.copy()
     raw_labels_alpha = new_labels.copy()
     cu_arr = np.unique(new_labels)
     cu_arr = np.sort(cu_arr, axis=0)
-    
+
     raw_labels_hex[raw_labels_hex == "mask"] = mpl.colors.to_hex(mask_color)
     raw_labels_alpha[raw_labels_alpha == "mask"] = mask_alpha
 
@@ -377,9 +377,8 @@ def add_mesh_labels(
     elif isinstance(colormap, list) or isinstance(colormap, np.ndarray):
         raw_labels_hex = np.array([mpl.colors.to_hex(color) for color in colormap]).astype(object)
     else:
-        raise ValueError(
-            "\n`colormap` value is wrong." "\nAvailable `colormap` types are: `str`, `list` and `dict`.")
-    
+        raise ValueError("\n`colormap` value is wrong." "\nAvailable `colormap` types are: `str`, `list` and `dict`.")
+
     # Set raw alpha.
     if isinstance(alphamap, float):
         raw_labels_alpha[raw_labels_alpha != "mask"] = alphamap
@@ -389,13 +388,12 @@ def add_mesh_labels(
     elif isinstance(alphamap, list) or isinstance(alphamap, np.ndarray):
         raw_labels_alpha = np.asarray(alphamap).astype(object)
     else:
-        raise ValueError(
-            "\n`alphamap` value is wrong." "\nAvailable `alphamap` types are: `float`, `list` and `dict`.")
+        raise ValueError("\n`alphamap` value is wrong." "\nAvailable `alphamap` types are: `float`, `list` and `dict`.")
 
     # Set rgba.
     labels_rgba = [mpl.colors.to_rgba(c, alpha=a) for c, a in zip(raw_labels_hex, raw_labels_alpha)]
     labels_rgba = np.array(labels_rgba).astype(np.float64)
-    
+
     # Added labels and rgba of the labels
     if where == "point_data":
         mesh.point_data[key_added] = labels

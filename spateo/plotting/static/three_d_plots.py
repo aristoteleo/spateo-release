@@ -114,7 +114,7 @@ def add_mesh(
             ambient=ambient,
             opacity=opacity,
         )
-        
+
     # Add mesh(es) to the plotter.
     if isinstance(mesh, MultiBlock):
         for sub_mesh in mesh:
@@ -187,7 +187,7 @@ def add_legend(
 
         legend_num = len(legend_entries)
         legend_size = (0.1 + 0.01 * legend_num, 0.1 + 0.012 * legend_num)
-        
+
         plotter.add_legend(
             legend_entries,
             face="circle",
