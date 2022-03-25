@@ -17,6 +17,88 @@ torch.manual_seed(0)
 device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 
+###########################################
+# THE HIGH-TO-LOW-DIMENSIONAL TRANSFORMER #
+###########################################
+
+
+class A(nn.Module):
+    def __init__(
+        self,
+        network_dim,
+        data_dim,
+        hidden_features=256,
+        hidden_layers=1,
+        activation_function=torch.nn.functional.leaky_relu,
+    ):
+
+        super(A, self).__init__()  # Call to the super-class is necessary
+
+        self.f = activation_function
+        self.name = "model/A"
+
+        self.layer1 = nn.Linear(data_dim, hidden_features)
+
+        self.net = []
+        for i in range(hidden_layers):
+            self.net.append(nn.Linear(hidden_features, hidden_features))
+
+        self.hidden_layers = nn.Sequential(*self.net)
+        self.outlayer = nn.Linear(256, network_dim)
+
+        # torch.nn.init.normal_(self.layer1.weight, std=.02)
+        # torch.nn.init.normal_(self.layer2.weight, std=.02)
+        # torch.nn.init.normal_(self.layer3.weight, std=.02)
+
+    def forward(self, inp):
+
+        out = self.f(self.layer1(inp), negative_slope=0.2)
+        out = self.f(self.hidden_layers(out), negative_slope=0.2)
+        out = self.outlayer(out)
+        return out
+
+
+###########################################
+# THE LOW-TO-HIGH-DIMENSIONAL TRANSFORMER #
+###########################################
+
+
+class B(nn.Module):
+    def __init__(
+        self,
+        network_dim,
+        data_dim,
+        hidden_features=256,
+        hidden_layers=3,
+        activation_function=torch.nn.functional.leaky_relu,
+    ):
+
+        super(B, self).__init__()  # Call to the super-class is necessary
+
+        self.f = activation_function
+        self.name = "model/B"
+
+        self.layer1 = nn.Linear(network_dim, hidden_features)
+
+        self.net = []
+        for i in range(hidden_layers):
+            self.net.append(nn.Linear(hidden_features, hidden_features))
+
+        self.hidden_layers = nn.Sequential(*self.net)
+        self.outlayer = nn.Linear(hidden_features, data_dim)
+
+        # torch.nn.init.normal_(self.layer1.weight, std=.02)
+        # torch.nn.init.normal_(self.layer2.weight, std=.02)
+        # torch.nn.init.normal_(self.layer3.weight, std=.02)
+
+    def forward(self, inp):
+
+        out = self.f(self.layer1(inp), negative_slope=0.2)
+        out = self.f(self.hidden_layers(out), negative_slope=0.2)
+        out = self.outlayer(out)
+        return out
+
+
 class SineLayer(nn.Module):
     # from https://colab.research.google.com/github/vsitzmann/siren/blob/master/explore_siren.ipynb#scrollTo=uTQfrFvah3Zc
     # See paper sec. 3.2, final paragraph, and supplement Sec. 1.5 for discussion of omega_0.
@@ -72,7 +154,7 @@ class h(nn.Module):
         network_dim,
         hidden_features=256,
         hidden_layers=3,
-        sirens=True,
+        sirens=False,
         first_omega_0=30.0,
         hidden_omega_0=30.0,
     ):
@@ -140,23 +222,23 @@ class MainFlow(torch.nn.Module):
     def forward(self, t, x, freeze=None):
 
         x_low = self.A(x) if self.A is not None else x
-        v_low = self.h.forward(x_low)
-        v_hat = self.B(v_low) if self.B is not None else v_low
+        e_low = self.h.forward(x_low)
+        e_hat = self.B(e_low) if self.B is not None else e_low
 
         if freeze is not None:
             for i in freeze:
-                if len(v_hat.shape) == 1:
-                    v_hat[i] = 0
-                elif len(v_hat.shape) == 2:
-                    v_hat[:, i] = 0
+                if len(e_hat.shape) == 1:
+                    e_hat[i] = 0
+                elif len(e_hat.shape) == 2:
+                    e_hat[:, i] = 0
                 else:
                     raise ValueError("Invalid output data shape. Please debug.")
 
         # forcing the x to remain positive: set velocity to 0 if x<=0 and v<0
         if self.enforce_positivity:
-            v_hat *= ~(v_hat < 0)  # ~((x <= 0) * (v_hat < 0))
+            e_hat *= ~(e_hat < 0)  # ~((x <= 0) * (v_hat < 0))
 
-        return v_hat
+        return e_hat
 
 
 class deep_interpolation:
