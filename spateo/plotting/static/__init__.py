@@ -13,6 +13,7 @@ from .three_d_plots import (
     three_d_animate,
     create_plotter,
     add_mesh,
+    add_outline,
     add_legend,
     save_plotter,
     output_plotter,
