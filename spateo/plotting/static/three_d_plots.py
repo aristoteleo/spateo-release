@@ -6,12 +6,14 @@ import pandas as pd
 import pyvista as pv
 
 from pyvista import MultiBlock, Plotter, PolyData, UnstructuredGrid
-from typing import Optional, Union
+from typing import Optional, Union, List, Tuple
 
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
+
+from ...tools.TDR.mesh import collect_mesh
 
 
 def create_plotter(
@@ -127,12 +129,14 @@ def add_legend(
     plotter: Plotter,
     mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
     key: Optional[str] = None,
+    legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
         "upper right",
         "upper left",
         "lower left",
         "lower right",
         "center left",
+        "center right",
         "lower center",
         "upper center",
         "center",
@@ -145,12 +149,16 @@ def add_legend(
         plotter: The plotting object to display pyvista/vtk mesh.
         mesh: A reconstructed mesh.
         key: The key under which are the labels.
+        legend_size: Two float tuple, each float between 0 and 1.
+                     For example (0.1, 0.1) would make the legend 10% the size of the entire figure window.
+                     By default (legend_size==None), legend_size will be adjusted adaptively.
         legend_loc: The location of the legend in the window. Available `legend_loc` are:
                 * `'upper right'`
                 * `'upper left'`
                 * `'lower left'`
                 * `'lower right'`
                 * `'center left'`
+                * `'center right'`
                 * `'lower center'`
                 * `'upper center'`
                 * `'center'`
@@ -178,15 +186,17 @@ def add_legend(
         legends.index = range(len(legends.index))
 
         gap = 1
-        gene_dtypes = ["float16", "float32", "float64", "int16", "int32", "int64"]
+        gene_dtypes = ["float32", "float64", "int16", "int32", "int64"]
         if legends["label"].dtype in gene_dtypes:
             legends["label"] = legends["label"].round(2).astype(np.str)
             gap = math.ceil(len(legends.index) / 10) - 1
 
         legend_entries = [[legends["label"].iloc[i], legends["hex"].iloc[i]] for i in range(0, len(legends.index), gap)]
 
-        legend_num = len(legend_entries)
-        legend_size = (0.1 + 0.01 * legend_num, 0.1 + 0.012 * legend_num)
+        if legend_size is None:
+            legend_num = len(legend_entries)
+            legend_num = 10 if legend_num >= 10 else legend_num
+            legend_size = (0.1 + 0.01 * legend_num, 0.1 + 0.012 * legend_num)
 
         plotter.add_legend(
             legend_entries,
@@ -291,6 +301,59 @@ def save_plotter(
         p.export_vtkjs(filename)
 
 
+def _interactive_cpo(
+    mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
+    key: Optional[str] = None,
+    jupyter: bool = False,
+    off_screen: bool = False,
+    window_size: tuple = (1024, 768),
+    background: str = "white",
+    ambient: float = 0.2,
+    opacity: float = 1.0,
+    point_size: float = 5.0,
+    initial_cpo: Union[str, tuple] = "iso",
+    legend_size: Optional[Tuple] = None,
+    legend_loc: Literal[
+        "upper right",
+        "upper left",
+        "lower left",
+        "lower right",
+        "center left",
+        "center right",
+        "lower center",
+        "upper center",
+        "center",
+    ] = "lower right",
+):
+    """Determining the camera position for the final visualization via the interactive window."""
+    p1 = create_plotter(
+        jupyter=jupyter,
+        off_screen=off_screen,
+        window_size=window_size,
+        background=background,
+        initial_cpo=initial_cpo,
+    )
+    add_mesh(
+        plotter=p1,
+        mesh=mesh,
+        key=key,
+        ambient=ambient,
+        opacity=opacity,
+        point_size=point_size,
+    )
+    add_legend(
+        plotter=p1,
+        mesh=mesh,
+        key=key,
+        legend_size=legend_size,
+        legend_loc=legend_loc,
+    )
+
+    jupyter_backend = "panel" if jupyter is True else None
+    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend)
+    return cpo
+
+
 def three_d_plot(
     mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
     key: Optional[str] = None,
@@ -303,12 +366,14 @@ def three_d_plot(
     opacity: float = 1.0,
     point_size: float = 5.0,
     initial_cpo: Union[str, tuple] = "iso",
+    legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
         "upper right",
         "upper left",
         "lower left",
         "lower right",
         "center left",
+        "center right",
         "lower center",
         "upper center",
         "center",
@@ -342,12 +407,16 @@ def three_d_plot(
         initial_cpo: Camera position of the window. Available `initial_cpo` are:
                 * `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
                 * Customize a tuple. E.g.: (7, 0, 20.).
+        legend_size: Two float tuple, each float between 0 and 1.
+                     For example (0.1, 0.1) would make the legend 10% the size of the entire figure window.
+                     By default (legend_size==None), legend_size will be adjusted adaptively.
         legend_loc: The location of the legend in the window. Available `legend_loc` are:
                 * `'upper right'`
                 * `'upper left'`
                 * `'lower left'`
                 * `'lower right'`
                 * `'center left'`
+                * `'center right'`
                 * `'lower center'`
                 * `'upper center'`
                 * `'center'`
@@ -365,29 +434,18 @@ def three_d_plot(
     """
 
     # Create a plotting object to display pyvista/vtk mesh.
-    p1 = create_plotter(
+    cpo = _interactive_cpo(
+        mesh=mesh,
+        key=key,
         jupyter=jupyter,
         off_screen=off_screen,
         window_size=window_size,
         background=background,
-        initial_cpo=initial_cpo,
-    )
-    add_mesh(
-        plotter=p1,
-        mesh=mesh,
-        key=key,
         ambient=ambient,
         opacity=opacity,
         point_size=point_size,
+        initial_cpo=initial_cpo,
     )
-    add_legend(
-        plotter=p1,
-        mesh=mesh,
-        key=key,
-        legend_loc=legend_loc,
-    )
-    jupyter_backend = "panel" if jupyter is True else None
-    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend)
 
     # Create another plotting object to save pyvista/vtk mesh.
     p2 = create_plotter(
@@ -409,6 +467,7 @@ def three_d_plot(
         plotter=p2,
         mesh=mesh,
         key=key,
+        legend_size=legend_size,
         legend_loc=legend_loc,
     )
     # Save the plotting object.
@@ -420,3 +479,145 @@ def three_d_plot(
         return output_plotter(p=p2, filename=filename, view_up=view_up, framerate=framerate)
     else:
         return None
+
+
+def three_d_animate(
+    meshes: Union[List[PolyData or UnstructuredGrid], MultiBlock],
+    key: Optional[str] = None,
+    filename: str = "animate.mp4",
+    jupyter: bool = False,
+    off_screen: bool = False,
+    window_size: tuple = (1024, 768),
+    background: str = "white",
+    ambient: float = 0.2,
+    opacity: float = 1.0,
+    point_size: float = 5.0,
+    initial_cpo: Union[str, tuple] = "iso",
+    legend_size: Optional[Tuple] = None,
+    legend_loc: Literal[
+        "upper right",
+        "upper left",
+        "lower left",
+        "lower right",
+        "center left",
+        "center right",
+        "lower center",
+        "upper center",
+        "center",
+    ] = "lower right",
+    framerate: int = 15,
+    plotter_filename: Optional[str] = None,
+):
+    """
+    Visualize reconstructed 3D meshes.
+
+    Args:
+        meshes: A List of reconstructed meshes or a MultiBlock.
+        key: The key under which are the labels.
+        filename: Filename of output file. Writer type is inferred from the extension of the filename.
+                * Output a gif file, please enter a filename ending with `.gif`.
+                * Output a mp4 file, please enter a filename ending with `.mp4`.
+        jupyter: Whether to plot in jupyter notebook.
+        off_screen: Renders off-screen when True. Useful for automated screenshots.
+        window_size: Window size in pixels. The default window_size is `[1024, 768]`.
+        background: The background color of the window.
+        ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
+                 the actor when not directed at the light source emitted from the viewer.
+        opacity: Opacity of the mesh. If a single float value is given, it will be the global opacity of the mesh and
+                 uniformly applied everywhere - should be between 0 and 1.
+                 A string can also be specified to map the scalars range to a predefined opacity transfer function
+                 (options include: 'linear', 'linear_r', 'geom', 'geom_r').
+        point_size: Point size of any nodes in the dataset plotted.
+        initial_cpo: Camera position of the window. Available `initial_cpo` are:
+                * `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
+                * Customize a tuple. E.g.: (7, 0, 20.).
+        legend_size: Two float tuple, each float between 0 and 1.
+                     For example (0.1, 0.1) would make the legend 10% the size of the entire figure window.
+                     By default (legend_size==None), legend_size will be adjusted adaptively.
+        legend_loc: The location of the legend in the window. Available `legend_loc` are:
+                * `'upper right'`
+                * `'upper left'`
+                * `'lower left'`
+                * `'lower right'`
+                * `'center left'`
+                * `'center right'`
+                * `'lower center'`
+                * `'upper center'`
+                * `'center'`
+        framerate: Frames per second. Only available when filename ending with `.mp4` or `.gif`.
+        plotter_filename: The filename of the file where the plotter is saved.
+                          Writer type is inferred from the extension of the filename.
+                * Output a gltf file, please enter a filename ending with `.gltf`.
+                * Output a html file, please enter a filename ending with `.html`.
+                * Output an obj file, please enter a filename ending with `.obj`.
+                * Output a vtkjs file, please enter a filename without format.
+    Returns:
+        img: Numpy array of the last image.
+             Returned only if filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
+    """
+
+    blocks = collect_mesh(meshes) if isinstance(meshes, list) else meshes
+    blocks_name = blocks.keys()
+
+    # Create a plotting object to display the end mesh of blocks.
+    end_block = blocks[blocks_name[-1]]
+    cpo = _interactive_cpo(
+        mesh=end_block,
+        key=key,
+        jupyter=jupyter,
+        off_screen=off_screen,
+        window_size=window_size,
+        background=background,
+        ambient=ambient,
+        opacity=opacity,
+        point_size=point_size,
+        initial_cpo=initial_cpo,
+    )
+
+    # Create another plotting object to save.
+    start_block = blocks[blocks_name[0]]
+    p2 = create_plotter(
+        jupyter=jupyter,
+        off_screen=True,
+        window_size=window_size,
+        background=background,
+        initial_cpo=cpo,
+    )
+    add_mesh(
+        plotter=p2,
+        mesh=start_block,
+        key=key,
+        ambient=ambient,
+        opacity=opacity,
+        point_size=point_size,
+    )
+
+    filename_format = filename.split(".")[-1]
+    if filename_format == "gif":
+        p2.open_gif(filename)
+    elif filename_format == "mp4":
+        p2.open_movie(filename, framerate=framerate, quality=5)
+
+    for block_name in blocks_name[1:]:
+        block = blocks[block_name]
+        start_block.overwrite(block)
+        add_mesh(
+            plotter=p2,
+            mesh=start_block,
+            key=key,
+            ambient=ambient,
+            opacity=opacity,
+            point_size=point_size,
+        )
+        add_legend(
+            plotter=p2,
+            mesh=start_block,
+            key=key,
+            legend_size=legend_size,
+            legend_loc=legend_loc,
+        )
+        p2.write_frame()
+
+    # Save the plotting object.
+    if plotter_filename is not None:
+        save_plotter(p2, filename=plotter_filename)

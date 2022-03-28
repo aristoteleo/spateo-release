@@ -17,4 +17,4 @@ from .spatial_degs import moran_i
 # from .spatial_markers import *
 # from .transformer import *
 
-from .three_d_reconstruction import *
+from .TDR import *

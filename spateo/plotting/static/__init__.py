@@ -8,4 +8,12 @@ from .bbs import (
 from .colorlabel import color_label
 from .geo import geo
 from .space import space
-from .three_d_plots import *
+from .three_d_plots import (
+    three_d_plot,
+    three_d_animate,
+    create_plotter,
+    add_mesh,
+    add_legend,
+    save_plotter,
+    output_plotter,
+)
