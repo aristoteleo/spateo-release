@@ -13,8 +13,7 @@ def three_d_pick(
     key: str = "groups",
     picked_groups: Union[str, list] = None,
 ) -> MultiBlock:
-    """Pick the desired groups.
-    """
+    """Pick the desired groups."""
     # Check input mesh.
     mesh = multiblock2mesh(mesh=mesh, message=None) if isinstance(mesh, MultiBlock) else mesh.copy()
 
