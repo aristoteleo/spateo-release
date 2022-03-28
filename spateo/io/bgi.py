@@ -286,6 +286,10 @@ def read_bgi(
     data = read_bgi_as_dataframe(path, label_column)
     n_columns = data.shape[1]
 
+    # Obtain total genes from raw data, so that the columns always match
+    # regardless of what method was used.
+    uniq_gene = sorted(data["geneID"].unique())
+
     props = None
     if label_column is not None:
         binsize = 1
@@ -341,7 +345,7 @@ def read_bgi(
         if add_props:
             props = get_label_props(labels)
 
-    uniq_cell, uniq_gene = sorted(data["label"].unique()), sorted(data["geneID"].unique())
+    uniq_cell = sorted(data["label"].unique())
     shape = (len(uniq_cell), len(uniq_gene))
     cell_dict = dict(zip(uniq_cell, range(len(uniq_cell))))
     gene_dict = dict(zip(uniq_gene, range(len(uniq_gene))))
