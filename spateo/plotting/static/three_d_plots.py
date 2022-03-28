@@ -6,14 +6,14 @@ import pandas as pd
 import pyvista as pv
 
 from pyvista import MultiBlock, Plotter, PolyData, UnstructuredGrid
-from typing import Optional, Union, List, Tuple
+from typing import Optional, Union, Tuple, List
 
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
 
-from ...tools.TDR.mesh import collect_mesh
+from ...tools.TDR import collect_mesh
 
 
 def create_plotter(
@@ -125,6 +125,62 @@ def add_mesh(
         _add_mesh(_p=plotter, _mesh=mesh)
 
 
+def add_outline(
+    plotter: Plotter,
+    mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
+    outline_width: float = 5.0,
+    outline_color: Union[str, tuple] = "black",
+    labels: bool = True,
+    labels_size: float = 16,
+    labels_color: Union[str, tuple] = "white",
+):
+    """
+    Produce an outline of the full extent for the mesh.
+    If labels is True, add the length, width and height information of the mesh to the outline.
+
+    Args:
+        plotter: The plotting object to display pyvista/vtk mesh.
+        mesh: A reconstructed mesh.
+        outline_width: The width of the outline.
+        outline_color: The color of the outline.
+        labels: Whether to add the length, width and height information of the mesh to the outline.
+        labels_size: The size of the label font.
+        labels_color: The color of the label.
+    """
+
+    mesh_outline = mesh.outline()
+    plotter.add_mesh(mesh_outline, color=outline_color, line_width=outline_width)
+
+    if labels is True:
+        mo_points = np.asarray(mesh_outline.points)
+        mesh_x = mo_points[:, 0].max() - mo_points[:, 0].min()
+        mesh_y = mo_points[:, 1].max() - mo_points[:, 1].min()
+        mesh_z = mo_points[:, 2].max() - mo_points[:, 2].min()
+        mesh_x, mesh_y, mesh_z = (
+            round(mesh_x.astype(float), 5),
+            round(mesh_y.astype(float), 5),
+            round(mesh_z.astype(float), 5),
+        )
+
+        momid_points = [
+            mo_points[1, :] - [mesh_x / 2, 0, 0],
+            mo_points[1, :] + [0, mesh_y / 2, 0],
+            mo_points[1, :] + [0, 0, mesh_z / 2],
+        ]
+        momid_labels = [mesh_x, mesh_y, mesh_z]
+        plotter.add_point_labels(
+            points=momid_points,
+            labels=momid_labels,
+            bold=True,
+            font_size=labels_size,
+            font_family="arial",
+            shape="rounded_rect",
+            shape_color=outline_color,
+            show_points=False,
+            text_color=labels_color,
+        )
+
+
 def add_legend(
     plotter: Plotter,
     mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
@@ -151,7 +207,7 @@ def add_legend(
         key: The key under which are the labels.
         legend_size: Two float tuple, each float between 0 and 1.
                      For example (0.1, 0.1) would make the legend 10% the size of the entire figure window.
-                     By default (legend_size==None), legend_size will be adjusted adaptively.
+                     If legend_size is None, legend_size will be adjusted adaptively.
         legend_loc: The location of the legend in the window. Available `legend_loc` are:
                 * `'upper right'`
                 * `'upper left'`
@@ -301,17 +357,14 @@ def save_plotter(
         p.export_vtkjs(filename)
 
 
-def _interactive_cpo(
+def _add2plotter(
+    plotter: Plotter,
     mesh: Union[PolyData, UnstructuredGrid, MultiBlock],
     key: Optional[str] = None,
-    jupyter: bool = False,
-    off_screen: bool = False,
-    window_size: tuple = (1024, 768),
     background: str = "white",
     ambient: float = 0.2,
     opacity: float = 1.0,
     point_size: float = 5.0,
-    initial_cpo: Union[str, tuple] = "iso",
     legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
         "upper right",
@@ -324,17 +377,13 @@ def _interactive_cpo(
         "upper center",
         "center",
     ] = "lower right",
+    outline: bool = False,
+    outline_width: float = 5.0,
+    outline_labels: bool = True,
 ):
-    """Determining the camera position for the final visualization via the interactive window."""
-    p1 = create_plotter(
-        jupyter=jupyter,
-        off_screen=off_screen,
-        window_size=window_size,
-        background=background,
-        initial_cpo=initial_cpo,
-    )
+    """What needs to be added to the visualization window."""
     add_mesh(
-        plotter=p1,
+        plotter=plotter,
         mesh=mesh,
         key=key,
         ambient=ambient,
@@ -342,16 +391,23 @@ def _interactive_cpo(
         point_size=point_size,
     )
     add_legend(
-        plotter=p1,
+        plotter=plotter,
         mesh=mesh,
         key=key,
         legend_size=legend_size,
         legend_loc=legend_loc,
     )
-
-    jupyter_backend = "panel" if jupyter is True else None
-    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend)
-    return cpo
+    if outline is True:
+        bg_rgb = mpl.colors.to_rgb(background)
+        cbg_rgb = (1 - bg_rgb[0], 1 - bg_rgb[1], 1 - bg_rgb[2])
+        add_outline(
+            plotter=plotter,
+            mesh=mesh,
+            outline_width=outline_width,
+            outline_color=cbg_rgb,
+            labels=outline_labels,
+            labels_color=bg_rgb,
+        )
 
 
 def three_d_plot(
@@ -378,6 +434,9 @@ def three_d_plot(
         "upper center",
         "center",
     ] = "lower right",
+    outline: bool = False,
+    outline_width: float = 5.0,
+    outline_labels: bool = True,
     view_up: tuple = (0.5, 0.5, 1),
     framerate: int = 15,
     plotter_filename: Optional[str] = None,
@@ -409,7 +468,7 @@ def three_d_plot(
                 * Customize a tuple. E.g.: (7, 0, 20.).
         legend_size: Two float tuple, each float between 0 and 1.
                      For example (0.1, 0.1) would make the legend 10% the size of the entire figure window.
-                     By default (legend_size==None), legend_size will be adjusted adaptively.
+                     If legend_size is None, legend_size will be adjusted adaptively.
         legend_loc: The location of the legend in the window. Available `legend_loc` are:
                 * `'upper right'`
                 * `'upper left'`
@@ -420,6 +479,9 @@ def three_d_plot(
                 * `'lower center'`
                 * `'upper center'`
                 * `'center'`
+        outline: Produce an outline of the full extent for the mesh.
+        outline_width: The width of outline.
+        outline_labels: Whether to add the length, width and height information of the mesh to the outline.
         view_up: The normal to the orbital plane. Only available when filename ending with `.mp4` or `.gif`.
         framerate: Frames per second. Only available when filename ending with `.mp4` or `.gif`.
         plotter_filename: The filename of the file where the plotter is saved.
@@ -434,18 +496,29 @@ def three_d_plot(
     """
 
     # Create a plotting object to display pyvista/vtk mesh.
-    cpo = _interactive_cpo(
-        mesh=mesh,
-        key=key,
+    p1 = create_plotter(
         jupyter=jupyter,
         off_screen=off_screen,
         window_size=window_size,
         background=background,
+        initial_cpo=initial_cpo,
+    )
+    _add2plotter(
+        plotter=p1,
+        mesh=mesh,
+        key=key,
+        background=background,
         ambient=ambient,
         opacity=opacity,
         point_size=point_size,
-        initial_cpo=initial_cpo,
+        legend_size=legend_size,
+        legend_loc=legend_loc,
+        outline=outline,
+        outline_width=outline_width,
+        outline_labels=outline_labels,
     )
+    jupyter_backend = "panel" if jupyter is True else None
+    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend)
 
     # Create another plotting object to save pyvista/vtk mesh.
     p2 = create_plotter(
@@ -455,21 +528,21 @@ def three_d_plot(
         background=background,
         initial_cpo=cpo,
     )
-    add_mesh(
+    _add2plotter(
         plotter=p2,
         mesh=mesh,
         key=key,
+        background=background,
         ambient=ambient,
         opacity=opacity,
         point_size=point_size,
-    )
-    add_legend(
-        plotter=p2,
-        mesh=mesh,
-        key=key,
         legend_size=legend_size,
         legend_loc=legend_loc,
+        outline=outline,
+        outline_width=outline_width,
+        outline_labels=outline_labels,
     )
+
     # Save the plotting object.
     if plotter_filename is not None:
         save_plotter(p2, filename=plotter_filename)
@@ -561,18 +634,26 @@ def three_d_animate(
 
     # Create a plotting object to display the end mesh of blocks.
     end_block = blocks[blocks_name[-1]]
-    cpo = _interactive_cpo(
-        mesh=end_block,
-        key=key,
+    p1 = create_plotter(
         jupyter=jupyter,
         off_screen=off_screen,
         window_size=window_size,
         background=background,
+        initial_cpo=initial_cpo,
+    )
+    _add2plotter(
+        plotter=p1,
+        mesh=end_block,
+        key=key,
+        background=background,
         ambient=ambient,
         opacity=opacity,
         point_size=point_size,
-        initial_cpo=initial_cpo,
+        legend_size=legend_size,
+        legend_loc=legend_loc,
     )
+    jupyter_backend = "panel" if jupyter is True else None
+    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend)
 
     # Create another plotting object to save.
     start_block = blocks[blocks_name[0]]
@@ -583,13 +664,16 @@ def three_d_animate(
         background=background,
         initial_cpo=cpo,
     )
-    add_mesh(
+    _add2plotter(
         plotter=p2,
         mesh=start_block,
         key=key,
+        background=background,
         ambient=ambient,
         opacity=opacity,
         point_size=point_size,
+        legend_size=legend_size,
+        legend_loc=legend_loc,
     )
 
     filename_format = filename.split(".")[-1]
@@ -601,18 +685,14 @@ def three_d_animate(
     for block_name in blocks_name[1:]:
         block = blocks[block_name]
         start_block.overwrite(block)
-        add_mesh(
+        _add2plotter(
             plotter=p2,
             mesh=start_block,
             key=key,
+            background=background,
             ambient=ambient,
             opacity=opacity,
             point_size=point_size,
-        )
-        add_legend(
-            plotter=p2,
-            mesh=start_block,
-            key=key,
             legend_size=legend_size,
             legend_loc=legend_loc,
         )
