@@ -1,7 +1,7 @@
 """Plotting functions for spatial geometry plots.
 """
 
-from typing import Union, Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import anndata
 import geopandas as gpd

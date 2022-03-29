@@ -7,7 +7,7 @@ import matplotlib as mpl
 import numpy as np
 import plotly.graph_objects as go
 from anndata import AnnData
-from skimage.color.colorlabel import color_dict, DEFAULT_COLORS
+from skimage.color.colorlabel import DEFAULT_COLORS, color_dict
 
 from ...configuration import SKM
 from ...errors import PlottingError

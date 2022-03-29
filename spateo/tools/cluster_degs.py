@@ -1,9 +1,9 @@
-from anndata import AnnData
 from collections import Counter
 from typing import List, Optional
 
 import numpy as np
 import pandas as pd
+from anndata import AnnData
 from scipy.sparse import issparse
 from scipy.stats import mannwhitneyu
 from sklearn.neighbors import NearestNeighbors

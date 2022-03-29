@@ -15,14 +15,13 @@ import cv2
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-
-from scipy.sparse import csr_matrix, spmatrix
-from typing import Optional, Tuple
 import skimage.io
 from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import MultiPolygon, Polygon
 
+from ..configuration import SKM
+from ..warnings import IOWarning
 from .utils import (
     bin_indices,
     centroids,
@@ -32,8 +31,6 @@ from .utils import (
     get_points_props,
     in_concave_hull,
 )
-from ..configuration import SKM
-from ..warnings import IOWarning
 
 COUNT_COLUMN_MAPPING = {
     SKM.X_LAYER: 3,

@@ -1,5 +1,6 @@
-from pyvista import PolyData, UnstructuredGrid, MultiBlock
 from typing import Optional, Union
+
+from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
 try:
     from typing import Literal

@@ -1,9 +1,9 @@
+import warnings
+from typing import List, Optional, Union
+
 import numpy as np
 import pyvista as pv
-import warnings
-
-from pyvista import PolyData, UnstructuredGrid, MultiBlock, DataSet
-from typing import Optional, Union, List
+from pyvista import DataSet, MultiBlock, PolyData, UnstructuredGrid
 
 try:
     from typing import Literal

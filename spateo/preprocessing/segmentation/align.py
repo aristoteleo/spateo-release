@@ -14,10 +14,10 @@ from kornia.geometry.transform import thin_plate_spline as tps
 from tqdm import tqdm
 from typing_extensions import Literal
 
-from . import utils
 from ...configuration import SKM
 from ...errors import PreprocessingError
 from ...warnings import PreprocessingWarning
+from . import utils
 
 
 class AlignmentRefiner(nn.Module):
