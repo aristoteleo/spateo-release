@@ -137,7 +137,8 @@ class SineLayer(nn.Module):
 class h(nn.Module):
     def __init__(
         self,
-        network_dim,
+        input_network_dim,
+        output_network_dim,
         hidden_features=256,
         hidden_layers=3,
         sirens=False,
@@ -155,9 +156,9 @@ class h(nn.Module):
         self.f = torch.sin if self.sirens else torch.nn.functional.leaky_relu
         self.name = "model/h"
 
-        self.layer1 = nn.Linear(network_dim, hidden_features)
+        self.layer1 = nn.Linear(input_network_dim, hidden_features)
         if sirens:
-            torch.nn.init.uniform_(self.layer1.weight, -1 / network_dim, 1 / network_dim)
+            torch.nn.init.uniform_(self.layer1.weight, -1 / input_network_dim, 1 / input_network_dim)
         self.net = []
         for i in range(hidden_layers):
             if sirens:
@@ -174,7 +175,7 @@ class h(nn.Module):
 
         self.hidden_layers = nn.Sequential(*self.net)
 
-        self.outlayer = nn.Linear(hidden_features, network_dim)
+        self.outlayer = nn.Linear(hidden_features, output_network_dim)
         if sirens:
             torch.nn.init.uniform_(
                 self.outlayer.weight,
@@ -207,7 +208,7 @@ class MainFlow(torch.nn.Module):
 
     def forward(self, t, x, freeze=None):
 
-        x_low = self.A(x) if self.A is not None else x
+        x_low = self.A(x.float()) if self.A is not None else x.float()
         e_low = self.h.forward(x_low)
         e_hat = self.B(e_low) if self.B is not None else e_low
 

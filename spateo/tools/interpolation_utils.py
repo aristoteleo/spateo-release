@@ -16,9 +16,10 @@ from anndata import AnnData
 from numpy.random import normal
 from torch import tensor
 
-from typing import Union, Tuple
+from typing import Union, Callable
+from types import ModuleType
 
-from .nn_losses import mse
+from .nn_losses import weighted_mse
 
 torch.manual_seed(0)
 device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
@@ -27,12 +28,11 @@ device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 class DeepInterpolation:
     def __init__(
         self,
-        model,
+        model: ModuleType,
         data_sampler: object,
         sirens: bool = False,
         enforce_positivity: bool = True,
-        network_dim: Union[int, None] = None,
-        loss_function: Union[int, None] = mse(),
+        loss_function: Union[Callable, None] = weighted_mse(),
         smoothing_factor: Union[float, None] = True,
         stability_factor: Union[float, None] = True,
         load_model_from_buffer: bool = False,
@@ -49,11 +49,10 @@ class DeepInterpolation:
         Args:
             model: Imported Python module
                Contains A, B, h and MainFlow blocks. Default is interpolation_nn.py
+            data_sampler: Data Sampler Object.
+            input_network_dim: The dimension of the gene expression space of h.
             sirens: Whether to use the sinusoidal representation network (SIRENs).
             enforce_positivity: Enforce the positivity of the dynamics when training the networks
-            data_sampler: Data Sampler Object.
-            network_dim: The dimension of the lower-dimensional space of dynamics h. Must be no greater than the
-                training data's dimensions.
             loss_function: The PyTorch-compatible module calculating the differentiable loss function for training by
                 the data upon calling.
             smoothing_factor: The coefficient of the Lipschitz smoothness regularization term (added to the loss
@@ -98,34 +97,34 @@ class DeepInterpolation:
         self.normalization_factor = self.data_sampler.normalization_factor
         self.data_dim = self.data_sampler.data_dim
 
-        self.network_dim = self.data_sampler.data_dim if network_dim is None else network_dim
-
-        assert network_dim <= self.data_dim, "Network dimension must be no greater than the data dimension."
+        self.input_network_dim = self.data_sampler.data["X"].shape[1]
+        self.output_network_dim = self.data_sampler.data["Y"].shape[1]
 
         ######################
         # NEURAL NET MODULES #
         ######################
 
         if load_model_from_buffer is True:  # restore the saved model
-            if self.network_dim < self.data_dim:
+            if self.input_network_dim < self.data_dim:
                 self.h, self.A, self.B = self.load()
             else:
                 self.h = self.load()
 
         else:  # create fresh modules to be trained
             self.h = model.h(
-                network_dim=network_dim,
+                input_network_dim=self.input_network_dim,
+                output_network_dim=self.output_network_dim,
                 sirens=sirens,
                 hidden_features=hidden_features,
                 hidden_layers=hidden_layers,
                 first_omega_0=first_omega_0,
                 hidden_omega_0=hidden_omega_0,
             )
-            if self.network_dim < self.data_dim:
-                self.A = model.A(network_dim=self.network_dim, data_dim=self.data_dim)
-                self.B = model.B(network_dim=self.network_dim, data_dim=self.data_dim)
+            if self.input_network_dim < self.data_dim:
+                self.A = model.A(network_dim=self.input_network_dim, data_dim=self.data_dim)
+                self.B = model.B(network_dim=self.input_network_dim, data_dim=self.data_dim)
 
-        if self.network_dim < self.data_dim:
+        if self.input_network_dim < self.data_dim:
             self.main_flow_func = model.MainFlow(self.h, self.A, self.B, enforce_positivity)
         else:
             self.main_flow_func = model.MainFlow(self.h, enforce_positivity=enforce_positivity)
@@ -137,13 +136,13 @@ class DeepInterpolation:
         #########################################################
 
     def high2low(self, high_batch):
-        if self.network_dim < self.data_dim:
+        if self.input_network_dim < self.data_dim:
             return self.A.forward(high_batch)
         else:
             return high_batch
 
     def low2high(self, low_batch):
-        if self.network_dim < self.data_dim:
+        if self.input_network_dim < self.data_dim:
             return self.B.forward(low_batch)
         else:
             return low_batch
@@ -186,7 +185,7 @@ class DeepInterpolation:
 
         # The optimizers for Neural Nets
 
-        if self.network_dim < self.data_dim:
+        if self.input_network_dim < self.data_dim:
 
             self.optimizer = optim.Adam(
                 list(self.A.parameters()) + list(self.h.parameters()) + list(self.B.parameters()),
@@ -229,12 +228,12 @@ class DeepInterpolation:
 
                 # Set the gradients to zero
                 self.h.zero_grad()
-                if self.network_dim < self.data_dim:
+                if self.input_network_dim < self.data_dim:
                     self.A.zero_grad(), self.B.zero_grad()
 
                 # Generate Data Batches
                 indx, input_batch, output_batch, weight = self.data_sampler.generate_batch(
-                    batch_size=data_batch_size, sample_subset_indx=sample_subset_indx
+                    batch_size=data_batch_size, sample_subset_indices=sample_subset_indx
                 )
                 input_batch_noised = input_batch + torch.tensor(normal(loc=0, scale=0.1, size=input_batch.shape))
 
@@ -254,7 +253,7 @@ class DeepInterpolation:
 
                 if self.stability_factor is not None:  # Adding Lyapunov stability regularizer term
                     loss_value += self.stability_factor * torch.mean(
-                        torch.sum(torch.mul(input_batch, v_hat_batch), dim=1)
+                        torch.sum(torch.mul(output_batch, v_hat_batch), dim=1)
                     )
 
                 # Backward Pass over the main flow
@@ -269,7 +268,7 @@ class DeepInterpolation:
             ### AUTO-ENCODER PASS ###
             #########################
 
-            if self.network_dim < self.data_dim:
+            if self.input_network_dim < self.data_dim:
 
                 # Set the gradients to zero
                 self.A.zero_grad(), self.B.zero_grad()
@@ -314,7 +313,7 @@ class DeepInterpolation:
                     % (iter + 1, time.time() - start_time, loss_value, autoencoder_loss_value)
                 )
 
-                if self.network_dim < self.data_dim:
+                if self.input_network_dim < self.data_dim:
                     torch.save(self.A, self.buffer_path + "/A")
                     torch.save(self.B, self.buffer_path + "/B")
                 torch.save(self.h, self.buffer_path + "/h")
@@ -328,19 +327,19 @@ class DeepInterpolation:
             #####################################
             if sample_fraction < 1 and (iter + 1) % iter_per_sample_update == 0:
                 # Taking the best subset of velocity samples
-                _, _, v = self.data_sampler.generate_batch(batch_size="all", sample_subset_indx="all")
+                _, _, v = self.data_sampler.generate_batch(batch_size="all", sample_subset_indices="all")
                 v_hat = self.predict(input_batch)
                 sample_subset_indx = subset_best_samples(sample_fraction, v_hat, v, self.loss_function)
 
     def save(self):
-        if self.network_dim < self.data_dim:
+        if self.input_network_dim < self.data_dim:
             torch.save(self.A, self.buffer_path + "/A")
             torch.save(self.B, self.buffer_path + "/B")
         torch.save(self.h, self.buffer_path + "/h")
 
     def load(self):
         h = torch.load(self.buffer_path + "/h")
-        if self.network_dim < self.data_dim:
+        if self.input_network_dim < self.data_dim:
             A = torch.load(self.buffer_path + "/A")
             B = torch.load(self.buffer_path + "/B")
 
