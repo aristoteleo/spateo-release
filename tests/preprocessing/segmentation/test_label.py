@@ -1,9 +1,10 @@
-from unittest import mock, TestCase
+from unittest import TestCase, mock
 
 import numpy as np
 
 import spateo.preprocessing.segmentation.label as label
-from ...mixins import create_random_adata, TestMixin
+
+from ...mixins import TestMixin, create_random_adata
 
 
 class TestLabel(TestMixin, TestCase):

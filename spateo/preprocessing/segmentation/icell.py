@@ -13,10 +13,10 @@ from scipy.sparse import issparse, spmatrix
 from skimage import filters
 from typing_extensions import Literal
 
-from . import bp, em, utils
 from ...configuration import SKM
 from ...errors import PreprocessingError
 from ...warnings import PreprocessingWarning
+from . import bp, em, utils
 
 
 def _mask_cells_from_stain(X: np.ndarray, otsu_classes: int = 4, otsu_index: int = 0, mk: int = 7) -> np.ndarray:

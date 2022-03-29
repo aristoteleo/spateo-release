@@ -4,14 +4,14 @@ from typing import Optional, Tuple, Union
 
 import colorcet
 import matplotlib
-import numpy as np
-import pandas as pd
-from anndata import AnnData
-from matplotlib import rcParams, colors
-from scipy import sparse
 
 # from cycler import cycler
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from anndata import AnnData
+from matplotlib import colors, rcParams
+from scipy import sparse
 
 from .errors import ConfigurationError
 

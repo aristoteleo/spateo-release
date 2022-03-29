@@ -1,6 +1,10 @@
-import numpy as np
 from typing import Union
+
 import anndata
+import numpy as np
+
+from spateo.tools.utils import compute_smallest_distance
+
 from .scatters import scatters
 
 # from .scatters import (
@@ -8,7 +12,6 @@ from .scatters import scatters
 #     docstrings,
 # )
 
-from spateo.tools.utils import compute_smallest_distance
 
 # from ..dynamo_logger import main_critical, main_info, main_finish_progress, main_log_time, main_warning
 

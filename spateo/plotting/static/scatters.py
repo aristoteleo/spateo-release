@@ -2,7 +2,8 @@
 # and https://github.com/lmcinnes/umap/blob/7e051d8f3c4adca90ca81eb45f6a9d1372c076cf/umap/plot.py
 
 import warnings
-from typing import Union, Optional, List
+from numbers import Number
+from typing import List, Optional, Union
 
 import anndata
 import cv2
@@ -12,31 +13,31 @@ import pandas as pd
 from anndata import AnnData
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
-from numbers import Number
 from pandas.api.types import is_categorical_dtype
 
 from spateo.configuration import _themes, reset_rcParams
+from spateo.tools.utils import (
+    affine_transform,
+    calc_1nd_moment,
+    flatten,
+    gen_rotation_2d,
+    get_mapper,
+    update_dict,
+)
+
 from .utils import (
-    despline_all,
-    deaxis_all,
+    _datashade_points,
+    _get_adata_color_vec,
+    _matplotlib_points,
     _select_font_color,
     arrowed_spines,
-    is_gene_name,
+    deaxis_all,
+    despline_all,
     is_cell_anno_column,
-    is_list_of_lists,
+    is_gene_name,
     is_layer_keys,
-    _matplotlib_points,
-    _datashade_points,
+    is_list_of_lists,
     save_fig,
-    _get_adata_color_vec,
-)
-from spateo.tools.utils import (
-    update_dict,
-    get_mapper,
-    flatten,
-    calc_1nd_moment,
-    gen_rotation_2d,
-    affine_transform,
 )
 
 # from ..tools.moments import calc_1nd_moment
@@ -333,8 +334,7 @@ def scatters(
 
     import matplotlib.pyplot as plt
     from matplotlib import rcParams
-    from matplotlib.colors import to_hex
-    from matplotlib.colors import rgb2hex
+    from matplotlib.colors import rgb2hex, to_hex
 
     # 2d is not a projection in matplotlib, default is None (rectilinear)
     if projection == "2d":

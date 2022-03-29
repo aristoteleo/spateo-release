@@ -3,14 +3,15 @@ Todo:
     * @Xiaojieqiu: update with Google style documentation, function typings, tests
 """
 import math
-import shapely
+
 import numpy as np
 import pandas as pd
-from sklearn.decomposition import PCA
-from scipy.spatial import Delaunay
+import shapely
 import shapely.geometry as geometry
-from shapely.geometry import MultiPoint, MultiLineString
+from scipy.spatial import Delaunay
+from shapely.geometry import MultiLineString, MultiPoint
 from shapely.ops import cascaded_union, polygonize
+from sklearn.decomposition import PCA
 
 
 def procrustes(X, Y, scaling=True, reflection="best"):

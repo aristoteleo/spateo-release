@@ -1,4 +1,4 @@
-from unittest import mock, TestCase
+from unittest import TestCase, mock
 
 import networkx as nx
 import numpy as np
@@ -6,7 +6,8 @@ from anndata import AnnData
 from scipy import sparse
 
 import spateo.preprocessing.segmentation.density as density
-from ...mixins import create_random_adata, TestMixin
+
+from ...mixins import TestMixin, create_random_adata
 
 
 class TestDensity(TestMixin, TestCase):

@@ -1,10 +1,11 @@
-from anndata import AnnData
+from typing import List, Optional
+
 import dynamo as dyn
 import numpy as np
 import pandas as pd
+from anndata import AnnData
 from scipy import sparse
-from scipy.stats import pearsonr, gmean
-from typing import List, Optional
+from scipy.stats import gmean, pearsonr
 from typing_extensions import Literal
 
 

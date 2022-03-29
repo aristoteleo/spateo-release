@@ -1,16 +1,16 @@
+from typing import Optional, Tuple, Union
+
 import matplotlib as mpl
 import numpy as np
 import open3d as o3d
 import pandas as pd
+import PVGeo
 import pyacvd
 import pymeshfix as mf
 import pyvista as pv
-import PVGeo
-
 from anndata import AnnData
 from pandas.core.frame import DataFrame
 from pyvista import PolyData, UnstructuredGrid
-from typing import Optional, Tuple, Union
 
 try:
     from typing import Literal

@@ -1,18 +1,17 @@
 import warnings
+from typing import Optional, Union
 
 import numpy as np
 import pyvista as pv
 import vtk
-
-from pyvista import Plotter, PolyData, UnstructuredGrid, MultiBlock
-from typing import Union, Optional
+from pyvista import MultiBlock, Plotter, PolyData, UnstructuredGrid
 
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
 
-from .utils import collect_mesh, _MultiBlock
+from .utils import _MultiBlock, collect_mesh
 
 
 def _create_plotter(message=True) -> Plotter:

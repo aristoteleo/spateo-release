@@ -1,6 +1,7 @@
 from unittest import TestCase
 
 import spateo.io.bgi as bgi
+
 from ..mixins import TestMixin
 
 

@@ -1,12 +1,11 @@
 import math
-import numpy as np
+from typing import Optional, Union
 
 import matplotlib as mpl
+import numpy as np
 import pandas as pd
 import pyvista as pv
-
 from pyvista import MultiBlock, Plotter, PolyData, UnstructuredGrid
-from typing import Optional, Union
 
 try:
     from typing import Literal
