@@ -1,9 +1,7 @@
 import numpy as np
 import pyvista as pv
-import warnings
-
-from pyvista import PolyData, UnstructuredGrid, MultiBlock, DataSet
-from typing import Optional, Union, List
+from pyvista import MultiBlock, DataSet
+from typing import Union
 
 try:
     from typing import Literal
@@ -20,7 +18,11 @@ def read_mesh(filename: str):
         Wrapped PyVista dataset.
     """
     mesh = pv.read(filename)
-    # del mesh.cell_data["orig_extract_id"]
+
+    if "vtkOriginalPointIds" in mesh.point_data.keys():
+        del mesh.point_data["vtkOriginalPointIds"]
+    if "vtkOriginalCellIds" in mesh.cell_data.keys():
+        del mesh.cell_data["vtkOriginalCellIds"]
 
     return mesh
 
@@ -56,51 +58,3 @@ def save_mesh(
             "\nIf mesh is a pyvista.MultiBlock object, please enter a filename ending with `.vtm`;"
             "else please enter a filename ending with `.vtk`."
         )
-
-
-def merge_mesh(
-    meshes: List[PolyData or UnstructuredGrid],
-) -> PolyData or UnstructuredGrid:
-    """Merge all meshes in the `meshes` list. The format of all meshes must be the same."""
-
-    merged_mesh = meshes[0]
-    for mesh in meshes[1:]:
-        merged_mesh.merge(mesh, inplace=True)
-
-    return merged_mesh
-
-
-def collect_mesh(
-    meshes: List[PolyData or UnstructuredGrid],
-    meshes_name: Optional[List[str]] = None,
-) -> MultiBlock:
-    """
-    A composite class to hold many data sets which can be iterated over.
-    You can think of MultiBlock like lists or dictionaries as we can iterate over this data structure by index
-    and we can also access blocks by their string name.
-
-    If the input is a dictionary, it can be iterated in the following ways:
-        >>> blocks = collect_mesh(meshes, meshes_name)
-        >>> for name in blocks.keys():
-        ...     print(blocks[name])
-
-    If the input is a list, it can be iterated in the following ways:
-        >>> blocks = collect_mesh(meshes)
-        >>> for block in blocks:
-        ...    print(block)
-    """
-
-    if meshes_name is not None:
-        meshes = {name: mesh for name, mesh in zip(meshes_name, meshes)}
-
-    return pv.MultiBlock(meshes)
-
-
-def _MultiBlock(mesh, message=None):
-    if message is not None:
-        warnings.warn(
-            f"\nMultiBlock does not support {message}. "
-            f"\nHere, all meshes contained in MultiBlock will be automatically merged into one mesh before {message}."
-        )
-    meshes = [mesh[name] for name in mesh.keys()]
-    return merge_mesh(meshes=meshes)
