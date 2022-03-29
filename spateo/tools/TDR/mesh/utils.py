@@ -33,7 +33,7 @@ def merge_mesh(
 
     merged_mesh = meshes[0]
     for mesh in meshes[1:]:
-        merged_mesh.merge(mesh, inplace=True)
+        merged_mesh = merged_mesh.merge(mesh)
 
     return merged_mesh
 
@@ -118,7 +118,7 @@ def add_mesh_labels(
 
     # Set raw hex.
     if isinstance(colormap, str):
-        if colormap in list(mpl.colormaps):
+        if colormap in list(mpl.pyplot.colormaps()):
             lscmap = mpl.cm.get_cmap(colormap)
             raw_hex_list = [mpl.colors.to_hex(lscmap(i)) for i in np.linspace(0, 1, len(cu_arr))]
             for label, color in zip(cu_arr, raw_hex_list):
