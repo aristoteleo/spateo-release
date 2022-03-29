@@ -50,7 +50,6 @@ class DeepInterpolation:
             model: Imported Python module
                Contains A, B, h and MainFlow blocks. Default is interpolation_nn.py
             data_sampler: Data Sampler Object.
-            input_network_dim: The dimension of the gene expression space of h.
             sirens: Whether to use the sinusoidal representation network (SIRENs).
             enforce_positivity: Enforce the positivity of the dynamics when training the networks
             loss_function: The PyTorch-compatible module calculating the differentiable loss function for training by
