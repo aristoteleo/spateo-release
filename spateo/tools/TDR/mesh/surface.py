@@ -424,6 +424,7 @@ def construct_surface(
     )
 
     # Clip the original pcd using the reconstructed surface and reconstruct new point cloud.
-    clipped_pcd = pc.clip_surface(uniform_surf, invert=False)
+    clip_invert = True if cs_method == "pyvista" else False
+    clipped_pcd = pc.clip_surface(uniform_surf, invert=clip_invert)
 
     return uniform_surf, clipped_pcd
