@@ -5,263 +5,69 @@ Todo:
 import os
 import time
 
+import anndata
 import numpy as np
+import scipy.io as sio
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from anndata import AnnData
 from numpy.random import normal
-from torch.autograd import Variable
+from torch import tensor
+
+from typing import Union, Tuple
+
+from .nn_losses import mse
 
 torch.manual_seed(0)
 device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 
-###########################################
-# THE HIGH-TO-LOW-DIMENSIONAL TRANSFORMER #
-###########################################
-
-
-class A(nn.Module):
-    def __init__(
-        self,
-        network_dim,
-        data_dim,
-        hidden_features=256,
-        hidden_layers=1,
-        activation_function=torch.nn.functional.leaky_relu,
-    ):
-
-        super(A, self).__init__()  # Call to the super-class is necessary
-
-        self.f = activation_function
-        self.name = "model/A"
-
-        self.layer1 = nn.Linear(data_dim, hidden_features)
-
-        self.net = []
-        for i in range(hidden_layers):
-            self.net.append(nn.Linear(hidden_features, hidden_features))
-
-        self.hidden_layers = nn.Sequential(*self.net)
-        self.outlayer = nn.Linear(256, network_dim)
-
-        # torch.nn.init.normal_(self.layer1.weight, std=.02)
-        # torch.nn.init.normal_(self.layer2.weight, std=.02)
-        # torch.nn.init.normal_(self.layer3.weight, std=.02)
-
-    def forward(self, inp):
-
-        out = self.f(self.layer1(inp), negative_slope=0.2)
-        out = self.f(self.hidden_layers(out), negative_slope=0.2)
-        out = self.outlayer(out)
-        return out
-
-
-###########################################
-# THE LOW-TO-HIGH-DIMENSIONAL TRANSFORMER #
-###########################################
-
-
-class B(nn.Module):
-    def __init__(
-        self,
-        network_dim,
-        data_dim,
-        hidden_features=256,
-        hidden_layers=3,
-        activation_function=torch.nn.functional.leaky_relu,
-    ):
-
-        super(B, self).__init__()  # Call to the super-class is necessary
-
-        self.f = activation_function
-        self.name = "model/B"
-
-        self.layer1 = nn.Linear(network_dim, hidden_features)
-
-        self.net = []
-        for i in range(hidden_layers):
-            self.net.append(nn.Linear(hidden_features, hidden_features))
-
-        self.hidden_layers = nn.Sequential(*self.net)
-        self.outlayer = nn.Linear(hidden_features, data_dim)
-
-        # torch.nn.init.normal_(self.layer1.weight, std=.02)
-        # torch.nn.init.normal_(self.layer2.weight, std=.02)
-        # torch.nn.init.normal_(self.layer3.weight, std=.02)
-
-    def forward(self, inp):
-
-        out = self.f(self.layer1(inp), negative_slope=0.2)
-        out = self.f(self.hidden_layers(out), negative_slope=0.2)
-        out = self.outlayer(out)
-        return out
-
-
-class SineLayer(nn.Module):
-    # from https://colab.research.google.com/github/vsitzmann/siren/blob/master/explore_siren.ipynb#scrollTo=uTQfrFvah3Zc
-    # See paper sec. 3.2, final paragraph, and supplement Sec. 1.5 for discussion of omega_0.
-
-    # If is_first=True, omega_0 is a frequency factor which simply multiplies the activations before the
-    # nonlinearity. Different signals may require different omega_0 in the first layer - this is a
-    # hyperparameter.
-
-    # If is_first=False, then the weights will be divided by omega_0 so as to keep the magnitude of
-    # activations constant, but boost gradients to the weight matrix (see supplement Sec. 1.5)
-    """
-    As discussed above, we aim to provide each sine nonlinearity with activations that are standard
-    normal distributed, except in the case of the first layer, where we introduced a factor ω0 that increased
-    the spatial frequency of the first layer to better match the frequency spectrum of the signal. However,
-    we found that the training of SIREN can be accelerated by leveraging a factor ω0 in all layers of the
-    SIREN, by factorizing the weight matrix W as W = Wˆ ∗ ω0, choosing.
-    This keeps the distribution of activations constant, but boosts gradients to the weight matrix Wˆ by
-    the factor ω0 while leaving gradients w.r.t. the input of the sine neuron unchanged
-    """
-
-    def __init__(self, in_features, out_features, bias=True, is_first=False, omega_0=30.0):
-        super().__init__()
-        self.omega_0 = omega_0
-        self.is_first = is_first
-
-        self.in_features = in_features
-        self.linear = nn.Linear(in_features, out_features, bias=bias)
-
-        self.init_weights()
-
-    def init_weights(self):
-        with torch.no_grad():
-            if self.is_first:
-                self.linear.weight.uniform_(-1 / self.in_features, 1 / self.in_features)
-            else:
-                self.linear.weight.uniform_(
-                    -np.sqrt(6 / self.in_features) / self.omega_0,
-                    np.sqrt(6 / self.in_features) / self.omega_0,
-                )
-
-    def forward(self, input):
-        return torch.sin(self.omega_0 * self.linear(input))
-
-    def forward_with_intermediate(self, input):
-        # For visualization of activation distributions
-        intermediate = self.omega_0 * self.linear(input)
-        return torch.sin(intermediate), intermediate
-
-
-class h(nn.Module):
-    def __init__(
-        self,
-        network_dim,
-        hidden_features=256,
-        hidden_layers=3,
-        sirens=False,
-        first_omega_0=30.0,
-        hidden_omega_0=30.0,
-    ):
-        self.sirens, self.first_omega_0, self.hidden_omega_0 = (
-            sirens,
-            first_omega_0,
-            hidden_omega_0,
-        )
-
-        super(h, self).__init__()  # Call to the super-class is necessary
-
-        self.f = torch.sin if self.sirens else torch.nn.functional.leaky_relu
-        self.name = "model/h"
-
-        self.layer1 = nn.Linear(network_dim, hidden_features)
-        if sirens:
-            torch.nn.init.uniform_(self.layer1.weight, -1 / network_dim, 1 / network_dim)
-        self.net = []
-        for i in range(hidden_layers):
-            if sirens:
-                self.net.append(
-                    SineLayer(
-                        hidden_features,
-                        hidden_features,
-                        is_first=False,
-                        omega_0=self.hidden_omega_0,
-                    )
-                )
-            else:
-                self.net.append(nn.Linear(hidden_features, hidden_features))
-
-        self.hidden_layers = nn.Sequential(*self.net)
-
-        self.outlayer = nn.Linear(hidden_features, network_dim)
-        if sirens:
-            torch.nn.init.uniform_(
-                self.outlayer.weight,
-                -np.sqrt(6 / hidden_features) / self.hidden_omega_0,
-                np.sqrt(6 / hidden_features) / self.hidden_omega_0,
-            )
-
-    def forward(self, inp):
-
-        out = (
-            self.f(self.first_omega_0 * self.layer1(inp))
-            if self.sirens
-            else self.f(self.layer1(inp), negative_slope=0.2)
-        )  # , negative_slope=0.2
-        out = self.hidden_layers(out) if self.sirens else self.f(self.hidden_layers(out), negative_slope=0.2)  #
-        out = self.outlayer(out)
-
-        return out
-
-
-class MainFlow(torch.nn.Module):
-    def __init__(self, h, A=None, B=None, enforce_positivity=False):
-
-        super(MainFlow, self).__init__()
-
-        self.A = A
-        self.B = B
-        self.h = h
-        self.enforce_positivity = enforce_positivity
-
-    def forward(self, t, x, freeze=None):
-
-        x_low = self.A(x) if self.A is not None else x
-        e_low = self.h.forward(x_low)
-        e_hat = self.B(e_low) if self.B is not None else e_low
-
-        if freeze is not None:
-            for i in freeze:
-                if len(e_hat.shape) == 1:
-                    e_hat[i] = 0
-                elif len(e_hat.shape) == 2:
-                    e_hat[:, i] = 0
-                else:
-                    raise ValueError("Invalid output data shape. Please debug.")
-
-        # forcing the x to remain positive: set velocity to 0 if x<=0 and v<0
-        if self.enforce_positivity:
-            e_hat *= ~(e_hat < 0)  # ~((x <= 0) * (v_hat < 0))
-
-        return e_hat
-
-
-class deep_interpolation:
+class DeepInterpolation:
     def __init__(
         self,
         model,
-        sirens,
-        enforce_positivity,
-        velocity_data_sampler,
-        network_dim,
-        velocity_loss_function,
-        velocity_x_initialize,
-        smoothing_factor,
-        stability_factor,
-        load_model_from_buffer,
-        buffer_path,
-        hidden_features=256,
-        hidden_layers=3,
-        first_omega_0=30.0,
-        hidden_omega_0=30.0,
-        *args,
-        **kwargs
+        data_sampler: object,
+        sirens: bool = False,
+        enforce_positivity: bool = True,
+        network_dim: Union[int, None] = None,
+        loss_function: Union[int, None] = mse(),
+        smoothing_factor: Union[float, None] = True,
+        stability_factor: Union[float, None] = True,
+        load_model_from_buffer: bool = False,
+        buffer_path: str = "model_buffer/",
+        hidden_features: int = 256,
+        hidden_layers: int = 3,
+        first_omega_0: float = 30.0,
+        hidden_omega_0: float = 30.0,
+        **kwargs,
     ):
+        """The DeepInterpolation class. Code originally written for dynode (by Arman Rahimzamani), adapted by Xiaojie
+        Qiu for building 3d continous models from discrete 3d points cloud.
+
+        Args:
+            model: Imported Python module
+               Contains A, B, h and MainFlow blocks. Default is interpolation_nn.py
+            sirens: Whether to use the sinusoidal representation network (SIRENs).
+            enforce_positivity: Enforce the positivity of the dynamics when training the networks
+            data_sampler: Data Sampler Object.
+            network_dim: The dimension of the lower-dimensional space of dynamics h. Must be no greater than the
+                training data's dimensions.
+            loss_function: The PyTorch-compatible module calculating the differentiable loss function for training by
+                the data upon calling.
+            smoothing_factor: The coefficient of the Lipschitz smoothness regularization term (added to the loss
+                function).
+            stability_factor: The coefficient of the Lyapunov stability regularization term (added to the loss function)
+            load_model_from_buffer: Whether load the A, B and h module from the saved buffer, or create and initialize
+                fresh copies to train.
+            buffer_path: The directory address keeping all the saved/to-be-saved torch variables and NN modules.
+            hidden_features: The dimension of the hidden layers.
+            hidden_layers: The number of total hidden layers.
+            first_omega_0: The omega for the first layer used in the SIRENs.
+            hidden_omega_0: The omega for the hidden layer used in the SIRENs.
+            **kwargs: Additional keyword parameters. Currently not used.
+        """
 
         try:
             os.makedirs(buffer_path)
@@ -277,44 +83,35 @@ class deep_interpolation:
         #         raise
 
         self.buffer_path = buffer_path
-        self.network_dim = network_dim
         self.smoothing_factor = smoothing_factor
         self.stability_factor = stability_factor
-        self.velocity_loss_function = velocity_loss_function
-        self.velocity_loss_traj = []
+        self.loss_function = loss_function
+        self.loss_traj = []
         self.autoencoder_loss_traj = []
 
         ############
         # SAMPLERS #
         ############
 
-        self.velocity_data_sampler = velocity_data_sampler
+        self.data_sampler = data_sampler
 
-        self.velocity_normalization_factor = self.velocity_data_sampler.normalization_factor
-        self.data_dim = self.velocity_data_sampler.data_dim
+        self.normalization_factor = self.data_sampler.normalization_factor
+        self.data_dim = self.data_sampler.data_dim
+
+        self.network_dim = self.data_sampler.data_dim if network_dim is None else network_dim
 
         assert network_dim <= self.data_dim, "Network dimension must be no greater than the data dimension."
-
-        ###########################
-        # VARIABLE INITIALIZATION #
-        ###########################
-
-        # Initialize X variable for velocity data
-        if velocity_data_sampler is not None:
-            if velocity_x_initialize == "load_from_buffer":
-                self.velocity_x_variable = torch.load(self.buffer_path + "velocity_x_variable")
-            else:
-                self.velocity_x_variable = Variable(torch.tensor(velocity_x_initialize).double(), requires_grad=True)
 
         ######################
         # NEURAL NET MODULES #
         ######################
 
         if load_model_from_buffer is True:  # restore the saved model
-            self.h = torch.load(self.buffer_path + "/h")
             if self.network_dim < self.data_dim:
-                self.A = torch.load(self.buffer_path + "/A")
-                self.B = torch.load(self.buffer_path + "/B")
+                self.h, self.A, self.B = self.load()
+            else:
+                self.h = self.load()
+
         else:  # create fresh modules to be trained
             self.h = model.h(
                 network_dim=network_dim,
@@ -337,7 +134,7 @@ class deep_interpolation:
 
         #########################################################
         # DEFINE HIGH-TO-LOW AND LOW-TO-HIGH INTERMEDIATE FLOWS #
-        ####################################################################################################################
+        #########################################################
 
     def high2low(self, high_batch):
         if self.network_dim < self.data_dim:
@@ -351,27 +148,37 @@ class deep_interpolation:
         else:
             return low_batch
 
-    def predict_expression(self, input_x=None, to_numpy=True):
-        input_x = self.velocity_data_sampler.data["X"] if input_x is None else input_x
+    def predict(self, input_x=None, to_numpy=True):
+        input_x = self.data_sampler.data["X"] if input_x is None else input_x
 
-        res = (
-            self.main_flow_func.forward(t=None, x=torch.tensor(input_x).double()).detach()
-            / self.velocity_normalization_factor
-        )
+        res = self.main_flow_func.forward(t=None, x=torch.tensor(input_x).double()).detach() / self.normalization_factor
 
         return res.numpy() if to_numpy else res
 
     def train(
         self,
-        max_iter,
-        velocity_batch_size,
-        autoencoder_batch_size,
-        velocity_lr,
-        velocity_x_lr,
-        autoencoder_lr,
-        velocity_sample_fraction=1,
-        iter_per_sample_update=None,
+        max_iter: int,
+        data_batch_size: int,
+        autoencoder_batch_size: int,
+        data_lr: float,
+        autoencoder_lr: float,
+        sample_fraction: float = 1,
+        iter_per_sample_update: Union[int, None] = None,
     ):
+        """The training method for the DeepInterpolation model object
+
+        Args:
+            max_iter: The maximum iteration the network will be trained.
+            data_batch_size: The size of the data sample batches to be generated in each iteration.
+            autoencoder_batch_size: The size of the auto-encoder training batches to be generated in each iteration.
+                Must be no greater than batch_size. .
+            data_lr: The learning rate for network training.
+            autoencoder_lr: The learning rate for network training the auto-encoder. Will have no effect if network_dim
+                equal data_dim.
+            sample_fraction: The best sample fraction to be filtered out of the velocity samples.
+            iter_per_sample_update: The frequency of updating the subset of best samples (in terms of per iterations).
+                Will have no effect if velocity_sample_fraction and time_course_sample_fraction are set to 1.
+        """
 
         ############################
         ## SETTING THE OPTIMIZERS ##
@@ -381,9 +188,9 @@ class deep_interpolation:
 
         if self.network_dim < self.data_dim:
 
-            self.velocity_optimizer = optim.Adam(
+            self.optimizer = optim.Adam(
                 list(self.A.parameters()) + list(self.h.parameters()) + list(self.B.parameters()),
-                lr=velocity_lr,
+                lr=data_lr,
                 betas=(0.5, 0.9),
                 weight_decay=2.5e-5,
                 amsgrad=True,
@@ -398,15 +205,9 @@ class deep_interpolation:
             )
 
         else:
-            self.velocity_optimizer = optim.Adam(
-                self.h.parameters(), lr=velocity_lr, betas=(0.5, 0.9), weight_decay=2.5e-5, amsgrad=True
+            self.optimizer = optim.Adam(
+                self.h.parameters(), lr=data_lr, betas=(0.5, 0.9), weight_decay=2.5e-5, amsgrad=True
             )
-
-        # The optimizers of velocity X and time course X0 variables
-        if hasattr(self, "velocity_x_variable"):
-            self.velocity_x_optimizer = optim.SGD([self.velocity_x_variable], lr=velocity_x_lr)
-            # Setting Previous Velocity loss for adaptive learning rate
-            previous_velocity_loss = np.inf
 
         ##############
         ## TRAINING ##
@@ -415,66 +216,54 @@ class deep_interpolation:
         start_time = time.time()
 
         # Start with all the samples included
-        velocity_sample_subset_indx = "all"
-        time_course_sample_subset_indx = "all"
+        sample_subset_indx = "all"
 
         # LET'S TRAIN!!
         for iter in range(max_iter):
 
             ###############################
-            ### MAIN FLOW VELOCITY PASS ###
+            ### MAIN FLOW PASS ###
             ###############################
 
-            if self.velocity_data_sampler is not None:
+            if self.data_sampler is not None:
 
                 # Set the gradients to zero
                 self.h.zero_grad()
-                self.velocity_x_variable.grad = torch.zeros(self.velocity_x_variable.shape)
                 if self.network_dim < self.data_dim:
                     self.A.zero_grad(), self.B.zero_grad()
 
                 # Generate Data Batches
-                indx, velocity_y_batch, v_batch, weight = self.velocity_data_sampler.generate_batch(
-                    batch_size=velocity_batch_size, sample_subset_indx=velocity_sample_subset_indx
+                indx, input_batch, output_batch, weight = self.data_sampler.generate_batch(
+                    batch_size=data_batch_size, sample_subset_indx=sample_subset_indx
                 )
-                velocity_x_batch_noised = self.velocity_x_variable[indx] + torch.tensor(
-                    normal(loc=0, scale=0.1, size=velocity_y_batch.shape)
-                )
+                input_batch_noised = input_batch + torch.tensor(normal(loc=0, scale=0.1, size=input_batch.shape))
 
                 # Forward Pass over the main flow
-                v_hat_batch = self.main_flow_func.forward(t=None, x=self.velocity_x_variable[indx])
+                v_hat_batch = self.main_flow_func.forward(t=None, x=input_batch)
 
                 # Forward Pass again, this time for smoothing
-                v_hat_batch_noised = self.main_flow_func.forward(t=None, x=velocity_x_batch_noised)
+                v_hat_batch_noised = self.main_flow_func.forward(t=None, x=input_batch_noised)
 
                 # Calculate the loss value
-                weight_subset = None if weight is None else weight[indx]
-                velocity_loss_value = self.velocity_loss_function(
-                    v_hat_batch, v_batch, weight
-                ) + self.velocity_loss_function(self.velocity_x_variable[indx], velocity_y_batch, weight_subset)
+                loss_value = self.loss_function(v_hat_batch, output_batch, weight)
 
                 if self.smoothing_factor is not None:  # Adding Lipschitz smoothness regularizer term
-                    velocity_loss_value += self.smoothing_factor * torch.nn.functional.mse_loss(
+                    loss_value += self.smoothing_factor * torch.nn.functional.mse_loss(
                         v_hat_batch, v_hat_batch_noised, reduction="mean"
                     )
 
                 if self.stability_factor is not None:  # Adding Lyapunov stability regularizer term
-                    velocity_loss_value += self.stability_factor * torch.mean(
-                        torch.sum(torch.mul(self.velocity_x_variable[indx], v_hat_batch), dim=1)
+                    loss_value += self.stability_factor * torch.mean(
+                        torch.sum(torch.mul(input_batch, v_hat_batch), dim=1)
                     )
 
                 # Backward Pass over the main flow
-                velocity_loss_value.backward()  # Compute the gradients, but don't apply them yet
+                loss_value.backward()  # Compute the gradients, but don't apply them yet
                 # Now take an optimization step over main flow's parameters and velocity X variable
-                self.velocity_optimizer.step()
-                self.velocity_x_optimizer.step()
+                self.optimizer.step()
 
             else:
-                velocity_loss_value = np.nan
-
-            ###############################################
-            ### MAIN FLOW TIME-COURSE PASS (NEURAL ODE) ###
-            ###############################################
+                loss_value = np.nan
 
             #########################
             ### AUTO-ENCODER PASS ###
@@ -488,8 +277,8 @@ class deep_interpolation:
                 # Generate Data Batches
                 ae_input_batch = torch.empty(0)
 
-                if self.velocity_data_sampler is not None:
-                    ae_input_batch = torch.cat([ae_input_batch, velocity_y_batch, v_batch])
+                if self.data_sampler is not None:
+                    ae_input_batch = torch.cat([ae_input_batch, input_batch, output_batch])
 
                 if autoencoder_batch_size != "all":
                     ae_input_batch = ae_input_batch[
@@ -511,57 +300,190 @@ class deep_interpolation:
             else:
                 autoencoder_loss_value = np.nan
 
-            self.velocity_loss_traj.append(velocity_loss_value)
+            self.loss_traj.append(loss_value)
             self.autoencoder_loss_traj.append(autoencoder_loss_value)
 
             ################################################################
             # Demonstrate the training progress and save the trained model #
             ################################################################
-            if (iter + 1) % 10 == 0:
-                # Update the learning rate for velocity X
-                if hasattr(self, "velocity_x_variable") and velocity_loss_value > previous_velocity_loss:
-                    print("Saturation detected for velocity. Reducing the X learning rate...")
-                    velocity_x_lr *= 0.1
-                    self.velocity_x_optimizer = optim.SGD([self.velocity_x_variable], lr=velocity_x_lr)
-
-                previous_velocity_loss = velocity_loss_value
 
             # LET'S SAVE THE MODEL AFTER TRAINING
             if (iter + 1) % 100 == 0:
+                print(
+                    "Iter [%8d] Time [%5.4f] regression loss [%.4f] autoencoder loss [%.4f]"
+                    % (iter + 1, time.time() - start_time, loss_value, autoencoder_loss_value)
+                )
+
                 if self.network_dim < self.data_dim:
                     torch.save(self.A, self.buffer_path + "/A")
                     torch.save(self.B, self.buffer_path + "/B")
                 torch.save(self.h, self.buffer_path + "/h")
-                if hasattr(self, "time_course_x0_variable"):
-                    torch.save(self.time_course_x0_variable, self.buffer_path + "/time_course_x0_variable")
-                if hasattr(self, "velocity_x_variable"):
-                    torch.save(self.velocity_x_variable, self.buffer_path + "/velocity_x_variable")
+
+                self.save()
 
                 print("Model saved in path: %s" % self.buffer_path)
 
             #####################################
             # Update the subset of best samples #
             #####################################
-            if velocity_sample_fraction < 1 and (iter + 1) % iter_per_sample_update == 0:
-
+            if sample_fraction < 1 and (iter + 1) % iter_per_sample_update == 0:
                 # Taking the best subset of velocity samples
-                _, _, v = self.velocity_data_sampler.generate_batch(batch_size="all", sample_subset_indx="all")
-                v_hat = self.predict_velocity(self.velocity_x_variable.data)
-                velocity_sample_subset_indx = subset_best_samples(
-                    velocity_sample_fraction, v_hat, v, self.velocity_loss_function
-                )
+                _, _, v = self.data_sampler.generate_batch(batch_size="all", sample_subset_indx="all")
+                v_hat = self.predict(input_batch)
+                sample_subset_indx = subset_best_samples(sample_fraction, v_hat, v, self.loss_function)
 
-    def save(self, save_path):
-        torch.save(self.model.state_dict(), save_path)
+    def save(self):
+        if self.network_dim < self.data_dim:
+            torch.save(self.A, self.buffer_path + "/A")
+            torch.save(self.B, self.buffer_path + "/B")
+        torch.save(self.h, self.buffer_path + "/h")
 
-    def load(self, load_path):
-        self.model.load_state_dict(torch.load(load_path, map_location=device))
-        # self.model.eval()
+    def load(self):
+        h = torch.load(self.buffer_path + "/h")
+        if self.network_dim < self.data_dim:
+            A = torch.load(self.buffer_path + "/A")
+            B = torch.load(self.buffer_path + "/B")
+
+            return h, A, B
+        else:
+            return h
 
 
 def subset_best_samples(best_sample_fraction, y_hat, y, loss_func):
-
     assert y_hat.shape == y.shape, "The shape of the two arrays y_hat and y must be the same."
     diff = [loss_func(y_hat[i], y[i]) for i in range(y.shape[0])]
 
     return np.argsort(diff)[: int(best_sample_fraction * y.shape[0])]
+
+
+class DataSampler(object):
+    """This module loads and retains the data pairs (X, Y) and delivers the batches of them to the DeepInterpolation
+    module upon calling. The module can load tha data from a .mat file. The file must contain two 2D matrices X and Y
+    with equal rows.
+
+    X: The spatial coordinates of each cell / binning / segmentation.
+    Y: The expression values at the corresponding coordinates X.
+    """
+
+    def __init__(
+        self,
+        path_to_data: Union[str, None] = None,
+        data: Union[AnnData, dict, None] = None,
+        skey: str = "spatial",
+        ekey: str = "M_s",
+        wkey: Union[str, None] = None,
+        normalize_data: bool = False,
+        number_of_random_samples: str = "all",
+        weighted: bool = False,
+    ):
+        """The initialization of the sampler for the expression data
+
+        Args:
+            path_to_data: A string that points to the file that stores the spatial coordinates and corresponding gene
+                expression.
+            data: If adata is an anndata.AnnData object, it must contain expression (embedding) / velocity information.
+                If it is a dictionary, it must have the `X` and `Y` keys.
+            skey: The key in .obsm that stores the spatial coordinates.
+            ekey: adata.X or The key in .layers that stores the gene expression for each cell / segmentation / bin
+            wkey: The key in .obs that stores the weight for each sample.
+            normalize_data: Whether normalize the Y vectors upon loading by the data sampler.
+            number_of_random_samples: The number of random samples loaded upfront from the box. If set to "all", all
+                samples will be kept.
+        """
+
+        if path_to_data is None:
+            weight = None
+            self.data = {"X": None, "Y": None}
+
+            if type(data) is anndata._core.anndata.AnnData:
+                X, Y = data.obsm[skey], data.X if ekey == "X" else data.layers[ekey]
+                if wkey:
+                    weight = data.obs[wkey]
+
+            elif type(data) is dict and ("X" in data.keys() and "Y" in data.keys()):
+                X, Y = data["X"], data["Y"]
+
+                if wkey in data.keys():
+                    weight = data[wkey]
+            else:
+                raise ValueError(
+                    f"data can be either an anndata object or a dictionary that has the `X` key and " f"the `Y` key"
+                )
+
+            good_ind = np.where(~np.isnan(Y.sum(1)))[0]
+            X = X[good_ind, :]
+            Y = Y[good_ind, :]
+
+            self.data["X"], self.data["Y"] = X, Y
+
+            if weight is not None:
+                self.data["weight"] = weight
+        else:
+            self.data = sio.loadmat(path_to_data, appendmat=False)
+
+        assert self.data["X"].shape[0] == self.data["Y"].shape[0], "The X and Y must have the same rows / cells."
+
+        if number_of_random_samples == "all":  # If you choose to keep all the loaded samples
+            self.X = self.data["X"]
+            self.Y = self.data["Y"]
+        else:  # Otherwise, it will keep a random subset of samples with the size given by "number_of_random_samples"
+            indices = np.random.choice(range(self.data["X"].shape[0]), size=number_of_random_samples, repalce=False)
+            self.X = self.data["X"][indices, :]
+            self.Y = self.data["Y"][indices, :]
+
+        self.train_size, self.data_dim = self.X.shape
+
+        # Normalization factor for the data
+        if normalize_data is True:
+            self.normalization_factor = 1.0 / max(np.linalg.norm(self.Y, axis=1))
+            self.Y *= self.normalization_factor
+        else:
+            self.normalization_factor = 1.0
+
+        if weighted:
+            self.weighted = True
+            if "weight" in self.data.keys():
+                self.weight = self.data["weight"] if number_of_random_samples == "all" else self.data["weight"][indices]
+            else:
+                raise ValueError(f"When `weighted` is set to be True, your data has to have the `weight` key!")
+        else:
+            self.weighted = False
+
+    def generate_batch(self, batch_size: int, sample_subset_indices: str = "all"):
+        """Generate random batches of the given size "batch_size" from the (X, Y) sample pairs.
+
+        Args:
+            batch_size: If the batch_size is set to "all",  all the samples will be returned.
+            sample_subset_indices: This argument is used when you want to further subset the samples (based on the
+                factors such as quality of the samples). If set to "all", it means it won't filter out samples based on
+                their qualities.
+        """
+
+        if sample_subset_indices == "all":
+            sample_subset_indices = range(self.train_size)
+
+        if batch_size == "all":
+            if self.weighted:
+                return (
+                    sample_subset_indices,
+                    tensor(self.X[sample_subset_indices, :]).double(),
+                    tensor(self.Y[sample_subset_indices, :]).double(),
+                    self.weight[sample_subset_indices],
+                )
+            else:
+                return (
+                    sample_subset_indices,
+                    tensor(self.X[sample_subset_indices, :]).double(),
+                    tensor(self.Y[sample_subset_indices, :]).double(),
+                )
+        else:
+            indices = np.random.choice(sample_subset_indices, size=batch_size, replace=False)
+            if self.weighted:
+                return (
+                    indices,
+                    tensor(self.X[indices, :]).double(),
+                    tensor(self.Y[indices, :]).double(),
+                    self.weight[indices],
+                )
+            else:
+                return indices, tensor(self.X[indices, :]).double(), tensor(self.Y[indices, :]).double(), None
