@@ -1,5 +1,4 @@
 import pyvista as pv
-
 from pyvista import Plotter
 
 try:

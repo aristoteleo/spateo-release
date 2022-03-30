@@ -1,11 +1,11 @@
+from typing import Optional, Union
+
 import numpy as np
 import pyvista as pv
+from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
-from pyvista import PolyData, UnstructuredGrid, MultiBlock
-from typing import Union, Optional
-
-from .utils import _interactive_plotter
 from ..mesh.utils import collect_mesh, multiblock2mesh
+from .utils import _interactive_plotter
 
 
 def three_d_pick(

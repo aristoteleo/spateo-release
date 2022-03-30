@@ -1,11 +1,10 @@
 import warnings
+from typing import List, Optional, Union
 
 import matplotlib as mpl
 import numpy as np
 import pyvista as pv
-
-from pyvista import PolyData, UnstructuredGrid, MultiBlock
-from typing import Optional, List, Union
+from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
 try:
     from typing import Literal

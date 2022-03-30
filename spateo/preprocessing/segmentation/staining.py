@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 
+import time
+from typing import Tuple, Union
+
 import cv2
 import lack
 import numpy as np
-import time
-
 from csbdeep.utils import normalize
 from stardist.models import StarDist2D  # this may need to move to the beginning
-from typing import Union, Tuple
 
 slog = lack.LoggerManager(namespace="spateo")
 

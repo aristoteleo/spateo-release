@@ -1,8 +1,8 @@
+from typing import Optional, Union
+
 import numpy as np
 import pyvista as pv
-
 from pyvista import PolyData, UnstructuredGrid
-from typing import Optional, Union
 
 from .utils import add_mesh_labels
 

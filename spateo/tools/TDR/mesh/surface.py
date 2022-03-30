@@ -1,13 +1,13 @@
+from typing import List, Optional, Tuple
+
 import mcubes
 import numpy as np
 import open3d as o3d
 import pyacvd
 import pymeshfix as mf
 import pyvista as pv
-
 from open3d import geometry
 from pyvista import PolyData
-from typing import Optional, Tuple, List
 
 try:
     from typing import Literal

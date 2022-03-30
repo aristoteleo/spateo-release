@@ -4,6 +4,8 @@ Todo:
 """
 import os
 import time
+from types import ModuleType
+from typing import Callable, Union
 
 import anndata
 import numpy as np
@@ -11,13 +13,9 @@ import scipy.io as sio
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 from anndata import AnnData
 from numpy.random import normal
 from torch import tensor
-
-from typing import Union, Callable
-from types import ModuleType
 
 from .nn_losses import weighted_mse
 

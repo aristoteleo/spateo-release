@@ -1,12 +1,12 @@
-import numpy as np
-import vtk
-
-from pyvista import PolyData, UnstructuredGrid, MultiBlock
 from typing import Union
 
+import numpy as np
+import vtk
+from pyvista import MultiBlock, PolyData, UnstructuredGrid
+
+from ..mesh.utils import collect_mesh, multiblock2mesh
 from .pick import _interactive_pick
 from .utils import _interactive_plotter
-from ..mesh.utils import collect_mesh, multiblock2mesh
 
 
 def _interactive_rectangle_clip(

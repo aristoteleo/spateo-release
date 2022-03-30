@@ -1,11 +1,11 @@
-import numpy as np
-import pyvista as pv
-import PVGeo
+from typing import Union
 
+import numpy as np
+import PVGeo
+import pyvista as pv
 from anndata import AnnData
 from pandas.core.frame import DataFrame
 from pyvista import PolyData, UnstructuredGrid
-from typing import Union
 
 from .utils import add_mesh_labels
 
