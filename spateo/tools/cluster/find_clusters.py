@@ -1,17 +1,21 @@
 import random
 from typing import Optional, Tuple
 
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
+
 import anndata
 import cv2
-import numpy as np
-import pandas as pd
-import torch
 
-from ..preprocessing.filter import filter_cells, filter_genes
-from .find_clusters_utils import *
+from spateo.preprocessing.filter import filter_cells, filter_genes
+
+from .spagcn_utils import *
+from .utils import compute_pca_components, harmony_debatch, spatial_adj_dyn
 
 
-def find_cluster_spagcn(
+def spagcn_pyg(
     adata: anndata.AnnData,
     n_clusters: int,
     p: float = 0.5,
@@ -170,48 +174,90 @@ def find_cluster_spagcn(
     return None
 
 
-def find_cluster_scc(
+def scc(
     adata: anndata.AnnData,
+    min_genes: int = 500,
     min_cells: int = 100,
     spatial_key: str = "spatial",
+    key_added: Optional[str] = "leiden",
+    n_pca_components: Optional[int] = None,
     e_neigh: int = 30,
     s_neigh: int = 6,
+    cluster_method: Literal["leiden", "louvain"] = "leiden",
     resolution: Optional[float] = None,
+    debatch: bool = False,
+    batch_key: Optional[str] = "slice",
+    max_iter_harmony: int = 10,
     copy: bool = False,
 ) -> Optional[anndata.AnnData]:
     """Spatially constrained clustering (scc) to identify continuous tissue domains.
 
     Args:
         adata: an Anndata object, after normalization.
-        min_cells: minimal number of cells the gene expressed.
+        min_genes: a minimal number of genes a valid cell should express.
+        min_cells: a minimal number of cells a valid gene should express.
         spatial_key: the key in `.obsm` that corresponds to the spatial coordinate of each bucket.
+        key_added: adata.obs key under which to add the cluster labels.
+        n_pca_components: Number of principal components to compute.
+                          If `n_pca_components` == None, the value at the inflection point of the PCA curve is
+                          automatically calculated as n_comps.
         e_neigh: the number of nearest neighbor in gene expression space.
         s_neigh: the number of nearest neighbor in physical space.
-        resolution: the resolution parameter of the leiden clustering algorithm.
+        cluster_method: the method that will be used to cluster the cells.
+        resolution: the resolution parameter of the louvain clustering algorithm.
+        debatch: Whether to remove batch effects. This function is used in integrated analysis with multiple batches.
+        batch_key: The name of the column in ``adata.obs`` that differentiates among experiments/batches.
+                   Used when `debatch`== True.
+        max_iter_harmony: Maximum number of rounds to run Harmony. One round of Harmony involves one clustering and one
+            correction step. Used when `debatch`== True.
         copy: Whether to return a new deep copy of `adata` instead of updating `adata` object passed in arguments.
             Defaults to False.
 
     Returns:
-        Depends on the argument `copy` return either an `~anndata.AnnData` object with cluster info in "scc_e_{a}_s{b}"
+        Depends on the argument `copy`, return either an `~anndata.AnnData` object with cluster info in "scc_e_{a}_s{b}"
         or None.
     """
 
     import dynamo as dyn
 
+    filter_cells(adata, min_expr_genes=min_genes)
     filter_genes(adata, min_cells=min_cells)
     adata.uns["pp"] = {}
     dyn.pp.normalize_cell_expr_by_size_factors(adata, layers="X")
     dyn.pp.log1p(adata)
-    dyn.pp.pca_monocle(adata, n_pca_components=30, pca_key="X_pca")
 
-    dyn.tl.neighbors(adata, n_neighbors=e_neigh)
-    dyn.tl.neighbors(adata, n_neighbors=s_neigh, basis=spatial_key, result_prefix="spatial")
-    conn = adata.obsp["connectivities"].copy()
-    conn.data[conn.data > 0] = 1
-    adj = conn + adata.obsp["spatial_connectivities"]
-    adj.data[adj.data > 0] = 1
-    dyn.tl.leiden(adata, adj_matrix=adj, resolution=resolution, result_key="scc_e" + str(e_neigh) + "_s" + str(s_neigh))
+    if n_pca_components is None:
+        pcs, n_pca_components, _ = compute_pca_components(adata.X, save_curve_img=None)
 
-    if copy:
-        return adata
-    return None
+    pca_key = "X_pca"
+    adata.obsm[pca_key] = pcs[:, :n_pca_components]
+
+    # Remove batch effects.
+    if debatch is True:
+        harmony_debatch(
+            adata,
+            batch_key,
+            basis="X_pca",
+            adjusted_basis="X_pca_harmony",
+            max_iter_harmony=max_iter_harmony,
+        )
+        pca_key = "X_pca_harmony"
+
+    # Calculate the adjacent matrix.
+    adj = spatial_adj_dyn(
+        adata=adata,
+        spatial_key=spatial_key,
+        pca_key=pca_key,
+        e_neigh=e_neigh,
+        s_neigh=s_neigh,
+    )
+
+    # Perform clustering.
+    if cluster_method is "leiden":
+        # Leiden clustering.
+        dyn.tl.leiden(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
+    elif cluster_method is "louvain":
+        # Louvain clustering.
+        dyn.tl.louvain(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
+
+    return adata if copy else None

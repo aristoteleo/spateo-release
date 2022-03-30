@@ -1,12 +1,11 @@
-import numpy as np
-import matplotlib.pyplot as plt
+from typing import List, Optional, Tuple, Union
 
+import numpy as np
 from anndata import AnnData
 from kneed import KneeLocator
-from scipy.sparse import isspmatrix, csr_matrix, spmatrix
+from scipy.sparse import csr_matrix, isspmatrix, spmatrix
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
-from typing import Optional, Tuple, List, Union
 
 # Convert sparse matrix to dense matrix.
 to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else X
@@ -31,7 +30,7 @@ def compute_pca_components(
 
     # Principal component analysis (PCA).
     pca = PCA(n_components=None)
-    pca.fit_transform(matrix)
+    pcs = pca.fit_transform(matrix)
 
     # Percentage of variance explained by each of the selected components.
     # If n_components is not set then all components are stored and the sum of the ratios is equal to 1.0.
@@ -45,11 +44,13 @@ def compute_pca_components(
 
     # Whether to save the image of PCA curve and inflection point.
     if save_curve_img is not None:
+        import matplotlib.pyplot as plt
+
         kl.plot_knee()
         plt.tight_layout()
         plt.savefig(save_curve_img, dpi=100)
 
-    return new_n_components, new_components_stored
+    return pcs, new_n_components, new_components_stored
 
 
 def sctransform(
@@ -92,9 +93,10 @@ def sctransform(
     Returns:
          Updates adata with the field ``adata.layers["raw_X"]``, containing raw expression matrix for n_top_genes(highly variable genes).
     """
+    import matplotlib.pyplot as plt
 
     try:
-        from pysctransform import vst, SCTransform
+        from pysctransform import SCTransform, vst
         from pysctransform.plotting import plot_fit, plot_residual_var
     except ImportError:
         raise ImportError(
@@ -142,14 +144,15 @@ def integrate(
     adatas: List[AnnData],
     batch_key: str = "slice",
 ) -> AnnData:
-    """
+    """Concatenate multiple different anndata objects.
 
     Args:
         adatas: AnnData matrices to concatenate with.
         batch_key: Add the batch annotation to :attr:`obs` using this key.
 
     Returns:
-        integrated_adata: The concatenated AnnData, where adata.obs[batch_key] stores a categorical variable labeling the batch.
+        integrated_adata: The concatenated AnnData, where adata.obs[batch_key] stores a categorical variable labeling
+            the batch.
     """
     batch_ca = [adata.obs[batch_key][0] for adata in adatas]
     integrated_adata = adatas[0].concatenate(adatas[1:], batch_key=batch_key, batch_categories=batch_ca, join="outer")
@@ -174,12 +177,15 @@ def harmony_debatch(
         adata: An Anndata object.
         key: The name of the column in ``adata.obs`` that differentiates among experiments/batches.
         basis: The name of the field in ``adata.obsm`` where the PCA table is stored.
-        adjusted_basis: The name of the field in ``adata.obsm`` where the adjusted PCAbtable will be stored after running this function.
-        max_iter_harmony: Maximum number of rounds to run Harmony. One round of Harmony involves one clustering and one correction step.
+        adjusted_basis: The name of the field in ``adata.obsm`` where the adjusted PCA table will be stored after
+            running this function.
+        max_iter_harmony: Maximum number of rounds to run Harmony. One round of Harmony involves one clustering and one
+            correction step.
         copy: Whether to copy `adata` or modify it inplace.
 
     Returns:
-        Updates adata with the field ``adata.obsm[adjusted_basis]``, containing principal components adjusted by Harmony.
+        Updates adata with the field ``adata.obsm[adjusted_basis]``, containing principal components adjusted by
+        Harmony.
     """
     try:
         import harmonypy
@@ -235,3 +241,30 @@ def ecp_silhouette(
         >>> silhouette_score(matrix=adata.obsm["X_pca"], cluster_labels=adata.obs["leiden"].values)
     """
     return silhouette_score(matrix, cluster_labels, metric="euclidean")
+
+
+def spatial_adj_dyn(
+    adata: AnnData,
+    spatial_key: str = "spatial",
+    pca_key: str = "X_pca",
+    e_neigh: int = 30,
+    s_neigh: int = 6,
+):
+    """
+    Calculate the adjacent matrix based on a neighborhood graph of gene expression space
+    and a neighborhood graph of physical space.
+    """
+    import dynamo as dyn
+
+    # Compute a neighborhood graph of gene expression space.
+    dyn.tl.neighbors(adata, n_neighbors=e_neigh, basis=pca_key)
+
+    # Compute a neighborhood graph of physical space.
+    dyn.tl.neighbors(adata, n_neighbors=s_neigh, basis=spatial_key, result_prefix="spatial")
+
+    # Calculate the adjacent matrix.
+    conn = adata.obsp["connectivities"].copy()
+    conn.data[conn.data > 0] = 1
+    adj = conn + adata.obsp["spatial_connectivities"]
+    adj.data[adj.data > 0] = 1
+    return adj

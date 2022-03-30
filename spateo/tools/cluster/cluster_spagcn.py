@@ -1,11 +1,9 @@
 import random
+from typing import Optional
 
 import numpy as np
-import SpaGCN as spg
 import torch
-
 from anndata import AnnData
-from typing import Optional
 
 try:
     from typing import Literal
@@ -15,7 +13,7 @@ except ImportError:
 from .utils import compute_pca_components
 
 
-def cluster_spagcn(
+def spagcn_vanilla(
     adata: AnnData,
     spatial_key: str = "spatial",
     key_added: Optional[str] = "spagcn_pred",
@@ -42,21 +40,28 @@ def cluster_spagcn(
         n_pca_components: Number of principal components to compute.
                           If `n_pca_components` == None, the value at the inflection point of the PCA curve is
                           automatically calculated as n_comps.
-        e_neigh: Number of nearest neighbor in gene expression space.Used in sc.pp.neighbors(adata, n_neighbors=e_neigh).
-        resolution: Resolution in the Louvain's Clustering method. Used when `n_clusters`==None.
+        e_neigh: Number of nearest neighbor in gene expression space.
+            Used in dyn.pp.neighbors(adata, n_neighbors=e_neigh).
+        resolution: Resolution in the Louvain clustering method. Used when `n_clusters`==None.
         n_clusters: Number of spatial domains wanted.
-                    If `n_clusters` != None, the suitable resolution in the initial Louvain's
-                    Clustering methods will be automatically searched based on n_clusters.
-        refine_shape: Smooth the spatial domains with given spatial topology, "hexagon" for Visium data, "square" for ST data. Defaults to None.
+                    If `n_clusters` != None, the suitable resolution in the initial Louvain clustering method
+                    will be automatically searched based on n_clusters.
+        refine_shape: Smooth the spatial domains with given spatial topology, "hexagon" for Visium data, "square" for ST
+            data. Defaults to None.
         p: Percentage of total expression contributed by neighborhoods.
         seed: Global seed for `random`, `torch`, `numpy`. Defaults to 100.
         numIterMaxSpa: SpaGCN maximum number of training iterations.
         copy: Whether to copy `adata` or modify it inplace.
 
     Returns:
-        Updates adata with the field ``adata.obs[key_added]`` and ``adata.obs[f'{key_added}_refined']``,
-        containing the cluster result based on SpaGCN.
+        Depending on the parameter `copy`, when True return an updates adata with the field ``adata.obs[key_added]`` and
+        ``adata.obs[f'{key_added}_refined']``, containing the cluster result based on SpaGCN; else inplace update the
+        adata object.
     """
+    try:
+        import SpaGCN as spg
+    except ImportError:
+        raise ImportError("\nplease install SpaGCN:\n\n\tpip install SpaGCN")
 
     adata = adata.copy() if copy else adata
 
@@ -102,7 +107,7 @@ def cluster_spagcn(
     np.random.seed(n_seed)
 
     if n_pca_components is None:
-        n_pca_components, _ = compute_pca_components(adata.X, save_curve_img=None)
+        pcs, n_pca_components, _ = compute_pca_components(adata.X, save_curve_img=None)
     clf.train(
         adata,
         adj,
