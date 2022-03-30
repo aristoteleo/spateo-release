@@ -1,10 +1,10 @@
+from typing import List, Optional, Tuple, Union
+
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
-
 from scipy.sparse import csr_matrix, diags, issparse, lil_matrix, spmatrix
 from scipy.spatial import cKDTree
-from typing import Optional, Tuple, Union, List
 
 
 def rescaling(mat: Union[np.ndarray, spmatrix], new_shape: Union[List, Tuple]) -> Union[np.ndarray, spmatrix]:
@@ -78,7 +78,7 @@ def affine_transform(X, A, b):
 
 
 def gen_rotation_2d(degree: float):
-    from math import cos, sin, radians
+    from math import cos, radians, sin
 
     rad = radians(degree)
     R = [

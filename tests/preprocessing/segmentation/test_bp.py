@@ -4,6 +4,7 @@ import numpy as np
 from scipy import stats
 
 import spateo.preprocessing.segmentation.bp as bp
+
 from ...mixins import TestMixin
 
 

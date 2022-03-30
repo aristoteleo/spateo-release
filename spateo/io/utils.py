@@ -9,7 +9,7 @@ import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix, issparse, spmatrix
 from scipy.spatial import Delaunay
-from shapely.geometry import Point, LineString, Polygon, MultiPolygon
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.wkb import dumps
 from skimage import measure
 

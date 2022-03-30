@@ -1,13 +1,13 @@
+from typing import List, Tuple, Union
+
 import nudged
 import numpy as np
 import ot
 import torch
-
 from anndata import AnnData
-from scipy.spatial import distance_matrix
 from scipy.sparse.csr import spmatrix
+from scipy.spatial import distance_matrix
 from tqdm import tqdm
-from typing import List, Tuple, Union
 
 
 def pairwise_align(

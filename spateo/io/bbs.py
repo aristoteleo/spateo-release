@@ -2,25 +2,24 @@
 """
 
 import math
-
-from typing import Optional, Tuple, Union, List
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 from scipy.spatial import Delaunay
 from shapely.geometry import (
-    Point,
-    MultiPoint,
     LineString,
     MultiLineString,
-    Polygon,
+    MultiPoint,
     MultiPolygon,
+    Point,
+    Polygon,
     multipolygon,
 )
-from shapely.ops import unary_union, polygonize
+from shapely.ops import polygonize, unary_union
 
+from ..configuration import SKM
 from .bgi import read_bgi_agg
 from .utils import centroids
-from ..configuration import SKM
 
 
 def alpha_shape(

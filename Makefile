@@ -21,7 +21,7 @@ test:
 		tests/tools/*
 
 check:
-	black spateo tests --check && echo OK
+	isort --profile black --check spateo tests && black --check spateo tests && echo OK
 
 build:
 	python setup.py sdist

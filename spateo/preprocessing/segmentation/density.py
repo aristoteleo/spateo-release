@@ -13,11 +13,11 @@ from sklearn import cluster
 from tqdm import tqdm
 from typing_extensions import Literal
 
-from . import utils
-from .label import _replace_labels
 from ...configuration import SKM
 from ...io.utils import bin_matrix
 from ...warnings import PreprocessingWarning
+from . import utils
+from .label import _replace_labels
 
 
 def _create_spatial_adjacency(shape: Tuple[int, int]) -> csr_matrix:

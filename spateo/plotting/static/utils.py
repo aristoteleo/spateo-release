@@ -12,9 +12,9 @@ import matplotlib.pyplot as plt
 import numba
 import numpy as np
 import pandas as pd
-from shapely.wkb import loads
-from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from shapely.wkb import loads
 
 from spateo.configuration import _themes
 
@@ -63,8 +63,8 @@ def _get_adata_color_vec(adata, layer, col):
 
 def map2color(val, min=None, max=None, cmap="viridis"):
     import matplotlib
-    import matplotlib.pyplot as plt
     import matplotlib.cm as cm
+    import matplotlib.pyplot as plt
 
     minima = np.min(val) if min is None else min
     maxima = np.max(val) if max is None else max
@@ -687,10 +687,9 @@ def _datashade_points(
     projection="2d",
     **kwargs,
 ):
-    import matplotlib.pyplot as plt
-
-    import datashader.transfer_functions as tf
     import datashader as ds
+    import datashader.transfer_functions as tf
+    import matplotlib.pyplot as plt
 
     dpi = plt.rcParams["figure.dpi"]
     width, height = width * dpi, height * dpi
@@ -951,7 +950,6 @@ def interactive(
 
     # from bokeh.plotting import output_notebook, output_file, show
     import datashader as ds
-
     import holoviews as hv
     import holoviews.operation.datashader as hd
     import matplotlib.pyplot as plt
@@ -1156,8 +1154,8 @@ def scatter_with_colorbar(fig, ax, x, y, c, cmap, **scatter_kwargs):
 
 
 def scatter_with_legend(fig, ax, df, font_color, x, y, c, cmap, legend, **scatter_kwargs):
-    import seaborn as sns
     import matplotlib.patheffects as PathEffects
+    import seaborn as sns
 
     unique_labels = np.unique(c)
 

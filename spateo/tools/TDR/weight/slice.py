@@ -1,13 +1,14 @@
-from pyvista import PolyData, UnstructuredGrid, MultiBlock
 from typing import Optional, Union
+
+from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
 
-from .utils import _interactive_plotter
 from ..mesh.utils import collect_mesh, multiblock2mesh
+from .utils import _interactive_plotter
 
 
 def three_d_slice(

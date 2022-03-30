@@ -1,8 +1,8 @@
-from setuptools import setup, find_packages
-
 # import numpy as np
 # from version import __version__
 from pathlib import Path
+
+from setuptools import find_packages, setup
 
 with open("README.md", "r") as fh:
     long_description = fh.read()

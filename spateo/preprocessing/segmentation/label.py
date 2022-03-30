@@ -8,11 +8,11 @@ import numpy as np
 from anndata import AnnData
 from numba import njit
 from scipy.sparse import issparse, spmatrix
-from skimage import segmentation, filters
+from skimage import filters, segmentation
 
-from . import utils
 from ...configuration import SKM
 from ...errors import PreprocessingError
+from . import utils
 
 
 def _replace_labels(labels: np.ndarray, mapping: Dict[int, int]) -> np.ndarray:

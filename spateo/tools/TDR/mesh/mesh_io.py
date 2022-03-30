@@ -1,7 +1,8 @@
+from typing import List, Optional, Union
+
 import numpy as np
 import pyvista as pv
-from pyvista import MultiBlock, DataSet
-from typing import Union
+from pyvista import DataSet, MultiBlock, PolyData, UnstructuredGrid
 
 try:
     from typing import Literal
