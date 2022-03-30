@@ -115,7 +115,7 @@ def _segment_densities(
     """
     # Warn on too large array
     if X.size > 5e5:
-        warnings.warn(
+        lm.main_warning(
             f"Array has {X.size} elements. This may take a while and a lot of memory. "
             "Please consider condensing the array by increasing the binsize."
         )
