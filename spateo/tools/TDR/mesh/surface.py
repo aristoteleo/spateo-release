@@ -39,7 +39,7 @@ def _o3d2pv(trimesh: geometry.TriangleMesh) -> PolyData:
     return surface
 
 
-def uniform_point_cloud(pc: PolyData, alpha: float = 2.0, nsub: Optional[int] = 3, nclus: int = 20000):
+def uniform_point_cloud(pc: PolyData, alpha: float = 2.0, nsub: Optional[int] = 5, nclus: int = 20000):
     """
     Generates a uniform point cloud with a larger number of points.
     If the number of points in the original point cloud is too small or the distribution of the original point cloud is
@@ -139,7 +139,7 @@ def pv_surface(pc: PolyData, alpha: float = 2.0) -> PolyData:
             f"\nThe point cloud cannot generate a surface mesh with `pyvista` method and alpha == {alpha}."
         )
 
-    surface.clean(inplace=True)
+    surface.clean(tolerance=1.5, inplace=True)
     return surface
 
 
