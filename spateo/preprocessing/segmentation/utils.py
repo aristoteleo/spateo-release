@@ -6,9 +6,11 @@ import cv2
 import numpy as np
 from kneed import KneeLocator
 from scipy import signal
+from tqdm import tqdm
 from typing_extensions import Literal
 
 from ...errors import PreprocessingError
+from ...logging import logger_manager as lm
 
 
 def circle(k: int) -> np.ndarray:
@@ -247,31 +249,33 @@ def safe_erode(
     kernel = np.ones((k, k), dtype=np.uint8) if square else circle(k)
 
     i = 0
-    while True:
-        # Find connected components and save if area <= min_area
-        components = cv2.connectedComponentsWithStats(
-            apply_threshold(X, float_k, float_threshold).astype(np.uint8) if is_float else X
-        )
+    with tqdm(desc="Eroding") as pbar:
+        while True:
+            # Find connected components and save if area <= min_area
+            components = cv2.connectedComponentsWithStats(
+                apply_threshold(X, float_k, float_threshold).astype(np.uint8) if is_float else X
+            )
 
-        areas = components[2][:, cv2.CC_STAT_AREA]
-        for label in np.where(areas <= min_area)[0]:
-            if label > 0:
-                stats = components[2][label]
-                left, top, width, height = (
-                    stats[cv2.CC_STAT_LEFT],
-                    stats[cv2.CC_STAT_TOP],
-                    stats[cv2.CC_STAT_WIDTH],
-                    stats[cv2.CC_STAT_HEIGHT],
-                )
-                saved[top : top + height, left : left + width] += (
-                    components[1][top : top + height, left : left + width] == label
-                )
+            areas = components[2][:, cv2.CC_STAT_AREA]
+            for label in np.where(areas <= min_area)[0]:
+                if label > 0:
+                    stats = components[2][label]
+                    left, top, width, height = (
+                        stats[cv2.CC_STAT_LEFT],
+                        stats[cv2.CC_STAT_TOP],
+                        stats[cv2.CC_STAT_WIDTH],
+                        stats[cv2.CC_STAT_HEIGHT],
+                    )
+                    saved[top : top + height, left : left + width] += (
+                        components[1][top : top + height, left : left + width] == label
+                    )
 
-        X = cv2.erode(X, kernel)
+            X = cv2.erode(X, kernel)
 
-        i += 1
-        if (areas > min_area).sum() == 1 or (n_iter > 0 and n_iter == i):
-            break
+            i += 1
+            pbar.update(1)
+            if (areas > min_area).sum() == 1 or (n_iter > 0 and n_iter == i):
+                break
 
     mask = (X >= float_threshold) if is_float else (X > 0)
     return (mask + saved).astype(bool)

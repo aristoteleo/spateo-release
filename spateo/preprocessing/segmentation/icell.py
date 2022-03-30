@@ -15,13 +15,16 @@ from typing_extensions import Literal
 
 from ...configuration import SKM
 from ...errors import PreprocessingError
+from ...logging import logger_manager as lm
 from ...warnings import PreprocessingWarning
 from . import bp, em, utils
 
 
 def _mask_cells_from_stain(X: np.ndarray, otsu_classes: int = 4, otsu_index: int = 0, mk: int = 7) -> np.ndarray:
     """Create a boolean mask indicating cells from stained image."""
+    lm.main_debug("Filtering with Multi-otsu.")
     thresholds = filters.threshold_multiotsu(X, otsu_classes)
+    lm.main_debug("Applying morphological close and open.")
     return utils.mclose_mopen(X >= thresholds[otsu_index], mk)
 
 
@@ -36,12 +39,15 @@ def _mask_nuclei_from_stain(
     """Create a boolean mask indicating nuclei from stained nuclei image.
     See :func:`mask_nuclei_from_stain` for arguments.
     """
+    lm.main_debug("Filtering with Multi-otsu.")
     thresholds = filters.threshold_multiotsu(X, otsu_classes)
     background_mask = X < thresholds[otsu_index]
     # local_mask = X >= filters.rank.otsu(X, utils.circle(local_k))
+    lm.main_debug("Filtering adaptive threshold.")
     local_mask = cv2.adaptiveThreshold(X, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, local_k, offset).astype(
         bool
     )
+    lm.main_debug("Applying morphological close and open.")
     nuclei_mask = utils.mclose_mopen((~background_mask) & local_mask, mk)
     return nuclei_mask
 
@@ -73,6 +79,7 @@ def mask_cells_from_stain(
             "with the `nuclei_path` argument to `st.io.read_bgi_agg`."
         )
     X = SKM.select_layer_data(adata, layer, make_dense=True)
+    lm.main_info("Constructing cell mask from staining image.")
     mask = _mask_cells_from_stain(X, otsu_classes, otsu_index, mk)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
     SKM.set_layer_data(adata, out_layer, mask)
@@ -116,6 +123,7 @@ def mask_nuclei_from_stain(
             "with the `nuclei_path` argument to `st.io.read_bgi_agg`."
         )
     X = SKM.select_layer_data(adata, layer, make_dense=True)
+    lm.main_info("Constructing nuclei mask from staining image.")
     mask = _mask_nuclei_from_stain(X, otsu_classes, otsu_index, local_k, -offset, mk)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
     SKM.set_layer_data(adata, out_layer, mask)
@@ -170,30 +178,37 @@ def _score_pixels(
     bp_kwargs = bp_kwargs or {}
 
     if em_kwargs and "em" not in method:
-        warnings.warn(f"`em_kwargs` will be ignored", PreprocessingWarning)
+        lm.main_warning(f"`em_kwargs` will be ignored.")
     if bp_kwargs and "bp" not in method:
-        warnings.warn(f"`bp_kwargs` will be ignored", PreprocessingWarning)
+        lm.main_warning(f"`bp_kwargs` will be ignored.")
 
     # Convert X to dense array
     if issparse(X):
+        lm.main_debug("Converting X to dense array.")
         X = X.A
 
     # All methods require some kind of 2D convolution to start off
+    lm.main_debug(f"Computing 2D convolution with k={k}.")
     res = utils.conv2d(X, k, mode="gauss" if method == "gauss" else "circle", bins=bins)
 
     # All methods other than gauss requires EM
     if method != "gauss":
+        lm.main_debug(f"Running EM with kwargs {em_kwargs}.")
         em_results = em.run_em(res, bins=bins, **em_kwargs)
 
         if "bp" in method:
+            lm.main_debug("Computing conditionals.")
             background_cond, cell_cond = em.conditionals(res, em_results=em_results, bins=bins)
+            lm.main_debug(f"Running BP with kwargs {bp_kwargs}.")
             res = bp.run_bp(res, background_cond, cell_cond, certain_mask=certain_mask, **bp_kwargs)
         else:
+            lm.main_debug("Computing confidences.")
             res = em.confidence(res, em_results=em_results, bins=bins)
             if certain_mask is not None:
                 res = np.clip(res + certain_mask, 0, 1)
 
         if "gauss" in method:
+            lm.main_debug("Computing Gaussian blur.")
             res = utils.conv2d(res, k, mode="gauss", bins=bins)
     else:
         # For just "gauss" method, we should rescale to [0, 1] because all the
@@ -257,13 +272,16 @@ def score_and_mask_pixels(
         bins_layer = bins_layer or SKM.gen_new_layer_key(layer, SKM.BINS_SUFFIX)
         if bins_layer in adata.layers:
             bins = SKM.select_layer_data(adata, bins_layer)
+    lm.main_info(f"Scoring pixels with {method} method.")
     scores = _score_pixels(X, k, method, em_kwargs, bp_kwargs, certain_mask, bins)
     scores_layer = scores_layer or SKM.gen_new_layer_key(layer, SKM.SCORES_SUFFIX)
     SKM.set_layer_data(adata, scores_layer, scores)
 
     if not threshold:
+        lm.main_debug("Finding Otsu threshold.")
         threshold = filters.threshold_otsu(scores)
 
+    lm.main_info(f"Applying threshold {threshold}.")
     mask = utils.apply_threshold(scores, mk, threshold)
     if certain_layer:
         mask += certain_mask

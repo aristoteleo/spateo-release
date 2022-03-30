@@ -14,7 +14,7 @@ from skimage.color import label2rgb
 
 from ...configuration import SKM
 from ...errors import PlottingError
-from ...warnings import PlottingWarning
+from ...logging import logger_manager as lm
 
 
 def imshow(
@@ -109,7 +109,7 @@ def qc_regions(
             or str(ymin) not in adata.var_names
             or str(ymax - 1) not in adata.var_names
         ):
-            warnings.warn(f"Region {region} not in AnnData bounds.", PlottingWarning)
+            lm.main_warning(f"Region {region} not in AnnData bounds.")
             continue
         imshow(
             adata[

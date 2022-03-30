@@ -15,7 +15,7 @@ from typing_extensions import Literal
 
 from ...configuration import SKM
 from ...io.utils import bin_matrix
-from ...warnings import PreprocessingWarning
+from ...logging import logger_manager as lm
 from . import utils
 from .label import _replace_labels
 
@@ -71,12 +71,15 @@ def _schc(X: np.ndarray, distance_threshold: Optional[float] = None) -> np.ndarr
         Clustering result as a Numpy array of same shape, where clusters are
         indicated by integers.
     """
+    lm.main_debug("Constructing spatial adjacency matrix.")
     adjacency = _create_spatial_adjacency(X.shape)
     X_flattened = X.flatten()
+    lm.main_debug("Computing Ward tree.")
     children, _, n_leaves, _, distances = cluster.ward_tree(X_flattened, connectivity=adjacency, return_distance=True)
 
     # Find distance threshold if not provided
     if not distance_threshold:
+        lm.main_debug("Finding dynamic distance threshold by using knee of the top 1000 distances.")
         x = np.sort(np.unique(distances))[-1000:]
         # NOTE: number of clusters needs a +1, as also done in sklearn
         # https://github.com/scikit-learn/scikit-learn/blob/7e1e6d09b/sklearn/cluster/_agglomerative.py#L1017
@@ -87,6 +90,7 @@ def _schc(X: np.ndarray, distance_threshold: Optional[float] = None) -> np.ndarr
         distance_threshold = kl.knee
 
     n_clusters = (distances >= distance_threshold).sum() + 1
+    lm.main_debug("Finding {n_clusters} assignments.")
     assignments = cluster._agglomerative._hc_cut(n_clusters, children, n_leaves)
 
     return assignments.reshape(X.shape)
@@ -111,21 +115,25 @@ def _segment_densities(
     """
     # Warn on too large array
     if X.size > 5e5:
-        warnings.warn(
+        lm.main_warning(
             f"Array has {X.size} elements. This may take a while and a lot of memory. "
             "Please consider condensing the array by increasing the binsize."
         )
 
     # Make dense and normalize.
     if issparse(X):
+        lm.main_debug("Converting to dense matrix.")
         X = X.A
+    lm.main_debug("Normalizing matrix.")
     X = X / X.max()
 
+    lm.main_debug(f"Applying Gaussian blur with k={k}.")
     X = utils.conv2d(X, k, mode="gauss")
 
     # Add 1 because 0 should indicate background!
     bins = _schc(X, distance_threshold=distance_threshold) + 1
 
+    lm.main_debug("Dilating labels in ascending mean density order.")
     dilated = np.zeros_like(bins)
     labels = np.unique(bins)
     for label in sorted(labels, key=lambda label: X[bins == label].mean()):
@@ -188,11 +196,15 @@ def segment_densities(
     """
     X = SKM.select_layer_data(adata, layer, make_dense=binsize == 1)
     if binsize > 1:
+        lm.main_debug(f"Binning matrix with binsize={binsize}.")
         X = bin_matrix(X, binsize)
         if issparse(X):
+            lm.main_debug("Converting to dense matrix.")
             X = X.A
+    lm.main_info("Finding density bins.")
     bins = _segment_densities(X, k, dk, distance_threshold)
     if background is not False:
+        lm.main_info("Setting background pixels.")
         if background is not None:
             x, y = background
             background_label = bins[x, y]
@@ -229,5 +241,6 @@ def merge_densities(
     if _layer not in adata.layers:
         _layer = layer
     bins = SKM.select_layer_data(adata, _layer)
+    lm.main_info(f"Merging densities with mapping {mapping}.")
     replaced = _replace_labels(bins, mapping)
     SKM.set_layer_data(adata, out_layer or _layer, replaced)

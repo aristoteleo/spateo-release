@@ -16,7 +16,7 @@ networkx>=2.6.3
 ngs_tools>=1.5.13
 nudged>=0.3.1
 numba>=0.46.0
-numpy>=1.18.1
+numpy>=1.18.1<=2.10.0
 opencv-python>=4.5.4.60
 open3d>=0.14.1
 pandas>=0.25.1
@@ -37,6 +37,7 @@ scikit-learn>=0.19.1
 seaborn>=0.9.0
 Shapely>=1.8.0
 statsmodels>=0.9.0
+tensorflow
 umap-learn>=0.5.1
 kneed>=0.7.0
 nudged>=0.3.1
