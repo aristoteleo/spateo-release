@@ -31,7 +31,7 @@ class DeepInterpolation:
         model: ModuleType,
         data_sampler: object,
         sirens: bool = False,
-        enforce_positivity: bool = True,
+        enforce_positivity: bool = False,
         loss_function: Union[Callable, None] = weighted_mse(),
         smoothing_factor: Union[float, None] = True,
         stability_factor: Union[float, None] = True,
