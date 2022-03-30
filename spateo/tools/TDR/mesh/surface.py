@@ -109,6 +109,12 @@ def fix_surface(surf: PolyData) -> PolyData:
     meshfix.repair(verbose=False)
 
     surf = meshfix.mesh.triangulate()
+
+    if surf.n_points == 0:
+        raise ValueError(
+            f"\nThe surface cannot be Repaired. " f"\nPlease change the method or parameters of surface reconstruction."
+        )
+
     surf.clean(inplace=True)
     return surf
 
@@ -167,7 +173,7 @@ def marching_cube_surface(pc: PolyData):
     )
     volume_array[pc_points_int[:, 0], pc_points_int[:, 1], pc_points_int[:, 2]] = 1
 
-    # Extract the isosurface based on marching cubes algorithm.
+    # Extract the iso-surface based on marching cubes algorithm.
     vertices, triangles = mcubes.marching_cubes(volume_array, 0)
 
     if len(vertices) == 0:
@@ -175,8 +181,8 @@ def marching_cube_surface(pc: PolyData):
 
     vertices = vertices - rmd_mean
 
-    v = np.asarray(vertices)
-    f = np.asarray(triangles)
+    v = np.asarray(vertices).astype(np.float64)
+    f = np.asarray(triangles).astype(np.int64)
     f = np.c_[np.full(len(f), 3), f]
 
     surface = pv.PolyData(v, f.ravel()).extract_surface().triangulate()
@@ -222,7 +228,7 @@ def alpha_shape_surface(pc: PolyData, alpha: float = 2.0) -> PolyData:
 
 def ball_pivoting_surface(pc: PolyData, radii: List[float] = None):
     """
-    Computes a triangle mesh from a oriented point cloud based on the Ball Pivoting algorithm.
+    Computes a triangle mesh from an oriented point cloud based on the Ball Pivoting algorithm.
 
     Algorithm Overview:
         The main assumption this algorithm is based on is the following: Given three vertices, and a ball of radius r,
@@ -320,8 +326,8 @@ def construct_surface(
     color: Optional[str] = "gainsboro",
     alpha: Optional[float] = 0.8,
     uniform_pc: bool = True,
-    uniform_pc_alpha: float = 0.0,
-    cs_method: Literal["pyvista", "alpha_shape", "ball_pivoting", "poisson", "marching_cube"] = "alpha_shape",
+    uniform_pc_alpha: float = 3.0,
+    cs_method: Literal["pyvista", "alpha_shape", "ball_pivoting", "poisson", "marching_cube"] = "marching_cube",
     cs_args: Optional[dict] = None,
     nsub: Optional[int] = 3,
     nclus: int = 20000,
@@ -343,7 +349,7 @@ def construct_surface(
                 * `'poisson'`: Computes a triangle mesh based on thee Screened Poisson Reconstruction.
                 * `'marching_cube'`: Computes a triangle mesh based on the marching cube algorithm.
         cs_args: Parameters for various surface reconstruction methods. Available `cs_args` are:
-                * `'pyvista'`: {"alpha": 2.0}
+                * `'pyvista'`: {"alpha": 0}
                 * `'alpha_shape'`: {"alpha": 2.0}
                 * `'ball_pivoting'`: {"radii": [1]}
                 * `'poisson'`: {'depth': 8, 'width'=0, 'scale'=1.1, 'linear_fit': False, 'density_threshold': 0.01}
@@ -366,7 +372,7 @@ def construct_surface(
 
     # Reconstruct surface mesh.
     if cs_method == "pyvista":
-        _cs_args = {"alpha": 2.0}
+        _cs_args = {"alpha": 0}
         if not (cs_args is None):
             _cs_args.update(cs_args)
         surf = pv_surface(pc=cloud, alpha=_cs_args["alpha"])
@@ -424,7 +430,7 @@ def construct_surface(
     )
 
     # Clip the original pcd using the reconstructed surface and reconstruct new point cloud.
-    clip_invert = True if cs_method == "pyvista" else False
-    clipped_pcd = pc.clip_surface(uniform_surf, invert=clip_invert)
+    clipped_invert = True if cs_method in ["pyvista", "marching_cube"] else False
+    clipped_pcd = pc.clip_surface(uniform_surf, invert=clipped_invert)
 
     return uniform_surf, clipped_pcd
