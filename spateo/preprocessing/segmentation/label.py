@@ -12,6 +12,7 @@ from skimage import filters, segmentation
 
 from ...configuration import SKM
 from ...errors import PreprocessingError
+from ...logging import logger_manager as lm
 from . import utils
 
 
@@ -49,6 +50,7 @@ def replace_labels(adata: AnnData, layer: str, mapping: Dict[int, int], out_laye
             overridden.
     """
     labels = SKM.select_layer_data(adata, layer)
+    lm.main_info(f"Replacing labels with mapping {mapping}")
     new_labels = _replace_labels(labels, mapping)
     SKM.set_layer_data(adata, out_layer or layer, new_labels)
 
@@ -75,7 +77,9 @@ def _watershed(
     """
     blur = utils.conv2d(X, k, mode="gauss")
     if markers.dtype == np.dtype(bool):
+        lm.main_debug("Finding connected components.")
         markers = cv2.connectedComponents(markers.astype(np.uint8))[1]
+    lm.main_debug("Running Watershed algorithm.")
     watershed = segmentation.watershed(-blur, markers, mask=mask)
     return watershed
 
@@ -124,7 +128,9 @@ def watershed_markers(
         _layer = _layer2
     X = SKM.select_layer_data(adata, _layer, make_dense=True)
     if np.issubdtype(X.dtype, np.floating) and not float_threshold:
+        lm.main_debug("Finding threshold with Multi-otsu.")
         float_threshold = filters.threshold_otsu(X)
+    lm.main_info("Finding Watershed markers with iterative erosion.")
     markers = utils.safe_erode(X, k, square, min_area, n_iter, float_k, float_threshold)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.MARKERS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, markers)
@@ -156,6 +162,7 @@ def watershed(
     mask = SKM.select_layer_data(adata, mask_layer)
     markers_layer = markers_layer or SKM.gen_new_layer_key(layer, SKM.MARKERS_SUFFIX)
     markers = SKM.select_layer_data(adata, markers_layer)
+    lm.main_info("Running Watershed.")
     # Markers should always be included in the mask.
     labels = _watershed(X, mask | (markers > 0), markers, k)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
@@ -240,6 +247,7 @@ def expand_labels(
     if label_layer not in adata.layers:
         label_layer = layer
     labels = SKM.select_layer_data(adata, label_layer)
+    lm.main_info("Expanding labels.")
     expanded = _expand_labels(labels, distance, max_area)
     out_layer = out_layer or SKM.gen_new_layer_key(label_layer, SKM.EXPANDED_SUFFIX)
     SKM.set_layer_data(adata, out_layer, expanded)

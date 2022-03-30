@@ -21,7 +21,7 @@ from scipy.sparse import csr_matrix, spmatrix
 from shapely.geometry import MultiPolygon, Polygon
 
 from ..configuration import SKM
-from ..warnings import IOWarning
+from ..logging import logger_manager as lm
 from .utils import (
     bin_indices,
     centroids,
@@ -159,6 +159,7 @@ def read_bgi_agg(
         `.layers['spliced']` and `.layers['unspliced']` respectively.
         The nuclei image is stored as a Numpy array in `.layers['nuclei']`.
     """
+    lm.main_debug(f"Reading data from {path}.")
     data = read_bgi_as_dataframe(path, label_column)
     x_min, y_min = data["x"].min(), data["y"].min()
     x, y = data["x"].values, data["y"].values
@@ -168,24 +169,34 @@ def read_bgi_agg(
     # Read image and update x,y max if appropriate
     layers = {}
     if stain_path:
+        lm.main_debug(f"Reading stain image from {stain_path}.")
         image = skimage.io.imread(stain_path)
         if prealigned:
+            lm.main_warning(
+                (
+                    "Assuming stain image was already aligned with the minimum x and y RNA coordinates. "
+                    "(prealinged=True)"
+                )
+            )
             image = np.pad(image, ((x_min, 0), (y_min, 0)))
         x_max = max(x_max, image.shape[0])
         y_max = max(y_max, image.shape[1])
         shape = (x_max + 1, y_max + 1)
         # Reshape image to match new x,y max
         if image.shape != shape:
+            lm.main_warning(f"Padding stain image from {image.shape} to {shape} with zeros.")
             image = np.pad(image, ((0, shape[0] - image.shape[0]), (0, shape[1] - image.shape[1])))
         layers[SKM.STAIN_LAYER_KEY] = image
 
     # Construct labels matrix if present
     labels = None
     if "label" in data.columns:
+        lm.main_info("Cell label column detected. Converting to labels matrix.")
         labels = dataframe_to_labels(data, "label", shape)
         layers[SKM.LABELS_LAYER_KEY] = labels
 
     if binsize > 1:
+        lm.main_info(f"Binning counts with binsize={binsize}.")
         shape = (math.ceil(shape[0] / binsize), math.ceil(shape[1] / binsize))
         x = bin_indices(x, 0, binsize)
         y = bin_indices(y, 0, binsize)
@@ -196,12 +207,11 @@ def read_bgi_agg(
             layers[SKM.STAIN_LAYER_KEY] = cv2.resize(image, shape[::-1])
 
         if labels is not None:
-            warnings.warn(
-                ("Cell labels were provided, but `binsize` > 1. " "There may be slight inconsistencies."), IOWarning
-            )
+            lm.main_warning("Cell labels were provided, but `binsize` > 1. There may be slight inconsistencies.")
             layers[SKM.LABELS_LAYER_KEY] = labels[::binsize, ::binsize]
 
     # See read_bgi_as_dataframe for standardized column names
+    lm.main_info("Constructing count matrices.")
     X = csr_matrix((data["total"].values, (x, y)), shape=shape, dtype=np.uint16)
     if "spliced" in data.columns:
         layers[SKM.SPLICED_LAYER_KEY] = csr_matrix((data["spliced"].values, (x, y)), shape=shape, dtype=np.uint16)
@@ -210,6 +220,7 @@ def read_bgi_agg(
 
     # Aggregate gene lists
     if gene_agg:
+        lm.main_info("Aggregating counts for genes provided by `gene_agg`.")
         for name, genes in gene_agg.items():
             mask = data["geneID"].isin(genes) if isinstance(genes, list) else data["geneID"].map(genes)
             data_genes = data[mask]
@@ -271,15 +282,16 @@ def read_bgi(
     if sum([binsize is not None, segmentation_adata is not None, labels is not None, label_column is not None]) != 1:
         raise IOError("Exactly one of `segmentation_adata`, `binsize`, `labels`, `label_column` must be provided.")
     if (segmentation_adata is None) ^ (labels_layer is None):
-        raise IOError("Both `segmentation_adata` and `labels_layer` must be provided")
+        raise IOError("Both `segmentation_adata` and `labels_layer` must be provided.")
     if segmentation_adata is not None:
         if SKM.get_adata_type(segmentation_adata) != SKM.ADATA_AGG_TYPE:
-            raise IOError("Only `AGG` type AnnDatas are supported")
+            raise IOError("Only `AGG` type AnnDatas are supported.")
     if binsize is not None and abs(int(binsize)) != binsize:
-        raise IOError("Positive integer `binsize` must be provided when `segmentation_adata` is not provided")
+        raise IOError("Positive integer `binsize` must be provided when `segmentation_adata` is not provided.")
     if isinstance(labels, str):
         labels = np.load(labels)
 
+    lm.main_debug(f"Reading data from {path}.")
     data = read_bgi_as_dataframe(path, label_column)
     n_columns = data.shape[1]
 
@@ -289,14 +301,16 @@ def read_bgi(
 
     props = None
     if label_column is not None:
+        lm.main_info(f"Using cell labels from `{label_column}` column.")
         binsize = 1
         data = data[data["label"] > 0]
         if add_props:
             props = get_points_props(data)
 
     elif binsize is not None:
+        lm.main_info(f"Using binsize={binsize}")
         if binsize < 2:
-            warnings.warn("Using binsize of 1. Please consider using a larger bin size.", IOWarning)
+            lm.main_warning("Please consider using a larger bin size.")
 
         if binsize > 1:
             x_bin = bin_indices(data["x"].values, 0, binsize)
@@ -312,13 +326,15 @@ def read_bgi(
         binsize = 1
         shape = (data["x"].max(), data["y"].max())
         if labels is not None:
+            lm.main_info(f"Using labels provided with `labels` argument.")
             if labels.shape != shape:
-                warnings.warn(f"Labels matrix {labels.shape} has different shape as data matrix {shape}", IOWarning)
+                lm.main_warning(f"Labels matrix {labels.shape} has different shape as data matrix {shape}")
         else:
             labels = SKM.select_layer_data(segmentation_adata, labels_layer)
         label_coords = get_coords_labels(labels)
 
         if labels_layer is not None:
+            lm.main_info(f"Using labels provided with `segmentation_adata` and `labels_layer` arguments.")
             seg_binsize = SKM.get_uns_spatial_attribute(segmentation_adata, SKM.UNS_SPATIAL_BINSIZE_KEY)
             x_min, y_min = (
                 int(segmentation_adata.obs_names[0]) * seg_binsize,
@@ -330,6 +346,7 @@ def read_bgi(
         # When binning was used for segmentation, need to expand indices to cover
         # every binned pixel.
         if seg_binsize > 1:
+            lm.main_warning("Binning was used for segmentation.")
             coords_dfs = []
             for i in range(seg_binsize):
                 for j in range(seg_binsize):
@@ -350,6 +367,7 @@ def read_bgi(
     y_ind = data["geneID"].map(gene_dict).astype(int).values
 
     # See read_bgi_as_dataframe for standardized column names
+    lm.main_info("Constructing count matrices.")
     X = csr_matrix((data["total"].values, (x_ind, y_ind)), shape=shape)
     layers = {}
     if "spliced" in data.columns:
