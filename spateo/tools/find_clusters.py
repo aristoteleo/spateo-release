@@ -1,15 +1,14 @@
-import anndata
-import cv2
-import dynamo as dyn
-import numpy as np
-import pandas as pd
 import random
-import torch
-
 from typing import Optional, Tuple
 
-from .find_clusters_utils import *
+import anndata
+import cv2
+import numpy as np
+import pandas as pd
+import torch
+
 from ..preprocessing.filter import filter_cells, filter_genes
+from .find_clusters_utils import *
 
 
 def find_cluster_spagcn(
@@ -196,6 +195,8 @@ def find_cluster_scc(
         Depends on the argument `copy` return either an `~anndata.AnnData` object with cluster info in "scc_e_{a}_s{b}"
         or None.
     """
+
+    import dynamo as dyn
 
     filter_genes(adata, min_cells=min_cells)
     adata.uns["pp"] = {}

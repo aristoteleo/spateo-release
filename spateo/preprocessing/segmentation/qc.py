@@ -1,12 +1,12 @@
 import warnings
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
 
 from ...configuration import SKM
 from ...errors import PreprocessingError
-from ...warnings import PreprocessingWarning
+from ...logging import logger_manager as lm
 
 
 def select_qc_regions(
@@ -33,10 +33,14 @@ def select_qc_regions(
     """
     _regions = np.zeros((n, 4), dtype=int)
     if not regions:
+        lm.main_info(f"Randomly selecting {n} regions of shape {(size, size)}.")
         # Construct grid indices
         indices = np.dstack(
             np.meshgrid(np.arange(0, adata.n_obs - size, size), np.arange(0, adata.n_vars - size, size))
         ).reshape(-1, 2)
+
+        if indices.shape[0] == 0:
+            raise PreprocessingError("No possible regions found. This may indicate the `size` argument is to big.")
 
         rng = np.random.default_rng(seed)
         choices = indices[rng.choice(np.arange(indices.shape[0]), n, replace=False)]
@@ -46,6 +50,7 @@ def select_qc_regions(
             ymin = int(adata.var_names[y])
             _regions[i] = [xmin, xmin + size, ymin, ymin + size]
     else:
+        lm.main_info(f"Using regions provided with `regions` argument.")
         adata_bounds = SKM.get_agg_bounds(adata)
         for i, region in enumerate(regions):
             if len(region) == 4:
@@ -58,9 +63,7 @@ def select_qc_regions(
                 raise PreprocessingError("`regions` must be a list of 4-element or 2-element tuples.")
 
             if xmin < adata_bounds[0] or xmax >= adata_bounds[1] or ymin < adata_bounds[2] or ymax >= adata_bounds[3]:
-                warnings.warn(
-                    f"Region {region} is out of bounds. It will be clipped into bounds.", PreprocessingWarning
-                )
+                lm.main_warning(f"Region {region} is out of bounds. It will be clipped into bounds.")
             xmin = max(xmin, adata_bounds[0])
             xmax = min(xmax, adata_bounds[1])
             ymin = max(ymin, adata_bounds[2])
@@ -70,3 +73,37 @@ def select_qc_regions(
 
     _regions = _regions.astype(int)
     SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_QC_KEY, _regions)
+
+
+def _generate_random_labels(shape: Tuple[int, int], areas: List[int], seed: Optional[int] = None) -> np.ndarray:
+    n = np.prod(shape)
+    if sum(areas) > n:
+        raise PreprocessingError("Sum of `areas` exceeds to total area")
+
+    rng = np.random.default_rng(seed)
+    labels = np.zeros(n, dtype=int)
+    indices = np.arange(n)
+    rng.shuffle(indices)
+    for i, area in enumerate(areas):
+        label = i + 1
+        labels[indices[:area]] = label
+        indices = indices[area:]
+    return labels.reshape(shape)
+
+
+def generate_random_labels(
+    adata: AnnData,
+    areas: List[int],
+    seed: Optional[int] = None,
+    out_layer: str = "random_labels",
+):
+    """Create random labels, usually for benchmarking and QC purposes.
+
+    Args:
+        adata: Input Anndata
+        areas: List of desired areas.
+        seed: Random seed.
+        out_layer: Layer to save results.
+    """
+    labels = _generate_random_labels(adata.shape, areas, seed)
+    SKM.set_layer_data(adata, out_layer, labels)

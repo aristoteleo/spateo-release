@@ -4,12 +4,11 @@ Developed by P Angerer, see https://github.com/flying-sheep/get_version.
 """
 # __version__ is defined at the very end of this file.
 
-import re
 import os
+import re
 from pathlib import Path
-from subprocess import run, PIPE, CalledProcessError
-from typing import NamedTuple, List, Union, Optional
-
+from subprocess import PIPE, CalledProcessError, run
+from typing import List, NamedTuple, Optional, Union
 
 RE_VERSION = r"([\d.]+?)(?:\.dev(\d+))?(?:[_+-]([0-9a-zA-Z.]+))?"
 RE_GIT_DESCRIBE = r"v?(?:([\d.]+)-(\d+)-g)?([0-9a-f]{7})(-dirty)?"
@@ -102,7 +101,7 @@ def get_version_from_git(parent):
 
 def get_version_from_metadata(name: str, parent: Optional[Path] = None):
     try:
-        from pkg_resources import get_distribution, DistributionNotFound
+        from pkg_resources import DistributionNotFound, get_distribution
     except ImportError:
         return None
 
@@ -168,9 +167,9 @@ def get_all_dependencies_version(display=True):
     Adapted from answer 2 in
     https://stackoverflow.com/questions/40428931/package-for-listing-version-of-packages-used-in-a-jupyter-notebook
     """
+    import pandas as pd
     import pkg_resources
     from IPython.display import display
-    import pandas as pd
 
     _package_name = "dynamo-release"
     _package = pkg_resources.working_set.by_key[_package_name]

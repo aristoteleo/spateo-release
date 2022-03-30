@@ -2,14 +2,12 @@ import math
 import random
 
 import anndata as ad
-import dynamo as dyn
 import lack
-import numpy as np
 import numba
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-
 from scipy.sparse import issparse
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA

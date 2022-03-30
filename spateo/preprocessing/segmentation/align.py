@@ -14,10 +14,10 @@ from kornia.geometry.transform import thin_plate_spline as tps
 from tqdm import tqdm
 from typing_extensions import Literal
 
-from . import utils
 from ...configuration import SKM
 from ...errors import PreprocessingError
-from ...warnings import PreprocessingWarning
+from ...logging import logger_manager as lm
+from . import utils
 
 
 class AlignmentRefiner(nn.Module):
@@ -191,22 +191,22 @@ def refine_alignment(
     if mode not in MODULES.keys():
         raise PreprocessingError('`mode` must be one of "rigid" and "non-rigid"')
     if adata.shape[0] * downscale > 10000 or adata.shape[1] * downscale > 10000:
-        warnings.warn(
-            (
-                "Input has dimension > 10000. This may take a while and a lot of memory. "
-                "Consider downscaling using the `downscale` option."
-            ),
-            PreprocessingWarning,
+        lm.main_warning(
+            "Input has dimension > 10000. This may take a while and a lot of memory. "
+            "Consider downscaling using the `downscale` option."
         )
 
     stain = SKM.select_layer_data(adata, stain_layer, make_dense=True)
     rna = SKM.select_layer_data(adata, rna_layer, make_dense=True)
     if k > 1 and rna.dtype != np.dtype(bool):
+        lm.main_debug(f"Applying Gaussian blur with k={k}.")
         rna = utils.conv2d(rna, k, mode="gauss")
     if downscale < 1:
+        lm.main_debug(f"Downscaling by a factor of {downscale}.")
         stain = cv2.resize(stain.astype(float), (0, 0), fx=downscale, fy=downscale)
         rna = cv2.resize(rna.astype(float), (0, 0), fx=downscale, fy=downscale)
 
+    lm.main_info(f"Refining alignment in {mode} mode.")
     module = MODULES[mode]
     # NOTE: we find a transformation FROM the stain coordinates TO the RNA coordinates
     aligner = module(rna, stain, **kwargs)
@@ -216,6 +216,7 @@ def refine_alignment(
     SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_ALIGNMENT_KEY, params)
 
     if transform_layers:
+        lm.main_info(f"Transforming layers {transform_layers}")
         for layer in transform_layers:
             data = SKM.select_layer_data(adata, layer)
             transformed = aligner.transform(data, params)

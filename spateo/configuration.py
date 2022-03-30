@@ -1,19 +1,20 @@
 # code adapted from https://github.com/aristoteleo/dynamo-release/blob/master/dynamo/configuration.py
-
+import warnings
 from typing import Optional, Tuple, Union
 
 import colorcet
 import matplotlib
-import numpy as np
-import pandas as pd
-from anndata import AnnData
-from matplotlib import rcParams, colors
-from scipy import sparse
 
 # from cycler import cycler
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from anndata import AnnData
+from matplotlib import colors, rcParams
+from scipy import sparse
 
 from .errors import ConfigurationError
+from .logging import logger_manager as lm
 
 
 class SpateoAdataKeyManager:
@@ -56,6 +57,7 @@ class SpateoAdataKeyManager:
     def select_layer_data(
         adata: AnnData, layer: str, copy: bool = False, make_dense: bool = False
     ) -> Union[np.ndarray, sparse.spmatrix]:
+        lm.main_info(f"<select> {layer} layer in AnnData Object")
         if layer is None:
             layer = SpateoAdataKeyManager.X_LAYER
         res_data = None
@@ -72,6 +74,8 @@ class SpateoAdataKeyManager:
     def set_layer_data(
         adata: AnnData, layer: str, vals: np.ndarray, var_indices: Optional[np.ndarray] = None, replace: bool = False
     ):
+        lm.main_info_insert_adata_layer(layer)
+
         # Mostly for testing
         if replace:
             adata.layers[layer] = vals
@@ -92,15 +96,18 @@ class SpateoAdataKeyManager:
         return adata.uns[SpateoAdataKeyManager.ADATA_TYPE_KEY]
 
     def init_adata_type(adata: AnnData, t: Optional[str] = None):
+        lm.main_info_insert_adata_uns(SpateoAdataKeyManager.ADATA_TYPE_KEY)
         if t is None:
             t = SpateoAdataKeyManager.ADATA_DEFAULT_TYPE
         adata.uns[SpateoAdataKeyManager.ADATA_TYPE_KEY] = t
 
     def init_uns_pp_namespace(adata: AnnData):
+        lm.main_info_insert_adata_uns(SpateoAdataKeyManager.UNS_PP_KEY)
         if SpateoAdataKeyManager.UNS_PP_KEY not in adata.uns:
             adata.uns[SpateoAdataKeyManager.UNS_PP_KEY] = {}
 
     def init_uns_spatial_namespace(adata: AnnData):
+        lm.main_info_insert_adata_uns(SpateoAdataKeyManager.UNS_SPATIAL_KEY)
         if SpateoAdataKeyManager.UNS_SPATIAL_KEY not in adata.uns:
             adata.uns[SpateoAdataKeyManager.UNS_SPATIAL_KEY] = {}
 
@@ -117,8 +124,9 @@ class SpateoAdataKeyManager:
 
     def get_agg_bounds(adata: AnnData) -> Tuple[int, int, int, int]:
         """Get (xmin, xmax, ymin, ymax) for AGG type anndatas."""
-        if SpateoAdataKeyManager.get_adata_type(adata) != SpateoAdataKeyManager.ADATA_AGG_TYPE:
-            raise ConfigurationError(f"AnnData has incorrect type.")
+        atype = SpateoAdataKeyManager.get_adata_type(adata)
+        if atype != SpateoAdataKeyManager.ADATA_AGG_TYPE:
+            raise ConfigurationError(f"AnnData has incorrect type: {atype}")
         return int(adata.obs_names[0]), int(adata.obs_names[-1]), int(adata.var_names[0]), int(adata.var_names[-1])
 
 
@@ -146,16 +154,17 @@ glasbey_dark_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
     "glasbey_dark", colorcet.glasbey_bw_minc_20_maxl_70
 )
 
-# register cmap
-plt.register_cmap("fire", fire_cmap)
-plt.register_cmap("darkblue", darkblue_cmap)
-plt.register_cmap("darkgreen", darkgreen_cmap)
-plt.register_cmap("darkred", darkred_cmap)
-plt.register_cmap("darkpurple", darkpurple_cmap)
-plt.register_cmap("div_blue_black_red", div_blue_black_red_cmap)
-plt.register_cmap("div_blue_red", div_blue_red_cmap)
-plt.register_cmap("glasbey_white", glasbey_white_cmap)
-plt.register_cmap("glasbey_dark", glasbey_dark_cmap)
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    plt.register_cmap("fire", fire_cmap)
+    plt.register_cmap("darkblue", darkblue_cmap)
+    plt.register_cmap("darkgreen", darkgreen_cmap)
+    plt.register_cmap("darkred", darkred_cmap)
+    plt.register_cmap("darkpurple", darkpurple_cmap)
+    plt.register_cmap("div_blue_black_red", div_blue_black_red_cmap)
+    plt.register_cmap("div_blue_red", div_blue_red_cmap)
+    plt.register_cmap("glasbey_white", glasbey_white_cmap)
+    plt.register_cmap("glasbey_dark", glasbey_dark_cmap)
 
 _themes = {
     "fire": {

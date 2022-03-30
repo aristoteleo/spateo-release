@@ -1,10 +1,11 @@
-from unittest import mock, TestCase
+from unittest import TestCase, mock
 
 import numpy as np
 from anndata import AnnData
 
 import spateo.preprocessing.segmentation.icell as icell
-from ...mixins import create_random_adata, TestMixin
+
+from ...mixins import TestMixin, create_random_adata
 
 
 class TestICell(TestMixin, TestCase):

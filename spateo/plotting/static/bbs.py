@@ -1,14 +1,14 @@
 """Plotting functions for creating the bounding box.
 """
 
-from typing import Union, Tuple, List, Optional
+from typing import List, Optional, Tuple, Union
 
+import matplotlib.pyplot as plt
 import numpy as np
 from descartes import PolygonPatch
-import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
-from matplotlib.axes import Axes
 from shapely.geometry import MultiPolygon, Polygon
 
 

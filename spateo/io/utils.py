@@ -9,7 +9,7 @@ import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix, issparse, spmatrix
 from scipy.spatial import Delaunay
-from shapely.geometry import Point, LineString, Polygon, MultiPolygon
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.wkb import dumps
 from skimage import measure
 
@@ -59,6 +59,61 @@ def centroids(bin_indices: np.ndarray, coord_min: float = 0, binsize: int = 50) 
     return coord_centroids
 
 
+def contour_to_geo(contour):
+    """Transfer contours to `shapely.geometry`"""
+    n = contour.shape[0]
+    if n >= 3:
+        geo = Polygon(contour)
+    elif n == 2:
+        geo = LineString(contour)
+    else:
+        geo = Point(contour[0])
+    geo = dumps(geo, hex=True)  # geometry object to hex
+    return geo
+
+
+def get_points_props(data: pd.DataFrame) -> pd.DataFrame:
+    """Calculate properties of labeled coordinates.
+
+    Args:
+        data: Pandas Dataframe containing `x`, `y`, `label` columns.
+
+    Returns:
+        A dataframe with properties and contours indexed by label
+    """
+    rows = []
+    for label, _df in data.drop_duplicates(subset=["label", "x", "y"]).groupby("label"):
+        if label <= 0:
+            continue
+        points = _df[["x", "y"]].values.astype(int)
+        min_offset = points.min(axis=0)
+        max_offset = points.max(axis=0)
+        min0, min1 = min_offset
+        max0, max1 = max_offset
+        hull = cv2.convexHull(points, returnPoints=True).squeeze(1)
+        contour = contour_to_geo(hull)
+
+        moments = cv2.moments(hull)
+        area = moments["m00"]
+        if area > 0:
+            centroid0 = moments["m10"] / area
+            centroid1 = moments["m01"] / area
+        elif hull.shape[0] == 2:
+            line = hull - min_offset
+            mask = cv2.line(np.zeros((max_offset - min_offset + 1)[::-1], dtype=np.uint8), line[0], line[1], color=1).T
+            area = mask.sum()
+            centroid0, centroid1 = hull.mean(axis=0)
+        elif hull.shape[0] == 1:
+            area = 1
+            centroid0, centroid1 = hull[0] + 0.5
+        else:
+            raise IOError(f"Convex hull contains {hull.shape[0]} points.")
+        rows.append([str(label), area, min0, min1, max0 + 1, max1 + 1, centroid0, centroid1, contour])
+    return pd.DataFrame(
+        rows, columns=["label", "area", "bbox-0", "bbox-1", "bbox-2", "bbox-3", "centroid-0", "centroid-1", "contour"]
+    ).set_index("label")
+
+
 def get_label_props(labels: np.ndarray) -> pd.DataFrame:
     """Measure properties of labeled cell regions.
 
@@ -75,18 +130,6 @@ def get_label_props(labels: np.ndarray) -> pd.DataFrame:
         contours = cv2.findContours(mtx, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
         assert len(contours) == 1
         return contours[0].squeeze(1)
-
-    def contour_to_geo(contour):
-        """Transfer contours to `shapely.geometry`"""
-        n = contour.shape[0]
-        if n >= 3:
-            geo = Polygon(contour)
-        elif n == 2:
-            geo = LineString(contour)
-        else:
-            geo = Point(contour[0])
-        geo = dumps(geo, hex=True)  # geometry object to hex
-        return geo
 
     props = measure.regionprops_table(
         labels, properties=("label", "area", "bbox", "centroid"), extra_properties=[contour]
@@ -110,9 +153,7 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
     """
 
     def create_geo(row):
-        x, y = row["x"], row["y"]
-        x *= binsize
-        y *= binsize
+        x, y = row["x"] * binsize, row["y"] * binsize
         if binsize > 1:
             geo = Polygon(
                 [
@@ -128,10 +169,6 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
         geo = dumps(geo, hex=True)  # geometry object to hex
         return geo
 
-    # def contour(row):
-    #     x, y = row["x"] * binsize, row["y"] * binsize
-    #     return np.array([[x, y], [x + binsize, y], [x + binsize, y + binsize], [x, y + binsize]], dtype=int)
-
     props = pd.DataFrame(
         {
             "label": data["label"].copy(),
@@ -141,6 +178,10 @@ def get_bin_props(data: pd.DataFrame, binsize: int) -> pd.DataFrame:
         }
     )
     props["area"] = binsize**2
+    props["bbox-0"] = data["x"] * binsize
+    props["bbox-1"] = data["y"] * binsize
+    props["bbox-2"] = (data["x"] + 1) * binsize + 1
+    props["bbox-3"] = (data["y"] + 1) * binsize + 1
     return props.set_index("label")
 
 

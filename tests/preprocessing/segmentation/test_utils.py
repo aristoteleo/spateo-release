@@ -1,8 +1,9 @@
-from unittest import mock, TestCase
+from unittest import TestCase, mock
 
 import numpy as np
 
 import spateo.preprocessing.segmentation.utils as utils
+
 from ...mixins import TestMixin
 
 

@@ -1,10 +1,10 @@
 """Image preprocessing.
 """
-from typing import Union, Optional
+from typing import Optional, Union
 
-from anndata import AnnData
 import cv2
 import matplotlib.pyplot as plt
+from anndata import AnnData
 
 from ..io.image_utils import add_image_layer
 
