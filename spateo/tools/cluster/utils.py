@@ -3,8 +3,6 @@ import matplotlib.pyplot as plt
 
 from anndata import AnnData
 from kneed import KneeLocator
-from pysctransform import vst, SCTransform
-from pysctransform.plotting import plot_fit, plot_residual_var
 from scipy.sparse import isspmatrix, csr_matrix, spmatrix
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
@@ -94,6 +92,15 @@ def sctransform(
     Returns:
          Updates adata with the field ``adata.layers["raw_X"]``, containing raw expression matrix for n_top_genes(highly variable genes).
     """
+
+    try:
+        from pysctransform import vst, SCTransform
+        from pysctransform.plotting import plot_fit, plot_residual_var
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `pysctransform`."
+            "Install pysctransform via `pip install git+https://github.com/saketkc/pysctransform.git`"
+        )
 
     adata = adata.copy() if copy else adata
 
