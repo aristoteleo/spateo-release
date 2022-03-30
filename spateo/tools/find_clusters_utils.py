@@ -2,7 +2,6 @@ import math
 import random
 
 import anndata as ad
-import dynamo as dyn
 import lack
 import numpy as np
 import numba

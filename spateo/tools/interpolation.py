@@ -3,7 +3,6 @@ Todo:
     * @Xiaojieqiu: update with Google style documentation, function typings, tests
 """
 import numpy as np
-from dynamo.vectorfield.scVectorField import SparseVFC
 
 from .interpolation_utils import *
 
@@ -53,6 +52,7 @@ def interpolation_SparseVFC(adata, genes=None, grid_num=50, lambda_=0.02, lstsq_
         point in the gene expression location space).
 
     """
+    from dynamo.vectorfield.scVectorField import SparseVFC
 
     X, V = adata.obsm["spatial"], adata[:, genes].X
 
