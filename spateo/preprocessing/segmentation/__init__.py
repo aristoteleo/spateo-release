@@ -12,4 +12,4 @@ from .label import (
     watershed_markers,
 )
 from .qc import generate_random_labels, select_qc_regions
-from .stardist import *
+from .stardist import stardist
