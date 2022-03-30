@@ -12,9 +12,11 @@ The IEEE Winter Conference on Applications of Computer Vision (WACV), Snowmass V
 import math
 from typing import Optional, Union
 
+import cv2
 import numpy as np
 from anndata import AnnData
 from csbdeep.data import Normalizer, PercentileNormalizer
+from skimage import measure
 from stardist.models import StarDist2D
 from typing_extensions import Literal
 
@@ -52,11 +54,43 @@ def _stardist(
     return labels
 
 
+def _sanitize_labels(labels: np.ndarray) -> np.ndarray:
+    """Sanitize labels obtained from StarDist.
+
+    StarDist sometimes yields disconnected labels. This function removes
+    these problems by selecting the largest area.
+
+    Args:
+        labels: Numpy array containing labels
+
+    Returns:
+        Sanitized labels.
+    """
+
+    def components(mtx):
+        mtx = mtx.astype(np.uint8)
+        return cv2.connectedComponentsWithStats(mtx)
+
+    sanitized = labels.copy()
+    label_props = measure.regionprops(labels, extra_properties=[components])
+    for props in label_props:
+        label = props.label
+        comps = props.components
+        if comps[0] > 2:
+            lm.main_debug(f"Sanitizing label {label}.")
+            largest_comp_label = comps[2][1:, cv2.CC_STAT_AREA].argmax() + 1
+            min_row, min_col, max_row, max_col = props.bbox
+            subset = (comps[1] > 0) & (comps[1] != largest_comp_label)
+            sanitized[min_row:max_row, min_col:max_col][subset] = 0
+    return sanitized
+
+
 def stardist(
     adata: AnnData,
     model: Union[Literal["2D_versatile_fluo", "2D_versatile_he", "2D_paper_dsb2018"], StarDist2D] = "2D_versatile_fluo",
     tilesize: int = 2000,
     normalizer: Optional[Normalizer] = PercentileNormalizer(),
+    sanitize: bool = True,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
     **kwargs,
@@ -77,6 +111,7 @@ def stardist(
         normalizer: Normalizer to use to perform normalization prior to prediction.
             By default, percentile-based normalization is performed. `None` may
             be provided to disable normalization.
+        sanitize: Whether to sanitize disconnected labels.
         layer: Layer that contains staining image. Defaults to `stain`.
         out_layer: Layer to put resulting labels. Defaults to `{layer}_labels`.
         **kwargs: Additional keyword arguments to pass to :func:`StarDist2D.predict_instances`.
@@ -92,5 +127,8 @@ def stardist(
 
     lm.main_info(f"Running StarDist with model {model}.")
     labels = _stardist(img, model, n_tiles=n_tiles, normalizer=normalizer, **kwargs)
+    if sanitize:
+        lm.main_info(f"Fixing disconnected labels.")
+        labels = _sanitize_labels(labels)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, labels)
