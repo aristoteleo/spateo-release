@@ -13,7 +13,7 @@ from .utils import add_mesh_labels
 def construct_pc(
     adata: AnnData,
     spatial_key: str = "spatial",
-    groupby: Union[str, list] = None,
+    groupby: Union[str, tuple] = None,
     key_added: str = "groups",
     mask: Union[str, int, float, list] = None,
     colormap: Union[str, list, dict] = "rainbow",
@@ -53,7 +53,7 @@ def construct_pc(
     if groupby in obs_names:
         groups = adata.obs[groupby].map(lambda x: "mask" if x in mask_list else x).values
     elif groupby in gene_names or set(groupby) <= gene_names:
-        groups = adata[:, groupby].X.sum(axis=1).flatten().round(2)
+        groups = adata[:, list(groupby)].X.sum(axis=1).flatten().round(2)
     elif groupby is None:
         groups = np.array(["same"] * adata.obs.shape[0])
     else:

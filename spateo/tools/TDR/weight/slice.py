@@ -69,7 +69,7 @@ def interactive_slice(
     mesh = multiblock2mesh(mesh=mesh, message="slicing") if isinstance(mesh, MultiBlock) else mesh.copy()
 
     # Create an interactive window for using widgets.
-    p = _interactive_plotter(message=True)
+    p = _interactive_plotter()
 
     # Slice a mesh using a slicing widget.
     if method == "axis":
@@ -83,6 +83,6 @@ def interactive_slice(
         )
     else:
         p.add_mesh_slice_orthogonal(mesh, scalars=f"{key}_rgba", rgba=True, tubing=True, widget_color="black")
-    p.show()
+    p.show(cpos="iso")
 
     return collect_mesh(p.plane_sliced_meshes)
