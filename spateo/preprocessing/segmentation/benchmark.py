@@ -85,7 +85,7 @@ def labeling_stats(y_true: np.ndarray, y_pred: np.ndarray) -> Tuple[float, float
     return ars, homogeneity, completeness, v
 
 
-def stats(
+def compare(
     adata: AnnData, true_layer: str, pred_layer: str, data_layer: str = SKM.X_LAYER, umi_pixels_only: bool = True
 ) -> pd.DataFrame:
     """Compute segmentation statistics.
