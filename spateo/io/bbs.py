@@ -17,8 +17,8 @@ from shapely.geometry import (
 )
 from shapely.ops import polygonize, unary_union
 
-from ...logging import logger_manager as lm
 from ..configuration import SKM
+from ..logging import logger_manager as lm
 from .bgi import read_bgi_agg
 from .utils import centroids
 
@@ -131,7 +131,7 @@ def alpha_shape(
 def get_concave_hull(
     path: str,
     binsize: int = 20,
-    min_agg_umi: int = 0,
+    min_agg_umi: Optional[int] = None,
     alpha: float = 1.0,
     buffer: Optional[float] = None,
 ) -> Tuple[Polygon, List]:
@@ -152,6 +152,9 @@ def get_concave_hull(
         edge_points: The coordinates of the edge of the resultant concave hull.
     """
     adata = read_bgi_agg(path, binsize=binsize)
+
+    if min_agg_umi is None:
+        min_agg_umi = binsize - 1
 
     i, j = (adata.X > min_agg_umi).nonzero()
 
