@@ -4,7 +4,11 @@ two sets of segmentation labels.
 from typing import Tuple
 
 import numpy as np
+import pandas as pd
+from anndata import AnnData
 from sklearn import metrics
+
+from ...configuration import SKM
 
 
 def adjusted_rand_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -79,3 +83,49 @@ def labeling_stats(y_true: np.ndarray, y_pred: np.ndarray) -> Tuple[float, float
     ars = adjusted_rand_score(y_true, y_pred)
     homogeneity, completeness, v = metrics.homogeneity_completeness_v_measure(y_true, y_pred)
     return ars, homogeneity, completeness, v
+
+
+def stats(
+    adata: AnnData, true_layer: str, pred_layer: str, data_layer: str = SKM.X_LAYER, umi_pixels_only: bool = True
+) -> pd.DataFrame:
+    """Compute segmentation statistics.
+
+    Args:
+        adata: Input Anndata
+        true_layer: Layer containing true labels
+        pred_layer: Layer containing predicted labels
+        data_layer: Layer containing UMIs
+        umi_pixels_only: Whether or not to only consider pixels that have at least
+            one UMI captured (as determined by `data_layer`).
+
+    Returns:
+        Pandas DataFrame containing classification and labeling statistics
+    """
+    y_true = SKM.select_layer_data(adata, true_layer)
+    y_pred = SKM.select_layer_data(adata, pred_layer)
+    X = SKM.select_layer_data(adata, data_layer, dense=True)
+
+    if umi_pixels_only:
+        umi_mask = X > 0
+        y_true = y_true[umi_mask]
+        y_pred = y_pred[umi_mask]
+
+    tn, fp, fn, tp, precision, accuracy, f1 = classification_stats(y_true, y_pred)
+    both_labeled = (y_true > 0) & (y_pred > 0)
+    ars, homogeneity, completeness, v = labeling_stats(y_true[both_labeled], y_pred[both_labeled])
+    return pd.DataFrame(
+        {"value": [tn, fp, fn, tp, precision, accuracy, f1, ars, homogeneity, completeness, v]},
+        index=[
+            "True negative",
+            "False positive",
+            "False negative",
+            "True positive",
+            "Precision",
+            "Accuracy",
+            "F1 score",
+            "Adjusted rand score",
+            "Homogeneity",
+            "Completeness",
+            "V measure",
+        ],
+    )
