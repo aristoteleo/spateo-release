@@ -9,6 +9,7 @@ from anndata import AnnData
 from sklearn import metrics
 
 from ...configuration import SKM
+from ...logging import logger_manager as lm
 
 
 def adjusted_rand_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -106,11 +107,14 @@ def compare(
     X = SKM.select_layer_data(adata, data_layer, make_dense=True)
 
     if umi_pixels_only:
+        lm.main_info("Ignoring pixels with zero detected UMIs.")
         umi_mask = X > 0
         y_true = y_true[umi_mask]
         y_pred = y_pred[umi_mask]
 
+    lm.main_info("Computing classification statistics.")
     tn, fp, fn, tp, precision, accuracy, f1 = classification_stats(y_true, y_pred)
+    lm.main_info("Computing label statistics.")
     both_labeled = (y_true > 0) & (y_pred > 0)
     ars, homogeneity, completeness, v = labeling_stats(y_true[both_labeled], y_pred[both_labeled])
     return pd.DataFrame(
