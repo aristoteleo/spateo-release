@@ -17,6 +17,7 @@ from shapely.geometry import (
 )
 from shapely.ops import polygonize, unary_union
 
+from ...logging import logger_manager as lm
 from ..configuration import SKM
 from .bgi import read_bgi_agg
 from .utils import centroids
@@ -163,8 +164,10 @@ def get_concave_hull(
     else:
         i, j = i + x_min, j + y_min
 
-    # TODO: give warnings when alpha_shape returns nothing and ask the users to set alpha to be smaller.
     if buffer is None:
         buffer = binsize
 
-    return alpha_shape(i, j, alpha, buffer, vectorize=True)
+    alpha_hull, edge_points = alpha_shape(i, j, alpha, buffer, vectorize=True)
+    lm.main_warning(f"No alpha convex hull is identified, please set to be smaller than {alpha}")
+
+    return alpha_hull, edge_points
