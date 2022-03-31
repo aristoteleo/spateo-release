@@ -77,7 +77,7 @@ def interactive_rectangle_clip(
     mesh = multiblock2mesh(mesh=mesh, message="rectangle clipping") if isinstance(mesh, MultiBlock) else mesh.copy()
 
     # Create an interactive window for using widgets.
-    p = _interactive_plotter(message=True)
+    p = _interactive_plotter()
 
     # Add a visualization-only background mesh with checkbox button widgets
     label_meshes = []
@@ -109,7 +109,7 @@ def interactive_rectangle_clip(
         point_size=10,
     )
     _interactive_rectangle_clip(plotter=p, mesh=mesh, picking_list=picked_meshes, picking_r_list=picking_r_list)
-    p.show()
+    p.show(cpos="iso")
 
     # Obtain final picked mesh
     picked_mesh = collect_mesh([picking_r_list[0]]) if invert else collect_mesh(picked_meshes)
@@ -136,7 +136,7 @@ def interactive_box_clip(
     mesh = multiblock2mesh(mesh=mesh, message="box clipping") if isinstance(mesh, MultiBlock) else mesh.copy()
 
     # Create an interactive window for using widgets.
-    p = _interactive_plotter(message=True)
+    p = _interactive_plotter()
 
     # Clip a mesh using a 3D box widget.
     p.add_mesh_clip_box(
@@ -148,7 +148,7 @@ def interactive_box_clip(
         point_size=10,
         widget_color="black",
     )
-    p.show()
+    p.show(cpos="iso")
 
     # obtain final picked meshes
     picked_mesh = collect_mesh(p.box_clipped_meshes)

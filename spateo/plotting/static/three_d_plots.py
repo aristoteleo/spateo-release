@@ -12,7 +12,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ...tools.TDR import collect_mesh
+from ...tools.TDR.mesh.utils import collect_mesh
 
 
 def create_plotter(
@@ -20,7 +20,6 @@ def create_plotter(
     off_screen: bool = False,
     window_size: tuple = (1024, 768),
     background: str = "white",
-    initial_cpo: Union[str, tuple, list] = "iso",
 ) -> Plotter:
     """
     Create a plotting object to display pyvista/vtk mesh.
@@ -30,24 +29,18 @@ def create_plotter(
         off_screen: Renders off screen when True. Useful for automated screenshots.
         window_size: Window size in pixels. The default window_size is `[1024, 768]`.
         background: The background color of the window.
-        initial_cpo: Camera position of the window. Available `initial_cpo` are:
-                * `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
-                * Customize a tuple. E.g.: (7, 0, 20.).
     Returns:
         plotter: The plotting object to display pyvista/vtk mesh.
     """
 
     # Create an initial plotting object.
-    notebook = True if jupyter is True else False
+    notebook = True if jupyter else False
     plotter = pv.Plotter(
         off_screen=off_screen,
         window_size=window_size,
         notebook=notebook,
         lighting="light_kit",
     )
-
-    # Set camera position of the active render window.
-    plotter.camera_position = initial_cpo
 
     # Set the background color of the active render window.
     plotter.background_color = background
@@ -82,6 +75,7 @@ def add_mesh(
     ambient: float = 0.2,
     opacity: float = 1.0,
     point_size: float = 5.0,
+    mesh_style: Literal["points", "surface", "wireframe"] = "surface",
 ):
     """
     Add mesh(es) to the plotter.
@@ -97,13 +91,13 @@ def add_mesh(
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
         point_size: Point size of any nodes in the dataset plotted.
+        mesh_style: Visualization style of the mesh. One of the following: style='surface', style='wireframe', style='points'.
     """
 
     def _add_mesh(_p, _mesh):
         """Add any PyVista/VTK mesh to the scene."""
 
         scalars = f"{key}_rgba" if key in _mesh.array_names else _mesh.active_scalars_name
-        mesh_style = "points" if scalars in _mesh.point_data.keys() else "surface"
 
         _p.add_mesh(
             _mesh,
@@ -114,6 +108,7 @@ def add_mesh(
             point_size=point_size,
             ambient=ambient,
             opacity=opacity,
+            smooth_shading=True,
         )
 
     # Add mesh(es) to the plotter.
@@ -364,6 +359,7 @@ def _add2plotter(
     ambient: float = 0.2,
     opacity: float = 1.0,
     point_size: float = 5.0,
+    mesh_style: Literal["points", "surface", "wireframe"] = "surface",
     legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
         "upper right",
@@ -388,6 +384,7 @@ def _add2plotter(
         ambient=ambient,
         opacity=opacity,
         point_size=point_size,
+        mesh_style=mesh_style,
     )
     add_legend(
         plotter=plotter,
@@ -420,6 +417,7 @@ def three_d_plot(
     ambient: float = 0.2,
     opacity: float = 1.0,
     point_size: float = 5.0,
+    mesh_style: Literal["points", "surface", "wireframe"] = "surface",
     initial_cpo: Union[str, tuple] = "iso",
     legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
@@ -462,6 +460,7 @@ def three_d_plot(
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
         point_size: Point size of any nodes in the dataset plotted.
+        mesh_style: Visualization style of the mesh. One of the following: style='surface', style='wireframe', style='points'.
         initial_cpo: Camera position of the window. Available `initial_cpo` are:
                 * `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
                 * Customize a tuple. E.g.: (7, 0, 20.).
@@ -500,7 +499,6 @@ def three_d_plot(
         off_screen=off_screen,
         window_size=window_size,
         background=background,
-        initial_cpo=initial_cpo,
     )
     _add2plotter(
         plotter=p1,
@@ -510,6 +508,7 @@ def three_d_plot(
         ambient=ambient,
         opacity=opacity,
         point_size=point_size,
+        mesh_style=mesh_style,
         legend_size=legend_size,
         legend_loc=legend_loc,
         outline=outline,
@@ -517,7 +516,7 @@ def three_d_plot(
         outline_labels=outline_labels,
     )
     jupyter_backend = "panel" if jupyter is True else None
-    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend)
+    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend, cpos=initial_cpo)
 
     # Create another plotting object to save pyvista/vtk mesh.
     p2 = create_plotter(
@@ -525,7 +524,6 @@ def three_d_plot(
         off_screen=True,
         window_size=window_size,
         background=background,
-        initial_cpo=cpo,
     )
     _add2plotter(
         plotter=p2,
@@ -535,12 +533,15 @@ def three_d_plot(
         ambient=ambient,
         opacity=opacity,
         point_size=point_size,
+        mesh_style=mesh_style,
         legend_size=legend_size,
         legend_loc=legend_loc,
         outline=outline,
         outline_width=outline_width,
         outline_labels=outline_labels,
     )
+
+    p2.camera_position = cpo
 
     # Save the plotting object.
     if plotter_filename is not None:
@@ -564,6 +565,7 @@ def three_d_animate(
     ambient: float = 0.2,
     opacity: float = 1.0,
     point_size: float = 5.0,
+    mesh_style: Literal["points", "surface", "wireframe"] = "surface",
     initial_cpo: Union[str, tuple] = "iso",
     legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
@@ -600,12 +602,13 @@ def three_d_animate(
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
         point_size: Point size of any nodes in the dataset plotted.
+        mesh_style: Visualization style of the mesh. One of the following: style='surface', style='wireframe', style='points'.
         initial_cpo: Camera position of the window. Available `initial_cpo` are:
                 * `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
                 * Customize a tuple. E.g.: (7, 0, 20.).
         legend_size: Two float tuple, each float between 0 and 1.
                      For example (0.1, 0.1) would make the legend 10% the size of the entire figure window.
-                     By default (legend_size==None), legend_size will be adjusted adaptively.
+                     If legend_size==None, legend_size will be adjusted adaptively.
         legend_loc: The location of the legend in the window. Available `legend_loc` are:
                 * `'upper right'`
                 * `'upper left'`
@@ -638,7 +641,6 @@ def three_d_animate(
         off_screen=off_screen,
         window_size=window_size,
         background=background,
-        initial_cpo=initial_cpo,
     )
     _add2plotter(
         plotter=p1,
@@ -648,11 +650,12 @@ def three_d_animate(
         ambient=ambient,
         opacity=opacity,
         point_size=point_size,
+        mesh_style=mesh_style,
         legend_size=legend_size,
         legend_loc=legend_loc,
     )
     jupyter_backend = "panel" if jupyter is True else None
-    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend)
+    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend, cpos=initial_cpo)
 
     # Create another plotting object to save.
     start_block = blocks[blocks_name[0]]
@@ -661,7 +664,6 @@ def three_d_animate(
         off_screen=True,
         window_size=window_size,
         background=background,
-        initial_cpo=cpo,
     )
     _add2plotter(
         plotter=p2,
@@ -671,9 +673,12 @@ def three_d_animate(
         ambient=ambient,
         opacity=opacity,
         point_size=point_size,
+        mesh_style=mesh_style,
         legend_size=legend_size,
         legend_loc=legend_loc,
     )
+
+    p2.camera_position = cpo
 
     filename_format = filename.split(".")[-1]
     if filename_format == "gif":

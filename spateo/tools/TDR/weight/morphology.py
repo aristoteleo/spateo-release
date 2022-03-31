@@ -15,7 +15,7 @@ def mesh_morphology(
 ) -> Dict[str, Union[float, Any]]:
     """
     Return the basic morphological characteristics of mesh,
-    including mesh volume, mesh surface area, volume / surface area ratio.
+    including mesh volume, mesh surface area, volume / surface area ratio，etc..
 
     Args:
         mesh: A reconstructed surface mesh or volume mesh.

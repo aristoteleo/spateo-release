@@ -120,7 +120,7 @@ def interactive_pick(
     picked_meshes = label_meshes.copy()
 
     # Create an interactive window for using widgets.
-    p = _interactive_plotter(message=True)
+    p = _interactive_plotter()
 
     checkbox_start_pos = 5.0
     for label_mesh in label_meshes:
@@ -135,6 +135,6 @@ def interactive_pick(
             checkbox_position=(5.0, checkbox_start_pos),
         )
         checkbox_start_pos = checkbox_start_pos + checkbox_size + (checkbox_size // 10)
-    p.show()
+    p.show(cpos="iso")
 
     return collect_mesh(picked_meshes)
