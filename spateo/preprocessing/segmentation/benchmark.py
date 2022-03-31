@@ -106,7 +106,7 @@ def compare(
     y_pred = SKM.select_layer_data(adata, pred_layer)
 
     if umi_pixels_only:
-        lm.main_info("Ignoring pixels with zero detected UMIs.")
+        lm.main_debug("Ignoring pixels with zero detected UMIs.")
         X = SKM.select_layer_data(adata, data_layer, make_dense=True)
         umi_mask = X > 0
         y_true = y_true[umi_mask]
