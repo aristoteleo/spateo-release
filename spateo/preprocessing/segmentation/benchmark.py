@@ -103,7 +103,7 @@ def stats(
     """
     y_true = SKM.select_layer_data(adata, true_layer)
     y_pred = SKM.select_layer_data(adata, pred_layer)
-    X = SKM.select_layer_data(adata, data_layer, dense=True)
+    X = SKM.select_layer_data(adata, data_layer, make_dense=True)
 
     if umi_pixels_only:
         umi_mask = X > 0
