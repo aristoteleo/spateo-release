@@ -17,7 +17,11 @@ import numpy as np
 from anndata import AnnData
 from csbdeep.data import Normalizer, PercentileNormalizer
 from skimage import measure
-from stardist.models import StarDist2D
+
+try:
+    from stardist.models import StarDist2D
+except ModuleNotFoundError:
+    StarDist2D = None
 from typing_extensions import Literal
 
 from ....configuration import SKM
@@ -27,7 +31,9 @@ from ....logging import logger_manager as lm
 
 def _stardist(
     img: np.ndarray,
-    model: Union[Literal["2D_versatile_fluo", "2D_versatile_he", "2D_paper_dsb2018"], StarDist2D] = "2D_versatile_fluo",
+    model: Union[
+        Literal["2D_versatile_fluo", "2D_versatile_he", "2D_paper_dsb2018"], "StarDist2D"
+    ] = "2D_versatile_fluo",
     **kwargs,
 ) -> np.ndarray:
     """Run StarDist on the provided image.
@@ -87,7 +93,9 @@ def _sanitize_labels(labels: np.ndarray) -> np.ndarray:
 
 def stardist(
     adata: AnnData,
-    model: Union[Literal["2D_versatile_fluo", "2D_versatile_he", "2D_paper_dsb2018"], StarDist2D] = "2D_versatile_fluo",
+    model: Union[
+        Literal["2D_versatile_fluo", "2D_versatile_he", "2D_paper_dsb2018"], "StarDist2D"
+    ] = "2D_versatile_fluo",
     tilesize: int = 2000,
     normalizer: Optional[Normalizer] = PercentileNormalizer(),
     sanitize: bool = True,
@@ -116,6 +124,8 @@ def stardist(
         out_layer: Layer to put resulting labels. Defaults to `{layer}_labels`.
         **kwargs: Additional keyword arguments to pass to :func:`StarDist2D.predict_instances`.
     """
+    if StarDist2D is None:
+        raise ModuleNotFoundError("Please install StarDist by running `pip install stardist`.")
     if layer not in adata.layers:
         raise PreprocessingError(
             f'Layer "{layer}" does not exist in AnnData. '

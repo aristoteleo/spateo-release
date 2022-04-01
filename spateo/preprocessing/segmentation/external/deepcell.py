@@ -9,7 +9,12 @@ from typing import Optional, Union
 
 import numpy as np
 from anndata import AnnData
-from deepcell.applications import Application, NuclearSegmentation
+
+try:
+    from deepcell.applications import Application, NuclearSegmentation
+except ModuleNotFoundError:
+    Application = None
+    NuclearSegmentation = None
 
 from ....configuration import SKM
 from ....errors import PreprocessingError
@@ -18,7 +23,7 @@ from ....logging import logger_manager as lm
 
 def _deepcell(
     img: np.ndarray,
-    model: Application,
+    model: "Application",
     **kwargs,
 ) -> np.ndarray:
     """Run DeepCell on the provided image.
@@ -38,7 +43,7 @@ def _deepcell(
 
 def deepcell(
     adata: AnnData,
-    model: Optional[Application] = None,
+    model: Optional["Application"] = None,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
     **kwargs,
@@ -56,6 +61,8 @@ def deepcell(
     Returns:
         Numpy array containing cell labels.
     """
+    if Application is None or NuclearSegmentation is None:
+        raise ModuleNotFoundError("Please install Cellpose by running `pip install deepcell`.")
     if layer not in adata.layers:
         raise PreprocessingError(
             f'Layer "{layer}" does not exist in AnnData. '

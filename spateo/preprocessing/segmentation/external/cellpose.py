@@ -9,7 +9,12 @@ from typing import Optional, Union
 
 import numpy as np
 from anndata import AnnData
-from cellpose.models import Cellpose, CellposeModel
+
+try:
+    from cellpose.models import Cellpose, CellposeModel
+except ModuleNotFoundError:
+    Cellpose = None
+    CellposeModel = None
 from typing_extensions import Literal
 
 from ....configuration import SKM
@@ -19,7 +24,7 @@ from ....logging import logger_manager as lm
 
 def _cellpose(
     img: np.ndarray,
-    model: Union[Literal["cyto", "nuclei"], CellposeModel] = "nuclei",
+    model: Union[Literal["cyto", "nuclei"], "CellposeModel"] = "nuclei",
     **kwargs,
 ) -> np.ndarray:
     """Run Cellpose on the provided image.
@@ -45,7 +50,7 @@ def _cellpose(
 
 def cellpose(
     adata: AnnData,
-    model: Union[Literal["cyto", "nuclei"], CellposeModel] = "nuclei",
+    model: Union[Literal["cyto", "nuclei"], "CellposeModel"] = "nuclei",
     diameter: Optional[int] = None,
     normalize: bool = True,
     layer: str = SKM.STAIN_LAYER_KEY,
@@ -72,6 +77,9 @@ def cellpose(
     Returns:
         Numpy array containing cell labels.
     """
+    if Cellpose is None or CellposeModel is None:
+        raise ModuleNotFoundError("Please install Cellpose by running `pip install cellpose`.")
+
     if layer not in adata.layers:
         raise PreprocessingError(
             f'Layer "{layer}" does not exist in AnnData. '
