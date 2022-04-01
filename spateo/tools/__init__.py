@@ -14,6 +14,8 @@ from .interpolation_nn import *
 from .interpolation_utils import DataSampler, DeepInterpolation
 from .nn_losses import *
 from .spatial_degs import moran_i
+
+from .three_d_alignment import slice_alignment, slice_alignment_bigBin
 from .TDR import *
 
 # from .spatial_markers import *
