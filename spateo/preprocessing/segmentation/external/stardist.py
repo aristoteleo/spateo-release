@@ -20,9 +20,9 @@ from skimage import measure
 from stardist.models import StarDist2D
 from typing_extensions import Literal
 
-from ...configuration import SKM
-from ...errors import PreprocessingError
-from ...logging import logger_manager as lm
+from ....configuration import SKM
+from ....errors import PreprocessingError
+from ....logging import logger_manager as lm
 
 
 def _stardist(

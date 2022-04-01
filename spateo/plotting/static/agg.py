@@ -53,7 +53,7 @@ def imshow(
 
     mtx = SKM.select_layer_data(adata, layer, make_dense=True)
     if labels:
-        mtx = label2rgb(mtx)
+        mtx = label2rgb(mtx, bg_label=0)
 
     kwargs.update({"interpolation": "none"})
     im = ax.imshow(mtx, **kwargs)
