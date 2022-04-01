@@ -70,6 +70,7 @@ def mask_cells_from_stain(
             classified as cell.
         mk: Size of the kernel used for morphological close and open operations
             applied at the very end.
+        layer: Layer that contains staining image.
         out_layer: Layer to put resulting nuclei mask. Defaults to `{layer}_mask`.
     """
     if layer not in adata.layers:

@@ -140,7 +140,7 @@ class RigidAlignmentRefiner(AlignmentRefiner):
             x = torch.tensor(x)[None][None].float()
         grid = F.affine_grid(theta.unsqueeze(0), x.size(), align_corners=False)
         t = F.grid_sample(x, grid, align_corners=False)
-        return t if train else t.detach().numpy()
+        return t if train else t.detach().numpy().squeeze()
 
     def get_params(self, train=False):
         theta = self.theta
@@ -222,4 +222,5 @@ def refine_alignment(
             transformed = aligner.transform(data, params)
             if data.dtype == np.dtype(bool):
                 transformed = transformed > 0.5
+            # NOTE: transformed dtypes are implicitly cast to the original dtype
             SKM.set_layer_data(adata, layer, transformed)
