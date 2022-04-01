@@ -3,6 +3,7 @@ cellpose
 colorcet>=2.0.1
 cvxopt>=1.2.3
 csbdeep>=0.6.3
+deepcell
 dynamo-release>=0.9.2
 fbgbp>=0.2.0
 folium>=0.12.1
