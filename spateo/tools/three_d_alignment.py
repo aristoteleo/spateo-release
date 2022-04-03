@@ -129,7 +129,7 @@ def slice_alignment(
     align_slices = []
     for i in lm.progress_logger(range(len(slices) - 1), progress_name="Slices alignment"):
 
-        slice1 = slices[i].copy() if i == 0 else align_slices[i]
+        slice1 = slices[i].copy() if i == 0 else align_slices[i].copy()
         slice2 = slices[i + 1].copy()
 
         # Calculate and returns optimal alignment of two slices.
