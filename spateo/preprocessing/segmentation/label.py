@@ -357,3 +357,43 @@ def label_connected_components(
     labels = _label_connected_components(mask, area_threshold, k, min_area, n_iter, distance, max_area, seed_labels)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, labels)
+
+
+def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.ndarray:
+    """Augment the labels in one label array using the labels in another.
+
+    This function first computes the overlap between the labels in the two
+    arrays, and any labels that are in `source_labels` that have no overlap with
+    any labels in `target_labels` is transferred to a copy of `target_labels` with
+    a new label.
+
+    Args:
+        source_labels: Numpy array containing labels to (possibly) transfer.
+        target_labels: Numpy array containing labels to augment.
+
+    Returns:
+        New Numpy array containing augmented labels.
+    """
+    pass
+
+
+def augment_labels(
+    adata: AnnData,
+    source_layer: str,
+    target_layer: str,
+    out_layer: Optional[str] = None,
+):
+    """Augment the labels in one label array using the labels in another.
+
+    Args:
+        adata: Input Anndata
+        source_layer: Layer containing source labels to (possibly) take labels
+            from.
+        target_layer: Layer containing target labels to augment.
+        out_layer: Layer to save results. Defaults to `{target_layer}_augmented`.
+    """
+    source_labels = SKM.select_layer_data(adata, source_layer)
+    target_labels = SKM.select_layer_data(adata, target_layer)
+    augmented = _augment_labels(source_labels, target_labels)
+    out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.AUGMENTED_SUFFIX)
+    SKM.set_layer_data(adata, out_layer, augmented)
