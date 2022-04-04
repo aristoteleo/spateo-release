@@ -19,6 +19,7 @@ except ModuleNotFoundError:
 from ....configuration import SKM
 from ....errors import PreprocessingError
 from ....logging import logger_manager as lm
+from ..utils import clahe
 
 
 def _deepcell(
@@ -44,6 +45,7 @@ def _deepcell(
 def deepcell(
     adata: AnnData,
     model: Optional["Application"] = None,
+    equalize: bool = True,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
     **kwargs,
@@ -53,6 +55,8 @@ def deepcell(
     Args:
         adata: Input Anndata
         model: DeepCell model to use
+        equalize: Whether or not to perform adaptive histogram equalization
+            prior to prediction.
         layer: Layer that contains staining image. Defaults to `stain`.
         out_layer: Layer to put resulting labels. Defaults to `{layer}_labels`.
         **kwargs: Additional keyword arguments to :func:`Application.predict`
@@ -70,6 +74,9 @@ def deepcell(
             "with the `nuclei_path` argument to `st.io.read_bgi_agg`."
         )
     img = SKM.select_layer_data(adata, layer, make_dense=True)
+    if equalize:
+        lm.main_info("Equalizing image with CLAHE.")
+        img = clahe(img)
     if model is None:
         model = NuclearSegmentation()
 

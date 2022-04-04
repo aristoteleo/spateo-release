@@ -27,6 +27,7 @@ from typing_extensions import Literal
 from ....configuration import SKM
 from ....errors import PreprocessingError
 from ....logging import logger_manager as lm
+from ..utils import clahe
 
 
 def _stardist(
@@ -98,6 +99,7 @@ def stardist(
     ] = "2D_versatile_fluo",
     tilesize: int = 2000,
     normalizer: Optional[Normalizer] = PercentileNormalizer(),
+    equalize: bool = True,
     sanitize: bool = True,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
@@ -119,6 +121,8 @@ def stardist(
         normalizer: Normalizer to use to perform normalization prior to prediction.
             By default, percentile-based normalization is performed. `None` may
             be provided to disable normalization.
+        equalize: Whether or not to perform adaptive histogram equalization
+            prior to prediction.
         sanitize: Whether to sanitize disconnected labels.
         layer: Layer that contains staining image. Defaults to `stain`.
         out_layer: Layer to put resulting labels. Defaults to `{layer}_labels`.
@@ -133,8 +137,11 @@ def stardist(
             "with the `nuclei_path` argument to `st.io.read_bgi_agg`."
         )
     img = SKM.select_layer_data(adata, layer, make_dense=True)
-    n_tiles = (math.ceil(img.shape[0] / tilesize), math.ceil(img.shape[1] / tilesize))
+    if equalize:
+        lm.main_info("Equalizing image with CLAHE.")
+        img = clahe(img)
 
+    n_tiles = (math.ceil(img.shape[0] / tilesize), math.ceil(img.shape[1] / tilesize))
     lm.main_info(f"Running StarDist with model {model}.")
     labels = _stardist(img, model, n_tiles=n_tiles, normalizer=normalizer, **kwargs)
     if sanitize:
