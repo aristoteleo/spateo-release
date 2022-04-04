@@ -8,7 +8,7 @@ import numpy as np
 from anndata import AnnData
 from numba import njit
 from scipy.sparse import issparse, spmatrix
-from skimage import filters, segmentation
+from skimage import filters, measure, segmentation
 
 from ...configuration import SKM
 from ...errors import PreprocessingError
@@ -374,7 +374,20 @@ def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.
     Returns:
         New Numpy array containing augmented labels.
     """
-    pass
+    overlap = utils.label_overlap(source_labels, target_labels)
+    # Find source labels that have no overlap with any target labels
+    no_overlap = (overlap == 0).all(axis=1)
+    label = target_labels.max() + 1
+    source_props = measure.regionprops(source_labels)  # lazy evaluation
+    augmented = target_labels.copy()
+    for props in source_props:
+        _label = props.label
+        if no_overlap[_label]:
+            min_row, min_col, max_row, max_col = props.bbox
+            source_mask = source_labels[min_row:max_row, min_col:max_col] == _label
+            augmented[min_row:max_row, min_col:max_col][source_mask] = label
+            label += 1
+    return augmented
 
 
 def augment_labels(
