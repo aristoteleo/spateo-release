@@ -8,7 +8,7 @@ import numpy as np
 from anndata import AnnData
 from numba import njit
 from scipy.sparse import issparse, spmatrix
-from skimage import filters, segmentation
+from skimage import filters, measure, segmentation
 
 from ...configuration import SKM
 from ...errors import PreprocessingError
@@ -357,3 +357,59 @@ def label_connected_components(
     labels = _label_connected_components(mask, area_threshold, k, min_area, n_iter, distance, max_area, seed_labels)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, labels)
+
+
+def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.ndarray:
+    """Augment the labels in one label array using the labels in another.
+
+    This function first computes the overlap between the labels in the two
+    arrays, and any labels that are in `source_labels` that have no overlap with
+    any labels in `target_labels` is transferred to a copy of `target_labels` with
+    a new label.
+
+    Args:
+        source_labels: Numpy array containing labels to (possibly) transfer.
+        target_labels: Numpy array containing labels to augment.
+
+    Returns:
+        New Numpy array containing augmented labels.
+    """
+    lm.main_debug("Constructing overlap matrix.")
+    # Ignore background pixels
+    overlap = utils.label_overlap(source_labels, target_labels)[1:, 1:]
+    # Find source labels that have no overlap with any target labels
+    no_overlap = (overlap == 0).all(axis=1)
+    label = target_labels.max() + 1
+    source_props = measure.regionprops(source_labels)  # lazy evaluation
+    augmented = target_labels.copy()
+    lm.main_debug("Copying over non-overlapping labels.")
+    for props in source_props:
+        _label = props.label
+        if no_overlap[_label - 1]:  # Because we removed background
+            min_row, min_col, max_row, max_col = props.bbox
+            source_mask = source_labels[min_row:max_row, min_col:max_col] == _label
+            augmented[min_row:max_row, min_col:max_col][source_mask] = label
+            label += 1
+    return augmented
+
+
+def augment_labels(
+    adata: AnnData,
+    source_layer: str,
+    target_layer: str,
+    out_layer: Optional[str] = None,
+):
+    """Augment the labels in one label array using the labels in another.
+
+    Args:
+        adata: Input Anndata
+        source_layer: Layer containing source labels to (possibly) take labels
+            from.
+        target_layer: Layer containing target labels to augment.
+        out_layer: Layer to save results. Defaults to `{target_layer}_augmented`.
+    """
+    source_labels = SKM.select_layer_data(adata, source_layer)
+    target_labels = SKM.select_layer_data(adata, target_layer)
+    augmented = _augment_labels(source_labels, target_labels)
+    out_layer = out_layer or SKM.gen_new_layer_key(target_layer, SKM.AUGMENTED_SUFFIX)
+    SKM.set_layer_data(adata, out_layer, augmented)

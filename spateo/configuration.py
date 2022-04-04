@@ -44,6 +44,7 @@ class SpateoAdataKeyManager:
     LABELS_SUFFIX = "labels"
     SCORES_SUFFIX = "scores"
     EXPANDED_SUFFIX = "expanded"
+    AUGMENTED_SUFFIX = "augmented"
 
     X_LAYER = "X"
 

@@ -5,6 +5,7 @@ from typing import Optional, Tuple, Union
 import cv2
 import numpy as np
 from kneed import KneeLocator
+from numba import njit
 from scipy import signal
 from tqdm import tqdm
 from typing_extensions import Literal
@@ -279,3 +280,53 @@ def safe_erode(
 
     mask = (X >= float_threshold) if is_float else (X > 0)
     return (mask + saved).astype(bool)
+
+
+def label_overlap(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
+    """Compuate the overlaps between two label arrays.
+
+    The integer labels in `X` and `Y` are used as the row and column indices
+    of the resulting array.
+
+    Note:
+        The overlap array contains background overlap (index 0) as well.
+
+    Args:
+        X: First label array. Labels in this array are the rows of the resulting
+            array.
+        Y: Second label array. Labels in this array are the columns of the resulting
+            array.
+
+    Returns:
+        A `(max(X)+1, max(Y)+1)` shape array containing how many pixels for
+            each label are overlapping.
+    """
+
+    @njit
+    def _label_overlap(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
+        overlap = np.zeros((X.max() + 1, Y.max() + 1), dtype=np.uint)
+        for i in range(X.shape[0]):
+            for j in range(X.shape[1]):
+                overlap[X[i, j], Y[i, j]] += 1
+        return overlap
+
+    if X.shape != Y.shape:
+        raise PreprocessingError(
+            f"Both arrays must have the same shape, but one is {X.shape} and the other is {Y.shape}."
+        )
+    return _label_overlap(X, Y)
+
+
+def clahe(X: np.ndarray, clip_limit: float = 10.0, tile_grid: Tuple[int, int] = (50, 50)) -> np.ndarray:
+    """Contrast-limited adaptive histogram equalization (CLAHE).
+
+    Args:
+        X: Image to equalize
+        clip_limit: Contrast clipping. Lower values retain more of homogeneous
+            regions.
+        tile_grid: Apply histogram equalization to tiles of this size.
+
+    Returns:
+        Equalized image
+    """
+    return cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid).apply(X)
