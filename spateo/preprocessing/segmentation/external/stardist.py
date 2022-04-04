@@ -61,6 +61,37 @@ def _stardist(
     return labels
 
 
+def _stardist_big(
+    img: np.ndarray,
+    model: Union[
+        Literal["2D_versatile_fluo", "2D_versatile_he", "2D_paper_dsb2018"], "StarDist2D"
+    ] = "2D_versatile_fluo",
+    **kwargs,
+) -> np.ndarray:
+    """Run StarDist on the provided image.
+
+    Args:
+        img: Image as a Numpy array.
+        model: Stardist model to use. Can be one of the three pretrained models
+            from StarDist2D:
+            1. '2D_versatile_fluo': 'Versatile (fluorescent nuclei)'
+            2. '2D_versatile_he':  'Versatile (H&E nuclei)'
+            3. '2D_paper_dsb2018': 'DSB 2018 (from StarDist 2D paper)'
+            Or any generic Stardist2D model.
+        **kwargs: Additional keyword arguments to :func:`StarDist2D.predict_instances_big`
+            function.
+
+    Returns:
+        Numpy array containing cell labels.
+    """
+    if isinstance(model, str):
+        model = StarDist2D.from_pretrained(model)
+
+    lm.main_debug(f"Running StarDist BIG with kwargs {kwargs}")
+    labels, _ = model.predict_instances_big(img, axes="YX", **kwargs)
+    return labels
+
+
 def _sanitize_labels(labels: np.ndarray) -> np.ndarray:
     """Sanitize labels obtained from StarDist.
 
@@ -98,6 +129,8 @@ def stardist(
         Literal["2D_versatile_fluo", "2D_versatile_he", "2D_paper_dsb2018"], "StarDist2D"
     ] = "2D_versatile_fluo",
     tilesize: int = 2000,
+    min_overlap: Optional[int] = None,
+    context: Optional[int] = None,
     normalizer: Optional[Normalizer] = PercentileNormalizer(),
     equalize: bool = True,
     sanitize: bool = True,
@@ -106,6 +139,11 @@ def stardist(
     **kwargs,
 ):
     """Run StarDist to label cells from a staining image.
+
+    Note:
+        When using `min_overlap`, the crucial assumption is that all predicted
+        object instances are smaller than the provided `min_overlap`.
+        https://github.com/stardist/stardist/blob/858cae17cf17f979122000ad2294a156d0547135/stardist/models/base.py#L776
 
     Args:
         adata: Input Anndata
@@ -118,6 +156,12 @@ def stardist(
             Or any generic Stardist2D model.
         tilesize: Run prediction separately on tiles of size `tilesize` x `tilesize`
             and merge them afterwards. Useful to avoid out-of-memory errors.
+            When `min_overlap` is also provided, this becomes the `block_size`
+            parameter to :func:`StarDist2D.predict_instances_big`.
+        min_overlap: Amount of guaranteed overlaps between tiles.
+        context: Amount of image context on all sides of a tile, which is dicarded.
+            Only used when `min_overlap` is not None. By default, an automatic
+            estimate is used.
         normalizer: Normalizer to use to perform normalization prior to prediction.
             By default, percentile-based normalization is performed. `None` may
             be provided to disable normalization.
@@ -141,9 +185,20 @@ def stardist(
         lm.main_info("Equalizing image with CLAHE.")
         img = clahe(img)
 
-    n_tiles = (math.ceil(img.shape[0] / tilesize), math.ceil(img.shape[1] / tilesize))
     lm.main_info(f"Running StarDist with model {model}.")
-    labels = _stardist(img, model, n_tiles=n_tiles, normalizer=normalizer, **kwargs)
+    if not min_overlap:
+        n_tiles = (math.ceil(img.shape[0] / tilesize), math.ceil(img.shape[1] / tilesize))
+        labels = _stardist(img, model, n_tiles=n_tiles, normalizer=normalizer, **kwargs)
+    else:
+        labels = _stardist_big(
+            img,
+            model,
+            block_size=tilesize,
+            min_overlap=min_overlap,
+            context=context,
+            n_tiles=(1, 1),
+            normalizer=normalizer,
+        )
     if sanitize:
         lm.main_info(f"Fixing disconnected labels.")
         labels = _sanitize_labels(labels)
