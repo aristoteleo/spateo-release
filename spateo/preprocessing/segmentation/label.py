@@ -374,15 +374,18 @@ def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.
     Returns:
         New Numpy array containing augmented labels.
     """
-    overlap = utils.label_overlap(source_labels, target_labels)
+    lm.main_debug("Constructing overlap matrix.")
+    # Ignore background pixels
+    overlap = utils.label_overlap(source_labels, target_labels)[1:, 1:]
     # Find source labels that have no overlap with any target labels
     no_overlap = (overlap == 0).all(axis=1)
     label = target_labels.max() + 1
     source_props = measure.regionprops(source_labels)  # lazy evaluation
     augmented = target_labels.copy()
+    lm.main_debug("Copying over non-overlapping labels.")
     for props in source_props:
         _label = props.label
-        if no_overlap[_label]:
+        if no_overlap[_label - 1]:  # Because we removed background
             min_row, min_col, max_row, max_col = props.bbox
             source_mask = source_labels[min_row:max_row, min_col:max_col] == _label
             augmented[min_row:max_row, min_col:max_col][source_mask] = label
@@ -408,5 +411,5 @@ def augment_labels(
     source_labels = SKM.select_layer_data(adata, source_layer)
     target_labels = SKM.select_layer_data(adata, target_layer)
     augmented = _augment_labels(source_labels, target_labels)
-    out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.AUGMENTED_SUFFIX)
+    out_layer = out_layer or SKM.gen_new_layer_key(target_layer, SKM.AUGMENTED_SUFFIX)
     SKM.set_layer_data(adata, out_layer, augmented)

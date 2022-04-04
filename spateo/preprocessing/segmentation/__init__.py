@@ -9,6 +9,7 @@ from .external.deepcell import deepcell
 from .external.stardist import stardist
 from .icell import mask_cells_from_stain, mask_nuclei_from_stain, score_and_mask_pixels
 from .label import (
+    augment_labels,
     expand_labels,
     label_connected_components,
     watershed,
