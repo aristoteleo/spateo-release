@@ -1,1 +1,1 @@
-from . import cellpose, stardist
+from . import cellpose, deepcell, stardist
