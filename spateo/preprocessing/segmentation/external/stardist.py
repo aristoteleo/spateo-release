@@ -143,6 +143,7 @@ def stardist(
     Note:
         When using `min_overlap`, the crucial assumption is that all predicted
         object instances are smaller than the provided `min_overlap`.
+        Also, it must hold that: min_overlap + 2*context < tilesize.
         https://github.com/stardist/stardist/blob/858cae17cf17f979122000ad2294a156d0547135/stardist/models/base.py#L776
 
     Args:
