@@ -156,9 +156,9 @@ def stardist(
             3. '2D_paper_dsb2018': 'DSB 2018 (from StarDist 2D paper)'
             Or any generic Stardist2D model.
         tilesize: Run prediction separately on tiles of size `tilesize` x `tilesize`
-            and merge them afterwards. Useful to avoid out-of-memory errors.
-            When `min_overlap` is also provided, this becomes the `block_size`
-            parameter to :func:`StarDist2D.predict_instances_big`.
+            and merge them afterwards. Useful to avoid out-of-memory errors. Can be
+            set to <= 0 to disable tiling. When `min_overlap` is also provided, this
+            becomes the `block_size` parameter to :func:`StarDist2D.predict_instances_big`.
         min_overlap: Amount of guaranteed overlaps between tiles.
         context: Amount of image context on all sides of a tile, which is dicarded.
             Only used when `min_overlap` is not None. By default, an automatic
@@ -175,6 +175,8 @@ def stardist(
     """
     if StarDist2D is None:
         raise ModuleNotFoundError("Please install StarDist by running `pip install stardist`.")
+    if tilesize <= 0 and min_overlap:
+        raise PreprocessingError("Positive `tilesize` must be provided when `min_overlap` is used.")
     if layer not in adata.layers:
         raise PreprocessingError(
             f'Layer "{layer}" does not exist in AnnData. '
@@ -188,7 +190,7 @@ def stardist(
 
     lm.main_info(f"Running StarDist with model {model}.")
     if not min_overlap:
-        n_tiles = (math.ceil(img.shape[0] / tilesize), math.ceil(img.shape[1] / tilesize))
+        n_tiles = (math.ceil(img.shape[0] / tilesize), math.ceil(img.shape[1] / tilesize)) if tilesize > 0 else (1, 1)
         labels = _stardist(img, model, n_tiles=n_tiles, normalizer=normalizer, **kwargs)
     else:
         labels = _stardist_big(

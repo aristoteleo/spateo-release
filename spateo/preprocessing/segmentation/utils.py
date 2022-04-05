@@ -317,7 +317,7 @@ def label_overlap(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
     return _label_overlap(X, Y)
 
 
-def clahe(X: np.ndarray, clip_limit: float = 10.0, tile_grid: Tuple[int, int] = (50, 50)) -> np.ndarray:
+def clahe(X: np.ndarray, clip_limit: float = 1.0, tile_grid: Tuple[int, int] = (50, 50)) -> np.ndarray:
     """Contrast-limited adaptive histogram equalization (CLAHE).
 
     Args:
