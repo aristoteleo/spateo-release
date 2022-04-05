@@ -1,10 +1,4 @@
 """IO functions for BGI stereo technology.
-
-Todo:
-    * Optimize `read_bgi` and add appropriate functionality for generating an
-        AnnData directly from cell labels.
-    * Figure out how to appropriately deal with bounding boxes and offsets.
-        @Xiaojieqiu
 """
 import gzip
 import math

@@ -1,8 +1,4 @@
 """Helper functions about image layer processing.
-
-Todo:
-    * Does it make sense for `slice` and/or `img_layer` to be None? This will
-        make the key of a dictionary be None, which is usually not good practice.
 """
 from typing import Optional
 

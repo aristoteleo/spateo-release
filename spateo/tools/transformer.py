@@ -1,7 +1,3 @@
-"""
-Todo:
-    * @Xiaojieqiu: update with Google style documentation, function typings, tests
-"""
 import math
 
 import numpy as np
