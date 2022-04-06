@@ -1,7 +1,12 @@
 """Spatial markers.
 """
 
+import random
+from random import sample
+
 from tqdm import tqdm
+
+random.seed(19491001)
 
 
 def cluster_specific_genes(
@@ -203,12 +208,6 @@ def cluster_specific_genes(
         )
 
     return adata
-
-
-import random
-from random import sample
-
-random.seed(19491001)
 
 
 def GM_lag_model(
