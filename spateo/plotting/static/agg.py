@@ -47,7 +47,7 @@ def imshow(
     return_fig_ax = False
     if ax is None:
         return_fig_ax = True
-        fig, ax = plt.subplots(figsize=(4, 4), tight_layout=True)
+        fig, ax = plt.subplots(figsize=(5, 5), tight_layout=True)
     else:
         fig = ax.get_figure()
 
