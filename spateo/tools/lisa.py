@@ -103,6 +103,17 @@ def local_moran_i(
         layer: the key to the layer. If it is None, adata.X will be used by default.
 
     Returns:
+        Depend on the `copy` argument, return a deep copied adata object (when `copy = True`) or inplace updated adata
+        object. The result adata will include the following new columns in `adata.var`:
+            {*}_num_val: The maximum number of categories across all cell groups
+            {*}_frac_val: The maximum fraction of categories across all cell groups
+            {*}_spec_val: The maximum specificity of categories across all cell groups
+            
+            {*}_num_group: The corresponding cell group with the largest number of each category (this can be affect by
+                           the cell group size).
+            {*}_frac_group: The corresponding cell group with the highest fraction of each category.
+            {*}_spec_group: The corresponding cell group with the highest specificity of each category.
+        {*} can be one of `{"hotspot", "coldspot", "doughnut", "diamond"}`. 
 
     Examples:
         >>> import spateo as st
@@ -162,6 +173,7 @@ def local_moran_i(
 
     valid_inds_list = [np.array(group_name) == g for g in uniq_g]
 
+    # calculate the value
     def _get_nums(spots, valid_inds, g):
         return (
             sum(spots[valid_inds]),
@@ -169,10 +181,12 @@ def local_moran_i(
             sum(spots[valid_inds]) / sum(hotspot),
         )
 
-    def _get_vals(spots, frac, spec):
+    # calculate the maximum across all cell groups
+    def _get_group_max(spots, frac, spec):
         return (np.max(spots), np.max(frac), np.max(spec))
 
-    def _get_order(spots, frac, spec):
+    # get the group name with the maximum
+    def _get_max_group_name(spots, frac, spec):
         return (
             uniq_g[np.argsort(spots)[-1]],
             uniq_g[np.argsort(frac)[-1]],
@@ -212,43 +226,43 @@ def local_moran_i(
             adata.var.loc[cur_g, "hotspot_num_val"],
             adata.var.loc[cur_g, "hotspot_frac_val"],
             adata.var.loc[cur_g, "hotspot_spec_val"],
-        ) = _get_vals(hotspot_num, hotspot_frac, hotspot_spec)
+        ) = _get_group_max(hotspot_num, hotspot_frac, hotspot_spec)
         (
             adata.var.loc[cur_g, "coldspot_num_val"],
             adata.var.loc[cur_g, "coldspot_frac_val"],
             adata.var.loc[cur_g, "coldspot_spec_val"],
-        ) = _get_vals(coldspot_num, coldspot_frac, coldspot_spec)
+        ) = _get_group_max(coldspot_num, coldspot_frac, coldspot_spec)
         (
             adata.var.loc[cur_g, "doughnut_num_val"],
             adata.var.loc[cur_g, "doughnut_frac_val"],
             adata.var.loc[cur_g, "doughnut_spec_val"],
-        ) = _get_vals(doughnut_num, doughnut_frac, doughnut_spec)
+        ) = _get_group_max(doughnut_num, doughnut_frac, doughnut_spec)
         (
             adata.var.loc[cur_g, "diamond_num_val"],
             adata.var.loc[cur_g, "diamond_frac_val"],
             adata.var.loc[cur_g, "diamond_spec_val"],
-        ) = _get_vals(diamond_num, diamond_frac, diamond_spec)
+        ) = _get_group_max(diamond_num, diamond_frac, diamond_spec)
 
         (
-            adata.var.loc[cur_g, "hotspot_num"],
-            adata.var.loc[cur_g, "hotspot_frac"],
-            adata.var.loc[cur_g, "hotspot_spec"],
-        ) = _get_order(hotspot_num, hotspot_frac, hotspot_spec)
+            adata.var.loc[cur_g, "hotspot_num_group"],
+            adata.var.loc[cur_g, "hotspot_frac_group"],
+            adata.var.loc[cur_g, "hotspot_spec_group"],
+        ) = _get_max_group_name(hotspot_num, hotspot_frac, hotspot_spec)
         (
-            adata.var.loc[cur_g, "coldspot_num"],
-            adata.var.loc[cur_g, "coldspot_frac"],
-            adata.var.loc[cur_g, "coldspot_spec"],
-        ) = _get_order(coldspot_num, coldspot_frac, coldspot_spec)
+            adata.var.loc[cur_g, "coldspot_num_group"],
+            adata.var.loc[cur_g, "coldspot_frac_group"],
+            adata.var.loc[cur_g, "coldspot_spec_group"],
+        ) = _get_max_group_name(coldspot_num, coldspot_frac, coldspot_spec)
         (
-            adata.var.loc[cur_g, "doughnut_num"],
-            adata.var.loc[cur_g, "doughnut_frac"],
-            adata.var.loc[cur_g, "doughnut_spec"],
-        ) = _get_order(doughnut_num, doughnut_frac, doughnut_spec)
+            adata.var.loc[cur_g, "doughnut_num_group"],
+            adata.var.loc[cur_g, "doughnut_frac_group"],
+            adata.var.loc[cur_g, "doughnut_spec_group"],
+        ) = _get_max_group_name(doughnut_num, doughnut_frac, doughnut_spec)
         (
-            adata.var.loc[cur_g, "diamond_num"],
-            adata.var.loc[cur_g, "diamond_frac"],
-            adata.var.loc[cur_g, "diamond_spec"],
-        ) = _get_order(diamond_num, diamond_frac, diamond_spec)
+            adata.var.loc[cur_g, "diamond_num_group"],
+            adata.var.loc[cur_g, "diamond_frac_group"],
+            adata.var.loc[cur_g, "diamond_spec_group"],
+        ) = _get_max_group_name(diamond_num, diamond_frac, diamond_spec)
 
     if copy:
         return adata
