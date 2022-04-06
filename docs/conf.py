@@ -21,6 +21,8 @@
 import sys
 from pathlib import Path
 
+import git
+
 HERE = Path(__file__).parent
 SPATEO_DIR = HERE.parent / "spateo"
 sys.path[:0] = [str(HERE.parent), str(HERE / "extensions")]
@@ -211,14 +213,14 @@ nbsphinx_prolog = r"""
         <p class="admonition-title">Note</p>
         <p>
         This page was generated from
-        <a class="reference external" href="https://github.com/aristoteleo/spateo-tutorials/tree/{version}/">{docname}</a>.
+        <a class="reference external" href="https://github.com/aristoteleo/spateo-tutorials/blob/{version}/{docname}">{docname}</a>.
         Interactive online version:
         <span style="white-space: nowrap;"><a href="https://colab.research.google.com/github/aristoteleo/spateo-tutorials/blob/{version}/{docname}"><img alt="Colab badge" src="https://colab.research.google.com/assets/colab-badge.svg" style="vertical-align:text-bottom"></a>.</span>
         Some tutorial content may look better in light mode.
         </p>
     </div>
 """.format(
-    version=version, docname="{{ docname|e }}"
+    version=str(git.Repo(HERE / "tutorials" / "notebooks").head.commit), docname="{{ docname|e }}"
 )
 nbsphinx_thumbnails = {
     # "tutorials/notebooks/data_loading": "_static/tutorials/anndata.svg",

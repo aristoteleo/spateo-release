@@ -13,3 +13,4 @@ sphinx-remove-toctrees
 sphinx-design
 sphinxext-opengraph
 sphinx-autoapi
+gitpython
