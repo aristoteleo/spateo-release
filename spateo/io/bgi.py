@@ -173,8 +173,8 @@ def read_bgi_agg(
                 )
             )
             image = np.pad(image, ((x_min, 0), (y_min, 0)))
-        x_max = max(x_max, image.shape[0]-1)
-        y_max = max(y_max, image.shape[1]-1)
+        x_max = max(x_max, image.shape[0] - 1)
+        y_max = max(y_max, image.shape[1] - 1)
         shape = (x_max + 1, y_max + 1)
         # Reshape image to match new x,y max
         if image.shape != shape:
