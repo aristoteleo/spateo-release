@@ -1,0 +1,346 @@
+"""Spatial markers.
+"""
+
+import random
+from random import sample
+
+import anndata
+import esda
+import geopandas
+import numpy as np
+import pandas as pd
+from pysal import explore, lib
+from pysal.lib import weights
+from pysal.model import spreg
+from tqdm import tqdm
+
+from ..utils import copy_adata
+
+
+def lisa_geo_df(
+    adata: anndata.AnnData,
+    gene: str,
+    spatial_key: str = "spatial",
+    n_neighbors: int = 8,
+    layer: tuple[None, str] = None,
+) -> geopandas.GeoDataFrame:
+    """Perform Local Indicators of Spatial Association (LISA) analyses on specific genes and prepare a geopandas
+    dataframe for downstream lisa plots to reveal the quantile plots and the hotspot, coldspot, doughnut and
+    diamond regions.
+
+    Args:
+        adata: An adata object that has spatial information (via `spatial` key).
+        gene: The gene that will be used for lisa analyses, must be included in the data.
+        spatial_key: The spatial key of the spatial coordinate of each bucket.
+        n_neighbors: The number of nearest neighbors of each bucket that will be used in calculating the spatial lag.
+        layer: the key to the layer. If it is None, adata.X will be used by default.
+
+    Returns:
+        df: a geopandas dataframe that consider the coordinate (`x`, `y` columns), expression (`exp` column) and lagged
+        expression (`w_exp` column), z-score (`exp_zscore`, `w_exp_zscore`) and the LISA (`Is` column).
+        score.
+    """
+
+    coords = adata.obsm[spatial_key]
+    weights.distance.KNN.from_array(coords)
+
+    # Generate W from the GeoDataFrame
+    w = weights.distance.KNN.from_array(coords, k=n_neighbors)
+    # Row-standardization
+    w.transform = "R"
+
+    df = pd.DataFrame(coords, columns=["x", "y"])
+
+    if layer is None:
+        df["exp"] = adata[:, gene].X.A.flatten()
+    else:
+        df["exp"] = adata[:, gene].layers[layer].A.flatten()
+
+    df["w_exp"] = weights.spatial_lag.lag_spatial(w, df["exp"])
+    df["exp_zscore"] = (df["exp"] - df["exp"].mean()) / df["exp"].std()
+    df["w_exp_zscore"] = (df["w_exp"] - df["w_exp"].mean()) / df["w_exp"].std()
+
+    lisa = esda.moran.Moran_Local(df["exp"], w)
+    df = geopandas.GeoDataFrame(df, geometry=geopandas.points_from_xy(df.x, df.y))
+    df.assign(Is=lisa.Is)
+
+    q_labels = ["Q1", "Q2", "Q3", "Q4"]
+    labels = [q_labels[i - 1] for i in lisa.q]
+    df.assign(labels=labels)
+
+    sig = 1 * (lisa.p_sim < 0.05)
+    df.assign(sig=sig)
+
+    hotspot = 1 * (sig * lisa.q == 1)
+    coldspot = 3 * (sig * lisa.q == 3)
+    doughnut = 2 * (sig * lisa.q == 2)
+    diamond = 4 * (sig * lisa.q == 4)
+    spots = hotspot + coldspot + doughnut + diamond
+    spot_labels = ["0 ns", "1 hot spot", "2 doughnut", "3 cold spot", "4 diamond"]
+    group = [spot_labels[i] for i in spots]
+    df.assign(group=group)
+
+    return df
+
+
+def local_moran_i(
+    adata: anndata.AnnData,
+    group: str,
+    spatial_key: str = "spatial",
+    genes: tuple[None, list] = None,
+    layer: tuple[None, str] = None,
+    n_neighbors: int = 8,
+    copy: bool = False,
+):
+    """Identify cell type specific genes with local moran's I test.
+
+    Args:
+        adata: An adata object that has spatial information (via `spatial` key).
+        group: The key to the cell group in the adata object.
+        gene: The gene that will be used for lisa analyses, must be included in the data.
+        spatial_key: The spatial key of the spatial coordinate of each bucket.
+        n_neighbors: The number of nearest neighbors of each bucket that will be used in calculating the spatial lag.
+        layer: the key to the layer. If it is None, adata.X will be used by default.
+
+    Returns:
+
+    Examples:
+        >>> import spateo as st
+        >>> markers_df = pd.DataFrame(adata.var).query("hotspot_frac_val > 0.05 & mean > 0.05").\
+        >>> groupby(['hotspot_spec'])['hotspot_spec_val'].nlargest(5)
+        >>> markers = markers_df.index.get_level_values(1)
+        >>>
+        >>>  for i in adata.obs[group].unique():
+        >>>      if i in markers_df.index.get_level_values(0):
+        >>>          print(markers_df[i])
+        >>>          st.pl.space(adata, color=group, highlights=[i], pointsize=0.1, alpha=1, figsize=(12, 8))
+        >>>
+        >>>          st.pl.space(adata, color=markers_df[i].index, pointsize=0.1, alpha=1, figsize=(12, 8))
+    """
+    if copy:
+        adata = copy_adata(adata) if copy else adata
+
+    group_num = adata.obs[group].value_counts()
+    group_name = adata.obs[group]
+    uniq_g, group_name = group_name.unique(), group_name.to_list()
+
+    # Generate W from the GeoDataFrame
+    w = weights.distance.KNN.from_array(adata.obsm[spatial_key], k=n_neighbors)
+
+    # Row-standardization
+    w.transform = "R"
+
+    if genes is None:
+        genes = adata.var.index[adata.var.use_for_pca]
+    else:
+        genes = adata.var.index.intersection(genes)
+
+    db = pd.DataFrame(adata.obsm[spatial_key], columns=["x", "y"])
+
+    suffix = ["_num", "_frac", "_spec"]
+
+    # hotspot: HH; coldspot: LL; doughnut: HL, diamond: LH; the first one is the query point
+    # while the second the neighbors. Order on the quantile plot is 1, 3, 2, 4
+    def _assign_columns(type):
+        hot_list = [type + i for i in suffix]
+        hot_val_list = [type + i + "_val" for i in suffix]
+        adata.var[hot_list[0]], adata.var[hot_list[1]], adata.var[hot_list[0]] = None, None, None
+        adata.var[hot_val_list[0]], adata.var[hot_val_list[1]], adata.var[hot_val_list[0]] = None, None, None
+
+    for i in ["hotspot", "coldspot", "doughnut", "diamond"]:
+        _assign_columns(i)
+
+    the_tuple = (
+        np.zeros(len(uniq_g)),
+        np.zeros(len(uniq_g)),
+        np.zeros(len(uniq_g)),
+    )
+    hotspot_num, hotspot_frac, hotspot_spec = the_tuple
+    coldspot_num, coldspot_frac, coldspot_spec = the_tuple
+    doughnut_num, doughnut_frac, doughnut_spec = the_tuple
+    diamond_num, diamond_frac, diamond_spec = the_tuple
+
+    valid_inds_list = [np.array(group_name) == g for g in uniq_g]
+
+    def _get_nums(spots, valid_inds, g):
+        return (
+            sum(spots[valid_inds]),
+            sum(spots[valid_inds]) / group_num[g],
+            sum(spots[valid_inds]) / sum(hotspot),
+        )
+
+    def _get_vals(spots, frac, spec):
+        return (np.max(spots), np.max(frac), np.max(spec))
+
+    def _get_order(spots, frac, spec):
+        return (
+            uniq_g[np.argsort(spots)[-1]],
+            uniq_g[np.argsort(frac)[-1]],
+            uniq_g[np.argsort(spec)[-1]],
+        )
+
+    for i, cur_g in tqdm(
+        enumerate(genes),
+        desc="performing local Moran I analysis and assign genes and significant domaints to cell type",
+    ):
+        if layer is None:
+            db["exp"] = adata[:, cur_g].X.A.flatten()
+        else:
+            db["exp"] = adata[:, cur_g].layers[layer].A.flatten()
+
+        db["w_exp"] = weights.spatial_lag.lag_spatial(w, db["exp"])
+
+        lisa = explore.esda.moran.Moran_Local(db["exp"], w)
+
+        # find significant cells
+        sig = 1 * (lisa.p_sim < 0.05)
+
+        # get quantiles (z-score of cells within the neighborhood and that of the smoothed expression)
+        hotspot = 1 * (sig * lisa.q == 1)
+        coldspot = 3 * (sig * lisa.q == 3)
+        doughnut = 2 * (sig * lisa.q == 2)
+        diamond = 4 * (sig * lisa.q == 4)
+
+        for ind, g in enumerate(uniq_g):
+            valid_inds = valid_inds_list[ind]
+            hotspot_num[ind], hotspot_frac[ind], hotspot_spec[ind] = _get_nums(hotspot, valid_inds, g)
+            coldspot_num[ind], coldspot_frac[ind], coldspot_spec[ind] = _get_nums(coldspot, valid_inds, g)
+            doughnut_num[ind], doughnut_frac[ind], doughnut_spec[ind] = _get_nums(doughnut, valid_inds, g)
+            diamond_num[ind], diamond_frac[ind], diamond_spec[ind] = _get_nums(diamond, valid_inds, g)
+
+        (
+            adata.var.loc[cur_g, "hotspot_num_val"],
+            adata.var.loc[cur_g, "hotspot_frac_val"],
+            adata.var.loc[cur_g, "hotspot_spec_val"],
+        ) = _get_vals(hotspot_num, hotspot_frac, hotspot_spec)
+        (
+            adata.var.loc[cur_g, "coldspot_num_val"],
+            adata.var.loc[cur_g, "coldspot_frac_val"],
+            adata.var.loc[cur_g, "coldspot_spec_val"],
+        ) = _get_vals(coldspot_num, coldspot_frac, coldspot_spec)
+        (
+            adata.var.loc[cur_g, "doughnut_num_val"],
+            adata.var.loc[cur_g, "doughnut_frac_val"],
+            adata.var.loc[cur_g, "doughnut_spec_val"],
+        ) = _get_vals(doughnut_num, doughnut_frac, doughnut_spec)
+        (
+            adata.var.loc[cur_g, "diamond_num_val"],
+            adata.var.loc[cur_g, "diamond_frac_val"],
+            adata.var.loc[cur_g, "diamond_spec_val"],
+        ) = _get_vals(diamond_num, diamond_frac, diamond_spec)
+
+        (
+            adata.var.loc[cur_g, "hotspot_num"],
+            adata.var.loc[cur_g, "hotspot_frac"],
+            adata.var.loc[cur_g, "hotspot_spec"],
+        ) = _get_order(hotspot_num, hotspot_frac, hotspot_spec)
+        (
+            adata.var.loc[cur_g, "coldspot_num"],
+            adata.var.loc[cur_g, "coldspot_frac"],
+            adata.var.loc[cur_g, "coldspot_spec"],
+        ) = _get_order(coldspot_num, coldspot_frac, coldspot_spec)
+        (
+            adata.var.loc[cur_g, "doughnut_num"],
+            adata.var.loc[cur_g, "doughnut_frac"],
+            adata.var.loc[cur_g, "doughnut_spec"],
+        ) = _get_order(doughnut_num, doughnut_frac, doughnut_spec)
+        (
+            adata.var.loc[cur_g, "diamond_num"],
+            adata.var.loc[cur_g, "diamond_frac"],
+            adata.var.loc[cur_g, "diamond_spec"],
+        ) = _get_order(diamond_num, diamond_frac, diamond_spec)
+
+    if copy:
+        return adata
+
+
+def GM_lag_model(
+    adata,
+    genes,
+    group,
+    drop_dummy=None,
+    n_neighbors=8,
+    layer=None,
+):
+    group_num = adata.obs[group].value_counts()
+    max_group, min_group, min_group_ncells = (
+        group_num.index[0],
+        group_num.index[-1],
+        group_num[-1],
+    )
+
+    group_name = adata.obs[group]
+    db = pd.DataFrame({"group": group_name})
+
+    if drop_dummy is None:
+        db.iloc[sample(np.arange(adata.n_obs).tolist(), min_group_ncells), :] = "others"
+        drop_columns = ["group_others"]
+    elif drop_dummy in group_name:
+        group_inds = np.where(db["group"] == drop_dummy)[0]
+        db.iloc[group_inds, :] = "others"
+        drop_columns = ["group_others", "group_" + str(drop_dummy)]
+    else:
+        raise ValueError(f"drop_dummy, {drop_dummy} you provided is not in the adata.obs[{group}].")
+
+    X = pd.get_dummies(data=db, drop_first=False)
+    variable_names = X.columns.difference(drop_columns).to_list()
+
+    uniq_g, group_name = (
+        set(group_name).difference([drop_dummy]),
+        group_name.to_list(),
+    )
+
+    uniq_g = list(np.sort(list(uniq_g)))  # sort and convert to list
+
+    # Generate W from the GeoDataFrame
+    knn = weights.distance.KNN.from_array(adata.obsm["spatial"], k=n_neighbors)
+    knn.transform = "R"
+
+    if genes is None:
+        genes = adata.var.index[adata.var.use_for_pca]
+    else:
+        genes = adata.var.index.intersection(genes)
+
+    for i in ["const"] + uniq_g + ["W_log_exp"]:
+        adata.var[str(i) + "_GM_lag_coeff"] = None
+        adata.var[str(i) + "_GM_lag_zstat"] = None
+        adata.var[str(i) + "_GM_lag_pval"] = None
+
+    for i, cur_g in tqdm(
+        enumerate(genes),
+        desc="performing GM_lag_model and assign coefficient and p-val to cell type",
+    ):
+        if layer is None:
+            X["log_exp"] = adata[:, cur_g].X.A
+        else:
+            X["log_exp"] = adata[:, cur_g].layers[layer].A
+
+        try:
+            model = spreg.GM_Lag(
+                X[["log_exp"]].values,
+                X[variable_names].values,
+                w=knn,
+                name_y="log_exp",
+                name_x=variable_names,
+            )
+            a = pd.DataFrame(model.betas, model.name_x + ["W_log_exp"], columns=["coef"])
+
+            b = pd.DataFrame(
+                model.z_stat,
+                model.name_x + ["W_log_exp"],
+                columns=["z_stat", "p_val"],
+            )
+
+            df = a.merge(b, left_index=True, right_index=True)
+
+            for ind, g in enumerate(["const"] + uniq_g + ["W_log_exp"]):
+                adata.var.loc[cur_g, str(g) + "_GM_lag_coeff"] = df.iloc[ind, 0]
+                adata.var.loc[cur_g, str(g) + "_GM_lag_zstat"] = df.iloc[ind, 1]
+                adata.var.loc[cur_g, str(g) + "_GM_lag_pval"] = df.iloc[ind, 2]
+        except:
+            for ind, g in enumerate(["const"] + uniq_g + ["W_log_exp"]):
+                adata.var.loc[cur_g, str(g) + "_GM_lag_coeff"] = np.nan
+                adata.var.loc[cur_g, str(g) + "_GM_lag_zstat"] = np.nan
+                adata.var.loc[cur_g, str(g) + "_GM_lag_pval"] = np.nan
+
+    return adata

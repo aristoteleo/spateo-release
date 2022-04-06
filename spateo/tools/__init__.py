@@ -6,12 +6,12 @@ from .cluster_degs import (
     find_cluster_degs,
     find_spatial_cluster_degs,
 )
+from .deep_interpolation import DataSampler, DeepInterpolation
+from .interpolation_nn import *
 
 # from .image import add_image_layer
 # from .interpolation_utils import *
-from .interpolation import interpolation_SparseVFC
-from .interpolation_nn import *
-from .interpolation_utils import DataSampler, DeepInterpolation
+from .kernel_interpolation import interpolation_SparseVFC
 from .nn_losses import *
 from .spatial_degs import moran_i
 from .TDR import *
