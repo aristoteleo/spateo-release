@@ -61,14 +61,6 @@ class TestEM(TestMixin, TestCase):
         # np.testing.assert_allclose([23.990499915230924, 740.2223695491173], r)
         # np.testing.assert_allclose([0.1631365477471769, 0.8734818488242497], p)
 
-    def test_run_em_peaks(self):
-        rng = np.random.default_rng(2021)
-        X = rng.negative_binomial(50, 0.5, (100, 100)) + rng.negative_binomial(500, 0.5, (100, 100))
-        w, r, p = em.run_em(X, downsample=1e6, use_peaks=True, min_distance=1, seed=2021, w=(0.99, 0.01), max_iter=100)
-        # np.testing.assert_allclose([3.847497690531427e-204, 1.0], w)
-        # np.testing.assert_allclose([30.091059744937105, 1031.3178918176766], r)
-        # np.testing.assert_allclose([0.04729785407753589, 0.6321837694765489], p)
-
     def test_run_em_bins(self):
         rng = np.random.default_rng(2021)
         X = rng.negative_binomial(50, 0.5, (100, 100)) + rng.negative_binomial(500, 0.5, (100, 100))
