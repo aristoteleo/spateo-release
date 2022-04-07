@@ -223,5 +223,5 @@ nbsphinx_prolog = r"""
     version=str(git.Repo(HERE / "tutorials" / "notebooks").head.commit), docname="{{ docname|e }}"
 )
 nbsphinx_thumbnails = {
-    "tutorials/notebooks/cell_segmentation": "_static/tutorials/anndata.svg",
+    "tutorials/notebooks/cell_segmentation": "_static/tutorials/cell_segmentation.png",
 }
