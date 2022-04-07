@@ -5,6 +5,6 @@ TODO
 ```{eval-rst}
 .. nbgallery::
 
-   notebooks/test
+   notebooks/cell_segmentation
 
 ```
