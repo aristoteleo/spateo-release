@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
@@ -13,7 +13,7 @@ to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else X
 
 def compute_pca_components(
     matrix: Union[np.ndarray, spmatrix], save_curve_img: Optional[str] = None
-) -> Tuple[int, float]:
+) -> Tuple[Any, int, float]:
     """
     Calculate the inflection point of the PCA curve to
     obtain the number of principal components that the PCA should retain.
@@ -27,6 +27,7 @@ def compute_pca_components(
     """
     # Convert sparse matrix to dense matrix.
     matrix = to_dense_matrix(matrix)
+    matrix[np.isnan(matrix)] = 0
 
     # Principal component analysis (PCA).
     pca = PCA(n_components=None)
@@ -142,20 +143,47 @@ def sctransform(
 
 def integrate(
     adatas: List[AnnData],
-    batch_key: str = "slice",
+    batch_key: str = "slices",
 ) -> AnnData:
-    """Concatenate multiple different anndata objects.
+    """
+    Concatenating all anndata objects.
 
     Args:
         adatas: AnnData matrices to concatenate with.
         batch_key: Add the batch annotation to :attr:`obs` using this key.
-
     Returns:
-        integrated_adata: The concatenated AnnData, where adata.obs[batch_key] stores a categorical variable labeling
-            the batch.
+        integrated_adata: The concatenated AnnData, where adata.obs[batch_key] stores a categorical variable labeling the batch.
     """
+
+    # Merge the obsm data and varm data of all anndata objcets separately.
+    obsm_dict, varm_dict = {}, {}
+    obsm_keys, varm_keys = adatas[0].obsm.keys(), adatas[0].varm.keys()
+    n_obsm_keys, n_varm_keys = len(obsm_keys), len(varm_keys)
+    if n_obsm_keys > 0:
+        for key in obsm_keys:
+            obsm_dict[key] = np.concatenate([np.asarray(adata.obsm[key]) for adata in adatas], axis=0)
+    if n_varm_keys > 0:
+        for key in varm_keys:
+            varm_dict[key] = np.concatenate([np.asarray(adata.varm[key]) for adata in adatas], axis=0)
+
+    # Delete obsm and varm data.
+    for adata in adatas:
+        del adata.obsm, adata.varm
+
+    # Concatenating obs and var data.
     batch_ca = [adata.obs[batch_key][0] for adata in adatas]
-    integrated_adata = adatas[0].concatenate(adatas[1:], batch_key=batch_key, batch_categories=batch_ca, join="outer")
+    integrated_adata = adatas[0].concatenate(
+        *adatas[1:], batch_key=batch_key, batch_categories=batch_ca, join="outer", fill_value=0, uns_merge="unique"
+    )
+
+    # Add Concatenated obsm data and varm data to integrated anndata object.
+    if n_obsm_keys > 0:
+        for key, value in obsm_dict.items():
+            integrated_adata.obsm[key] = value
+    if n_varm_keys > 0:
+        for key, value in varm_dict.items():
+            integrated_adata.varm[key] = value
+
     return integrated_adata
 
 
@@ -249,6 +277,7 @@ def spatial_adj_dyn(
     pca_key: str = "X_pca",
     e_neigh: int = 30,
     s_neigh: int = 6,
+    n_pca_components: int = 30,
 ):
     """
     Calculate the adjacent matrix based on a neighborhood graph of gene expression space
@@ -257,10 +286,16 @@ def spatial_adj_dyn(
     import dynamo as dyn
 
     # Compute a neighborhood graph of gene expression space.
-    dyn.tl.neighbors(adata, n_neighbors=e_neigh, basis=pca_key)
+    dyn.tl.neighbors(adata, X_data=adata.obsm[pca_key], n_neighbors=e_neigh, n_pca_components=n_pca_components)
 
     # Compute a neighborhood graph of physical space.
-    dyn.tl.neighbors(adata, n_neighbors=s_neigh, basis=spatial_key, result_prefix="spatial")
+    dyn.tl.neighbors(
+        adata,
+        X_data=adata.obsm[spatial_key],
+        n_neighbors=s_neigh,
+        result_prefix="spatial",
+        n_pca_components=n_pca_components,
+    )
 
     # Calculate the adjacent matrix.
     conn = adata.obsp["connectivities"].copy()
