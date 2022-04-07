@@ -196,8 +196,6 @@ def confidence(
 
 def run_em(
     X: np.ndarray,
-    use_peaks: bool = False,
-    min_distance: int = 21,
     downsample: Union[int, float] = 0.001,
     w: Tuple[float, float] = (0.5, 0.5),
     mu: Tuple[float, float] = (10.0, 300.0),
@@ -239,20 +237,7 @@ def run_em(
         Otherwise, a dictionary of tuple of parameters, with bin labels as keys.
     """
     samples = {}  # key 0 when bins = None
-    if use_peaks:
-        picks = feature.peak_local_max(X, min_distance=min_distance, labels=bins)
-        b = np.zeros(X.shape, dtype=np.uint8)
-        b[picks[:, 0], picks[:, 1]] = 1
-        n_objects, labels = cv2.connectedComponents(b)
-
-        added = set()
-        for i in range(labels.shape[0]):
-            for j in range(labels.shape[1]):
-                label = labels[i, j]
-                if label > 0 and label not in added:
-                    samples.setdefault(bins[i, j] if bins is not None else 0, []).append(X[i, j])
-                    added.add(label)
-    elif bins is not None:
+    if bins is not None:
         for label in np.unique(bins):
             if label > 0:
                 samples[label] = X[bins == label]
@@ -268,8 +253,8 @@ def run_em(
     for label, _samples in samples.items():
         _downsample = int(len(_samples) * downsample) if downsample_scale else int(downsample * (len(_samples) / total))
         if len(_samples) > _downsample:
-            log = np.log1p(_samples)
-            _samples = rng.choice(_samples, _downsample, replace=False, p=log / log.sum())
+            weights = np.log1p(_samples + 1)
+            _samples = rng.choice(_samples, _downsample, replace=False, p=weights / weights.sum())
         final_samples[label] = np.array(_samples)
 
     # Run in parallel
