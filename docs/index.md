@@ -38,6 +38,7 @@ TODO: Brief description about spateo.
 :maxdepth: 3
 :titlesonly: true
 
+Documentation home <self>
 installation
 tutorials/index
 % api/index
