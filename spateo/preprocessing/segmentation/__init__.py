@@ -1,6 +1,6 @@
 """A complete solution of spatialtemporal dynamics analyses toolkit of single cell spatial transcriptomics
 """
-from . import align, benchmark, bp, density, em, external, icell, label, utils
+from . import align, benchmark, bp, density, em, external, icell, label, utils, vi
 from .align import refine_alignment
 from .benchmark import compare
 from .density import merge_densities, segment_densities
