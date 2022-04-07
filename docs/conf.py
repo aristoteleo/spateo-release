@@ -63,8 +63,8 @@ extensions = [
 # remove_from_toctrees = ["tutorials/notebooks/*", "api/reference/*"]
 
 # for sharing urls with nice info
-# ogp_site_url = "https://docs.scvi-tools.org/"
-# ogp_image = "https://docs.scvi-tools.org/en/stable/_static/logo.png"
+# ogp_site_url = "full url to website"
+# ogp_image = "full url to logo"
 
 # nbsphinx specific settings
 exclude_patterns = ["_build", "**.ipynb_checkpoints"]
@@ -223,29 +223,5 @@ nbsphinx_prolog = r"""
     version=str(git.Repo(HERE / "tutorials" / "notebooks").head.commit), docname="{{ docname|e }}"
 )
 nbsphinx_thumbnails = {
-    # "tutorials/notebooks/data_loading": "_static/tutorials/anndata.svg",
-    # "tutorials/notebooks/api_overview": "_static/tutorials/overview.svg",
-    # "tutorials/notebooks/linear_decoder": "_static/tutorials/ldvae.svg",
-    # "tutorials/notebooks/scvi_in_R": "_static/tutorials/Rlogo.png",
-    # "tutorials/notebooks/python_in_R": "_static/tutorials/Rlogo.png",
-    # "tutorials/notebooks/harmonization": "_static/tutorials/lung_atlas.png",
-    # "tutorials/notebooks/totalVI": "_static/tutorials/totalvi_cell.svg",
-    # "tutorials/notebooks/AutoZI_tutorial": "_static/tutorials/history.png",
-    # "tutorials/notebooks/gimvi_tutorial": "_static/tutorials/gimvi.png",
-    # "tutorials/notebooks/scarches_scvi_tools": "_static/tutorials/scarches.png",
-    # "tutorials/notebooks/cite_scrna_integration_w_totalVI": "_static/tutorials/cite_scrna.png",
-    # "tutorials/notebooks/scVI_DE_worm": "_static/tutorials/worm.png",
-    # "tutorials/notebooks/stereoscope_heart_LV_tutorial": "_static/tutorials/stereoscope.png",
-    # "tutorials/notebooks/seed_labeling": "_static/tutorials/seed.png",
-    # "tutorials/notebooks/cellassign_tutorial": "_static/tutorials/cellassign.png",
-    # "tutorials/notebooks/DestVI_tutorial": "_static/tutorials/destvi.png",
-    # "tutorials/notebooks/DestVI_in_R": "_static/tutorials/Rlogo.png",
-    # "tutorials/notebooks/PeakVI": "_static/tutorials/peakvi.png",
-    # "tutorials/notebooks/peakvi_in_R": "_static/tutorials/Rlogo.png",
-    # "tutorials/notebooks/totalvi_in_R": "_static/tutorials/Rlogo.png",
-    # "tutorials/notebooks/MultiVI_tutorial": "_static/tutorials/multivi_umap.png",
-    # "tutorials/notebooks/totalVI_reference_mapping": "_static/tutorials/totalvi_cell.svg",
-    # "tutorials/notebooks/amortized_lda": "_static/tutorials/lda.png",
-    # "tutorials/notebooks/cell2location_lymph_node_spatial_tutorial": "_static/tutorials/cell2location.png",
-    # "tutorials/notebooks/tabula_muris": "_static/tutorials/muris-mouse.png",
+    "tutorials/notebooks/cell_segmentation": "_static/tutorials/anndata.svg",
 }
