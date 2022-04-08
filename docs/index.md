@@ -19,6 +19,14 @@ TODO: Brief description about spateo.
 ```
 
 ```{eval-rst}
+.. card:: Technicals :octicon:`info;1em;`
+    :link: technicals/index
+    :link-type: doc
+
+    Technical information on algorithms and tools provided by *spateo*.
+```
+
+```{eval-rst}
 .. card:: API reference :octicon:`book;1em;`
     :link: autoapi/spateo/index
     :link-type: doc

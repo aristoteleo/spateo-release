@@ -93,6 +93,7 @@ myst_enable_extensions = [
 autoapi_type = "python"
 autoapi_dirs = [str(SPATEO_DIR)]
 autoapi_add_toctree_entry = False
+autoapi_keep_files = True
 
 
 # The master toctree document.
