@@ -1,14 +1,14 @@
 """Spatial markers.
 """
 from random import sample
-from typing import List, Optional, Tuple, Union
+from typing import Tuple
 
 import anndata
 import esda
 import geopandas
 import numpy as np
 import pandas as pd
-from pysal import explore, lib
+from pysal import explore
 from pysal.lib import weights
 from pysal.model import spreg
 from tqdm import tqdm
@@ -22,7 +22,7 @@ def lisa_geo_df(
     gene: str,
     spatial_key: str = "spatial",
     n_neighbors: int = 8,
-    layer: tuple[None, str] = None,
+    layer: Tuple[None, str] = None,
 ) -> geopandas.GeoDataFrame:
     """Perform Local Indicators of Spatial Association (LISA) analyses on specific genes and prepare a geopandas
     dataframe for downstream lisa plots to reveal the quantile plots and the hotspot, coldspot, doughnut and

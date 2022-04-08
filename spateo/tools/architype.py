@@ -6,7 +6,7 @@ Nature (2019)
 code adapted from: https://github.com/rajewsky-lab/novosparc
 """
 
-from typing import List, Optional, Tuple, Union
+from typing import Tuple, Union
 
 import anndata
 import numpy as np
