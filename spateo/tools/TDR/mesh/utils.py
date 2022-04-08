@@ -18,7 +18,7 @@ def mesh_type(
 ) -> PolyData or UnstructuredGrid:
     """Get a new representation of this mesh as a new type."""
     if mtype == "polydata":
-        return mesh if isinstance(mesh, PolyData) else pv.PolyData(mesh.points, mesh.cells)
+        return mesh if isinstance(mesh, PolyData) else mesh.extract_surface()
     elif mtype == "unstructured":
         return mesh.cast_to_unstructured_grid() if isinstance(mesh, PolyData) else mesh
     else:
