@@ -8,11 +8,16 @@ except ImportError:
 
 import anndata
 import cv2
+import dynamo as dyn
+from scipy.sparse import isspmatrix
 
 from spateo.preprocessing.filter import filter_cells, filter_genes
 
 from .spagcn_utils import *
 from .utils import compute_pca_components, harmony_debatch, spatial_adj_dyn
+
+# Convert sparse matrix to dense matrix.
+to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else X
 
 
 def spagcn_pyg(
@@ -179,7 +184,8 @@ def scc(
     min_genes: int = 500,
     min_cells: int = 100,
     spatial_key: str = "spatial",
-    key_added: Optional[str] = "leiden",
+    key_added: Optional[str] = "scc",
+    pca_key: str = "pca",
     n_pca_components: Optional[int] = None,
     e_neigh: int = 30,
     s_neigh: int = 6,
@@ -198,6 +204,7 @@ def scc(
         min_cells: a minimal number of cells a valid gene should express.
         spatial_key: the key in `.obsm` that corresponds to the spatial coordinate of each bucket.
         key_added: adata.obs key under which to add the cluster labels.
+        pca_key: the key in `.obsm` that corresponds to the PCA result.
         n_pca_components: Number of principal components to compute.
                           If `n_pca_components` == None, the value at the inflection point of the PCA curve is
                           automatically calculated as n_comps.
@@ -218,19 +225,23 @@ def scc(
         or None.
     """
 
-    import dynamo as dyn
+    # import dynamo as dyn
 
-    filter_cells(adata, min_expr_genes=min_genes)
-    filter_genes(adata, min_cells=min_cells)
-    adata.uns["pp"] = {}
-    dyn.pp.normalize_cell_expr_by_size_factors(adata, layers="X")
-    dyn.pp.log1p(adata)
+    # filter_cells(adata, min_expr_genes=min_genes)
+    # filter_genes(adata, min_cells=min_cells)
+    # adata.uns["pp"] = {}
+    # dyn.pp.normalize_cell_expr_by_size_factors(adata, layers="X")
+    # dyn.pp.log1p(adata)
 
-    if n_pca_components is None:
-        pcs, n_pca_components, _ = compute_pca_components(adata.X, save_curve_img=None)
+    # if n_pca_components is None:
+    #     pcs, n_pca_components, _ = compute_pca_components(adata.X, save_curve_img=None)
+    # else:
+    #     matrix = to_dense_matrix(adata.X)
+    #     pca = PCA(n_components=n_pca_components)
+    #     pcs = pca.fit_transform(matrix)
 
-    pca_key = "X_pca"
-    adata.obsm[pca_key] = pcs[:, :n_pca_components]
+    # pca_key = "X_pca"
+    # adata.obsm[pca_key] = pcs[:, :n_pca_components]
 
     # Remove batch effects.
     if debatch is True:
@@ -253,10 +264,10 @@ def scc(
     )
 
     # Perform clustering.
-    if cluster_method is "leiden":
+    if cluster_method == "leiden":
         # Leiden clustering.
         dyn.tl.leiden(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
-    elif cluster_method is "louvain":
+    elif cluster_method == "louvain":
         # Louvain clustering.
         dyn.tl.louvain(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
 

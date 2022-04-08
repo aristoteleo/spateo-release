@@ -1,11 +1,14 @@
 from typing import List, Optional, Tuple, Union
 
+import lack
 import numpy as np
 from anndata import AnnData
 from kneed import KneeLocator
 from scipy.sparse import csr_matrix, isspmatrix, spmatrix
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
+
+slog = lack.LoggerManager(namespace="spateo")
 
 # Convert sparse matrix to dense matrix.
 to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else X
@@ -53,12 +56,46 @@ def compute_pca_components(
     return pcs, new_n_components, new_components_stored
 
 
+def pca_spateo(
+    adata: AnnData,
+    n_pca_components: Optional[int] = None,
+    pca_key: Optional[str] = "X_pca",
+    basis: str = None,
+) -> Optional[AnnData]:
+    """
+    Do PCA for dimensional reduction.
+
+    Args:
+        adata: An Anndata object.
+        n_pca_components: The number of principal components that PCA will retain. If none, will Calculate the
+            inflection point of the PCA curve to obtain the number of principal components that the PCA should retain.
+        pca_key: Add the PCA result to :attr:`obsm` using this key.
+        basis: The name of the field in ``adata.obsm`` where the PCA should be performed on. If none, will perform
+            PCA on ``adata.X``
+    Returns:
+        adata_after_pca: The processed AnnData, where adata.obsm[pca_key] stores the PCA result.
+    """
+    if basis is None:
+        matrix = adata.X.copy()
+        slog.main_info("Runing PCA on X data...")
+    else:
+        matrix = adata.obsm[basis].copy()
+        slog.main_info('Runing PCA on obsm["' + basis + '"]...')
+
+    if n_pca_components is None:
+        pcs, n_pca_components, _ = compute_pca_components(adata.X, save_curve_img=None)
+    else:
+        matrix = to_dense_matrix(matrix)
+        pca = PCA(n_components=n_pca_components)
+        pcs = pca.fit_transform(matrix)
+
+    adata.obsm[pca_key] = pcs[:, :n_pca_components]
+
+
 def sctransform(
     adata: AnnData,
+    rlib_path: str,
     n_top_genes: int = 3000,
-    save_sct_img_1: Optional[str] = None,
-    save_sct_img_2: Optional[str] = None,
-    copy: bool = False,
 ) -> Optional[AnnData]:
     """
     Use sctransform with an additional flag vst.flavor="v2" to perform normalization and dimensionality reduction
@@ -77,67 +114,30 @@ def sctransform(
         ```pip install git+https://github.com/saketkc/pysctransform```
 
     Examples:
-    1.In pycharm:
-        >>> sctransform(adata=adata, save_sct_img_1="sct10.png", save_sct_img_2="sct20.png")
-    2.In remote server:
-        >>> os.environ['R_HOME'] = '/hwfssz1/ST_SUPERCELLS/P21Z10200N0090/tuzhencheng/software/anaconda3/envs/SCT-SpaGCN/lib/R' # Specify the R environment
-        >>> sctransform(adata=adata, save_sct_img_1="sct10.png", save_sct_img_2="sct20.png")
+        >>> sctransform(adata=adata, rlib_path="/Users/jingzehua/opt/anaconda3/envs/spateo/lib/R")
 
     Args:
         adata: An Anndata object.
+        rlib_path: library path for R environment.
         n_top_genes: Number of highly-variable genes to keep.
-        save_sct_img_1: If save_sct_img_1 != None, save the image of the GLM model parameters.
-        save_sct_img_2: If save_sct_img_2 != None, save the image of the final residual variances.
-        copy: Whether to copy `adata` or modify it inplace.
 
     Returns:
-         Updates adata with the field ``adata.layers["raw_X"]``, containing raw expression matrix for n_top_genes(highly variable genes).
+        Updates adata with the field ``adata.obsm["pearson_residuals"]``, containing pearson_residuals.
     """
-    import matplotlib.pyplot as plt
+    import os
+
+    os.environ["R_HOME"] = rlib_path
 
     try:
-        from pysctransform import SCTransform, vst
-        from pysctransform.plotting import plot_fit, plot_residual_var
+        from pysctransform import SCTransform
     except ImportError:
         raise ImportError(
             "You need to install the package `pysctransform`."
             "Install pysctransform via `pip install git+https://github.com/saketkc/pysctransform.git`"
         )
 
-    adata = adata.copy() if copy else adata
-
-    # Get pearson residuals for n_top_genes(highly variable genes).
-    residuals = SCTransform(adata, vst_flavor="v2", var_features_n=n_top_genes)
-
-    # Plot model characteristics.
-    if save_sct_img_1 is not None or save_sct_img_2 is not None:
-        # adata.obsm["pearson_residuals"] = residuals
-        vst_out = vst(
-            adata.X.T,
-            gene_names=adata.var_names.tolist(),
-            cell_names=adata.obs_names.tolist(),
-            method="fix-slope",
-            exclude_poisson=True,
-        )
-        # Visualize the GLM model parameters.
-        if save_sct_img_1 is not None:
-            _ = plot_fit(vst_out)
-            plt.savefig(save_sct_img_1, dpi=100)
-        # Visualize the final residual variances with respect to mean and highlight highly variable genes.
-        if save_sct_img_2 is not None:
-            _ = plot_residual_var(vst_out)
-            plt.savefig(save_sct_img_2, dpi=100)
-
-    # Only store highly variable genes.
-    adata = adata[:, adata.var_names.isin(residuals.columns.tolist())]
-    adata.layers["raw_X"] = adata.X
-
-    # Highly variable genes' expression matrix.
-    residuals = residuals.reindex(columns=adata.var_names.tolist())
-    hvgs_matrix = csr_matrix(residuals.values) if isspmatrix(adata.X) else residuals.values
-    adata.X = hvgs_matrix
-
-    return adata if copy else None
+    residuals = SCTransform(adata, var_features_n=n_top_genes)
+    adata.obsm["pearson_residuals"] = residuals
 
 
 def integrate(
@@ -246,7 +246,7 @@ def ecp_silhouette(
 def spatial_adj_dyn(
     adata: AnnData,
     spatial_key: str = "spatial",
-    pca_key: str = "X_pca",
+    pca_key: str = "pca",
     e_neigh: int = 30,
     s_neigh: int = 6,
 ):
