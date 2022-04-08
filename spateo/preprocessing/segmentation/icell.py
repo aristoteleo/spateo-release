@@ -213,8 +213,11 @@ def _score_pixels(
         if "bp" in method:
             lm.main_debug("Computing conditionals.")
             background_cond, cell_cond = conditional_func(res)
+            if certain_mask is not None:
+                background_cond[certain_mask] = 1e-2
+                cell_cond[certain_mask] = 1 - (1e-2)
             lm.main_debug(f"Running BP with kwargs {bp_kwargs}.")
-            res = bp.run_bp(res, background_cond, cell_cond, certain_mask=certain_mask, **bp_kwargs)
+            res = bp.run_bp(background_cond, cell_cond, **bp_kwargs)
         else:
             lm.main_debug("Computing confidences.")
             res = em.confidence(res, em_results=em_results, bins=bins)
@@ -242,7 +245,7 @@ def score_and_mask_pixels(
     vi_kwargs: Optional[dict] = None,
     bp_kwargs: Optional[dict] = None,
     threshold: Optional[float] = None,
-    mk: int = 11,
+    mk: Optional[int] = None,
     bins_layer: Optional[Union[Literal[False], str]] = None,
     certain_layer: Optional[str] = None,
     scores_layer: Optional[str] = None,
@@ -269,7 +272,7 @@ def score_and_mask_pixels(
             By default, a threshold is automatically determined by using
             the first value of the 3-class Multiotsu method.
         mk: Kernel size of morphological open and close operations to reduce
-            noise in the mask.
+            noise in the mask. Defaults to `k`+2.
         bins_layer: Layer containing assignment of pixels into bins. Each bin
             is considered separately. Defaults to `{layer}_bins`. This can be
             set to `False` to disable binning, even if the layer exists.
@@ -296,10 +299,10 @@ def score_and_mask_pixels(
 
     if not threshold:
         lm.main_debug("Finding Otsu threshold.")
-        threshold = filters.threshold_otsu(scores)
+        threshold = filters.threshold_multiotsu(scores, 3)[-1]
 
     lm.main_info(f"Applying threshold {threshold}.")
-    mask = utils.apply_threshold(scores, mk, threshold)
+    mask = utils.apply_threshold(scores, mk or k + 2, threshold)
     if certain_layer:
         mask += certain_mask
     mask_layer = mask_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)

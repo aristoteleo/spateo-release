@@ -19,8 +19,10 @@ from ...errors import PreprocessingError
 
 
 class NegativeBinomialMixture(PyroModule):
-    def __init__(self, x: np.ndarray, n: int = 2):
+    def __init__(self, x: np.ndarray, n: int = 2, seed: Optional[int] = None):
         super().__init__()
+        if seed is not None:
+            torch.manual_seed(seed)
         self.x = torch.tensor(x.astype(np.float32))
         self.n = n
         self.w = PyroParam(torch.randn(n))
@@ -53,7 +55,7 @@ class NegativeBinomialMixture(PyroModule):
                 "obs", dist.NegativeBinomial(counts[assignment], logits=logits[assignment], validate_args=False), obs=x
             )
 
-    def train(self, n_epochs: int = 1000):
+    def train(self, n_epochs: int = 500):
         optimizer = self.optimizer()
         elbo = TraceEnum_ELBO(max_plate_nesting=1)
         guide = AutoDelta(poutine.block(self, expose=["w", "counts", "logits"]))
@@ -121,7 +123,7 @@ def conditionals(
 def run_vi(
     X: np.ndarray,
     downsample: Union[int, float] = 1.0,
-    n_epochs: int = 1000,
+    n_epochs: int = 500,
     bins: Optional[np.ndarray] = None,
     seed: Optional[int] = None,
 ) -> Union[
@@ -145,14 +147,13 @@ def run_vi(
     for label, _samples in samples.items():
         _downsample = int(len(_samples) * downsample) if downsample_scale else int(downsample * (len(_samples) / total))
         if len(_samples) > _downsample:
-            weights = np.log1p(_samples + 1)
-            _samples = rng.choice(_samples, _downsample, replace=False, p=weights / weights.sum())
+            _samples = rng.choice(_samples, _downsample, replace=False)
         final_samples[label] = np.array(_samples)
 
     results = {}
     for label, _samples in final_samples.items():
         pyro.clear_param_store()
-        nbm = NegativeBinomialMixture(_samples)
+        nbm = NegativeBinomialMixture(_samples, seed=seed)
         nbm.train(n_epochs)
         params = nbm.get_params()
         results[label] = params["counts"], params["logits"]

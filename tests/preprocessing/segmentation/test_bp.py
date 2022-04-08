@@ -23,7 +23,7 @@ class TestBP(TestMixin, TestCase):
     def test_cell_marginals(self):
         background_probs = np.full((10, 10), 0.1)
         cell_probs = np.full((10, 10), 0.9)
-        marginals = bp.cell_marginals(background_probs, cell_probs)
+        marginals = bp.cell_marginals(background_probs, cell_probs, p=0.7, q=0.3)
         np.testing.assert_allclose(np.ones((10, 10)), marginals, atol=0.05)
 
     def test_run_bp(self):
@@ -35,6 +35,6 @@ class TestBP(TestMixin, TestCase):
         expected[5:15, 5:15] = 1
         np.testing.assert_allclose(
             expected,
-            bp.run_bp(X, stats.nbinom(n=10, p=0.5).pmf(X), stats.nbinom(n=100, p=0.5).pmf(X), square=True),
+            bp.run_bp(stats.nbinom(n=10, p=0.5).pmf(X), stats.nbinom(n=100, p=0.5).pmf(X), square=True, p=0.7, q=0.3),
             atol=1e-3,
         )
