@@ -9,7 +9,10 @@ install:
 install-dev:
 	pip install -r dev-requirements.txt
 
-install-all: install-dev install
+install-docs:
+	pip install -r docs/requirements.txt
+
+install-all: install-dev install-docs install
 
 test:
 	rm -f .coverage

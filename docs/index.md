@@ -33,6 +33,8 @@ TODO: Brief description about spateo.
     Ask questions, report bugs, and contribute to *spateo* at our GitHub repository.
 ```
 
+*This documentation was heavily inspired and adapted from the [scvi-tools documentation](https://docs.scvi-tools.org/en/stable/). Go check them out!*
+
 ```{toctree}
 :hidden: true
 :maxdepth: 3
@@ -41,9 +43,8 @@ TODO: Brief description about spateo.
 Documentation home <self>
 installation
 tutorials/index
-% api/index
+Technicals <technicals/index>
 API <autoapi/spateo/index>
-% release_notes/index
 references
 contributing/index
 GitHub <https://github.com/aristoteleo/spateo-release>
