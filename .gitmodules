@@ -1,4 +1,4 @@
 [submodule "docs/tutorials/notebooks"]
 	path = docs/tutorials/notebooks
-	url = https://github.com/aristoteleo/spateo-tutorials
+	url = git@github.com:aristoteleo/spateo-tutorials.git
 	branch = main
