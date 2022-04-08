@@ -14,6 +14,7 @@ from pysal.lib import weights
 from pysal.model import spreg
 from tqdm import tqdm
 
+from ..logging import logger_manager as lm
 from ..utils import copy_adata
 
 
@@ -97,10 +98,11 @@ def local_moran_i(
     Args:
         adata: An adata object that has spatial information (via `spatial` key).
         group: The key to the cell group in the adata object.
-        gene: The gene that will be used for lisa analyses, must be included in the data.
         spatial_key: The spatial key of the spatial coordinate of each bucket.
-        n_neighbors: The number of nearest neighbors of each bucket that will be used in calculating the spatial lag.
+        genes: The gene that will be used for lisa analyses, must be included in the data.
         layer: the key to the layer. If it is None, adata.X will be used by default.
+        n_neighbors: The number of nearest neighbors of each bucket that will be used in calculating the spatial lag.
+        copy: Whether to copy the adata object.
 
     Returns:
         Depend on the `copy` argument, return a deep copied adata object (when `copy = True`) or inplace updated adata
@@ -113,20 +115,20 @@ def local_moran_i(
                            the cell group size).
             {*}_frac_group: The corresponding cell group with the highest fraction of each category.
             {*}_spec_group: The corresponding cell group with the highest specificity of each category.
-        {*} can be one of `{"hotspot", "coldspot", "doughnut", "diamond"}`. 
+        {*} can be one of `{"hotspot", "coldspot", "doughnut", "diamond"}`.
 
     Examples:
-        >>> import spateo as st
-        >>> markers_df = pd.DataFrame(adata.var).query("hotspot_frac_val > 0.05 & mean > 0.05").\
-        >>> groupby(['hotspot_spec'])['hotspot_spec_val'].nlargest(5)
-        >>> markers = markers_df.index.get_level_values(1)
-        >>>
-        >>>  for i in adata.obs[group].unique():
-        >>>      if i in markers_df.index.get_level_values(0):
-        >>>          print(markers_df[i])
-        >>>          st.pl.space(adata, color=group, highlights=[i], pointsize=0.1, alpha=1, figsize=(12, 8))
-        >>>
-        >>>          st.pl.space(adata, color=markers_df[i].index, pointsize=0.1, alpha=1, figsize=(12, 8))
+    >>> import spateo as st
+    >>> markers_df = pd.DataFrame(adata.var).query("hotspot_frac_val > 0.05 & mean > 0.05").\
+    >>> groupby(['hotspot_spec'])['hotspot_spec_val'].nlargest(5)
+    >>> markers = markers_df.index.get_level_values(1)
+    >>>
+    >>>  for i in adata.obs[group].unique():
+    >>>      if i in markers_df.index.get_level_values(0):
+    >>>          print(markers_df[i])
+    >>>          st.pl.space(adata, color=group, highlights=[i], pointsize=0.1, alpha=1, figsize=(12, 8))
+    >>>
+    >>>          st.pl.space(adata, color=markers_df[i].index, pointsize=0.1, alpha=1, figsize=(12, 8))
     """
     if copy:
         adata = copy_adata(adata) if copy else adata
@@ -269,13 +271,55 @@ def local_moran_i(
 
 
 def GM_lag_model(
-    adata,
-    genes,
-    group,
-    drop_dummy=None,
-    n_neighbors=8,
-    layer=None,
+    adata: anndata.AnnData,
+    group: str,
+    spatial_key: str = "spatial",
+    genes: tuple[None, list] = None,
+    drop_dummy: tuple[None, str] = None,
+    n_neighbors: int = 8,
+    layer: tuple[None, str] = None,
+    copy: bool = False,
 ):
+    """Spatial lag model with Spatial two stage least squares (S2SLS) with results and diagnostics; Anselin (1988).
+
+    :math: `\log{P_i} = \alpha + \rho \log{P_{lag-i}} + \sum_k \beta_k X_{ki} + \epsilon_i`
+
+    Reference:
+        https://geographicdata.science/book/notebooks/11_regression.html
+        http://darribas.org/gds_scipy16/ipynb_md/08_spatial_regression.html
+
+    Args:
+        adata: An adata object that has spatial information (via `spatial` key).
+        group: The key to the cell group in the adata object.
+        spatial_key: The spatial key of the spatial coordinate of each bucket.
+        genes: The gene that will be used for lisa analyses, must be included in the data.
+        drop_dummy: The name of the dummy group.
+        n_neighbors: The number of nearest neighbors of each bucket that will be used in calculating the spatial lag.
+        layer: The key to the layer. If it is None, adata.X will be used by default.
+        copy: Whether to copy the adata object.
+
+    Returns:
+        Depend on the `copy` argument, return a deep copied adata object (when `copy = True`) or inplace updated adata
+        object. The result adata will include the following new columns in `adata.var`:
+            {*}_GM_lag_coeff: coefficient of GM test for each cell group (denoted by {*})
+            {*}_GM_lag_zstat: z-score of GM test for each cell group (denoted by {*})
+            {*}_GM_lag_pval: p-value of GM test for each cell group (denoted by {*})
+
+    Examples:
+    >>> import spateo as st
+    >>> st.tl.GM_lag_model(adata, group='simpleanno')
+    >>> coef_cols = adata.var.columns[adata.var.columns.str.endswith('_GM_lag_coeff')]
+    >>> adata.var.loc[["Hbb-bt", "Hbb-bh1", "Hbb-y", "Hbb-bs"], :].T
+    >>>     for i in coef_cols[1:-1]:
+    >>>         print(i)
+    >>>         top_markers = adata.var.sort_values(i, ascending=False).index[:5]
+    >>>         st.pl.scatters(adata, basis='spatial', color=top_markers, ncols=5, pointsize=0.1, alpha=1)
+    >>>         st.pl.scatters(adata.copy(), basis='spatial', color=['simpleanno'],
+    >>>             highlights=[i.split('_GM_lag_coeff')[0]], pointsize=0.1, alpha=1, show_legend='on data')
+    """
+    if copy:
+        adata = copy_adata(adata) if copy else adata
+
     group_num = adata.obs[group].value_counts()
     max_group, min_group, min_group_ncells = (
         group_num.index[0],
@@ -307,7 +351,7 @@ def GM_lag_model(
     uniq_g = list(np.sort(list(uniq_g)))  # sort and convert to list
 
     # Generate W from the GeoDataFrame
-    knn = weights.distance.KNN.from_array(adata.obsm["spatial"], k=n_neighbors)
+    knn = weights.distance.KNN.from_array(adata.obsm[spatial_key], k=n_neighbors)
     knn.transform = "R"
 
     if genes is None:
@@ -320,9 +364,9 @@ def GM_lag_model(
         adata.var[str(i) + "_GM_lag_zstat"] = None
         adata.var[str(i) + "_GM_lag_pval"] = None
 
-    for i, cur_g in tqdm(
+    for i, cur_g in lm.tqdm(
         enumerate(genes),
-        desc="performing GM_lag_model and assign coefficient and p-val to cell type",
+        desc="performing GM_lag_model and assign coefficient and p-val to each cell type",
     ):
         if layer is None:
             X["log_exp"] = adata[:, cur_g].X.A
@@ -357,4 +401,5 @@ def GM_lag_model(
                 adata.var.loc[cur_g, str(g) + "_GM_lag_zstat"] = np.nan
                 adata.var.loc[cur_g, str(g) + "_GM_lag_pval"] = np.nan
 
-    return adata
+    if copy:
+        return adata

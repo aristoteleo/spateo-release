@@ -178,14 +178,14 @@ def archetypes_genes(
         that particular archetype.
 
     Examples:
-         >>> st.tl.archetypes_genes(adata)
-         >>> dyn.pl.scatters(subset_adata,
-         >>>     basis="spatial",
-         >>>     color=['archetype %d'% i] + typical_genes.to_list(),
-         >>>     pointsize=0.03,
-         >>>     alpha=1,
-         >>>     figsize=(3, ptp_vec[1]/ptp_vec[0] * 3)
-         >>> )
+    >>> st.tl.archetypes_genes(adata)
+    >>> dyn.pl.scatters(subset_adata,
+    >>>     basis="spatial",
+    >>>     color=['archetype %d'% i] + typical_genes.to_list(),
+    >>>     pointsize=0.03,
+    >>>     alpha=1,
+    >>>     figsize=(3, ptp_vec[1]/ptp_vec[0] * 3)
+    >>> )
     """
 
     if layer is None:
