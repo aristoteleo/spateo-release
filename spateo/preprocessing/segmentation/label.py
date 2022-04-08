@@ -1,14 +1,17 @@
 """Functions for use when labeling individual nuclei/cells, after obtaining a
 mask.
 """
+import math
 from typing import Dict, Optional, Union
 
 import cv2
 import numpy as np
 from anndata import AnnData
+from joblib import Parallel, delayed
 from numba import njit
 from scipy.sparse import issparse, spmatrix
 from skimage import filters, measure, segmentation
+from tqdm import tqdm
 
 from ...configuration import SKM
 from ...errors import PreprocessingError
@@ -169,7 +172,13 @@ def watershed(
     SKM.set_layer_data(adata, out_layer, labels)
 
 
-def _expand_labels(labels: np.ndarray, distance: int, max_area: int, mask: Optional[np.ndarray] = None) -> np.ndarray:
+def _expand_labels(
+    labels: np.ndarray,
+    distance: int,
+    max_area: int,
+    mask: Optional[np.ndarray] = None,
+    n_threads: int = 1,
+) -> np.ndarray:
     """Expand labels up to a certain distance, while ignoring labels that are
     above a certain size.
 
@@ -179,49 +188,73 @@ def _expand_labels(labels: np.ndarray, distance: int, max_area: int, mask: Optio
             of iterations of distance 1 dilations.
         max_area: Maximum area of each label.
         mask: Only expand within the provided mask.
+        n_threads: Number of threads to use.
 
     Returns:
         New label array with expanded labels.
     """
 
     @njit
-    def _expand(X, areas, kernel, max_area, n_iter, mask):
-        pad = kernel.shape[0] // 2
-        expanded = np.zeros((X.shape[0] + 2 * pad, X.shape[1] + 2 * pad), dtype=X.dtype)
-        expanded[pad:-pad, pad:-pad] = X
-        for _ in range(n_iter):
+    def _expand(X, areas, max_area, mask, start_i, end_i):
+        expanded = X[start_i:end_i].copy()
+        new_areas = np.zeros_like(areas)
+        n_neighbors = 0
+        neighbors = np.zeros(4, dtype=X.dtype)
+        for i in range(start_i, end_i):
+            for j in range(X.shape[1]):
+                if X[i, j] > 0 or not mask[i, j]:
+                    continue
+
+                if i - 1 >= 0:
+                    neighbors[n_neighbors] = X[i - 1, j]
+                    n_neighbors += 1
+                if i + 1 < X.shape[0]:
+                    neighbors[n_neighbors] = X[i + 1, j]
+                    n_neighbors += 1
+                if j - 1 >= 0:
+                    neighbors[n_neighbors] = X[i, j - 1]
+                    n_neighbors += 1
+                if j + 1 < X.shape[1]:
+                    neighbors[n_neighbors] = X[i, j + 1]
+                    n_neighbors += 1
+                unique = np.unique(neighbors[:n_neighbors])
+                unique_labels = unique[unique > 0]
+                if len(unique_labels) == 1:
+                    label = unique_labels[0]
+                    if areas[label] < max_area:
+                        expanded[i - start_i, j] = label
+                        new_areas[label] += 1
+                n_neighbors = 0
+        return expanded, new_areas
+
+    areas = np.bincount(labels.flatten())
+    mask = np.ones(labels.shape, dtype=bool) if mask is None else mask
+    step = math.ceil(labels.shape[0] / n_threads)
+    expanded = labels.copy()
+    with Parallel(n_jobs=n_threads) as parallel:
+        for _ in tqdm(range(distance), desc="Expanding"):
             new_areas = np.zeros_like(areas)
-            _expanded = np.zeros_like(expanded)
-            for _i in range(X.shape[0]):
-                i = _i + pad
-                for _j in range(X.shape[1]):
-                    j = _j + pad
-                    if expanded[i, j] > 0:
-                        _expanded[i, j] = expanded[i, j]
-                        continue
-                    if not mask[_i, _j]:
-                        continue
-
-                    neighbors = expanded[i - pad : i + pad + 1, j - pad : j + pad + 1]
-                    unique = np.unique(neighbors * kernel)
-                    unique_labels = unique[unique > 0]
-                    if len(unique_labels) == 1:
-                        label = unique_labels[0]
-                        if areas[label] < max_area:
-                            _expanded[i, j] = label
-                            new_areas[label] += 1
-            expanded = _expanded
+            subis = range(0, labels.shape[0], step)
+            sublabels = []
+            submasks = []
+            for i in subis:
+                sl = slice(max(0, i - 1), min(labels.shape[0], i + step + 1))
+                sublabels.append(expanded[sl])
+                submasks.append(mask[sl])
+            for i, (_expanded, _new_areas) in zip(
+                subis,
+                parallel(
+                    delayed(_expand)(
+                        sl, areas, max_area, sm, int(i - 1 >= 0), sl.shape[0] - int(i + step + 1 < labels.shape[0])
+                    )
+                    for i, sl, sm in zip(subis, sublabels, submasks)
+                ),
+            ):
+                expanded[i : i + step] = _expanded
+                new_areas += _new_areas
             areas += new_areas
-        return expanded[pad:-pad, pad:-pad]
 
-    return _expand(
-        labels,
-        np.bincount(labels.flatten()),
-        utils.circle(3),
-        max_area,
-        distance,
-        np.ones(labels.shape, dtype=bool) if mask is None else mask,
-    )
+    return expanded
 
 
 def expand_labels(
@@ -231,6 +264,7 @@ def expand_labels(
     max_area: int = 400,
     mask_layer: Optional[str] = None,
     out_layer: Optional[str] = None,
+    n_threads: int = 1,
 ):
     """Expand labels up to a certain distance.
 
@@ -241,14 +275,17 @@ def expand_labels(
         distance: Distance to expand. Internally, this is used as the number
             of iterations of distance 1 dilations.
         max_area: Maximum area of each label.
+        mask_layer: Layer containing mask to restrict expansion to within.
         out_layer: Layer to save results. By default, uses `{layer}_labels_expanded`.
+        n_threads: Number of threads to use.
     """
     label_layer = SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
     if label_layer not in adata.layers:
         label_layer = layer
     labels = SKM.select_layer_data(adata, label_layer)
+    mask = SKM.select_layer_data(adata, mask_layer) if mask_layer else None
     lm.main_info("Expanding labels.")
-    expanded = _expand_labels(labels, distance, max_area)
+    expanded = _expand_labels(labels, distance, max_area, mask=mask, n_threads=n_threads)
     out_layer = out_layer or SKM.gen_new_layer_key(label_layer, SKM.EXPANDED_SUFFIX)
     SKM.set_layer_data(adata, out_layer, expanded)
 
