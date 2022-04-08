@@ -28,6 +28,7 @@ pyacvd>=0.2.7
 pymeshfix>=0.15.0
 pynndescent>=0.4.8
 pysal>=1.14.4
+pyro-ppl
 python-igraph>=0.7.1
 pyvista>=0.33.3
 scipy>=1.0

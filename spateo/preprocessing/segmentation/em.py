@@ -245,7 +245,7 @@ def run_em(
         samples[0] = X.flatten()
 
     downsample_scale = True
-    if downsample == int(downsample):
+    if downsample > 1:
         downsample_scale = False
     rng = np.random.default_rng(seed)
     final_samples = {}

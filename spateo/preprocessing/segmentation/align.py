@@ -46,7 +46,7 @@ class AlignmentRefiner(nn.Module):
         optimizer = self.optimizer()
 
         with tqdm(total=n_epochs) as pbar:
-            for i in range(n_epochs):
+            for _ in range(n_epochs):
                 pred = self()
                 loss = self.loss(pred)
                 self.history.setdefault("loss", []).append(loss.item())
@@ -60,6 +60,10 @@ class AlignmentRefiner(nn.Module):
 
     def get_params(self, train=False):
         raise NotImplementedError()
+
+    @staticmethod
+    def transform(x, params, train=False):
+        raise NotImplementederror()
 
 
 class NonRigidAlignmentRefiner(AlignmentRefiner):
