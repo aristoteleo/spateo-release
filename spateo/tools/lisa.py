@@ -1,8 +1,7 @@
 """Spatial markers.
 """
-
-import random
 from random import sample
+from typing import List, Optional, Tuple, Union
 
 import anndata
 import esda
@@ -88,8 +87,8 @@ def local_moran_i(
     adata: anndata.AnnData,
     group: str,
     spatial_key: str = "spatial",
-    genes: tuple[None, list] = None,
-    layer: tuple[None, str] = None,
+    genes: Tuple[None, list] = None,
+    layer: Tuple[None, str] = None,
     n_neighbors: int = 8,
     copy: bool = False,
 ):
@@ -274,10 +273,10 @@ def GM_lag_model(
     adata: anndata.AnnData,
     group: str,
     spatial_key: str = "spatial",
-    genes: tuple[None, list] = None,
-    drop_dummy: tuple[None, str] = None,
+    genes: Tuple[None, list] = None,
+    drop_dummy: Tuple[None, str] = None,
     n_neighbors: int = 8,
-    layer: tuple[None, str] = None,
+    layer: Tuple[None, str] = None,
     copy: bool = False,
 ):
     """Spatial lag model with Spatial two stage least squares (S2SLS) with results and diagnostics; Anselin (1988).
