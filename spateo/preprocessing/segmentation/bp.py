@@ -8,6 +8,7 @@ import numpy as np
 from fbgbp import FastBinaryGridBeliefPropagation
 from scipy import stats
 
+from ...configuration import config
 from . import utils
 
 
@@ -48,7 +49,6 @@ def cell_marginals(
     q: float = 0.4,
     precision: float = 1e-5,
     max_iter: int = 100,
-    n_threads: int = 1,
 ) -> np.ndarray:
     """Compute the marginal probablity of each pixel being a cell, as opposed
     to background. This function calls a fast belief propagation library
@@ -69,7 +69,6 @@ def cell_marginals(
         precision: Stop iterations when desired precision is reached, as computed
             by the L2-norm of the messages from two consecutive iterations.
         max_iter: Maximum number of iterations.
-        n_threads: Number of threads to use.
 
     Returns:
         The marginal probability, at each pixel, of the pixel being a cell.
@@ -84,7 +83,7 @@ def cell_marginals(
     potentials0 = background_probs.flatten().astype(np.double)
     potentials1 = cell_probs.flatten().astype(np.double)
     bp = FastBinaryGridBeliefPropagation(shape, neighbor_offsets, potentials0, potentials1, p, q)
-    bp.run(precision=precision, max_iter=max_iter, n_threads=n_threads)
+    bp.run(precision=precision, max_iter=max_iter, n_threads=config.n_threads)
     return bp.marginals()
 
 
@@ -97,7 +96,6 @@ def run_bp(
     q: float = 0.4,
     precision: float = 1e-6,
     max_iter: int = 100,
-    n_threads: int = 1,
 ) -> np.ndarray:
     """Compute the marginal probability of each pixel being a cell, using
     belief propagation.
@@ -115,7 +113,6 @@ def run_bp(
         precision: Stop iterations when desired precision is reached, as computed
             by the L2-norm of the messages from two consecutive iterations.
         max_iter: Maximum number of iterations.
-        n_threads: Number of threads to use.
 
     Returns:
         Numpy array of marginal probabilities.
@@ -129,6 +126,5 @@ def run_bp(
         q=q,
         precision=precision,
         max_iter=max_iter,
-        n_threads=n_threads,
     )
     return marginals

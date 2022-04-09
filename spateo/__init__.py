@@ -8,3 +8,4 @@ __version__ = get_version(__file__)
 del get_version
 
 from . import io, pl, pp, tl
+from .configuration import config

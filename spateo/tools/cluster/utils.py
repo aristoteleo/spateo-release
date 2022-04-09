@@ -8,7 +8,7 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 
 # Convert sparse matrix to dense matrix.
-to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else X
+to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else np.asarray(X)
 
 
 def compute_pca_components(
@@ -161,10 +161,10 @@ def integrate(
     n_obsm_keys, n_varm_keys = len(obsm_keys), len(varm_keys)
     if n_obsm_keys > 0:
         for key in obsm_keys:
-            obsm_dict[key] = np.concatenate([np.asarray(adata.obsm[key]) for adata in adatas], axis=0)
+            obsm_dict[key] = np.concatenate([to_dense_matrix(adata.obsm[key]) for adata in adatas], axis=0)
     if n_varm_keys > 0:
         for key in varm_keys:
-            varm_dict[key] = np.concatenate([np.asarray(adata.varm[key]) for adata in adatas], axis=0)
+            varm_dict[key] = np.concatenate([to_dense_matrix(adata.varm[key]) for adata in adatas], axis=0)
 
     # Delete obsm and varm data.
     for adata in adatas:
