@@ -80,14 +80,65 @@ Taking advantage of the fact that most nuclei labeling strategies also very weak
 
 ## RNA-only segmentation
 
+Spateo features a novel method for cell segmentation using only RNA signal. As with any approximation/estimation method, some level of dropouts and noise is expected. A key requirement for RNA-only segmentation is that the unit of measure ("pixel") is much smaller than the expected size of a cell. Otherwise, there is no real benefit of attempting cell segmentation because each pixel most likely contains more than one cell.
+
 
 ### Density binning
+
+* {py:func}`spateo.preprocessing.segmentation.segment_densities`
+* {py:func}`spateo.preprocessing.segmentation.merge_densities`
+
+We've found in testing that the RNA-only segmentation method, without separating out regions with different RNA (UMI) densities, tends to be too lenient in RNA-dense regions and too strict in RNA-sparse regions. Therefore, unless the UMI counts are sufficiently sparse (such as the case when only certain genes are being used), we recommend to first separate out the pixels into different "bins" according to their RNA density. Then, RNA- only segmentation can be performed on each bin separately, resulting in a better-calibrated algorithm.
+
+One important detail is that density binning, as with any kind of clustering, is highly subjective. We suggest testing various parameters to find one that qualitatively "makes sense" to you.
 
 
 ### Negative binomial mixture model
 
+* {py:func}`spateo.preprocessing.segmentation.score_and_mask_pixels`
+
+The [negative binomial distribution](https://en.wikipedia.org/wiki/Negative_binomial_distribution) is widely used to model count data. It has been applied to many different kinds of biological data (such as sequencing data [^ref5]), and this is also how Spateo models the number of UMIs detected per pixel. For the purpose of cell segmentation, any pixel is either occupied or unoccupied by a cell. This is modeled as a two-component negative binomial mixture model, with one component for the UMIs detected in pixels occupied by a cell and the other for those unoccupied ("background"). Mathematically,
+
+```{math}
+:nowrap: true
+
+$$P(X|p,r,r',\theta,\theta')=p \cdot NB(X|r,\theta)+(1-p) \cdot NB(X|r',\theta')$$
+```
+where
+```{math}
+:nowrap: true
+\begin{align}
+    X &\text{: number of observed UMIs}\\
+    p &\text{: proportion of occupied pixels}\\
+    NB(\cdot|r,\theta) &\text{: negative binomial PDF with parameters } r, \theta\\
+    r,\theta &\text{: parameters to the negative binomial for occupied pixels}\\
+    r',\theta' &\text{: parameters to the negative binomial for unoccupied pixels}
+\end{align}
+```
+
+Ultimately, we wish to obtain estimates for $r,r',\theta,\theta'$. Spateo offers two strategies: expectation-maximization (EM) [^ref6] and a custom variational inference (VI) model. The latter is implemented with [Pyro](https://pyro.ai/), which is a Bayesian modeling and estimation framework built on top of PyTorch.
+
+Once the desired parameter estimates are obtained, likelihoods of obtaining the number of observed UMIs $X$, for each pixel $(x,y)$, conditional on the pixel being occupied and unoccupied, are calculated.
+```{math}
+:nowrap: true
+
+\begin{align}
+    P_{(x,y)}(X|r,\theta) &\triangleq P_{(x,y)}(X|occupied)\\
+    P_{(x,y)}(X|r',\theta') &\triangleq P_{(x,y)}(X|unoccupied)
+\end{align}
+```
+These probabilities can be used directly to classify each pixel as occupied or unoccupied.
+
 
 ### Belief propagation
+
+* {py:func}`spateo.preprocessing.segmentation.score_and_mask_pixels`
+
+One important caveat of the [](#negative-binomial-mixture-model) is that it does *not* yield the marginal probabilities $P_{(x,y)}(occupied),P_{(x,y)}(unoccupied)$. In order to obtain these probabilities directly, Spateo can apply an efficient [belief propagation](https://en.wikipedia.org/wiki/Belief_propagation) algorithm. An undirected graphical model is constructed by considering each pixel as a node, and edges ("potentials") between neighboring pixels (a.k.a. a grid [Markov random field](https://en.wikipedia.org/wiki/Markov_random_field)).
+
+![Markov Random Field](../_static/technicals/cell_segmentation/markov_random_field.jpg) [^ref7]
+
+Each pixel has two possible states: occupied or unoccupied. The conditional probabilities obtained with the [](#negative-binomial-mixture-model) are used as the node potentials, and the edge potentials are defined in such a way that it is more probable for two connected nodes have the same state. This encodes the expectation that if a pixel is occupied, then its neighbors are also likely to also be occupied (and vice-versa). Loopy belief propagation is run on this graph until convergence, which yields estimates for the desired marginal probabilities.
 
 [^ref1]: Yin-Chiao Tsai, Hong-Dun Lin, Yu-Chang Hu, Chin-Lung Yu, Kang-Ping Lin (2006),
     *Thin-plate spline technique for medical image deformation*,
@@ -101,3 +152,12 @@ Taking advantage of the fact that most nuclei labeling strategies also very weak
 [^ref4]: Noah F. Greenwald, Geneva Miller, Erick Moen, Alex Kong, Adam Kagel, Thomas Dougherty, Christine Camacho Fullaway, Brianna J. McIntosh, Ke Xuan Leow, Morgan Sarah Schwartz, Cole Pavelchek, Sunny Cui, Isabella Camplisson, Omer Bar-Tal, Jaiveer Singh, Mara Fong, Gautam Chaudhry, Zion Abraham, Jackson Moseley, Shiri Warshawsky, Erin Soon, Shirley Greenbaum, Tyler Risom, Travis Hollmann, Sean C. Bendall, Leeat Keren, William Graf, Michael Angelo, David Van Valen (2021),
     *Whole-cell segmentation of tissue images with human-level performance using large-scale data annotation and deep learning*,
     [Nature Biotechnology](https://doi.org/10.1038/s41587-021-01094-0).
+[^ref5]: Valentine Svensson (2020),
+    *Droplet scRNA-seq is not zero-inflated*,
+    [Nature Biotechnology](https://doi.org/10.1038/s41587-019-0379-5).
+[^ref6]: Chunmao Huang, Xingwang Liu, Tianyuan Yao, Xiaoqiang Wang (2019),
+    *An efficient EM algorithm for the mixture of negative binomial models*,
+    [Journal of Physics: Conference Series](https://doi.org/10.1088/1742-6596/1324/1/012093).
+[^ref7]: Peter Orchard,
+    *Markov Random Field Optimisation*,
+    [https://homepages.inf.ed.ac.uk/rbf/CVonline/LOCAL_COPIES/AV0809/ORCHARD/](https://homepages.inf.ed.ac.uk/rbf/CVonline/LOCAL_COPIES/AV0809/ORCHARD/).
