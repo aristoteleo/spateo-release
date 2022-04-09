@@ -37,6 +37,7 @@ clean:
 	rm -rf dist
 	rm -rf spateo.egg-info
 	rm -rf docs/_build
+	rm -rf docs/autoapi
 	rm -rf .coverage
 
 bump_patch:

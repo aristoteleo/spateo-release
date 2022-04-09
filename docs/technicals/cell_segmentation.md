@@ -2,13 +2,16 @@
 
 This section describes the technical details behind Spateo's cell segmentation pipeline.
 
+
 ## Alignment of stain and RNA coordinates
 
 * {py:func}`spateo.preprocessing.segmentation.refine_alignment`
 
 Correct alignment between the stain and RNA coordinates is imperative to obtain correct cell segmentation. Slight misalignments can cause inaccuracies when aggregating UMIs in a patch of pixels into a single cell. We've found that for the most part, the alignments produced by the spatial assays themselves are quite good, but there are sometimes slight misalignments. Therefore, Spateo includes a couple of strategies to further refine this alignment to achieve the best possible cell segmentation results. In both cases, the stain image is considered as the "source" image (a.k.a. the image that will be transfomed), and the RNA coordinates represent the "target" image. This convention was chosen because the original RNA coordinates should be maintained as much as possible.
 
+
 ### Rigid alignment
+
 The goal is to find the [affine transformation](https://en.wikipedia.org/wiki/Affine_transformation) of the stain such that the normalized cross-correlation (NCC) between the stain and RNA is minimized. Mathematically, we wish to find matrix $T$ such that
 
 ```{math}
@@ -25,11 +28,13 @@ The matrix $T$ is optimized with [PyTorch](https://pytorch.org/)'s automatic dif
 
 
 ### Non-rigid alignment
-The goal is to find a transformation from the source coordinates to the target coordinates (also minimizing the NCC as with [Rigid alignment](#rigid-alignment)) where the transformation is defined using a set of reference ("control") points on the source image arranged in a grid (or a mesh) and displacements in each dimension (X and Y) from these points to a set of target points on the target image. Then, to obtain the transformation from the source to the target, the displacement of *every* source coordinate is computed by [thin-plate-spline](https://en.wikipedia.org/wiki/Thin_plate_spline) (TPS) interpolation. Here is an illustration of an image warped using control points and TPS interpolation [^ref1].
+
+The goal is to find a transformation from the source coordinates to the target coordinates (also minimizing the NCC as with [](#rigid-alignment)) where the transformation is defined using a set of reference ("control") points on the source image arranged in a grid (or a mesh) and displacements in each dimension (X and Y) from these points to a set of target points on the target image. Then, to obtain the transformation from the source to the target, the displacement of *every* source coordinate is computed by [thin-plate-spline](https://en.wikipedia.org/wiki/Thin_plate_spline) (TPS) interpolation. Here is an illustration of an image warped using control points and TPS interpolation [^ref1].
 
 ![Thin Plate Spline](../_static/technicals/cell_segmentation/thin_plate_spline.png)
 
 The displacements for each of the control points are also optimized using PyTorch. Internally, the [`thin_plate_spline`](https://kornia.readthedocs.io/en/latest/_modules/kornia/geometry/transform/thin_plate_spline.html) module in the [Kornia](https://kornia.github.io/) library is used for TPS calculations.
+
 
 ## Watershed-based segmentation
 
@@ -45,6 +50,7 @@ With the nuclei mask in hand, we need to identify initial markers in order to ru
 
 Finally, the Watershed algorithm is applied on a blurred stain image, limiting the labels to within the mask obtained in the first step, using the initial markers from the previous step.
 
+
 ## Deep-learning-based segmentation
 
 Spateo provides a variety of existing deep-learning-based segmentation models. These include:
@@ -55,6 +61,7 @@ Spateo provides a variety of existing deep-learning-based segmentation models. T
 
 In our experiments, StarDist performed the most consistently and is the recommended method to try first.
 
+
 ## Integrating both segmentation approaches
 
 * {py:func}`spateo.preprocessing.segmentation.augment_labels`
@@ -63,11 +70,22 @@ The Watershed-based and deep-learning-based segmentation approaches have their o
 
 Therefore, we implemented a simple method of integrating the Watershed-based segmentation into the deep-learning-based segmentation. For every label in the Watershed segmentation that does not overlap with any label in the deep-learning-based segmentation, the label is copied to the deep-learning-based segmentation. This effectively results in "filling the gaps" ("augmenting") in the deep-learning segmentation using the Watershed segmentation.
 
+
+## Identifying cytoplasm
+
+* {py:func}`spateo.preprocessing.segmentation.mask_cells_from_stain`
+
+Taking advantage of the fact that most nuclei labeling strategies also very weakly label the cytoplasm, cytoplasmic regions can be identified by using a very lenient threshold. Then, cells can be labeled by iteratively expanding the nuclei labels by a certain distance.
+
+
 ## RNA-only segmentation
+
 
 ### Density binning
 
+
 ### Negative binomial mixture model
+
 
 ### Belief propagation
 

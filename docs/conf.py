@@ -71,7 +71,10 @@ exclude_patterns = ["_build", "**.ipynb_checkpoints"]
 nbsphinx_execute = "never"
 
 templates_path = ["_templates"]
-# source_suffix = ".rst"
+# source_suffix = {
+#     '.rst': 'restructuredtext',
+#     '.md': 'markdown',
+# }
 
 # Generate the API documentation when building
 autosummary_generate = True
@@ -90,6 +93,7 @@ myst_enable_extensions = [
     "dollarmath",
     "amsmath",
 ]
+myst_heading_anchors = 3
 autoapi_type = "python"
 autoapi_dirs = [str(SPATEO_DIR)]
 autoapi_add_toctree_entry = False
