@@ -8,8 +8,8 @@ import numpy as np
 from fbgbp import FastBinaryGridBeliefPropagation
 from scipy import stats
 
-from . import utils
 from ...configuration import config
+from . import utils
 
 
 def create_neighbor_offsets(neighborhood: np.ndarray) -> np.ndarray:

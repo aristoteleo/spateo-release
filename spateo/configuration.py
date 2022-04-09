@@ -18,6 +18,7 @@ from scipy import sparse
 from .errors import ConfigurationError
 from .logging import logger_manager as lm
 
+
 class SpateoConfig:
     def __init__(
         self,
@@ -28,51 +29,58 @@ class SpateoConfig:
         self.n_threads = n_threads
 
     @property
-    def logging_level(self): return self.__logging_level
+    def logging_level(self):
+        return self.__logging_level
 
     @property
-    def n_threads(self): return self.__n_threads
+    def n_threads(self):
+        return self.__n_threads
 
     @logging_level.setter
     def logging_level(self, level):
-        lm.main_debug(f'Setting logging level to {level}.')
+        lm.main_debug(f"Setting logging level to {level}.")
         if isinstance(level, str):
             level = level.lower()
-            if level == 'debug':
+            if level == "debug":
                 level = logging.DEBUG
-            elif level == 'info':
+            elif level == "info":
                 level = logging.INFO
-            elif level == 'warning':
+            elif level == "warning":
                 level = logging.WARNING
-            elif level == 'error':
+            elif level == "error":
                 level = logging.ERROR
-            elif level == 'critical':
+            elif level == "critical":
                 level = logging.CRITICAL
         lm.main_set_level(level)
         self.__logging_level = level
 
     @n_threads.setter
     def n_threads(self, n):
-        lm.main_debug(f'Setting n_threads to {n}.')
+        lm.main_debug(f"Setting n_threads to {n}.")
         try:
             import torch
+
             torch.set_num_threads(n)
         except:
             pass
         try:
             import cv2
+
             cv2.setNumThreads(n)
         except:
             pass
         try:
             import tensorflow as tf
+
             tf.config.threading.set_intra_op_parallelism_threads(n)
             tf.config.threading.set_inter_op_parallelism_threads(n)
         except:
             pass
         self.__n_threads = n
 
+
 config = SpateoConfig()
+
 
 class SpateoAdataKeyManager:
     # This key will be present in the .uns of the AnnData to indicate the type of

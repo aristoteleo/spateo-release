@@ -13,7 +13,7 @@ from scipy.sparse import issparse, spmatrix
 from skimage import filters, measure, segmentation
 from tqdm import tqdm
 
-from ...configuration import config, SKM
+from ...configuration import SKM, config
 from ...errors import PreprocessingError
 from ...logging import logger_manager as lm
 from . import utils
