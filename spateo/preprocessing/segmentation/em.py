@@ -14,6 +14,7 @@ from joblib import delayed
 from scipy import special, stats
 from skimage import feature
 
+from ...configuration import config
 from ...errors import PreprocessingError
 
 
@@ -204,7 +205,6 @@ def run_em(
     precision: float = 1e-6,
     bins: Optional[np.ndarray] = None,
     seed: Optional[int] = None,
-    n_threads: int = 1,
 ) -> Union[
     Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
     Dict[int, Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]],
@@ -230,7 +230,6 @@ def run_em(
         bins: Bins of pixels to estimate separately, such as those obtained by
             density segmentation. Zeros are ignored.
         seed: Random seed.
-        n_threads: Number of threads to use.
 
     Returns:
         Tuple of parameters estimated by the EM algorithm if `bins` is not provided.
@@ -261,7 +260,7 @@ def run_em(
     results = {}
     for label, (res_w, res_r, res_p) in zip(
         final_samples.keys(),
-        ngs.utils.ParallelWithProgress(n_jobs=n_threads, total=len(final_samples), desc="Running EM")(
+        ngs.utils.ParallelWithProgress(n_jobs=config.n_threads, total=len(final_samples), desc="Running EM")(
             delayed(nbn_em)(_samples, w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
             for _samples in final_samples.values()
         ),

@@ -122,7 +122,7 @@ def conditionals(
 
 def run_vi(
     X: np.ndarray,
-    downsample: Union[int, float] = 1.0,
+    downsample: Union[int, float] = 0.01,
     n_epochs: int = 500,
     bins: Optional[np.ndarray] = None,
     seed: Optional[int] = None,
