@@ -85,10 +85,9 @@ class TestLabel(TestMixin, TestCase):
             adata = create_random_adata(["nuclei_labels", "mask"], (3, 3))
             distance = mock.MagicMock()
             max_area = mock.MagicMock()
-            n_threads = mock.MagicMock()
-            label.expand_labels(adata, "nuclei", distance, max_area, mask_layer="mask", n_threads=n_threads)
+            label.expand_labels(adata, "nuclei", distance, max_area, mask_layer="mask")
             np.testing.assert_array_equal(adata.layers["nuclei_labels_expanded"], _expand_labels.return_value)
-            _expand_labels.assert_called_once_with(mock.ANY, distance, max_area, mask=mock.ANY, n_threads=n_threads)
+            _expand_labels.assert_called_once_with(mock.ANY, distance, max_area, mask=mock.ANY)
             np.testing.assert_array_equal(adata.layers["nuclei_labels"], _expand_labels.call_args[0][0])
             np.testing.assert_array_equal(adata.layers["mask"], _expand_labels.call_args.kwargs["mask"])
 
