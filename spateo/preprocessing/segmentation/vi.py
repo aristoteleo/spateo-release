@@ -19,26 +19,49 @@ from ...errors import PreprocessingError
 
 
 class NegativeBinomialMixture(PyroModule):
-    def __init__(self, x: np.ndarray, n: int = 2, seed: Optional[int] = None):
+    def __init__(self, x: np.ndarray, n: int = 2, n_init: int = 5, seed: Optional[int] = None):
         super().__init__()
         if seed is not None:
             torch.manual_seed(seed)
         self.x = torch.tensor(x.astype(np.float32))
         self.n = n
-        self.w = PyroParam(torch.randn(n))
-        self.counts = PyroParam(torch.randn(n))
-        self.logits = PyroParam(torch.randn(n))
+        self.scale = torch.median(self.x[self.x > 0])
+
+        params = self.init_best_params(n_init)
+        self.w = PyroParam(params["w"])
+        self.counts = PyroParam(params["counts"])
+        self.logits = PyroParam(params["logits"])
         self.__optimizer = None
+
+    def init_best_params(self, n_init):
+        best_log_prob = -np.inf
+        best_params = None
+        for _ in range(n_init):
+            self.w = torch.randn(self.n)
+            self.counts = torch.randn(self.n)
+            self.logits = torch.randn(self.n)
+            params = self.get_params(True)
+            w, counts, logits = params["w"], params["counts"], params["logits"]
+
+            assignment = dist.Categorical(logits=w).sample(self.x.size())
+            log_prob = dist.NegativeBinomial(
+                counts[assignment], logits=logits[assignment], validate_args=False
+            ).log_prob(self.x)
+            if log_prob.sum() > best_log_prob:
+                best_log_prob = log_prob.sum()
+                best_params = self.get_params(True, False)
+        return best_params
 
     def optimizer(self):
         if self.__optimizer is None:
             self.__optimizer = Adam({"lr": 0.1})
         return self.__optimizer
 
-    def get_params(self, train=False):
-        w = self.w
-        counts = F.softplus(self.counts)
-        logits = self.logits
+    def get_params(self, train=False, transform=True):
+        w, counts, logits = self.w, self.counts, self.logits
+
+        if transform:
+            counts = F.softplus(self.counts) * self.scale
         if not train:
             w = w.detach().numpy()
             counts = counts.detach().numpy()
@@ -46,7 +69,7 @@ class NegativeBinomialMixture(PyroModule):
         return dict(w=w, counts=counts, logits=logits)
 
     def forward(self, x):
-        params = self.get_params(train=True)
+        params = self.get_params(True)
         w, counts, logits = params["w"], params["counts"], params["logits"]
 
         with pyro.plate("x", size=len(x)):
@@ -108,14 +131,12 @@ def conditionals(
         cell_cond = np.zeros(X.shape)
         for label, params in vi_results.items():
             mask = bins == label
-            background_cond[mask], cell_cond[mask] = NegativeBinomialMixture.conditionals(
-                {"counts": params[0], "logits": params[-1]}, X[mask]
-            )
+            conditionals = NegativeBinomialMixture.conditionals({"counts": params[0], "logits": params[1]}, X[mask])
+            background_cond[mask], cell_cond[mask] = conditionals[0], conditionals[-1]
     else:
         params = vi_results
-        background_cond, cell_cond = NegativeBinomialMixture.conditionals(
-            {"counts": params[0], "logits": params[-1]}, X
-        )
+        conditionals = NegativeBinomialMixture.conditionals({"counts": params[0], "logits": params[1]}, X)
+        background_cond, cell_cond = conditionals[0], conditionals[-1]
 
     return background_cond, cell_cond
 
