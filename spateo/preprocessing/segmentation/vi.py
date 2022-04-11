@@ -27,10 +27,7 @@ class NegativeBinomialMixture(PyroModule):
         self.n = n
         self.scale = torch.median(self.x[self.x > 0])
 
-        params = self.init_best_params(n_init)
-        self.w = PyroParam(params["w"])
-        self.counts = PyroParam(params["counts"])
-        self.logits = PyroParam(params["logits"])
+        self.init_best_params(n_init)
         self.__optimizer = None
 
     def init_best_params(self, n_init):
@@ -50,7 +47,9 @@ class NegativeBinomialMixture(PyroModule):
             if log_prob.sum() > best_log_prob:
                 best_log_prob = log_prob.sum()
                 best_params = self.get_params(True, False)
-        return best_params
+        self.w = PyroParam(best_params["w"])
+        self.counts = PyroParam(best_params["counts"])
+        self.logits = PyroParam(best_params["logits"])
 
     def optimizer(self):
         if self.__optimizer is None:
