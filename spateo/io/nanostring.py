@@ -46,6 +46,7 @@ def read_nanostring(
             (i.e. the `segmentation_adata` and `labels` arguments) are not used.
         label_columns: Columns that contain already-segmented cell labels. Each
             unique combination is considered a unique cell.
+
     Returns:
         Bins x genes or labels x genes AnnData.
     """
