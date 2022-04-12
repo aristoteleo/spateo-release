@@ -29,20 +29,18 @@ def lisa_geo_df(
     diamond regions.
 
     Args:
-        adata: An adata object that has spatial information (via `spatial` key).
+        adata: An adata object that has spatial information (via `spatial_key` key in adata.obsm).
         gene: The gene that will be used for lisa analyses, must be included in the data.
         spatial_key: The spatial key of the spatial coordinate of each bucket.
         n_neighbors: The number of nearest neighbors of each bucket that will be used in calculating the spatial lag.
         layer: the key to the layer. If it is None, adata.X will be used by default.
 
     Returns:
-        df: a geopandas dataframe that consider the coordinate (`x`, `y` columns), expression (`exp` column) and lagged
+        df: a geopandas dataframe that includes the coordinate (`x`, `y` columns), expression (`exp` column) and lagged
         expression (`w_exp` column), z-score (`exp_zscore`, `w_exp_zscore`) and the LISA (`Is` column).
         score.
     """
-
     coords = adata.obsm[spatial_key]
-    weights.distance.KNN.from_array(coords)
 
     # Generate W from the GeoDataFrame
     w = weights.distance.KNN.from_array(coords, k=n_neighbors)
@@ -92,11 +90,11 @@ def local_moran_i(
     n_neighbors: int = 8,
     copy: bool = False,
 ):
-    """Identify cell type specific genes with local moran's I test.
+    """Identify cell type specific genes with local Moran's I test.
 
     Args:
-        adata: An adata object that has spatial information (via `spatial` key).
-        group: The key to the cell group in the adata object.
+        adata: An adata object that has spatial information (via `spatial_key` key in adata.obsm).
+        group: The key to the cell group in the adata.obs.
         spatial_key: The spatial key of the spatial coordinate of each bucket.
         genes: The gene that will be used for lisa analyses, must be included in the data.
         layer: the key to the layer. If it is None, adata.X will be used by default.
@@ -105,8 +103,9 @@ def local_moran_i(
 
     Returns:
         Depend on the `copy` argument, return a deep copied adata object (when `copy = True`) or inplace updated adata
-        object. The result adata will include the following new columns in `adata.var`:
-            {*}_num_val: The maximum number of categories across all cell groups
+        object. The resultant adata will include the following new columns in `adata.var`:
+            {*}_num_val: The maximum number of categories (`{"hotspot", "coldspot", "doughnut", "diamond"}) across all
+                         cell groups
             {*}_frac_val: The maximum fraction of categories across all cell groups
             {*}_spec_val: The maximum specificity of categories across all cell groups
             
@@ -122,12 +121,12 @@ def local_moran_i(
     >>> groupby(['hotspot_spec'])['hotspot_spec_val'].nlargest(5)
     >>> markers = markers_df.index.get_level_values(1)
     >>>
-    >>>  for i in adata.obs[group].unique():
-    >>>      if i in markers_df.index.get_level_values(0):
-    >>>          print(markers_df[i])
-    >>>          st.pl.space(adata, color=group, highlights=[i], pointsize=0.1, alpha=1, figsize=(12, 8))
+    >>> for i in adata.obs[group].unique():
+    >>>     if i in markers_df.index.get_level_values(0):
+    >>>         print(markers_df[i])
+    >>>         st.pl.space(adata, color=group, highlights=[i], pointsize=0.1, alpha=1, figsize=(12, 8))
     >>>
-    >>>          st.pl.space(adata, color=markers_df[i].index, pointsize=0.1, alpha=1, figsize=(12, 8))
+    >>>         st.pl.space(adata, color=markers_df[i].index, pointsize=0.1, alpha=1, figsize=(12, 8))
     """
     if copy:
         adata = copy_adata(adata) if copy else adata
@@ -154,10 +153,10 @@ def local_moran_i(
     # hotspot: HH; coldspot: LL; doughnut: HL, diamond: LH; the first one is the query point
     # while the second the neighbors. Order on the quantile plot is 1, 3, 2, 4
     def _assign_columns(type):
-        hot_list = [type + i for i in suffix]
-        hot_val_list = [type + i + "_val" for i in suffix]
-        adata.var[hot_list[0]], adata.var[hot_list[1]], adata.var[hot_list[0]] = None, None, None
-        adata.var[hot_val_list[0]], adata.var[hot_val_list[1]], adata.var[hot_val_list[0]] = None, None, None
+        cat_list = [type + i for i in suffix]
+        cat_val_list = [type + i + "_val" for i in suffix]
+        adata.var[cat_list[0]], adata.var[cat_list[1]], adata.var[cat_list[0]] = None, None, None
+        adata.var[cat_val_list[0]], adata.var[cat_val_list[1]], adata.var[cat_val_list[0]] = None, None, None
 
     for i in ["hotspot", "coldspot", "doughnut", "diamond"]:
         _assign_columns(i)
@@ -177,19 +176,19 @@ def local_moran_i(
     # calculate the value
     def _get_nums(spots, valid_inds, g):
         return (
-            sum(spots[valid_inds]),
-            sum(spots[valid_inds]) / group_num[g],
-            sum(spots[valid_inds]) / sum(hotspot),
+            sum(spots[valid_inds] > 0),  # number of {*} (like hotspot, colospot, etc.) in this cell group
+            sum(spots[valid_inds] > 0) / group_num[g],  # fraction of {*} in this cell group
+            sum(spots[valid_inds] > 0) / sum(hotspot > 0),  # specificity of {*} in this cell group
         )
 
     # calculate the maximum across all cell groups
-    def _get_group_max(spots, frac, spec):
-        return (np.max(spots), np.max(frac), np.max(spec))
+    def _get_group_max(num, frac, spec):
+        return (np.max(num), np.max(frac), np.max(spec))
 
     # get the group name with the maximum
-    def _get_max_group_name(spots, frac, spec):
+    def _get_max_group_name(num, frac, spec):
         return (
-            uniq_g[np.argsort(spots)[-1]],
+            uniq_g[np.argsort(num)[-1]],
             uniq_g[np.argsort(frac)[-1]],
             uniq_g[np.argsort(spec)[-1]],
         )
@@ -279,7 +278,7 @@ def GM_lag_model(
     layer: Tuple[None, str] = None,
     copy: bool = False,
 ):
-    """Spatial lag model with Spatial two stage least squares (S2SLS) with results and diagnostics; Anselin (1988).
+    """Spatial lag model with spatial two stage least squares (S2SLS) with results and diagnostics; Anselin (1988).
 
     :math: `\log{P_i} = \alpha + \rho \log{P_{lag-i}} + \sum_k \beta_k X_{ki} + \epsilon_i`
 
@@ -288,10 +287,10 @@ def GM_lag_model(
         http://darribas.org/gds_scipy16/ipynb_md/08_spatial_regression.html
 
     Args:
-        adata: An adata object that has spatial information (via `spatial` key).
+        adata: An adata object that has spatial information (via `spatial_key` key in adata.obsm).
         group: The key to the cell group in the adata object.
         spatial_key: The spatial key of the spatial coordinate of each bucket.
-        genes: The gene that will be used for lisa analyses, must be included in the data.
+        genes: The gene that will be used for S2SLS analyses, must be included in the data.
         drop_dummy: The name of the dummy group.
         n_neighbors: The number of nearest neighbors of each bucket that will be used in calculating the spatial lag.
         layer: The key to the layer. If it is None, adata.X will be used by default.
@@ -312,8 +311,8 @@ def GM_lag_model(
     >>>     for i in coef_cols[1:-1]:
     >>>         print(i)
     >>>         top_markers = adata.var.sort_values(i, ascending=False).index[:5]
-    >>>         st.pl.scatters(adata, basis='spatial', color=top_markers, ncols=5, pointsize=0.1, alpha=1)
-    >>>         st.pl.scatters(adata.copy(), basis='spatial', color=['simpleanno'],
+    >>>         st.pl.space(adata, basis='spatial', color=top_markers, ncols=5, pointsize=0.1, alpha=1)
+    >>>         st.pl.space(adata.copy(), basis='spatial', color=['simpleanno'],
     >>>             highlights=[i.split('_GM_lag_coeff')[0]], pointsize=0.1, alpha=1, show_legend='on data')
     """
     if copy:
@@ -331,11 +330,11 @@ def GM_lag_model(
 
     if drop_dummy is None:
         db.iloc[sample(np.arange(adata.n_obs).tolist(), min_group_ncells), :] = "others"
-        drop_columns = ["group_others"]
+        drop_columns = ["group_others"]  # ?
     elif drop_dummy in group_name:
         group_inds = np.where(db["group"] == drop_dummy)[0]
         db.iloc[group_inds, :] = "others"
-        drop_columns = ["group_others", "group_" + str(drop_dummy)]
+        drop_columns = ["group_others", "group_" + str(drop_dummy)]  # ?
     else:
         raise ValueError(f"drop_dummy, {drop_dummy} you provided is not in the adata.obs[{group}].")
 
@@ -370,7 +369,7 @@ def GM_lag_model(
         if layer is None:
             X["log_exp"] = adata[:, cur_g].X.A
         else:
-            X["log_exp"] = adata[:, cur_g].layers[layer].A
+            X["log_exp"] = np.log1p(adata[:, cur_g].layers[layer].A)
 
         try:
             model = spreg.GM_Lag(
@@ -386,7 +385,7 @@ def GM_lag_model(
                 model.z_stat,
                 model.name_x + ["W_log_exp"],
                 columns=["z_stat", "p_val"],
-            )
+            )  # ?
 
             df = a.merge(b, left_index=True, right_index=True)
 
