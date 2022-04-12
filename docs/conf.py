@@ -90,9 +90,11 @@ myst_enable_extensions = [
     "dollarmath",
     "amsmath",
 ]
+myst_heading_anchors = 3
 autoapi_type = "python"
 autoapi_dirs = [str(SPATEO_DIR)]
 autoapi_add_toctree_entry = False
+autoapi_keep_files = True
 
 
 # The master toctree document.
