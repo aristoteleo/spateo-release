@@ -15,4 +15,4 @@ from .label import (
     watershed,
     watershed_markers,
 )
-from .qc import generate_random_labels, select_qc_regions
+from .qc import generate_random_labels, generate_random_labels_like, select_qc_regions
