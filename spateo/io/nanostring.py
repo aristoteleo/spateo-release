@@ -4,6 +4,7 @@ from typing import List, Optional, Union
 
 import pandas as pd
 from anndata import AnnData
+from scipy.sparse import csr_matrix
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
