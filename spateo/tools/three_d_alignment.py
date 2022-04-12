@@ -1,13 +1,14 @@
-from typing import List, Tuple, Union
+from typing import List, Tuple
 
 import nudged
 import numpy as np
 import ot
 import torch
 from anndata import AnnData
-from scipy.sparse.csr import spmatrix
+from scipy.sparse import isspmatrix
 from scipy.spatial import distance_matrix
-from tqdm import tqdm
+
+from ..logging import logger_manager as lm
 
 
 def pairwise_align(
@@ -16,7 +17,7 @@ def pairwise_align(
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
-    device: Union[str, torch.device] = "cpu",
+    device: str = "cpu",
 ) -> np.ndarray:
     """Calculates and returns optimal alignment of two slices.
 
@@ -27,20 +28,27 @@ def pairwise_align(
         numItermax: max number of iterations for cg.
         numItermaxEmd: Max number of iterations for emd.
         device: Equipment used to run the program.
-            Can also accept a torch.device. E.g.: torch.device('cuda:0')
+            Can also accept a torch.device. E.g.: 'cuda:0'.
 
     Returns:
         Alignment of spots.
     """
 
-    if device != "cpu":
+    # Equipment used to run the program.
+    device = torch.device(device=device)
+
+    if device != torch.device("cpu"):
+        cuda_available = torch.cuda.is_available()
+        if cuda_available is False:
+            raise ValueError("Cannot use GPU, please use CPU.")
         torch.cuda.init()
+
     # Subset for common genes
     common_genes = [value for value in slice1.var.index if value in set(slice2.var.index)]
     slice1, slice2 = slice1[:, common_genes], slice2[:, common_genes]
 
     # Calculate expression dissimilarity
-    to_dense_array = lambda X: np.array(X.todense()) if isinstance(X, spmatrix) else X
+    to_dense_array = lambda X: np.array(X.todense()) if isspmatrix(X) else X
     slice1_x, slice2_x = (
         to_dense_array(slice1.X) + 0.0000000001,
         to_dense_array(slice2.X) + 0.0000000001,
@@ -102,44 +110,26 @@ def slice_alignment(
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
-    device: Union[str, torch.device] = "cpu",
-    verbose: bool = True,
+    device: str = "cpu",
 ):
     """Align spatial coordinates of slices.
 
     Args:
         slices: List of slices (AnnData Object).
-        alpha: Trade-off parameter (0 < alpha < 1).
-        numItermax: max number of iterations for cg.
+        alpha:  Alignment tuning parameter (0 < alpha < 1).
+        numItermax: Max number of iterations for cg.
         numItermaxEmd: Max number of iterations for emd.
         device: Equipment used to run the program.
-            Can also accept a torch.device. E.g.: torch.device('cuda:0')
-        verbose: Print information along iterations.
+            Can also accept a torch.device. E.g.: 'cuda:0'.
 
     Returns:
         List of slices (AnnData Object) after alignment.
     """
 
-    def _log(m):
-        if verbose:
-            print(m)
-
-    if device != "cpu":
-        _log(f"\nWhether CUDA is currently available: {torch.cuda.is_available()}")
-        _log(f"Device: {torch.cuda.get_device_name(device=device)}")
-        _log(
-            f"GPU total memory: {int(torch.cuda.get_device_properties(device).total_memory / (1024 * 1024 * 1024))} GB"
-        )
-    else:
-        _log(f"Device: CPU")
-
     align_slices = []
-    for i in tqdm(range(len(slices) - 1), desc=" Alignment "):
+    for i in lm.progress_logger(range(len(slices) - 1), progress_name="Slices alignment"):
 
-        if i == 0:
-            slice1 = slices[i].copy()
-        else:
-            slice1 = align_slices[i].copy()
+        slice1 = slices[i].copy() if i == 0 else align_slices[i].copy()
         slice2 = slices[i + 1].copy()
 
         # Calculate and returns optimal alignment of two slices.
@@ -153,16 +143,17 @@ def slice_alignment(
         )
 
         # Calculate new coordinates of two slices
-        raw_slice1_coords, raw_slice2_coords = (
-            slice1.obsm["spatial"],
-            slice2.obsm["spatial"],
-        )
+        raw_slice1_coords = slice1.obsm["spatial"]
+        raw_slice2_coords = slice2.obsm["spatial"]
+
         slice1_coords = raw_slice1_coords - pi.sum(axis=1).dot(raw_slice1_coords)
         slice2_coords = raw_slice2_coords - pi.sum(axis=0).dot(raw_slice2_coords)
+
         H = slice2_coords.T.dot(pi.T.dot(slice1_coords))
         U, S, Vt = np.linalg.svd(H)
         R = Vt.T.dot(U.T)
         slice2_coords = R.dot(slice2_coords.T).T
+
         slice1.obsm["spatial"] = np.around(slice1_coords, decimals=2)
         slice2.obsm["spatial"] = np.around(slice2_coords, decimals=2)
 
@@ -183,8 +174,7 @@ def slice_alignment_bigBin(
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
-    device: Union[str, torch.device] = "cpu",
-    verbose: bool = True,
+    device: str = "cpu",
 ) -> Tuple[List[AnnData], List[AnnData]]:
     """Align spatial coordinates of slices.
 
@@ -200,8 +190,7 @@ def slice_alignment_bigBin(
         numItermax: max number of iterations for cg.
         numItermaxEmd: Max number of iterations for emd.
         device: Equipment used to run the program.
-            Can also accept a torch.device. E.g.: torch.device('cuda:0')
-        verbose: Print information along iterations.
+            Can also accept a torch.device. E.g.: 'cuda:0'.
 
     Returns:
         Tuple of two elements. The first contains a list of slices after alignment.
@@ -216,7 +205,6 @@ def slice_alignment_bigBin(
         numItermax=numItermax,
         numItermaxEmd=numItermaxEmd,
         device=device,
-        verbose=verbose,
     )
 
     align_slices = []

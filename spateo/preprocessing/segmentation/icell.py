@@ -4,6 +4,7 @@ generate a cell mask, NOT to identify individual cells.
 Original author @HailinPan, refactored by @Lioscro.
 """
 import warnings
+from functools import partial
 from typing import Optional, Tuple, Union
 
 import cv2
@@ -17,7 +18,7 @@ from ...configuration import SKM
 from ...errors import PreprocessingError
 from ...logging import logger_manager as lm
 from ...warnings import PreprocessingWarning
-from . import bp, em, utils
+from . import bp, em, utils, vi
 
 
 def _mask_cells_from_stain(X: np.ndarray, otsu_classes: int = 4, otsu_index: int = 0, mk: int = 7) -> np.ndarray:
@@ -70,6 +71,7 @@ def mask_cells_from_stain(
             classified as cell.
         mk: Size of the kernel used for morphological close and open operations
             applied at the very end.
+        layer: Layer that contains staining image.
         out_layer: Layer to put resulting nuclei mask. Defaults to `{layer}_mask`.
     """
     if layer not in adata.layers:
@@ -132,8 +134,9 @@ def mask_nuclei_from_stain(
 def _score_pixels(
     X: Union[spmatrix, np.ndarray],
     k: int,
-    method: Literal["gauss", "EM", "EM+gauss", "EM+BP"],
+    method: Literal["gauss", "EM", "EM+gauss", "EM+BP", "VI+gauss", "VI+BP"],
     em_kwargs: Optional[dict] = None,
+    vi_kwargs: Optional[dict] = None,
     bp_kwargs: Optional[dict] = None,
     certain_mask: Optional[np.ndarray] = None,
     bins: Optional[np.ndarray] = None,
@@ -151,6 +154,8 @@ def _score_pixels(
             EM+gauss: EM algorithm followed by Gaussian blur.
             EM+BP: EM algorithm followed by belief propagation to estimate the
                 marginal probabilities of cell and background.
+            VI+gauss:
+            VI+BP
         em_kwargs: Keyword arguments to the :func:`em.run_em` function.
         bp_kwargs: Keyword arguments to the :func:`bp.run_bp` function.
         certain_mask: A boolean Numpy array indicating which pixels are certain
@@ -166,7 +171,7 @@ def _score_pixels(
         PreprocessingError: If `bins` and/or `certain_mask` was provided but
             their sizes do not match `X`
     """
-    if method.lower() not in ("gauss", "em", "em+gauss", "em+bp"):
+    if method.lower() not in ("gauss", "em", "em+gauss", "em+bp", "vi+gauss", "vi+bp"):
         raise PreprocessingError(f"Unknown method `{method}`")
     if certain_mask is not None and X.shape != certain_mask.shape:
         raise PreprocessingError("`certain_mask` does not have the same shape as `X`")
@@ -175,10 +180,13 @@ def _score_pixels(
 
     method = method.lower()
     em_kwargs = em_kwargs or {}
+    vi_kwargs = vi_kwargs or {}
     bp_kwargs = bp_kwargs or {}
 
     if em_kwargs and "em" not in method:
         lm.main_warning(f"`em_kwargs` will be ignored.")
+    if vi_kwargs and "vi" not in method:
+        lm.main_warning(f"`vi_kwargs` will be ignored.")
     if bp_kwargs and "bp" not in method:
         lm.main_warning(f"`bp_kwargs` will be ignored.")
 
@@ -193,14 +201,23 @@ def _score_pixels(
 
     # All methods other than gauss requires EM
     if method != "gauss":
-        lm.main_debug(f"Running EM with kwargs {em_kwargs}.")
-        em_results = em.run_em(res, bins=bins, **em_kwargs)
+        if "em" in method:
+            lm.main_debug(f"Running EM with kwargs {em_kwargs}.")
+            em_results = em.run_em(res, bins=bins, **em_kwargs)
+            conditional_func = partial(em.conditionals, em_results=em_results, bins=bins)
+        else:
+            lm.main_debug(f"Running VI with kwargs {vi_kwargs}.")
+            vi_results = vi.run_vi(res, bins=bins, **vi_kwargs)
+            conditional_func = partial(vi.conditionals, vi_results=vi_results, bins=bins)
 
         if "bp" in method:
             lm.main_debug("Computing conditionals.")
-            background_cond, cell_cond = em.conditionals(res, em_results=em_results, bins=bins)
+            background_cond, cell_cond = conditional_func(res)
+            if certain_mask is not None:
+                background_cond[certain_mask] = 1e-2
+                cell_cond[certain_mask] = 1 - (1e-2)
             lm.main_debug(f"Running BP with kwargs {bp_kwargs}.")
-            res = bp.run_bp(res, background_cond, cell_cond, certain_mask=certain_mask, **bp_kwargs)
+            res = bp.run_bp(background_cond, cell_cond, **bp_kwargs)
         else:
             lm.main_debug("Computing confidences.")
             res = em.confidence(res, em_results=em_results, bins=bins)
@@ -223,11 +240,12 @@ def score_and_mask_pixels(
     adata: AnnData,
     layer: str,
     k: int,
-    method: Literal["gauss", "EM", "EM+gauss", "EM+BP"],
+    method: Literal["gauss", "EM", "EM+gauss", "EM+BP", "VI+gauss", "VI+BP"],
     em_kwargs: Optional[dict] = None,
+    vi_kwargs: Optional[dict] = None,
     bp_kwargs: Optional[dict] = None,
     threshold: Optional[float] = None,
-    mk: int = 11,
+    mk: Optional[int] = None,
     bins_layer: Optional[Union[Literal[False], str]] = None,
     certain_layer: Optional[str] = None,
     scores_layer: Optional[str] = None,
@@ -246,13 +264,15 @@ def score_and_mask_pixels(
             EM+gauss: EM algorithm followed by Gaussian blur.
             EM+BP: EM algorithm followed by belief propagation to estimate the
                 marginal probabilities of cell and background.
+            VI+gauss:
+            VI+BP
         em_kwargs: Keyword arguments to the :func:`em.run_em` function.
         bp_kwargs: Keyword arguments to the :func:`bp.run_bp` function.
         threshold: Score cutoff, above which pixels are considered occupied.
             By default, a threshold is automatically determined by using
             the first value of the 3-class Multiotsu method.
         mk: Kernel size of morphological open and close operations to reduce
-            noise in the mask.
+            noise in the mask. Defaults to `k`+2.
         bins_layer: Layer containing assignment of pixels into bins. Each bin
             is considered separately. Defaults to `{layer}_bins`. This can be
             set to `False` to disable binning, even if the layer exists.
@@ -273,16 +293,16 @@ def score_and_mask_pixels(
         if bins_layer in adata.layers:
             bins = SKM.select_layer_data(adata, bins_layer)
     lm.main_info(f"Scoring pixels with {method} method.")
-    scores = _score_pixels(X, k, method, em_kwargs, bp_kwargs, certain_mask, bins)
+    scores = _score_pixels(X, k, method, em_kwargs, vi_kwargs, bp_kwargs, certain_mask, bins)
     scores_layer = scores_layer or SKM.gen_new_layer_key(layer, SKM.SCORES_SUFFIX)
     SKM.set_layer_data(adata, scores_layer, scores)
 
     if not threshold:
         lm.main_debug("Finding Otsu threshold.")
-        threshold = filters.threshold_otsu(scores)
+        threshold = filters.threshold_multiotsu(scores, 3)[-1]
 
     lm.main_info(f"Applying threshold {threshold}.")
-    mask = utils.apply_threshold(scores, mk, threshold)
+    mask = utils.apply_threshold(scores, mk or k + 2, threshold)
     if certain_layer:
         mask += certain_mask
     mask_layer = mask_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)

@@ -50,12 +50,12 @@ def construct_pc(
 
     obs_names = set(adata.obs_keys())
     gene_names = set(adata.var_names.tolist())
-    if groupby in obs_names:
+    if groupby is None:
+        groups = np.array(["same"] * adata.obs.shape[0])
+    elif groupby in obs_names:
         groups = adata.obs[groupby].map(lambda x: "mask" if x in mask_list else x).values
     elif groupby in gene_names or set(groupby) <= gene_names:
-        groups = adata[:, list(groupby)].X.sum(axis=1).flatten().round(2)
-    elif groupby is None:
-        groups = np.array(["same"] * adata.obs.shape[0])
+        groups = adata[:, groupby].X.sum(axis=1).flatten().round(2)
     else:
         raise ValueError(
             "\n`groupby` value is wrong."

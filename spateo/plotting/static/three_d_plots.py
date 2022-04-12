@@ -299,12 +299,12 @@ def output_plotter(
 
     # Output the plotter in the format of the output file.
     if filename_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
-        _, img = p.show(
+        cpo, img = p.show(
             screenshot=filename,
             return_img=True,
             return_cpos=True,
         )
-        return img
+        return cpo, img
     elif filename_format == "gif":
         _to_gif(_filename=filename, _view_up=view_up)
         return None
@@ -418,7 +418,7 @@ def three_d_plot(
     opacity: float = 1.0,
     point_size: float = 5.0,
     mesh_style: Literal["points", "surface", "wireframe"] = "surface",
-    initial_cpo: Union[str, tuple] = "iso",
+    initial_cpo: Union[str, list] = "iso",
     legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
         "upper right",
@@ -462,8 +462,12 @@ def three_d_plot(
         point_size: Point size of any nodes in the dataset plotted.
         mesh_style: Visualization style of the mesh. One of the following: style='surface', style='wireframe', style='points'.
         initial_cpo: Camera position of the window. Available `initial_cpo` are:
-                * `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
-                * Customize a tuple. E.g.: (7, 0, 20.).
+                * Iterable containing position, focal_point, and view up. E.g.:
+                    `[(2.0, 5.0, 13.0), (0.0, 0.0, 0.0), (-0.7, -0.5, 0.3)]`
+                * Iterable containing a view vector. E.g.:
+                   ` [-1.0, 2.0, -5.0]`
+                * A string containing the plane orthogonal to the view direction. E.g.:
+                    `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
         legend_size: Two float tuple, each float between 0 and 1.
                      For example (0.1, 0.1) would make the legend 10% the size of the entire figure window.
                      If legend_size is None, legend_size will be adjusted adaptively.
@@ -566,7 +570,7 @@ def three_d_animate(
     opacity: float = 1.0,
     point_size: float = 5.0,
     mesh_style: Literal["points", "surface", "wireframe"] = "surface",
-    initial_cpo: Union[str, tuple] = "iso",
+    initial_cpo: Union[str, list] = "iso",
     legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
         "upper right",
@@ -604,8 +608,12 @@ def three_d_animate(
         point_size: Point size of any nodes in the dataset plotted.
         mesh_style: Visualization style of the mesh. One of the following: style='surface', style='wireframe', style='points'.
         initial_cpo: Camera position of the window. Available `initial_cpo` are:
-                * `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
-                * Customize a tuple. E.g.: (7, 0, 20.).
+                * Iterable containing position, focal_point, and view up. E.g.:
+                    `[(2.0, 5.0, 13.0), (0.0, 0.0, 0.0), (-0.7, -0.5, 0.3)]`
+                * Iterable containing a view vector. E.g.:
+                   ` [-1.0, 2.0, -5.0]`
+                * A string containing the plane orthogonal to the view direction. E.g.:
+                    `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
         legend_size: Two float tuple, each float between 0 and 1.
                      For example (0.1, 0.1) would make the legend 10% the size of the entire figure window.
                      If legend_size==None, legend_size will be adjusted adaptively.

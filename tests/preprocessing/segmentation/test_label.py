@@ -82,13 +82,14 @@ class TestLabel(TestMixin, TestCase):
     def test_expand_labels_adata(self):
         with mock.patch("spateo.preprocessing.segmentation.label._expand_labels") as _expand_labels:
             _expand_labels.return_value = np.random.random((3, 3))
-            adata = create_random_adata(["nuclei_labels"], (3, 3))
+            adata = create_random_adata(["nuclei_labels", "mask"], (3, 3))
             distance = mock.MagicMock()
             max_area = mock.MagicMock()
-            label.expand_labels(adata, "nuclei", distance, max_area)
+            label.expand_labels(adata, "nuclei", distance, max_area, mask_layer="mask")
             np.testing.assert_array_equal(adata.layers["nuclei_labels_expanded"], _expand_labels.return_value)
-            _expand_labels.assert_called_once_with(mock.ANY, distance, max_area)
+            _expand_labels.assert_called_once_with(mock.ANY, distance, max_area, mask=mock.ANY)
             np.testing.assert_array_equal(adata.layers["nuclei_labels"], _expand_labels.call_args[0][0])
+            np.testing.assert_array_equal(adata.layers["mask"], _expand_labels.call_args.kwargs["mask"])
 
     def test_label_connected_components(self):
         pass

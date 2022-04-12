@@ -47,13 +47,13 @@ def imshow(
     return_fig_ax = False
     if ax is None:
         return_fig_ax = True
-        fig, ax = plt.subplots(figsize=(4, 4), tight_layout=True)
+        fig, ax = plt.subplots(figsize=(5, 5), tight_layout=True)
     else:
         fig = ax.get_figure()
 
     mtx = SKM.select_layer_data(adata, layer, make_dense=True)
     if labels:
-        mtx = label2rgb(mtx)
+        mtx = label2rgb(mtx, bg_label=0)
 
     kwargs.update({"interpolation": "none"})
     im = ax.imshow(mtx, **kwargs)

@@ -31,9 +31,9 @@ def select_qc_regions(
         size: Width and height of each randomly selected region.
         seed: Random seed.
     """
-    _regions = np.zeros((n, 4), dtype=int)
     if not regions:
         lm.main_info(f"Randomly selecting {n} regions of shape {(size, size)}.")
+        _regions = np.zeros((n, 4), dtype=int)
         # Construct grid indices
         indices = np.dstack(
             np.meshgrid(np.arange(0, adata.n_obs - size, size), np.arange(0, adata.n_vars - size, size))
@@ -51,6 +51,7 @@ def select_qc_regions(
             _regions[i] = [xmin, xmin + size, ymin, ymin + size]
     else:
         lm.main_info(f"Using regions provided with `regions` argument.")
+        _regions = np.zeros((len(regions), 4), dtype=int)
         adata_bounds = SKM.get_agg_bounds(adata)
         for i, region in enumerate(regions):
             if len(region) == 4:

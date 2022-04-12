@@ -5,13 +5,13 @@ import pyvista as pv
 from pyvista import PolyData, UnstructuredGrid
 from sklearn.neighbors import KernelDensity
 
+from ....logging import logger_manager as lm
 from ..mesh.utils import add_mesh_labels
 
 
 def mesh_morphology(
     mesh: Union[PolyData, UnstructuredGrid],
     pcd: Optional[PolyData or UnstructuredGrid] = None,
-    verbose: bool = True,
 ) -> Dict[str, Union[float, Any]]:
     """
     Return the basic morphological characteristics of mesh,
@@ -20,7 +20,6 @@ def mesh_morphology(
     Args:
         mesh: A reconstructed surface mesh or volume mesh.
         pcd: A point cloud representing the number of cells.
-        verbose: Print information.
     Returns:
         morphology: A dictionary containing the following mesh morphological features:
             morphology['Length(x)']: Length (x) of mesh.
@@ -51,32 +50,30 @@ def mesh_morphology(
         mesh_y,
         mesh_z,
     )
+    lm.main_info(f"Length (x) of mesh: {morphology['Length(x)']};", indent_level=1)
+    lm.main_info(f"Width (y) of mesh: {morphology['Width(y)']};", indent_level=1)
+    lm.main_info(f"Height (z) of mesh: {morphology['Height(z)']};", indent_level=1)
 
     # Surface area of mesh
     mesh_sa = round(mesh_surf.area, 5)
     morphology["Surface_area"] = mesh_sa
+    lm.main_info(f"Surface area of mesh: {morphology['Surface_area']};", indent_level=1)
 
     # Volume of mesh
     mesh_v = round(mesh_surf.volume, 5)
     morphology["Volume"] = mesh_v
+    lm.main_info(f"Volume of mesh: {morphology['Volume']};", indent_level=1)
 
     # Volume / surface area ratio of mesh
     mesh_vsa = round(mesh_v / mesh_sa, 5)
     morphology["V/SA_ratio"] = mesh_vsa
+    lm.main_info(f"Volume / surface area ratio of mesh: {morphology['V/SA_ratio']}.", indent_level=1)
 
     # cell density
     if not (pcd is None):
         mesh_cd = round(pcd.n_points / mesh_v, 5)
         morphology["cell_density"] = mesh_cd
-
-    if verbose:
-        print(f"Length (x) of mesh: {morphology['Length(x)']};")
-        print(f"Width (y) of mesh: {morphology['Width(y)']};")
-        print(f"Height (z) of mesh: {morphology['Height(z)']};")
-        print(f"Surface area of mesh: {morphology['Surface_area']};")
-        print(f"Volume of mesh: {morphology['Volume']};")
-        print(f"Volume / surface area ratio of mesh: {morphology['V/SA_ratio']}.")
-        print(f"Cell density of mesh: {morphology['cell_density']}.")
+        lm.main_info(f"Cell density of mesh: {morphology['cell_density']}.", indent_level=1)
 
     return morphology
 

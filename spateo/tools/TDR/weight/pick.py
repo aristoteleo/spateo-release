@@ -1,7 +1,6 @@
 from typing import Optional, Union
 
 import numpy as np
-import pyvista as pv
 from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
 from ..mesh.utils import collect_mesh, multiblock2mesh
@@ -31,16 +30,9 @@ def three_d_pick(
             )
 
         if isinstance(mesh, PolyData):
-            picked_mesh_poly = pv.PolyData(picked_mesh.points, picked_mesh.cells)
-            for pd_key in picked_mesh.point_data.keys():
-                if pd_key != "vtkOriginalPointIds":
-                    picked_mesh_poly.point_data[pd_key] = picked_mesh.point_data[pd_key]
-            for cd_key in picked_mesh.cell_data.keys():
-                if cd_key != "vtkOriginalCellIds":
-                    picked_mesh_poly.cell_data[cd_key] = picked_mesh.cell_data[cd_key]
-            picked_meshes.append(picked_mesh_poly)
-        else:
-            picked_meshes.append(picked_mesh)
+            picked_mesh = picked_mesh.extract_surface()
+
+        picked_meshes.append(picked_mesh)
 
     return collect_mesh(picked_meshes)
 
