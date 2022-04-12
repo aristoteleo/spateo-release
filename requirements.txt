@@ -48,6 +48,7 @@ PVGeo>=2.1.0
 pyacvd>=0.2.7
 PyMCubes
 pysal>=1.14.4
+pyro-ppl>=1.8.1
 pyvista>=0.33.3
 setuptools>=58.0.4
 tqdm>=4.62.3
