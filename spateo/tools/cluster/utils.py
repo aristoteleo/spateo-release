@@ -121,6 +121,7 @@ def sctransform(
     n_top_genes: int = 3000,
     save_sct_img_1: Optional[str] = None,
     save_sct_img_2: Optional[str] = None,
+    **kwargs,
 ) -> Optional[AnnData]:
     """
     Use sctransform with an additional flag vst.flavor="v2" to perform normalization and dimensionality reduction
@@ -147,6 +148,7 @@ def sctransform(
         n_top_genes: Number of highly-variable genes to keep.
         save_sct_img_1: If save_sct_img_1 != None, save the image of the GLM model parameters.
         save_sct_img_2: If save_sct_img_2 != None, save the image of the final residual variances.
+        **kwargs: Additional keyword arguments to ``pysctransform.SCTransform``.
 
     Returns:
         Updates adata with the field ``adata.obsm["pearson_residuals"]``, containing pearson_residuals.
@@ -164,7 +166,7 @@ def sctransform(
             "Install pysctransform via `pip install git+https://github.com/saketkc/pysctransform.git`"
         )
 
-    residuals = SCTransform(adata, var_features_n=n_top_genes)
+    residuals = SCTransform(adata, var_features_n=n_top_genes, **kwargs)
     adata.obsm["pearson_residuals"] = residuals
 
     # Plot model characteristics.
