@@ -2,14 +2,14 @@
 Todo:
     * @Xiaojieqiu: update with Google style documentation, function typings, tests
 """
-from typing import List, Optional, Tuple, Union
+from typing import List, Tuple
 
 from ..logging import logger_manager as lm
 from .deep_interpolation import *
 from .utils import in_hull, polyhull
 
 
-def KernelInterpolation(
+def kernel_interpolation(
     adata: AnnData,
     genes: Tuple[None, List] = None,
     grid_num: List = [50, 50, 50],
