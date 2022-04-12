@@ -5,5 +5,6 @@ from .utils import (
     ecp_silhouette,
     harmony_debatch,
     integrate,
+    pca_spateo,
     sctransform,
 )
