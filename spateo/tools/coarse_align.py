@@ -124,8 +124,8 @@ def AffineTrans(
     y: np.ndarray,
     centroid_x: float,
     centroid_y: float,
-    theta: tuple[None, float],
-    R: tuple[None, np.ndarray],
+    theta: Tuple[None, float],
+    R: Tuple[None, np.ndarray],
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Translate the x/y coordinates of data points by the translating the centroid to the origin. Then data will be
     rotated with angle theta.
@@ -197,7 +197,7 @@ def align_slices_pca(
     adata: anndata.AnnData,
     spatial_key: str = "spatial",
     inplace: bool = True,
-    result_key: tuple[None, str] = None,
+    result_key: Tuple[None, str] = None,
 ) -> None:
     """Coarsely align the slices based on the major axis, identified via PCA
 

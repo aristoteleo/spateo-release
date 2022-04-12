@@ -123,7 +123,7 @@ def archetypes(
     moran_i_genes: Union[np.ndarray, list],
     num_clusters: int = 5,
     layer: Union[str, None] = None,
-) -> np.ndarray:
+) -> pd.DataFrame:
 
     """Identify archetypes from the anndata object.
 
@@ -134,13 +134,14 @@ def archetypes(
         layers: the layer for the gene expression, can be None which corresponds to adata.X.
 
     Returns:
-        archetypes: the archetypes within the genes with high moran I scores.
+        archetypes: the pandas dataframe of archetypes within the genes with high moran I scores, together with other
+        gene annotation info.
 
     Examples:
-        >>> archetypes = st.tl.archetypes(adata)
-        >>> adata.obs = pd.concat((adata.obs, df), 1)
-        >> arch_cols = adata.obs.columns
-        >>> st.pl.space(adata, basis="spatial", color=arch_cols, pointsize=0.1, alpha=1)
+    >>> archetypes = st.tl.archetypes(adata)
+    >>> adata.obs = pd.concat((adata.obs, df), 1)
+    >>> arch_cols = adata.obs.columns[archetypes.columns.str.startswith("archetype")]
+    >>> st.pl.space(adata, basis="spatial", color=arch_cols, pointsize=0.1, alpha=1)
     """
 
     if layer is None:
@@ -178,10 +179,15 @@ def archetypes_genes(
         that particular archetype.
 
     Examples:
-    >>> st.tl.archetypes_genes(adata)
-    >>> dyn.pl.scatters(subset_adata,
+    >>> archetypes = st.tl.archetypes(adata)
+    >>> adata.obs = pd.concat((adata.obs, df), 1)
+    >>> arch_cols = adata.obs.columns[archetypes.columns.str.startswith("archetype")]
+    >>> st.pl.space(adata, basis="spatial", color=arch_cols, pointsize=0.1, alpha=1)
+    >>> archetypes_mat = archetypes.loc[:, archetypes.columns.str.startswith("archetype")]
+    >>> typical_genes = st.tl.archetypes_genes(adata, archetypes_mat, moran_i_genes=adata.var_names)
+    >>> st.pl.scatters(subset_adata,
     >>>     basis="spatial",
-    >>>     color=['archetype %d'% i] + typical_genes.to_list(),
+    >>>     color=['archetype %d'% i] + typical_genes[0].to_list(),
     >>>     pointsize=0.03,
     >>>     alpha=1,
     >>>     figsize=(3, ptp_vec[1]/ptp_vec[0] * 3)
@@ -196,13 +202,13 @@ def archetypes_genes(
     archetypes_dict = {}
 
     for i in np.arange(5):
-        lm.main_info("current archetype is, ", str(i))
+        lm.main_info(f"current archetype is, {i}")
 
         typical_genes = get_genes_from_spatial_archetype(
             exp.T, moran_i_genes, archetypes, archetype=i, pval_threshold=0
         )
 
-        lm.main_info("typical gene for the current archetype include, ", typical_genes)
+        lm.main_info(f"typical gene for the current archetype include {typical_genes}")
         archetypes_dict[i] = typical_genes
 
     return archetypes_dict
