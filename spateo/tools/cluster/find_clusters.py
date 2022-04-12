@@ -1,5 +1,4 @@
-import random
-from typing import Optional, Tuple
+from typing import Optional
 
 try:
     from typing import Literal
@@ -8,13 +7,10 @@ except ImportError:
 
 import anndata
 import cv2
-import dynamo as dyn
 from scipy.sparse import isspmatrix
 
-from spateo.preprocessing.filter import filter_cells, filter_genes
-
 from .spagcn_utils import *
-from .utils import compute_pca_components, harmony_debatch, spatial_adj_dyn
+from .utils import spatial_adj_dyn
 
 # Convert sparse matrix to dense matrix.
 to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else X
@@ -208,6 +204,7 @@ def scc(
         Depends on the argument `copy`, return either an `~anndata.AnnData` object with cluster info in "scc_e_{a}_s{b}"
         or None.
     """
+    import dynamo as dyn
 
     # Calculate the adjacent matrix.
     adj = spatial_adj_dyn(
