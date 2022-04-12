@@ -143,7 +143,7 @@ def polyhull(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> PolyData:
     hull = ConvexHull(np.column_stack((x, y, z)))
     faces = np.column_stack((3 * np.ones((len(hull.simplices), 1), dtype=np.int), hull.simplices)).flatten()
     poly = PolyData(hull.points, faces)
-    return poly
+    return hull, poly
 
 
 def in_hull(p: np.ndarray, hull: Tuple[Delaunay, np.ndarray]) -> np.ndarray:
