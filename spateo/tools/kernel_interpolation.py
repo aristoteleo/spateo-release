@@ -4,7 +4,7 @@ Todo:
 """
 import numpy as np
 
-from .interpolation_utils import *
+from .deep_interpolation import *
 
 
 def interpolation_SparseVFC(adata, genes=None, grid_num=50, lambda_=0.02, lstsq_method="scipy", **kwargs):
