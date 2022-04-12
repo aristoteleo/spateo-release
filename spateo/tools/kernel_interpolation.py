@@ -12,6 +12,8 @@ from .utils import in_hull, polyhull
 def kernel_interpolation(
     adata: AnnData,
     genes: Tuple[None, List] = None,
+    X: Tuple[None, np.ndarray] = None,
+    Y: Tuple[None, np.ndarray] = None,
     grid_num: List = [50, 50, 50],
     lambda_: float = 0.02,
     lstsq_method: str = "scipy",
@@ -21,10 +23,13 @@ def kernel_interpolation(
 
     Args:
         adata: AnnData object that contains spatial (numpy.ndarray) in the `obsm` attribute.
-        genes: Gene list that needs to interpolate.
+        genes: Gene list whose interpolate expression across space needs to learned. If Y is provided, genes will only
+            be used to retrive the gene annotation info.
+        X: The spatial coordinates of each data point.
+        Y: The gene expression of the corresponding data point.
         grid_num: Number of grid to generate. Default is 50 for each dimension. Must be non-negative.
-        lambda_: Represents the trade-off between the goodness of data fit and regularization. Larger Lambda_ put more weights
-            on regularization.
+        lambda_: Represents the trade-off between the goodness of data fit and regularization. Larger Lambda_ put more
+            weights on regularization.
         lstsq_method: The name of the linear least square solver, can be either 'scipy` or `douin`.
         **kwargs: Additional parameters that will be passed to SparseVFC function.
 
@@ -39,7 +44,7 @@ def kernel_interpolation(
     lm.info("Learn a continuous mapping from space to gene expression pattern")
     lm.log_time()
 
-    X, V = adata.obsm["spatial"], adata[:, genes].X
+    X, Y = adata.obsm["spatial"] if X is None else X, adata[:, genes].X if Y is None else Y
 
     # Generate grid
     lm.main_info("Generate grid...")
@@ -58,13 +63,13 @@ def kernel_interpolation(
     lm.main_info("Identify grid points within the Convex Hull...")
     grid_in_hull = in_hull(Grid, hull.points[hull.vertices, :])
 
-    res = SparseVFC(X, V, Grid, lambda_=lambda_, lstsq_method=lstsq_method, **kwargs)
+    res = SparseVFC(X, Y, Grid, lambda_=lambda_, lstsq_method=lstsq_method, **kwargs)
 
     lm.main_info("Creating an adata object with the interpolated expression...")
     interp_adata = AnnData(
         X=res["grid_V"][grid_in_hull],
         obsm={"spatial": res["grid"][grid_in_hull]},
-        var=adata[:, genes].var,
+        var=adata[:, genes].var if Y.shape[1] == len(genes) else None,
     )
 
     lm.finish_progress(progress_name="KernelInterpolation")
