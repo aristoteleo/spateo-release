@@ -71,10 +71,7 @@ exclude_patterns = ["_build", "**.ipynb_checkpoints"]
 nbsphinx_execute = "never"
 
 templates_path = ["_templates"]
-# source_suffix = {
-#     '.rst': 'restructuredtext',
-#     '.md': 'markdown',
-# }
+# source_suffix = ".rst"
 
 # Generate the API documentation when building
 autosummary_generate = True
@@ -93,11 +90,9 @@ myst_enable_extensions = [
     "dollarmath",
     "amsmath",
 ]
-myst_heading_anchors = 3
 autoapi_type = "python"
 autoapi_dirs = [str(SPATEO_DIR)]
 autoapi_add_toctree_entry = False
-autoapi_keep_files = True
 
 
 # The master toctree document.
@@ -124,8 +119,8 @@ intersphinx_mapping = dict(
 
 # General information about the project.
 project = "spateo"
-# copyright = ""
-# author = ""
+copyright = ""
+author = ""
 
 # The version info for the project you're documenting, acts as replacement
 # for |version| and |release|, also used in various other places throughout
@@ -182,6 +177,16 @@ html_static_path = ["_static"]
 html_css_files = ["css/override.css", "css/sphinx_gallery.css"]
 html_show_sphinx = False
 
+# Set up links to the notebooks such that it always points to the notebook the
+# documentation was built against.
+tutorials_dir = HERE / "tutorials" / "notebooks"
+try:
+    tutorials_repo = git.Repo(tutorials_dir)
+except git.exc.InvalidGitRepositoryError:
+    raise git.exc.InvalidGitRepositoryError(
+        f"Failed to find git repository {tutorials_dir}. "
+        "Did you run `git submodules init` and `git submodules update --remote`?"
+    )
 
 nbsphinx_prolog = r"""
 .. raw:: html
@@ -225,7 +230,7 @@ nbsphinx_prolog = r"""
         </p>
     </div>
 """.format(
-    version=str(git.Repo(HERE / "tutorials" / "notebooks").head.commit), docname="{{ docname|e }}"
+    version=str(tutorials_repo.head.commit), docname="{{ docname|e }}"
 )
 nbsphinx_thumbnails = {
     "tutorials/notebooks/cell_segmentation": "_static/tutorials/cell_segmentation.png",
