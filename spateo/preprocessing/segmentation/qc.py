@@ -108,3 +108,22 @@ def generate_random_labels(
     """
     labels = _generate_random_labels(adata.shape, areas, seed)
     SKM.set_layer_data(adata, out_layer, labels)
+
+
+def generate_random_labels_like(
+    adata: AnnData,
+    layer: str,
+    seed: Optional[int] = None,
+    out_layer: str = "random_labels",
+):
+    """Create random labels, using another layer as a template.
+
+    Args:
+        adata: Input Anndata
+        layer: Layer containing template labels
+        seed: Random seed.
+        out_layer: Layer to save results.
+    """
+    labels = SKM.select_layer_data(adata, layer)
+    bincount = np.bincount(labels.flatten())
+    generate_random_labels(adata, bincount[1:], seed=seed, out_layer=out_layer)
