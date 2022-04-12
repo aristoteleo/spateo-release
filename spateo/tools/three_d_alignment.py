@@ -1,8 +1,6 @@
 from typing import List, Tuple
 
-import nudged
 import numpy as np
-import ot
 import torch
 from anndata import AnnData
 from scipy.sparse import isspmatrix
@@ -14,6 +12,7 @@ from ..logging import logger_manager as lm
 def pairwise_align(
     slice1: AnnData,
     slice2: AnnData,
+    spatial_key: str = "spatial",
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
@@ -24,6 +23,7 @@ def pairwise_align(
     Args:
         slice1: An AnnData object.
         slice2: An AnnData object.
+        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         alpha: Trade-off parameter (0 < alpha < 1).
         numItermax: max number of iterations for cg.
         numItermaxEmd: Max number of iterations for emd.
@@ -33,6 +33,7 @@ def pairwise_align(
     Returns:
         Alignment of spots.
     """
+    import ot
 
     # Equipment used to run the program.
     device = torch.device(device=device)
@@ -75,12 +76,12 @@ def pairwise_align(
 
     # Calculate spatial distances
     DA = torch.tensor(
-        distance_matrix(slice1.obsm["spatial"], slice1.obsm["spatial"]),
+        distance_matrix(slice1.obsm[spatial_key], slice1.obsm[spatial_key]),
         device=device,
         dtype=torch.float32,
     )
     DB = torch.tensor(
-        distance_matrix(slice2.obsm["spatial"], slice2.obsm["spatial"]),
+        distance_matrix(slice2.obsm[spatial_key], slice2.obsm[spatial_key]),
         device=device,
         dtype=torch.float32,
     )
@@ -107,6 +108,8 @@ def pairwise_align(
 
 def slice_alignment(
     slices: List[AnnData],
+    spatial_key: str = "spatial",
+    key_added: str = "align_spatial",
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
@@ -116,11 +119,13 @@ def slice_alignment(
 
     Args:
         slices: List of slices (AnnData Object).
-        alpha:  Alignment tuning parameter (0 < alpha < 1).
+        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
+        key_added: adata.obsm key under which to add the registered spatial coordinate.
+        alpha: Trade-off parameter (0 < alpha < 1).
         numItermax: Max number of iterations for cg.
         numItermaxEmd: Max number of iterations for emd.
         device: Equipment used to run the program.
-            Can also accept a torch.device. E.g.: 'cuda:0'.
+            Can also accept a torch.device. E.g.: 'cuda:0'
 
     Returns:
         List of slices (AnnData Object) after alignment.
@@ -136,6 +141,7 @@ def slice_alignment(
         pi = pairwise_align(
             slice1,
             slice2,
+            spatial_key=spatial_key,
             alpha=alpha,
             numItermax=numItermax,
             numItermaxEmd=numItermaxEmd,
@@ -143,27 +149,26 @@ def slice_alignment(
         )
 
         # Calculate new coordinates of two slices
-        raw_slice1_coords = slice1.obsm["spatial"]
-        raw_slice2_coords = slice2.obsm["spatial"]
-
+        raw_slice1_coords, raw_slice2_coords = (
+            slice1.obsm[spatial_key],
+            slice2.obsm[spatial_key],
+        )
         slice1_coords = raw_slice1_coords - pi.sum(axis=1).dot(raw_slice1_coords)
         slice2_coords = raw_slice2_coords - pi.sum(axis=0).dot(raw_slice2_coords)
-
         H = slice2_coords.T.dot(pi.T.dot(slice1_coords))
         U, S, Vt = np.linalg.svd(H)
         R = Vt.T.dot(U.T)
         slice2_coords = R.dot(slice2_coords.T).T
-
-        slice1.obsm["spatial"] = np.around(slice1_coords, decimals=2)
-        slice2.obsm["spatial"] = np.around(slice2_coords, decimals=2)
+        slice1.obsm[key_added] = np.around(slice1_coords, decimals=2)
+        slice2.obsm[key_added] = np.around(slice2_coords, decimals=2)
 
         if i == 0:
             align_slices.append(slice1)
         align_slices.append(slice2)
 
     for i, align_slice in enumerate(align_slices):
-        align_slice.obs["x"] = align_slice.obsm["spatial"][:, 0].astype(float)
-        align_slice.obs["y"] = align_slice.obsm["spatial"][:, 1].astype(float)
+        align_slice.obs["x"] = align_slice.obsm[key_added][:, 0].astype(float)
+        align_slice.obs["y"] = align_slice.obsm[key_added][:, 1].astype(float)
 
     return align_slices
 
@@ -171,6 +176,8 @@ def slice_alignment(
 def slice_alignment_bigBin(
     slices: List[AnnData],
     slices_big: List[AnnData],
+    spatial_key: str = "spatial",
+    key_added: str = "align_spatial",
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
@@ -186,11 +193,13 @@ def slice_alignment_bigBin(
     Args:
         slices: List of slices (AnnData Object).
         slices_big: List of slices (AnnData Object) with a small number of coordinates.
+        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
+        key_added: adata.obsm key under which to add the registered spatial coordinate.
         alpha: Trade-off parameter (0 < alpha < 1).
         numItermax: max number of iterations for cg.
         numItermaxEmd: Max number of iterations for emd.
         device: Equipment used to run the program.
-            Can also accept a torch.device. E.g.: 'cuda:0'.
+            Can also accept a torch.device. E.g.: 'cuda:0'
 
     Returns:
         Tuple of two elements. The first contains a list of slices after alignment.
@@ -198,9 +207,13 @@ def slice_alignment_bigBin(
         after alignment.
     """
 
+    import nudged
+
     # Align spatial coordinates of slices with a small number of coordinates.
     align_slices_big = slice_alignment(
         slices=slices_big,
+        spatial_key=spatial_key,
+        key_added=key_added,
         alpha=alpha,
         numItermax=numItermax,
         numItermaxEmd=numItermaxEmd,
@@ -210,17 +223,17 @@ def slice_alignment_bigBin(
     align_slices = []
     for slice_big, align_slice_big, slice in zip(slices_big, align_slices_big, slices):
         # Calculate the affine transformation matrix through nudged
-        slice_big_coords = slice_big.obsm["spatial"].tolist()
-        align_slice_big_coords = align_slice_big.obsm["spatial"].tolist()
+        slice_big_coords = slice_big.obsm[spatial_key].tolist()
+        align_slice_big_coords = align_slice_big.obsm[key_added].tolist()
         trans = nudged.estimate(slice_big_coords, align_slice_big_coords)
-        slice_coords = slice.obsm["spatial"].tolist()
+        slice_coords = slice.obsm[spatial_key].tolist()
 
         #  Align slices through the calculated affine transformation matrix.
         align_slice_coords = np.around(trans.transform(slice_coords), decimals=2)
         align_slice = slice.copy()
-        align_slice.obsm["spatial"] = np.array(align_slice_coords)
-        align_slice.obs["x"] = align_slice.obsm["spatial"][:, 0].astype(float)
-        align_slice.obs["y"] = align_slice.obsm["spatial"][:, 1].astype(float)
+        align_slice.obsm[key_added] = np.array(align_slice_coords)
+        align_slice.obs["x"] = align_slice.obsm[key_added][:, 0].astype(float)
+        align_slice.obs["y"] = align_slice.obsm[key_added][:, 1].astype(float)
         align_slices.append(align_slice)
 
     return align_slices, align_slices_big
