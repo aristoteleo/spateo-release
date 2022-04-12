@@ -4,7 +4,6 @@ from random import sample
 from typing import Tuple
 
 import anndata
-import esda
 import geopandas
 import numpy as np
 import pandas as pd
@@ -13,7 +12,6 @@ from pysal.lib import weights
 from pysal.model import spreg
 from tqdm import tqdm
 
-from ..logging import logger_manager as lm
 from ..utils import copy_adata
 
 
@@ -52,13 +50,13 @@ def lisa_geo_df(
     if layer is None:
         df["exp"] = adata[:, gene].X.A.flatten()
     else:
-        df["exp"] = adata[:, gene].layers[layer].A.flatten()
+        df["exp"] = np.log1p(adata[:, gene].layers[layer].A.flatten())
 
     df["w_exp"] = weights.spatial_lag.lag_spatial(w, df["exp"])
     df["exp_zscore"] = (df["exp"] - df["exp"].mean()) / df["exp"].std()
     df["w_exp_zscore"] = (df["w_exp"] - df["w_exp"].mean()) / df["w_exp"].std()
 
-    lisa = esda.moran.Moran_Local(df["exp"], w)
+    lisa = explore.esda.moran.Moran_Local(df["exp"], w)
     df = geopandas.GeoDataFrame(df, geometry=geopandas.points_from_xy(df.x, df.y))
     df.assign(Is=lisa.Is)
 
@@ -144,7 +142,7 @@ def local_moran_i(
     if genes is None:
         genes = adata.var.index[adata.var.use_for_pca]
     else:
-        genes = adata.var.index.intersection(genes)
+        genes = np.log1p(adata.var.index.intersection(genes))
 
     db = pd.DataFrame(adata.obsm[spatial_key], columns=["x", "y"])
 
@@ -200,7 +198,7 @@ def local_moran_i(
         if layer is None:
             db["exp"] = adata[:, cur_g].X.A.flatten()
         else:
-            db["exp"] = adata[:, cur_g].layers[layer].A.flatten()
+            db["exp"] = np.log1p(adata[:, cur_g].layers[layer].A.flatten())
 
         db["w_exp"] = weights.spatial_lag.lag_spatial(w, db["exp"])
 
@@ -322,7 +320,7 @@ def GM_lag_model(
     max_group, min_group, min_group_ncells = (
         group_num.index[0],
         group_num.index[-1],
-        group_num[-1],
+        group_num.values[-1],
     )
 
     group_name = adata.obs[group]
@@ -362,7 +360,7 @@ def GM_lag_model(
         adata.var[str(i) + "_GM_lag_zstat"] = None
         adata.var[str(i) + "_GM_lag_pval"] = None
 
-    for i, cur_g in lm.tqdm(
+    for i, cur_g in tqdm(
         enumerate(genes),
         desc="performing GM_lag_model and assign coefficient and p-val to each cell type",
     ):
