@@ -13,6 +13,7 @@ from .cluster_degs import (
     find_cluster_degs,
     find_spatial_cluster_degs,
 )
+from .coarse_align import AffineTrans, align_slices_pca, pca_align, procrustes
 from .deep_interpolation import DataSampler, DeepInterpolation
 from .interpolation_nn import *
 
