@@ -92,6 +92,14 @@ We've found in testing that the RNA-only segmentation method, without separating
 
 One important detail is that density binning, as with any kind of clustering, is highly subjective. We suggest testing various parameters to find one that qualitatively "makes sense" to you.
 
+Spateo employs a spatially-constrained hierarchical Ward clustering approach to segment the tissue into different RNA densities. Each pixel (or bin, if binning is used) is considered as an observation of a single feature: the number of UMIs observed for that pixel. Spatial constraints are imposed by providing a connectivity matrix with an edge between each neighboring pixel (so each pixel has four neighbors).
+
+There are a few additional considerations in this approach.
+
+* As briefly noted in the previous paragraph, pixels can be grouped in the square bins (where the UMI count of each bin is simply the sum of UMIs of its constituent pixels). We highly recommend binning as it drastically reduces runtime with minimal downsides.
+* The pixel UMI counts (or equivalently, the binned UMI counts) are Gaussian-blurred prior to clustering to reduce noise. The size of the kernel is controlled by the `k` parameter.
+* After the pixels (or bins) have been clustered, each bin is "[dilated](https://docs.opencv.org/3.4/db/df6/tutorial_erosion_dilatation.html)" one at a time, in ascending order of mean UMI counts. The size of the kernel is controlled by the `dk` parameter. This is done to reduce sharp transitions between bins in downstream RNA-based cell segmentation that we've observed in our testing.
+
 
 ### Negative binomial mixture model
 
