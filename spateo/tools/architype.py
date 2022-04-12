@@ -170,6 +170,9 @@ def archetypes_genes(
 
     Args:
         adata: Anndata object of interests.
+        archetypes: a np.ndarray that stores the archetypes information. Rows are architype and columns and expression.
+         Can be generated with the data frame generated from st.tl.archetypes(adata) function using the following code:
+                `archetypes.loc[:, archetypes.columns.str.startswith("archetype")].values.T`
         moran_i_genes: genes that are identified as singificant autocorrelation genes in space based on Moran's I.
         num_clusters: number of archetypes.
         layers: the layer for the gene expression, can be None which corresponds to adata.X.
@@ -183,7 +186,7 @@ def archetypes_genes(
     >>> adata.obs = pd.concat((adata.obs, df), 1)
     >>> arch_cols = adata.obs.columns[archetypes.columns.str.startswith("archetype")]
     >>> st.pl.space(adata, basis="spatial", color=arch_cols, pointsize=0.1, alpha=1)
-    >>> archetypes_mat = archetypes.loc[:, archetypes.columns.str.startswith("archetype")]
+    >>> archetypes_mat = archetypes.loc[:, archetypes.columns.str.startswith("archetype")].values.T
     >>> typical_genes = st.tl.archetypes_genes(adata, archetypes_mat, moran_i_genes=adata.var_names)
     >>> st.pl.scatters(subset_adata,
     >>>     basis="spatial",

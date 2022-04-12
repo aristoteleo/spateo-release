@@ -72,7 +72,6 @@ def lisa(df: GeoDataFrame):
 
     # Subplot 3: significance
     ax = axs[2]
-    sig = 1 * (lisa.p_sim < 0.05)
     hmap = colors.ListedColormap(["grey", "black"])
 
     df.plot(column="sig", categorical=True, k=2, cmap=hmap, linewidth=0.1, ax=ax, edgecolor="white", legend=True)

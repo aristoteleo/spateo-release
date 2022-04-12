@@ -58,14 +58,14 @@ def lisa_geo_df(
 
     lisa = explore.esda.moran.Moran_Local(df["exp"], w)
     df = geopandas.GeoDataFrame(df, geometry=geopandas.points_from_xy(df.x, df.y))
-    df.assign(Is=lisa.Is)
+    df = df.assign(Is=lisa.Is)
 
     q_labels = ["Q1", "Q2", "Q3", "Q4"]
     labels = [q_labels[i - 1] for i in lisa.q]
-    df.assign(labels=labels)
+    df = df.assign(labels=labels)
 
     sig = 1 * (lisa.p_sim < 0.05)
-    df.assign(sig=sig)
+    df = df.assign(sig=sig)
 
     hotspot = 1 * (sig * lisa.q == 1)
     coldspot = 3 * (sig * lisa.q == 3)
@@ -74,7 +74,7 @@ def lisa_geo_df(
     spots = hotspot + coldspot + doughnut + diamond
     spot_labels = ["0 ns", "1 hot spot", "2 doughnut", "3 cold spot", "4 diamond"]
     group = [spot_labels[i] for i in spots]
-    df.assign(group=group)
+    df = df.assign(group=group)
 
     return df
 
