@@ -76,7 +76,7 @@ def read_nanostring(
     cell_dict = dict(zip(uniq_cell, range(len(uniq_cell))))
     gene_dict = dict(zip(uniq_gene, range(len(uniq_gene))))
 
-    label_gene_counts = data.groupby(["label", "target"], observed=True, sort=False)
+    label_gene_counts = data.groupby(["label", "target"], observed=True, sort=False).size()
     label_gene_counts.name = "count"
     label_gene_counts = label_gene_counts.reset_index()
     x_ind = label_gene_counts["label"].map(cell_dict).astype(int).values
