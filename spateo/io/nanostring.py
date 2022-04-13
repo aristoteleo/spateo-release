@@ -2,6 +2,7 @@
 """
 from typing import List, Optional, Union
 
+import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix
@@ -39,6 +40,7 @@ def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] =
         "CenterY_local_px": np.uint16,
         "CenterX_global_px": np.uint32,
         "CenterY_global_px": np.uint32,
+        "Area": np.uint32,
         "Width": np.uint16,
         "Height": np.uint16,
     }
