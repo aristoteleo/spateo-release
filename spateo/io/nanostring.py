@@ -33,10 +33,10 @@ def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] =
         "Width": np.uint16,
         "Height": np.uint16,
     }
-    converters = {
-        # These are actually stored as floats in the CSV, but we cast them to
-        # integers because they are in terms of the TIFF coordinates,
-        # which are integers.
+    # These are actually stored as floats in the CSV, but we cast them to
+    # integers because they are in terms of the TIFF coordinates,
+    # which are integers.
+    convert = {
         "x_global_px": np.uint32,
         "y_global_px": np.uint32,
         "x_local_px": np.uint16,
@@ -52,13 +52,15 @@ def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] =
         "y_global_px": "y",
     }
     # Use first 10 rows for validation.
-    df = pd.read_csv(path, dtype=dtype, converters=converters, nrows=10)
+    df = pd.read_csv(path, dtype=dtype, nrows=10)
     if label_columns:
         for column in label_columns:
             if column not in df.columns:
                 raise IOError(f"Column `{column}` is not present.")
 
-    df = pd.read_csv(path, dtype=dtype, converters=converters)
+    df = pd.read_csv(path, dtype=dtype)
+    for column, t in convert.items():
+        df[column] = df[column].astype(t)
     if label_columns:
         labels = df[label_columns[0]].astype(str)
         for label in label_columns[1:]:
