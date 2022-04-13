@@ -86,8 +86,7 @@ def read_nanostring(
         meta_path: Path to cell metadata CSV file.
         scale: Physical length per coordinate. For visualization only.
         scale_unit: Scale unit.
-        binsize: Size of pixel bins. Should only be provided when labels
-            (i.e. the `segmentation_adata` and `labels` arguments) are not used.
+        binsize: Size of pixel bins
         label_columns: Columns that contain already-segmented cell labels. Each
             unique combination is considered a unique cell.
         add_props: Whether or not to compute label properties, such as area,
