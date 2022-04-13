@@ -60,7 +60,8 @@ def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] =
 
     df = pd.read_csv(path, dtype=dtype)
     for column, t in convert.items():
-        df[column] = df[column].astype(t)
+        if column in df.columns:
+            df[column] = df[column].astype(t)
     if label_columns:
         labels = df[label_columns[0]].astype(str)
         for label in label_columns[1:]:
