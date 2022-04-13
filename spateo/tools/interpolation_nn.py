@@ -207,7 +207,7 @@ class MainFlow(torch.nn.Module):
 
     def forward(self, t, x, freeze=None):
 
-        x_low = self.A(x.float()) if self.A is not None else x.float()
+        x_low = self.A(x.double()) if self.A is not None else x.double()
         e_low = self.h.forward(x_low)
         e_hat = self.B(e_low) if self.B is not None else e_low
 

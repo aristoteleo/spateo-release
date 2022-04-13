@@ -55,7 +55,7 @@ def kernel_interpolation(
     interp_adata = AnnData(
         X=res["grid_V"][grid_in_hull],
         obsm={"spatial": res["grid"][grid_in_hull]},
-        var=adata[:, genes].var if Y.shape[1] == len(genes) else None,
+        var=adata[:, genes].var if genes is not None and Y.shape[1] == len(genes) else None,
     )
 
     lm.main_finish_progress(progress_name="KernelInterpolation")
@@ -108,7 +108,7 @@ def deep_intepretation(
     interp_adata = AnnData(
         X=Grid_Y,
         obsm={"spatial": Grid[grid_in_hull]},
-        var=adata[:, genes].var if Y.shape[1] == len(genes) else None,
+        var=adata[:, genes].var if genes is not None and Y.shape[1] == len(genes) else None,
     )
 
     return interp_adata
