@@ -75,12 +75,9 @@ def read_slideseq(
 
     if binsize is not None:
         lm.main_info(f"Using binsize={binsize}")
-        if binsize < 2:
-            lm.main_warning("Please consider using a larger bin size.")
-        if binsize > 1:
-            x_bin = bin_indices(data["x"].values, 0, binsize)
-            y_bin = bin_indices(data["y"].values, 0, binsize)
-            data["x"], data["y"] = x_bin, y_bin
+        x_bin = bin_indices(data["x"].values, 0, binsize)
+        y_bin = bin_indices(data["y"].values, 0, binsize)
+        data["x"], data["y"] = x_bin, y_bin
 
         data["label"] = data["x"].astype(str) + "-" + data["y"].astype(str)
         props = get_bin_props(data[["x", "y", "label"]].drop_duplicates(), binsize)
