@@ -138,11 +138,11 @@ def read_nanostring(
     cell_dict = dict(zip(uniq_cell, range(len(uniq_cell))))
     gene_dict = dict(zip(uniq_gene, range(len(uniq_gene))))
 
-    label_gene_counts = data.groupby(["label", "target"], observed=True, sort=False).size()
+    label_gene_counts = data.groupby(["label", "gene"], observed=True, sort=False).size()
     label_gene_counts.name = "count"
     label_gene_counts = label_gene_counts.reset_index()
     x_ind = label_gene_counts["label"].map(cell_dict).astype(int).values
-    y_ind = label_gene_counts["target"].map(gene_dict).astype(int).values
+    y_ind = label_gene_counts["gene"].map(gene_dict).astype(int).values
 
     lm.main_info("Constructing count matrix.")
     X = csr_matrix((label_gene_counts["count"].values, (x_ind, y_ind)), shape=shape)
