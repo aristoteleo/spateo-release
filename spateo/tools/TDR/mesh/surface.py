@@ -106,9 +106,9 @@ def uniform_surface(surf: PolyData, nsub: Optional[int] = 3, nclus: int = 20000)
 
 def fix_surface(surf: PolyData) -> PolyData:
     """Repair the surface mesh where it was extracted and subtle holes along complex parts of the mesh."""
+
     meshfix = mf.MeshFix(surf)
     meshfix.repair(verbose=False)
-
     surf = meshfix.mesh.triangulate()
 
     if surf.n_points == 0:
@@ -148,6 +148,7 @@ def scale_mesh(
     mesh_s.points[:, 1] = (mesh_s.points[:, 1] - mesh_s.center[1]) * factor_y + mesh_s.center[1]
     mesh_s.points[:, 2] = (mesh_s.points[:, 2] - mesh_s.center[2]) * factor_z + mesh_s.center[2]
 
+    mesh_s = mesh_s.triangulate()
     return mesh_s
 
 
@@ -189,6 +190,12 @@ def marching_cube_surface(pc: PolyData):
         surface: Surface mesh.
     """
 
+    z_arr = np.asarray(pc.points[:, 2])
+    z_unique = np.sort(np.unique(z_arr))
+    z_diff = np.diff(z_unique).astype(float)
+    mc_scale_factor = np.max(z_diff) * 1.5
+
+    pc = scale_mesh(mesh=pc, scale_factor=1 / mc_scale_factor)
     pc_points = np.asarray(pc.points)
     pc_points_int = np.ceil(pc_points).astype(np.int64)
 
@@ -218,6 +225,7 @@ def marching_cube_surface(pc: PolyData):
 
     surface = pv.PolyData(v, f.ravel()).extract_surface().triangulate()
     surface.clean(inplace=True)
+    surface = scale_mesh(mesh=surface, scale_factor=mc_scale_factor)
     return surface
 
 
@@ -446,11 +454,17 @@ def construct_surface(
             "\nAvailable `cs_method` are: `'pyvista'`, `'alpha_shape'`, `'ball_pivoting'`, `'poisson'`, `'marching_cube'`."
         )
 
-    # Repair the surface mesh where it was extracted and subtle holes along complex parts of the mesh
-    fix_surf = fix_surface(surf=surf)
+    uniform_surfs = []
+    for sub_surf in surf.split_bodies():
+        # Repair the surface mesh where it was extracted and subtle holes along complex parts of the mesh
+        sub_fix_surf = fix_surface(surf=sub_surf.extract_surface())
 
-    # Get a uniformly meshed surface using voronoi clustering.
-    uniform_surf = uniform_surface(surf=fix_surf, nsub=nsub, nclus=nclus)
+        # Get a uniformly meshed surface using voronoi clustering.
+        sub_uniform_surf = uniform_surface(surf=sub_fix_surf, nsub=nsub, nclus=nclus)
+        uniform_surfs.append(sub_uniform_surf)
+    uniform_surf = merge_mesh(meshes=uniform_surfs)
+    uniform_surf = uniform_surf.extract_surface().triangulate()
+    uniform_surf.clean(inplace=True)
 
     # Adjust point coordinates using Laplacian smoothing.
     if not (smooth is None):
