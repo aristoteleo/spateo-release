@@ -41,8 +41,11 @@ def read_bgi_as_dataframe(path: str, label_column: Optional[str] = None) -> pd.D
         label_column: Column name containing positive cell labels.
 
     Returns:
-        Pandas Dataframe with column names `gene`, `x`, `y`, `total` and
-        additionally `spliced` and `unspliced` if splicing counts are present.
+        Pandas Dataframe with the following standardized column names.
+            * `gene`: Gene name/ID (whatever was used in the original file)
+            * `x`, `y`: X and Y coordinates
+            * `total`, `spliced`, `unspliced`: Counts for each RNA species.
+                The latter two is only present if they are in the original file.
     """
     dtype = {
         "geneID": "category",  # geneID
