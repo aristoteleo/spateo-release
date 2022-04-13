@@ -29,6 +29,11 @@ def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] =
         "CellComp": "category",
         "fov": np.uint8,
         "cell_ID": np.uint16,
+        "Area": np.uint32,
+        "Width": np.uint16,
+        "Height": np.uint16,
+    }
+    converters = {
         # These are actually stored as floats in the CSV, but we cast them to
         # integers because they are in terms of the TIFF coordinates,
         # which are integers.
@@ -40,9 +45,6 @@ def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] =
         "CenterY_local_px": np.uint16,
         "CenterX_global_px": np.uint32,
         "CenterY_global_px": np.uint32,
-        "Area": np.uint32,
-        "Width": np.uint16,
-        "Height": np.uint16,
     }
     rename = {
         "target": "gene",
@@ -50,13 +52,13 @@ def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] =
         "y_global_px": "y",
     }
     # Use first 10 rows for validation.
-    df = pd.read_csv(path, dtype=dtype, nrows=10)
+    df = pd.read_csv(path, dtype=dtype, converters=converters, nrows=10)
     if label_columns:
         for column in label_columns:
             if column not in df.columns:
                 raise IOError(f"Column `{column}` is not present.")
 
-    df = pd.read_csv(path, dtype=dtype)
+    df = pd.read_csv(path, dtype=dtype, converters=converters)
     if label_columns:
         labels = df[label_columns[0]].astype(str)
         for label in label_columns[1:]:
