@@ -302,7 +302,7 @@ def read_bgi(
         binsize = 1
         data = data[data["label"] > 0]
         if add_props:
-            props = get_points_props(data)
+            props = get_points_props(data[["x", "y", "label"]])
 
     elif binsize is not None:
         lm.main_info(f"Using binsize={binsize}")

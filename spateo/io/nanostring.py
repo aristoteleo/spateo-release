@@ -117,7 +117,7 @@ def read_nanostring(
         # cell_ID == 0 indicates not assigned
         data = data[data["cell_ID"] > 0]
         if add_props:
-            props = get_points_props(data)
+            props = get_points_props(data[["x", "y", "label"]])
     elif binsize is not None:
         lm.main_info(f"Using binsize={binsize}")
         if binsize < 2:
