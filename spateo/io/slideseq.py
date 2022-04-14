@@ -7,9 +7,12 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix
+from typing_extensions import Literal
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
+
+VERSIONS = {"slide2": ngs.chemistry.get_chemistry("Slide-seqV2")}
 
 
 def read_slideseq_as_dataframe(path: str) -> pd.DataFrame:
@@ -54,20 +57,16 @@ def read_slideseq_beads_as_dataframe(path: str) -> pd.DataFrame:
 
 
 def read_slideseq(
-    path: str,
-    beads_path: str,
-    scale: float = 1.0,
-    scale_unit: Optional[str] = None,
-    binsize: Optional[int] = None,
+    path: str, beads_path: str, binsize: Optional[int] = None, version: Literal["slide2"] = "slide2"
 ) -> AnnData:
     """Read Slide-seq data as AnnData.
 
     Args:
         path: Path to Slide-seq digital expression matrix CSV.
         beads_path: Path to CSV file containing bead locations.
-        scale: Physical length per coordinate. For visualization only.
-        scale_unit: Scale unit.
         binsize: Size of pixel bins.
+        version: Slideseq technology version. Currently only used to set the scale and
+            scale units of each unit coordinate. This may change in the future.
     """
     data = read_slideseq_as_dataframe(path)
     beads = read_slideseq_beads_as_dataframe(beads_path)
@@ -106,6 +105,11 @@ def read_slideseq(
     adata = AnnData(X=X, obs=obs, var=var)
     ordered_props = props.loc[adata.obs_names]
     adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
+
+    scale, scale_unit = 1.0, None
+    if version in VERSIONS:
+        resolution = VERSIONS[version].resolution
+        scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)
