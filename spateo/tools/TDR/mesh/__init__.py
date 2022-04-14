@@ -7,6 +7,7 @@ from .surface import (
     marching_cube_surface,
     poisson_surface,
     pv_surface,
+    scale_mesh,
     uniform_point_cloud,
     uniform_surface,
 )

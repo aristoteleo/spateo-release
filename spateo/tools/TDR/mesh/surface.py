@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import mcubes
 import numpy as np
@@ -7,7 +7,7 @@ import pyacvd
 import pymeshfix as mf
 import pyvista as pv
 from open3d import geometry
-from pyvista import PolyData
+from pyvista import PolyData, UnstructuredGrid
 
 try:
     from typing import Literal
@@ -53,19 +53,19 @@ def uniform_point_cloud(pc: PolyData, alpha: float = 2.0, nsub: Optional[int] = 
         nsub: Number of subdivisions. Each subdivision creates 4 new triangles, so the number of resulting triangles is
               nface*4**nsub where nface is the current number of faces.
         nclus: Number of voronoi clustering.
+
     Returns:
         uniform_cloud: A uniform point cloud with a larger number of points.
     """
     coords = np.asarray(pc.points)
     coords_z = np.unique(coords[:, 2])
-
     slices = []
     for z in coords_z:
         slice_coords = coords[coords[:, 2] == z]
         if len(slice_coords) >= 3:
             slice_cloud = pv.PolyData(slice_coords)
-            slice = slice_cloud.delaunay_2d(alpha=alpha).triangulate().clean()
-            slices.append(slice)
+            slice_plane = slice_cloud.delaunay_2d(alpha=alpha).triangulate().clean()
+            slices.append(slice_plane)
         else:
             raise ValueError(
                 f"\nWhen the z-axis is {z}, the number of coordinates is less than 3 and cannot be uniform."
@@ -87,6 +87,7 @@ def uniform_surface(surf: PolyData, nsub: Optional[int] = 3, nclus: int = 20000)
         nsub: Number of subdivisions. Each subdivision creates 4 new triangles, so the number of resulting triangles is
               nface*4**nsub where nface is the current number of faces.
         nclus: Number of voronoi clustering.
+
     Returns:
         uniform_surf: A uniform surface mesh.
     """
@@ -105,9 +106,9 @@ def uniform_surface(surf: PolyData, nsub: Optional[int] = 3, nclus: int = 20000)
 
 def fix_surface(surf: PolyData) -> PolyData:
     """Repair the surface mesh where it was extracted and subtle holes along complex parts of the mesh."""
+
     meshfix = mf.MeshFix(surf)
     meshfix.repair(verbose=False)
-
     surf = meshfix.mesh.triangulate()
 
     if surf.n_points == 0:
@@ -119,10 +120,41 @@ def fix_surface(surf: PolyData) -> PolyData:
     return surf
 
 
+def scale_mesh(
+    mesh: Union[PolyData, UnstructuredGrid],
+    scale_factor: Union[float, list] = 1,
+) -> Union[PolyData, UnstructuredGrid]:
+    """
+    Scale the mesh around the center of the mesh.
+
+    Args:
+        mesh: Reconstructed 3D mesh.
+        scale_factor: scale of scaling. If `scale factor` is float, the mesh is scaled along the xyz axis at the same
+                      scale; when the `scale factor` is list, the mesh is scaled along the xyz axis at different scales.
+
+    Returns:
+        mesh_s: Scaled mesh.
+    """
+    mesh_s = mesh.copy()
+
+    if isinstance(scale_factor, float):
+        factor_x = factor_y = factor_z = scale_factor
+    else:
+        factor_x = scale_factor[0]
+        factor_y = scale_factor[1]
+        factor_z = scale_factor[2]
+
+    mesh_s.points[:, 0] = (mesh_s.points[:, 0] - mesh_s.center[0]) * factor_x + mesh_s.center[0]
+    mesh_s.points[:, 1] = (mesh_s.points[:, 1] - mesh_s.center[1]) * factor_y + mesh_s.center[1]
+    mesh_s.points[:, 2] = (mesh_s.points[:, 2] - mesh_s.center[2]) * factor_z + mesh_s.center[2]
+
+    mesh_s = mesh_s.triangulate()
+    return mesh_s
+
+
 def pv_surface(pc: PolyData, alpha: float = 2.0) -> PolyData:
     """
     Generate a 3D tetrahedral mesh from a scattered points and extract surface mesh of the 3D tetrahedral mesh.
-
     Args:
         pc: A point cloud.
         alpha: Distance value to control output of this filter.
@@ -146,7 +178,6 @@ def pv_surface(pc: PolyData, alpha: float = 2.0) -> PolyData:
 def marching_cube_surface(pc: PolyData):
     """
     Computes a triangle mesh from a point cloud based on the marching cube algorithm.
-
     Algorithm Overview:
         The algorithm proceeds through the scalar field, taking eight neighbor locations at a time (thus forming an
         imaginary cube), then determining the polygon(s) needed to represent the part of the isosurface that passes
@@ -154,10 +185,17 @@ def marching_cube_surface(pc: PolyData):
 
     Args:
         pc: A point cloud.
+
     Returns:
         surface: Surface mesh.
     """
 
+    z_arr = np.asarray(pc.points[:, 2])
+    z_unique = np.sort(np.unique(z_arr))
+    z_diff = np.diff(z_unique).astype(float)
+    mc_scale_factor = np.max(z_diff) * 1.5
+
+    pc = scale_mesh(mesh=pc, scale_factor=1 / mc_scale_factor)
     pc_points = np.asarray(pc.points)
     pc_points_int = np.ceil(pc_points).astype(np.int64)
 
@@ -187,23 +225,21 @@ def marching_cube_surface(pc: PolyData):
 
     surface = pv.PolyData(v, f.ravel()).extract_surface().triangulate()
     surface.clean(inplace=True)
+    surface = scale_mesh(mesh=surface, scale_factor=mc_scale_factor)
     return surface
 
 
 def alpha_shape_surface(pc: PolyData, alpha: float = 2.0) -> PolyData:
     """
     Computes a triangle mesh from a point cloud based on the alpha shape algorithm.
-
     Algorithm Overview:
         For each real number α, define the concept of a generalized disk of radius 1/α as follows:
             If α = 0, it is a closed half-plane;
             If α > 0, it is a closed disk of radius 1/α;
             If α < 0, it is the closure of the complement of a disk of radius −1/α.
-
         Then an edge of the alpha-shape is drawn between two members of the finite point set whenever there exists a
         generalized disk of radius 1/α containing none of the point set and which has the property that the two points
         lie on its boundary.
-
         If α = 0, then the alpha-shape associated with the finite point set is its ordinary convex hull.
 
     Args:
@@ -211,6 +247,7 @@ def alpha_shape_surface(pc: PolyData, alpha: float = 2.0) -> PolyData:
         alpha: Parameter to control the shape.
                With decreasing alpha value the shape shrinks and creates cavities.
                A very big value will give a shape close to the convex hull.
+
     Returns:
         surface: Surface mesh.
     """
@@ -229,12 +266,10 @@ def alpha_shape_surface(pc: PolyData, alpha: float = 2.0) -> PolyData:
 def ball_pivoting_surface(pc: PolyData, radii: List[float] = None):
     """
     Computes a triangle mesh from an oriented point cloud based on the Ball Pivoting algorithm.
-
     Algorithm Overview:
         The main assumption this algorithm is based on is the following: Given three vertices, and a ball of radius r,
         the three vertices form a triangle if the ball is getting "caught" and settle between the points, without
         containing any other point.
-
         The algorithm stimulates a virtual ball of radius r. Each iteration consists of two steps:
             * Seed triangle - The ball rolls over the point cloud until it gets "caught" between three vertices and
                               settles between in them. Choosing the right r promises no other point is contained in the
@@ -243,9 +278,7 @@ def ball_pivoting_surface(pc: PolyData, radii: List[float] = None):
                                    pivots until it gets "caught" in the triangle formed by the edge and the third point.
                                    A new triangle is formed, and the algorithm tries to expand from it. This process
                                    continues until the ball can't find any point to expand to.
-
         At this point, the algorithm looks for a new seed triangle, and the process described above starts all over.
-
     Useful Notes:
         1. The point cloud is "dense enough";
         2. The chosen r size should be "slightly" larger than the average space between points.
@@ -254,6 +287,7 @@ def ball_pivoting_surface(pc: PolyData, radii: List[float] = None):
         pc: A point cloud.
         radii: The radii of the ball that are used for the surface reconstruction.
                This is a list of multiple radii that will create multiple balls of different radii at the same time.
+
     Returns:
         surface: Surface mesh.
     """
@@ -297,6 +331,7 @@ def poisson_surface(
                samples’ bounding cube.
         linear_fit: If true, the reconstructor will use linear interpolation to estimate the positions of iso-vertices.
         density_threshold: The threshold of the low density.
+
     Returns:
         surface: Surface mesh.
     """
@@ -331,6 +366,8 @@ def construct_surface(
     cs_args: Optional[dict] = None,
     nsub: Optional[int] = 3,
     nclus: int = 20000,
+    smooth: Optional[int] = 500,
+    scale_factor: Union[float, list] = 1.1,
 ) -> Tuple[PolyData, PolyData]:
     """
     Surface mesh reconstruction based on 3D point cloud model.
@@ -357,6 +394,11 @@ def construct_surface(
         nsub: Number of subdivisions. Each subdivision creates 4 new triangles, so the number of resulting triangles is
               nface*4**nsub where nface is the current number of faces.
         nclus: Number of voronoi clustering.
+        smooth: Number of iterations for Laplacian smoothing.
+        scale_factor: scale of scaling. If `scale factor` is float, the mesh is scaled along the xyz axis at the same
+                      scale; when the `scale factor` is list, the mesh is scaled along the xyz axis at different scales.
+
+
     Returns:
         uniform_surf: A reconstructed surface mesh, which contains the following properties:
             `uniform_surf.cell_data[key_added]`, the "surface" array;
@@ -412,13 +454,23 @@ def construct_surface(
             "\nAvailable `cs_method` are: `'pyvista'`, `'alpha_shape'`, `'ball_pivoting'`, `'poisson'`, `'marching_cube'`."
         )
 
-    # Repair the surface mesh where it was extracted and subtle holes along complex parts of the mesh
-    fix_surf = fix_surface(surf=surf)
+    uniform_surfs = []
+    for sub_surf in surf.split_bodies():
+        # Repair the surface mesh where it was extracted and subtle holes along complex parts of the mesh
+        sub_fix_surf = fix_surface(surf=sub_surf.extract_surface())
 
-    # Get a uniformly meshed surface using voronoi clustering.
-    uniform_surf = uniform_surface(surf=fix_surf, nsub=nsub, nclus=nclus)
+        # Get a uniformly meshed surface using voronoi clustering.
+        sub_uniform_surf = uniform_surface(surf=sub_fix_surf, nsub=nsub, nclus=nclus)
+        uniform_surfs.append(sub_uniform_surf)
+    uniform_surf = merge_mesh(meshes=uniform_surfs)
+    uniform_surf = uniform_surf.extract_surface().triangulate()
+    uniform_surf.clean(inplace=True)
 
-    # Add labels and the colormap of the surface mesh
+    # Adjust point coordinates using Laplacian smoothing.
+    if not (smooth is None):
+        uniform_surf.smooth(n_iter=smooth, inplace=True)
+
+    # Add labels and the colormap of the surface mesh.
     labels = np.array(["surface"] * uniform_surf.n_cells).astype(str)
     add_mesh_labels(
         mesh=uniform_surf,
@@ -428,6 +480,9 @@ def construct_surface(
         colormap=color,
         alphamap=alpha,
     )
+
+    # Scale the surface mesh.
+    uniform_surf = scale_mesh(mesh=uniform_surf, scale_factor=scale_factor)
 
     # Clip the original pcd using the reconstructed surface and reconstruct new point cloud.
     clipped_invert = True if cs_method in ["pyvista", "marching_cube"] else False

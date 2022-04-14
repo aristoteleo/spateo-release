@@ -3,8 +3,9 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from pyvista import PolyData
 from scipy.sparse import csr_matrix, diags, issparse, lil_matrix, spmatrix
-from scipy.spatial import cKDTree
+from scipy.spatial import ConvexHull, Delaunay, cKDTree
 
 
 def rescaling(mat: Union[np.ndarray, spmatrix], new_shape: Union[List, Tuple]) -> Union[np.ndarray, spmatrix]:
@@ -123,3 +124,43 @@ def compute_smallest_distance(coords: list, leaf_size: int = 40, sample_num=None
     min_dist = min(distances[:, 1])
 
     return min_dist
+
+
+def polyhull(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> PolyData:
+    """Create a PolyData object from the convex hull constructed with the input data points.
+
+    scipy's ConvexHull to be 500X faster than using vtkDelaunay3D and vtkDataSetSurfaceFilter because you skip the
+    expensive 3D tesselation of the volume.
+
+    Args:
+        x: x coordinates of the data points.
+        y: y coordinates of the data points.
+        z: z coordinates of the data points.
+
+    Returns:
+        poly: a PolyData object generated with the convex hull constructed based on the input data points.
+    """
+    hull = ConvexHull(np.column_stack((x, y, z)))
+    faces = np.column_stack((3 * np.ones((len(hull.simplices), 1), dtype=np.int), hull.simplices)).flatten()
+    poly = PolyData(hull.points, faces)
+    return hull, poly
+
+
+def in_hull(p: np.ndarray, hull: Tuple[Delaunay, np.ndarray]) -> np.ndarray:
+    """Test if points in `p` are in `hull`
+
+    Args:
+        p: a `N x K` coordinates of `N` points in `K` dimensions
+        hull: either a scipy.spatial.Delaunay object or the `MxK` array of the coordinates of `M` points in `K`
+        dimensions for which Delaunay triangulation will be computed.
+
+    Returns:
+        res: A numpy array with boolean values indicating whether the input points is in the convex hull.
+    """
+    from scipy.spatial import Delaunay
+
+    if not isinstance(hull, Delaunay):
+        hull = Delaunay(hull)
+
+    res = hull.find_simplex(p) >= 0
+    return res

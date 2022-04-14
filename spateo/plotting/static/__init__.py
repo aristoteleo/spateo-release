@@ -4,6 +4,7 @@ from .agg import imshow, qc_regions
 from .bbs import delaunay, polygon
 from .colorlabel import color_label
 from .geo import geo
+from .lisa import lisa, lisa_quantiles
 from .space import space
 from .three_d_plots import (
     add_legend,
