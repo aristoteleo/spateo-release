@@ -7,12 +7,14 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import cv2
 import geopandas as gpd
+import ngs_tools as ngs
 import numpy as np
 import pandas as pd
 import skimage.io
 from anndata import AnnData
 from scipy.sparse import csr_matrix, spmatrix
 from shapely.geometry import MultiPolygon, Polygon
+from typing_extensions import Literal
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
@@ -26,6 +28,9 @@ from .utils import (
     in_concave_hull,
 )
 
+VERSIONS = {
+    "stereo": ngs.chemistry.get_chemistry("Stereo-seq"),
+}
 COUNT_COLUMN_MAPPING = {
     SKM.X_LAYER: 3,
     SKM.SPLICED_LAYER_KEY: 4,
@@ -124,12 +129,11 @@ def dataframe_to_labels(df: pd.DataFrame, column: str, shape: Optional[Tuple[int
 def read_bgi_agg(
     path: str,
     stain_path: Optional[str] = None,
-    scale: Optional[float] = 1.0,
-    scale_unit: Optional[str] = None,
     binsize: int = 1,
     gene_agg: Optional[Dict[str, Union[List[str], Callable[[str], bool]]]] = None,
     prealigned: bool = False,
     label_column: Optional[str] = None,
+    version: Literal["stereo"] = "stereo",
 ) -> AnnData:
     """Read BGI read file to calculate total number of UMIs observed per
     coordinate.
@@ -138,8 +142,6 @@ def read_bgi_agg(
         path: Path to read file.
         stain_path: Path to nuclei staining image. Must have the same coordinate
             system as the read file.
-        scale: Physical length per coordinate. For visualization only.
-        scale_unit: Scale unit.
         binsize: Size of pixel bins.
         gene_agg: Dictionary of layer keys to gene names to aggregate. For
             example, `{'mito': ['list', 'of', 'mitochondrial', 'genes']}` will
@@ -148,6 +150,8 @@ def read_bgi_agg(
         prealigned: Whether the stain image is already aligned with the minimum
             x and y RNA coordinates.
         label_column: Column that contains already-segmented cell labels.
+        version: BGI technology version. Currently only used to set the scale and
+            scale units of each unit coordinate. This may change in the future.
 
     Returns:
         An AnnData object containing the UMIs per coordinate and the nucleus
@@ -230,6 +234,11 @@ def read_bgi_agg(
 
     adata = AnnData(X=X, layers=layers)[x_min:, y_min:].copy()
 
+    scale, scale_unit = 1.0, None
+    if version in VERSIONS:
+        resolution = VERSIONS[version].resolution
+        scale, scale_unit = resolution.scale, resolution.unit
+
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_AGG_TYPE)
     SKM.init_uns_pp_namespace(adata)
@@ -242,8 +251,6 @@ def read_bgi_agg(
 
 def read_bgi(
     path: str,
-    scale: float = 1.0,
-    scale_unit: Optional[str] = None,
     binsize: Optional[int] = None,
     segmentation_adata: Optional[AnnData] = None,
     labels_layer: Optional[str] = None,
@@ -251,13 +258,12 @@ def read_bgi(
     seg_binsize: int = 1,
     label_column: Optional[str] = None,
     add_props: bool = True,
+    version: Literal["stereo"] = "stereo",
 ) -> AnnData:
     """Read BGI read file as AnnData.
 
     Args:
         path: Path to read file.
-        scale: Physical length per coordinate. For visualization only.
-        scale_unit: Scale unit.
         binsize: Size of pixel bins. Should only be provided when labels
             (i.e. the `segmentation_adata` and `labels` arguments) are not used.
         segmentation_adata: AnnData containing segmentation results.
@@ -271,6 +277,8 @@ def read_bgi(
             column is present, this takes prescedence.
         add_props: Whether or not to compute label properties, such as area,
             bounding box, centroid, etc.
+        version: BGI technology version. Currently only used to set the scale and
+            scale units of each unit coordinate. This may change in the future.
 
     Returns:
         Bins x genes or labels x genes AnnData.
@@ -381,6 +389,11 @@ def read_bgi(
         adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
         adata.obsm["contour"] = ordered_props["contour"].values
         adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
+
+    scale, scale_unit = 1.0, None
+    if version in VERSIONS:
+        resolution = VERSIONS[version].resolution
+        scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)

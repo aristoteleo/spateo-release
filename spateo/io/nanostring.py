@@ -2,14 +2,20 @@
 """
 from typing import List, Optional, Union
 
+import ngs_tools as ngs
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix
+from typing_extensions import Literal
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
 from .utils import get_points_props
+
+VERSIONS = {
+    "cosmx": ngs.chemistry.get_chemistry("CosMx"),
+}
 
 
 def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] = None) -> pd.DataFrame:
@@ -73,11 +79,10 @@ def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] =
 def read_nanostring(
     path: str,
     meta_path: Optional[str] = None,
-    scale: float = 1.0,
-    scale_unit: Optional[str] = None,
     binsize: Optional[int] = None,
     label_columns: Optional[Union[str, List[str]]] = None,
     add_props: bool = True,
+    version: Literal["cosmx"] = "cosmx",
 ) -> AnnData:
     """Read NanoString CosMx data as AnnData.
 
@@ -91,6 +96,8 @@ def read_nanostring(
             unique combination is considered a unique cell.
         add_props: Whether or not to compute label properties, such as area,
             bounding box, centroid, etc.
+        version: NanoString technology version. Currently only used to set the scale and
+            scale units of each unit coordinate. This may change in the future.
 
     Returns:
         Bins x genes or labels x genes AnnData.
@@ -156,6 +163,11 @@ def read_nanostring(
         adata.obsm["spatial"] = ordered_props.filter(regex="centroid-").values
         adata.obsm["contour"] = ordered_props["contour"].values
         adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
+
+    scale, scale_unit = 1.0, None
+    if version in VERSIONS:
+        resolution = VERSIONS[version].resolution
+        scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)
