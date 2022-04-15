@@ -20,6 +20,7 @@ numba>=0.46.0
 numpy>=1.18.1<=2.10.0
 opencv-python>=4.5.4.60
 open3d>=0.14.1
+pandana
 pandas>=0.25.1
 PATSY>=0.5.1
 plotly>=5.1.0
