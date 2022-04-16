@@ -395,10 +395,13 @@ def label_connected_components(
 def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.ndarray:
     """Augment the labels in one label array using the labels in another.
 
-    This function first computes the overlap between the labels in the two
-    arrays, and any labels that are in `source_labels` that have no overlap with
-    any labels in `target_labels` is transferred to a copy of `target_labels` with
-    a new label.
+    This function modifies the labels in `target_labels` in the following way.
+    Note that this function operates on a copy of `target_labels`. It does NOT
+    modify in-place.
+    * Any labels that are in `source_labels` that have no overlap with
+        any labels in `target_labels` is copied over to `target_labels`.
+    * Any labels that are in `target_labels` that have no overlap with any labels
+        in `source_labels` is removed.
 
     Args:
         source_labels: Numpy array containing labels to (possibly) transfer.
@@ -407,10 +410,21 @@ def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.
     Returns:
         New Numpy array containing augmented labels.
     """
-    label = target_labels.max() + 1
-    source_props = measure.regionprops(source_labels)  # lazy evaluation
-    augmented = target_labels.copy()
+    augmented = np.zeros_like(target_labels)
+    label = 1
+
+    lm.main_debug("Removing non-overlapping labels.")
+    target_props = measure.regionprops(target_labels)  # lazy evaluation
+    for props in target_props:
+        _label = props.label
+        min_row, min_col, max_row, max_col = props.bbox
+        target_mask = target_labels[min_row:max_row, min_col:max_col] == _label
+        if source_labels[min_row:max_row, min_col:max_col][target_mask].sum() > 0:
+            augmented[min_row:max_row, min_col:max_col][source_mask] = label
+            label += 1
+
     lm.main_debug("Copying over non-overlapping labels.")
+    source_props = measure.regionprops(source_labels)  # lazy evaluation
     for props in source_props:
         _label = props.label
         min_row, min_col, max_row, max_col = props.bbox
