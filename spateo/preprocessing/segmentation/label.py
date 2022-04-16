@@ -420,7 +420,7 @@ def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.
         min_row, min_col, max_row, max_col = props.bbox
         target_mask = target_labels[min_row:max_row, min_col:max_col] == _label
         if source_labels[min_row:max_row, min_col:max_col][target_mask].sum() > 0:
-            augmented[min_row:max_row, min_col:max_col][source_mask] = label
+            augmented[min_row:max_row, min_col:max_col][target_mask] = label
             label += 1
 
     lm.main_debug("Copying over non-overlapping labels.")
