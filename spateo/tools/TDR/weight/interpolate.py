@@ -89,8 +89,7 @@ def interpolate_mesh(
         kern = vtk.vtkLinearKernel()
     else:
         raise ValueError(
-            "\n`kernels` value is wrong."
-            "\nAvailable `kernels` are: `'shepard'`, `'gaussian'`, `'linear'`."
+            "\n`kernels` value is wrong." "\nAvailable `kernels` are: `'shepard'`, `'gaussian'`, `'linear'`."
         )
 
     if radius is None and not N:
