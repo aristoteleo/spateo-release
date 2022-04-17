@@ -10,6 +10,7 @@ from sklearn import metrics
 
 from ...configuration import SKM
 from ...logging import logger_manager as lm
+from .qc import _generate_random_labels
 
 
 def adjusted_rand_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -87,7 +88,13 @@ def labeling_stats(y_true: np.ndarray, y_pred: np.ndarray) -> Tuple[float, float
 
 
 def compare(
-    adata: AnnData, true_layer: str, pred_layer: str, data_layer: str = SKM.X_LAYER, umi_pixels_only: bool = True
+    adata: AnnData,
+    true_layer: str,
+    pred_layer: str,
+    data_layer: str = SKM.X_LAYER,
+    umi_pixels_only: bool = True,
+    random_background: bool = True,
+    seed: Optional[int] = None,
 ) -> pd.DataFrame:
     """Compute segmentation statistics.
 
@@ -98,10 +105,22 @@ def compare(
         data_layer: Layer containing UMIs
         umi_pixels_only: Whether or not to only consider pixels that have at least
             one UMI captured (as determined by `data_layer`).
+        random_background: Simulate random background by randomly permuting the
+            `pred_layer` labels and computing the same statistics against
+            `true_layer`. The returned DataFrame will have an additional column
+            for these statistics.
+        seed: Random seed.
 
     Returns:
         Pandas DataFrame containing classification and labeling statistics
     """
+
+    def _stats(y_true, y_pred):
+        tn, fp, fn, tp, precision, accuracy, f1 = classification_stats(y_true, y_pred)
+        both_labeled = (y_true > 0) & (y_pred > 0)
+        ars, homogeneity, completeness, v = labeling_stats(y_true[both_labeled], y_pred[both_labeled])
+        return tn, fp, fn, tp, precision, accuracy, f1, ars, homogeneity, completeness, v
+
     y_true = SKM.select_layer_data(adata, true_layer)
     y_pred = SKM.select_layer_data(adata, pred_layer)
 
@@ -112,13 +131,15 @@ def compare(
         y_true = y_true[umi_mask]
         y_pred = y_pred[umi_mask]
 
-    lm.main_info("Computing classification statistics.")
-    tn, fp, fn, tp, precision, accuracy, f1 = classification_stats(y_true, y_pred)
-    lm.main_info("Computing label statistics.")
-    both_labeled = (y_true > 0) & (y_pred > 0)
-    ars, homogeneity, completeness, v = labeling_stats(y_true[both_labeled], y_pred[both_labeled])
+    lm.main_info("Computing statistics.")
+    data = {pred_layer: _stats(y_true, y_pred)}
+    if random_background:
+        lm.main_info("Computing background statistics.")
+        bincount = np.bincount(y_pred.flatten())
+        y_random = _generate_random_labels(y_pred.shape, bincount[1:], seed)
+        data["background"] = _stats(y_true, y_random)
     return pd.DataFrame(
-        {"value": [tn, fp, fn, tp, precision, accuracy, f1, ars, homogeneity, completeness, v]},
+        data,
         index=[
             "True negative",
             "False positive",
