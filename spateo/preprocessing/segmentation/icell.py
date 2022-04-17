@@ -21,7 +21,7 @@ from ...warnings import PreprocessingWarning
 from . import bp, em, utils, vi
 
 
-def _mask_cells_from_stain(X: np.ndarray, otsu_classes: int = 4, otsu_index: int = 0, mk: int = 7) -> np.ndarray:
+def _mask_cells_from_stain(X: np.ndarray, otsu_classes: int = 3, otsu_index: int = 0, mk: int = 7) -> np.ndarray:
     """Create a boolean mask indicating cells from stained image."""
     lm.main_debug("Filtering with Multi-otsu.")
     thresholds = filters.threshold_multiotsu(X, otsu_classes)
@@ -43,7 +43,6 @@ def _mask_nuclei_from_stain(
     lm.main_debug("Filtering with Multi-otsu.")
     thresholds = filters.threshold_multiotsu(X, otsu_classes)
     background_mask = X < thresholds[otsu_index]
-    # local_mask = X >= filters.rank.otsu(X, utils.circle(local_k))
     lm.main_debug("Filtering adaptive threshold.")
     local_mask = cv2.adaptiveThreshold(X, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, local_k, offset).astype(
         bool
@@ -55,7 +54,7 @@ def _mask_nuclei_from_stain(
 
 def mask_cells_from_stain(
     adata: AnnData,
-    otsu_classes: int = 4,
+    otsu_classes: int = 3,
     otsu_index: int = 0,
     mk: int = 7,
     layer: str = SKM.STAIN_LAYER_KEY,
