@@ -70,7 +70,7 @@ def interactive_slice(
 
     # Create an interactive window for using widgets.
     p = _interactive_plotter()
-
+    p.add_mesh(mesh, opacity=0.2, scalars=f"{key}_rgba", rgba=True, style="surface")
     # Slice a mesh using a slicing widget.
     if method == "axis":
         p.add_mesh_slice(
@@ -80,9 +80,19 @@ def interactive_slice(
             rgba=True,
             tubing=True,
             widget_color="black",
+            color="black",
+            line_width=3.0,
         )
     else:
-        p.add_mesh_slice_orthogonal(mesh, scalars=f"{key}_rgba", rgba=True, tubing=True, widget_color="black")
+        p.add_mesh_slice_orthogonal(
+            mesh,
+            scalars=f"{key}_rgba",
+            rgba=True,
+            tubing=True,
+            widget_color="black",
+            color="black",
+            line_width=3.0,
+        )
     p.show(cpos="iso")
 
     return collect_mesh(p.plane_sliced_meshes)
