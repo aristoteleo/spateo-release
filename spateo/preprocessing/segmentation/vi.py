@@ -112,6 +112,7 @@ class NegativeBinomialMixture(PyroModule):
 
     @staticmethod
     def conditionals(params, x):
+        pyro.clear_param_store()
         zero_inflated = "z" in params
         z, counts, logits = params.get("z"), params["counts"], params["logits"]
         x = torch.tensor(x.astype(np.float32))
