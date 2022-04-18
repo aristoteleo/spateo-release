@@ -134,22 +134,33 @@ class TestICell(TestMixin, TestCase):
             adata = create_random_adata(["unspliced", "unspliced_bins", "certain"], (3, 3))
             k = mock.MagicMock()
             method = mock.MagicMock()
+            moran_kwargs = mock.MagicMock()
             em_kwargs = mock.MagicMock()
             vi_kwargs = mock.MagicMock()
             bp_kwargs = mock.MagicMock()
             threshold = mock.MagicMock()
             mk = mock.MagicMock()
             icell.score_and_mask_pixels(
-                adata, "unspliced", k, method, em_kwargs, vi_kwargs, bp_kwargs, threshold, mk, certain_layer="certain"
+                adata,
+                "unspliced",
+                k,
+                method,
+                moran_kwargs,
+                em_kwargs,
+                vi_kwargs,
+                bp_kwargs,
+                threshold,
+                mk,
+                certain_layer="certain",
             )
             np.testing.assert_array_equal(adata.layers["unspliced_scores"], _score_pixels.return_value)
             np.testing.assert_array_equal(adata.layers["unspliced_mask"], apply_threshold.return_value)
             _score_pixels.assert_called_once_with(
-                mock.ANY, k, method, em_kwargs, vi_kwargs, bp_kwargs, mock.ANY, mock.ANY
+                mock.ANY, k, method.lower(), moran_kwargs, em_kwargs, vi_kwargs, bp_kwargs, mock.ANY, mock.ANY
             )
             np.testing.assert_array_equal(adata.layers["unspliced"], _score_pixels.call_args[0][0])
-            np.testing.assert_array_equal(adata.layers["certain"] > 0, _score_pixels.call_args[0][6])
-            np.testing.assert_array_equal(adata.layers["unspliced_bins"], _score_pixels.call_args[0][7])
+            np.testing.assert_array_equal(adata.layers["certain"] > 0, _score_pixels.call_args[0][7])
+            np.testing.assert_array_equal(adata.layers["unspliced_bins"], _score_pixels.call_args[0][8])
 
             apply_threshold.assert_called_once_with(mock.ANY, mk, threshold)
             np.testing.assert_array_equal(_score_pixels.return_value, apply_threshold.call_args[0][0])

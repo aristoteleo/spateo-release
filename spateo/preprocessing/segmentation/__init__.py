@@ -9,6 +9,7 @@ from . import (
     external,
     icell,
     label,
+    moran,
     simulation,
     utils,
     vi,
