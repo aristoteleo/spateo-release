@@ -18,7 +18,7 @@ from ...configuration import SKM
 from ...errors import PreprocessingError
 from ...logging import logger_manager as lm
 from ...warnings import PreprocessingWarning
-from . import bp, em, utils, vi
+from . import bp, em, moran, utils, vi
 
 
 def _mask_cells_from_stain(X: np.ndarray, otsu_classes: int = 3, otsu_index: int = 0, mk: int = 7) -> np.ndarray:
@@ -133,7 +133,8 @@ def mask_nuclei_from_stain(
 def _score_pixels(
     X: Union[spmatrix, np.ndarray],
     k: int,
-    method: Literal["gauss", "EM", "EM+gauss", "EM+BP", "VI+gauss", "VI+BP"],
+    method: Literal["gauss", "moran", "EM", "EM+gauss", "EM+BP", "VI+gauss", "VI+BP"],
+    moran_kwargs: Optional[dict] = None,
     em_kwargs: Optional[dict] = None,
     vi_kwargs: Optional[dict] = None,
     bp_kwargs: Optional[dict] = None,
@@ -148,6 +149,7 @@ def _score_pixels(
         k: Kernel size for convolution.
         method: Method to use. Valid methods are:
             gauss: Gaussian blur
+            moran:
             EM: EM algorithm to estimate cell and background expression
                 parameters.
             EM+gauss: EM algorithm followed by Gaussian blur.
@@ -155,6 +157,7 @@ def _score_pixels(
                 marginal probabilities of cell and background.
             VI+gauss:
             VI+BP
+        moran_kwargs: Keyword arguments to the :func:`moran.run_moran` function.
         em_kwargs: Keyword arguments to the :func:`em.run_em` function.
         bp_kwargs: Keyword arguments to the :func:`bp.run_bp` function.
         certain_mask: A boolean Numpy array indicating which pixels are certain
@@ -170,7 +173,7 @@ def _score_pixels(
         PreprocessingError: If `bins` and/or `certain_mask` was provided but
             their sizes do not match `X`
     """
-    if method.lower() not in ("gauss", "em", "em+gauss", "em+bp", "vi+gauss", "vi+bp"):
+    if method.lower() not in ("gauss", "moran", "em", "em+gauss", "em+bp", "vi+gauss", "vi+bp"):
         raise PreprocessingError(f"Unknown method `{method}`")
     if certain_mask is not None and X.shape != certain_mask.shape:
         raise PreprocessingError("`certain_mask` does not have the same shape as `X`")
@@ -178,10 +181,13 @@ def _score_pixels(
         raise PreprocessingError("`bins` does not have the same shape as `X`")
 
     method = method.lower()
+    moran_kwargs = moran_kwargs or {}
     em_kwargs = em_kwargs or {}
     vi_kwargs = vi_kwargs or {}
     bp_kwargs = bp_kwargs or {}
 
+    if moran_kwargs and "moran" not in method:
+        lm.main_warning(f"`moran_kwargs` will be ignored.")
     if em_kwargs and "em" not in method:
         lm.main_warning(f"`em_kwargs` will be ignored.")
     if vi_kwargs and "vi" not in method:
@@ -196,10 +202,18 @@ def _score_pixels(
 
     # All methods require some kind of 2D convolution to start off
     lm.main_debug(f"Computing 2D convolution with k={k}.")
-    res = utils.conv2d(X, k, mode="gauss" if method == "gauss" else "circle", bins=bins)
+    res = utils.conv2d(X, k, mode="gauss" if method in ("gauss", "moran") else "circle", bins=bins)
 
     # All methods other than gauss requires EM
-    if method != "gauss":
+    if method == "gauss":
+        # For just "gauss" method, we should rescale to [0, 1] because all the
+        # other methods eventually produce an array of [0, 1] values.
+        res = utils.scale_to_01(res)
+        if certain_mask is not None:
+            res = np.clip(res + certain_mask, 0, 1)
+    elif method == "moran":
+        res = moran.run_moran(res, mask=None if bins is None else bins > 0, **moran_kwargs)
+    else:
         if "em" in method:
             lm.main_debug(f"Running EM with kwargs {em_kwargs}.")
             em_results = em.run_em(res, bins=bins, **em_kwargs)
@@ -226,12 +240,7 @@ def _score_pixels(
         if "gauss" in method:
             lm.main_debug("Computing Gaussian blur.")
             res = utils.conv2d(res, k, mode="gauss", bins=bins)
-    else:
-        # For just "gauss" method, we should rescale to [0, 1] because all the
-        # other methods eventually produce an array of [0, 1] values.
-        res = utils.scale_to_01(res)
-        if certain_mask is not None:
-            res = np.clip(res + certain_mask, 0, 1)
+
     return res
 
 
@@ -240,6 +249,7 @@ def score_and_mask_pixels(
     layer: str,
     k: int,
     method: Literal["gauss", "EM", "EM+gauss", "EM+BP", "VI+gauss", "VI+BP"],
+    moran_kwargs: Optional[dict] = None,
     em_kwargs: Optional[dict] = None,
     vi_kwargs: Optional[dict] = None,
     bp_kwargs: Optional[dict] = None,
@@ -258,6 +268,7 @@ def score_and_mask_pixels(
         k: Kernel size for convolution
         method: Method to use. Valid methods are:
             gauss: Gaussian blur
+            moran:
             EM: EM algorithm to estimate cell and background expression
                 parameters.
             EM+gauss: EM algorithm followed by Gaussian blur.
@@ -265,13 +276,15 @@ def score_and_mask_pixels(
                 marginal probabilities of cell and background.
             VI+gauss:
             VI+BP
+        moran_kwargs: Keyword arguments to the :func:`moran.run_moran` function.
         em_kwargs: Keyword arguments to the :func:`em.run_em` function.
         bp_kwargs: Keyword arguments to the :func:`bp.run_bp` function.
         threshold: Score cutoff, above which pixels are considered occupied.
             By default, a threshold is automatically determined by using
             the first value of the 3-class Multiotsu method.
         mk: Kernel size of morphological open and close operations to reduce
-            noise in the mask. Defaults to `k`+2.
+            noise in the mask. Defaults to `k`+2 if EM or VI is run. Otherwise,
+            defaults to 3.
         bins_layer: Layer containing assignment of pixels into bins. Each bin
             is considered separately. Defaults to `{layer}_bins`. This can be
             set to `False` to disable binning, even if the layer exists.
@@ -291,17 +304,23 @@ def score_and_mask_pixels(
         bins_layer = bins_layer or SKM.gen_new_layer_key(layer, SKM.BINS_SUFFIX)
         if bins_layer in adata.layers:
             bins = SKM.select_layer_data(adata, bins_layer)
+    method = method.lower()
     lm.main_info(f"Scoring pixels with {method} method.")
-    scores = _score_pixels(X, k, method, em_kwargs, vi_kwargs, bp_kwargs, certain_mask, bins)
+    scores = _score_pixels(X, k, method, moran_kwargs, em_kwargs, vi_kwargs, bp_kwargs, certain_mask, bins)
     scores_layer = scores_layer or SKM.gen_new_layer_key(layer, SKM.SCORES_SUFFIX)
     SKM.set_layer_data(adata, scores_layer, scores)
 
     if not threshold:
         lm.main_debug("Finding Otsu threshold.")
-        threshold = filters.threshold_multiotsu(scores, 3)[-1]
+        threshold = (
+            filters.threshold_multiotsu(scores)[1]
+            if any(m in method for m in ("em", "vi"))
+            else filters.threshold_otsu(scores)
+        )
 
     lm.main_info(f"Applying threshold {threshold}.")
-    mask = utils.apply_threshold(scores, mk or k + 2, threshold)
+    mk = mk or (k + 2 if any(m in method for m in ("em", "vi")) else 3)
+    mask = utils.apply_threshold(scores, mk, threshold)
     if certain_layer:
         mask += certain_mask
     mask_layer = mask_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
