@@ -104,3 +104,40 @@ def voxelize_pc(
         voxel.cell_data[key] = pc.point_data[key]
 
     return voxel
+
+
+def construct_cells(
+    pc: PolyData,
+    cell_size: Union[np.ndarray] = None,
+    xyz_scale: tuple = (1, 1, 1),
+    n_scale: tuple = (1, 1),
+    factor: float = 1.0,
+):
+    """
+    Reconstructing cells from point clouds.
+
+    Args:
+        pc: A point cloud object, including `pc.point_data["obs_index"]`.
+        cell_size: A numpy.ndarray object including the relative radius size of each cell.
+        xyz_scale: The scaling factor for the x-axis, y-axis and z-axis.
+        n_scale: The “squareness” parameter in the x-y plane adn z axis.
+        factor: Scale factor applied to scaling array.
+
+    Returns:
+        ds_glyph: A cells mesh including `ds_glyph.point_data["cell_size"]`, `ds_glyph.point_data["cell_centroid"]` and
+        the data contained in the pc.
+
+    """
+
+    pc.point_data["cell_size"] = cell_size.flatten()
+
+    geom = pv.ParametricSuperEllipsoid(
+        xradius=xyz_scale[0], yradius=xyz_scale[1], zradius=xyz_scale[2], n1=n_scale[0], n2=n_scale[1]
+    )
+
+    ds_glyph = pc.glyph(geom=geom, scale="cell_size", factor=factor)
+
+    centroid_coords = {index: coords for index, coords in zip(pc.point_data["obs_index"], pc.points)}
+    ds_glyph.point_data["cell_centroid"] = np.asarray([centroid_coords[i] for i in ds_glyph.point_data["obs_index"]])
+
+    return ds_glyph
