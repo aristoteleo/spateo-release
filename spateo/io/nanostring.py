@@ -1,10 +1,14 @@
 """IO functions for NanoString CosMx technology.
 """
+import glob
+import os
+import re
 from typing import List, Optional, Union
 
 import ngs_tools as ngs
 import numpy as np
 import pandas as pd
+import skimage.io
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 from typing_extensions import Literal
@@ -16,6 +20,7 @@ from .utils import get_points_props
 VERSIONS = {
     "cosmx": ngs.chemistry.get_chemistry("CosMx"),
 }
+FOV_PARSER = re.compile("^.+_F(?P<fov>[0-9]+)\..+$")
 
 
 def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] = None) -> pd.DataFrame:
@@ -74,6 +79,114 @@ def read_nanostring_as_dataframe(path: str, label_columns: Optional[List[str]] =
             labels += "-" + df[label].astype(str)
     df["label"] = labels
     return df.rename(columns=rename)
+
+
+def stitch_images(stain_dir: str, positions_path: str, labels: bool = False) -> np.ndarray:
+    """Stitch multiple FOVs into a single image using position information.
+
+    Args:
+        stain_dir: Directory containing JPEG or TIFF files with filenames
+            ending in '_FXXX' where XXX indicates the FOV index.
+        positions_path: Path to CSV file containing FOV positions.
+        labels: Whether these are labels (and therefore should be made unique).
+
+    Returns:
+        A numpy array containing the stitched image. May contain multiple channels,
+            which is the last dimension of the array.
+    """
+    # Load all images in stain_dir, indexed by FOV
+    stain_fov_paths = {}
+    for filename in os.listdir(stain_dir):
+        path = os.path.join(stain_dir, filename)
+        match = FOV_PARSER.match(filename)
+        if match:
+            fov = int(match["fov"])
+            if fov in stain_fov_paths:
+                raise IOError(f"Multiple images for FOV {fov} were found: {stain_fov_paths[fov]}, {path}.")
+            stain_fov_paths[fov] = path
+    lm.main_debug(f"Found {len(stain_fov_paths)} FOV images.")
+
+    # Read FOV positions and make sure they match exactly with the files.
+    fov_df = pd.read_csv(positions_path, dtype={"fov": int}, index_col="fov")
+    if set(fov_df.index) != set(stain_fov_paths.keys()):
+        raise IOError(f"FOVs defined in {positions_path} do not match exactly with those found in {stain_dir}.")
+    fov_x = dict(fov_df["x_global_px"].astype(np.uint32))
+    fov_y = dict(fov_df["y_global_px"].astype(np.uint32))
+
+    # Detect the size of the entire image.
+    # Also, check that all the images have the same non-XY dimensions.
+    xmin, ymin = min(fov_x.values()), min(fov_y.values())
+    xmax, ymax = 0, 0
+    extra_dims = None
+    dtype = None
+    stain_fovs = {}
+    for fov, path in stain_fov_paths.items():
+        x, y = fov_x[fov], fov_y[fov]
+        img = skimage.io.imread(path)
+        xmax = max(xmax, x + img.shape[1] - 1)
+        ymax = max(ymax, y + img.shape[0] - 1)
+        stain_fovs[fov] = img
+
+        if extra_dims is None:
+            extra_dims = img.shape[2:]
+        elif extra_dims != img.shape[2:]:
+            raise IOError(f"FOV {path} has inconsistent non-XY dimensions.")
+        if dtype is None:
+            dtype = img.dtype
+        elif dtype != img.dtype:
+            raise IOError(f"FOV {path} has inconsistent dtype.")
+
+    if labels:
+        dtype = np.uint
+
+    last_label = 0
+    img = np.zeros((xmax - xmin + 1, ymax - ymin + 1) + extra_dims, dtype=dtype)
+    for fov, _img in stain_fovs.items():
+        x, y = fov_x[fov] - xmin, fov_y[fov] - ymin
+        if labels:
+            _img[_img > 0] += last_label
+            last_label = _img.max()
+        img[x : x + _img.shape[1], y : y + _img.shape[0]] = np.fliplr(np.swapaxes(_img, 0, 1))
+    return img
+
+
+# def read_nanostring_agg(
+#     path: str,
+#     stain_path: Optional[str] = None,
+#     binsize: int = 1,
+#     gene_agg: Optional[Dict[str, Union[List[str], Callable[[str], bool]]]] = None,
+#     prealigned: bool = False,
+#     label_columns: Optional[Union[str, List[str]]] = None,
+#     version: Literal["cosmx"] = "cosmx",
+# ) -> AnnData:
+#     lm.main_debug(f"Reading data from {path}.")
+#     data = read_nanostring_as_dataframe(path, label_columns)
+#     x_min, y_min = data["x"].min(), data["y"].min()
+#     x, y = data["x"].values, data["y"].values
+#     x_max, y_max = x.max(), y.max()
+#     shape = (x_max + 1, y_max + 1)
+#
+#     # Read image and update x,y max if appropriate
+#     layers = {}
+#     if stain_path:
+#         lm.main_debug(f"Reading stain image from {stain_path}.")
+#         image = skimage.io.imread(stain_path)
+#         if prealigned:
+#             lm.main_warning(
+#                 (
+#                     "Assuming stain image was already aligned with the minimum x and y RNA coordinates. "
+#                     "(prealinged=True)"
+#                 )
+#             )
+#             image = np.pad(image, ((x_min, 0), (y_min, 0)))
+#         x_max = max(x_max, image.shape[0] - 1)
+#         y_max = max(y_max, image.shape[1] - 1)
+#         shape = (x_max + 1, y_max + 1)
+#         # Reshape image to match new x,y max
+#         if image.shape != shape:
+#             lm.main_warning(f"Padding stain image from {image.shape} to {shape} with zeros.")
+#             image = np.pad(image, ((0, shape[0] - image.shape[0]), (0, shape[1] - image.shape[1])))
+#         layers[SKM.STAIN_LAYER_KEY] = image
 
 
 def read_nanostring(
