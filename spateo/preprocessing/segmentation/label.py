@@ -2,6 +2,7 @@
 mask.
 """
 import math
+import warnings
 from typing import Dict, Optional, Union
 
 import cv2
@@ -191,6 +192,9 @@ def _expand_labels(
     Returns:
         New label array with expanded labels.
     """
+    masked_labels = labels[mask] if mask is not None else labels
+    if (masked_labels > 0).all() or (masked_labels == 0).all():
+        return labels
 
     @njit
     def _expand(X, areas, max_area, mask, start_i, end_i):
@@ -330,18 +334,23 @@ def _label_connected_components(
                 stats[cv2.CC_STAT_HEIGHT],
             )
             label_mask = components[1][top : top + height, left : left + width] == label
-            if seed_labels is not None:
-                if (seed_labels[top : top + height, left : left + width][label_mask] > 0).any():
-                    continue
+            if seed_labels is not None and (seed_labels[top : top + height, left : left + width][label_mask] > 0).any():
+                continue
 
             if area <= area_threshold:
                 saved[top : top + height, left : left + width] += label_mask * saved_i
                 saved_i += 1
             else:
                 to_erode[top : top + height, left : left + width] += label_mask
-    eroded = utils.safe_erode(to_erode, k=k, min_area=min_area, n_iter=n_iter)
-    labels = cv2.connectedComponents(eroded.astype(np.uint8))[1]
-    labels[labels > 0] += saved_i - 1
+    erode = (to_erode > 0).any()
+    if erode:
+        eroded = utils.safe_erode(to_erode, k=k, min_area=min_area, n_iter=n_iter)
+        labels = cv2.connectedComponents(eroded.astype(np.uint8))[1]
+        labels[labels > 0] += saved_i - 1
+    elif seed_labels is None:
+        return saved
+    else:
+        labels = np.zeros_like(saved)
     if seed_labels is not None:
         labels += seed_labels
     expanded = _expand_labels(labels, distance=distance, max_area=max_area, mask=X > 0)

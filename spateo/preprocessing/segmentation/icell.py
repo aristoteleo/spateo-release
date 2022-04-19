@@ -209,10 +209,10 @@ def _score_pixels(
         # For just "gauss" method, we should rescale to [0, 1] because all the
         # other methods eventually produce an array of [0, 1] values.
         res = utils.scale_to_01(res)
-        if certain_mask is not None:
-            res = np.clip(res + certain_mask, 0, 1)
     elif method == "moran":
         res = moran.run_moran(res, mask=None if bins is None else bins > 0, **moran_kwargs)
+        # Rescale
+        res /= res.max()
     else:
         if "em" in method:
             lm.main_debug(f"Running EM with kwargs {em_kwargs}.")
@@ -312,11 +312,7 @@ def score_and_mask_pixels(
 
     if not threshold:
         lm.main_debug("Finding Otsu threshold.")
-        threshold = (
-            filters.threshold_multiotsu(scores)[1]
-            if any(m in method for m in ("em", "vi"))
-            else filters.threshold_otsu(scores)
-        )
+        threshold = filters.threshold_multiotsu(scores)[1] if "bp" in method else filters.threshold_otsu(scores)
 
     lm.main_info(f"Applying threshold {threshold}.")
     mk = mk or (k + 2 if any(m in method for m in ("em", "vi")) else 3)

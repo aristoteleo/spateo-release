@@ -151,7 +151,7 @@ def conditionals(
         PreprocessingError: If `em_results` is a dictionary but `bins` was not
             provided.
     """
-    if any(isinstance(k, int) for k in vi_results.keys()):
+    if "counts" not in vi_results:
         if bins is None:
             raise PreprocessingError("`vi_results` indicate binning was used, but `bins` was not provided")
         background_cond = np.ones(X.shape)

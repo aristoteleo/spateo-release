@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from kneed import KneeLocator
 from numba import njit
-from scipy import signal
+from scipy import signal, sparse
 from tqdm import tqdm
 from typing_extensions import Literal
 
@@ -119,6 +119,8 @@ def conv2d(
         raise ValueError(f'`mode` must be one of "median", "gauss", "circle", "square"')
     if bins is not None and X.shape != bins.shape:
         raise ValueError("`bins` must have the same shape as `X`")
+    if k == 1:
+        return X
 
     def _conv(_X):
         if mode == "gauss":
@@ -282,7 +284,7 @@ def safe_erode(
     return (mask + saved).astype(bool)
 
 
-def label_overlap(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
+def label_overlap(X: np.ndarray, Y: np.ndarray) -> sparse.csr_matrix:
     """Compuate the overlaps between two label arrays.
 
     The integer labels in `X` and `Y` are used as the row and column indices
@@ -298,23 +300,21 @@ def label_overlap(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
             array.
 
     Returns:
-        A `(max(X)+1, max(Y)+1)` shape array containing how many pixels for
+        A `(max(X)+1, max(Y)+1)` shape sparse array containing how many pixels for
             each label are overlapping.
     """
 
-    @njit
-    def _label_overlap(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
-        overlap = np.zeros((X.max() + 1, Y.max() + 1), dtype=np.uint)
-        for i in range(X.shape[0]):
-            for j in range(X.shape[1]):
-                overlap[X[i, j], Y[i, j]] += 1
+    def _label_overlap(X, Y):
+        overlap = sparse.dok_matrix((X.max() + 1, Y.max() + 1), dtype=np.uint)
+        for i in range(X.size):
+            overlap[X[i], Y[i]] += 1
         return overlap
 
     if X.shape != Y.shape:
         raise PreprocessingError(
             f"Both arrays must have the same shape, but one is {X.shape} and the other is {Y.shape}."
         )
-    return _label_overlap(X, Y)
+    return _label_overlap(X.flatten(), Y.flatten()).tocsr()
 
 
 def clahe(X: np.ndarray, clip_limit: float = 1.0, tile_grid: Tuple[int, int] = (50, 50)) -> np.ndarray:

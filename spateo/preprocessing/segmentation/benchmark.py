@@ -6,10 +6,12 @@ from typing import Optional, Tuple
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from scipy import sparse
 from sklearn import metrics
 
 from ...configuration import SKM
 from ...logging import logger_manager as lm
+from . import utils
 from .qc import _generate_random_labels
 
 
@@ -31,6 +33,42 @@ def adjusted_rand_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     if fn == 0 and fp == 0:
         return 1.0
     return 2.0 * (tp * tn - fn * fp) / ((tp + fn) * (fn + tn) + (tp + fp) * (fp + tn))
+
+
+def iou(labels1: np.ndarray, labels2: np.ndarray) -> sparse.csr_matrix:
+    """Compute intersection-over-union (IOU).
+
+    Args:
+        labels1: First set of labels
+        labels2: Second set of labels
+
+    Returns:
+        Sparse matrix where the first axis corresponds to the first set of
+            labels and vice-versa.
+    """
+    areas1 = np.bincount(labels1.flatten())
+    areas2 = np.bincount(labels2.flatten())
+    overlaps = utils.label_overlap(labels1, labels2).astype(float)
+    for i, j in zip(*overlaps.nonzero()):
+        overlap = overlaps[i, j]
+        overlaps[i, j] = overlap / (areas1[i] + areas2[j] - overlap)
+    return overlaps
+
+
+def average_precision(iou: sparse.csr_matrix, tau: float = 0.5) -> float:
+    """Compute average precision (AP).
+
+    Args:
+        iou: IOU of true and predicted labels
+        tau: IOU threshold to determine whether a prediction is correct
+
+    Returns:
+        Average precision
+    """
+    tp = (iou > tau).sum()
+    fp = iou.shape[1] - tp
+    fn = iou.shape[0] - tp
+    return tp / (tp + fn + fp)
 
 
 def classification_stats(
@@ -94,6 +132,7 @@ def compare(
     data_layer: str = SKM.X_LAYER,
     umi_pixels_only: bool = True,
     random_background: bool = True,
+    ap_taus: Tuple[int, ...] = tuple(np.arange(0.5, 1, 0.05)),
     seed: Optional[int] = None,
 ) -> pd.DataFrame:
     """Compute segmentation statistics.
@@ -109,6 +148,8 @@ def compare(
             `pred_layer` labels and computing the same statistics against
             `true_layer`. The returned DataFrame will have an additional column
             for these statistics.
+        ap_taus: Tau thresholds to calculate average precision. Defaults to
+            0.05 increments starting at 0.5 and ending at (and including) 0.95.
         seed: Random seed.
 
     Returns:
@@ -121,6 +162,15 @@ def compare(
         ars, homogeneity, completeness, v = labeling_stats(y_true[both_labeled], y_pred[both_labeled])
         return tn, fp, fn, tp, precision, accuracy, f1, ars, homogeneity, completeness, v
 
+    def _ap(y_true, y_pred, taus):
+        aps = []
+        _iou = None
+        for tau in taus:
+            if _iou is None:
+                _iou = iou(y_true, y_pred)
+            aps.append(average_precision(_iou, tau))
+        return aps
+
     y_true = SKM.select_layer_data(adata, true_layer)
     y_pred = SKM.select_layer_data(adata, pred_layer)
 
@@ -132,12 +182,15 @@ def compare(
         y_pred = y_pred[umi_mask]
 
     lm.main_info("Computing statistics.")
-    data = {pred_layer: _stats(y_true, y_pred)}
+    pred_stats = list(_stats(y_true, y_pred)) + _ap(y_true, y_pred, ap_taus)
+    data = {pred_layer: pred_stats}
     if random_background:
         lm.main_info("Computing background statistics.")
         bincount = np.bincount(y_pred.flatten())
         y_random = _generate_random_labels(y_pred.shape, bincount[1:], seed)
-        data["background"] = _stats(y_true, y_random)
+
+        random_stats = list(_stats(y_true, y_random)) + _ap(y_true, y_random, ap_taus)
+        data["background"] = random_stats
     return pd.DataFrame(
         data,
         index=[
@@ -152,5 +205,6 @@ def compare(
             "Homogeneity",
             "Completeness",
             "V measure",
-        ],
+        ]
+        + [f"Average precision ({tau:.2f})" for tau in ap_taus],
     )
