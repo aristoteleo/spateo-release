@@ -3,6 +3,7 @@ import copy
 import math
 import os
 import warnings
+from typing import Dict, List, Optional, Tuple, Union
 from warnings import warn
 
 import geopandas as gpd
@@ -1367,6 +1368,8 @@ def default_quiver_args(arrow_size, arrow_len=None):
 
 # ---------------------------------------------------------------------------------------------------
 def _plot_traj(y0, t, args, integration_direction, ax, color, lw, f):
+    from dynamo.tools.utils import integrate_vf
+
     _, y = integrate_vf(y0, t, args, integration_direction, f)  # integrate_vf_ivp
 
     ax.plot(*y.transpose(), color=color, lw=lw, linestyle="dashed", alpha=0.5)
@@ -1495,6 +1498,8 @@ def alpha_shape(x, y, alpha):
             "If you want to use the tricontourf in plotting function, you need to install `shapely` "
             "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
         )
+
+    from scipy.spatial import Delaunay
 
     crds = np.array([x.flatten(), y.flatten()]).transpose()
     points = MultiPoint(crds)
@@ -1676,3 +1681,55 @@ def _convert_to_geo_dataframe(adata, basis):
     adata.obs[basis] = pd.Series(adata.obsm[basis]).apply(loads, hex=True).values
     adata.obs = gpd.GeoDataFrame(adata.obs, geometry=basis)
     return adata
+
+
+def save_return_show_fig_utils(
+    save_show_or_return: str,
+    show_legend: bool,
+    background: str,
+    prefix: str,
+    save_kwargs: Dict,
+    total_panels: int,
+    fig: matplotlib.figure.Figure,
+    axes: matplotlib.axes._subplots.AxesSubplot,
+    return_all: bool,
+    return_all_list: Union[List, Tuple, None],
+) -> Optional[Tuple]:
+
+    from ...configuration import reset_rcParams
+    from ...tools.utils import update_dict
+
+    if save_show_or_return in ["save", "both", "all"]:
+        s_kwargs = {
+            "path": None,
+            "prefix": prefix,
+            "dpi": None,
+            "ext": "pdf",
+            "transparent": True,
+            "close": True,
+            "verbose": True,
+        }
+        s_kwargs = update_dict(s_kwargs, save_kwargs)
+
+        save_fig(**s_kwargs)
+        if background is not None:
+            reset_rcParams()
+    elif save_show_or_return in ["show", "both", "all"]:
+        if show_legend:
+            plt.subplots_adjust(right=0.85)
+
+        # with warnings.catch_warnings():
+        #     warnings.simplefilter("ignore")
+        #     plt.tight_layout()
+
+        plt.show()
+        if background is not None:
+            reset_rcParams()
+    elif save_show_or_return in ["return", "all"]:
+        if background is not None:
+            reset_rcParams()
+
+        if return_all:
+            return (fig, *return_all_list) if total_panels > 1 else (fig, *return_all_list)
+        else:
+            return fig, axes if total_panels > 1 else fig, axes
