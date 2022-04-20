@@ -2,7 +2,7 @@
 """
 import math
 import warnings
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,7 +25,7 @@ def imshow(
     show_cbar: bool = False,
     use_scale: bool = True,
     labels: bool = False,
-    background: Optional[None, str] = None,
+    background: Union[None, str] = None,
     save_show_or_return: str = "show",
     save_kwargs: Dict = {},
     **kwargs,
@@ -121,7 +121,7 @@ def qc_regions(
     layer: str = SKM.X_LAYER,
     axes: Optional[np.ndarray] = None,
     ncols: int = 1,
-    background: Optional[None, str] = None,
+    background: Union[None, str] = None,
     save_show_or_return: str = "show",
     save_kwargs: Dict = {},
     **kwargs,

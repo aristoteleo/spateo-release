@@ -22,7 +22,7 @@ def polygon(
     ec: str = "#000000",
     fig: Optional[Figure] = None,
     ax: Optional[Axes] = None,
-    background: Optional[None, str] = None,
+    background: Union[None, str] = None,
     save_show_or_return: str = "show",
     save_kwargs: Dict = {},
 ):
@@ -98,7 +98,7 @@ def delaunay(
     title: Optional[str] = None,
     fig: Optional[Figure] = None,
     ax: Optional[Axes] = None,
-    background: Optional[None, str] = None,
+    background: Union[None, str] = None,
     save_show_or_return: str = "show",
     save_kwargs: Dict = {},
 ):
