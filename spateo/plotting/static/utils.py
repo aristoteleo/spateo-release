@@ -1691,7 +1691,7 @@ def save_return_show_fig_utils(
     save_kwargs: Dict,
     total_panels: int,
     fig: matplotlib.figure.Figure,
-    axes: matplotlib.axes._subplots.AxesSubplot,
+    axes: matplotlib.axes.Axes,
     return_all: bool,
     return_all_list: Union[List, Tuple, None],
 ) -> Optional[Tuple]:
