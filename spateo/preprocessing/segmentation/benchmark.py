@@ -66,8 +66,8 @@ def average_precision(iou: sparse.csr_matrix, tau: float = 0.5) -> float:
         Average precision
     """
     tp = (iou > tau).sum()
-    fp = iou.shape[1] - tp
-    fn = iou.shape[0] - tp
+    fp = iou.shape[1] - tp - 1
+    fn = iou.shape[0] - tp - 1
     return tp / (tp + fn + fp)
 
 
