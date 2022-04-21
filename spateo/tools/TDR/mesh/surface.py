@@ -155,12 +155,14 @@ def scale_mesh(
 def pv_surface(pc: PolyData, alpha: float = 2.0) -> PolyData:
     """
     Generate a 3D tetrahedral mesh from a scattered points and extract surface mesh of the 3D tetrahedral mesh.
+
     Args:
         pc: A point cloud.
         alpha: Distance value to control output of this filter.
                For a non-zero alpha value, only vertices, edges, faces,
                or tetrahedra contained within the circumsphere (of radius alpha) will be output.
                Otherwise, only tetrahedra will be output.
+
     Returns:
         surface: Surface mesh.
     """

@@ -1,8 +1,8 @@
-from typing import List, Optional, Union
+from typing import Union
 
 import numpy as np
 import pyvista as pv
-from pyvista import DataSet, MultiBlock, PolyData, UnstructuredGrid
+from pyvista import DataSet, MultiBlock
 
 try:
     from typing import Literal
@@ -55,7 +55,6 @@ def save_mesh(
         mesh.save(filename=filename, binary=binary, texture=texture)
     else:
         raise ValueError(
-            "\nFilename is wrong. This function is only available when saving vtk or vtm files."
-            "\nIf mesh is a pyvista.MultiBlock object, please enter a filename ending with `.vtm`;"
-            "else please enter a filename ending with `.vtk`."
+            "\n`filename` is wrong."
+            "\nFor pyvista.MultiBlock object please save as `.vtm` file; For other objects please save as `.vtk` file."
         )
