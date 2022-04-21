@@ -130,6 +130,8 @@ def slice_alignment(
     Returns:
         List of slices (AnnData Object) after alignment.
     """
+    for slice in slices:
+        slice.obsm[key_added] = slice.obsm[spatial_key]
 
     align_slices = []
     for i in lm.progress_logger(range(len(slices) - 1), progress_name="Slices alignment"):
@@ -141,7 +143,7 @@ def slice_alignment(
         pi = pairwise_align(
             slice1,
             slice2,
-            spatial_key=spatial_key,
+            spatial_key=key_added,
             alpha=alpha,
             numItermax=numItermax,
             numItermaxEmd=numItermaxEmd,
@@ -150,8 +152,8 @@ def slice_alignment(
 
         # Calculate new coordinates of two slices
         raw_slice1_coords, raw_slice2_coords = (
-            slice1.obsm[spatial_key],
-            slice2.obsm[spatial_key],
+            slice1.obsm[key_added],
+            slice2.obsm[key_added],
         )
         slice1_coords = raw_slice1_coords - pi.sum(axis=1).dot(raw_slice1_coords)
         slice2_coords = raw_slice2_coords - pi.sum(axis=0).dot(raw_slice2_coords)
