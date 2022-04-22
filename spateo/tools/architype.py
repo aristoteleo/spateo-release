@@ -14,7 +14,8 @@ import pandas as pd
 from scipy.cluster import hierarchy
 from scipy.stats import pearsonr
 from tqdm import tqdm
-#from ..logging import logger_manager as lm
+
+from ..logging import logger_manager as lm
 
 
 def find_spatial_archetypes(
@@ -37,11 +38,10 @@ def find_spatial_archetypes(
     archetypes = np.array([arch_comp(xi) for xi in range(1, num_clusters + 1)])
     gene_corrs = np.array([])
 
-    #for gene in lm.main_tqdm(range(len(exp_mat)), "Finding gene archetypes"):
-    for gene in tqdm(range(len(exp_mat)), "Finding gene archetypes"):
+    for gene in lm.main_tqdm(range(len(exp_mat)), "Finding gene archetypes"):
         gene_corrs = np.append(gene_corrs, pearsonr(exp_mat[gene, :], archetypes[clusters[gene] - 1, :])[0])
 
-    #lm.main_info("done!")
+    lm.main_info("done!")
 
     return archetypes, clusters, gene_corrs
 
@@ -77,7 +77,7 @@ def get_genes_from_spatial_archetype(
     indices = np.where(all_corrs_p[all_corrs > 0] <= pval_threshold)[0]
 
     if len(indices) == 0:
-        #lm.main_warning("No genes with significant correlation were found at the current p-value threshold.")
+        lm.main_warning("No genes with significant correlation were found at the current p-value threshold.")
         return None
 
     genes = gene_names[all_corrs > 0][indices]
@@ -111,7 +111,7 @@ def find_spatially_related_genes(
         arch_corrs = np.append(arch_corrs, pearsonr(exp_mat[gene, :], archetypes[archetype, :])[0])
 
     if np.max(arch_corrs) < 0.7:
-        #lm.main_warning("No significant correlation between the gene and the spatial archetypes was found.")
+        lm.main_warning("No significant correlation between the gene and the spatial archetypes was found.")
         return None
 
     archetype = np.argmax(arch_corrs)
@@ -198,13 +198,13 @@ def archetypes_genes(
     archetypes_dict = {}
 
     for i in np.arange(num_clusters):
-        #lm.main_info("current archetype is, ", str(i))
+        lm.main_info("current archetype is, ", str(i))
 
         typical_genes = get_genes_from_spatial_archetype(
             exp.T, moran_i_genes, archetypes, archetype=i, pval_threshold=0
         )
 
-        #lm.main_info("typical gene for the current archetype include, ", typical_genes)
+        lm.main_info("typical gene for the current archetype include, ", typical_genes)
         archetypes_dict[i] = typical_genes
 
     return archetypes_dict
