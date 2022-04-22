@@ -465,8 +465,7 @@ def construct_surface(
         sub_uniform_surf = uniform_surface(surf=sub_fix_surf, nsub=nsub, nclus=nclus)
         uniform_surfs.append(sub_uniform_surf)
     uniform_surf = merge_mesh(meshes=uniform_surfs)
-    uniform_surf = uniform_surf.extract_surface().triangulate()
-    uniform_surf.clean(inplace=True)
+    uniform_surf = uniform_surf.extract_surface().triangulate().clean()
 
     # Adjust point coordinates using Laplacian smoothing.
     if not (smooth is None):

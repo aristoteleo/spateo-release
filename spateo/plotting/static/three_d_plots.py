@@ -45,25 +45,8 @@ def create_plotter(
     # Set the background color of the active render window.
     plotter.background_color = background
 
-    # Contrasting color of the background color.
-    bg_rgb = mpl.colors.to_rgb(background)
-    cbg_rgb = (1 - bg_rgb[0], 1 - bg_rgb[1], 1 - bg_rgb[2])
-
-    if jupyter is True:
-        # Description of control 3D images in jupyter notebook.
-        plotter.add_text(
-            "The method to control 3D images in jupyter notebook is as follows:"
-            "CTRL Left Mouse spins the camera around its view plane normal;"
-            "SHIFT Left Mouse pans the camera; "
-            "CTRL SHIFT Left Mouse dollies (a positional zoom) the camera;"
-            "Left mouse button dollies the camera.",
-            font_size=12,
-            color=cbg_rgb,
-            font="arial",
-        )
-    else:
-        # Add a camera orientation widget to the active renderer (This Widget cannot be used in jupyter notebook).
-        plotter.add_camera_orientation_widget()
+    # Add a camera orientation widget to the active renderer (This Widget cannot be used in jupyter notebook).
+    plotter.add_camera_orientation_widget()
 
     return plotter
 
@@ -498,39 +481,14 @@ def three_d_plot(
     """
 
     # Create a plotting object to display pyvista/vtk mesh.
-    p1 = create_plotter(
+    p = create_plotter(
         jupyter=jupyter,
         off_screen=off_screen,
         window_size=window_size,
         background=background,
     )
     _add2plotter(
-        plotter=p1,
-        mesh=mesh,
-        key=key,
-        background=background,
-        ambient=ambient,
-        opacity=opacity,
-        point_size=point_size,
-        mesh_style=mesh_style,
-        legend_size=legend_size,
-        legend_loc=legend_loc,
-        outline=outline,
-        outline_width=outline_width,
-        outline_labels=outline_labels,
-    )
-    jupyter_backend = "panel" if jupyter is True else None
-    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend, cpos=initial_cpo)
-
-    # Create another plotting object to save pyvista/vtk mesh.
-    p2 = create_plotter(
-        jupyter=jupyter,
-        off_screen=True,
-        window_size=window_size,
-        background=background,
-    )
-    _add2plotter(
-        plotter=p2,
+        plotter=p,
         mesh=mesh,
         key=key,
         background=background,
@@ -545,17 +503,46 @@ def three_d_plot(
         outline_labels=outline_labels,
     )
 
-    p2.camera_position = cpo
-
-    # Save the plotting object.
-    if plotter_filename is not None:
-        save_plotter(p2, filename=plotter_filename)
-
-    # Output the plotting object.
-    if filename is not None:
-        return output_plotter(p=p2, filename=filename, view_up=view_up, framerate=framerate)
+    if jupyter is True:
+        p.show(jupyter_backend="panel", cpos=initial_cpo)
     else:
-        return None
+        cpo = p.show(return_cpos=True, cpos=initial_cpo)
+        # Create another plotting object to save pyvista/vtk mesh.
+        p = create_plotter(
+            jupyter=jupyter,
+            off_screen=True,
+            window_size=window_size,
+            background=background,
+        )
+        _add2plotter(
+            plotter=p,
+            mesh=mesh,
+            key=key,
+            background=background,
+            ambient=ambient,
+            opacity=opacity,
+            point_size=point_size,
+            mesh_style=mesh_style,
+            legend_size=legend_size,
+            legend_loc=legend_loc,
+            outline=outline,
+            outline_width=outline_width,
+            outline_labels=outline_labels,
+        )
+
+        p.camera_position = cpo
+
+        # Save the plotting object.
+        if plotter_filename is not None:
+            save_plotter(p, filename=plotter_filename)
+
+        # Output the plotting object.
+        if filename is not None:
+            return output_plotter(
+                p=p, filename=filename, view_up=view_up, framerate=framerate
+            )
+        else:
+            return None
 
 
 def three_d_animate(
