@@ -6,15 +6,15 @@ Nature (2019)
 code adapted from: https://github.com/rajewsky-lab/novosparc
 """
 
-from typing import Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import anndata
 import numpy as np
 import pandas as pd
 from scipy.cluster import hierarchy
 from scipy.stats import pearsonr
-
-from ..logging import logger_manager as lm
+from tqdm import tqdm
+#from ..logging import logger_manager as lm
 
 
 def find_spatial_archetypes(
@@ -37,10 +37,11 @@ def find_spatial_archetypes(
     archetypes = np.array([arch_comp(xi) for xi in range(1, num_clusters + 1)])
     gene_corrs = np.array([])
 
-    for gene in lm.main_tqdm(range(len(exp_mat)), "Finding gene archetypes"):
+    #for gene in lm.main_tqdm(range(len(exp_mat)), "Finding gene archetypes"):
+    for gene in tqdm(range(len(exp_mat)), "Finding gene archetypes"):
         gene_corrs = np.append(gene_corrs, pearsonr(exp_mat[gene, :], archetypes[clusters[gene] - 1, :])[0])
 
-    lm.main_info("done!")
+    #lm.main_info("done!")
 
     return archetypes, clusters, gene_corrs
 
@@ -76,7 +77,7 @@ def get_genes_from_spatial_archetype(
     indices = np.where(all_corrs_p[all_corrs > 0] <= pval_threshold)[0]
 
     if len(indices) == 0:
-        lm.main_warning("No genes with significant correlation were found at the current p-value threshold.")
+        #lm.main_warning("No genes with significant correlation were found at the current p-value threshold.")
         return None
 
     genes = gene_names[all_corrs > 0][indices]
@@ -110,7 +111,7 @@ def find_spatially_related_genes(
         arch_corrs = np.append(arch_corrs, pearsonr(exp_mat[gene, :], archetypes[archetype, :])[0])
 
     if np.max(arch_corrs) < 0.7:
-        lm.main_warning("No significant correlation between the gene and the spatial archetypes was found.")
+        #lm.main_warning("No significant correlation between the gene and the spatial archetypes was found.")
         return None
 
     archetype = np.argmax(arch_corrs)
@@ -123,7 +124,7 @@ def archetypes(
     moran_i_genes: Union[np.ndarray, list],
     num_clusters: int = 5,
     layer: Union[str, None] = None,
-) -> pd.DataFrame:
+) -> np.ndarray:
 
     """Identify archetypes from the anndata object.
 
@@ -134,14 +135,13 @@ def archetypes(
         layers: the layer for the gene expression, can be None which corresponds to adata.X.
 
     Returns:
-        archetypes: the pandas dataframe of archetypes within the genes with high moran I scores, together with other
-        gene annotation info.
+        archetypes: the archetypes within the genes with high moran I scores.
 
     Examples:
-    >>> archetypes = st.tl.archetypes(adata)
-    >>> adata.obs = pd.concat((adata.obs, df), 1)
-    >>> arch_cols = adata.obs.columns[archetypes.columns.str.startswith("archetype")]
-    >>> st.pl.space(adata, basis="spatial", color=arch_cols, pointsize=0.1, alpha=1)
+        >>> archetypes = st.tl.archetypes(adata)
+        >>> adata.obs = pd.concat((adata.obs, df), 1)
+        >> arch_cols = adata.obs.columns
+        >>> st.pl.space(adata, basis="spatial", color=arch_cols, pointsize=0.1, alpha=1)
     """
 
     if layer is None:
@@ -163,6 +163,7 @@ def archetypes(
 def archetypes_genes(
     adata: anndata.AnnData,
     archetypes: np.ndarray,
+    num_clusters: int,
     moran_i_genes: Union[np.ndarray, list],
     layer: Union[str, None] = None,
 ) -> dict:
@@ -170,9 +171,6 @@ def archetypes_genes(
 
     Args:
         adata: Anndata object of interests.
-        archetypes: a np.ndarray that stores the archetypes information. Rows are architype and columns and expression.
-         Can be generated with the data frame generated from st.tl.archetypes(adata) function using the following code:
-                `archetypes.loc[:, archetypes.columns.str.startswith("archetype")].values.T`
         moran_i_genes: genes that are identified as singificant autocorrelation genes in space based on Moran's I.
         num_clusters: number of archetypes.
         layers: the layer for the gene expression, can be None which corresponds to adata.X.
@@ -182,19 +180,14 @@ def archetypes_genes(
         that particular archetype.
 
     Examples:
-    >>> archetypes = st.tl.archetypes(adata)
-    >>> adata.obs = pd.concat((adata.obs, df), 1)
-    >>> arch_cols = adata.obs.columns[archetypes.columns.str.startswith("archetype")]
-    >>> st.pl.space(adata, basis="spatial", color=arch_cols, pointsize=0.1, alpha=1)
-    >>> archetypes_mat = archetypes.loc[:, archetypes.columns.str.startswith("archetype")].values.T
-    >>> typical_genes = st.tl.archetypes_genes(adata, archetypes_mat, moran_i_genes=adata.var_names)
-    >>> st.pl.scatters(subset_adata,
-    >>>     basis="spatial",
-    >>>     color=['archetype %d'% i] + typical_genes[0].to_list(),
-    >>>     pointsize=0.03,
-    >>>     alpha=1,
-    >>>     figsize=(3, ptp_vec[1]/ptp_vec[0] * 3)
-    >>> )
+         >>> st.tl.archetypes_genes(adata)
+         >>> dyn.pl.scatters(subset_adata,
+         >>>     basis="spatial",
+         >>>     color=['archetype %d'% i] + typical_genes.to_list(),
+         >>>     pointsize=0.03,
+         >>>     alpha=1,
+         >>>     figsize=(3, ptp_vec[1]/ptp_vec[0] * 3)
+         >>> )
     """
 
     if layer is None:
@@ -204,14 +197,14 @@ def archetypes_genes(
 
     archetypes_dict = {}
 
-    for i in np.arange(5):
-        lm.main_info(f"current archetype is, {i}")
+    for i in np.arange(num_clusters):
+        #lm.main_info("current archetype is, ", str(i))
 
         typical_genes = get_genes_from_spatial_archetype(
             exp.T, moran_i_genes, archetypes, archetype=i, pval_threshold=0
         )
 
-        lm.main_info(f"typical gene for the current archetype include {typical_genes}")
+        #lm.main_info("typical gene for the current archetype include, ", typical_genes)
         archetypes_dict[i] = typical_genes
 
     return archetypes_dict
