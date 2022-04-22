@@ -538,9 +538,7 @@ def three_d_plot(
 
         # Output the plotting object.
         if filename is not None:
-            return output_plotter(
-                p=p, filename=filename, view_up=view_up, framerate=framerate
-            )
+            return output_plotter(p=p, filename=filename, view_up=view_up, framerate=framerate)
         else:
             return None
 
