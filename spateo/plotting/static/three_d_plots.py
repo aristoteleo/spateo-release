@@ -20,6 +20,7 @@ def create_plotter(
     off_screen: bool = False,
     window_size: tuple = (1024, 768),
     background: str = "white",
+    shape: Union[str, list, tuple] = (1, 1),
 ) -> Plotter:
     """
     Create a plotting object to display pyvista/vtk mesh.
@@ -29,6 +30,11 @@ def create_plotter(
         off_screen: Renders off screen when True. Useful for automated screenshots.
         window_size: Window size in pixels. The default window_size is `[1024, 768]`.
         background: The background color of the window.
+        shape: Number of sub-render windows inside of the main window. Specify two across with shape=(2, 1) and a two by
+               two grid with shape=(2, 2). By default there is only one render window. Can also accept a string descriptor
+               as shape. E.g.:
+               shape="3|1" means 3 plots on the left and 1 on the right,
+               shape="4/2" means 4 plots on top and 2 at the bottom.
     Returns:
         plotter: The plotting object to display pyvista/vtk mesh.
     """
@@ -36,10 +42,7 @@ def create_plotter(
     # Create an initial plotting object.
     notebook = True if jupyter else False
     plotter = pv.Plotter(
-        off_screen=off_screen,
-        window_size=window_size,
-        notebook=notebook,
-        lighting="light_kit",
+        off_screen=off_screen, window_size=window_size, notebook=notebook, lighting="light_kit", shape=shape
     )
 
     # Set the background color of the active render window.
