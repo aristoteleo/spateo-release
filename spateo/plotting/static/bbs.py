@@ -1,7 +1,7 @@
 """Plotting functions for creating the bounding box.
 """
 
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +10,8 @@ from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from shapely.geometry import MultiPolygon, Polygon
+
+from .utils import save_return_show_fig_utils
 
 
 def polygon(
@@ -20,6 +22,9 @@ def polygon(
     ec: str = "#000000",
     fig: Optional[Figure] = None,
     ax: Optional[Axes] = None,
+    background: Union[None, str] = None,
+    save_show_or_return: str = "show",
+    save_kwargs: Dict = {},
 ):
     """Plot the polygon identified by the alpha hull method.
 
@@ -29,11 +34,29 @@ def polygon(
         margin: The margin of the figure Axes.
         fc: The facecolor of the PolygonPatch.
         ec: The edgecolor of the PolygonPatch.
+        background: string or None (optional, default 'None`)
+            The color of the background. Usually this will be either
+            'white' or 'black', but any color name will work. Ideally
+            one wants to match this appropriately to the colors being
+            used for points etc. This is one of the things that themes
+            handle for you. Note that if theme
+            is passed then this value will be overridden by the
+            corresponding option of the theme.
+        save_show_or_return: `str` {'save', 'show', 'return', 'both', 'all'} (default: `show`)
+            Whether to save, show or return the figure. If "both", it will save and plot the figure at the same time. If
+            "all", the figure will be saved, displayed and the associated axis and other object will be return.
+        save_kwargs: `dict` (default: `{}`)
+            A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
+            save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent":
+            True, "close": True, "verbose": True} as its parameters. Otherwise you can provide a dictionary that
+            properly modify those keys according to your needs.
 
     Returns:
         fig: The matplotlib.figure figure object of the figure.
         ax: The matplotlib.axes._subplots AxesSubplot object of the figure.
     """
+    from matplotlib import rcParams
+    from matplotlib.colors import to_hex
 
     if fig is None:
         fig = plt.figure(figsize=figsize)
@@ -46,7 +69,26 @@ def polygon(
     ax.set_ylim([y_min - margin, y_max + margin])
     patch = PolygonPatch(concave_hull, fill=True, zorder=-1, fc=fc, ec=ec)
     ax.add_patch(patch)
-    return fig, ax
+
+    if background is None:
+        _background = rcParams.get("figure.facecolor")
+        _background = to_hex(_background) if type(_background) is tuple else _background
+        # if save_show_or_return != 'save': set_figure_params('dynamo', background=_background)
+    else:
+        _background = background
+
+    return save_return_show_fig_utils(
+        save_show_or_return=save_show_or_return,
+        show_legend=False,
+        background=_background,
+        prefix="scatters",
+        save_kwargs=save_kwargs,
+        total_panels=1,
+        fig=fig,
+        axes=ax,
+        return_all=False,
+        return_all_list=None,
+    )
 
 
 def delaunay(
@@ -56,6 +98,9 @@ def delaunay(
     title: Optional[str] = None,
     fig: Optional[Figure] = None,
     ax: Optional[Axes] = None,
+    background: Union[None, str] = None,
+    save_show_or_return: str = "show",
+    save_kwargs: Dict = {},
 ):
     """Plot the Delaunay triangulation result.
 
@@ -66,11 +111,29 @@ def delaunay(
         title: The title of the figure.
         fig: The matplotlib.figure figure object of the figure.
         ax: The matplotlib.axes._subplots AxesSubplot object of the figure.
+        background: string or None (optional, default 'None`)
+            The color of the background. Usually this will be either
+            'white' or 'black', but any color name will work. Ideally
+            one wants to match this appropriately to the colors being
+            used for points etc. This is one of the things that themes
+            handle for you. Note that if theme
+            is passed then this value will be overridden by the
+            corresponding option of the theme.
+        save_show_or_return: `str` {'save', 'show', 'return', 'both', 'all'} (default: `show`)
+            Whether to save, show or return the figure. If "both", it will save and plot the figure at the same time. If
+            "all", the figure will be saved, displayed and the associated axis and other object will be return.
+        save_kwargs: `dict` (default: `{}`)
+            A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
+            save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent":
+            True, "close": True, "verbose": True} as its parameters. Otherwise you can provide a dictionary that
+            properly modify those keys according to your needs.
 
     Returns:
         fig: The matplotlib.figure figure object of the figure.
         ax: The matplotlib.axes._subplots AxesSubplot object of the figure.
     """
+    from matplotlib import rcParams
+    from matplotlib.colors import to_hex
 
     if fig is None:
         fig = plt.figure(figsize=figsize)
@@ -83,4 +146,22 @@ def delaunay(
     ax.plot(delaunay_points[:, 0], delaunay_points[:, 1], "o", color=pc)
     ax.set_title(title)
 
-    return fig, ax
+    if background is None:
+        _background = rcParams.get("figure.facecolor")
+        _background = to_hex(_background) if type(_background) is tuple else _background
+        # if save_show_or_return != 'save': set_figure_params('dynamo', background=_background)
+    else:
+        _background = background
+
+    return save_return_show_fig_utils(
+        save_show_or_return=save_show_or_return,
+        show_legend=False,
+        background=_background,
+        prefix="scatters",
+        save_kwargs=save_kwargs,
+        total_panels=1,
+        fig=fig,
+        axes=ax,
+        return_all=False,
+        return_all_list=None,
+    )

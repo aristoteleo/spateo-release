@@ -38,6 +38,7 @@ from .utils import (
     is_layer_keys,
     is_list_of_lists,
     save_fig,
+    save_return_show_fig_utils,
 )
 
 # from ..tools.moments import calc_1nd_moment
@@ -216,7 +217,7 @@ def scatters(
         sort: `str` (optional, default `raw`)
             The method to reorder data so that high values points will be on top of background points. Can be one of
             {'raw', 'abs', 'neg'}, i.e. sorted by raw data, sort by absolute values or sort by negative values.
-        save_show_or_return: `str` {'save', 'show', 'return'} (default: `show`)
+        save_show_or_return: `str` {'save', 'show', 'return', 'both', 'all'} (default: `show`)
             Whether to save, show or return the figure. If "both", it will save and plot the figure at the same time. If
             "all", the figure will be saved, displayed and the associated axis and other object will be return.
         save_kwargs: `dict` (default: `{}`)
@@ -999,37 +1000,16 @@ def scatters(
             _plot_basis_layer(cur_b, cur_l)
 
     # main_debug("show, return or save...")
-    if save_show_or_return in ["save", "both", "all"]:
-        s_kwargs = {
-            "path": None,
-            "prefix": "scatters",
-            "dpi": None,
-            "ext": "pdf",
-            "transparent": True,
-            "close": True,
-            "verbose": True,
-        }
-        s_kwargs = update_dict(s_kwargs, save_kwargs)
-
-        save_fig(**s_kwargs)
-        if background is not None:
-            reset_rcParams()
-    elif save_show_or_return in ["show", "both", "all"]:
-        if show_legend:
-            plt.subplots_adjust(right=0.85)
-
-        # with warnings.catch_warnings():
-        #     warnings.simplefilter("ignore")
-        #     plt.tight_layout()
-
-        plt.show()
-        if background is not None:
-            reset_rcParams()
-    elif save_show_or_return in ["return", "all"]:
-        if background is not None:
-            reset_rcParams()
-
-        if return_all:
-            return (axes_list, color_list, font_color) if total_panels > 1 else (ax, color_out, font_color)
-        else:
-            return axes_list if total_panels > 1 else ax
+    # save_return_show_fig_utils
+    return save_return_show_fig_utils(
+        save_show_or_return=save_show_or_return,
+        show_legend=show_legend,
+        background=background,
+        prefix="scatters",
+        save_kwargs=save_kwargs,
+        total_panels=total_panels,
+        fig=figure,
+        axes=axes_list if total_panels else ax,
+        return_all=return_all,
+        return_all_list=(axes_list, color_list, font_color) if total_panels > 1 else (ax, color_out, font_color),
+    )
