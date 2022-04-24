@@ -49,7 +49,10 @@ def create_plotter(
     plotter.background_color = background
 
     # Add a camera orientation widget to the active renderer (This Widget cannot be used in jupyter notebook).
-    plotter.add_camera_orientation_widget()
+    if shape == (1, 1):
+        plotter.add_camera_orientation_widget()
+    else:
+        plotter.add_axes()
 
     return plotter
 
