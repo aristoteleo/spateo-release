@@ -1,14 +1,15 @@
 """Spatial DEGs
 """
+import random
 from typing import List, Optional
 
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from joblib import Parallel, delayed
 from pysal import explore, lib
 from scipy.sparse import issparse
 from statsmodels.sandbox.stats.multicomp import multipletests
-from tqdm import tqdm
 
 
 def moran_i(
@@ -19,8 +20,9 @@ def moran_i(
     x: Optional[List[int]] = None,
     y: Optional[List[int]] = None,
     k: int = 5,
-    weighted: str = "kernel",
-    permutations: int = 999,
+    weighted: Optional[List[str]] = None,
+    permutations: int = 199,
+    n_jobs: int = 40,
 ) -> pd.DataFrame:
     """Identify genes with strong spatial autocorrelation with Moran's I test.
     This can be used to identify genes that are
@@ -46,9 +48,12 @@ def moran_i(
         k: 'int' (defult=20)
             Number of neighbors to use by default for kneighbors queries.
         weighted : 'str'(defult='kernel')
-            Spatial weights, defult is based on kernel functions.
+            Spatial weights, defult is None, 'kernel' is based on kernel functions.
         permutations: `int` (default=999)
             Number of random permutations for calculation of pseudo-p_values.
+        n_cores: `int` (default=30)
+            The maximum number of concurrently running jobs, If -1 all CPUs are used.
+            If 1 is given, no parallel computing code is used at all.
     Returns
     -------
         A pandas DataFrame of the Moran' I test results.
@@ -69,8 +74,6 @@ def moran_i(
         y = adata.obsm["spatial"][:, 1].tolist()
     else:
         y = y
-    gene_num = len(genes)
-    sparse = issparse(X_data)
     xymap = pd.DataFrame({"x": x, "y": y})
     if weighted is not None:
         # weighted matrix (kernel distance)
@@ -81,24 +84,20 @@ def moran_i(
         kd = lib.cg.KDTree(np.array(xymap))
         nw = lib.weights.KNN(kd, k)
         W = lib.weights.W(nw.neighbors, nw.weights)
-    Moran_I, p_value, statistics = (
-        [0] * gene_num,
-        [0] * gene_num,
-        [0] * gene_num,
-    )
-    for i_gene, gene in tqdm(enumerate(genes), desc="Moran's I Global Autocorrelation Statistic"):
-        cur_X = X_data[:, adata.var.index == gene].A if sparse else X_data[:, adata.var.index == gene]
+
+    # computing the moran_i for a single gene, and then used the joblib.Parallel to compute all genes in adata object.
+    def _single(gene, X_data, W, adata, permutations):
+        cur_X = X_data[:, adata.var.index == gene].A if issparse(X_data) else X_data[:, adata.var.index == gene]
         mbi = explore.esda.moran.Moran(cur_X, W, permutations=permutations, two_tailed=False)
-        Moran_I[i_gene] = mbi.I
-        p_value[i_gene] = mbi.p_sim
-        statistics[i_gene] = mbi.z_sim
-    Moran_res = pd.DataFrame(
-        {
-            "moran_i": Moran_I,
-            "moran_p_val": p_value,
-            "moran_q_val": multipletests(p_value, method="fdr_bh")[1],
-            "moran_z": statistics,
-        },
-        index=genes,
-    )
-    return Moran_res
+        Moran_I = mbi.I
+        p_value = mbi.p_sim
+        statistics = mbi.z_sim
+        return [gene, Moran_I, p_value, statistics]
+
+    # parallel computing
+    res = Parallel(n_jobs)(delayed(_single)(gene, X_data, W, adata, permutations) for gene in adata.var_names)
+    res = pd.DataFrame(res, index=adata.var_names)
+    res = res.drop(columns=0)
+    res.columns = ["moran_i", "moran_p_val", "moran_z"]
+    res["moran_q_val"] = multipletests(res["moran_p_val"], method="fdr_bh")[1]
+    return res
