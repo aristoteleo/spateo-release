@@ -7,6 +7,7 @@ import anndata
 import geopandas
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 from pysal import explore
 from pysal.lib import weights
 from pysal.model import spreg
@@ -56,6 +57,7 @@ def lisa_geo_df(
     df["exp_zscore"] = (df["exp"] - df["exp"].mean()) / df["exp"].std()
     df["w_exp_zscore"] = (df["w_exp"] - df["w_exp"].mean()) / df["w_exp"].std()
 
+    df["exp"] = df["exp"].astype(np.float64)
     lisa = explore.esda.moran.Moran_Local(df["exp"], w)
     df = geopandas.GeoDataFrame(df, geometry=geopandas.points_from_xy(df.x, df.y))
     df = df.assign(Is=lisa.Is)
@@ -76,7 +78,7 @@ def lisa_geo_df(
     group = [spot_labels[i] for i in spots]
     df = df.assign(group=group)
 
-    return df
+    return (lisa, df)
 
 
 def local_moran_i(
@@ -85,8 +87,9 @@ def local_moran_i(
     spatial_key: str = "spatial",
     genes: Tuple[None, list] = None,
     layer: Tuple[None, str] = None,
-    n_neighbors: int = 8,
+    n_neighbors: int = 5,
     copy: bool = False,
+    n_jobs: int = 30,
 ):
     """Identify cell type specific genes with local Moran's I test.
 
@@ -106,7 +109,6 @@ def local_moran_i(
                          cell groups
             {*}_frac_val: The maximum fraction of categories across all cell groups
             {*}_spec_val: The maximum specificity of categories across all cell groups
-            
             {*}_num_group: The corresponding cell group with the largest number of each category (this can be affect by
                            the cell group size).
             {*}_frac_group: The corresponding cell group with the highest fraction of each category.
@@ -116,19 +118,15 @@ def local_moran_i(
     Examples:
     >>> import spateo as st
     >>> markers_df = pd.DataFrame(adata.var).query("hotspot_frac_val > 0.05 & mean > 0.05").\
-    >>> groupby(['hotspot_spec'])['hotspot_spec_val'].nlargest(5)
+    >>> groupby(['hotspot_spec_group'])['hotspot_spec_val'].nlargest(5)
     >>> markers = markers_df.index.get_level_values(1)
     >>>
     >>> for i in adata.obs[group].unique():
     >>>     if i in markers_df.index.get_level_values(0):
     >>>         print(markers_df[i])
-    >>>         st.pl.space(adata, color=group, highlights=[i], pointsize=0.1, alpha=1, figsize=(12, 8))
-    >>>
+    >>>         dyn.pl.space(adata, color=group, highlights=[i], pointsize=0.1, alpha=1, figsize=(12, 8))
     >>>         st.pl.space(adata, color=markers_df[i].index, pointsize=0.1, alpha=1, figsize=(12, 8))
     """
-    if copy:
-        adata = copy_adata(adata) if copy else adata
-
     group_num = adata.obs[group].value_counts()
     group_name = adata.obs[group]
     uniq_g, group_name = group_name.unique(), group_name.to_list()
@@ -142,7 +140,7 @@ def local_moran_i(
     if genes is None:
         genes = adata.var.index[adata.var.use_for_pca]
     else:
-        genes = np.log1p(adata.var.index.intersection(genes))
+        genes = adata.var.index.intersection(genes)
 
     db = pd.DataFrame(adata.obsm[spatial_key], columns=["x", "y"])
 
@@ -151,10 +149,10 @@ def local_moran_i(
     # hotspot: HH; coldspot: LL; doughnut: HL, diamond: LH; the first one is the query point
     # while the second the neighbors. Order on the quantile plot is 1, 3, 2, 4
     def _assign_columns(type):
-        cat_list = [type + i for i in suffix]
+        cat_group_list = [type + i + "_group" for i in suffix]
         cat_val_list = [type + i + "_val" for i in suffix]
-        adata.var[cat_list[0]], adata.var[cat_list[1]], adata.var[cat_list[0]] = None, None, None
-        adata.var[cat_val_list[0]], adata.var[cat_val_list[1]], adata.var[cat_val_list[0]] = None, None, None
+        adata.var[cat_group_list[0]], adata.var[cat_group_list[1]], adata.var[cat_group_list[2]] = None, None, None
+        adata.var[cat_val_list[0]], adata.var[cat_val_list[1]], adata.var[cat_val_list[2]] = None, None, None
 
     for i in ["hotspot", "coldspot", "doughnut", "diamond"]:
         _assign_columns(i)
@@ -171,29 +169,26 @@ def local_moran_i(
 
     valid_inds_list = [np.array(group_name) == g for g in uniq_g]
 
-    # calculate the value
-    def _get_nums(spots, valid_inds, g):
-        return (
-            sum(spots[valid_inds] > 0),  # number of {*} (like hotspot, colospot, etc.) in this cell group
-            sum(spots[valid_inds] > 0) / group_num[g],  # fraction of {*} in this cell group
-            sum(spots[valid_inds] > 0) / sum(hotspot > 0),  # specificity of {*} in this cell group
-        )
-
-    # calculate the maximum across all cell groups
-    def _get_group_max(num, frac, spec):
-        return (np.max(num), np.max(frac), np.max(spec))
-
-    # get the group name with the maximum
-    def _get_max_group_name(num, frac, spec):
-        return (
-            uniq_g[np.argsort(num)[-1]],
-            uniq_g[np.argsort(frac)[-1]],
-            uniq_g[np.argsort(spec)[-1]],
-        )
-
-    for i, cur_g in tqdm(
-        enumerate(genes),
-        desc="performing local Moran I analysis and assign genes and significant domaints to cell type",
+    ###
+    def _single(
+        cur_g,
+        db,
+        w,
+        adata,
+        uniq_g,
+        valid_inds_list,
+        hotspot_num,
+        hotspot_frac,
+        hotspot_spec,
+        coldspot_num,
+        coldspot_frac,
+        coldspot_spec,
+        doughnut_num,
+        doughnut_frac,
+        doughnut_spec,
+        diamond_num,
+        diamond_frac,
+        diamond_spec,
     ):
         if layer is None:
             db["exp"] = adata[:, cur_g].X.A.flatten()
@@ -202,7 +197,8 @@ def local_moran_i(
 
         db["w_exp"] = weights.spatial_lag.lag_spatial(w, db["exp"])
 
-        lisa = explore.esda.moran.Moran_Local(db["exp"], w)
+        db["exp"] = db["exp"].astype(np.float64)
+        lisa = explore.esda.moran.Moran_Local(db["exp"], w, permutations=199)
 
         # find significant cells
         sig = 1 * (lisa.p_sim < 0.05)
@@ -212,6 +208,26 @@ def local_moran_i(
         coldspot = 3 * (sig * lisa.q == 3)
         doughnut = 2 * (sig * lisa.q == 2)
         diamond = 4 * (sig * lisa.q == 4)
+
+        # calculate the value
+        def _get_nums(spots, valid_inds, g):
+            return (
+                sum(spots[valid_inds] > 0),  # number of {*} (like hotspot, colospot, etc.) in this cell group
+                sum(spots[valid_inds] > 0) / group_num[g],  # fraction of {*} in this cell group
+                sum(spots[valid_inds] > 0) / sum(spots > 0),  # specificity of {*} in this cell group
+            )
+
+        # calculate the maximum val across all cell groups
+        def _get_group_max(num, frac, spec):
+            return (np.max(num), np.max(frac), np.max(spec))
+
+        # get the group name with the maximum
+        def _get_max_group_name(num, frac, spec):
+            return (
+                uniq_g[np.argsort(num)[-1]],
+                uniq_g[np.argsort(frac)[-1]],
+                uniq_g[np.argsort(spec)[-1]],
+            )
 
         for ind, g in enumerate(uniq_g):
             valid_inds = valid_inds_list[ind]
@@ -261,9 +277,36 @@ def local_moran_i(
             adata.var.loc[cur_g, "diamond_frac_group"],
             adata.var.loc[cur_g, "diamond_spec_group"],
         ) = _get_max_group_name(diamond_num, diamond_frac, diamond_spec)
+        return adata.var.loc[cur_g, :].values
 
-    if copy:
-        return adata
+    # parallel computing
+    res = Parallel(n_jobs)(
+        delayed(_single)(
+            cur_g,
+            db,
+            w,
+            adata,
+            uniq_g,
+            valid_inds_list,
+            hotspot_num,
+            hotspot_frac,
+            hotspot_spec,
+            coldspot_num,
+            coldspot_frac,
+            coldspot_spec,
+            doughnut_num,
+            doughnut_frac,
+            doughnut_spec,
+            diamond_num,
+            diamond_frac,
+            diamond_spec,
+        )
+        for cur_g in genes
+    )
+    res = pd.DataFrame(res, index=genes)
+    res = res.drop(columns=0)
+    res.columns = adata.var.loc[genes, :].columns.drop("mt")
+    return res
 
 
 def GM_lag_model(
@@ -272,9 +315,10 @@ def GM_lag_model(
     spatial_key: str = "spatial",
     genes: Tuple[None, list] = None,
     drop_dummy: Tuple[None, str] = None,
-    n_neighbors: int = 8,
+    n_neighbors: int = 5,
     layer: Tuple[None, str] = None,
     copy: bool = False,
+    n_jobs=30,
 ):
     """Spatial lag model with spatial two stage least squares (S2SLS) with results and diagnostics; Anselin (1988).
 
@@ -313,9 +357,6 @@ def GM_lag_model(
     >>>         st.pl.space(adata.copy(), basis='spatial', color=['simpleanno'],
     >>>             highlights=[i.split('_GM_lag_coeff')[0]], pointsize=0.1, alpha=1, show_legend='on data')
     """
-    if copy:
-        adata = copy_adata(adata) if copy else adata
-
     group_num = adata.obs[group].value_counts()
     max_group, min_group, min_group_ncells = (
         group_num.index[0],
@@ -325,6 +366,8 @@ def GM_lag_model(
 
     group_name = adata.obs[group]
     db = pd.DataFrame({"group": group_name})
+    categories = np.array(adata.obs[group].unique().tolist() + ["others"])
+    db["group"] = pd.Categorical(db["group"], categories=categories)
 
     if drop_dummy is None:
         db.iloc[sample(np.arange(adata.n_obs).tolist(), min_group_ncells), :] = "others"
@@ -360,9 +403,12 @@ def GM_lag_model(
         adata.var[str(i) + "_GM_lag_zstat"] = None
         adata.var[str(i) + "_GM_lag_pval"] = None
 
-    for i, cur_g in tqdm(
-        enumerate(genes),
-        desc="performing GM_lag_model and assign coefficient and p-val to each cell type",
+    def _single(
+        cur_g,
+        genes,
+        X,
+        adata,
+        knn,
     ):
         if layer is None:
             X["log_exp"] = adata[:, cur_g].X.A
@@ -396,6 +442,18 @@ def GM_lag_model(
                 adata.var.loc[cur_g, str(g) + "_GM_lag_coeff"] = np.nan
                 adata.var.loc[cur_g, str(g) + "_GM_lag_zstat"] = np.nan
                 adata.var.loc[cur_g, str(g) + "_GM_lag_pval"] = np.nan
+        return adata.var.loc[cur_g, :].values
 
-    if copy:
-        return adata
+    res = Parallel(n_jobs)(
+        delayed(_single)(
+            cur_g,
+            genes,
+            X,
+            adata,
+            knn,
+        )
+        for cur_g in genes
+    )
+    res = pd.DataFrame(res, index=genes)
+    res.columns = adata.var.loc[genes, :].columns
+    return res
