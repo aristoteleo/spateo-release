@@ -114,7 +114,7 @@ def add_outline(
     outline_width: float = 5.0,
     outline_color: Union[str, tuple] = "black",
     labels: bool = True,
-    labels_size: float = 16,
+    labels_size: int = 16,
     labels_color: Union[str, tuple] = "white",
 ):
     """
@@ -248,9 +248,10 @@ def add_legend(
 
 def output_plotter(
     p: Plotter,
-    filename: str,
+    filename: Optional[str] = None,
     view_up: tuple = (0.5, 0.5, 1),
     framerate: int = 15,
+    jupyter: bool = False,
 ):
     """
     Output plotter as image, gif file or mp4 file.
@@ -264,6 +265,7 @@ def output_plotter(
             * Output a mp4 file, please enter a filename ending with `.mp4`.
         view_up: The normal to the orbital plane. Only available when filename ending with `.mp4` or `.gif`.
         framerate: Frames per second. Only available when filename ending with `.mp4` or `.gif`.
+        jupyter: Whether to plot in jupyter notebook.
     Returns:
         img: Numpy array of the last image.
              Returned only if filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
@@ -284,30 +286,37 @@ def output_plotter(
         p.close()
 
     # The format of the output file.
-    filename_format = filename.split(".")[-1]
-
-    # Output the plotter in the format of the output file.
-    if filename_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
-        cpo, img = p.show(
-            screenshot=filename,
-            return_img=True,
-            return_cpos=True,
-        )
-        return cpo, img
-    elif filename_format == "gif":
-        _to_gif(_filename=filename, _view_up=view_up)
-        return None
-    elif filename_format == "mp4":
-        _to_mp4(_filename=filename, _view_up=view_up, _framerate=framerate)
-        return None
+    if jupyter is True:
+        p.show()
     else:
-        raise ValueError(
-            "\nFilename is wrong."
-            "\nIf outputting an image file, "
-            "please enter a filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`."
-            "\nIf outputting a gif file, please enter a filename ending with `.gif`."
-            "\nIf outputting a mp4 file, please enter a filename ending with `.mp4`."
-        )
+        if filename is None:
+            cpo, img = p.show(return_img=True, return_cpos=True)
+            return cpo, img
+        else:
+            filename_format = filename.split(".")[-1]
+
+            # Output the plotter in the format of the output file.
+            if filename_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
+                cpo, img = p.show(
+                    screenshot=filename,
+                    return_img=True,
+                    return_cpos=True,
+                )
+                return cpo, img
+            elif filename_format == "gif":
+                _to_gif(_filename=filename, _view_up=view_up)
+                return None
+            elif filename_format == "mp4":
+                _to_mp4(_filename=filename, _view_up=view_up, _framerate=framerate)
+                return None
+            else:
+                raise ValueError(
+                    "\nFilename is wrong."
+                    "\nIf outputting an image file, "
+                    "please enter a filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`."
+                    "\nIf outputting a gif file, please enter a filename ending with `.gif`."
+                    "\nIf outputting a mp4 file, please enter a filename ending with `.mp4`."
+                )
 
 
 def save_plotter(
