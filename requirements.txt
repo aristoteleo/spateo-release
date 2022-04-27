@@ -17,7 +17,7 @@ networkx>=2.6.3
 ngs_tools>=1.6.0
 nudged>=0.3.1
 numba>=0.46.0
-numpy>=1.18.1<= 2.10.0
+numpy>=1.18.1<=2.10.0
 opencv-python>=4.5.4.60
 open3d>=0.14.1
 pandana
