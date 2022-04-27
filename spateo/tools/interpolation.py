@@ -1,4 +1,4 @@
-from typing import Tuple, Union, List
+from typing import List, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
