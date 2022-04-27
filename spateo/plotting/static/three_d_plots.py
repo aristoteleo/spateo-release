@@ -20,6 +20,7 @@ def create_plotter(
     off_screen: bool = False,
     window_size: tuple = (1024, 768),
     background: str = "white",
+    shape: Union[str, list, tuple] = (1, 1),
 ) -> Plotter:
     """
     Create a plotting object to display pyvista/vtk mesh.
@@ -29,6 +30,11 @@ def create_plotter(
         off_screen: Renders off screen when True. Useful for automated screenshots.
         window_size: Window size in pixels. The default window_size is `[1024, 768]`.
         background: The background color of the window.
+        shape: Number of sub-render windows inside of the main window. Specify two across with shape=(2, 1) and a two by
+               two grid with shape=(2, 2). By default there is only one render window. Can also accept a string descriptor
+               as shape. E.g.:
+               shape="3|1" means 3 plots on the left and 1 on the right,
+               shape="4/2" means 4 plots on top and 2 at the bottom.
     Returns:
         plotter: The plotting object to display pyvista/vtk mesh.
     """
@@ -36,34 +42,17 @@ def create_plotter(
     # Create an initial plotting object.
     notebook = True if jupyter else False
     plotter = pv.Plotter(
-        off_screen=off_screen,
-        window_size=window_size,
-        notebook=notebook,
-        lighting="light_kit",
+        off_screen=off_screen, window_size=window_size, notebook=notebook, lighting="light_kit", shape=shape
     )
 
     # Set the background color of the active render window.
     plotter.background_color = background
 
-    # Contrasting color of the background color.
-    bg_rgb = mpl.colors.to_rgb(background)
-    cbg_rgb = (1 - bg_rgb[0], 1 - bg_rgb[1], 1 - bg_rgb[2])
-
-    if jupyter is True:
-        # Description of control 3D images in jupyter notebook.
-        plotter.add_text(
-            "The method to control 3D images in jupyter notebook is as follows:"
-            "CTRL Left Mouse spins the camera around its view plane normal;"
-            "SHIFT Left Mouse pans the camera; "
-            "CTRL SHIFT Left Mouse dollies (a positional zoom) the camera;"
-            "Left mouse button dollies the camera.",
-            font_size=12,
-            color=cbg_rgb,
-            font="arial",
-        )
-    else:
-        # Add a camera orientation widget to the active renderer (This Widget cannot be used in jupyter notebook).
+    # Add a camera orientation widget to the active renderer (This Widget cannot be used in jupyter notebook).
+    if shape == (1, 1):
         plotter.add_camera_orientation_widget()
+    else:
+        plotter.add_axes()
 
     return plotter
 
@@ -125,7 +114,7 @@ def add_outline(
     outline_width: float = 5.0,
     outline_color: Union[str, tuple] = "black",
     labels: bool = True,
-    labels_size: float = 16,
+    labels_size: int = 16,
     labels_color: Union[str, tuple] = "white",
 ):
     """
@@ -259,9 +248,10 @@ def add_legend(
 
 def output_plotter(
     p: Plotter,
-    filename: str,
+    filename: Optional[str] = None,
     view_up: tuple = (0.5, 0.5, 1),
     framerate: int = 15,
+    jupyter: bool = False,
 ):
     """
     Output plotter as image, gif file or mp4 file.
@@ -275,6 +265,7 @@ def output_plotter(
             * Output a mp4 file, please enter a filename ending with `.mp4`.
         view_up: The normal to the orbital plane. Only available when filename ending with `.mp4` or `.gif`.
         framerate: Frames per second. Only available when filename ending with `.mp4` or `.gif`.
+        jupyter: Whether to plot in jupyter notebook.
     Returns:
         img: Numpy array of the last image.
              Returned only if filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
@@ -295,30 +286,37 @@ def output_plotter(
         p.close()
 
     # The format of the output file.
-    filename_format = filename.split(".")[-1]
-
-    # Output the plotter in the format of the output file.
-    if filename_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
-        cpo, img = p.show(
-            screenshot=filename,
-            return_img=True,
-            return_cpos=True,
-        )
-        return cpo, img
-    elif filename_format == "gif":
-        _to_gif(_filename=filename, _view_up=view_up)
-        return None
-    elif filename_format == "mp4":
-        _to_mp4(_filename=filename, _view_up=view_up, _framerate=framerate)
-        return None
+    if jupyter is True:
+        p.show()
     else:
-        raise ValueError(
-            "\nFilename is wrong."
-            "\nIf outputting an image file, "
-            "please enter a filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`."
-            "\nIf outputting a gif file, please enter a filename ending with `.gif`."
-            "\nIf outputting a mp4 file, please enter a filename ending with `.mp4`."
-        )
+        if filename is None:
+            cpo, img = p.show(return_img=True, return_cpos=True)
+            return cpo, img
+        else:
+            filename_format = filename.split(".")[-1]
+
+            # Output the plotter in the format of the output file.
+            if filename_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
+                cpo, img = p.show(
+                    screenshot=filename,
+                    return_img=True,
+                    return_cpos=True,
+                )
+                return cpo, img
+            elif filename_format == "gif":
+                _to_gif(_filename=filename, _view_up=view_up)
+                return None
+            elif filename_format == "mp4":
+                _to_mp4(_filename=filename, _view_up=view_up, _framerate=framerate)
+                return None
+            else:
+                raise ValueError(
+                    "\nFilename is wrong."
+                    "\nIf outputting an image file, "
+                    "please enter a filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`."
+                    "\nIf outputting a gif file, please enter a filename ending with `.gif`."
+                    "\nIf outputting a mp4 file, please enter a filename ending with `.mp4`."
+                )
 
 
 def save_plotter(
@@ -498,39 +496,14 @@ def three_d_plot(
     """
 
     # Create a plotting object to display pyvista/vtk mesh.
-    p1 = create_plotter(
+    p = create_plotter(
         jupyter=jupyter,
         off_screen=off_screen,
         window_size=window_size,
         background=background,
     )
     _add2plotter(
-        plotter=p1,
-        mesh=mesh,
-        key=key,
-        background=background,
-        ambient=ambient,
-        opacity=opacity,
-        point_size=point_size,
-        mesh_style=mesh_style,
-        legend_size=legend_size,
-        legend_loc=legend_loc,
-        outline=outline,
-        outline_width=outline_width,
-        outline_labels=outline_labels,
-    )
-    jupyter_backend = "panel" if jupyter is True else None
-    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend, cpos=initial_cpo)
-
-    # Create another plotting object to save pyvista/vtk mesh.
-    p2 = create_plotter(
-        jupyter=jupyter,
-        off_screen=True,
-        window_size=window_size,
-        background=background,
-    )
-    _add2plotter(
-        plotter=p2,
+        plotter=p,
         mesh=mesh,
         key=key,
         background=background,
@@ -545,17 +518,44 @@ def three_d_plot(
         outline_labels=outline_labels,
     )
 
-    p2.camera_position = cpo
-
-    # Save the plotting object.
-    if plotter_filename is not None:
-        save_plotter(p2, filename=plotter_filename)
-
-    # Output the plotting object.
-    if filename is not None:
-        return output_plotter(p=p2, filename=filename, view_up=view_up, framerate=framerate)
+    if jupyter is True:
+        p.show(jupyter_backend="panel", cpos=initial_cpo)
     else:
-        return None
+        cpo = p.show(return_cpos=True, cpos=initial_cpo)
+        # Create another plotting object to save pyvista/vtk mesh.
+        p = create_plotter(
+            jupyter=jupyter,
+            off_screen=True,
+            window_size=window_size,
+            background=background,
+        )
+        _add2plotter(
+            plotter=p,
+            mesh=mesh,
+            key=key,
+            background=background,
+            ambient=ambient,
+            opacity=opacity,
+            point_size=point_size,
+            mesh_style=mesh_style,
+            legend_size=legend_size,
+            legend_loc=legend_loc,
+            outline=outline,
+            outline_width=outline_width,
+            outline_labels=outline_labels,
+        )
+
+        p.camera_position = cpo
+
+        # Save the plotting object.
+        if plotter_filename is not None:
+            save_plotter(p, filename=plotter_filename)
+
+        # Output the plotting object.
+        if filename is not None:
+            return output_plotter(p=p, filename=filename, view_up=view_up, framerate=framerate)
+        else:
+            return None
 
 
 def three_d_animate(

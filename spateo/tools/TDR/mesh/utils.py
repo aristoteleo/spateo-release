@@ -45,12 +45,10 @@ def collect_mesh(
     A composite class to hold many data sets which can be iterated over.
     You can think of MultiBlock like lists or dictionaries as we can iterate over this data structure by index
     and we can also access blocks by their string name.
-
     If the input is a dictionary, it can be iterated in the following ways:
         >>> blocks = collect_mesh(meshes, meshes_name)
         >>> for name in blocks.keys():
         ...     print(blocks[name])
-
     If the input is a list, it can be iterated in the following ways:
         >>> blocks = collect_mesh(meshes)
         >>> for block in blocks:
@@ -98,6 +96,7 @@ def add_mesh_labels(
         mask_color: Color to use for plotting mask information.
         mask_alpha: The opacity of the color to use for plotting mask information.
         copy: Whether to copy `pcd` or modify it inplace.
+
     Returns:
          A mesh, which contains the following properties:
             `mesh.cell_data[key_added]` or `mesh.point_data[key_added]`, the labels array;

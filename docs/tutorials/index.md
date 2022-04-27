@@ -6,5 +6,6 @@ TODO
 .. nbgallery::
 
    notebooks/cell_segmentation
+   notebooks/tdr
 
 ```

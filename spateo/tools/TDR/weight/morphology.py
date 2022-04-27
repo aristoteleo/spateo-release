@@ -101,19 +101,12 @@ def pc_KDE(
                 * `'linear'`
                 * `'cosine'`
         bandwidth: The bandwidth of the kernel.
-        colormap: Colors to use for plotting pcd. The default pcd_cmap is `'hot_r'`.
-        alphamap: The opacity of the colors to use for plotting pcd. The default pcd_amap is `1.0`.
+        colormap: Colors to use for plotting pcd. The default colormap is `'hot_r'`.
+        alphamap: The opacity of the colors to use for plotting pcd. The default alphamap is `1.0`.
         copy: Whether to copy `pcd` or modify it inplace.
     Returns:
         pcd: Reconstructed 3D point cloud, which contains the following properties:
             `pcd[key_added]`, the kernel density.
-
-    Examples:
-        >>> new_pc = pc_KDE(pc=pc, key_added="kde", kernel="gaussian", bandwidth=1.0)
-        >>> surf = new_pc.delaunay_3d(alpha=3).extract_surface()
-        >>> p = pv.Plotter()
-        >>> p.add_mesh(surf, scalars="kde_rgba", rgba=True)
-        >>> p.show()
     """
 
     pc = pc.copy() if copy else pc

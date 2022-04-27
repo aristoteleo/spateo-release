@@ -2,6 +2,7 @@
 mask.
 """
 import math
+import warnings
 from typing import Dict, Optional, Union
 
 import cv2
@@ -191,6 +192,9 @@ def _expand_labels(
     Returns:
         New label array with expanded labels.
     """
+    masked_labels = labels[mask] if mask is not None else labels
+    if (masked_labels > 0).all() or (masked_labels == 0).all():
+        return labels
 
     @njit
     def _expand(X, areas, max_area, mask, start_i, end_i):
@@ -330,18 +334,23 @@ def _label_connected_components(
                 stats[cv2.CC_STAT_HEIGHT],
             )
             label_mask = components[1][top : top + height, left : left + width] == label
-            if seed_labels is not None:
-                if (seed_labels[top : top + height, left : left + width][label_mask] > 0).any():
-                    continue
+            if seed_labels is not None and (seed_labels[top : top + height, left : left + width][label_mask] > 0).any():
+                continue
 
             if area <= area_threshold:
                 saved[top : top + height, left : left + width] += label_mask * saved_i
                 saved_i += 1
             else:
                 to_erode[top : top + height, left : left + width] += label_mask
-    eroded = utils.safe_erode(to_erode, k=k, min_area=min_area, n_iter=n_iter)
-    labels = cv2.connectedComponents(eroded.astype(np.uint8))[1]
-    labels[labels > 0] += saved_i - 1
+    erode = (to_erode > 0).any()
+    if erode:
+        eroded = utils.safe_erode(to_erode, k=k, min_area=min_area, n_iter=n_iter)
+        labels = cv2.connectedComponents(eroded.astype(np.uint8))[1]
+        labels[labels > 0] += saved_i - 1
+    elif seed_labels is None:
+        return saved
+    else:
+        labels = np.zeros_like(saved)
     if seed_labels is not None:
         labels += seed_labels
     expanded = _expand_labels(labels, distance=distance, max_area=max_area, mask=X > 0)
@@ -395,10 +404,13 @@ def label_connected_components(
 def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.ndarray:
     """Augment the labels in one label array using the labels in another.
 
-    This function first computes the overlap between the labels in the two
-    arrays, and any labels that are in `source_labels` that have no overlap with
-    any labels in `target_labels` is transferred to a copy of `target_labels` with
-    a new label.
+    This function modifies the labels in `target_labels` in the following way.
+    Note that this function operates on a copy of `target_labels`. It does NOT
+    modify in-place.
+    * Any labels that are in `source_labels` that have no overlap with
+        any labels in `target_labels` is copied over to `target_labels`.
+    * Any labels that are in `target_labels` that have no overlap with any labels
+        in `source_labels` is removed.
 
     Args:
         source_labels: Numpy array containing labels to (possibly) transfer.
@@ -407,10 +419,21 @@ def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.
     Returns:
         New Numpy array containing augmented labels.
     """
-    label = target_labels.max() + 1
-    source_props = measure.regionprops(source_labels)  # lazy evaluation
-    augmented = target_labels.copy()
+    augmented = np.zeros_like(target_labels)
+    label = 1
+
+    lm.main_debug("Removing non-overlapping labels.")
+    target_props = measure.regionprops(target_labels)  # lazy evaluation
+    for props in target_props:
+        _label = props.label
+        min_row, min_col, max_row, max_col = props.bbox
+        target_mask = target_labels[min_row:max_row, min_col:max_col] == _label
+        if source_labels[min_row:max_row, min_col:max_col][target_mask].sum() > 0:
+            augmented[min_row:max_row, min_col:max_col][target_mask] = label
+            label += 1
+
     lm.main_debug("Copying over non-overlapping labels.")
+    source_props = measure.regionprops(source_labels)  # lazy evaluation
     for props in source_props:
         _label = props.label
         min_row, min_col, max_row, max_col = props.bbox

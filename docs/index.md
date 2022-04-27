@@ -1,6 +1,24 @@
 # Welcome to Spateo documentation
 
-TODO: Brief description about spateo.
+Cells do not live in a vacuum, but in a milieu defined by cell–cell
+communication that can be quantified via recent advances in spatial
+transcriptomics. Here we present spateo, a open source framework that
+welcomes community contributions for quantitative spatiotemporal
+modeling of spatial transcriptomics. Leveraging the ultra-high
+spatial-resolution, large field of view and high RNA capture sensitivity
+of stereo-seq, spateo enables single cell resolution spatial
+transcriptomics via nuclei-staining and RNA signal based cell
+segmentation. Spateo also delivers novel methods for spatially
+constrained clustering to identify continuous tissue domains, spatial
+aware differential analyses to reveal spatial gene expression hotspots
+and modules, as well as the intricate ligand-receptor interactions.
+Importantly, spateo is also equipped with sophisticated methods for
+building whole-body 3D models of embryogenesis by leveraging serial
+profilings of drosophila embryos across different stages. Spateo thus
+enables us to evolve from reductionism of single cells to the
+holisticism of tissues and organs, heralding a paradigm shift in moving
+toward studying the ecology of tissue and organ while still offering us
+the opportunity to reveal associated molecular mechanisms.
 
 ```{eval-rst}
 .. card:: Installation :octicon:`plug;1em;`

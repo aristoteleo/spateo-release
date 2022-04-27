@@ -83,8 +83,6 @@ def get_points_props(data: pd.DataFrame) -> pd.DataFrame:
     """
     rows = []
     for label, _df in data.drop_duplicates(subset=["label", "x", "y"]).groupby("label"):
-        if label <= 0:
-            continue
         points = _df[["x", "y"]].values.astype(int)
         min_offset = points.min(axis=0)
         max_offset = points.max(axis=0)
