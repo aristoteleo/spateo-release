@@ -103,8 +103,8 @@ def imshow(
         binsize = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_BINSIZE_KEY)
         scale = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY) * binsize
         extent = [val * scale for val in extent]
-        xlabel += f" ({scale})"
-        ylabel += f" ({scale})"
+        xlabel += f" ({unit})"
+        ylabel += f" ({unit})"
 
     im.set_extent(tuple(extent))
     ax.set_xlabel(xlabel)
