@@ -72,9 +72,7 @@ def imshow(
     if SKM.get_adata_type(adata) != SKM.ADATA_AGG_TYPE:
         raise PlottingError("Only `AGG` type AnnDatas are supported.")
 
-    return_fig_ax = False
     if ax is None:
-        return_fig_ax = True
         fig, ax = plt.subplots(figsize=(5, 5), tight_layout=True)
     else:
         fig = ax.get_figure()
@@ -109,9 +107,6 @@ def imshow(
     im.set_extent(tuple(extent))
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-
-    if return_fig_ax:
-        return fig, ax
 
     if background is None:
         _background = rcParams.get("figure.facecolor")
@@ -202,6 +197,7 @@ def qc_regions(
             ],
             layer,
             ax=ax,
+            save_show_or_return="return",
             **kwargs,
         )
         ax.set_title(f"{layer} [{xmin}:{xmax},{ymin}:{ymax}]")
