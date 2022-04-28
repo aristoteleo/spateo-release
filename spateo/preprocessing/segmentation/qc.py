@@ -15,6 +15,7 @@ def select_qc_regions(
     n: int = 4,
     size: int = 2000,
     seed: Optional[int] = None,
+    absolute: bool = False,
 ):
     """Select regions to use for segmentation quality control purposes.
 
@@ -30,6 +31,10 @@ def select_qc_regions(
         n: Number of regions to select if `regions` is not provided.
         size: Width and height of each randomly selected region.
         seed: Random seed.
+        absolute: Whether or not the provided `regions` are in terms of absolute
+            X and Y coordinates. This option only has effect when `regions` are
+            provided. `False` means the provided coordinates are relative with
+            respect to the coordinates in the provided `adata`.
     """
     if not regions:
         lm.main_info(f"Randomly selecting {n} regions of shape {(size, size)}.")
@@ -62,6 +67,13 @@ def select_qc_regions(
                 ymax = ymin + size
             else:
                 raise PreprocessingError("`regions` must be a list of 4-element or 2-element tuples.")
+
+            # If absolute = False, adjust for anndata bounds
+            if not absolute:
+                xmin += adata_bounds[0]
+                xmax += adata_bounds[0]
+                ymin += adata_bounds[2]
+                ymax += adata_bounds[2]
 
             if xmin < adata_bounds[0] or xmax >= adata_bounds[1] or ymin < adata_bounds[2] or ymax >= adata_bounds[3]:
                 lm.main_warning(f"Region {region} is out of bounds. It will be clipped into bounds.")
