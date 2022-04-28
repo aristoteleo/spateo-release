@@ -383,6 +383,13 @@ class simple_GC_DEC(nn.Module):
         init_spa=True,
         tol=1e-3,
     ):
+        try:
+            import dynamo as dyn
+        except ImportError:
+            raise ImportError(
+                "You need to install the package `dynamo`." "Install dynamo via `pip install dynamo-release`"
+            )
+
         self.trajectory = []
         if opt == "sgd":
             optimizer = torch.optim.SGD(self.parameters(), lr=lr, momentum=0.9)
@@ -511,6 +518,13 @@ class simple_GC_DEC_PyG(simple_GC_DEC):
         init_spa=True,
         tol=1e-3,
     ):
+        try:
+            import dynamo as dyn
+        except ImportError:
+            raise ImportError(
+                "You need to install the package `dynamo`." "Install dynamo via `pip install dynamo-release`"
+            )
+
         self.trajectory = []
         if opt == "sgd":
             optimizer = torch.optim.SGD(self.parameters(), lr=lr, momentum=0.9)
