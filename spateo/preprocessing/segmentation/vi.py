@@ -111,23 +111,30 @@ class NegativeBinomialMixture(PyroModule):
                 pbar.update(1)
 
     @staticmethod
-    def conditionals(params, x):
+    def conditionals(params, x, use_weights=False):
         pyro.clear_param_store()
         zero_inflated = "z" in params
-        z, counts, logits = params.get("z"), params["counts"], params["logits"]
+        z, w, counts, logits = params.get("z"), params["w"], params["counts"], params["logits"]
         x = torch.tensor(x.astype(np.float32))
         n = len(counts)
         dists = (
             [dist.NegativeBinomial(c, logits=l, validate_args=False) for c, l in zip(counts, logits)]
-            if "z" not in params
+            if not zero_inflated
             else [
                 dist.ZeroInflatedNegativeBinomial(c, logits=l, gate_logits=torch.tensor(_z), validate_args=False)
                 for _z, c, l in zip(z, counts, logits)
             ]
         )
-        if zero_inflated:
-            return tuple(torch.exp(d.log_prob(x)).numpy() for d in sorted(dists, key=lambda d: -d.log_prob(0.0).item()))
-        return tuple(torch.exp(d.log_prob(x)).numpy() for d in sorted(dists, key=lambda d: d.mean.item()))
+        weights = dist.Categorical(logits=torch.tensor(w)).probs.numpy()
+        conds = []
+        for i in sorted(
+            range(len(dists)), key=lambda i: -dists[i].log_prob(0.0).item() if zero_inflated else dists[i].mean.item()
+        ):
+            cond = torch.exp(dists[i].log_prob(x)).numpy()
+            if use_weights:
+                cond *= weights[i]
+            conds.append(cond)
+        return tuple(conds)
 
 
 def conditionals(
