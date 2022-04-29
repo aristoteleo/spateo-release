@@ -2,7 +2,7 @@
 """
 import math
 import warnings
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import cv2
 import numpy as np
