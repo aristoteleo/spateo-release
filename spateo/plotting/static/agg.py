@@ -180,7 +180,7 @@ def qc_regions(
     elif axes.size < n_regions:
         raise PlottingError(f"`fig` must have at least {n_regions} axes.")
     else:
-        fig = axes[0].get_figure()
+        fig = axes.flatten()[0].get_figure()
 
     for ax, region in zip(axes.flatten(), regions):
         xmin, xmax, ymin, ymax = region
