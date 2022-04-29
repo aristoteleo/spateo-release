@@ -24,6 +24,7 @@ def imshow(
     ax: Optional[Axes] = None,
     show_cbar: bool = False,
     use_scale: bool = True,
+    absolute: bool = False,
     labels: bool = False,
     background: Union[None, str] = None,
     save_show_or_return: str = "show",
@@ -39,6 +40,9 @@ def imshow(
         show_cbar: Whether or not to show a colorbar next to the plot.
         use_scale: Whether or not to plot in physical units. Only valid when
             appropriate scale keys are present in .uns
+        absolute: Whether to set the axes to be in absolute coordinates. By
+            default, relative coordinates are used (i.e. the axes start at
+            zero).
         labels: Whether the input data contains labels, encoded as positive
             integers.
         background: string or None (optional, default 'None`)
@@ -68,9 +72,7 @@ def imshow(
     if SKM.get_adata_type(adata) != SKM.ADATA_AGG_TYPE:
         raise PlottingError("Only `AGG` type AnnDatas are supported.")
 
-    return_fig_ax = False
     if ax is None:
-        return_fig_ax = True
         fig, ax = plt.subplots(figsize=(5, 5), tight_layout=True)
     else:
         fig = ax.get_figure()
@@ -85,15 +87,26 @@ def imshow(
     if show_cbar:
         fig.colorbar(im)
     unit = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY)
+    adata_bounds = SKM.get_agg_bounds(adata)
+    # Note that we +1 to the xmax and ymax values because the first and last
+    # ticks are at exactly these locations.
+    extent = (
+        [adata_bounds[0], adata_bounds[1] + 1, adata_bounds[3] + 1, adata_bounds[2]]
+        if absolute
+        else [0, mtx.shape[1], mtx.shape[0], 0]
+    )
+    xlabel = "Y"
+    ylabel = "X"
     if use_scale and unit is not None:
         binsize = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_BINSIZE_KEY)
         scale = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY) * binsize
-        im.set_extent((0, (mtx.shape[1] - 1) * scale, (mtx.shape[0] - 1) * scale, 0))
-        ax.set_xlabel(unit)
-        ax.set_ylabel(unit)
+        extent = [val * scale for val in extent]
+        xlabel += f" ({unit})"
+        ylabel += f" ({unit})"
 
-    if return_fig_ax:
-        return fig, ax
+    im.set_extent(tuple(extent))
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
 
     if background is None:
         _background = rcParams.get("figure.facecolor")
@@ -184,6 +197,7 @@ def qc_regions(
             ],
             layer,
             ax=ax,
+            save_show_or_return="return",
             **kwargs,
         )
         ax.set_title(f"{layer} [{xmin}:{xmax},{ymin}:{ymax}]")

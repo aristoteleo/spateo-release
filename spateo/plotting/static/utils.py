@@ -1732,4 +1732,4 @@ def save_return_show_fig_utils(
         if return_all:
             return (fig, *return_all_list) if total_panels > 1 else (fig, *return_all_list)
         else:
-            return fig, axes if total_panels > 1 else fig, axes
+            return (fig, axes) if total_panels > 1 else (fig, axes)

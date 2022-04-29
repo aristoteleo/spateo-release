@@ -2,7 +2,7 @@
 """
 import math
 import warnings
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import cv2
 import numpy as np
@@ -164,7 +164,7 @@ def refine_alignment(
     downscale: float = 1,
     k: int = 5,
     n_epochs: int = 100,
-    transform_layers: Optional[List[str]] = None,
+    transform_layers: Optional[Union[str, List[str]]] = None,
     **kwargs,
 ):
     """Refine the alignment between the staining image and RNA coordinates.
@@ -220,6 +220,8 @@ def refine_alignment(
     SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_ALIGNMENT_KEY, params)
 
     if transform_layers:
+        if isinstance(transform_layers):
+            transform_layers = [transform_layers]
         lm.main_info(f"Transforming layers {transform_layers}")
         for layer in transform_layers:
             data = SKM.select_layer_data(adata, layer)
