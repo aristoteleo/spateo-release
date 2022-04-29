@@ -179,6 +179,8 @@ def qc_regions(
         fig, axes = plt.subplots(figsize=(4 * ncols, 4 * nrows), ncols=ncols, nrows=nrows, tight_layout=True)
     elif axes.size < n_regions:
         raise PlottingError(f"`fig` must have at least {n_regions} axes.")
+    else:
+        fig = axes[0].get_figure()
 
     for ax, region in zip(axes.flatten(), regions):
         xmin, xmax, ymin, ymax = region
