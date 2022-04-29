@@ -46,7 +46,7 @@ def _mask_nuclei_from_stain(
     lm.main_debug("Filtering adaptive threshold.")
     if X.dtype != np.uint8:
         lm.main_warning(
-            f"Adaptive thresholding using OpenCV requires np.uint8 dtype, but array has {X.dtype} dtype. "
+            f"Adaptive thresholding using OpenCV requires {np.uint8} dtype, but array has {X.dtype} dtype. "
             "The slower skimage implementation will be used instead."
         )
         local_mask = X > filters.threshold_local(X, block_size=local_k, method="gaussian", offset=offset)
