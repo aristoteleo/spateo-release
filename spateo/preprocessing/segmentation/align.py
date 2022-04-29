@@ -220,7 +220,7 @@ def refine_alignment(
     SKM.set_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_ALIGNMENT_KEY, params)
 
     if transform_layers:
-        if isinstance(transform_layers):
+        if isinstance(transform_layers, str):
             transform_layers = [transform_layers]
         lm.main_info(f"Transforming layers {transform_layers}")
         for layer in transform_layers:
