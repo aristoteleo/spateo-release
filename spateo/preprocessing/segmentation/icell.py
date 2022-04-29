@@ -44,9 +44,16 @@ def _mask_nuclei_from_stain(
     thresholds = filters.threshold_multiotsu(X, otsu_classes)
     background_mask = X < thresholds[otsu_index]
     lm.main_debug("Filtering adaptive threshold.")
-    local_mask = cv2.adaptiveThreshold(X, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, local_k, offset).astype(
-        bool
-    )
+    _X = X
+    if X.dtype != np.uint8:
+        lm.main_warning(
+            "Adaptive thresholding requires np.uint8 dtype, but array has {X.dtype} dtype. "
+            "Array will be scaled and cast to np.uint8."
+        )
+        _X = utils.scale_to_255(X).astype(np.uint8)
+    local_mask = cv2.adaptiveThreshold(
+        _X, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, local_k, offset
+    ).astype(bool)
     lm.main_debug("Applying morphological close and open.")
     nuclei_mask = utils.mclose_mopen((~background_mask) & local_mask, mk)
     return nuclei_mask
