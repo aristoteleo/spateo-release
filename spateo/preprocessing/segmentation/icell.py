@@ -52,7 +52,7 @@ def _mask_nuclei_from_stain(
         local_mask = X > filters.threshold_local(X, block_size=local_k, method="gaussian", offset=offset)
     else:
         local_mask = cv2.adaptiveThreshold(
-            _X, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, local_k, offset
+            X, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, local_k, offset
         ).astype(bool)
     lm.main_debug("Applying morphological close and open.")
     nuclei_mask = utils.mclose_mopen((~background_mask) & local_mask, mk)
