@@ -1,12 +1,11 @@
 from typing import Any, Dict, Optional, Union
 
 import numpy as np
-import pyvista as pv
 from pyvista import PolyData, UnstructuredGrid
 from sklearn.neighbors import KernelDensity
 
 from ....logging import logger_manager as lm
-from ..mesh.utils import add_mesh_labels
+from ..models import add_model_labels
 
 
 def mesh_morphology(
@@ -88,10 +87,10 @@ def pc_KDE(
     copy: bool = False,
 ) -> Union[PolyData, UnstructuredGrid]:
     """
-    Calculate the kernel density of a 3D point cloud.
+    Calculate the kernel density of a 3D point cloud model.
 
     Args:
-        pc: A point cloud.
+        pc: A point cloud model.
         key_added: The key under which to add the labels.
         kernel: The kernel to use. Available `kernel` are:
                 * `'gaussian'`
@@ -104,17 +103,18 @@ def pc_KDE(
         colormap: Colors to use for plotting pcd. The default colormap is `'hot_r'`.
         alphamap: The opacity of the colors to use for plotting pcd. The default alphamap is `1.0`.
         copy: Whether to copy `pcd` or modify it inplace.
+
     Returns:
-        pcd: Reconstructed 3D point cloud, which contains the following properties:
-            `pcd[key_added]`, the kernel density.
+        pc: Reconstructed 3D point cloud, which contains the following properties:
+            `pc[key_added]`, the kernel density.
     """
 
     pc = pc.copy() if copy else pc
     coords = pc.points
     pc_kde = KernelDensity(kernel=kernel, bandwidth=bandwidth).fit(coords).score_samples(coords)
 
-    add_mesh_labels(
-        mesh=pc,
+    add_model_labels(
+        model=pc,
         labels=pc_kde,
         key_added=key_added,
         where="point_data",

@@ -1,5 +1,6 @@
 from spateo.tools.cluster.find_clusters import scc, spagcn_pyg
 
+from . import TDR as tdr
 from .architype import (
     archetypes,
     archetypes_genes,
@@ -23,5 +24,4 @@ from .interpolation_nn import *
 from .lisa import GM_lag_model, lisa_geo_df, local_moran_i
 from .nn_losses import *
 from .spatial_degs import moran_i
-from .TDR import *
 from .three_d_alignment import slice_alignment, slice_alignment_bigBin
