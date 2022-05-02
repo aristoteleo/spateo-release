@@ -8,71 +8,64 @@ from ....logging import logger_manager as lm
 from ..models import add_model_labels
 
 
-def mesh_morphology(
-    mesh: Union[PolyData, UnstructuredGrid],
-    pcd: Optional[PolyData or UnstructuredGrid] = None,
+def model_morphology(
+    model: Union[PolyData, UnstructuredGrid],
+    pc: Optional[PolyData or UnstructuredGrid] = None,
 ) -> Dict[str, Union[float, Any]]:
     """
-    Return the basic morphological characteristics of mesh,
-    including mesh volume, mesh surface area, volume / surface area ratio，etc..
+    Return the basic morphological characteristics of model,
+    including model volume, model surface area, volume / surface area ratio，etc.
 
     Args:
-        mesh: A reconstructed surface mesh or volume mesh.
-        pcd: A point cloud representing the number of cells.
+        model: A reconstructed surface model or volume model.
+        pc: A point cloud representing the number of cells.
     Returns:
-        morphology: A dictionary containing the following mesh morphological features:
-            morphology['Length(x)']: Length (x) of mesh.
-            morphology['Width(y)']: Width (y) of mesh.
-            morphology['Height(z)']: Height (z) of mesh.
-            morphology['Surface_area']: Surface area of mesh.
-            morphology['Volume']: Volume of mesh.
-            morphology['V/SA_ratio']: Volume / surface area ratio of mesh;
-            morphology['cell_density']: Cell density of mesh.
+        morphology: A dictionary containing the following model morphological features:
+            morphology['Length(x)']: Length (x) of model.
+            morphology['Width(y)']: Width (y) of model.
+            morphology['Height(z)']: Height (z) of model.
+            morphology['Surface_area']: Surface area of model.
+            morphology['Volume']: Volume of model.
+            morphology['V/SA_ratio']: Volume / surface area ratio of model;
+            morphology['cell_density']: Cell density of model.
     """
 
-    mesh_surf = mesh.extract_surface()
+    model_surf = model.extract_surface()
     morphology = {}
 
-    # Length, width and height of mesh
-    mesh_outline = mesh.outline()
-    mo_points = np.asarray(mesh_outline.points)
-    mesh_x = mo_points[:, 0].max() - mo_points[:, 0].min()
-    mesh_y = mo_points[:, 1].max() - mo_points[:, 1].min()
-    mesh_z = mo_points[:, 2].max() - mo_points[:, 2].min()
-    mesh_x, mesh_y, mesh_z = (
-        round(mesh_x.astype(float), 5),
-        round(mesh_y.astype(float), 5),
-        round(mesh_z.astype(float), 5),
-    )
+    # Length, width and height of model
+    model_x = round(abs(model.bounds[1] - model.bounds[0]), 5)
+    model_y = round(abs(model.bounds[3] - model.bounds[2]), 5)
+    model_z = round(abs(model.bounds[5] - model.bounds[4]), 5)
     morphology["Length(x)"], morphology["Width(y)"], morphology["Height(z)"] = (
-        mesh_x,
-        mesh_y,
-        mesh_z,
+        model_x,
+        model_y,
+        model_z,
     )
-    lm.main_info(f"Length (x) of mesh: {morphology['Length(x)']};", indent_level=1)
-    lm.main_info(f"Width (y) of mesh: {morphology['Width(y)']};", indent_level=1)
-    lm.main_info(f"Height (z) of mesh: {morphology['Height(z)']};", indent_level=1)
+    lm.main_info(f"Length (x) of model: {morphology['Length(x)']};", indent_level=1)
+    lm.main_info(f"Width (y) of model: {morphology['Width(y)']};", indent_level=1)
+    lm.main_info(f"Height (z) of model: {morphology['Height(z)']};", indent_level=1)
 
-    # Surface area of mesh
-    mesh_sa = round(mesh_surf.area, 5)
-    morphology["Surface_area"] = mesh_sa
-    lm.main_info(f"Surface area of mesh: {morphology['Surface_area']};", indent_level=1)
+    # Surface area of model
+    model_sa = round(model_surf.area, 5)
+    morphology["Surface_area"] = model_sa
+    lm.main_info(f"Surface area of model: {morphology['Surface_area']};", indent_level=1)
 
-    # Volume of mesh
-    mesh_v = round(mesh_surf.volume, 5)
-    morphology["Volume"] = mesh_v
-    lm.main_info(f"Volume of mesh: {morphology['Volume']};", indent_level=1)
+    # Volume of model
+    model_v = round(model_surf.volume, 5)
+    morphology["Volume"] = model_v
+    lm.main_info(f"Volume of model: {morphology['Volume']};", indent_level=1)
 
-    # Volume / surface area ratio of mesh
-    mesh_vsa = round(mesh_v / mesh_sa, 5)
-    morphology["V/SA_ratio"] = mesh_vsa
-    lm.main_info(f"Volume / surface area ratio of mesh: {morphology['V/SA_ratio']}.", indent_level=1)
+    # Volume / surface area ratio of model
+    model_vsa = round(model_v / model_sa, 5)
+    morphology["V/SA_ratio"] = model_vsa
+    lm.main_info(f"Volume / surface area ratio of model: {morphology['V/SA_ratio']}.", indent_level=1)
 
     # cell density
-    if not (pcd is None):
-        mesh_cd = round(pcd.n_points / mesh_v, 5)
-        morphology["cell_density"] = mesh_cd
-        lm.main_info(f"Cell density of mesh: {morphology['cell_density']}.", indent_level=1)
+    if not (pc is None):
+        model_cd = round(pc.n_points / model_v, 5)
+        morphology["cell_density"] = model_cd
+        lm.main_info(f"Cell density of model: {morphology['cell_density']}.", indent_level=1)
 
     return morphology
 
