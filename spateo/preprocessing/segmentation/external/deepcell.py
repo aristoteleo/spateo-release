@@ -45,7 +45,7 @@ def _deepcell(
 def deepcell(
     adata: AnnData,
     model: Optional["Application"] = None,
-    equalize: bool = True,
+    equalize: float = 5.0,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
     **kwargs,
@@ -55,8 +55,8 @@ def deepcell(
     Args:
         adata: Input Anndata
         model: DeepCell model to use
-        equalize: Whether or not to perform adaptive histogram equalization
-            prior to prediction.
+        equalize: Controls the `clip_limit` argument to the :func:`clahe` function.
+            Set this value to a non-positive value to turn off equalization.
         layer: Layer that contains staining image. Defaults to `stain`.
         out_layer: Layer to put resulting labels. Defaults to `{layer}_labels`.
         **kwargs: Additional keyword arguments to :func:`Application.predict`
@@ -76,7 +76,7 @@ def deepcell(
     img = SKM.select_layer_data(adata, layer, make_dense=True)
     if equalize:
         lm.main_info("Equalizing image with CLAHE.")
-        img = clahe(img)
+        img = clahe(img, equalize)
     if model is None:
         model = NuclearSegmentation()
 
