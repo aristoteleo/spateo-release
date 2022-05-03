@@ -59,6 +59,7 @@ def _mask_nuclei_from_stain(
     return nuclei_mask
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def mask_cells_from_stain(
     adata: AnnData,
     otsu_classes: int = 3,
@@ -93,6 +94,7 @@ def mask_cells_from_stain(
     SKM.set_layer_data(adata, out_layer, mask)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def mask_nuclei_from_stain(
     adata: AnnData,
     otsu_classes: int = 3,
@@ -251,6 +253,7 @@ def _score_pixels(
     return res
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def score_and_mask_pixels(
     adata: AnnData,
     layer: str,

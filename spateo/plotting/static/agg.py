@@ -18,6 +18,7 @@ from ...logging import logger_manager as lm
 from .utils import save_return_show_fig_utils
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def imshow(
     adata: AnnData,
     layer: str = SKM.X_LAYER,
@@ -129,6 +130,7 @@ def imshow(
     )
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def qc_regions(
     adata: AnnData,
     layer: str = SKM.X_LAYER,
