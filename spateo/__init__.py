@@ -10,3 +10,5 @@ del get_version
 from . import io, pl, pp, tl
 from .configuration import config
 from .data_io import *
+from .sample_data import *
+
