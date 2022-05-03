@@ -180,7 +180,6 @@ class SpateoAdataKeyManager:
                         f"AnnData provided to `{argname}` argument must be of `{t}` type, but received "
                         f"`{SpateoAdataKeyManager.get_adata_type(adata)}` type."
                     )
-                print("here")
                 return func(*args, **kwargs)
 
             return wrapper
