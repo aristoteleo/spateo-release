@@ -1,10 +1,14 @@
 """Spatial markers.
 """
+import warnings
 from random import sample
 from typing import Tuple
 
 import anndata
-import geopandas
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import geopandas
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed

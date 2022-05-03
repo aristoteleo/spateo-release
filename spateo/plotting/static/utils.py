@@ -4,9 +4,10 @@ import math
 import os
 import warnings
 from typing import Dict, List, Optional, Tuple, Union
-from warnings import warn
 
-import geopandas as gpd
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import geopandas as gpd
 import matplotlib
 import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
@@ -1032,7 +1033,7 @@ def interactive(
         # bpl.show(plot)
     else:
         if hover_data is not None:
-            warn(
+            warnings.warn(
                 "Too many points for hover data -- tooltips will not" "be displayed. Sorry; try subssampling your data."
             )
         hv.extension("bokeh")
