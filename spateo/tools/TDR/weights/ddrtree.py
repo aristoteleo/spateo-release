@@ -2,6 +2,7 @@ from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
+import scipy.sparse as sp
 from scipy.cluster.vq import kmeans2
 from scipy.linalg import eig
 from scipy.sparse import csr_matrix
@@ -21,9 +22,10 @@ from scipy.sparse.linalg import inv
 
 
 def cal_ncenter(ncells, ncells_limit=100):
-    res = np.round(2 * ncells_limit * np.log(ncells) / (np.log(ncells) + np.log(ncells_limit)))
-
-    return res
+    if ncells >= ncells_limit:
+        return np.round(2 * ncells_limit * np.log(ncells) / (np.log(ncells) + np.log(ncells_limit)))
+    else:
+        return None
 
 
 def pca_projection(C: np.ndarray, L: int):
@@ -190,8 +192,3 @@ def DDRTree(
         Y = np.dot(np.dot(Z, R), inv(csr_matrix((Lambda / gamma) * L + Gamma)).toarray())
 
     return Z, Y, stree, R, W, Q, C, objs
-
-
-###############
-#             #
-###############
