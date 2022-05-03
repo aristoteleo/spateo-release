@@ -165,7 +165,7 @@ class SpateoAdataKeyManager:
     def adata_is_type(adata: AnnData, t: str) -> bool:
         return SpateoAdataKeyManager.get_adata_type(adata) == t
 
-    def check_adata_is_type(t: str, argname: str = "adata"):
+    def check_adata_is_type(t: str, argname: str = "adata", optional: bool = False):
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
@@ -175,7 +175,7 @@ class SpateoAdataKeyManager:
                 # Obtain arguments by name.
                 call_args = inspect.getcallargs(unwrapped, *args, **kwargs)
                 adata = call_args[argname]
-                if not SpateoAdataKeyManager.adata_is_type(adata, t):
+                if (not optional or adata is not None) and not SpateoAdataKeyManager.adata_is_type(adata, t):
                     raise ConfigurationError(
                         f"AnnData provided to `{argname}` argument must be of `{t}` type, but received "
                         f"`{SpateoAdataKeyManager.get_adata_type(adata)}` type."

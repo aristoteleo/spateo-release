@@ -250,6 +250,7 @@ def read_bgi_agg(
     return adata
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE, "segmentation_adata", optional=True)
 def read_bgi(
     path: str,
     binsize: Optional[int] = None,
