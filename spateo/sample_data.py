@@ -1,18 +1,15 @@
 import ntpath
 import os
 from pathlib import Path
+from typing import Optional, Tuple, Union
 from urllib.request import urlretrieve
 
-from anndata import read_h5ad, read_loom, AnnData
-from typing import Optional, Tuple, Union
+from anndata import AnnData, read_h5ad, read_loom
 
 from .logging import logger_manager as lm
 
 
-def download_data(url: str,
-                  file_path: Optional[str] = None,
-                  dir_name: str = "./data"
-                  ) -> str:
+def download_data(url: str, file_path: Optional[str] = None, dir_name: str = "./data") -> str:
     """Parse url to get the file name and then download the data to designated folders.
 
     Args:
@@ -38,9 +35,7 @@ def download_data(url: str,
     return file_path
 
 
-def get_adata(url: str,
-              filename: Optional[str] = None
-              ) -> AnnData:
+def get_adata(url: str, filename: Optional[str] = None) -> AnnData:
     """Download example data to local folder.
 
     Args:

@@ -20,8 +20,6 @@ def pairwise_align(
 ) -> np.ndarray:
     """Calculates and returns optimal alignment of two slices.
 
-
-
     Args:
         slice1: An AnnData object.
         slice2: An AnnData object.
