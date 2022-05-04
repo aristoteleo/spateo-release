@@ -5,8 +5,9 @@ import numpy as np
 
 from spateo.tools.utils import compute_smallest_distance
 
-from .scatters import scatters
 from ...configuration import SKM
+from .scatters import scatters
+
 # from .scatters import (
 #     scatters,
 #     docstrings,

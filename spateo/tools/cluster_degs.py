@@ -16,6 +16,7 @@ from typing_extensions import Literal
 
 from ..configuration import SKM
 
+
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def find_spatial_cluster_degs(
     adata: AnnData,

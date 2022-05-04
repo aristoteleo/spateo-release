@@ -25,6 +25,7 @@ from spateo.tools.utils import (
     update_dict,
 )
 
+from ...configuration import SKM
 from .utils import (
     _datashade_points,
     _get_adata_color_vec,
@@ -41,7 +42,6 @@ from .utils import (
     save_return_show_fig_utils,
 )
 
-from ...configuration import SKM
 # from ..tools.moments import calc_1nd_moment
 # from ..docrep import DocstringProcessor
 
