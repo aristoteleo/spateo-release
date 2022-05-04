@@ -9,6 +9,7 @@ from ...errors import PreprocessingError
 from ...logging import logger_manager as lm
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def select_qc_regions(
     adata: AnnData,
     regions: Union[List[Tuple[int, int]], List[Tuple[int, int, int, int]]] = None,
@@ -104,6 +105,7 @@ def _generate_random_labels(shape: Tuple[int, int], areas: List[int], seed: Opti
     return labels.reshape(shape)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def generate_random_labels(
     adata: AnnData,
     areas: List[int],
@@ -122,6 +124,7 @@ def generate_random_labels(
     SKM.set_layer_data(adata, out_layer, labels)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def generate_random_labels_like(
     adata: AnnData,
     layer: str,

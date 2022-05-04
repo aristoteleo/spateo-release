@@ -14,7 +14,10 @@ from statsmodels.sandbox.stats.multicomp import multipletests
 from tqdm import tqdm
 from typing_extensions import Literal
 
+from ..configuration import SKM
 
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def find_spatial_cluster_degs(
     adata: AnnData,
     test_group: str,
@@ -91,6 +94,7 @@ def find_spatial_cluster_degs(
     return res
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def find_cluster_degs(
     adata: AnnData,
     test_group: str,
@@ -311,6 +315,7 @@ def find_cluster_degs(
     return de
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def find_all_cluster_degs(
     adata: AnnData,
     group: str,

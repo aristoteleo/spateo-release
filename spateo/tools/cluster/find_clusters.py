@@ -9,6 +9,7 @@ import anndata
 import cv2
 from scipy.sparse import isspmatrix
 
+from ...configuration import SKM
 from .spagcn_utils import *
 from .utils import spatial_adj_dyn
 
@@ -16,6 +17,7 @@ from .utils import spatial_adj_dyn
 to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else X
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def spagcn_pyg(
     adata: anndata.AnnData,
     n_clusters: int,
@@ -175,6 +177,7 @@ def spagcn_pyg(
     return None
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def scc(
     adata: anndata.AnnData,
     spatial_key: str = "spatial",

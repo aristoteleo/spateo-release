@@ -13,6 +13,7 @@ from ...configuration import SKM
 from ...errors import PlottingError
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def contours(adata: AnnData, layer: str, colors: Optional[List] = None, scale: float = 0.05) -> go.Figure:
     """Interactively display UMI density bins.
 

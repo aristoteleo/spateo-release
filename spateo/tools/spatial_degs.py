@@ -11,7 +11,10 @@ from pysal import explore, lib
 from scipy.sparse import issparse
 from statsmodels.sandbox.stats.multicomp import multipletests
 
+from ..configuration import SKM
 
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def moran_i(
     adata: AnnData,
     X_data: Optional[np.ndarray] = None,

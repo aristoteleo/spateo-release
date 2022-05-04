@@ -6,12 +6,15 @@ from unittest import TestCase
 import numpy as np
 from anndata import AnnData
 
+from spateo.configuration import SKM
 
-def create_random_adata(layers=None, shape=(3, 3)):
+
+def create_random_adata(layers=None, shape=(3, 3), t=SKM.ADATA_AGG_TYPE):
     adata = AnnData(X=np.random.random(shape))
     if layers:
         for layer in layers:
             adata.layers[layer] = np.random.random(shape)
+    SKM.init_adata_type(adata, t)
     return adata
 
 

@@ -8,8 +8,11 @@ from scipy import sparse
 from scipy.stats import gmean, pearsonr
 from typing_extensions import Literal
 
+from ..configuration import SKM
+
 
 # Niches
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def niches(
     adata: AnnData,
     path: str,
@@ -143,6 +146,7 @@ def niches(
 
 
 # NicheNet
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def predict_ligand_activities(
     adata: AnnData,
     path: str,
@@ -252,6 +256,7 @@ def predict_ligand_activities(
     return res
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def predict_target_genes(
     adata: AnnData,
     path: str,

@@ -1,8 +1,12 @@
-# import numpy as np
-# from version import __version__
-from pathlib import Path
+import os
 
 from setuptools import find_packages, setup
+
+
+def read_requirements(path):
+    with open(path, "r") as f:
+        return [line.strip() for line in f if not line.isspace()]
+
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
@@ -11,18 +15,10 @@ setup(
     name="spateo-release",
     version="0.0.0",
     python_requires=">=3.7",
-    install_requires=[l.strip() for l in Path("requirements.txt").read_text("utf-8").splitlines()],  # 'yt>=3.5.1',
+    install_requires=read_requirements("requirements.txt"),
     extras_require={
-        "spatial": ["pysal>2.0.0"],
-        "interactive_plots": ["plotly"],
-        "network": ["networkx", "nxviz", "hiveplotlib"],
-        "dimension_reduction": ["fitsne>=1.0.1", "dbmap>=1.1.2"],
-        "test": ["sympy>=1.4"],
-        "bigdata_visualization": [
-            "datashader>=0.9.0",
-            "bokeh>=1.4.0",
-            "holoviews>=1.9.2",
-        ],
+        "dev": read_requirements("dev-requirements.txt"),
+        "docs": read_requirements(os.path.join("docs", "requirements.txt")),
     },
     packages=find_packages(exclude=("tests", "docs")),
     classifiers=[
@@ -30,7 +26,6 @@ setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
     ],
-    #     include_dirs=[np.get_include()],
     author="Xiaojie Qiu",
     author_email="xqiu.sc@gmail.com",
     description="A complete solution of spatialtemporal dynamics analyses toolkit of single cell spatial transcriptomics",

@@ -9,6 +9,8 @@ from scipy.sparse import csr_matrix, isspmatrix, spmatrix
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 
+from ...configuration import SKM
+
 slog = lack.LoggerManager(namespace="spateo")
 
 # Convert sparse matrix to dense matrix.
@@ -58,6 +60,7 @@ def compute_pca_components(
     return pcs, new_n_components, new_components_stored
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def pca_spateo(
     adata: AnnData,
     X_data=None,
@@ -116,6 +119,7 @@ def pca_spateo(
     adata.obsm[pca_key] = pcs[:, :n_pca_components]
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def sctransform(
     adata: AnnData,
     rlib_path: str,
@@ -189,6 +193,7 @@ def sctransform(
             plt.savefig(save_sct_img_2, dpi=100)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def integrate(
     adatas: List[AnnData],
     batch_key: str = "slices",
@@ -235,6 +240,7 @@ def integrate(
     return integrated_adata
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def harmony_debatch(
     adata: AnnData,
     key: str,
@@ -319,6 +325,7 @@ def ecp_silhouette(
     return silhouette_score(matrix, cluster_labels, metric="euclidean")
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def spatial_adj_dyn(
     adata: AnnData,
     spatial_key: str = "spatial",

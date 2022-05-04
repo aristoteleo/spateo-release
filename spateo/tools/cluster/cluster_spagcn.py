@@ -10,9 +10,11 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+from ...configuration import SKM
 from .utils import compute_pca_components
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def spagcn_vanilla(
     adata: AnnData,
     spatial_key: str = "spatial",

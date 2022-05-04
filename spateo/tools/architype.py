@@ -15,6 +15,7 @@ from scipy.cluster import hierarchy
 from scipy.stats import pearsonr
 from tqdm import tqdm
 
+from ..configuration import SKM
 from ..logging import logger_manager as lm
 
 
@@ -119,6 +120,7 @@ def find_spatially_related_genes(
     return get_genes_from_spatial_archetype(exp_mat, gene_names, archetypes, archetype, pval_threshold=pval_threshold)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def archetypes(
     adata: anndata.AnnData,
     moran_i_genes: Union[np.ndarray, list],
@@ -160,6 +162,7 @@ def archetypes(
     return archetypes
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def archetypes_genes(
     adata: anndata.AnnData,
     archetypes: np.ndarray,
