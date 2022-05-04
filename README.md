@@ -1,6 +1,4 @@
 [![documentation](https://readthedocs.org/projects/spateo-release/badge/?version=latest)](https://spateo-release.readthedocs.io/en/latest/)
-![build](https://github.com/aristoteleo/spateo-release/actions/workflows/python-package.yml/badge.svg)
-![test](https://github.com/aristoteleo/spateo-release/actions/workflows/python-plain-run-test.yml/badge.svg)
 
 # spateo-release
 Spatiotemporal modeling of spatial transcriptomics 
