@@ -1,6 +1,6 @@
 from anndata import (
     AnnData,
-    cancat,
+    concat,
     read,
     read_csv,
     read_excel,

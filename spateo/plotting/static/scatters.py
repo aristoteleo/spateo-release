@@ -41,6 +41,7 @@ from .utils import (
     save_return_show_fig_utils,
 )
 
+from ...configuration import SKM
 # from ..tools.moments import calc_1nd_moment
 # from ..docrep import DocstringProcessor
 
@@ -48,6 +49,7 @@ from .utils import (
 
 
 # @docstrings.get_sectionsf("scatters")
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def scatters(
     adata: AnnData,
     basis: Union[str, list] = "umap",

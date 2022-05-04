@@ -6,7 +6,7 @@ import numpy as np
 from spateo.tools.utils import compute_smallest_distance
 
 from .scatters import scatters
-
+from ...configuration import SKM
 # from .scatters import (
 #     scatters,
 #     docstrings,
@@ -19,6 +19,7 @@ from .scatters import scatters
 
 
 # @docstrings.with_indent(4)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def space(
     adata: anndata.AnnData,
     color: Union[list, str, None] = None,
