@@ -1,3 +1,3 @@
 import lack
 
-logger_manager = lack.LoggerManager("spateo", f"spateo-temp-timer-logger")
+logger_manager = lack.LoggerManager("spateo", "spateo-temp-timer-logger")

@@ -54,7 +54,7 @@ def cellpose(
     model: Union[Literal["cyto", "nuclei"], "CellposeModel"] = "nuclei",
     diameter: Optional[int] = None,
     normalize: bool = True,
-    equalize: bool = True,
+    equalize: float = 5.0,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
     **kwargs,
@@ -71,8 +71,8 @@ def cellpose(
             nuclei for `model="nuclei"`). Can be `None` to run automatic detection.
         normalize: Whether or not to percentile-normalize the image. This is an
             argument to :func:`Cellpose.eval`.
-        equalize: Whether or not to perform adaptive histogram equalization
-            prior to prediction.
+        equalize: Controls the `clip_limit` argument to the :func:`clahe` function.
+            Set this value to a non-positive value to turn off equalization.
         layer: Layer that contains staining image. Defaults to `stain`.
         out_layer: Layer to put resulting labels. Defaults to `{layer}_labels`.
         **kwargs: Additional keyword arguments to :func:`Cellpose.eval`
@@ -93,7 +93,7 @@ def cellpose(
     img = SKM.select_layer_data(adata, layer, make_dense=True)
     if equalize:
         lm.main_info("Equalizing image with CLAHE.")
-        img = clahe(img)
+        img = clahe(img, equalize)
 
     if diameter is None:
         lm.main_warning("`diameter` was not provided and will be estimated.")

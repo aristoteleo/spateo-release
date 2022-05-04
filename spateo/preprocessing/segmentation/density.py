@@ -143,6 +143,7 @@ def _segment_densities(
     return dilated
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def segment_densities(
     adata: AnnData,
     layer: str,
@@ -220,6 +221,7 @@ def segment_densities(
     SKM.set_layer_data(adata, out_layer, bins)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def merge_densities(
     adata: AnnData,
     layer: str,

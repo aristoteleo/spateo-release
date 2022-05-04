@@ -4,7 +4,6 @@
 from typing import Optional, Tuple, Union
 
 import anndata
-import geopandas as gpd
 
 from .scatters import scatters
 from .utils import _convert_to_geo_dataframe, save_return_show_fig_utils

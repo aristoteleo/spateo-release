@@ -44,14 +44,22 @@ def _mask_nuclei_from_stain(
     thresholds = filters.threshold_multiotsu(X, otsu_classes)
     background_mask = X < thresholds[otsu_index]
     lm.main_debug("Filtering adaptive threshold.")
-    local_mask = cv2.adaptiveThreshold(X, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, local_k, offset).astype(
-        bool
-    )
+    if X.dtype != np.uint8:
+        lm.main_warning(
+            f"Adaptive thresholding using OpenCV requires {np.uint8} dtype, but array has {X.dtype} dtype. "
+            "The slower skimage implementation will be used instead."
+        )
+        local_mask = X > filters.threshold_local(X, block_size=local_k, method="gaussian", offset=offset)
+    else:
+        local_mask = cv2.adaptiveThreshold(
+            X, 1, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, local_k, offset
+        ).astype(bool)
     lm.main_debug("Applying morphological close and open.")
     nuclei_mask = utils.mclose_mopen((~background_mask) & local_mask, mk)
     return nuclei_mask
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def mask_cells_from_stain(
     adata: AnnData,
     otsu_classes: int = 3,
@@ -86,6 +94,7 @@ def mask_cells_from_stain(
     SKM.set_layer_data(adata, out_layer, mask)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def mask_nuclei_from_stain(
     adata: AnnData,
     otsu_classes: int = 3,
@@ -244,6 +253,7 @@ def _score_pixels(
     return res
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def score_and_mask_pixels(
     adata: AnnData,
     layer: str,
