@@ -10,7 +10,6 @@ python:
     path: .
     extra_requirements:
     - docs
-    - pymde
 submodules:
   include:
      - "docs/tutorials/notebooks"
