@@ -1,3 +1,7 @@
+<p align="center">
+  <img height="150" src="https://github.com/aristoteleo/spateo-release/blob/main/docs/_static/logo.png" />
+</p
+
 [![documentation](https://readthedocs.org/projects/spateo-release/badge/?version=latest)](https://spateo-release.readthedocs.io/en/latest/)
 
 # spateo-release
