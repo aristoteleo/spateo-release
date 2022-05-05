@@ -47,6 +47,6 @@ All tutorials are located in the [spateo-tutorials](https://github.com/aristotel
 ```{eval-rst}
 .. nbgallery::
 
-   notebooks/template
+   /tutorials/notebooks/template
 
 ```
