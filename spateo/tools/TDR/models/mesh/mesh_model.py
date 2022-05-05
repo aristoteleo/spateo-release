@@ -240,6 +240,6 @@ def construct_surface(
 
     # Clip the original pc using the reconstructed surface and reconstruct new point cloud.
     select_pc = pc.select_enclosed_points(surface=uniform_surf, check_surface=False)
-    inside_pc = select_pc.threshold(0.5).extract_surface()
+    # inside_pc = select_pc.threshold(0.5).extract_surface()
 
-    return uniform_surf, inside_pc
+    return uniform_surf, select_pc
