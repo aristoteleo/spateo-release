@@ -9,7 +9,7 @@ from scipy.sparse import csr_matrix, isspmatrix, spmatrix
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 
-slog = lack.LoggerManager(namespace="spateo")
+from ...logging import logger_manager as lm
 
 # Convert sparse matrix to dense matrix.
 to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else np.asarray(X)
@@ -91,20 +91,20 @@ def pca_spateo(
     if X_data is None:
         if genes is not None:
             genes = adata.var_names.intersection(genes).to_list()
-            slog.main_info("Using user provided gene set...")
+            lm.main_info("Using user provided gene set...")
             if len(genes) == 0:
                 raise ValueError("no genes from your genes list appear in your adata object.")
         else:
             genes = adata.var_names
         if layer is not None:
             matrix = adata[:, genes].layers[layer].copy()
-            slog.main_info('Runing PCA on adata.layers["' + layer + '"]...')
+            lm.main_info('Runing PCA on adata.layers["' + layer + '"]...')
         else:
             matrix = adata[:, genes].X.copy()
-            slog.main_info("Runing PCA on adata.X...")
+            lm.main_info("Runing PCA on adata.X...")
     else:
         matrix = X_data.copy()
-        slog.main_info("Runing PCA on user provided data...")
+        lm.main_info("Runing PCA on user provided data...")
 
     if n_pca_components is None:
         pcs, n_pca_components, _ = compute_pca_components(adata.X, save_curve_img=None)

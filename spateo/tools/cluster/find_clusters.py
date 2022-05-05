@@ -34,6 +34,12 @@ def spagcn_pyg(
 ) -> Optional[anndata.AnnData]:
     """Function to find clusters with spagcn.
 
+    Reference:
+        Jian Hu, Xiangjie Li, Kyle Coleman, Amelia Schroeder, Nan Ma, David J. Irwin, Edward B. Lee,
+        Russell T. Shinohara & Mingyao Li. SpaGCN: Integrating gene expression, spatial location and histology to
+        identify spatial domains and spatially variable genes by graph convolutional network. Nature Methods volume 18,
+        pages1342–1351 (2021)
+
     Args:
         adata: an Anndata object, after normalization.
         n_clusters: Desired number of clusters.
@@ -187,6 +193,14 @@ def scc(
     copy: bool = False,
 ) -> Optional[anndata.AnnData]:
     """Spatially constrained clustering (scc) to identify continuous tissue domains.
+
+    Reference:
+        Ao Chen, Sha Liao, Mengnan Cheng, Kailong Ma, Liang Wu, Yiwei Lai, Xiaojie Qiu, Jin Yang, Wenjiao Li, Jiangshan
+        Xu, Shijie Hao, Xin Wang, Huifang Lu, Xi Chen, Xing Liu, Xin Huang, Feng Lin, Zhao Li, Yan Hong, Defeng Fu,
+        Yujia Jiang, Jian Peng, Shuai Liu, Mengzhe Shen, Chuanyu Liu, Quanshui Li, Yue Yuan, Huiwen Zheng, Zhifeng Wang,
+        H Xiang, L Han, B Qin, P Guo, PM Cánoves, JP Thiery, Q Wu, F Zhao, M Li, H Kuang, J Hui, O Wang, B Wang, M Ni, W
+        Zhang, F Mu, Y Yin, H Yang, M Lisby, RJ Cornall, J Mulder, M Uhlen, MA Esteban, Y Li, L Liu, X Xu, J Wang.
+        Spatiotemporal transcriptomic atlas of mouse organogenesis using DNA nanoball-patterned arrays. Cell, 2022.
 
     Args:
         adata: an Anndata object, after normalization.

@@ -31,6 +31,12 @@ def spagcn_vanilla(
     Integrating gene expression and spatial location to identify spatial domains via SpaGCN.
     Original Code Repository: https://github.com/jianhuupenn/SpaGCN
 
+    Reference:
+        Jian Hu, Xiangjie Li, Kyle Coleman, Amelia Schroeder, Nan Ma, David J. Irwin, Edward B. Lee,
+        Russell T. Shinohara & Mingyao Li. SpaGCN: Integrating gene expression, spatial location and histology to
+        identify spatial domains and spatially variable genes by graph convolutional network. Nature Methods volume 18,
+        pages1342–1351 (2021)
+
     Args:
         adata: An Anndata object after normalization.
         spatial_key: the key in `.obsm` that corresponds to the spatial coordinate of each bucket.
