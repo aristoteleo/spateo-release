@@ -1,7 +1,6 @@
 from typing import Any, Dict, Optional, Union
 
 import numpy as np
-import pyvista as pv
 from pyvista import PolyData, UnstructuredGrid
 from sklearn.neighbors import KernelDensity
 
