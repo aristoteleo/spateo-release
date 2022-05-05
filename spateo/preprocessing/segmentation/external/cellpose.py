@@ -54,7 +54,7 @@ def cellpose(
     model: Union[Literal["cyto", "nuclei"], "CellposeModel"] = "nuclei",
     diameter: Optional[int] = None,
     normalize: bool = True,
-    equalize: float = 5.0,
+    equalize: float = 2.0,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
     **kwargs,

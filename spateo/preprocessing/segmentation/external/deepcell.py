@@ -45,7 +45,7 @@ def _deepcell(
 def deepcell(
     adata: AnnData,
     model: Optional["Application"] = None,
-    equalize: float = 5.0,
+    equalize: float = 2.0,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
     **kwargs,

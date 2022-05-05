@@ -132,7 +132,7 @@ def stardist(
     min_overlap: Optional[int] = None,
     context: Optional[int] = None,
     normalizer: Optional[Normalizer] = PercentileNormalizer(),
-    equalize: float = 5.0,
+    equalize: float = 2.0,
     sanitize: bool = True,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
