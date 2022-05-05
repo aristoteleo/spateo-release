@@ -1,4 +1,4 @@
-./docs/tutorials/notebooks
+./docs/tutorials/notebooks/*
 
 spateo_release.egg-info/
 *.html
