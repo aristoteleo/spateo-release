@@ -43,7 +43,6 @@ def add_model_labels(
 
     model = model.copy() if not inplace else model
 
-    labels = labels.flatten()
     new_labels = labels.copy().astype(object)
     raw_labels_hex = new_labels.copy()
     raw_labels_alpha = new_labels.copy()

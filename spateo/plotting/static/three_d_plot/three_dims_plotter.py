@@ -67,7 +67,7 @@ def _set_jupyter(
         jupyter_backend = None
     elif jupyter is True:
         off_screen1, off_screen2 = True, off_screen
-        jupyter_backend = None
+        jupyter_backend = "static"
     elif jupyter in ["panel", "none", "pythreejs", "static", "ipygany"]:
         off_screen1, off_screen2 = True, off_screen
         jupyter_backend = jupyter
