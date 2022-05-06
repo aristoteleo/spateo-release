@@ -1,7 +1,7 @@
 """Use DeepCell for cell identification and labeling.
 https://github.com/vanvalenlab/deepcell-tf
 
-[Greenwald2021]_
+[Greenwald21]_
 """
 from typing import Optional, Union
 
