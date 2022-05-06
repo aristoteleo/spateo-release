@@ -1,9 +1,7 @@
 """Use Cellpose for cell identification and labeling.
 https://github.com/MouseLand/cellpose
 
-Stringer, C., Wang, T., Michaelos, M. et al.
-Cellpose: a generalist algorithm for cellular segmentation.
-Nat Methods 18, 100–106 (2021). https://doi.org/10.1038/s41592-020-01018-x
+[Stringer20]_
 """
 from typing import Optional, Union
 

@@ -1,13 +1,7 @@
 """Use StarDist for cell identification and labeling.
 https://github.com/stardist/stardist
 
-Uwe Schmidt, Martin Weigert, Coleman Broaddus, and Gene Myers.
-Cell Detection with Star-convex Polygons.
-International Conference on Medical Image Computing and Computer-Assisted Intervention (MICCAI), Granada, Spain, September 2018.
-
-Martin Weigert, Uwe Schmidt, Robert Haase, Ko Sugawara, and Gene Myers.
-Star-convex Polyhedra for 3D Object Detection and Segmentation in Microscopy.
-The IEEE Winter Conference on Applications of Computer Vision (WACV), Snowmass Village, Colorado, March 2020
+[Schmidt18]_ and [Weigert20]_
 """
 import math
 from typing import Optional, Union

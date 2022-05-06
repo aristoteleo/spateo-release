@@ -1,9 +1,7 @@
 """Use DeepCell for cell identification and labeling.
 https://github.com/vanvalenlab/deepcell-tf
 
-Greenwald, N.F., Miller, G., Moen, E. et al.
-Whole-cell segmentation of tissue images with human-level performance using large-scale data annotation and deep learning.
-Nat Biotechnol (2021). https://doi.org/10.1038/s41587-021-01094-0
+[Greenwald2021]_
 """
 from typing import Optional, Union
 
