@@ -33,7 +33,11 @@ def pairwise_align(
     Returns:
         Alignment of spots.
     """
-    import ot
+    # Check POT package
+    try:
+        import ot
+    except ImportError:
+        raise ImportError("You need to install the package `POT`. \nInstall POT via `pip install POT`")
 
     # Equipment used to run the program.
     device = torch.device(device=device)
@@ -208,8 +212,11 @@ def slice_alignment_bigBin(
         The second contains a list of slices with a small number of coordinates
         after alignment.
     """
-
-    import nudged
+    # Check nudged package
+    try:
+        import nudged
+    except ImportError:
+        raise ImportError("You need to install the package `nudged`. \nInstall nudged via `pip install nudged`")
 
     # Align spatial coordinates of slices with a small number of coordinates.
     align_slices_big = slice_alignment(

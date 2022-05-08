@@ -69,7 +69,7 @@ def add_model_labels(
         for label, color in zip(cu_arr, raw_hex_list):
             raw_labels_hex[raw_labels_hex == label] = color
     else:
-        raise ValueError("\n`colormap` value is wrong." "\nAvailable `colormap` types are: `str`, `list` and `dict`.")
+        raise ValueError("`colormap` value is wrong." "\nAvailable `colormap` types are: `str`, `list` and `dict`.")
 
     # Set raw alpha.
     if isinstance(alphamap, float) or isinstance(alphamap, int):
@@ -80,7 +80,7 @@ def add_model_labels(
     elif isinstance(alphamap, list) or isinstance(alphamap, np.ndarray):
         raw_labels_alpha = np.asarray(alphamap).astype(object)
     else:
-        raise ValueError("\n`alphamap` value is wrong." "\nAvailable `alphamap` types are: `float`, `list` and `dict`.")
+        raise ValueError("`alphamap` value is wrong." "\nAvailable `alphamap` types are: `float`, `list` and `dict`.")
 
     # Set rgba.
     labels_rgba = [mpl.colors.to_rgba(c, alpha=a) for c, a in zip(raw_labels_hex, raw_labels_alpha)]

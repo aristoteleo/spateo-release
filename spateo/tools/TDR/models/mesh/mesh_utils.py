@@ -6,8 +6,6 @@ This code contains methods to optimize the final reconstructed mesh model.
 from typing import Optional, Union
 
 import numpy as np
-import pyacvd
-import pymeshfix as mf
 import pyvista as pv
 from pyvista import PolyData
 
@@ -78,6 +76,12 @@ def uniform_mesh(mesh: PolyData, nsub: Optional[int] = 3, nclus: int = 20000) ->
     Returns:
         new_mesh: A uniform mesh model.
     """
+    # Check pyacvd package
+    try:
+        import pyacvd
+    except ImportError:
+        raise ImportError("You need to install the package `pyacvd`. \nInstall pyacvd via `pip install pyacvd`")
+
     # if mesh is not dense enough for uniform remeshing, increase the number of triangles in a mesh.
     if not (nsub is None):
         mesh.subdivide(nsub=nsub, subfilter="butterfly", inplace=True)
@@ -121,6 +125,14 @@ def smooth_mesh(mesh: PolyData, n_iter: int = 100, **kwargs) -> PolyData:
 
 def fix_mesh(mesh: PolyData) -> PolyData:
     """Repair the mesh where it was extracted and subtle holes along complex parts of the mesh."""
+
+    # Check pymeshfix package
+    try:
+        import pymeshfix as mf
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `pymeshfix`. \nInstall pymeshfix via `pip install pymeshfix`"
+        )
 
     meshfix = mf.MeshFix(mesh)
     meshfix.repair(verbose=False)

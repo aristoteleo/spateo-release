@@ -56,7 +56,7 @@ def multiblock2model(model, message=None):
         import warnings
 
         warnings.warn(
-            f"\nMultiBlock does not support {message}. "
+            f"MultiBlock does not support {message}. "
             f"\nHere, all models contained in MultiBlock will be automatically merged into one model before {message}."
         )
     models = [model[name] for name in model.keys()]
@@ -78,7 +78,7 @@ def _scale_model_by_distance(
     distance = distance if isinstance(distance, (tuple, list)) else [distance] * 3
     if len(distance) != 3:
         raise ValueError(
-            "`distance` value is wrong." "\nWhen `distance` is a list or tuple, it can only contain three elements."
+            "`distance` value is wrong. \nWhen `distance` is a list or tuple, it can only contain three elements."
         )
 
     # Check the scaling center.
@@ -182,7 +182,7 @@ def translate_model(
     """
     if len(distance) != 3:
         raise ValueError(
-            "`distance` value is wrong." "\nWhen `distance` is a list or tuple, it can only contain three elements."
+            "`distance` value is wrong. \nWhen `distance` is a list or tuple, it can only contain three elements."
         )
 
     model_t = model.copy() if not inplace else model

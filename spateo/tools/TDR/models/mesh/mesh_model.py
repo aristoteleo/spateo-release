@@ -46,7 +46,7 @@ def construct_cells(
     if not (cell_size is None):
         pc.point_data["cell_size"] = cell_size.flatten()
     else:
-        raise ValueError("`cell_size` value is wrong. Please enter a value for `cell_size`")
+        raise ValueError("`cell_size` value is wrong. \nPlease enter a value for `cell_size`")
 
     if geometry == "cube":
         geom = pv.Box(
@@ -71,9 +71,7 @@ def construct_cells(
             n2=n_scale[1],
         )
     else:
-        raise ValueError(
-            "`geometry` value is wrong." "\nAvailable `geometry` are: `'cube'`, `'sphere'`, `'ellipsoid'`."
-        )
+        raise ValueError("`geometry` value is wrong. \nAvailable `geometry` are: `'cube'`, `'sphere'`, `'ellipsoid'`.")
 
     ds_glyph = pc.glyph(geom=geom, scale="cell_size", factor=factor)
     centroid_coords = {index: coords for index, coords in zip(pc.point_data["obs_index"], pc.points)}

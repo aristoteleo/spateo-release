@@ -10,9 +10,7 @@ This code contains methods to reconstruct the mesh model based on the 3D point c
 from typing import List, Optional
 
 import numpy as np
-import open3d as o3d
 import pyvista as pv
-from open3d import geometry
 from pyvista import PolyData
 
 try:
@@ -102,7 +100,7 @@ def marching_cube_mesh(pc: PolyData):
     vertices, triangles = mcubes.marching_cubes(volume_array, 0)
 
     if len(vertices) == 0:
-        raise ValueError(f"\nThe point cloud cannot generate a surface mesh with `marching_cube` method.")
+        raise ValueError(f"The point cloud cannot generate a surface mesh with `marching_cube` method.")
 
     vertices = vertices - rmd_mean
 
@@ -123,6 +121,14 @@ def marching_cube_mesh(pc: PolyData):
 
 def _pv2o3d(pc: PolyData):
     """Convert a point cloud in PyVista to Open3D."""
+
+    # Check open3d package
+    try:
+        import open3d as o3d
+        from open3d import geometry
+    except ImportError:
+        raise ImportError("You need to install the package `open3d`. \nInstall open3d via `pip install open3d`")
+
     cloud = o3d.geometry.PointCloud()
     cloud.points = o3d.utility.Vector3dVector(pc.points)
     if "norms" in pc.point_data.keys():
@@ -132,7 +138,7 @@ def _pv2o3d(pc: PolyData):
     return cloud
 
 
-def _o3d2pv(trimesh: geometry.TriangleMesh) -> PolyData:
+def _o3d2pv(trimesh) -> PolyData:
     """Convert a triangle mesh in Open3D to PyVista."""
     v = np.asarray(trimesh.vertices)
     f = np.array(trimesh.triangles)
@@ -169,12 +175,19 @@ def alpha_shape_mesh(pc: PolyData, alpha: float = 2.0) -> PolyData:
     Returns:
         A mesh model.
     """
+    # Check open3d package
+    try:
+        import open3d as o3d
+        from open3d import geometry
+    except ImportError:
+        raise ImportError("You need to install the package `open3d`. \nInstall open3d via `pip install open3d`")
+
     cloud = _pv2o3d(pc)
     trimesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(cloud, alpha)
 
     if len(trimesh.vertices) == 0:
         raise ValueError(
-            f"\nThe point cloud cannot generate a surface mesh with `alpha shape` method and alpha == {alpha}."
+            f"The point cloud cannot generate a surface mesh with `alpha shape` method and alpha == {alpha}."
         )
 
     return _o3d2pv(trimesh=trimesh)
@@ -213,6 +226,12 @@ def ball_pivoting_mesh(pc: PolyData, radii: List[float] = None):
     Returns:
         A mesh model.
     """
+    # Check open3d package
+    try:
+        import open3d as o3d
+        from open3d import geometry
+    except ImportError:
+        raise ImportError("You need to install the package `open3d`. \nInstall open3d via `pip install open3d`")
 
     cloud = _pv2o3d(pc)
     radii = [1] if radii is None else radii
@@ -221,7 +240,7 @@ def ball_pivoting_mesh(pc: PolyData, radii: List[float] = None):
 
     if len(trimesh.vertices) == 0:
         raise ValueError(
-            f"\nThe point cloud cannot generate a surface mesh with `ball pivoting` method and radii == {radii}."
+            f"The point cloud cannot generate a surface mesh with `ball pivoting` method and radii == {radii}."
         )
 
     return _o3d2pv(trimesh=trimesh)
@@ -261,15 +280,20 @@ def poisson_mesh(
     Returns:
         A mesh model.
     """
+    # Check open3d package
+    try:
+        import open3d as o3d
+        from open3d import geometry
+    except ImportError:
+        raise ImportError("You need to install the package `open3d`. \nInstall open3d via `pip install open3d`")
+
     cloud = _pv2o3d(pc)
     trimesh, density = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
         cloud, depth=depth, width=width, scale=scale, linear_fit=linear_fit
     )
 
     if len(trimesh.vertices) == 0:
-        raise ValueError(
-            f"\nThe point cloud cannot generate a surface mesh with `poisson` method and depth == {depth}."
-        )
+        raise ValueError(f"The point cloud cannot generate a surface mesh with `poisson` method and depth == {depth}.")
 
     # A low density value means that the vertex is only supported by a low number of points from the input point cloud.
     # Remove all vertices (and connected triangles) that have a lower density value than the density_threshold quantile
@@ -284,5 +308,5 @@ def poisson_mesh(
 # spherical harmonics: scipy.special.sph_harm
 # Reference:
 #   https://www.nature.com/articles/s41467-017-00023-7#Abs1
-#   https: // www.hindawi.com / journals / mpe / 2015 / 582870 /  # related-articles
+#   https://www.hindawi.com/journals/mpe/2015/582870/  # related-articles
 ############################################################

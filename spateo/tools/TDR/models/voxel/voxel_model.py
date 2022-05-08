@@ -1,5 +1,4 @@
 import numpy as np
-import PVGeo
 import pyvista as pv
 from pyvista import PolyData, UnstructuredGrid
 
@@ -31,6 +30,12 @@ def voxelize_pc(
     Returns:
         voxel: A voxel model.
     """
+    # Check open3d package
+    try:
+        import PVGeo
+    except ImportError:
+        raise ImportError("You need to install the package `PVGeo`. \nInstall PVGeo via `pip install PVGeo`")
+
     voxelizer = PVGeo.filters.VoxelizePoints()
 
     if not (voxel_size is None):
