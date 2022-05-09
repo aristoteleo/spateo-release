@@ -92,8 +92,8 @@ def run_bp(
     cell_cond: np.ndarray,
     k: int = 3,
     square: bool = False,
-    p: float = 0.6,
-    q: float = 0.4,
+    p: float = 0.95,
+    q: float = 0.05,
     precision: float = 1e-6,
     max_iter: int = 100,
 ) -> np.ndarray:
