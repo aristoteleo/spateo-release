@@ -11,13 +11,11 @@ from scipy.spatial import distance
 from scipy.stats import mannwhitneyu
 from sklearn.neighbors import NearestNeighbors
 from statsmodels.sandbox.stats.multicomp import multipletests
+from sympy import N
 from tqdm import tqdm
 from typing_extensions import Literal
 
-from ..configuration import SKM
 
-
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def find_spatial_cluster_degs(
     adata: AnnData,
     test_group: str,
@@ -94,7 +92,6 @@ def find_spatial_cluster_degs(
     return res
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def find_cluster_degs(
     adata: AnnData,
     test_group: str,
@@ -315,7 +312,6 @@ def find_cluster_degs(
     return de
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def find_all_cluster_degs(
     adata: AnnData,
     group: str,
@@ -408,3 +404,44 @@ def find_all_cluster_degs(
     else:
         adata.uns["cluster_markers"] = {"deg_tables": de_tables, "de_genes": de_genes}
         return adata
+
+
+def top_n_degs(
+    adata: AnnData,
+    group: str,
+    sort_by="cosine_score",
+    top_n_genes=10,
+    only_deg_list: bool = True,
+):
+    """Find marker genes for each group of buckets based on gene expression.
+
+    Args:
+        adata: an Annodata object
+        group: The column key/name that identifies the grouping information (for
+            example, clusters that correspond to different cell types) of
+            buckets.This will be used for calculating group-specific genes.
+        sort_by: `str` or `list`
+            Column name or names to sort by.
+        top_n_genes: `int`
+            The number of top sorted markers.
+        only_gene_list: `bool`
+            Whether to only return the marker gene list for each cluster.
+
+    """
+    if "cluster_markers" not in adata.uns.keys():
+        raise ValueError(
+            f"No info of cluster markers stored in your adata. "
+            f"Running `find_all_cluster_degs` with default parameters."
+        )
+    deg_table = adata.uns["cluster_markers"]["deg_tables"][0][0]
+    for i in range(len(adata.obs[group].unique()) - 1):
+        deg_table = deg_table.append(adata.uns["cluster_markers"]["deg_tables"][i + 1][i + 1])
+    deg_table = deg_table.groupby("test_group").apply(lambda grp: grp.nlargest(top_n_genes, sort_by))
+    if only_deg_list:
+        top_n_groups = deg_table.loc[:, "test_group"].unique()
+        marker_genes_dict = {}
+        for i in top_n_groups:
+            marker_genes_dict[i] = deg_table[deg_table["test_group"] == i].loc[:, "gene"].to_list()
+        return marker_genes_dict
+    else:
+        return deg_table
