@@ -15,7 +15,6 @@ from tqdm import tqdm
 from typing_extensions import Literal
 
 from ..configuration import SKM
-from ..logging import logger_manager as lm
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
@@ -276,7 +275,7 @@ def find_cluster_degs(
                     )
                 )
         else:
-            lm.main_warning("`method` must be one of 'multiple' or 'pairwise'")
+            raise ValueError(f'`method` must be one of "multiple" or "pairwise"')
     de = pd.DataFrame(
         de,
         columns=[
@@ -361,12 +360,12 @@ def find_all_cluster_degs(
     else:
         genes = adata.var_names
     if group not in adata.obs.keys():
-        lm.main_warning("group {group} is not a valid key for .obs in your adata object.")
+        raise ValueError(f"group {group} is not a valid key for .obs in your adata object.")
     else:
         adata.obs[group] = adata.obs[group].astype("str")
         cluster_set = np.sort(adata.obs[group].unique())
     if len(cluster_set) < 2:
-        lm.main_warning("the number of groups for the argument {group} must be at least two.")
+        raise ValueError(f"the number of groups for the argument {group} must be at least two.")
     de_tables = [None] * len(cluster_set)
     de_genes = {}
     if len(cluster_set) > 2:
@@ -408,48 +407,4 @@ def find_all_cluster_degs(
         return adata_1
     else:
         adata.uns["cluster_markers"] = {"deg_tables": de_tables, "de_genes": de_genes}
-    return adata
-
-
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
-def top_n_degs(
-    adata: AnnData,
-    group: str,
-    sort_by="cosine_score",
-    top_n_genes=10,
-    only_deg_list: bool = True,
-):
-    """Find marker genes for each group of buckets based on gene expression.
-
-    Args:
-        adata: an Annodata object
-        group: The column key/name that identifies the grouping information (for
-            example, clusters that correspond to different cell types) of
-            buckets. This will be used for calculating group-specific genes.
-        sort_by: `str` or `list`
-            Column name or names to sort by.
-        top_n_genes: `int`
-            The number of top sorted markers.
-        only_gene_list: `bool`
-            Whether to only return the marker gene list for each cluster.
-    """
-    if "cluster_markers" not in adata.uns.keys():
-        lm.main_warning(
-            "No info of cluster markers stored in your adata.Running `find_all_cluster_degs` with default parameters."
-        )
-
-    deg_table = adata.uns["cluster_markers"]["deg_tables"][0][0]
-
-    for i in range(len(adata.obs[group].unique()) - 1):
-        deg_table = deg_table.append(adata.uns["cluster_markers"]["deg_tables"][i + 1][i + 1])
-    deg_table = deg_table.groupby("test_group").apply(lambda grp: grp.nlargest(top_n_genes, sort_by))
-
-    if only_deg_list:
-        top_n_groups = deg_table.loc[:, "test_group"].unique()
-        marker_genes_dict = {}
-
-        for i in top_n_groups:
-            marker_genes_dict[i] = deg_table[deg_table["test_group"] == i].loc[:, "gene"].to_list()
-        return marker_genes_dict
-    else:
-        return deg_table
+        return adata
