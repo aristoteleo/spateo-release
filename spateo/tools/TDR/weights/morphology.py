@@ -1,6 +1,5 @@
 from typing import Any, Dict, Optional, Union
 
-import numpy as np
 from pyvista import PolyData, UnstructuredGrid
 from sklearn.neighbors import KernelDensity
 
@@ -77,7 +76,7 @@ def pc_KDE(
     bandwidth: float = 1.0,
     colormap: Union[str, list, dict] = "hot_r",
     alphamap: Union[float, list, dict] = 1.0,
-    copy: bool = False,
+    inplace: bool = False,
 ) -> Union[PolyData, UnstructuredGrid]:
     """
     Calculate the kernel density of a 3D point cloud model.
@@ -95,14 +94,14 @@ def pc_KDE(
         bandwidth: The bandwidth of the kernel.
         colormap: Colors to use for plotting pcd. The default colormap is `'hot_r'`.
         alphamap: The opacity of the colors to use for plotting pcd. The default alphamap is `1.0`.
-        copy: Whether to copy `pcd` or modify it inplace.
+        inplace: Updates model in-place.
 
     Returns:
         pc: Reconstructed 3D point cloud, which contains the following properties:
             `pc[key_added]`, the kernel density.
     """
 
-    pc = pc.copy() if copy else pc
+    pc = pc.copy() if not inplace else pc
     coords = pc.points
     pc_kde = KernelDensity(kernel=kernel, bandwidth=bandwidth).fit(coords).score_samples(coords)
 
@@ -113,6 +112,7 @@ def pc_KDE(
         where="point_data",
         colormap=colormap,
         alphamap=alphamap,
+        inplace=True,
     )
 
-    return pc if copy else None
+    return pc if not inplace else None

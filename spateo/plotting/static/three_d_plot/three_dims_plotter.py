@@ -155,7 +155,7 @@ def add_outline(
     """
 
     model_outline = model.outline()
-    plotter.add_model(model_outline, color=outline_color, line_width=outline_width)
+    plotter.add_mesh(model_outline, color=outline_color, line_width=outline_width)
 
     if labels is True:
         mo_points = np.asarray(model_outline.points)
