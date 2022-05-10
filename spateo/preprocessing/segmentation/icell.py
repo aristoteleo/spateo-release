@@ -139,6 +139,29 @@ def mask_nuclei_from_stain(
     SKM.set_layer_data(adata, out_layer, mask)
 
 
+def _initial_nb_params(X: np.ndarray, bins: Optional[np.ndarray] = None):
+    samples = {}
+    if bins is not None:
+        for label in np.unique(bins):
+            if label > 0:
+                samples[label] = X[bins == label]
+    else:
+        samples[0] = X.flatten()
+
+    params = {}
+    for label, _samples in samples.items():
+        threshold = filters.threshold_otsu(_samples)
+        mask = _samples > threshold
+        background_values = _samples[~mask]
+        foreground_values = _samples[mask]
+        params[label] = dict(
+            w=tuple(np.array([_samples.size - mask.sum(), mask.sum()]) / _samples.size),
+            mu=(background_values.mean(), foreground_values.mean()),
+            var=(background_values.var(), foreground_values.var()),
+        )
+    return params[0] if bins is None else params
+
+
 def _score_pixels(
     X: Union[spmatrix, np.ndarray],
     k: int,
@@ -223,13 +246,18 @@ def _score_pixels(
         # Rescale
         res /= res.max()
     else:
+        # Obtain initial parameter estimates with Otsu thresholding.
+        # These may be overridden by providing the appropriate kwargs.
+        nb_kwargs = dict(params=_initial_nb_params(res, bins=bins))
         if "em" in method:
-            lm.main_debug(f"Running EM with kwargs {em_kwargs}.")
-            em_results = em.run_em(res, bins=bins, **em_kwargs)
+            nb_kwargs.update(em_kwargs)
+            lm.main_debug(f"Running EM with kwargs {nb_kwargs}.")
+            em_results = em.run_em(res, bins=bins, **nb_kwargs)
             conditional_func = partial(em.conditionals, em_results=em_results, bins=bins)
         else:
-            lm.main_debug(f"Running VI with kwargs {vi_kwargs}.")
-            vi_results = vi.run_vi(res, bins=bins, **vi_kwargs)
+            nb_kwargs.update(vi_kwargs)
+            lm.main_debug(f"Running VI with kwargs {nb_kwargs}.")
+            vi_results = vi.run_vi(res, bins=bins, **nb_kwargs)
             conditional_func = partial(vi.conditionals, vi_results=vi_results, bins=bins)
 
         if "bp" in method:
