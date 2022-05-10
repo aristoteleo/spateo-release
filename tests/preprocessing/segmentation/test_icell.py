@@ -69,61 +69,70 @@ class TestICell(TestMixin, TestCase):
         self.assertEqual(result, self.utils.scale_to_01.return_value)
 
     def test_score_pixels_em(self):
-        X = mock.MagicMock()
-        em_kwargs = mock.MagicMock()
-        background_cond = mock.MagicMock()
-        cell_cond = mock.MagicMock()
-        self.em.conditionals.return_value = background_cond, cell_cond
-        result = icell._score_pixels(X, k=3, method="EM", em_kwargs=em_kwargs)
-        self.utils.conv2d.assert_called_once_with(X, 3, mode="circle", bins=None)
-        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, bins=None, **em_kwargs)
-        self.em.conditional.assert_not_called()
-        self.bp.run_bp.assert_not_called()
-        self.em.confidence.assert_called_once_with(
-            self.utils.conv2d.return_value, em_results=self.em.run_em.return_value, bins=None
-        )
-        self.utils.scale_to_01.assert_not_called()
-        self.assertEqual(result, self.em.confidence.return_value)
+        with mock.patch("spateo.preprocessing.segmentation.icell._initial_nb_params") as _initial_nb_params:
+            X = mock.MagicMock()
+            em_kwargs = mock.MagicMock()
+            background_cond = mock.MagicMock()
+            cell_cond = mock.MagicMock()
+            self.em.conditionals.return_value = background_cond, cell_cond
+            result = icell._score_pixels(X, k=3, method="EM", em_kwargs=em_kwargs)
+            self.utils.conv2d.assert_called_once_with(X, 3, mode="circle", bins=None)
+            self.em.run_em.assert_called_once_with(
+                self.utils.conv2d.return_value, bins=None, params=_initial_nb_params.return_value, **em_kwargs
+            )
+            self.em.conditional.assert_not_called()
+            self.bp.run_bp.assert_not_called()
+            self.em.confidence.assert_called_once_with(
+                self.utils.conv2d.return_value, em_results=self.em.run_em.return_value, bins=None
+            )
+            self.utils.scale_to_01.assert_not_called()
+            self.assertEqual(result, self.em.confidence.return_value)
 
     def test_score_pixels_em_gauss(self):
-        X = mock.MagicMock()
-        em_kwargs = mock.MagicMock()
-        background_cond = mock.MagicMock()
-        cell_cond = mock.MagicMock()
-        self.em.conditionals.return_value = background_cond, cell_cond
-        result = icell._score_pixels(X, k=3, method="EM+gauss", em_kwargs=em_kwargs)
-        self.utils.conv2d.assert_has_calls(
-            [
-                mock.call(X, 3, mode="circle", bins=None),
-                mock.call(self.em.confidence.return_value, 3, mode="gauss", bins=None),
-            ]
-        )
-        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, bins=None, **em_kwargs)
-        self.em.conditional.assert_not_called()
-        self.bp.run_bp.assert_not_called()
-        self.em.confidence.assert_called_once_with(
-            self.utils.conv2d.return_value, em_results=self.em.run_em.return_value, bins=None
-        )
-        self.utils.scale_to_01.assert_not_called()
-        self.assertEqual(result, self.utils.conv2d.return_value)
+        with mock.patch("spateo.preprocessing.segmentation.icell._initial_nb_params") as _initial_nb_params:
+            X = mock.MagicMock()
+            em_kwargs = mock.MagicMock()
+            background_cond = mock.MagicMock()
+            cell_cond = mock.MagicMock()
+            self.em.conditionals.return_value = background_cond, cell_cond
+            result = icell._score_pixels(X, k=3, method="EM+gauss", em_kwargs=em_kwargs)
+            self.utils.conv2d.assert_has_calls(
+                [
+                    mock.call(X, 3, mode="circle", bins=None),
+                    mock.call(self.em.confidence.return_value, 3, mode="gauss", bins=None),
+                ]
+            )
+            self.em.run_em.assert_called_once_with(
+                self.utils.conv2d.return_value, bins=None, params=_initial_nb_params.return_value, **em_kwargs
+            )
+            self.em.conditional.assert_not_called()
+            self.bp.run_bp.assert_not_called()
+            self.em.confidence.assert_called_once_with(
+                self.utils.conv2d.return_value, em_results=self.em.run_em.return_value, bins=None
+            )
+            self.utils.scale_to_01.assert_not_called()
+            self.assertEqual(result, self.utils.conv2d.return_value)
 
     def test_score_pixels_em_bp(self):
-        X = mock.MagicMock()
-        em_kwargs = mock.MagicMock()
-        bp_kwargs = mock.MagicMock()
-        background_cond = mock.MagicMock()
-        cell_cond = mock.MagicMock()
-        self.em.conditionals.return_value = background_cond, cell_cond
-        result = icell._score_pixels(X, k=3, method="EM+BP", em_kwargs=em_kwargs, bp_kwargs=bp_kwargs)
-        self.utils.conv2d.assert_called_once_with(X, 3, mode="circle", bins=None)
-        self.em.run_em.assert_called_once_with(self.utils.conv2d.return_value, bins=None, **em_kwargs)
-        self.em.conditionals.assert_called_once_with(
-            self.utils.conv2d.return_value, em_results=self.em.run_em.return_value, bins=None
-        )
-        self.bp.run_bp.assert_called_once_with(background_cond, cell_cond, **bp_kwargs)
-        self.em.confidence.assert_not_called()
-        self.utils.scale_to_01.assert_not_called()
-        self.assertEqual(result, self.bp.run_bp.return_value)
+        with mock.patch("spateo.preprocessing.segmentation.icell._initial_nb_params") as _initial_nb_params:
+            X = mock.MagicMock()
+            em_kwargs = mock.MagicMock()
+            bp_kwargs = mock.MagicMock()
+            background_cond = mock.MagicMock()
+            cell_cond = mock.MagicMock()
+            self.em.conditionals.return_value = background_cond, cell_cond
+            result = icell._score_pixels(X, k=3, method="EM+BP", em_kwargs=em_kwargs, bp_kwargs=bp_kwargs)
+            self.utils.conv2d.assert_called_once_with(X, 3, mode="circle", bins=None)
+            self.em.run_em.assert_called_once_with(
+                self.utils.conv2d.return_value, bins=None, params=_initial_nb_params.return_value, **em_kwargs
+            )
+            self.em.conditionals.assert_called_once_with(
+                self.utils.conv2d.return_value, em_results=self.em.run_em.return_value, bins=None
+            )
+            self.bp.run_bp.assert_called_once_with(background_cond, cell_cond, **bp_kwargs)
+            self.em.confidence.assert_not_called()
+            self.utils.scale_to_01.assert_not_called()
+            self.assertEqual(result, self.bp.run_bp.return_value)
 
     def test_score_pixels_adata(self):
         with mock.patch("spateo.preprocessing.segmentation.icell._score_pixels") as _score_pixels, mock.patch(

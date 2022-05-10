@@ -5,7 +5,7 @@ Original author @HailinPan, refactored by @Lioscro.
 """
 import warnings
 from functools import partial
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -139,7 +139,20 @@ def mask_nuclei_from_stain(
     SKM.set_layer_data(adata, out_layer, mask)
 
 
-def _initial_nb_params(X: np.ndarray, bins: Optional[np.ndarray] = None):
+def _initial_nb_params(
+    X: np.ndarray, bins: Optional[np.ndarray] = None
+) -> Union[Dict[str, Tuple[float, float]], Dict[int, Dict[str, Tuple[float, float]]]]:
+    """Calculate initial estimates for the negative binomial mixture.
+
+    Args:
+        X: UMI counts
+        bins: Density bins
+
+    Returns:
+        Dictionary containing initial `w`, `mu`, `var` parameters. If `bins` is also
+        provided, the dictionary is nested with the outer dictionary containing each
+        bin label as the keys.
+    """
     samples = {}
     if bins is not None:
         for label in np.unique(bins):
