@@ -55,6 +55,7 @@ def changes_along_shape(
     model: Union[PolyData, UnstructuredGrid],
     spatial_key: Optional[str] = None,
     key_added: Optional[str] = "rd_spatial",
+    dim: int = 3,
     inplace: bool = False,
     **kwargs,
 ):
@@ -66,12 +67,13 @@ def changes_along_shape(
         "sigma": 0.001,
         "gamma": 10,
         "eps": 0,
-        "dim": 2,
+        "dim": dim,
         "Lambda": 5 * X.shape[1],
         "ncenter": cal_ncenter(X.shape[1]),
     }
     DDRTree_kwargs.update(kwargs)
     Z, Y, stree, R, W, Q, C, objs = DDRTree(X, **DDRTree_kwargs)
+
     model[key_added] = W
 
     return model if not inplace else None

@@ -1,4 +1,4 @@
-from .changes import changes_along_line
+from .changes import changes_along_line, changes_along_shape
 from .clip import interactive_box_clip, interactive_rectangle_clip
 from .ddrtree import DDRTree, cal_ncenter
 from .interpolate import interpolate_model
