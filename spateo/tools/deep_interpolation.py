@@ -73,6 +73,7 @@ class DeepInterpolation:
         # except OSError as e:
         #     if e.errno != os.errno.EEXIST:
         #         raise
+        torch.set_default_dtype(torch.double)
 
         self.buffer_path = buffer_path
         self.smoothing_factor = smoothing_factor
