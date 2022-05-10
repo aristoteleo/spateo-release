@@ -276,7 +276,7 @@ def find_cluster_degs(
                     )
                 )
         else:
-            lm.main_warning("`method` must be one of 'multiple' or 'pairwise'")
+            lm.main_exception("`method` must be one of 'multiple' or 'pairwise'")
     de = pd.DataFrame(
         de,
         columns=[
@@ -361,12 +361,12 @@ def find_all_cluster_degs(
     else:
         genes = adata.var_names
     if group not in adata.obs.keys():
-        lm.main_warning("group {group} is not a valid key for .obs in your adata object.")
+        lm.main_exception("group {group} is not a valid key for .obs in your adata object.")
     else:
         adata.obs[group] = adata.obs[group].astype("str")
         cluster_set = np.sort(adata.obs[group].unique())
     if len(cluster_set) < 2:
-        lm.main_warning("the number of groups for the argument {group} must be at least two.")
+        lm.main_exception("the number of groups for the argument {group} must be at least two.")
     de_tables = [None] * len(cluster_set)
     de_genes = {}
     if len(cluster_set) > 2:
@@ -434,7 +434,7 @@ def top_n_degs(
             Whether to only return the marker gene list for each cluster.
     """
     if "cluster_markers" not in adata.uns.keys():
-        lm.main_warning(
+        lm.main_exception(
             "No info of cluster markers stored in your adata.Running `find_all_cluster_degs` with default parameters."
         )
 
