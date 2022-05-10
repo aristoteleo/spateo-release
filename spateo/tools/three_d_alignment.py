@@ -48,6 +48,7 @@ def pairwise_align(
         cuda_available = torch.cuda.is_available()
         if cuda_available is False:
             raise ValueError("Cannot use GPU, please use CPU.")
+
         torch.cuda.init()
 
     # Subset for common genes
