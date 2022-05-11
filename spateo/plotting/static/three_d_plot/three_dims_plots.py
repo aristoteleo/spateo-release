@@ -14,6 +14,7 @@ from .three_dims_plotter import (
     add_legend,
     add_model,
     add_outline,
+    add_text,
     create_plotter,
     output_plotter,
     save_plotter,
@@ -44,6 +45,20 @@ def _add2plotter(
     outline: bool = False,
     outline_width: float = 5.0,
     outline_labels: bool = True,
+    text: Optional[str] = None,
+    text_font: Literal["times", "courier", "arial"] = "times",
+    text_size: Union[int, float] = 18,
+    text_color: Union[str, tuple, list, None] = None,
+    text_loc: Literal[
+        "lower_left",
+        "lower_right",
+        "upper_left",
+        "upper_right",
+        "lower_edge",
+        "upper_edge",
+        "right_edge",
+        "left_edge",
+    ] = "upper_left",
 ):
     """What needs to be added to the visualization window."""
     add_model(
@@ -55,6 +70,7 @@ def _add2plotter(
         point_size=point_size,
         model_style=model_style,
     )
+
     add_legend(
         plotter=plotter,
         model=model,
@@ -62,9 +78,11 @@ def _add2plotter(
         legend_size=legend_size,
         legend_loc=legend_loc,
     )
+
+    bg_rgb = mpl.colors.to_rgb(background)
+    cbg_rgb = (1 - bg_rgb[0], 1 - bg_rgb[1], 1 - bg_rgb[2])
+
     if outline is True:
-        bg_rgb = mpl.colors.to_rgb(background)
-        cbg_rgb = (1 - bg_rgb[0], 1 - bg_rgb[1], 1 - bg_rgb[2])
         add_outline(
             plotter=plotter,
             model=model,
@@ -72,6 +90,16 @@ def _add2plotter(
             outline_color=cbg_rgb,
             labels=outline_labels,
             labels_color=bg_rgb,
+        )
+
+    if not (text is None):
+        add_text(
+            plotter=plotter,
+            text=text,
+            text_font=text_font,
+            text_size=text_size,
+            text_color=cbg_rgb if text_color is None else text_color,
+            text_loc=text_loc,
         )
 
 
@@ -103,6 +131,20 @@ def three_d_plot(
     outline: bool = False,
     outline_width: float = 5.0,
     outline_labels: bool = True,
+    text: Optional[str] = None,
+    text_font: Literal["times", "courier", "arial"] = "times",
+    text_size: Union[int, float] = 18,
+    text_color: Union[str, tuple, list, None] = None,
+    text_loc: Literal[
+        "lower_left",
+        "lower_right",
+        "upper_left",
+        "upper_right",
+        "lower_edge",
+        "upper_edge",
+        "right_edge",
+        "left_edge",
+    ] = "upper_left",
     view_up: tuple = (0.5, 0.5, 1),
     framerate: int = 15,
     plotter_filename: Optional[str] = None,
@@ -157,6 +199,22 @@ def three_d_plot(
         outline: Produce an outline of the full extent for the model.
         outline_width: The width of outline.
         outline_labels: Whether to add the length, width and height information of the model to the outline.
+        text: The text to add the rendering.
+        text_font: The font of the text. Available `text_font` are:
+                * `'times'`
+                * `'courier'`
+                * `'arial'`
+        text_size: The size of the text.
+        text_color: The color of the text.
+        text_loc: The location of the text in the window. Available `text_loc` are:
+                * `'lower_left'`
+                * `'lower_right'`
+                * `'upper_left'`
+                * `'upper_right'`
+                * `'lower_edge'`
+                * `'upper_edge'`
+                * `'right_edge'`
+                * `'left_edge'`
         view_up: The normal to the orbital plane. Only available when filename ending with `.mp4` or `.gif`.
         framerate: Frames per second. Only available when filename ending with `.mp4` or `.gif`.
         plotter_filename: The filename of the file where the plotter is saved.
@@ -188,6 +246,11 @@ def three_d_plot(
         outline=outline,
         outline_width=outline_width,
         outline_labels=outline_labels,
+        text=text,
+        text_font=text_font,
+        text_size=text_size,
+        text_color=text_color,
+        text_loc=text_loc,
     )
 
     # Set jupyter.
@@ -205,10 +268,10 @@ def three_d_plot(
 
     # Save the plotting object.
     if plotter_filename is not None:
-        save_plotter(p, filename=plotter_filename)
+        save_plotter(plotter=p, filename=plotter_filename)
 
     # Output the plotting object.
-    return output_plotter(p=p, filename=filename, view_up=view_up, framerate=framerate, jupyter=jupyter)
+    return output_plotter(plotter=p, filename=filename, view_up=view_up, framerate=framerate, jupyter=jupyter)
 
 
 def three_d_animate(
@@ -236,6 +299,20 @@ def three_d_animate(
         "upper center",
         "center",
     ] = "lower right",
+    text: Optional[str] = None,
+    text_font: Literal["times", "courier", "arial"] = "times",
+    text_size: Union[int, float] = 18,
+    text_color: Union[str, tuple, list, None] = None,
+    text_loc: Literal[
+        "lower_left",
+        "lower_right",
+        "upper_left",
+        "upper_right",
+        "lower_edge",
+        "upper_edge",
+        "right_edge",
+        "left_edge",
+    ] = "upper_left",
     framerate: int = 15,
     plotter_filename: Optional[str] = None,
 ):
@@ -279,6 +356,22 @@ def three_d_animate(
                 * `'lower center'`
                 * `'upper center'`
                 * `'center'`
+        text: The text to add the rendering.
+        text_font: The font of the text. Available `text_font` are:
+                * `'times'`
+                * `'courier'`
+                * `'arial'`
+        text_size: The size of the text.
+        text_color: The color of the text.
+        text_loc: The location of the text in the window. Available `text_loc` are:
+                * `'lower_left'`
+                * `'lower_right'`
+                * `'upper_left'`
+                * `'upper_right'`
+                * `'lower_edge'`
+                * `'upper_edge'`
+                * `'right_edge'`
+                * `'left_edge'`
         framerate: Frames per second. Only available when filename ending with `.mp4` or `.gif`.
         plotter_filename: The filename of the file where the plotter is saved.
                           Writer type is inferred from the extension of the filename.
@@ -291,77 +384,59 @@ def three_d_animate(
              Returned only if filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
     """
 
+    plotter_kws = dict(
+        jupyter=False if jupyter is False else True,
+        window_size=window_size,
+        background=background,
+    )
+
+    model_kws = dict(
+        key=key,
+        background=background,
+        ambient=ambient,
+        opacity=opacity,
+        point_size=point_size,
+        model_style=model_style,
+        legend_size=legend_size,
+        legend_loc=legend_loc,
+        text=text,
+        text_font=text_font,
+        text_size=text_size,
+        text_color=text_color,
+        text_loc=text_loc,
+    )
+
+    # Set jupyter.
+    off_screen1, off_screen2, jupyter_backend = _set_jupyter(jupyter=jupyter, off_screen=off_screen)
+
+    # Check models.
     blocks = collect_model(models) if isinstance(models, list) else models
     blocks_name = blocks.keys()
 
     # Create a plotting object to display the end model of blocks.
     end_block = blocks[blocks_name[-1]]
-    p1 = create_plotter(
-        jupyter=jupyter,
-        off_screen=off_screen,
-        window_size=window_size,
-        background=background,
-    )
-    _add2plotter(
-        plotter=p1,
-        model=end_block,
-        key=key,
-        background=background,
-        ambient=ambient,
-        opacity=opacity,
-        point_size=point_size,
-        model_style=model_style,
-        legend_size=legend_size,
-        legend_loc=legend_loc,
-    )
-    jupyter_backend = "panel" if jupyter is True else None
-    cpo = p1.show(return_cpos=True, jupyter_backend=jupyter_backend, cpos=initial_cpo)
+    p = create_plotter(off_screen=off_screen1, **plotter_kws)
+    _add2plotter(plotter=p, model=end_block, **model_kws)
+    cpo = p.show(return_cpos=True, cpos=initial_cpo, jupyter_backend="none")
 
-    # Create another plotting object to save.
+    # Create another plotting object to save pyvista/vtk model.
     start_block = blocks[blocks_name[0]]
-    p2 = create_plotter(
-        jupyter=jupyter,
-        off_screen=True,
-        window_size=window_size,
-        background=background,
-    )
-    _add2plotter(
-        plotter=p2,
-        model=start_block,
-        key=key,
-        background=background,
-        ambient=ambient,
-        opacity=opacity,
-        point_size=point_size,
-        model_style=model_style,
-        legend_size=legend_size,
-        legend_loc=legend_loc,
-    )
-
-    p2.camera_position = cpo
+    p = create_plotter(off_screen=off_screen2, **plotter_kws)
+    _add2plotter(plotter=p, model=start_block, **model_kws)
+    p.camera_position = cpo
 
     filename_format = filename.split(".")[-1]
     if filename_format == "gif":
-        p2.open_gif(filename)
+        p.open_gif(filename)
     elif filename_format == "mp4":
-        p2.open_movie(filename, framerate=framerate, quality=5)
+        p.open_movie(filename, framerate=framerate, quality=5)
 
     for block_name in blocks_name[1:]:
         block = blocks[block_name]
         start_block.overwrite(block)
-        _add2plotter(
-            plotter=p2,
-            model=start_block,
-            key=key,
-            background=background,
-            ambient=ambient,
-            opacity=opacity,
-            point_size=point_size,
-            legend_size=legend_size,
-            legend_loc=legend_loc,
-        )
-        p2.write_frame()
+        _add2plotter(plotter=p, model=start_block, **model_kws)
+        p.write_frame()
 
     # Save the plotting object.
     if plotter_filename is not None:
-        save_plotter(p2, filename=plotter_filename)
+        save_plotter(plotter=p, filename=plotter_filename)

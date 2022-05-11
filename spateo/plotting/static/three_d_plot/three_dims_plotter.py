@@ -269,8 +269,50 @@ def add_legend(
         )
 
 
+def add_text(
+    plotter: Plotter,
+    text: str,
+    text_font: Literal["times", "courier", "arial"] = "times",
+    text_size: Union[int, float] = 18,
+    text_color: Union[str, tuple, list] = "black",
+    text_loc: Literal[
+        "lower_left",
+        "lower_right",
+        "upper_left",
+        "upper_right",
+        "lower_edge",
+        "upper_edge",
+        "right_edge",
+        "left_edge",
+    ] = "upper_left",
+):
+    """
+    Add text to the plotter.
+
+    Args:
+        plotter: The plotting object to display pyvista/vtk model.
+        text: The text to add the rendering.
+        text_font: The font of the text. Available `text_font` are:
+                * `'times'`
+                * `'courier'`
+                * `'arial'`
+        text_size: The size of the text.
+        text_color: The color of the text.
+        text_loc: The location of the text in the window. Available `text_loc` are:
+                * `'lower_left'`
+                * `'lower_right'`
+                * `'upper_left'`
+                * `'upper_right'`
+                * `'lower_edge'`
+                * `'upper_edge'`
+                * `'right_edge'`
+                * `'left_edge'`
+    """
+    plotter.add_text(text=text, font=text_font, color=text_color, font_size=text_size, position=text_loc)
+
+
 def output_plotter(
-    p: Plotter,
+    plotter: Plotter,
     filename: Optional[str] = None,
     view_up: tuple = (0.5, 0.5, 1),
     framerate: int = 15,
@@ -280,7 +322,7 @@ def output_plotter(
     Output plotter as image, gif file or mp4 file.
 
     Args:
-        p: The plotting object to display pyvista/vtk model.
+        plotter: The plotting object to display pyvista/vtk model.
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
                 * Output an image file,
                   please enter a filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
@@ -302,17 +344,17 @@ def output_plotter(
 
     def _to_gif(_filename, _view_up):
         """Output plotter to gif file."""
-        path = p.generate_orbital_path(factor=2.0, shift=0, viewup=_view_up, n_points=20)
-        p.open_gif(_filename)
-        p.orbit_on_path(path, write_frames=True, viewup=(0, 0, 1), step=0.1)
-        p.close()
+        path = plotter.generate_orbital_path(factor=2.0, shift=0, viewup=_view_up, n_points=20)
+        plotter.open_gif(_filename)
+        plotter.orbit_on_path(path, write_frames=True, viewup=(0, 0, 1), step=0.1)
+        plotter.close()
 
     def _to_mp4(_filename, _view_up, _framerate):
         """Output plotter to mp4 file."""
-        path = p.generate_orbital_path(factor=2.0, shift=0, viewup=_view_up, n_points=20)
-        p.open_movie(_filename, framerate=_framerate, quality=5)
-        p.orbit_on_path(path, write_frames=True, viewup=(0, 0, 1), step=0.1)
-        p.close()
+        path = plotter.generate_orbital_path(factor=2.0, shift=0, viewup=_view_up, n_points=20)
+        plotter.open_movie(_filename, framerate=_framerate, quality=5)
+        plotter.orbit_on_path(path, write_frames=True, viewup=(0, 0, 1), step=0.1)
+        plotter.close()
 
     _, _, jupyter_backend = _set_jupyter(jupyter=jupyter)
 
@@ -320,17 +362,17 @@ def output_plotter(
     if filename is None:
         # p.show(jupyter_backend=jupyter_backend)
         if jupyter is False:
-            cpo, img = p.show(return_img=True, return_cpos=True, jupyter_backend=jupyter_backend)
+            cpo, img = plotter.show(return_img=True, return_cpos=True, jupyter_backend=jupyter_backend)
             return cpo, img
         else:
-            p.show(jupyter_backend=jupyter_backend)
+            plotter.show(jupyter_backend=jupyter_backend)
     else:
         filename_format = filename.split(".")[-1]
 
         # Output the plotter in the format of the output file.
         if filename_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
             if jupyter is False:
-                cpo, img = p.show(
+                cpo, img = plotter.show(
                     screenshot=filename,
                     return_img=True,
                     return_cpos=True,
@@ -338,7 +380,7 @@ def output_plotter(
                 )
                 return cpo, img
             else:
-                p.show(screenshot=filename, jupyter_backend=jupyter_backend)
+                plotter.show(screenshot=filename, jupyter_backend=jupyter_backend)
         elif filename_format == "gif":
             _to_gif(_filename=filename, _view_up=view_up)
             return None
@@ -356,13 +398,13 @@ def output_plotter(
 
 
 def save_plotter(
-    p: Plotter,
+    plotter: Plotter,
     filename: str,
 ):
     """Save plotter as gltf file, html file, obj file or vtkjs file.
 
     Args:
-       p: The plotting object to display pyvista/vtk model.
+       plotter: The plotting object to display pyvista/vtk model.
        filename: The filename of the file where the plotter is saved.
                  Writer type is inferred from the extension of the filename.
            * Output a gltf file, please enter a filename ending with `.gltf`.
@@ -376,10 +418,10 @@ def save_plotter(
 
     # Save the plotter in the format of the output file.
     if filename_format == "gltf":
-        p.export_gltf(filename)
+        plotter.export_gltf(filename)
     elif filename_format == "html":
-        p.export_html(filename)
+        plotter.export_html(filename)
     elif filename_format == "obj":
-        p.export_obj(filename)
+        plotter.export_obj(filename)
     else:
-        p.export_vtkjs(filename)
+        plotter.export_vtkjs(filename)
