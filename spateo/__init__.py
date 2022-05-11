@@ -1,5 +1,4 @@
-"""A complete solution of spatialtemporal dynamics analyses toolkit of single
-cell spatial transcriptomics.
+"""Spatiotemporal modeling of spatial transcriptomics
 """
 
 from .get_version import get_version

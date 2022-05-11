@@ -1,4 +1,4 @@
-"""A complete solution of spatialtemporal dynamics analyses toolkit of single cell spatial transcriptomics
+"""Spatiotemporal modeling of spatial transcriptomics
 """
 from .agg import imshow, qc_regions
 from .bbs import delaunay, polygon
