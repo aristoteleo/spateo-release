@@ -9,8 +9,8 @@ except ImportError:
     from typing_extensions import Literal
 
 
-def interpolate_mesh(
-    mesh,
+def interpolate_model(
+    model,
     source,
     source_key: Union[str, list] = None,
     radius: Optional[float] = None,
@@ -24,9 +24,9 @@ def interpolate_mesh(
     Interpolate over source to port its data onto the current object using various kernels.
 
     Args:
-        mesh: Mesh that require interpolation.
+        model: Model that require interpolation.
         source: A data source that provides coordinates and data. Usually a point cloud object.
-        source_key: Which data to migrate to the mesh object. If `source_key` is None, migrate all to the mesh object.
+        source_key: Which data to migrate to the model object. If `source_key` is None, migrate all to the model object.
         radius: Set the radius of the point cloud. If you are generating a Gaussian distribution, then this is the
                 standard deviation for each of x, y, and z.
         N: Specify the number of points for the source object to hold.
@@ -42,7 +42,7 @@ def interpolate_mesh(
                               point within R. The sharpness s simply affects the rate of fall off of the Gaussian.
                 * `linear`: vtkLinearKernel is an interpolation kernel that averages the contributions of all points in
                             the basis.
-        where: The location where the data is stored in the mesh.
+        where: The location where the data is stored in the model.
         nullStrategy: Specify a strategy to use when encountering a "null" point during the interpolation process.
                       Null points occur when the local neighborhood(of nearby points to interpolate from) is empty.
                 * Case 0: an output array is created that marks points as being valid (=1) or null (invalid =0), and
@@ -52,21 +52,10 @@ def interpolate_mesh(
         nullValue: see above.
 
     Returns:
-        interpolated_mesh: Interpolated mesh.
-
-    Examples:
-        >>> import spateo as st
-        >>> import pyvista as pv
-        >>> surf = st.tl.read_mesh(r"CNS_surf.vtk")
-        >>> points = st.tl.read_mesh(r"CNS_pc_new.vtk")
-        >>> st.tl.pc_KDE(pc=points, bandwidth=10.0, key_added="pc_kde")
-        >>> new_surf = st.tl.interpolate_mesh(mesh=surf, source=points, N=5, where="cell_data", source_key=["pc_kde"])
-        >>> p = pv.Plotter()
-        >>> p.add_mesh(new_surf, scalars="pc_kde1", opacity=0.8, colormap="hot_r")
-        >>> p.show()
+        interpolated_model: Interpolated model.
     """
 
-    _mesh = mesh.copy()
+    _model = model.copy()
     source = source.cell_data_to_point_data()
     _source = source.copy()
     if not (source_key is None):
@@ -101,7 +90,7 @@ def interpolate_mesh(
         kern.SetRadius(radius)
 
     interpolator = vtk.vtkPointInterpolator()
-    interpolator.SetInputData(_mesh)
+    interpolator.SetInputData(_model)
     interpolator.SetSourceData(_source)
     interpolator.SetKernel(kern)
     interpolator.SetLocator(locator)
@@ -119,15 +108,15 @@ def interpolate_mesh(
         p2c.Update()
         cpoly = p2c.GetOutput()
 
-    interpolated_mesh = pv.wrap(cpoly)
+    interpolated_model = pv.wrap(cpoly)
 
-    raw_pdk = mesh.point_data.keys()
-    raw_cdk = mesh.cell_data.keys()
+    raw_pdk = model.point_data.keys()
+    raw_cdk = model.cell_data.keys()
     if not (raw_pdk is None):
         for key in raw_pdk:
-            interpolated_mesh.point_data[key] = mesh.point_data[key]
+            interpolated_model.point_data[key] = model.point_data[key]
     if not (raw_cdk is None):
         for key in raw_cdk:
-            interpolated_mesh.cell_data[key] = mesh.cell_data[key]
+            interpolated_model.cell_data[key] = model.cell_data[key]
 
-    return interpolated_mesh
+    return interpolated_model

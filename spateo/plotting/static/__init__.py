@@ -6,9 +6,9 @@ from .colorlabel import color_label
 from .geo import geo
 from .lisa import lisa, lisa_quantiles
 from .space import space
-from .three_d_plots import (
+from .three_d_plot import (
     add_legend,
-    add_mesh,
+    add_model,
     add_outline,
     create_plotter,
     output_plotter,

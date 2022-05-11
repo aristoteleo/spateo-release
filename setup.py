@@ -19,6 +19,7 @@ setup(
     extras_require={
         "dev": read_requirements("dev-requirements.txt"),
         "docs": read_requirements(os.path.join("docs", "requirements.txt")),
+        "3d": read_requirements("3d-requirements.txt"),
     },
     packages=find_packages(exclude=("tests", "docs")),
     classifiers=[

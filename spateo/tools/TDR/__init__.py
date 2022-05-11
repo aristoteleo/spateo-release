@@ -1,2 +1,2 @@
-from .mesh import *
-from .weight import *
+from .models import *
+from .weights import *
