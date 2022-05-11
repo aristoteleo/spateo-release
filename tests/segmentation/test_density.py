@@ -38,9 +38,9 @@ class TestDensity(TestMixin, TestCase):
             schc.assert_called_once_with(conv2d.return_value, distance_threshold=None)
 
     def test_segment_densities_adata(self):
-        with mock.patch(
-            "spateo.segmentation.density._segment_densities"
-        ) as _segment_densities, mock.patch("spateo.segmentation.density.bin_matrix") as bin_matrix:
+        with mock.patch("spateo.segmentation.density._segment_densities") as _segment_densities, mock.patch(
+            "spateo.segmentation.density.bin_matrix"
+        ) as bin_matrix:
             adata = create_random_adata(shape=(3, 3))
             _segment_densities.return_value = np.random.random((3, 3))
             bin_matrix.return_value = np.random.random((3, 3))
