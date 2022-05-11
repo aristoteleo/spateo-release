@@ -237,7 +237,7 @@ def pearson_residuals(
     adata.obsm["pearson_residuals"] = residuals
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+# @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def integrate(
     adatas: List[AnnData],
     batch_key: str = "slices",
