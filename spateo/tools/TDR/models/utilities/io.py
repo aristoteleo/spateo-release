@@ -10,7 +10,7 @@ except ImportError:
     from typing_extensions import Literal
 
 
-def read_mesh(filename: str):
+def read_model(filename: str):
     """
     Read any file type supported by vtk or meshio.
     Args:
@@ -18,28 +18,28 @@ def read_mesh(filename: str):
     Returns:
         Wrapped PyVista dataset.
     """
-    mesh = pv.read(filename)
+    model = pv.read(filename)
 
-    if "vtkOriginalPointIds" in mesh.point_data.keys():
-        del mesh.point_data["vtkOriginalPointIds"]
-    if "vtkOriginalCellIds" in mesh.cell_data.keys():
-        del mesh.cell_data["vtkOriginalCellIds"]
+    if "vtkOriginalPointIds" in model.point_data.keys():
+        del model.point_data["vtkOriginalPointIds"]
+    if "vtkOriginalCellIds" in model.cell_data.keys():
+        del model.cell_data["vtkOriginalCellIds"]
 
-    return mesh
+    return model
 
 
-def save_mesh(
-    mesh: Union[DataSet, MultiBlock],
+def save_model(
+    model: Union[DataSet, MultiBlock],
     filename: str,
     binary: bool = True,
     texture: Union[str, np.ndarray] = None,
 ):
     """
-    Save the pvvista/vtk mesh to vtk/vtm file.
+    Save the pvvista/vtk model to vtk/vtm file.
     Args:
-        mesh: A reconstructed mesh.
+        model: A reconstructed model.
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
-                  If mesh is a pyvista.MultiBlock object, please enter a filename ending with `.vtm`;
+                  If model is a pyvista.MultiBlock object, please enter a filename ending with `.vtm`;
                   else please enter a filename ending with `.vtk`.
         binary: If True, write as binary. Otherwise, write as ASCII.
                 Binary files write much faster than ASCII and have a smaller file size.
@@ -52,7 +52,7 @@ def save_mesh(
     """
 
     if filename.endswith(".vtk") or filename.endswith(".vtm"):
-        mesh.save(filename=filename, binary=binary, texture=texture)
+        model.save(filename=filename, binary=binary, texture=texture)
     else:
         raise ValueError(
             "\n`filename` is wrong."
