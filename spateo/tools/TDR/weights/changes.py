@@ -74,6 +74,7 @@ def changes_along_shape(
     DDRTree_kwargs.update(kwargs)
     Z, Y, stree, R, W, Q, C, objs = DDRTree(X, **DDRTree_kwargs)
 
-    model[key_added] = W
+    # Obtain the real part of the complex argument
+    model[key_added] = np.real(W).astype(np.float64)
 
     return model if not inplace else None
