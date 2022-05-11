@@ -8,8 +8,12 @@ from scipy import sparse
 from scipy.stats import gmean, pearsonr
 from typing_extensions import Literal
 
+from ..configuration import SKM
+from ..logging import logger_manager as lm
+
 
 # Niches
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def niches(
     adata: AnnData,
     path: str,
@@ -25,6 +29,10 @@ def niches(
        -bucket pairs, while the rows ligand-receptor mechanisms. This resultant
        anndated object allows flexible downstream manipulations such as the
        dimensional reduction of the row or column of this object.
+
+    Our method is adapted from:
+        Robin Browaeys, Wouter Saelens & Yvan Saeys. NicheNet: modeling intercellular communication by linking ligands
+        to target genes. Nature Methods volume 17, pages159–162 (2020).
 
     Args:
         path: Path to ligand_receptor network of NicheNet (prior lr_network).
@@ -143,6 +151,7 @@ def niches(
 
 
 # NicheNet
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def predict_ligand_activities(
     adata: AnnData,
     path: str,
@@ -152,6 +161,12 @@ def predict_ligand_activities(
     species: Literal["human", "mouse"] = "human",
 ) -> pd.DataFrame:
     """Function to predict the ligand activity.
+
+     Our method is adapted from:
+        Micha Sam Brickman Raredon, Junchen Yang, Neeharika Kothapalli,  Naftali Kaminski, Laura E. Niklason,
+        Yuval Kluger. Comprehensive visualization of cell-cell interactions in single-cell and spatial transcriptomics
+        with NICHES. doi: https://doi.org/10.1101/2022.01.23.477401
+
     Args:
         path: Path to ligand_target_matrix, lr_network (human and mouse).
         adata: An Annodata object.
@@ -161,6 +176,7 @@ def predict_ligand_activities(
             expressed genes in receiver cells (comparing cells in case and
             control group). Ligands activity prediction is based on this gene
             set. By default, all genes expressed in receiver cells is used.
+
     Returns:
         A pandas DataFrame of the predicted activity ligands.
 
@@ -252,6 +268,7 @@ def predict_ligand_activities(
     return res
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def predict_target_genes(
     adata: AnnData,
     path: str,
@@ -278,6 +295,7 @@ def predict_target_genes(
         top_target: `int` (default=300)
             Infer target genes of top-ranked ligands, and choose the top targets
             according to the general prior model.
+
     Returns:
         A pandas DataFrame of the predict target genes.
 

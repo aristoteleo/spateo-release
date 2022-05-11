@@ -19,15 +19,10 @@ nudged>=0.3.1
 numba>=0.46.0
 numpy>=1.18.1<=2.10.0
 opencv-python>=4.5.4.60
-open3d>=0.14.1
 pandana
 pandas>=0.25.1
 plotly>=5.1.0
 POT>=0.8.1
-PVGeo>=2.1.0
-pyacvd>=0.2.7
-PyMCubes
-pymeshfix>=0.15.0
 pynndescent>=0.4.8
 pysal>=1.14.4
 pyro-ppl

@@ -3,12 +3,16 @@
 import glob
 import os
 import re
+import warnings
 from typing import List, Optional, Union
 
 import ngs_tools as ngs
 import numpy as np
 import pandas as pd
-import skimage.io
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import skimage.io
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 from typing_extensions import Literal

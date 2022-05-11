@@ -1,8 +1,3 @@
-"""
-Todo:
-    * @Xiaojieqiu: update with Google style documentation, function typings, tests
-"""
-
 from typing import List, Tuple, Union
 
 import numpy as np
@@ -10,11 +5,13 @@ from anndata import AnnData
 
 from spateo.tools import interpolation_nn
 
+from ..configuration import SKM
 from ..logging import logger_manager as lm
 from .deep_interpolation import DataSampler, DeepInterpolation
 from .utils import in_hull, polyhull
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def kernel_interpolation(
     adata: Union[AnnData, None] = None,
     genes: Union[None, List] = None,
@@ -63,6 +60,7 @@ def kernel_interpolation(
     return interp_adata
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def deep_intepretation(
     adata: Union[AnnData, None] = None,
     genes: Union[None, List] = None,
@@ -114,6 +112,7 @@ def deep_intepretation(
     return interp_adata
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def get_X_Y_grid(
     adata: Union[AnnData, None] = None,
     genes: Union[None, List] = None,

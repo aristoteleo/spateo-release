@@ -1,13 +1,7 @@
 """Use StarDist for cell identification and labeling.
 https://github.com/stardist/stardist
 
-Uwe Schmidt, Martin Weigert, Coleman Broaddus, and Gene Myers.
-Cell Detection with Star-convex Polygons.
-International Conference on Medical Image Computing and Computer-Assisted Intervention (MICCAI), Granada, Spain, September 2018.
-
-Martin Weigert, Uwe Schmidt, Robert Haase, Ko Sugawara, and Gene Myers.
-Star-convex Polyhedra for 3D Object Detection and Segmentation in Microscopy.
-The IEEE Winter Conference on Applications of Computer Vision (WACV), Snowmass Village, Colorado, March 2020
+[Schmidt18]_ and [Weigert20]_
 """
 import math
 from typing import Optional, Union
@@ -132,7 +126,7 @@ def stardist(
     min_overlap: Optional[int] = None,
     context: Optional[int] = None,
     normalizer: Optional[Normalizer] = PercentileNormalizer(),
-    equalize: bool = True,
+    equalize: float = 2.0,
     sanitize: bool = True,
     layer: str = SKM.STAIN_LAYER_KEY,
     out_layer: Optional[str] = None,
@@ -166,8 +160,8 @@ def stardist(
         normalizer: Normalizer to use to perform normalization prior to prediction.
             By default, percentile-based normalization is performed. `None` may
             be provided to disable normalization.
-        equalize: Whether or not to perform adaptive histogram equalization
-            prior to prediction.
+        equalize: Controls the `clip_limit` argument to the :func:`clahe` function.
+            Set this value to a non-positive value to turn off equalization.
         sanitize: Whether to sanitize disconnected labels.
         layer: Layer that contains staining image. Defaults to `stain`.
         out_layer: Layer to put resulting labels. Defaults to `{layer}_labels`.
@@ -184,9 +178,9 @@ def stardist(
             "with the `nuclei_path` argument to `st.io.read_bgi_agg`."
         )
     img = SKM.select_layer_data(adata, layer, make_dense=True)
-    if equalize:
+    if equalize > 0:
         lm.main_info("Equalizing image with CLAHE.")
-        img = clahe(img)
+        img = clahe(img, equalize)
 
     lm.main_info(f"Running StarDist with model {model}.")
     if not min_overlap:

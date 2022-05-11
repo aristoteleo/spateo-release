@@ -5,7 +5,7 @@ Original author @HailinPan, refactored by @Lioscro.
 """
 import warnings
 from functools import partial
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -59,6 +59,7 @@ def _mask_nuclei_from_stain(
     return nuclei_mask
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def mask_cells_from_stain(
     adata: AnnData,
     otsu_classes: int = 3,
@@ -93,6 +94,7 @@ def mask_cells_from_stain(
     SKM.set_layer_data(adata, out_layer, mask)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def mask_nuclei_from_stain(
     adata: AnnData,
     otsu_classes: int = 3,
@@ -135,6 +137,42 @@ def mask_nuclei_from_stain(
     mask = _mask_nuclei_from_stain(X, otsu_classes, otsu_index, local_k, -offset, mk)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
     SKM.set_layer_data(adata, out_layer, mask)
+
+
+def _initial_nb_params(
+    X: np.ndarray, bins: Optional[np.ndarray] = None
+) -> Union[Dict[str, Tuple[float, float]], Dict[int, Dict[str, Tuple[float, float]]]]:
+    """Calculate initial estimates for the negative binomial mixture.
+
+    Args:
+        X: UMI counts
+        bins: Density bins
+
+    Returns:
+        Dictionary containing initial `w`, `mu`, `var` parameters. If `bins` is also
+        provided, the dictionary is nested with the outer dictionary containing each
+        bin label as the keys.
+    """
+    samples = {}
+    if bins is not None:
+        for label in np.unique(bins):
+            if label > 0:
+                samples[label] = X[bins == label]
+    else:
+        samples[0] = X.flatten()
+
+    params = {}
+    for label, _samples in samples.items():
+        threshold = filters.threshold_otsu(_samples)
+        mask = _samples > threshold
+        background_values = _samples[~mask]
+        foreground_values = _samples[mask]
+        params[label] = dict(
+            w=tuple(np.array([_samples.size - mask.sum(), mask.sum()]) / _samples.size),
+            mu=(background_values.mean(), foreground_values.mean()),
+            var=(background_values.var(), foreground_values.var()),
+        )
+    return params[0] if bins is None else params
 
 
 def _score_pixels(
@@ -221,13 +259,18 @@ def _score_pixels(
         # Rescale
         res /= res.max()
     else:
+        # Obtain initial parameter estimates with Otsu thresholding.
+        # These may be overridden by providing the appropriate kwargs.
+        nb_kwargs = dict(params=_initial_nb_params(res, bins=bins))
         if "em" in method:
-            lm.main_debug(f"Running EM with kwargs {em_kwargs}.")
-            em_results = em.run_em(res, bins=bins, **em_kwargs)
+            nb_kwargs.update(em_kwargs)
+            lm.main_debug(f"Running EM with kwargs {nb_kwargs}.")
+            em_results = em.run_em(res, bins=bins, **nb_kwargs)
             conditional_func = partial(em.conditionals, em_results=em_results, bins=bins)
         else:
-            lm.main_debug(f"Running VI with kwargs {vi_kwargs}.")
-            vi_results = vi.run_vi(res, bins=bins, **vi_kwargs)
+            nb_kwargs.update(vi_kwargs)
+            lm.main_debug(f"Running VI with kwargs {nb_kwargs}.")
+            vi_results = vi.run_vi(res, bins=bins, **nb_kwargs)
             conditional_func = partial(vi.conditionals, vi_results=vi_results, bins=bins)
 
         if "bp" in method:
@@ -251,6 +294,7 @@ def _score_pixels(
     return res
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def score_and_mask_pixels(
     adata: AnnData,
     layer: str,

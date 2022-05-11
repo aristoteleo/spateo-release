@@ -125,6 +125,7 @@ def labeling_stats(y_true: np.ndarray, y_pred: np.ndarray) -> Tuple[float, float
     return ars, homogeneity, completeness, v
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def compare(
     adata: AnnData,
     true_layer: str,

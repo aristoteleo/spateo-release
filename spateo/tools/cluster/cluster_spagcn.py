@@ -10,9 +10,11 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+from ...configuration import SKM
 from .utils import compute_pca_components
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def spagcn_vanilla(
     adata: AnnData,
     spatial_key: str = "spatial",
@@ -30,6 +32,12 @@ def spagcn_vanilla(
     """
     Integrating gene expression and spatial location to identify spatial domains via SpaGCN.
     Original Code Repository: https://github.com/jianhuupenn/SpaGCN
+
+    Reference:
+        Jian Hu, Xiangjie Li, Kyle Coleman, Amelia Schroeder, Nan Ma, David J. Irwin, Edward B. Lee,
+        Russell T. Shinohara & Mingyao Li. SpaGCN: Integrating gene expression, spatial location and histology to
+        identify spatial domains and spatially variable genes by graph convolutional network. Nature Methods volume 18,
+        pages1342–1351 (2021)
 
     Args:
         adata: An Anndata object after normalization.

@@ -1,10 +1,14 @@
 """Spatial markers.
 """
+import warnings
 from random import sample
 from typing import Tuple
 
 import anndata
-import geopandas
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import geopandas
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
@@ -13,9 +17,11 @@ from pysal.lib import weights
 from pysal.model import spreg
 from tqdm import tqdm
 
+from ..configuration import SKM
 from ..utils import copy_adata
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def lisa_geo_df(
     adata: anndata.AnnData,
     gene: str,
@@ -81,6 +87,7 @@ def lisa_geo_df(
     return (lisa, df)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def local_moran_i(
     adata: anndata.AnnData,
     group: str,
@@ -309,6 +316,7 @@ def local_moran_i(
     return res
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def GM_lag_model(
     adata: anndata.AnnData,
     group: str,

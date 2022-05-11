@@ -1,7 +1,9 @@
 # code adapted from https://github.com/aristoteleo/dynamo-release/blob/master/dynamo/configuration.py
+import inspect
 import logging
 import os
 import warnings
+from functools import wraps
 from typing import Optional, Tuple, Union
 
 import colorcet
@@ -159,6 +161,30 @@ class SpateoAdataKeyManager:
 
     def get_adata_type(adata: AnnData) -> str:
         return adata.uns[SpateoAdataKeyManager.ADATA_TYPE_KEY]
+
+    def adata_is_type(adata: AnnData, t: str) -> bool:
+        return SpateoAdataKeyManager.get_adata_type(adata) == t
+
+    def check_adata_is_type(t: str, argname: str = "adata", optional: bool = False):
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                # Get original, unwrapped function in case multiple decorators
+                # are applied.
+                unwrapped = inspect.unwrap(func)
+                # Obtain arguments by name.
+                call_args = inspect.getcallargs(unwrapped, *args, **kwargs)
+                adata = call_args[argname]
+                if (not optional or adata is not None) and not SpateoAdataKeyManager.adata_is_type(adata, t):
+                    raise ConfigurationError(
+                        f"AnnData provided to `{argname}` argument must be of `{t}` type, but received "
+                        f"`{SpateoAdataKeyManager.get_adata_type(adata)}` type."
+                    )
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        return decorator
 
     def init_adata_type(adata: AnnData, t: Optional[str] = None):
         lm.main_info_insert_adata_uns(SpateoAdataKeyManager.ADATA_TYPE_KEY)
@@ -341,129 +367,6 @@ zebrafish_colors = [
     "#ff4241",
     "#b77df9",
 ]
-zebrafish_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("zebrafish", zebrafish_colors)
-
-fire_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("fire", colorcet.fire)
-darkblue_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("darkblue", colorcet.kbc)
-darkgreen_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("darkgreen", colorcet.kgy)
-darkred_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
-    "darkred", colors=colorcet.linear_kry_5_95_c72[:192], N=256
-)
-darkpurple_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("darkpurple", colorcet.linear_bmw_5_95_c89)
-# add gkr theme for velocity
-div_blue_black_red_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
-    "div_blue_black_red", colorcet.diverging_gkr_60_10_c40
-)
-# add RdBu_r theme for velocity
-div_blue_red_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
-    "div_blue_red", colorcet.diverging_bwr_55_98_c37
-)
-# add glasbey_bw for cell annotation in white background
-glasbey_white_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("glasbey_white", colorcet.glasbey_bw_minc_20)
-# add glasbey_bw_minc_20_maxl_70 theme for cell annotation in dark background
-glasbey_dark_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
-    "glasbey_dark", colorcet.glasbey_bw_minc_20_maxl_70
-)
-
-# register cmap
-with warnings.catch_warnings():
-    plt.register_cmap("zebrafish", zebrafish_cmap)
-    plt.register_cmap("fire", fire_cmap)
-    plt.register_cmap("darkblue", darkblue_cmap)
-    plt.register_cmap("darkgreen", darkgreen_cmap)
-    plt.register_cmap("darkred", darkred_cmap)
-    plt.register_cmap("darkpurple", darkpurple_cmap)
-    plt.register_cmap("div_blue_black_red", div_blue_black_red_cmap)
-    plt.register_cmap("div_blue_red", div_blue_red_cmap)
-    plt.register_cmap("glasbey_white", glasbey_white_cmap)
-    plt.register_cmap("glasbey_dark", glasbey_dark_cmap)
-
-_themes = {
-    "fire": {
-        "cmap": "fire",
-        "color_key_cmap": "rainbow",
-        "background": "black",
-        "edge_cmap": "fire",
-    },
-    "viridis": {
-        "cmap": "viridis",
-        "color_key_cmap": "Spectral",
-        "background": "white",
-        "edge_cmap": "gray",
-    },
-    "inferno": {
-        "cmap": "inferno",
-        "color_key_cmap": "Spectral",
-        "background": "black",
-        "edge_cmap": "gray",
-    },
-    "blue": {
-        "cmap": "Blues",
-        "color_key_cmap": "tab20",
-        "background": "white",
-        "edge_cmap": "gray_r",
-    },
-    "red": {
-        "cmap": "Reds",
-        "color_key_cmap": "tab20b",
-        "background": "white",
-        "edge_cmap": "gray_r",
-    },
-    "green": {
-        "cmap": "Greens",
-        "color_key_cmap": "tab20c",
-        "background": "white",
-        "edge_cmap": "gray_r",
-    },
-    "darkblue": {
-        "cmap": "darkblue",
-        "color_key_cmap": "rainbow",
-        "background": "black",
-        "edge_cmap": "darkred",
-    },
-    "darkred": {
-        "cmap": "darkred",
-        "color_key_cmap": "rainbow",
-        "background": "black",
-        "edge_cmap": "darkblue",
-    },
-    "darkgreen": {
-        "cmap": "darkgreen",
-        "color_key_cmap": "rainbow",
-        "background": "black",
-        "edge_cmap": "darkpurple",
-    },
-    "div_blue_black_red": {
-        "cmap": "div_blue_black_red",
-        "color_key_cmap": "div_blue_black_red",
-        "background": "black",
-        "edge_cmap": "gray_r",
-    },
-    "div_blue_red": {
-        "cmap": "div_blue_red",
-        "color_key_cmap": "div_blue_red",
-        "background": "white",
-        "edge_cmap": "gray_r",
-    },
-    "glasbey_dark": {
-        "cmap": "glasbey_dark",
-        "color_key_cmap": "glasbey_dark",
-        "background": "black",
-        "edge_cmap": "gray",
-    },
-    "glasbey_white_zebrafish": {
-        "cmap": "zebrafish",
-        "color_key_cmap": "zebrafish",
-        "background": "white",
-        "edge_cmap": "gray_r",
-    },
-    "glasbey_white": {
-        "cmap": "glasbey_white",
-        "color_key_cmap": "glasbey_white",
-        "background": "white",
-        "edge_cmap": "gray_r",
-    },
-}
 
 # https://github.com/vega/vega/wiki/Scales#scale-range-literals
 cyc_10 = list(map(colors.to_hex, cm.tab10.colors))

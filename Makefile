@@ -9,7 +9,10 @@ install:
 install-dev:
 	pip install -r dev-requirements.txt
 
-install-all: install-dev install
+install-docs:
+	pip install -r docs/requirements.txt
+
+install-all: install-dev install-docs install
 
 test:
 	rm -f .coverage
@@ -34,7 +37,7 @@ clean:
 	rm -rf dist
 	rm -rf spateo.egg-info
 	rm -rf docs/_build
-	rm -rf docs/api
+	rm -rf docs/autoapi
 	rm -rf .coverage
 
 bump_patch:

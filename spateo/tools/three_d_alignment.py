@@ -6,9 +6,12 @@ from anndata import AnnData
 from scipy.sparse import isspmatrix
 from scipy.spatial import distance_matrix
 
+from ..configuration import SKM
 from ..logging import logger_manager as lm
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slice1", optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slice2", optional=True)
 def pairwise_align(
     slice1: AnnData,
     slice2: AnnData,
@@ -19,6 +22,9 @@ def pairwise_align(
     device: str = "cpu",
 ) -> np.ndarray:
     """Calculates and returns optimal alignment of two slices.
+
+    Our method is adapted from:
+        Ron Zeira, Max Land,  Benjamin J. Raphael, Alignment and Integration of Spatial Transcriptomics Data.
 
     Args:
         slice1: An AnnData object.
@@ -42,6 +48,7 @@ def pairwise_align(
         cuda_available = torch.cuda.is_available()
         if cuda_available is False:
             raise ValueError("Cannot use GPU, please use CPU.")
+
         torch.cuda.init()
 
     # Subset for common genes

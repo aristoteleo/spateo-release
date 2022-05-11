@@ -156,6 +156,7 @@ class RigidAlignmentRefiner(AlignmentRefiner):
 MODULES = {"rigid": RigidAlignmentRefiner, "non-rigid": NonRigidAlignmentRefiner}
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def refine_alignment(
     adata: AnnData,
     stain_layer: str = SKM.STAIN_LAYER_KEY,

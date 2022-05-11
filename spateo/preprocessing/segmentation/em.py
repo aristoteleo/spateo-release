@@ -39,6 +39,16 @@ def lamtheta_to_muvar(lam: float, theta: float) -> Tuple[float, float]:
     return mu, var
 
 
+def nbn_pmf(n, p, X):
+    """Helper function to compute PMF of negative binomial distribution.
+
+    This function is used instead of calling :func:`stats.nbinom` directly because there
+    is some weird behavior when float32 is used. This function essentially casts the `n` and
+    `p` parameters as floats.
+    """
+    return stats.nbinom(n=float(n), p=float(p)).pmf(X)
+
+
 def nbn_em(
     X: np.ndarray,
     w: Tuple[float, float] = (0.99, 0.01),
@@ -75,8 +85,8 @@ def nbn_em(
     r = lamtheta_to_r(lam, theta)
     for i in range(max_iter):
         # E step
-        bp = stats.nbinom(n=r[0], p=theta[0]).pmf(X)
-        cp = stats.nbinom(n=r[1], p=theta[1]).pmf(X)
+        bp = nbn_pmf(r[0], theta[0], X)
+        cp = nbn_pmf(r[1], theta[1], X)
         tau[0] = w[0] * bp
         tau[1] = w[1] * cp
         # mu = lamtheta_to_muvar(lam, theta)[0]
@@ -151,12 +161,13 @@ def conditionals(
         cell_cond = np.zeros(X.shape)
         for label, (_, r, p) in em_results.items():
             mask = bins == label
-            background_cond[mask] = stats.nbinom(n=r[0], p=p[0]).pmf(X[mask])
-            cell_cond[mask] = stats.nbinom(n=r[1], p=p[1]).pmf(X[mask])
+            samples = X[mask]
+            background_cond[mask] = nbn_pmf(r[0], p[0], samples)
+            cell_cond[mask] = nbn_pmf(r[1], p[1], samples)
     else:
         _, r, p = em_results
-        background_cond = stats.nbinom(n=r[0], p=p[0]).pmf(X)
-        cell_cond = stats.nbinom(n=r[1], p=p[1]).pmf(X)
+        background_cond = nbn_pmf(r[0], p[0], X)
+        cell_cond = nbn_pmf(r[1], p[1], X)
 
     return background_cond, cell_cond
 
@@ -198,9 +209,9 @@ def confidence(
 def run_em(
     X: np.ndarray,
     downsample: Union[int, float] = 0.001,
-    w: Tuple[float, float] = (0.5, 0.5),
-    mu: Tuple[float, float] = (10.0, 300.0),
-    var: Tuple[float, float] = (20.0, 400.0),
+    params: Union[Dict[str, Tuple[float, float]], Dict[int, Dict[str, Tuple[float, float]]]] = dict(
+        w=(0.5, 0.5), mu=(10.0, 300.0), var=(20.0, 400.0)
+    ),
     max_iter: int = 2000,
     precision: float = 1e-6,
     bins: Optional[np.ndarray] = None,
@@ -221,10 +232,14 @@ def run_em(
             log UMI counts. When `bins` is provided, the size of each bin is
             used as a scaling factor. If this is a float, then samples are
             downsampled by this fraction.
-        w: Initial proportions of cell and background as a tuple.
-        mu: Initial means of cell and background negative binomial distributions.
-        var: Initial variances of cell and background negative binomial
-            distributions.
+        params: Initial parameters. This is a dictionary that contains `w`, `mu`,
+            `var` as its keys, each corresponding to initial proportions, means and
+            variances of background and foreground pixels. The values must be a
+            2-element tuple containing the values for background and foreground.
+            This may also be a nested dictionary, where the outermost key maps bin
+            labels provided in the `bins` argument. In this case, each of the inner
+            dictionaries will be used as the initial paramters corresponding to
+            each bin.
         max_iter: Maximum number of EM iterations.
         precision: Stop EM algorithm once desired precision has been reached.
         bins: Bins of pixels to estimate separately, such as those obtained by
@@ -240,8 +255,13 @@ def run_em(
         for label in np.unique(bins):
             if label > 0:
                 samples[label] = X[bins == label]
+                _params = params.get(label, params)
+                if set(_params.keys()) != {"w", "mu", "var"}:
+                    raise PreprocessingError("`params` must contain exactly the keys `w`, `mu`, `var`.")
     else:
         samples[0] = X.flatten()
+        if set(params.keys()) != {"w", "mu", "var"}:
+            raise PreprocessingError("`params` must contain exactly the keys `w`, `mu`, `var`.")
 
     downsample_scale = True
     if downsample > 1:
@@ -261,8 +281,8 @@ def run_em(
     for label, (res_w, res_r, res_p) in zip(
         final_samples.keys(),
         ngs.utils.ParallelWithProgress(n_jobs=config.n_threads, total=len(final_samples), desc="Running EM")(
-            delayed(nbn_em)(_samples, w=w, mu=mu, var=var, max_iter=max_iter, precision=precision)
-            for _samples in final_samples.values()
+            delayed(nbn_em)(final_samples[label], max_iter=max_iter, precision=precision, **params.get(label, params))
+            for label in final_samples
         ),
     ):
         results[label] = (tuple(res_w), tuple(res_r), tuple(res_p))

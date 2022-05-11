@@ -43,6 +43,7 @@ def _replace_labels(labels: np.ndarray, mapping: Dict[int, int]) -> np.ndarray:
     return new_labels
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def replace_labels(adata: AnnData, layer: str, mapping: Dict[int, int], out_layer: Optional[str] = None):
     """Replace labels according to mapping.
 
@@ -88,6 +89,7 @@ def _watershed(
     return watershed
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def watershed_markers(
     adata: AnnData,
     layer: str = SKM.STAIN_LAYER_KEY,
@@ -140,6 +142,7 @@ def watershed_markers(
     SKM.set_layer_data(adata, out_layer, markers)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def watershed(
     adata: AnnData,
     layer: str = SKM.STAIN_LAYER_KEY,
@@ -259,6 +262,7 @@ def _expand_labels(
     return expanded
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def expand_labels(
     adata: AnnData,
     layer: str,
@@ -357,6 +361,7 @@ def _label_connected_components(
     return saved + expanded
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def label_connected_components(
     adata: AnnData,
     layer: str,
@@ -444,6 +449,7 @@ def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.
     return augmented
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def augment_labels(
     adata: AnnData,
     source_layer: str,

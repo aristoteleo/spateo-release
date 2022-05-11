@@ -14,6 +14,7 @@ from pyro.infer import SVI, TraceEnum_ELBO
 from pyro.infer.autoguide import AutoDelta
 from pyro.nn import PyroModule, PyroParam
 from pyro.optim import Adam
+from torch.distributions.utils import logits_to_probs, probs_to_logits
 from tqdm import tqdm
 
 from ...errors import PreprocessingError
@@ -21,9 +22,23 @@ from ...errors import PreprocessingError
 
 class NegativeBinomialMixture(PyroModule):
     def __init__(
-        self, x: np.ndarray, n: int = 2, n_init: int = 5, zero_inflated: bool = False, seed: Optional[int] = None
+        self,
+        x: np.ndarray,
+        n: int = 2,
+        n_init: int = 5,
+        w: Optional[np.ndarray] = None,
+        mu: Optional[np.ndarray] = None,
+        var: Optional[np.ndarray] = None,
+        zero_inflated: bool = False,
+        seed: Optional[int] = None,
     ):
         super().__init__()
+
+        if not ((w is None) == (mu is None) and (w is None) == (var is None)):
+            raise PreprocessingError("All or none of `w`, `mu`, `var` must be provided.")
+        if (w is not None) and (n != len(w) or n != len(mu) or n != len(var)):
+            raise PreprocessingError(f"`w`, `mu`, `var` must have length {n}.")
+
         if seed is not None:
             torch.manual_seed(seed)
         self.zero_inflated = zero_inflated
@@ -31,7 +46,10 @@ class NegativeBinomialMixture(PyroModule):
         self.n = n
         self.scale = torch.median(self.x[self.x > 0])
 
-        self.init_best_params(n_init)
+        if w is not None:
+            self.init_mean_variance(w, mu, var)
+        else:
+            self.init_best_params(n_init)
         self.__optimizer = None
 
     def assignment(self, train=False):
@@ -69,9 +87,30 @@ class NegativeBinomialMixture(PyroModule):
         self.counts = PyroParam(best_params["counts"])
         self.logits = PyroParam(best_params["logits"])
 
+    def init_mean_variance(self, w, mu, var):
+        self.w = PyroParam(probs_to_logits(torch.tensor(w).float()))
+
+        counts = torch.zeros(self.n)
+        logits = torch.zeros(self.n)
+        for i, (m, v) in enumerate(zip(mu, var)):
+            prob = 1 - m / v
+            logits[i] = probs_to_logits(torch.tensor(prob), is_binary=True).item()
+
+            # Inverse softplus for counts
+            counts[i] = (m * (1 - prob) / prob) / self.scale
+            if counts[i] <= 20:
+                counts[i] = torch.log(torch.exp(counts[i]) - 1)
+
+        self.counts = PyroParam(counts)
+        self.logits = PyroParam(logits)
+
+        # Is there a better way to initialize the dropout param?
+        if self.zero_inflated:
+            self.z = PyroParam(torch.randn(self.n))
+
     def optimizer(self):
         if self.__optimizer is None:
-            self.__optimizer = Adam({"lr": 0.1})
+            self.__optimizer = Adam({"lr": 0.01})
         return self.__optimizer
 
     def get_params(self, train=False, transform=True):
@@ -180,19 +219,40 @@ def run_vi(
     downsample: Union[int, float] = 0.01,
     n_epochs: int = 500,
     bins: Optional[np.ndarray] = None,
+    params: Union[Dict[str, Tuple[float, float]], Dict[int, Dict[str, Tuple[float, float]]]] = dict(
+        w=(0.5, 0.5), mu=(10.0, 300.0), var=(20.0, 400.0)
+    ),
     zero_inflated: bool = False,
     seed: Optional[int] = None,
 ) -> Union[
     Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
     Dict[int, Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]],
 ]:
+    """Run negative binomial mixture variational inference.
+
+    Args:
+        X:
+        downsample:
+        n_epochs:
+        bins:
+        params:
+        zero_inflated:
+        seed:
+
+    Returns:
+    """
     samples = {}  # key 0 when bins = None
     if bins is not None:
         for label in np.unique(bins):
             if label > 0:
                 samples[label] = X[bins == label]
+                _params = params.get(label, params)
+                if set(_params.keys()) != {"w", "mu", "var"}:
+                    raise PreprocessingError("`params` must contain exactly the keys `w`, `mu`, `var`.")
     else:
         samples[0] = X.flatten()
+        if set(params.keys()) != {"w", "mu", "var"}:
+            raise PreprocessingError("`params` must contain exactly the keys `w`, `mu`, `var`.")
 
     downsample_scale = True
     if downsample > 1:
@@ -209,7 +269,7 @@ def run_vi(
     results = {}
     for label, _samples in final_samples.items():
         pyro.clear_param_store()
-        nbm = NegativeBinomialMixture(_samples, zero_inflated=zero_inflated, seed=seed)
+        nbm = NegativeBinomialMixture(_samples, zero_inflated=zero_inflated, seed=seed, **params.get(label, params))
         nbm.train(n_epochs)
         results[label] = nbm.get_params()
 

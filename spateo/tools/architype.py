@@ -15,6 +15,7 @@ from scipy.cluster import hierarchy
 from scipy.stats import pearsonr
 from tqdm import tqdm
 
+from ..configuration import SKM
 from ..logging import logger_manager as lm
 
 
@@ -119,6 +120,7 @@ def find_spatially_related_genes(
     return get_genes_from_spatial_archetype(exp_mat, gene_names, archetypes, archetype, pval_threshold=pval_threshold)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def archetypes(
     adata: anndata.AnnData,
     moran_i_genes: Union[np.ndarray, list],
@@ -160,6 +162,7 @@ def archetypes(
     return archetypes
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def archetypes_genes(
     adata: anndata.AnnData,
     archetypes: np.ndarray,
@@ -171,9 +174,11 @@ def archetypes_genes(
 
     Args:
         adata: Anndata object of interests.
-        moran_i_genes: genes that are identified as singificant autocorrelation genes in space based on Moran's I.
+        archetypes: the archetypes output of find_spatial_archetypes
         num_clusters: number of archetypes.
-        layers: the layer for the gene expression, can be None which corresponds to adata.X.
+        moran_i_genes: genes that are identified as singificant autocorrelation genes in space based on Moran's I.
+        layer: the layer for the gene expression, can be None which corresponds to adata.X.
+
 
     Returns:
         archetypes_dict: a dictionary where the key is the index of the archetype and the values are the top genes for
