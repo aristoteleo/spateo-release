@@ -6,10 +6,12 @@ import pandas as pd
 import seaborn as sns
 from anndata import AnnData
 
+from ...configuration import SKM
 from .baseplot import BasePlot
 from .utils import _to_hex
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 class HeatMap(BasePlot):
     def __init__(
         self,
@@ -117,6 +119,7 @@ class HeatMap(BasePlot):
         return value_df, colors
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def heatmap(
     adata: AnnData,
     markers: list,

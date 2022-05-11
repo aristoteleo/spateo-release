@@ -8,9 +8,11 @@ from matplotlib.colors import to_hex
 
 from spateo.tools.utils import update_dict
 
+from ...configuration import SKM
 from .utils import _select_font_color, save_fig
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 class BasePlot:
     def __init__(
         self,
