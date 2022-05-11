@@ -1,3 +1,6 @@
+"""Written by @Jinerhal, adapted by @Xiaojieqiu.
+"""
+
 import random
 from typing import List, Optional, Tuple, Union
 
