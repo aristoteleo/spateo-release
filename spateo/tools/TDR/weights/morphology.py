@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional, Union
 
+import numpy as np
 from pyvista import PolyData, UnstructuredGrid
 from sklearn.neighbors import KernelDensity
 
@@ -33,9 +34,10 @@ def model_morphology(
     morphology = {}
 
     # Length, width and height of model
-    model_x = round(abs(model.bounds[1] - model.bounds[0]), 5)
-    model_y = round(abs(model.bounds[3] - model.bounds[2]), 5)
-    model_z = round(abs(model.bounds[5] - model.bounds[4]), 5)
+    model_bounds = np.asfarray(model.bounds)
+    model_x = round(abs(model_bounds[1] - model_bounds[0]), 5)
+    model_y = round(abs(model_bounds[3] - model_bounds[2]), 5)
+    model_z = round(abs(model_bounds[5] - model_bounds[4]), 5)
     morphology["Length(x)"], morphology["Width(y)"], morphology["Height(z)"] = (
         model_x,
         model_y,

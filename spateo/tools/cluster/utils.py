@@ -1,6 +1,5 @@
 from typing import Any, List, Optional, Tuple, Union
 
-import lack
 import matplotlib.pyplot as plt
 import numpy as np
 from anndata import AnnData
@@ -49,7 +48,6 @@ def compute_pca_components(
 
     # Whether to save the image of PCA curve and inflection point.
     if save_curve_img is not None:
-        import matplotlib.pyplot as plt
 
         kl.plot_knee()
         plt.tight_layout()
@@ -65,7 +63,7 @@ def pca_spateo(
     pca_key: Optional[str] = "X_pca",
     genes: Union[list, None] = None,
     layer: Union[str, None] = None,
-) -> Optional[AnnData]:
+):
     """
     Do PCA for dimensional reduction.
 
@@ -123,7 +121,7 @@ def sctransform(
     save_sct_img_1: Optional[str] = None,
     save_sct_img_2: Optional[str] = None,
     **kwargs,
-) -> Optional[AnnData]:
+):
     """
     Use sctransform with an additional flag vst.flavor="v2" to perform normalization and dimensionality reduction
     Original Code Repository: https://github.com/saketkc/pySCTransform
