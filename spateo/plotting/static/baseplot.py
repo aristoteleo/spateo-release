@@ -1,48 +1,44 @@
-from typing import Union, Optional
+from typing import Optional, Union
 
-from anndata import AnnData
 import matplotlib.pyplot as plt
+import numpy as np
+from anndata import AnnData
 from matplotlib import rcParams
 from matplotlib.colors import to_hex
-import numpy as np
 
+from spateo.tools.utils import update_dict
 
-from .utils import (
-    _select_font_color,
-    save_fig
-)
-from spateo.tools.utils import (
-    update_dict
-)
+from .utils import _select_font_color, save_fig
 
 
 class BasePlot:
-    def __init__(self,
-                 adata: AnnData,
-                 color: Union[str, list] = "ntr",
-                 layer: Union[str, list] = "X",
-                 basis: Union[str, list] = "umap",
-                 slices: Union[str, list] = None,
-                 slices_split: bool = False,
-                 slices_key: str = "slices",
-                 stack_colors=False,
-                 stack_colors_threshold=0.001,
-                 stack_colors_title="stacked colors",
-                 stack_colors_legend_size=2,
-                 stack_colors_cmaps=None,
-                 ncols: int = 4,
-                 aspect: str = "auto",
-                 axis_on: bool = False,
-                 background: Optional[str] = None,
-                 dpi: int = 100,
-                 figsize: tuple = (6, 4),
-                 gridspec: bool = True,
-                 pointsize: Optional[int] = None,
-                 save_show_or_return: str = "show",
-                 save_kwargs: Optional[dict] = None,
-                 show_legend="on data",
-                 theme: Optional[str] = None,
-                 ):
+    def __init__(
+        self,
+        adata: AnnData,
+        color: Union[str, list] = "ntr",
+        layer: Union[str, list] = "X",
+        basis: Union[str, list] = "umap",
+        slices: Union[str, list] = None,
+        slices_split: bool = False,
+        slices_key: str = "slices",
+        stack_colors=False,
+        stack_colors_threshold=0.001,
+        stack_colors_title="stacked colors",
+        stack_colors_legend_size=2,
+        stack_colors_cmaps=None,
+        ncols: int = 4,
+        aspect: str = "auto",
+        axis_on: bool = False,
+        background: Optional[str] = None,
+        dpi: int = 100,
+        figsize: tuple = (6, 4),
+        gridspec: bool = True,
+        pointsize: Optional[int] = None,
+        save_show_or_return: str = "show",
+        save_kwargs: Optional[dict] = None,
+        show_legend="on data",
+        theme: Optional[str] = None,
+    ):
         self.adata = adata.copy()
         self.stack_colors = stack_colors
         self.stack_colors_threshold = stack_colors_threshold
@@ -52,7 +48,7 @@ class BasePlot:
         self.aspect = aspect
         self.axis_on = axis_on
         self.dpi = dpi
-        self.figsize =figsize
+        self.figsize = figsize
         self.save_show_or_return = save_show_or_return
         self.save_kwargs = save_kwargs
         self.slices_split = slices_split
@@ -134,9 +130,7 @@ class BasePlot:
                 for cur_b in self.basis:
                     for cur_l in self.layer:
                         for cur_c in self.color:
-                            self._plot_basis_layer(
-                                adata, cur_c, cur_b, cur_l
-                            )
+                            self._plot_basis_layer(adata, cur_c, cur_b, cur_l)
                             if not self.stack_colors:
                                 self.ax_index += 1
                         if self.stack_colors:
@@ -146,9 +140,7 @@ class BasePlot:
             for cur_b in self.basis:
                 for cur_l in self.layer:
                     for cur_c in self.color:
-                        self._plot_basis_layer(
-                            self.adata, cur_c, cur_b, cur_l
-                        )
+                        self._plot_basis_layer(self.adata, cur_c, cur_b, cur_l)
                         if not self.stack_colors:
                             self.ax_index += 1
                     if self.stack_colors:

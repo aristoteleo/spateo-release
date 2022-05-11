@@ -1,40 +1,40 @@
-from typing import Union, Optional
+from typing import Optional, Union
 
-from anndata import AnnData
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from anndata import AnnData
 
 from .baseplot import BasePlot
 from .utils import _to_hex
 
 
 class HeatMap(BasePlot):
-
-    def __init__(self,
-                 adata: AnnData,
-                 markers: list,
-                 group: Optional[str] = None,
-                 group_mean: bool = False,
-                 group_cmap: str = "tab20",
-                 col_cluster: bool = False,
-                 row_cluster: bool = False,
-                 layer: Union[str, list] = "X",
-                 slices: Union[str, list] = None,
-                 slices_split: bool = False,
-                 slices_key: str = 'slices',
-                 background: Optional[str] = None,
-                 dpi: int = 100,
-                 figsize: tuple = (11, 5),
-                 save_show_or_return: str = "show",
-                 save_kwargs: Optional[dict] = None,
-                 swap_axis: bool = False,
-                 cbar_pos: Optional[tuple] = None,
-                 theme: Optional[str] = None,
-                 cmap: str = "viridis",
-                 **kwargs
-                 ):
+    def __init__(
+        self,
+        adata: AnnData,
+        markers: list,
+        group: Optional[str] = None,
+        group_mean: bool = False,
+        group_cmap: str = "tab20",
+        col_cluster: bool = False,
+        row_cluster: bool = False,
+        layer: Union[str, list] = "X",
+        slices: Union[str, list] = None,
+        slices_split: bool = False,
+        slices_key: str = "slices",
+        background: Optional[str] = None,
+        dpi: int = 100,
+        figsize: tuple = (11, 5),
+        save_show_or_return: str = "show",
+        save_kwargs: Optional[dict] = None,
+        swap_axis: bool = False,
+        cbar_pos: Optional[tuple] = None,
+        theme: Optional[str] = None,
+        cmap: str = "viridis",
+        **kwargs
+    ):
         super().__init__(
             adata=adata,
             color=[markers],
@@ -49,7 +49,7 @@ class HeatMap(BasePlot):
             save_show_or_return=save_show_or_return,
             save_kwargs=save_kwargs,
             theme=theme,
-            gridspec=False
+            gridspec=False,
         )
         self.group_mean = group_mean
         self.group_cmap = group_cmap
@@ -95,7 +95,7 @@ class HeatMap(BasePlot):
         #     sns_heatmap.cax.set_visible(False)
 
     def _fetch_data(self, adata: AnnData, markers, cells_group, cur_l):
-        layer = None if cur_l == 'X' else cur_l
+        layer = None if cur_l == "X" else cur_l
         value_df = pd.DataFrame()
         for i, marker in enumerate(markers):
             v = adata.obs_vector(marker, layer=layer)
@@ -117,46 +117,50 @@ class HeatMap(BasePlot):
         return value_df, colors
 
 
-def heatmap(adata: AnnData,
-            markers: list,
-            group: Optional[str] = None,
-            group_mean: bool = False,
-            group_cmap: str = "tab20",
-            col_cluster: bool = False,
-            row_cluster: bool = False,
-            layer: Union[str, list] = "X",
-            slices: Union[str, list] = None,
-            slices_split: bool = False,
-            slices_key: str = 'slices',
-            background: Optional[str] = None,
-            dpi: int = 100,
-            figsize: tuple = (11, 5),
-            save_show_or_return: str = "show",
-            save_kwargs: Optional[dict] = None,
-            swap_axis: bool = False,
-            cbar_pos: Optional[tuple] = None,
-            theme: Optional[str] = None,
-            cmap: str = "viridis",
-            **kwargs):
-    hm = HeatMap(adata=adata,
-                 markers=markers,
-                 group=group,
-                 group_mean=group_mean,
-                 group_cmap=group_cmap,
-                 col_cluster=col_cluster,
-                 row_cluster=row_cluster,
-                 layer=layer,
-                 slices=slices,
-                 slices_split=slices_split,
-                 slices_key=slices_key,
-                 background=background,
-                 dpi=dpi,
-                 figsize=figsize,
-                 save_show_or_return=save_show_or_return,
-                 save_kwargs=save_kwargs,
-                 swap_axis=swap_axis,
-                 cbar_pos=cbar_pos,
-                 theme=theme,
-                 cmap=cmap,
-                 **kwargs)
+def heatmap(
+    adata: AnnData,
+    markers: list,
+    group: Optional[str] = None,
+    group_mean: bool = False,
+    group_cmap: str = "tab20",
+    col_cluster: bool = False,
+    row_cluster: bool = False,
+    layer: Union[str, list] = "X",
+    slices: Union[str, list] = None,
+    slices_split: bool = False,
+    slices_key: str = "slices",
+    background: Optional[str] = None,
+    dpi: int = 100,
+    figsize: tuple = (11, 5),
+    save_show_or_return: str = "show",
+    save_kwargs: Optional[dict] = None,
+    swap_axis: bool = False,
+    cbar_pos: Optional[tuple] = None,
+    theme: Optional[str] = None,
+    cmap: str = "viridis",
+    **kwargs
+):
+    hm = HeatMap(
+        adata=adata,
+        markers=markers,
+        group=group,
+        group_mean=group_mean,
+        group_cmap=group_cmap,
+        col_cluster=col_cluster,
+        row_cluster=row_cluster,
+        layer=layer,
+        slices=slices,
+        slices_split=slices_split,
+        slices_key=slices_key,
+        background=background,
+        dpi=dpi,
+        figsize=figsize,
+        save_show_or_return=save_show_or_return,
+        save_kwargs=save_kwargs,
+        swap_axis=swap_axis,
+        cbar_pos=cbar_pos,
+        theme=theme,
+        cmap=cmap,
+        **kwargs,
+    )
     return hm.plot()
