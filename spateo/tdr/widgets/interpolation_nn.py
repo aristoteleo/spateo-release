@@ -92,7 +92,7 @@ class SineLayer(nn.Module):
     # nonlinearity. Different signals may require different omega_0 in the first layer - this is a
     # hyperparameter.
 
-    # If is_first=False, then the weights will be divided by omega_0 so as to keep the magnitude of
+    # If is_first=False, then the widgets will be divided by omega_0 so as to keep the magnitude of
     # activations constant, but boost gradients to the weight matrix (see supplement Sec. 1.5)
     """
     As discussed above, we aim to provide each sine nonlinearity with activations that are standard

@@ -19,7 +19,7 @@ def moranI(
     Args:
         X: Numpy array containing (possibly smoothed) UMI counts or binarized
             values.
-        kernel: 2D kernel containing weights
+        kernel: 2D kernel containing widgets
         mask: If provided, only consider pixels within the mask
 
     Returns:

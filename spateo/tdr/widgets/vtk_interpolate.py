@@ -33,11 +33,11 @@ def interpolate_model(
            If N (number of the closest points to use) is set then radius value is ignored.
         kernel: The kernel of interpolation kernel. Available `kernels` are:
                 * `shepard`: vtkShepardKernel is an interpolation kernel that uses the method of Shepard to perform
-                             interpolation. The weights are computed as 1/r^p, where r is the distance to a neighbor
+                             interpolation. The widgets are computed as 1/r^p, where r is the distance to a neighbor
                              point within the kernel radius R; and p (the power parameter) is a positive exponent
                              (typically p=2).
-                * `gaussian`: vtkGaussianKernel is an interpolation kernel that simply returns the weights for all
-                              points found in the sphere defined by radius R. The weights are computed as:
+                * `gaussian`: vtkGaussianKernel is an interpolation kernel that simply returns the widgets for all
+                              points found in the sphere defined by radius R. The widgets are computed as:
                               exp(-(s*r/R)^2) where r is the distance from the point to be interpolated to a neighboring
                               point within R. The sharpness s simply affects the rate of fall off of the Gaussian.
                 * `linear`: vtkLinearKernel is an interpolation kernel that averages the contributions of all points in
