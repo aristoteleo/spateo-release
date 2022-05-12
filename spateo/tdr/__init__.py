@@ -1,2 +1,2 @@
 from .models import *
-from .weights import *
+from .widgets import *
