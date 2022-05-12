@@ -10,8 +10,8 @@ import numpy as np
 from anndata import AnnData
 from scipy import stats
 
-from ...configuration import SKM
-from ...errors import PreprocessingError
+from ..configuration import SKM
+from ..errors import SegmentationError
 
 
 def _create_labels(
@@ -40,13 +40,13 @@ def _create_labels(
     """
     n = xs.size
     if n != xs.size or n != axes1.size or n != axes2.size or n != angles.size:
-        raise PreprocessingError(f"All input arrays must have size {n}")
+        raise SegmentationError(f"All input arrays must have size {n}")
     indices_to_add = deque(range(xs.size))  # +1 to get actual label to add!
     labels = np.zeros(shape, dtype=np.int32)
     i = 0
     while indices_to_add:
         if i >= n * 100:
-            raise PreprocessingError(
+            raise SegmentationError(
                 f"Reached iteration {i}. Try reducing the number of cells or turn off shifting by setting `shift=0`."
             )
 
@@ -121,7 +121,7 @@ def simulate_cells(
     f_do, f_mu, f_var = foreground_params
     b_do, b_mu, b_var = background_params
     if f_var < f_mu or b_var < b_mu:
-        raise PreprocessingError("Variance must be less than mean.")
+        raise SegmentationError("Variance must be less than mean.")
     f_n, f_p = muvar_to_np(f_mu, f_var)
     b_n, b_p = muvar_to_np(b_mu, b_var)
 

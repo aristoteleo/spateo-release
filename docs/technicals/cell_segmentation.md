@@ -5,7 +5,7 @@ This section describes the technical details behind Spateo's cell segmentation p
 
 ## Alignment of stain and RNA coordinates
 
-* {py:func}`spateo.preprocessing.segmentation.refine_alignment`
+* {py:func}`spateo.segmentation.refine_alignment`
 
 Correct alignment between the stain and RNA coordinates is imperative to obtain correct cell segmentation. Slight misalignments can cause inaccuracies when aggregating UMIs in a patch of pixels into a single cell. We've found that for the most part, the alignments produced by the spatial assays themselves are quite good, but there are sometimes slight misalignments. Therefore, Spateo includes a couple of strategies to further refine this alignment to achieve the best possible cell segmentation results. In both cases, the stain image is considered as the "source" image (a.k.a. the image that will be transfomed), and the RNA coordinates represent the "target" image. This convention was chosen because the original RNA coordinates should be maintained as much as possible.
 
@@ -38,9 +38,9 @@ The displacements for each of the control points are also optimized using PyTorc
 
 ## Watershed-based segmentation
 
-* {py:func}`spateo.preprocessing.segmentation.mask_nuclei_from_stain`
-* {py:func}`spateo.preprocessing.segmentation.watershed_markers`
-* {py:func}`spateo.preprocessing.segmentation.watershed`
+* {py:func}`spateo.segmentation.mask_nuclei_from_stain`
+* {py:func}`spateo.segmentation.watershed_markers`
+* {py:func}`spateo.segmentation.watershed`
 
 [Watershed](https://en.wikipedia.org/wiki/Watershed_(image_processing))-based nuclei segmentation works in three broad steps. First, a boolean mask, indicating where the nuclei are, is constructed. Second, Watershed markers are obtained by iteratively eroding the mask. Finally, the Watershed algorithm is used to label each nuclei. We will go over each of these steps in more detail.
 
@@ -55,16 +55,16 @@ Finally, the Watershed algorithm is applied on a blurred stain image, limiting t
 
 Spateo provides a variety of existing deep-learning-based segmentation models. These include:
 
-* StarDist [^ref2] ({py:func}`spateo.preprocessing.segmentation.stardist`)
-* Cellpose [^ref3] ({py:func}`spateo.preprocessing.segmentation.cellpose`)
-* Deepcell [^ref4] ({py:func}`spateo.preprocessing.segmentation.deepcell`)
+* StarDist [^ref2] ({py:func}`spateo.segmentation.stardist`)
+* Cellpose [^ref3] ({py:func}`spateo.segmentation.cellpose`)
+* Deepcell [^ref4] ({py:func}`spateo.segmentation.deepcell`)
 
 In our experiments, StarDist performed the most consistently and is the recommended method to try first.
 
 
 ## Integrating both segmentation approaches
 
-* {py:func}`spateo.preprocessing.segmentation.augment_labels`
+* {py:func}`spateo.segmentation.augment_labels`
 
 The Watershed-based and deep-learning-based segmentation approaches have their own advantages. The former tends to perform reasonably well on most staining images and does not require any kind of training. However, the resulting segmentation tends to be "choppy" and sometimes breaks convexity. The latter performs very well on images similar to those they were trained on and results in more evenly-shaped segmentations, but does poorly on outlier regions. In particular, we've found that the deep-learning-based approaches have difficulty identifying nuclei in dense regions, often resulting in segmentations spanning multiple nuclei, or missing them entirely. The latter problem is mitigated to a certain degree by [adaptive histogram equalization](https://en.wikipedia.org/wiki/Adaptive_histogram_equalization#Contrast_Limited_AHE).
 
@@ -73,7 +73,7 @@ Therefore, we implemented a simple method of integrating the Watershed-based seg
 
 ## Identifying cytoplasm
 
-* {py:func}`spateo.preprocessing.segmentation.mask_cells_from_stain`
+* {py:func}`spateo.segmentation.mask_cells_from_stain`
 
 Taking advantage of the fact that most nuclei labeling strategies also very weakly label the cytoplasm, cytoplasmic regions can be identified by using a very lenient threshold. Then, cells can be labeled by iteratively expanding the nuclei labels by a certain distance.
 
@@ -85,8 +85,8 @@ Spateo features a novel method for cell segmentation using only RNA signal. As w
 
 ### Density binning
 
-* {py:func}`spateo.preprocessing.segmentation.segment_densities`
-* {py:func}`spateo.preprocessing.segmentation.merge_densities`
+* {py:func}`spateo.segmentation.segment_densities`
+* {py:func}`spateo.segmentation.merge_densities`
 
 We've found in testing that the RNA-only segmentation method, without separating out regions with different RNA (UMI) densities, tends to be too lenient in RNA-dense regions and too strict in RNA-sparse regions. Therefore, unless the UMI counts are sufficiently sparse (such as the case when only certain genes are being used), we recommend to first separate out the pixels into different "bins" according to their RNA density. Then, RNA- only segmentation can be performed on each bin separately, resulting in a better-calibrated algorithm.
 
@@ -103,7 +103,7 @@ There are a few additional considerations in this approach.
 
 ### Negative binomial mixture model
 
-* {py:func}`spateo.preprocessing.segmentation.score_and_mask_pixels`
+* {py:func}`spateo.segmentation.score_and_mask_pixels`
 
 The [negative binomial distribution](https://en.wikipedia.org/wiki/Negative_binomial_distribution) is widely used to model count data. It has been applied to many different kinds of biological data (such as sequencing data [^ref5]), and this is also how Spateo models the number of UMIs detected per pixel. For the purpose of cell segmentation, any pixel is either occupied or unoccupied by a cell. This is modeled as a two-component negative binomial mixture model, with one component for the UMIs detected in pixels occupied by a cell and the other for those unoccupied ("background"). Mathematically,
 
@@ -140,7 +140,7 @@ These probabilities can be used directly to classify each pixel as occupied or u
 
 ### Belief propagation
 
-* {py:func}`spateo.preprocessing.segmentation.score_and_mask_pixels`
+* {py:func}`spateo.segmentation.score_and_mask_pixels`
 
 One important caveat of the [](#negative-binomial-mixture-model) is that it does *not* yield the marginal probabilities $P_{(x,y)}(occupied),P_{(x,y)}(unoccupied)$. In order to obtain these probabilities directly, Spateo can apply an efficient [belief propagation](https://en.wikipedia.org/wiki/Belief_propagation) algorithm. An undirected graphical model is constructed by considering each pixel as a node, and edges ("potentials") between neighboring pixels (a.k.a. a grid [Markov random field](https://en.wikipedia.org/wiki/Markov_random_field)).
 

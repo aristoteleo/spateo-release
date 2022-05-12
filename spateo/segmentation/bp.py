@@ -1,14 +1,13 @@
 """Belief propagation to compute the marginal probabilities of a spot being
 occupied by a cell.
 """
-from typing import Optional, Tuple
+from typing import Optional
 
 import cv2
 import numpy as np
 from fbgbp import FastBinaryGridBeliefPropagation
-from scipy import stats
 
-from ...configuration import config
+from ..configuration import config
 from . import utils
 
 

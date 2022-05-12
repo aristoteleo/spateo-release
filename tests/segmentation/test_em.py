@@ -3,9 +3,9 @@ from unittest import TestCase
 import numpy as np
 from scipy import stats
 
-import spateo.preprocessing.segmentation.em as em
+import spateo.segmentation.em as em
 
-from ...mixins import TestMixin
+from ..mixins import TestMixin
 
 
 class TestEM(TestMixin, TestCase):

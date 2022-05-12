@@ -1,6 +1,5 @@
 """Functions to segment regions of a slice by UMI density.
 """
-import warnings
 from collections import Counter
 from typing import Dict, Optional, Tuple, Union
 
@@ -10,12 +9,11 @@ from anndata import AnnData
 from kneed import KneeLocator
 from scipy.sparse import csr_matrix, issparse, lil_matrix, spmatrix
 from sklearn import cluster
-from tqdm import tqdm
 from typing_extensions import Literal
 
-from ...configuration import SKM
-from ...io.utils import bin_matrix
-from ...logging import logger_manager as lm
+from ..configuration import SKM
+from ..io.utils import bin_matrix
+from ..logging import logger_manager as lm
 from . import utils
 from .label import _replace_labels
 

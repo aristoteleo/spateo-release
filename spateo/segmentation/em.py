@@ -7,15 +7,13 @@ Written by @HailinPan, optimized by @Lioscro.
 
 from typing import Dict, Optional, Tuple, Union
 
-import cv2
 import ngs_tools as ngs
 import numpy as np
 from joblib import delayed
 from scipy import special, stats
-from skimage import feature
 
-from ...configuration import config
-from ...errors import PreprocessingError
+from ..configuration import config
+from ..errors import SegmentationError
 
 
 def lamtheta_to_r(lam: float, theta: float) -> float:
@@ -151,12 +149,12 @@ def conditionals(
         probabilities, and the second to the foreground conditional probabilities
 
     Raises:
-        PreprocessingError: If `em_results` is a dictionary but `bins` was not
+        SegmentationError: If `em_results` is a dictionary but `bins` was not
             provided.
     """
     if isinstance(em_results, dict):
         if bins is None:
-            raise PreprocessingError("`em_results` indicate binning was used, but `bins` was not provided")
+            raise SegmentationError("`em_results` indicate binning was used, but `bins` was not provided")
         background_cond = np.ones(X.shape)
         cell_cond = np.zeros(X.shape)
         for label, (_, r, p) in em_results.items():
@@ -257,11 +255,11 @@ def run_em(
                 samples[label] = X[bins == label]
                 _params = params.get(label, params)
                 if set(_params.keys()) != {"w", "mu", "var"}:
-                    raise PreprocessingError("`params` must contain exactly the keys `w`, `mu`, `var`.")
+                    raise SegmentationError("`params` must contain exactly the keys `w`, `mu`, `var`.")
     else:
         samples[0] = X.flatten()
         if set(params.keys()) != {"w", "mu", "var"}:
-            raise PreprocessingError("`params` must contain exactly the keys `w`, `mu`, `var`.")
+            raise SegmentationError("`params` must contain exactly the keys `w`, `mu`, `var`.")
 
     downsample_scale = True
     if downsample > 1:

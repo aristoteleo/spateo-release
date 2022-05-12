@@ -1,18 +1,17 @@
 from unittest import TestCase, mock
 
 import numpy as np
-from anndata import AnnData
 
-import spateo.preprocessing.segmentation.icell as icell
+import spateo.segmentation.icell as icell
 
-from ...mixins import TestMixin, create_random_adata
+from ..mixins import TestMixin, create_random_adata
 
 
 class TestICell(TestMixin, TestCase):
     def setUp(self):
-        self.utils_patch = mock.patch("spateo.preprocessing.segmentation.icell.utils")
-        self.em_patch = mock.patch("spateo.preprocessing.segmentation.icell.em")
-        self.bp_patch = mock.patch("spateo.preprocessing.segmentation.icell.bp")
+        self.utils_patch = mock.patch("spateo.segmentation.icell.utils")
+        self.em_patch = mock.patch("spateo.segmentation.icell.em")
+        self.bp_patch = mock.patch("spateo.segmentation.icell.bp")
         self.utils = self.utils_patch.start()
         self.em = self.em_patch.start()
         self.bp = self.bp_patch.start()
@@ -30,7 +29,7 @@ class TestICell(TestMixin, TestCase):
 
     def test_mask_nuclei_from_stain(self):
         pass
-        # with mock.patch("spateo.preprocessing.segmentation.icell.filters") as filters:
+        # with mock.patch("spateo.segmentation.icell.filters") as filters:
         #     X = np.zeros((2, 2), dtype=np.uint8)
         #     X[1, 1] = 1
         #     X[1, 0] = 2
@@ -42,7 +41,7 @@ class TestICell(TestMixin, TestCase):
 
     def test_mask_nuclei_from_stain_adata(self):
         pass
-        # with mock.patch("spateo.preprocessing.segmentation.icell._mask_nuclei_from_stain") as _mask_nuclei_from_stain:
+        # with mock.patch("spateo.segmentation.icell._mask_nuclei_from_stain") as _mask_nuclei_from_stain:
         #     _mask_nuclei_from_stain.return_value = np.random.random((3, 3))
         #     adata = create_random_adata(["stain"], (3, 3))
         #     otsu_classes = mock.MagicMock()
@@ -69,7 +68,7 @@ class TestICell(TestMixin, TestCase):
         self.assertEqual(result, self.utils.scale_to_01.return_value)
 
     def test_score_pixels_em(self):
-        with mock.patch("spateo.preprocessing.segmentation.icell._initial_nb_params") as _initial_nb_params:
+        with mock.patch("spateo.segmentation.icell._initial_nb_params") as _initial_nb_params:
             X = mock.MagicMock()
             em_kwargs = mock.MagicMock()
             background_cond = mock.MagicMock()
@@ -89,7 +88,7 @@ class TestICell(TestMixin, TestCase):
             self.assertEqual(result, self.em.confidence.return_value)
 
     def test_score_pixels_em_gauss(self):
-        with mock.patch("spateo.preprocessing.segmentation.icell._initial_nb_params") as _initial_nb_params:
+        with mock.patch("spateo.segmentation.icell._initial_nb_params") as _initial_nb_params:
             X = mock.MagicMock()
             em_kwargs = mock.MagicMock()
             background_cond = mock.MagicMock()
@@ -114,7 +113,7 @@ class TestICell(TestMixin, TestCase):
             self.assertEqual(result, self.utils.conv2d.return_value)
 
     def test_score_pixels_em_bp(self):
-        with mock.patch("spateo.preprocessing.segmentation.icell._initial_nb_params") as _initial_nb_params:
+        with mock.patch("spateo.segmentation.icell._initial_nb_params") as _initial_nb_params:
             X = mock.MagicMock()
             em_kwargs = mock.MagicMock()
             bp_kwargs = mock.MagicMock()
@@ -135,8 +134,8 @@ class TestICell(TestMixin, TestCase):
             self.assertEqual(result, self.bp.run_bp.return_value)
 
     def test_score_pixels_adata(self):
-        with mock.patch("spateo.preprocessing.segmentation.icell._score_pixels") as _score_pixels, mock.patch(
-            "spateo.preprocessing.segmentation.icell.utils.apply_threshold"
+        with mock.patch("spateo.segmentation.icell._score_pixels") as _score_pixels, mock.patch(
+            "spateo.segmentation.icell.utils.apply_threshold"
         ) as apply_threshold:
             _score_pixels.return_value = np.random.random((3, 3))
             apply_threshold.return_value = np.random.random((3, 3))
