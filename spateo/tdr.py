@@ -1,1 +1,1 @@
-from .TDR import *
+from .tdr import *
