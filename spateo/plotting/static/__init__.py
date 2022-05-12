@@ -10,6 +10,7 @@ from .three_d_plot import (
     add_legend,
     add_model,
     add_outline,
+    add_text,
     create_plotter,
     output_plotter,
     save_plotter,

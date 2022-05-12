@@ -9,8 +9,8 @@ from anndata import AnnData
 from scipy import sparse
 from sklearn import metrics
 
-from ...configuration import SKM
-from ...logging import logger_manager as lm
+from ..configuration import SKM
+from ..logging import logger_manager as lm
 from . import utils
 from .qc import _generate_random_labels
 

@@ -2,12 +2,11 @@ from unittest import TestCase, mock
 
 import networkx as nx
 import numpy as np
-from anndata import AnnData
 from scipy import sparse
 
-import spateo.preprocessing.segmentation.density as density
+import spateo.segmentation.density as density
 
-from ...mixins import TestMixin, create_random_adata
+from ..mixins import TestMixin, create_random_adata
 
 
 class TestDensity(TestMixin, TestCase):
@@ -28,8 +27,8 @@ class TestDensity(TestMixin, TestCase):
         np.testing.assert_array_equal(expected, density._schc(X))
 
     def test_segment_densities(self):
-        with mock.patch("spateo.preprocessing.segmentation.density.utils.conv2d") as conv2d, mock.patch(
-            "spateo.preprocessing.segmentation.density._schc"
+        with mock.patch("spateo.segmentation.density.utils.conv2d") as conv2d, mock.patch(
+            "spateo.segmentation.density._schc"
         ) as schc:
             schc.return_value = np.zeros((3, 3), dtype=int)
             X = sparse.csr_matrix(np.random.random((3, 3)))
@@ -39,9 +38,9 @@ class TestDensity(TestMixin, TestCase):
             schc.assert_called_once_with(conv2d.return_value, distance_threshold=None)
 
     def test_segment_densities_adata(self):
-        with mock.patch(
-            "spateo.preprocessing.segmentation.density._segment_densities"
-        ) as _segment_densities, mock.patch("spateo.preprocessing.segmentation.density.bin_matrix") as bin_matrix:
+        with mock.patch("spateo.segmentation.density._segment_densities") as _segment_densities, mock.patch(
+            "spateo.segmentation.density.bin_matrix"
+        ) as bin_matrix:
             adata = create_random_adata(shape=(3, 3))
             _segment_densities.return_value = np.random.random((3, 3))
             bin_matrix.return_value = np.random.random((3, 3))
