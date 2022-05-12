@@ -31,7 +31,7 @@ def kernel_interpolation(
         Y: The gene expression of the corresponding data point.
         grid_num: Number of grid to generate. Default is 50 for each dimension. Must be non-negative.
         lambda_: Represents the trade-off between the goodness of data fit and regularization. Larger Lambda_ put more
-            widgets on regularization.
+            weights on regularization.
         lstsq_method: The name of the linear least square solver, can be either 'scipy` or `douin`.
         **kwargs: Additional parameters that will be passed to SparseVFC function.
 

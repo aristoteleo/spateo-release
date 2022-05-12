@@ -50,7 +50,7 @@ def moran_i(
         k: 'int' (defult=20)
             Number of neighbors to use by default for kneighbors queries.
         weighted : 'str'(defult='kernel')
-            Spatial widgets, defult is None, 'kernel' is based on kernel functions.
+            Spatial weights, defult is None, 'kernel' is based on kernel functions.
         permutations: `int` (default=999)
             Number of random permutations for calculation of pseudo-p_values.
         n_cores: `int` (default=30)

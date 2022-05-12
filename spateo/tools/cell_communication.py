@@ -37,9 +37,9 @@ def niches(
         path: Path to ligand_receptor network of NicheNet (prior lr_network).
         adata: An Annodata object.
         weighted: 'False' (defult)
-            whether to supply the edge widgets according to the actual spatial
+            whether to supply the edge weights according to the actual spatial
             distance(just as weighted kNN). Defult is 'False', means all neighbor
-            edge widgets equal to 1, others is 0.
+            edge weights equal to 1, others is 0.
         spatial_neighbors : neighbor_key {spatial_neighbors} in adata.uns.keys(),
         spatial_distances : neighbor_key {spatial_distances} in adata.obsp.keys().
         system: 'niches_c2c'(defult)
@@ -87,7 +87,7 @@ def niches(
             f"using 'dyn.tl.neighbors' to calulate the spatial diatances first."
         )
     nw = {}
-    nw = {"neighbors": adata.uns["spatial_neighbors"]["indices"], "widgets": adata.obsp["spatial_distances"]}
+    nw = {"neighbors": adata.uns["spatial_neighbors"]["indices"], "weights": adata.obsp["spatial_distances"]}
     k = adata.uns["spatial_neighbors"]["params"]["n_neighbors"]
 
     # construct c2c matrix
@@ -95,10 +95,10 @@ def niches(
         X = np.zeros(shape=(ligand_matrix.shape[0], k * adata.n_obs))
         if weighted:
             # weighted matrix (weighted distance)
-            row, col = np.diag_indices_from(nw["widgets"])
-            nw["widgets"][row, col] = 1
+            row, col = np.diag_indices_from(nw["weights"])
+            nw["weights"][row, col] = 1
             weight = np.zeros(shape=(adata.n_obs, k))
-            for i, row in enumerate(nw["widgets"].A):
+            for i, row in enumerate(nw["weights"].A):
                 weight[i, :] = 1 / row[nw["neighbors"][i]]
             for i in range(ligand_matrix.shape[1]):
                 receptor_matrix = adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :]
@@ -120,8 +120,8 @@ def niches(
         X = np.zeros(shape=(ligand_matrix.shape[0], adata.n_obs))
         if weighted:
             # weighted matrix (weighted distance)
-            row, col = np.diag_indices_from(nw["widgets"])
-            nw["widgets"][row, col] = 1
+            row, col = np.diag_indices_from(nw["weights"])
+            nw["weights"][row, col] = 1
             weight = np.zeros(shape=(adata.n_obs, k))
             for i in range(ligand_matrix.shape[1]):
                 receptor_matrix = gmean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
@@ -313,7 +313,7 @@ def predict_target_genes(
     )
     predict_ligand.sort_values(by="pearson_coef", axis=0, ascending=False, inplace=True)
     predict_ligand_top = predict_ligand[:top_ligand]["ligand"]
-    res = pd.DataFrame(columns=("ligand", "targets", "widgets"))
+    res = pd.DataFrame(columns=("ligand", "targets", "weights"))
     for ligand in ligand_target_matrix[predict_ligand_top]:
         top_n_score = ligand_target_matrix[ligand].sort_values(ascending=False)[:top_target]
         if geneset is None:
@@ -329,7 +329,7 @@ def predict_target_genes(
             [
                 res,
                 pd.DataFrame(
-                    {"ligand": ligand, "targets": targets, "widgets": ligand_target_matrix.loc[targets, ligand]}
+                    {"ligand": ligand, "targets": targets, "weights": ligand_target_matrix.loc[targets, ligand]}
                 ).reset_index(drop=True),
             ],
             axis=0,
