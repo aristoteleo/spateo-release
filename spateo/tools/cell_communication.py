@@ -1,6 +1,5 @@
 from typing import List, Optional
 
-import dynamo as dyn
 import numpy as np
 import pandas as pd
 from anndata import AnnData

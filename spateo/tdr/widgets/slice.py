@@ -10,7 +10,8 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ....logging import logger_manager as lm
+from spateo.logging import logger_manager as lm
+
 from ..models import collect_model, multiblock2model
 from .utils import _interactive_plotter
 
