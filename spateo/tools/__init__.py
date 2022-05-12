@@ -1,6 +1,5 @@
 from spateo.tools.cluster.find_clusters import scc, spagcn_pyg
 
-from . import TDR as tdr
 from .architype import (
     archetypes,
     archetypes_genes,
