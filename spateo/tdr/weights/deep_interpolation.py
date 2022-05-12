@@ -7,7 +7,6 @@ import anndata
 import numpy as np
 import scipy.io as sio
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from anndata import AnnData
 from numpy.random import normal
