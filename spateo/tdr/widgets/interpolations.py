@@ -3,12 +3,11 @@ from typing import List, Tuple, Union
 import numpy as np
 from anndata import AnnData
 
-from spateo.tools import interpolation_nn
-
-from ..configuration import SKM
-from ..logging import logger_manager as lm
+from ...configuration import SKM
+from ...logging import logger_manager as lm
+from ...tools.utils import in_hull, polyhull
+from . import interpolation_nn
 from .deep_interpolation import DataSampler, DeepInterpolation
-from .utils import in_hull, polyhull
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
