@@ -49,7 +49,7 @@ from .utils import (
 
 
 # @docstrings.get_sectionsf("scatters")
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def scatters(
     adata: AnnData,
     basis: Union[str, list] = "umap",

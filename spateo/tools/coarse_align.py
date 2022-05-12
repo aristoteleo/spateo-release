@@ -194,7 +194,7 @@ def pca_align(X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return Y, R
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def align_slices_pca(
     adata: anndata.AnnData,
     spatial_key: str = "spatial",

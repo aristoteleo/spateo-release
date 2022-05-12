@@ -10,7 +10,7 @@ from . import interpolation_nn
 from .deep_interpolation import DataSampler, DeepInterpolation
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def kernel_interpolation(
     adata: Union[AnnData, None] = None,
     genes: Union[None, List] = None,
@@ -59,7 +59,7 @@ def kernel_interpolation(
     return interp_adata
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def deep_intepretation(
     adata: Union[AnnData, None] = None,
     genes: Union[None, List] = None,
@@ -111,7 +111,7 @@ def deep_intepretation(
     return interp_adata
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def get_X_Y_grid(
     adata: Union[AnnData, None] = None,
     genes: Union[None, List] = None,

@@ -20,7 +20,7 @@ from .scatters import scatters
 
 
 # @docstrings.with_indent(4)
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def space(
     adata: anndata.AnnData,
     color: Union[list, str, None] = None,

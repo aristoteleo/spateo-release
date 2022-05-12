@@ -175,9 +175,14 @@ class SpateoAdataKeyManager:
                 # Obtain arguments by name.
                 call_args = inspect.getcallargs(unwrapped, *args, **kwargs)
                 adata = call_args[argname]
-                if (not optional or adata is not None) and not SpateoAdataKeyManager.adata_is_type(adata, t):
+                passing = (
+                    all(SpateoAdataKeyManager.adata_is_type(_adata, t) for _adata in adata)
+                    if isinstance(adata, (list, tuple))
+                    else SpateoAdataKeyManager.adata_is_type(adata, t)
+                )
+                if (not optional or adata is not None) and not passing:
                     raise ConfigurationError(
-                        f"AnnData provided to `{argname}` argument must be of `{t}` type, but received "
+                        f"AnnData(s) provided to `{argname}` argument must be of `{t}` type, but received "
                         f"`{SpateoAdataKeyManager.get_adata_type(adata)}` type."
                     )
                 return func(*args, **kwargs)

@@ -17,7 +17,7 @@ from .utils import spatial_adj_dyn
 to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else X
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def spagcn_pyg(
     adata: anndata.AnnData,
     n_clusters: int,
@@ -183,7 +183,7 @@ def spagcn_pyg(
     return None
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def scc(
     adata: anndata.AnnData,
     spatial_key: str = "spatial",
