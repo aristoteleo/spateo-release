@@ -15,9 +15,9 @@ except ModuleNotFoundError:
     CellposeModel = None
 from typing_extensions import Literal
 
-from ....configuration import SKM
-from ....errors import PreprocessingError
-from ....logging import logger_manager as lm
+from ...configuration import SKM
+from ...errors import SegmentationError
+from ...logging import logger_manager as lm
 from ..utils import clahe
 
 
@@ -83,7 +83,7 @@ def cellpose(
         raise ModuleNotFoundError("Please install Cellpose by running `pip install cellpose`.")
 
     if layer not in adata.layers:
-        raise PreprocessingError(
+        raise SegmentationError(
             f'Layer "{layer}" does not exist in AnnData. '
             "Please import nuclei staining results either manually or "
             "with the `nuclei_path` argument to `st.io.read_bgi_agg`."

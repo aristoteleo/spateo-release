@@ -2,7 +2,6 @@
 mask.
 """
 import math
-import warnings
 from typing import Dict, Optional, Union
 
 import cv2
@@ -10,13 +9,12 @@ import numpy as np
 from anndata import AnnData
 from joblib import Parallel, delayed
 from numba import njit
-from scipy.sparse import issparse, spmatrix
 from skimage import filters, measure, segmentation
 from tqdm import tqdm
 
-from ...configuration import SKM, config
-from ...errors import PreprocessingError
-from ...logging import logger_manager as lm
+from ..configuration import SKM, config
+from ..errors import SegmentationError
+from ..logging import logger_manager as lm
 from . import utils
 
 
@@ -122,7 +120,7 @@ def watershed_markers(
     _layer1 = SKM.gen_new_layer_key(layer, SKM.SCORES_SUFFIX)
     _layer2 = SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
     if _layer1 not in adata.layers and _layer2 not in adata.layers and layer not in adata.layers:
-        raise PreprocessingError(
+        raise SegmentationError(
             f'Neither "{_layer1}", "{_layer2}", nor "{layer}" are present in AnnData. '
             "Please run either `st.pp.segmentation.icell.mask_nuclei_from_stain` "
             "or `st.pp.segmentation.score_and_mask_pixels` first."

@@ -3,7 +3,6 @@ generate a cell mask, NOT to identify individual cells.
 
 Original author @HailinPan, refactored by @Lioscro.
 """
-import warnings
 from functools import partial
 from typing import Dict, Optional, Tuple, Union
 
@@ -14,10 +13,9 @@ from scipy.sparse import issparse, spmatrix
 from skimage import filters
 from typing_extensions import Literal
 
-from ...configuration import SKM
-from ...errors import PreprocessingError
-from ...logging import logger_manager as lm
-from ...warnings import PreprocessingWarning
+from ..configuration import SKM
+from ..errors import SegmentationError
+from ..logging import logger_manager as lm
 from . import bp, em, moran, utils, vi
 
 
@@ -82,7 +80,7 @@ def mask_cells_from_stain(
         out_layer: Layer to put resulting nuclei mask. Defaults to `{layer}_mask`.
     """
     if layer not in adata.layers:
-        raise PreprocessingError(
+        raise SegmentationError(
             f'Layer "{layer}" does not exist in AnnData. '
             "Please import nuclei staining results either manually or "
             "with the `nuclei_path` argument to `st.io.read_bgi_agg`."
@@ -127,7 +125,7 @@ def mask_nuclei_from_stain(
         out_layer: Layer to put resulting nuclei mask. Defaults to `{layer}_mask`.
     """
     if layer not in adata.layers:
-        raise PreprocessingError(
+        raise SegmentationError(
             f'Layer "{layer}" does not exist in AnnData. '
             "Please import nuclei staining results either manually or "
             "with the `nuclei_path` argument to `st.io.read_bgi_agg`."
@@ -215,15 +213,15 @@ def _score_pixels(
         [0, 1] score of each pixel being a cell.
 
     Raises:
-        PreprocessingError: If `bins` and/or `certain_mask` was provided but
+        SegmentationError: If `bins` and/or `certain_mask` was provided but
             their sizes do not match `X`
     """
     if method.lower() not in ("gauss", "moran", "em", "em+gauss", "em+bp", "vi+gauss", "vi+bp"):
-        raise PreprocessingError(f"Unknown method `{method}`")
+        raise SegmentationError(f"Unknown method `{method}`")
     if certain_mask is not None and X.shape != certain_mask.shape:
-        raise PreprocessingError("`certain_mask` does not have the same shape as `X`")
+        raise SegmentationError("`certain_mask` does not have the same shape as `X`")
     if bins is not None and X.shape != bins.shape:
-        raise PreprocessingError("`bins` does not have the same shape as `X`")
+        raise SegmentationError("`bins` does not have the same shape as `X`")
 
     method = method.lower()
     moran_kwargs = moran_kwargs or {}

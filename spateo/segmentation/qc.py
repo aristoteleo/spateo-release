@@ -1,12 +1,11 @@
-import warnings
-from typing import Callable, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
 
-from ...configuration import SKM
-from ...errors import PreprocessingError
-from ...logging import logger_manager as lm
+from ..configuration import SKM
+from ..errors import SegmentationError
+from ..logging import logger_manager as lm
 
 
 @SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
@@ -46,7 +45,7 @@ def select_qc_regions(
         ).reshape(-1, 2)
 
         if indices.shape[0] == 0:
-            raise PreprocessingError("No possible regions found. This may indicate the `size` argument is to big.")
+            raise SegmentationError("No possible regions found. This may indicate the `size` argument is to big.")
 
         rng = np.random.default_rng(seed)
         choices = indices[rng.choice(np.arange(indices.shape[0]), n, replace=False)]
@@ -67,7 +66,7 @@ def select_qc_regions(
                 xmax = xmin + size
                 ymax = ymin + size
             else:
-                raise PreprocessingError("`regions` must be a list of 4-element or 2-element tuples.")
+                raise SegmentationError("`regions` must be a list of 4-element or 2-element tuples.")
 
             # If absolute = False, adjust for anndata bounds
             if not absolute:
@@ -92,7 +91,7 @@ def select_qc_regions(
 def _generate_random_labels(shape: Tuple[int, int], areas: List[int], seed: Optional[int] = None) -> np.ndarray:
     n = np.prod(shape)
     if sum(areas) > n:
-        raise PreprocessingError("Sum of `areas` exceeds to total area")
+        raise SegmentationError("Sum of `areas` exceeds to total area")
 
     rng = np.random.default_rng(seed)
     labels = np.zeros(n, dtype=int)

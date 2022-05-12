@@ -2,9 +2,9 @@ from unittest import TestCase, mock
 
 import numpy as np
 
-import spateo.preprocessing.segmentation.label as label
+import spateo.segmentation.label as label
 
-from ...mixins import TestMixin, create_random_adata
+from ..mixins import TestMixin, create_random_adata
 
 
 class TestLabel(TestMixin, TestCase):
@@ -33,7 +33,7 @@ class TestLabel(TestMixin, TestCase):
         np.testing.assert_array_equal(expected, label._expand_labels(X, 3, 9))
 
     def test_watershed_markers_with_scores(self):
-        with mock.patch("spateo.preprocessing.segmentation.label.utils.safe_erode") as safe_erode:
+        with mock.patch("spateo.segmentation.label.utils.safe_erode") as safe_erode:
             safe_erode.return_value = np.random.random((3, 3))
             adata = create_random_adata(["unspliced_scores", "unspliced_mask"], (3, 3))
             k = mock.MagicMock()
@@ -49,7 +49,7 @@ class TestLabel(TestMixin, TestCase):
             np.testing.assert_array_equal(adata.layers["unspliced_scores"], safe_erode.call_args[0][0])
 
     def test_watershed_markers_with_mask(self):
-        with mock.patch("spateo.preprocessing.segmentation.label.utils.safe_erode") as safe_erode:
+        with mock.patch("spateo.segmentation.label.utils.safe_erode") as safe_erode:
             safe_erode.return_value = np.random.random((3, 3))
             adata = create_random_adata(["unspliced_mask"], (3, 3))
             k = mock.MagicMock()
@@ -65,7 +65,7 @@ class TestLabel(TestMixin, TestCase):
             np.testing.assert_array_equal(adata.layers["unspliced_mask"], safe_erode.call_args[0][0])
 
     def test_watershed_adata(self):
-        with mock.patch("spateo.preprocessing.segmentation.label._watershed") as _watershed:
+        with mock.patch("spateo.segmentation.label._watershed") as _watershed:
             _watershed.return_value = np.random.random((3, 3))
             adata = create_random_adata(["nuclei", "nuclei_mask", "nuclei_markers"], (3, 3))
             adata.layers["nuclei_mask"] = adata.layers["nuclei_mask"] > 0.5
@@ -80,7 +80,7 @@ class TestLabel(TestMixin, TestCase):
             np.testing.assert_array_equal(adata.layers["nuclei_markers"], _watershed.call_args[0][2])
 
     def test_expand_labels_adata(self):
-        with mock.patch("spateo.preprocessing.segmentation.label._expand_labels") as _expand_labels:
+        with mock.patch("spateo.segmentation.label._expand_labels") as _expand_labels:
             _expand_labels.return_value = np.random.random((3, 3))
             adata = create_random_adata(["nuclei_labels", "mask"], (3, 3))
             distance = mock.MagicMock()
