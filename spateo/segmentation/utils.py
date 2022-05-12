@@ -5,13 +5,11 @@ from typing import Optional, Tuple, Union
 import cv2
 import numpy as np
 from kneed import KneeLocator
-from numba import njit
 from scipy import signal, sparse
 from tqdm import tqdm
 from typing_extensions import Literal
 
-from ...errors import PreprocessingError
-from ...logging import logger_manager as lm
+from ..errors import SegmentationError
 
 
 def circle(k: int) -> np.ndarray:
@@ -311,7 +309,7 @@ def label_overlap(X: np.ndarray, Y: np.ndarray) -> sparse.csr_matrix:
         return overlap
 
     if X.shape != Y.shape:
-        raise PreprocessingError(
+        raise SegmentationError(
             f"Both arrays must have the same shape, but one is {X.shape} and the other is {Y.shape}."
         )
     return _label_overlap(X.flatten(), Y.flatten()).tocsr()

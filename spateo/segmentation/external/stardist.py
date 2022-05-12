@@ -18,9 +18,9 @@ except ModuleNotFoundError:
     StarDist2D = None
 from typing_extensions import Literal
 
-from ....configuration import SKM
-from ....errors import PreprocessingError
-from ....logging import logger_manager as lm
+from ...configuration import SKM
+from ...errors import SegmentationError
+from ...logging import logger_manager as lm
 from ..utils import clahe
 
 
@@ -170,9 +170,9 @@ def stardist(
     if StarDist2D is None:
         raise ModuleNotFoundError("Please install StarDist by running `pip install stardist`.")
     if tilesize <= 0 and min_overlap:
-        raise PreprocessingError("Positive `tilesize` must be provided when `min_overlap` is used.")
+        raise SegmentationError("Positive `tilesize` must be provided when `min_overlap` is used.")
     if layer not in adata.layers:
-        raise PreprocessingError(
+        raise SegmentationError(
             f'Layer "{layer}" does not exist in AnnData. '
             "Please import nuclei staining results either manually or "
             "with the `nuclei_path` argument to `st.io.read_bgi_agg`."

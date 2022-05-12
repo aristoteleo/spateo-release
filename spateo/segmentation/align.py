@@ -1,7 +1,6 @@
 """Functions to refine staining and RNA alignments.
 """
 import math
-import warnings
 from typing import List, Optional, Union
 
 import cv2
@@ -14,9 +13,9 @@ from kornia.geometry.transform import thin_plate_spline as tps
 from tqdm import tqdm
 from typing_extensions import Literal
 
-from ...configuration import SKM
-from ...errors import PreprocessingError
-from ...logging import logger_manager as lm
+from ..configuration import SKM
+from ..errors import SegmentationError
+from ..logging import logger_manager as lm
 from . import utils
 
 
@@ -77,7 +76,7 @@ class NonRigidAlignmentRefiner(AlignmentRefiner):
         meshsize = meshsize or min(to_align.shape) // 3
         meshes = (math.ceil(to_align.shape[0] / meshsize), math.ceil(to_align.shape[1] / meshsize))
         if meshes[0] <= 1 or meshes[1] <= 1:
-            raise PreprocessingError(
+            raise SegmentationError(
                 f"Using `meshsize` {meshsize} for image of shape {to_align.shape} "
                 f"results in {meshes} meshes. Please reduce `meshsize`."
             )
@@ -194,7 +193,7 @@ def refine_alignment(
         **kwargs: Additional keyword arguments to pass to the Pytorch module.
     """
     if mode not in MODULES.keys():
-        raise PreprocessingError('`mode` must be one of "rigid" and "non-rigid"')
+        raise SegmentationError('`mode` must be one of "rigid" and "non-rigid"')
     if adata.shape[0] * downscale > 10000 or adata.shape[1] * downscale > 10000:
         lm.main_warning(
             "Input has dimension > 10000. This may take a while and a lot of memory. "

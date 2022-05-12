@@ -23,7 +23,7 @@ test:
 		tests/* \
 		tests/io/* \
 		tests/preprocessing/* \
-		tests/preprocessing/segmentation/* \
+		tests/segmentation/* \
 		tests/tools/*
 
 check:

@@ -8,3 +8,7 @@ class PreprocessingError(Exception):
 
 class PlottingError(Exception):
     pass
+
+
+class SegmentationError(Exception):
+    pass

@@ -1,7 +1,6 @@
 """Variational inference implementation of a negative binomial mixture model
 using Pyro.
 """
-import itertools
 from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
@@ -14,10 +13,10 @@ from pyro.infer import SVI, TraceEnum_ELBO
 from pyro.infer.autoguide import AutoDelta
 from pyro.nn import PyroModule, PyroParam
 from pyro.optim import Adam
-from torch.distributions.utils import logits_to_probs, probs_to_logits
+from torch.distributions.utils import probs_to_logits
 from tqdm import tqdm
 
-from ...errors import PreprocessingError
+from ..errors import SegmentationError
 
 
 class NegativeBinomialMixture(PyroModule):
@@ -35,9 +34,9 @@ class NegativeBinomialMixture(PyroModule):
         super().__init__()
 
         if not ((w is None) == (mu is None) and (w is None) == (var is None)):
-            raise PreprocessingError("All or none of `w`, `mu`, `var` must be provided.")
+            raise SegmentationError("All or none of `w`, `mu`, `var` must be provided.")
         if (w is not None) and (n != len(w) or n != len(mu) or n != len(var)):
-            raise PreprocessingError(f"`w`, `mu`, `var` must have length {n}.")
+            raise SegmentationError(f"`w`, `mu`, `var` must have length {n}.")
 
         if seed is not None:
             torch.manual_seed(seed)
@@ -194,12 +193,12 @@ def conditionals(
         probabilities, and the second to the foreground conditional probabilities
 
     Raises:
-        PreprocessingError: If `em_results` is a dictionary but `bins` was not
+        SegmentationError: If `em_results` is a dictionary but `bins` was not
             provided.
     """
     if "counts" not in vi_results:
         if bins is None:
-            raise PreprocessingError("`vi_results` indicate binning was used, but `bins` was not provided")
+            raise SegmentationError("`vi_results` indicate binning was used, but `bins` was not provided")
         background_cond = np.ones(X.shape)
         cell_cond = np.zeros(X.shape)
         for label, params in vi_results.items():
@@ -248,11 +247,11 @@ def run_vi(
                 samples[label] = X[bins == label]
                 _params = params.get(label, params)
                 if set(_params.keys()) != {"w", "mu", "var"}:
-                    raise PreprocessingError("`params` must contain exactly the keys `w`, `mu`, `var`.")
+                    raise SegmentationError("`params` must contain exactly the keys `w`, `mu`, `var`.")
     else:
         samples[0] = X.flatten()
         if set(params.keys()) != {"w", "mu", "var"}:
-            raise PreprocessingError("`params` must contain exactly the keys `w`, `mu`, `var`.")
+            raise SegmentationError("`params` must contain exactly the keys `w`, `mu`, `var`.")
 
     downsample_scale = True
     if downsample > 1:
