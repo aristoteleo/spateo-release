@@ -8,7 +8,8 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ....tools.TDR.models import collect_model
+from spateo.TDR import collect_model
+
 from .three_dims_plotter import (
     _set_jupyter,
     add_legend,
