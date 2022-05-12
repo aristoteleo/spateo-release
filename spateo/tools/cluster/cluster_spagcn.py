@@ -14,7 +14,7 @@ from ...configuration import SKM
 from .utils import compute_pca_components
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def spagcn_vanilla(
     adata: AnnData,
     spatial_key: str = "spatial",

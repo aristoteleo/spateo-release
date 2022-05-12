@@ -18,7 +18,7 @@ from ..configuration import SKM
 from ..logging import logger_manager as lm
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def find_spatial_cluster_degs(
     adata: AnnData,
     test_group: str,
@@ -95,7 +95,7 @@ def find_spatial_cluster_degs(
     return res
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def find_cluster_degs(
     adata: AnnData,
     test_group: str,
@@ -316,7 +316,7 @@ def find_cluster_degs(
     return de
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def find_all_cluster_degs(
     adata: AnnData,
     group: str,
@@ -411,7 +411,7 @@ def find_all_cluster_degs(
     return adata
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def top_n_degs(
     adata: AnnData,
     group: str,

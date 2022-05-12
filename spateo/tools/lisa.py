@@ -21,7 +21,7 @@ from ..configuration import SKM
 from ..utils import copy_adata
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def lisa_geo_df(
     adata: anndata.AnnData,
     gene: str,
@@ -87,7 +87,7 @@ def lisa_geo_df(
     return (lisa, df)
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def local_moran_i(
     adata: anndata.AnnData,
     group: str,
@@ -316,7 +316,7 @@ def local_moran_i(
     return res
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def GM_lag_model(
     adata: anndata.AnnData,
     group: str,

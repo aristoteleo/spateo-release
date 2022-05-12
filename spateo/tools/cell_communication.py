@@ -13,7 +13,7 @@ from ..logging import logger_manager as lm
 
 
 # Niches
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def niches(
     adata: AnnData,
     path: str,
@@ -151,7 +151,7 @@ def niches(
 
 
 # NicheNet
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def predict_ligand_activities(
     adata: AnnData,
     path: str,
@@ -268,7 +268,7 @@ def predict_ligand_activities(
     return res
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def predict_target_genes(
     adata: AnnData,
     path: str,

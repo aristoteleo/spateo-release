@@ -14,7 +14,7 @@ from statsmodels.sandbox.stats.multicomp import multipletests
 from ..configuration import SKM
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def moran_i(
     adata: AnnData,
     X_data: Optional[np.ndarray] = None,
