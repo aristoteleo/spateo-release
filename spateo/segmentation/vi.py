@@ -105,7 +105,7 @@ class NegativeBinomialMixture(PyroModule):
 
         # Is there a better way to initialize the dropout param?
         if self.zero_inflated:
-            self.z = PyroParam(torch.randn(self.n))
+            self.z = PyroParam(probs_to_logits(torch.zeros(self.n).float(), is_binary=True))
 
     def optimizer(self):
         if self.__optimizer is None:

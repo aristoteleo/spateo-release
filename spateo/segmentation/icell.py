@@ -384,7 +384,7 @@ def score_and_mask_pixels(
         threshold = filters.threshold_multiotsu(scores)[1] if "bp" in method else filters.threshold_otsu(scores)
 
     lm.main_info(f"Applying threshold {threshold}.")
-    mk = mk or k
+    mk = mk or (k + 2 if any(m in method for m in ("em", "vi")) else max(k - 2, 3))
     mask = utils.apply_threshold(scores, mk, threshold)
     if certain_layer:
         mask += certain_mask
