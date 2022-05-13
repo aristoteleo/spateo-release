@@ -40,10 +40,9 @@ def space(
     *args,
     **kwargs
 ):
-    """\
-    Scatter plot for physical coordinates of each cell.
-    Parameters
-    ----------
+    """Scatter plot for physical coordinates of each cell.
+
+    Args:
         adata:
             an Annodata object that contain the physical coordinates for each bin/cell, etc.
         genes:
@@ -83,8 +82,8 @@ def space(
         ps_sample_num: `int`
             The number of bins / cells that will be sampled to estimate the distance between different bin / cells.
         %(scatters.parameters.no_adata|basis|figsize)s
-    Returns
-    -------
+
+    Returns:
         plots gene or cell feature of the adata object on the physical spatial coordinates.
     """
     # main_info("Plotting spatial info on adata")

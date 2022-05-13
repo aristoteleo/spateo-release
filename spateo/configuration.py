@@ -584,8 +584,8 @@ def set_figure_params(
 ):
     """Set resolution/size, styling and format of figures.
        This function is adapted from: https://github.com/theislab/scanpy/blob/f539870d7484675876281eb1c475595bf4a69bdb/scanpy/_settings.py
-    Arguments
-    ---------
+
+    Args:
         spateo: `bool` (default: `True`)
             Init default values for :obj:`matplotlib.rcParams` suited for spateo.
         background: `str` (default: `white`)

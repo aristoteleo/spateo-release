@@ -21,7 +21,6 @@ numpy>=1.18.1<=2.10.0
 opencv-python>=4.5.4.60
 pandana
 pandas>=0.25.1
-PATSY>=0.5.1
 plotly>=5.1.0
 POT>=0.8.1
 pynndescent>=0.4.8
