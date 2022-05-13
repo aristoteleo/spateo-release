@@ -165,11 +165,17 @@ def _initial_nb_params(
         mask = _samples > threshold
         background_values = _samples[~mask]
         foreground_values = _samples[mask]
-        params[label] = dict(
-            w=tuple(np.array([_samples.size - mask.sum(), mask.sum()]) / _samples.size),
-            mu=(background_values.mean(), foreground_values.mean()),
-            var=(background_values.var(), foreground_values.var()),
-        )
+        w = tuple(np.array([_samples.size - mask.sum(), mask.sum()]) / _samples.size)
+        mu = (background_values.mean(), foreground_values.mean())
+        var0 = background_values.var()
+        var1 = foreground_values.var()
+        # Negative binomial distribution requires variance > mean
+        if var0 <= mu[0]:
+            var0 = mu[0] * 1.1
+        if var1 <= mu[1]:
+            var1 = mu[1] * 1.1
+        var = (var0, var1)
+        params[label] = dict(w=w, mu=mu, var=var)
     return params[0] if bins is None else params
 
 
