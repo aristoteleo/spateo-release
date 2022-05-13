@@ -116,7 +116,7 @@ def dataframe_to_labels(df: pd.DataFrame, column: str, shape: Optional[Tuple[int
     for label, _df in df.drop_duplicates(subset=[column, "x", "y"]).groupby(column):
         if label <= 0:
             continue
-        labels[(_df["x"].values, df["y"].values)] = label
+        labels[(_df["x"].values, _df["y"].values)] = label
     return labels
 
 
