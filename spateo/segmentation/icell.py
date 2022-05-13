@@ -149,7 +149,8 @@ def _initial_nb_params(
     Returns:
         Dictionary containing initial `w`, `mu`, `var` parameters. If `bins` is also
         provided, the dictionary is nested with the outer dictionary containing each
-        bin label as the keys.
+        bin label as the keys. If `zero_inflated=True`, then the dictionary also contains
+        a `z` key.
     """
     samples = {}
     if bins is not None:
@@ -165,17 +166,30 @@ def _initial_nb_params(
         mask = _samples > threshold
         background_values = _samples[~mask]
         foreground_values = _samples[mask]
-        w = tuple(np.array([_samples.size - mask.sum(), mask.sum()]) / _samples.size)
-        mu = (background_values.mean(), foreground_values.mean())
-        var0 = background_values.var()
-        var1 = foreground_values.var()
+        w = np.array([_samples.size - mask.sum(), mask.sum()]) / _samples.size
+        mu = np.array([background_values.mean(), foreground_values.mean()])
+        var = np.array([background_values.var(), foreground_values.var()])
+        if (mu == 0).any():
+            raise SegmentationError("Estimated mean(s) equals to zero. Please increase `k`.")
+
         # Negative binomial distribution requires variance > mean
-        if var0 <= mu[0]:
-            var0 = mu[0] * 1.1
-        if var1 <= mu[1]:
-            var1 = mu[1] * 1.1
-        var = (var0, var1)
-        params[label] = dict(w=w, mu=mu, var=var)
+        if var[0] <= mu[0]:
+            lm.main_warning(
+                f"Estimated variance of background ({var[0]:.2f}) is less than the mean ({mu[0]:.2f}). "
+                "Initial variance will be arbitrarily set to 1.1x of the mean. "
+                "This is usually due to extreme sparsity. Please consider increasing `k` or using "
+                "the zero-inflated distribution."
+            )
+            var[0] = mu[0] * 1.1
+        if var[1] <= mu[1]:
+            lm.main_warning(
+                f"Estimated variance of foreground ({var[1]:.2f}) is less than the mean ({mu[1]:.2f}). "
+                "Initial variance will be arbitrarily set to 1.1x of the mean. "
+                "This is usually due to extreme sparsity. Please consider increasing `k` or using "
+                "the zero-inflated distribution."
+            )
+            var[1] = mu[1] * 1.1
+        params[label] = dict(w=tuple(w), mu=tuple(mu), var=tuple(var))
     return params[0] if bins is None else params
 
 
