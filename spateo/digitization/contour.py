@@ -15,117 +15,143 @@ from ..logging import logger_manager as lm
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
-def gen_cluster_images(
+def gen_cluster_image(
     adata: AnnData,
-    bin_size: int,
-    cluster_id: Union[int, List],
+    bin_size: int = None,
     spatial_key: str = "spatial",
     cluster_key: str = "scc",
+    label_mapping_key: str = "cluster_img_label",
+    show: bool = True,
     cmap: str = "tab20",
-) -> Union[NDArray[np.uint16], List]:
-    """Generate images with each cell cluster(s) a distinct color prepared from the designated cmap.
+):  # need output type
+    """Generate images with each spatial cluster(s) a distinct color prepared from the designated cmap.
 
     Args:
         adata: The adata object used to create the image for cluster(s).
         bin_size: The size of the binning.
-        cluster_id: The cluster id of interests.
         spatial_key: The key name of the spatial coordinates.
-        cluster_key: The key name of the cell cluster.
+        cluster_key: The key name of the spatial cluster.
+        label_mapping_key: The key name to store the mapping between cluster name and label values.
+        show: Visualize the cluster image.
         cmap: The colormap that will be used to draw colors for the resultant cluster image(s).
 
     Returns:
-        color_cluster: A numpy array or a list of numpy arrays that store the image of each cluster, each with a
+        cluster_image: A numpy array or a list of numpy arrays that store the image of each cluster, each with a
         distinct color.
     """
 
-    lm.main_info(f"Set up the color for the clusters with the {cmap} colormap.")
     import matplotlib.pyplot as plt
 
-    coord = adata.obsm[spatial_key]
-    labels = adata.obs[cluster_key]
+    if bin_size is None:
+        bin_size = adata.uns["bin_size"]
+
+    lm.main_info(f"Set up the color for the clusters with the {cmap} colormap.")
 
     cmap = plt.cm.get_cmap(cmap)
     colors = cmap(np.arange(cmap.N))
     color_ls = []
     for i in range(cmap.N):
         color_ls.append(tuple(np.array(colors[i][:3] * 255).astype(int)))
+    random.seed(1)
+    color_ls_cut = random.sample(color_ls, len(np.unique(adata.obs[cluster_key])))
+
+    lm.main_info(f"Saving integer labels for clusters into adata.obs['{label_mapping_key}'].")
+
+    # TODO: adata.obs[cluster_key] are not always int, need to support strings.
+    # int:adata.obs[label_mapping] , dict:convert_map = todo:convert(any:adata.obs[cluster_key])
+    # background is 0, so adata.obs[label_mapping] start from 1
+    adata.obs[label_mapping_key] = 0
+    cluster_list = np.unique(adata.obs[cluster_key])
+    for i in range(len(cluster_list)):
+        adata.obs[label_mapping_key][adata.obs[cluster_key] == cluster_list[i]] = i + 1
 
     # get cluster image
     lm.main_info(f"Prepare a mask image and assign each pixel to the corresponding cluster id.")
-    x_ls = []
-    y_ls = []
-    for i in range(len(coord)):
-        x = int(coord[i][0])
-        y = int(coord[i][1])
-        x_ls.append(x)
-        y_ls.append(y)
 
-    max_x, max_y = max(x_ls), max(y_ls)
-    c, r = max_x, max_y
+    max_coords = [int(np.max(adata.obsm[spatial_key][:, 0])) + 1, int(np.max(adata.obsm[spatial_key][:, 1])) + 1]
 
-    mask = np.zeros((r, c), np.uint8)
-    color_cluster = np.zeros((r, c, 3), np.uint16)
-    for j in range(len(coord)):
-        x = int(coord[j][0])
-        y = int(coord[j][1])
-        label = int(labels[j]) + 1  # background is 0, so cluster value start from 1
+    cluster_label_image = np.zeros((max_coords[0], max_coords[1]), np.uint8)
 
+    for i in range(len(adata)):
         # fill the image (mask) with the label
-        # cv2.circle(image, center_coordinates, radius, color, thickness)
-        cv2.circle(mask, (x, y), int(bin_size / 2), label, -1)
+        cv2.circle(
+            img=cluster_label_image,
+            center=(int(adata.obsm[spatial_key][i, 1]), int(adata.obsm[spatial_key][i, 0])),
+            radius=bin_size // 2,
+            color=int(adata.obs[label_mapping_key][i]),
+            thickness=-1,
+        )
 
-    random.seed(10000)
-    color_ls_cut = random.sample(color_ls, len(np.unique(labels)))
+    if show:
+        lm.main_info(f"Plot the cluster image with the color(s) in the color list.")
+        cluster_rgb_image = np.zeros((max_coords[0], max_coords[1], 3), np.uint8)
+        for i in np.unique(adata.obs[label_mapping_key]):
+            cluster_rgb_image[cluster_label_image == i] = color_ls_cut[i - 1]
+        plt.imshow(cluster_rgb_image)
 
-    lm.main_info(f"Generate the cluster image with the color(s) in the color list.")
-    if type(cluster_id) == int:
-        color_cluster[mask == cluster_id + 1] = color_ls_cut[cluster_id]
-        return color_cluster
-    elif type(cluster_id) == List:
-        color_cluster = []
-        for cur_c in cluster_id:
-            tmp = color_cluster.copy()
-            tmp[mask == cur_c + 1] = color_ls_cut[cur_c]
-            color_cluster.append(tmp)
-
-        return color_cluster
+    return cluster_label_image
 
 
 def extract_cluster_contours(
-    cluster_id_img: NDArray[np.uint8], ksize: float, min_area: float
-) -> Tuple[NDArray, Tuple[NDArray]]:
+    cluster_image,
+    cluster_labels: Union[int, List],
+    bin_size: int,
+    k_size: float = 2,
+    min_area: float = 9,
+    show: bool = True,
+):  # need specify output type
     """Extract contour(s) for area(s) formed by buckets of the same identified cluster.
 
     Args:
         cluster_id_img: the image that sets the pixels of the cluster of interests as the front color (background is 0).
-        ksize: kernel size of the elliptic structuring element.
+        cluster_labels: The label values of interested clusters.
+        bin_size: The size of the binning.
+        k_size: kernel size of the elliptic structuring element.
         min_area: minimal area threshold corresponding to the resulting contour(s).
+        show: Visualize the result.
 
     Returns:
-        close_img: The resultant image with the contour identified.
         contours: The coordinates of contors identified.
+        cluster_image_close: The resultant image of the area of interest.
+        cluster_image_contour: The resultant image of the contour.
     """
 
-    c, r = cluster_id_img.shape[:2]
-    contours_1pixel = np.zeros((r, c), np.uint8)
+    import matplotlib.pyplot as plt
 
-    lm.main_info("Convert BGR cluster image to GRAY image.")
-    cluster_img_gray = cv2.cvtColor(cluster_id_img, cv2.COLOR_BGR2GRAY)
+    k_size = int(k_size * bin_size)
+    min_area = int(min_area * bin_size * bin_size)
+
+    lm.main_info(f"Get selected areas in labels:{cluster_labels}.")
+    cluster_image_close = cluster_image.copy()
+    if type(cluster_labels) == int:
+        cluster_image_close = np.where(cluster_image_close == cluster_labels, cluster_image_close, 0)
+    # elif type(cluster_labels) == list: #what is type List in typing.List
+    else:
+        cluster_image_close = np.where(np.isin(cluster_image_close, cluster_labels), cluster_image_close, 0)
+
     lm.main_info("Use MORPH_ELLIPSE to close cluster morphology.")
-    kernal = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
-    close = cv2.morphologyEx(cluster_img_gray, cv2.MORPH_CLOSE, kernal)
+    kernal = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+    cluster_image_close = cv2.morphologyEx(cluster_image_close, cv2.MORPH_CLOSE, kernal)
 
     lm.main_info("Remove small region.")
-    close_img_bool = close.astype(bool)
-    close_img = np.uint8(morphology.remove_small_objects(close_img_bool, min_area, connectivity=2).astype(int))
+    cluster_image_close = morphology.remove_small_objects(
+        cluster_image_close.astype(bool),
+        min_area,
+        connectivity=2,
+    ).astype(np.uint8)
 
     lm.main_info("Extract contours.")
-    contours, hierarchy = cv2.findContours(close_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    contours, _ = cv2.findContours(cluster_image_close, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
-    lm.main_info("Draw contours.")
-    # cv.drawContours(	image, contours, contourIdx, color[, thickness[, lineType[, hierarchy[, maxLevel[, offset]]]]]	) ->	image
-    cv2.drawContours(contours_1pixel, contours, -1, 255, 1)
-    return close_img, contours
+    cluster_image_contour = np.zeros((cluster_image.shape[0], cluster_image.shape[1]))
+    for i in range(len(contours)):
+        cv2.drawContours(cluster_image_contour, contours, i, i + 1, bin_size)
+
+    if show:
+        lm.main_info("Showing extracted contours.")
+        plt.imshow(cluster_image_contour)
+
+    return contours, cluster_image_close, cluster_image_contour
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata_high_res", optional=True)
@@ -134,11 +160,11 @@ def set_domains(
     adata_low_res: Optional[AnnData] = None,
     spatial_key: str = "spatial",
     cluster_key: str = "scc",
-    domain_key: str = "domain",
-    bin_size: int = 60,
-    cmap: str = "tab20",
-    ksize: float = 110,
-    min_area: float = 50000,
+    domain_key_prefix: str = "domain",
+    bin_size_high: int = None,
+    bin_size_low: int = None,
+    k_size: float = 2,
+    min_area: float = 9,
 ) -> None:
     """Set the domains for each bucket based on spatial clusters.
 
@@ -147,38 +173,104 @@ def set_domains(
         adata_low_res: The anndata object in low spatial resolution.
         spatial_key: The key to the spatial coordinate of each bucket. Should be consistent in both `adata_high_res` and
             `adata_low_res`.
-        cluster_key: The key in `.obs` to the cell cluster.
-        domain_key: The key in `.obs` that will be used to store the spatial domain for each bucket.
-        bin_size: The size of the binning.
-        cmap: The colormap that will be used to draw colors for the resultant cluster image(s).
-        ksize: kernel size of the elliptic structuring element.
+        cluster_key: The key in `.obs` to the spatial cluster.
+        domain_key_prefix: The key prefix in `.obs` that will be used to store the spatial domain for each bucket.
+        bin_size_high: The size of the binning, for adata_high_res.
+        bin_size_low: The size of the binning, for adata_low_res (if provided).
+        k_size: kernel size of the elliptic structuring element.
         min_area: minimal area threshold corresponding to the resulting contour(s).
 
     Returns:
-        Nothing but update the `adata_high_res` with the `domain` in `domain_key`.
+        Nothing but update the `adata_high_res` with the `domain` in `domain_key_prefix + cluster_key`.
     """
+
+    domain_key = domain_key_prefix + "_" + cluster_key
 
     if adata_low_res is None:
         adata_low_res = adata_high_res
+    if bin_size_high is None:
+        bin_size_high = adata_high_res.uns["bin_size"]
+    if bin_size_low is None:
+        bin_size_low = adata_low_res.uns["bin_size"]
 
-    lm.main_info(f"Generate the cluster images with `gen_cluster_images`.")
-    coord = adata_high_res.obsm[spatial_key]
-    adata_high_res.obs[domain_key] = "-1"
-
-    u, count = np.unique(adata_low_res.obs[cluster_key], return_counts=True)
-    count_sort_ind = np.argsort(-count)
-
-    cluster_ids = u[count_sort_ind]
-    cluster_ids = [int(c) for c in cluster_ids]
-    color_cluster_list = gen_cluster_images(adata_low_res, bin_size, cluster_ids, spatial_key, cluster_key, cmap)
+    lm.main_info(f"Generate the cluster label image with `gen_cluster_image`.")
+    cluster_label_image = gen_cluster_image(
+        adata_low_res, bin_size=bin_size_low, spatial_key=spatial_key, cluster_key=cluster_key, show=False
+    )
 
     lm.main_info(f"Iterate through each cluster and identify contours with `extract_cluster_contours`.")
-    for c, color_cluster in zip(cluster_ids, color_cluster_list):
-        close_img, contours = extract_cluster_contours(np.uint8(color_cluster), ksize, min_area)
+    # TODO need a more stable mapping for ids and labels
+    u, count = np.unique(adata_low_res.obs[cluster_key], return_counts=True)
+    count_sort_ind = np.argsort(-count)
+    cluster_ids = u[count_sort_ind]
+    cluster_ids = [str(c) for c in cluster_ids]
 
-        for i in range(len(coord)):
-            x = coord[i][0]
-            y = coord[i][1]
-            for j in range(len(contours)):
-                if cv2.pointPolygonTest(contours[j], (x, y), False) >= 0:
-                    adata_high_res.obs[domain_key][i] = c
+    u, count = np.unique(adata_low_res.obs["cluster_img_label"], return_counts=True)
+    count_sort_ind = np.argsort(-count)
+    cluster_labels = u[count_sort_ind]
+    cluster_labels = [c for c in cluster_labels]
+
+    adata_high_res.obs[domain_key] = "NA"
+
+    for i in range(len(cluster_ids)):
+        ctrs, _, _ = extract_cluster_contours(
+            cluster_label_image, cluster_labels[i], bin_size=bin_size_low, k_size=k_size, min_area=min_area, show=False
+        )
+        for j in range(len(adata_high_res)):
+            x = adata_high_res.obsm[spatial_key][j, 0]
+            y = adata_high_res.obsm[spatial_key][j, 1]
+            for k in range(len(ctrs)):
+                if cv2.pointPolygonTest(ctrs[k], (y, x), False) >= 0:
+                    adata_high_res.obs[domain_key][j] = cluster_ids[i]
+
+
+def gen_contour_img(
+    adata: AnnData,
+    bin_size: int = None,
+    spatial_key: str = "spatial",
+    label_key: str = "cluster_img_label",
+    show: bool = True,
+    save_fig: str = "plot_contour_img",
+) -> None:
+    """Generate an image with contours of each spatial domains.
+
+    Args:
+        adata (AnnData): The adata object used to create the image.
+        bin_size (int, optional): The size of the binning. Defaults to None.
+        spatial_key (str, optional): The key name of the spatial coordinates. Defaults to "spatial".
+        label_key (str, optional): The key name of the image label values. Defaults to "cluster_img_label".
+        show (bool, optional): Visualize the result. Defaults to True.
+        save_fig (str, optional): Save image to path or filename. Defaults to "plot_contour_img".
+    """
+
+    import matplotlib.pyplot as plt
+    from numpngw import write_png
+
+    label_list = np.unique(adata.obs[label_key])
+    labels = np.zeros(len(adata))
+    for i in range(len(label_list)):
+        labels[adata.obs[label_key] == label_list[i]] = i + 1
+
+    label_img = np.zeros(
+        (
+            int(max(adata.obsm[spatial_key][:, 0] // bin_size)) + 1,
+            int(max(adata.obsm[spatial_key][:, 1] // bin_size)) + 1,
+        )
+    )
+    for i in range(len(adata)):
+        label_img[
+            int(adata.obsm[spatial_key][i, 0] // bin_size), int(adata.obsm[spatial_key][i, 1] // bin_size)
+        ] = labels[i]
+
+    contour_img = label_img.copy()
+    contour_img[:, :] = 255
+    for i in np.unique(label_img):
+        if i == 0:
+            continue
+        label_img_gray = np.where(label_img == i, 0, 1).astype("uint8")
+        _, thresh = cv2.threshold(label_img_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        contour, _ = cv2.findContours(thresh, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+        contour_img = cv2.drawContours(contour_img, contour[:], -1, 0.5, 1)
+    if show:
+        plt.imshow(contour_img, cmap="Blues")
+    write_png(save_fig + ".png", contour_img.astype("uint8"))

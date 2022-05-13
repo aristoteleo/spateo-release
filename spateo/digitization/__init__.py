@@ -2,3 +2,4 @@
 """
 
 from .contour import *
+from .gridding import *
