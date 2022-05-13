@@ -175,7 +175,7 @@ def _initial_nb_params(
         # Negative binomial distribution requires variance > mean
         if var[0] <= mu[0]:
             lm.main_warning(
-                f"Estimated variance of background ({var[0]:.2f}) is less than the mean ({mu[0]:.2f}). "
+                f"Estimated variance of background ({var[0]:.2e}) is less than the mean ({mu[0]:.2e}). "
                 "Initial variance will be arbitrarily set to 1.1x of the mean. "
                 "This is usually due to extreme sparsity. Please consider increasing `k` or using "
                 "the zero-inflated distribution."
@@ -183,7 +183,7 @@ def _initial_nb_params(
             var[0] = mu[0] * 1.1
         if var[1] <= mu[1]:
             lm.main_warning(
-                f"Estimated variance of foreground ({var[1]:.2f}) is less than the mean ({mu[1]:.2f}). "
+                f"Estimated variance of foreground ({var[1]:.2e}) is less than the mean ({mu[1]:.2e}). "
                 "Initial variance will be arbitrarily set to 1.1x of the mean. "
                 "This is usually due to extreme sparsity. Please consider increasing `k` or using "
                 "the zero-inflated distribution."
