@@ -25,6 +25,7 @@ from spateo.tools.utils import (
     update_dict,
 )
 
+from ...configuration import SKM
 from .utils import (
     _datashade_points,
     _get_adata_color_vec,
@@ -48,6 +49,7 @@ from .utils import (
 
 
 # @docstrings.get_sectionsf("scatters")
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def scatters(
     adata: AnnData,
     basis: Union[str, list] = "umap",

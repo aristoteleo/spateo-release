@@ -12,7 +12,7 @@ from scipy.sparse import issparse
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 
-slog = lack.LoggerManager(namespace="spateo")
+from ...logging import logger_manager as lm
 
 
 def calculate_adj_matrix(x, y, x_pixel=None, y_pixel=None, image=None, beta=49, alpha=1, histology=True):
@@ -35,7 +35,7 @@ def calculate_adj_matrix(x, y, x_pixel=None, y_pixel=None, image=None, beta=49, 
     if histology:
         assert (x_pixel is not None) & (x_pixel is not None) & (image is not None)
         assert (len(x) == len(x_pixel)) & (len(y) == len(y_pixel))
-        slog.main_info("Calculateing adj matrix using histology image...")
+        lm.main_info("Calculateing adj matrix using histology image...")
         beta_half = round(beta / 2)
         g = []
         max_x = image.shape[0]
@@ -54,16 +54,16 @@ def calculate_adj_matrix(x, y, x_pixel=None, y_pixel=None, image=None, beta=49, 
         c0 = np.array(c0)
         c1 = np.array(c1)
         c2 = np.array(c2)
-        slog.main_info(f"Var of c0,c1,c2 = {np.var(c0)}, {np.var(c1)}, {np.var(c2)}")
+        lm.main_info(f"Var of c0,c1,c2 = {np.var(c0)}, {np.var(c1)}, {np.var(c2)}")
         c3 = (c0 * np.var(c0) + c1 * np.var(c1) + c2 * np.var(c2)) / (np.var(c0) + np.var(c1) + np.var(c2))
         c4 = (c3 - np.mean(c3)) / np.std(c3)
         z_scale = np.max([np.std(x), np.std(y)]) * alpha
         z = c4 * z_scale
         z = z.tolist()
-        slog.main_info(f"Var of x,y,z = {np.var(x)}, {np.var(y)}, {np.var(z)}")
+        lm.main_info(f"Var of x,y,z = {np.var(x)}, {np.var(y)}, {np.var(z)}")
         X = np.array([x, y, z]).T.astype(np.float32)
     else:
-        slog.main_info("Calculateing adj matrix using xy only...")
+        lm.main_info("Calculateing adj matrix using xy only...")
         X = np.array([x, y]).T.astype(np.float32)
     n = X.shape[0]
     adj = np.empty((n, n), dtype=np.float32)
@@ -96,20 +96,20 @@ def search_l(p, adj, start=0.01, end=1000, tol=0.01, max_run=100):
     p_low = calculate_p(adj, start)
     p_high = calculate_p(adj, end)
     if p_low > p + tol:
-        slog.main_info("l not found, try smaller start point.")
+        lm.main_info("l not found, try smaller start point.")
         return None
     elif p_high < p - tol:
-        slog.main_info("l not found, try bigger end point.")
+        lm.main_info("l not found, try bigger end point.")
         return None
     elif np.abs(p_low - p) <= tol:
-        slog.main_info(f"recommended l = {str(start)}.")
+        lm.main_info(f"recommended l = {str(start)}.")
         return start
     elif np.abs(p_high - p) <= tol:
-        slog.main_info(f"recommended l = {str(end)}.")
+        lm.main_info(f"recommended l = {str(end)}.")
         return end
     while (p_low + tol) < p < (p_high - tol):
         run += 1
-        slog.main_info(
+        lm.main_info(
             "Run "
             + str(run)
             + ": l ["
@@ -123,7 +123,7 @@ def search_l(p, adj, start=0.01, end=1000, tol=0.01, max_run=100):
             + "]"
         )
         if run > max_run:
-            slog.main_info(
+            lm.main_info(
                 "Exact l not found, closest values are:\n"
                 + "l="
                 + str(start)
@@ -140,7 +140,7 @@ def search_l(p, adj, start=0.01, end=1000, tol=0.01, max_run=100):
         mid = (start + end) / 2
         p_mid = calculate_p(adj, mid)
         if np.abs(p_mid - p) <= tol:
-            slog.main_info(f"recommended l = {str(mid)}")
+            lm.main_info(f"recommended l = {str(mid)}")
             return mid
         if p_mid <= p:
             start = mid
@@ -223,9 +223,9 @@ def search_res(
         float: calculated initial louvain resolution.
     """
     res = start
-    slog.main_info(f"Start at res = {res} step = {step}")
+    lm.main_info(f"Start at res = {res} step = {step}")
     old_num = get_cluster_num(adata, adj, res, tol, lr, max_epochs, l, r_seed, t_seed, n_seed)
-    slog.main_info(f"Res = {res} Num of clusters = {old_num}")
+    lm.main_info(f"Res = {res} Num of clusters = {old_num}")
     run = 0
     while old_num != target_num:
         old_sign = -1 if (old_num < target_num) else 1
@@ -241,25 +241,25 @@ def search_res(
             t_seed,
             n_seed,
         )
-        slog.main_info(f"Res = {res + step * old_sign} Num of clusters = {new_num}")
+        lm.main_info(f"Res = {res + step * old_sign} Num of clusters = {new_num}")
         if new_num == target_num:
             res = res + step * old_sign
-            slog.main_info(f"recommended res = {res}")
+            lm.main_info(f"recommended res = {res}")
             return res
         new_sign = -1 if (new_num < target_num) else 1
         if new_sign == old_sign:
             res = res + step * old_sign
-            slog.main_info(f"Res changed to res")
+            lm.main_info(f"Res changed to res")
             old_num = new_num
         else:
             step = step / 2
-            slog.main_info(f"Step changed to {step}")
+            lm.main_info(f"Step changed to {step}")
         if run > max_run:
-            slog.main_info("Exact resolution not found")
-            slog.main_info(f"Recommended res = {res}")
+            lm.main_info("Exact resolution not found")
+            lm.main_info(f"Recommended res = {res}")
             return res
         run += 1
-    slog.main_info(f"recommended res = {res}")
+    lm.main_info(f"recommended res = {res}")
     return res
 
 
@@ -283,7 +283,7 @@ def refine(sample_id, pred, dis, shape="square"):
     elif shape == "square":
         num_nbs = 4
     else:
-        slog.main_info("Shape not recongized, shape='hexagon' for Visium data, 'square' for ST data.")
+        lm.main_info("Shape not recongized, shape='hexagon' for Visium data, 'square' for ST data.")
     for i in range(len(sample_id)):
         index = sample_id[i]
         dis_tmp = dis_df.loc[index, :].sort_values()
@@ -399,7 +399,7 @@ class simple_GC_DEC(nn.Module):
         features = self.gc(torch.FloatTensor(X), torch.FloatTensor(adj))
         # ----------------------------------------------------------------
         if init == "kmeans":
-            slog.main_info("Initializing cluster centers with kmeans, n_clusters known")
+            lm.main_info("Initializing cluster centers with kmeans, n_clusters known")
             self.n_clusters = n_clusters
             kmeans = KMeans(self.n_clusters, n_init=20)
             if init_spa:
@@ -409,11 +409,14 @@ class simple_GC_DEC(nn.Module):
                 # ------Kmeans only use exp info, no spatial
                 y_pred = kmeans.fit_predict(X)  # Here we use X as numpy
         elif init == "louvain":
-            slog.main_info(f"Initializing cluster centers with louvain, resolution = {res}")
+            lm.main_info(f"Initializing cluster centers with louvain, resolution = {res}")
             if init_spa:
                 adata = ad.AnnData(features.detach().numpy())
             else:
                 adata = ad.AnnData(X)
+
+            import dynamo as dyn
+
             dyn.tl.neighbors(adata, n_neighbors=n_neighbors, X_data=adata.X)
             dyn.tl.louvain(adata, resolution=res)
             y_pred = adata.obs["louvain"].astype(int).to_numpy()
@@ -436,7 +439,7 @@ class simple_GC_DEC(nn.Module):
                 _, q = self.forward(X, adj)
                 p = self.target_distribution(q).data
             if epoch % 10 == 0:
-                slog.main_info(f"Epoch {epoch}")
+                lm.main_info(f"Epoch {epoch}")
             optimizer.zero_grad()
             z, q = self(X, adj)
             loss = self.loss_function(p, q)
@@ -450,9 +453,9 @@ class simple_GC_DEC(nn.Module):
             delta_label = np.sum(y_pred != y_pred_last).astype(np.float32) / X.shape[0]
             y_pred_last = y_pred
             if epoch > 0 and (epoch - 1) % update_interval == 0 and delta_label < tol:
-                slog.main_info(f"delta_label {delta_label} < tol {tol}")
-                slog.main_info("Reach tolerance threshold. Stopping training.")
-                slog.main_info(f"Total epoch: {epoch}")
+                lm.main_info(f"delta_label {delta_label} < tol {tol}")
+                lm.main_info("Reach tolerance threshold. Stopping training.")
+                lm.main_info(f"Total epoch: {epoch}")
                 break
 
     def predict(self, X, adj):
@@ -538,7 +541,7 @@ class simple_GC_DEC_PyG(simple_GC_DEC):
         features = self.gc(torch.FloatTensor(X), edge_index, edge_attr)
         # ----------------------------------------------------------------
         if init == "kmeans":
-            slog.main_info("Initializing cluster centers with kmeans, n_clusters known")
+            lm.main_info("Initializing cluster centers with kmeans, n_clusters known")
             self.n_clusters = n_clusters
             kmeans = KMeans(self.n_clusters, n_init=20)
             if init_spa:
@@ -548,11 +551,14 @@ class simple_GC_DEC_PyG(simple_GC_DEC):
                 # ------Kmeans only use exp info, no spatial
                 y_pred = kmeans.fit_predict(X)  # Here we use X as numpy
         elif init == "louvain":
-            slog.main_info(f"Initializing cluster centers with louvain, resolution = {res}")
+            lm.main_info(f"Initializing cluster centers with louvain, resolution = {res}")
             if init_spa:
                 adata = ad.AnnData(features.detach().numpy())
             else:
                 adata = ad.AnnData(X)
+
+            import dynamo as dyn
+
             dyn.tl.neighbors(adata, n_neighbors=n_neighbors)
             dyn.tl.louvain(adata, resolution=res)
             y_pred = adata.obs["louvain"].astype(int).to_numpy()
@@ -574,7 +580,7 @@ class simple_GC_DEC_PyG(simple_GC_DEC):
                 _, q = self.forward(X, edge_index, edge_attr)
                 p = self.target_distribution(q).data
             if epoch % 10 == 0:
-                slog.main_info(f"Epoch {epoch}")
+                lm.main_info(f"Epoch {epoch}")
             optimizer.zero_grad()
             z, q = self(X, edge_index, edge_attr)
             loss = self.loss_function(p, q)
@@ -588,9 +594,9 @@ class simple_GC_DEC_PyG(simple_GC_DEC):
             delta_label = np.sum(y_pred != y_pred_last).astype(np.float32) / X.shape[0]
             y_pred_last = y_pred
             if epoch > 0 and (epoch - 1) % update_interval == 0 and delta_label < tol:
-                slog.main_info(f"delta_label {delta_label} < tol {tol}")
-                slog.main_info("Reach tolerance threshold. Stopping training.")
-                slog.main_info(f"Total epoch: {epoch}")
+                lm.main_info(f"delta_label {delta_label} < tol {tol}")
+                lm.main_info("Reach tolerance threshold. Stopping training.")
+                lm.main_info(f"Total epoch: {epoch}")
                 break
 
     def predict(self, X, adj):

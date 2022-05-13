@@ -6,14 +6,15 @@ import warnings
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import cv2
-import geopandas as gpd
 import ngs_tools as ngs
 import numpy as np
 import pandas as pd
-import skimage.io
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import skimage.io
 from anndata import AnnData
-from scipy.sparse import csr_matrix, spmatrix
-from shapely.geometry import MultiPolygon, Polygon
+from scipy.sparse import csr_matrix
 from typing_extensions import Literal
 
 from ..configuration import SKM
@@ -249,6 +250,7 @@ def read_bgi_agg(
     return adata
 
 
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE, "segmentation_adata", optional=True)
 def read_bgi(
     path: str,
     binsize: Optional[int] = None,

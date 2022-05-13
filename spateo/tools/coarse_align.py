@@ -12,6 +12,7 @@ import shapely
 import shapely.geometry as geometry
 from sklearn.decomposition import PCA
 
+from ..configuration import SKM
 from ..io.bbs import alpha_shape
 from ..logging import logger_manager as lm
 
@@ -193,6 +194,7 @@ def pca_align(X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return Y, R
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def align_slices_pca(
     adata: anndata.AnnData,
     spatial_key: str = "spatial",

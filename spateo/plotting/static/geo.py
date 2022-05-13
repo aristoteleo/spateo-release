@@ -4,12 +4,13 @@
 from typing import Optional, Tuple, Union
 
 import anndata
-import geopandas as gpd
 
+from ...configuration import SKM
 from .scatters import scatters
 from .utils import _convert_to_geo_dataframe, save_return_show_fig_utils
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def geo(
     adata: anndata.AnnData,
     basis: str = "contour",

@@ -1,3 +1,4 @@
+
 spateo_release.egg-info/
 *.html
 # vscode related
@@ -58,3 +59,6 @@ package-lock.json
 public/*.js
 
 .pytest_cache
+docs/_build
+!docs/_templates/layout.html
+docs/autoapi

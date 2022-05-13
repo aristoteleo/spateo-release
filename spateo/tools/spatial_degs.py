@@ -1,6 +1,5 @@
 """Spatial DEGs
 """
-import random
 from typing import List, Optional
 
 import numpy as np
@@ -11,7 +10,10 @@ from pysal import explore, lib
 from scipy.sparse import issparse
 from statsmodels.sandbox.stats.multicomp import multipletests
 
+from ..configuration import SKM
 
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def moran_i(
     adata: AnnData,
     X_data: Optional[np.ndarray] = None,

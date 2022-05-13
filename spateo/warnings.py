@@ -8,3 +8,7 @@ class IOWarning(UserWarning):
 
 class PlottingWarning(UserWarning):
     pass
+
+
+class SegmentationWarning(UserWarning):
+    pass

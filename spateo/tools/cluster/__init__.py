@@ -6,5 +6,6 @@ from .utils import (
     harmony_debatch,
     integrate,
     pca_spateo,
+    pearson_residuals,
     sctransform,
 )
