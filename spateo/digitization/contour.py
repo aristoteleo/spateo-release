@@ -23,15 +23,15 @@ def gen_cluster_image(
     label_mapping_key: str = "cluster_img_label",
     show: bool = True,
     cmap: str = "tab20",
-):  # need output type
-    """Generate images with each spatial cluster(s) a distinct color prepared from the designated cmap.
+) -> NDArray[np.uint8]:
+    """Generate images with spatial cluster(s) a distinct color prepared from the designated cmap.
 
     Args:
         adata: The adata object used to create the image for cluster(s).
         bin_size: The size of the binning.
         spatial_key: The key name of the spatial coordinates.
         cluster_key: The key name of the spatial cluster.
-        label_mapping_key: The key name to store the mapping between cluster name and label values.
+        label_mapping_key: The key name to store the mapping between cluster name and label index values.
         show: Visualize the cluster image.
         cmap: The colormap that will be used to draw colors for the resultant cluster image(s).
 
@@ -47,18 +47,18 @@ def gen_cluster_image(
 
     lm.main_info(f"Set up the color for the clusters with the {cmap} colormap.")
 
+    # TODO: what if cluster number is larger than cmap.N?
     cmap = plt.cm.get_cmap(cmap)
     colors = cmap(np.arange(cmap.N))
     color_ls = []
     for i in range(cmap.N):
         color_ls.append(tuple(np.array(colors[i][:3] * 255).astype(int)))
+
     random.seed(1)
     color_ls_cut = random.sample(color_ls, len(np.unique(adata.obs[cluster_key])))
 
     lm.main_info(f"Saving integer labels for clusters into adata.obs['{label_mapping_key}'].")
 
-    # TODO: adata.obs[cluster_key] are not always int, need to support strings.
-    # int:adata.obs[label_mapping] , dict:convert_map = todo:convert(any:adata.obs[cluster_key])
     # background is 0, so adata.obs[label_mapping] start from 1
     adata.obs[label_mapping_key] = 0
     cluster_list = np.unique(adata.obs[cluster_key])
@@ -99,12 +99,12 @@ def extract_cluster_contours(
     k_size: float = 2,
     min_area: float = 9,
     show: bool = True,
-):  # need specify output type
+) -> Tuple[NDArray, NDArray[np.uint8], NDArray]:
     """Extract contour(s) for area(s) formed by buckets of the same identified cluster.
 
     Args:
-        cluster_id_img: the image that sets the pixels of the cluster of interests as the front color (background is 0).
-        cluster_labels: The label values of interested clusters.
+        cluster_image: the image that sets the pixels of the cluster of interests as the front color (background is 0).
+        cluster_labels: The label values of clusters of interests.
         bin_size: The size of the binning.
         k_size: kernel size of the elliptic structuring element.
         min_area: minimal area threshold corresponding to the resulting contour(s).
@@ -125,7 +125,6 @@ def extract_cluster_contours(
     cluster_image_close = cluster_image.copy()
     if type(cluster_labels) == int:
         cluster_image_close = np.where(cluster_image_close == cluster_labels, cluster_image_close, 0)
-    # elif type(cluster_labels) == list: #what is type List in typing.List
     else:
         cluster_image_close = np.where(np.isin(cluster_image_close, cluster_labels), cluster_image_close, 0)
 
@@ -154,7 +153,8 @@ def extract_cluster_contours(
     return contours, cluster_image_close, cluster_image_contour
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata_high_res", optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata_high_res")
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata_low_res", optional=True)
 def set_domains(
     adata_high_res: AnnData,
     adata_low_res: Optional[AnnData] = None,
@@ -224,6 +224,7 @@ def set_domains(
                     adata_high_res.obs[domain_key][j] = cluster_ids[i]
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def gen_contour_img(
     adata: AnnData,
     bin_size: int = None,
@@ -244,7 +245,12 @@ def gen_contour_img(
     """
 
     import matplotlib.pyplot as plt
-    from numpngw import write_png
+
+    # Check numpngw package
+    try:
+        from numpngw import write_png
+    except ImportError:
+        raise ImportError("You need to install the package `numpngw`. \nInstall pyacvd via `pip install numpngw`")
 
     label_list = np.unique(adata.obs[label_key])
     labels = np.zeros(len(adata))
