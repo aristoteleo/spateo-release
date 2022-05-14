@@ -169,7 +169,7 @@ def watershed(
     lm.main_info("Running Watershed.")
     # Markers should always be included in the mask.
     labels = _watershed(X, mask | (markers > 0), markers, k)
-    areas = np.bincount(labels)
+    areas = np.bincount(labels.flatten())
     if (areas[1:] > 10000).any():
         lm.main_warning(
             "Some labels have area greater than 10000. If you are segmenting based on RNA, consider "
