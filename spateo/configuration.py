@@ -179,12 +179,21 @@ class SpateoAdataKeyManager:
                     all(SpateoAdataKeyManager.adata_is_type(_adata, t) for _adata in adata)
                     if isinstance(adata, (list, tuple))
                     else SpateoAdataKeyManager.adata_is_type(adata, t)
+                    if type(adata) == AnnData
+                    else False
                 )
                 if (not optional or adata is not None) and not passing:
-                    raise ConfigurationError(
-                        f"AnnData(s) provided to `{argname}` argument must be of `{t}` type, but received "
-                        f"`{SpateoAdataKeyManager.get_adata_type(adata)}` type."
-                    )
+                    if isinstance(adata, (list, tuple)):
+                        raise ConfigurationError(
+                            f"AnnDatas provided to `{argname}` argument must be of `{t}` type, but some are not."
+                        )
+                    elif type(adata) == AnnData:
+                        raise ConfigurationError(
+                            f"AnnData provided to `{argname}` argument must be of `{t}` type, but received "
+                            f"`{SpateoAdataKeyManager.get_adata_type(adata)}` type."
+                        )
+                    else:
+                        raise ConfigurationError(f"AnnData is not AnnData object, but {type(adata)}.")
                 return func(*args, **kwargs)
 
             return wrapper

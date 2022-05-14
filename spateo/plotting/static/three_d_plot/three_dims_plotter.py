@@ -325,7 +325,8 @@ def output_plotter(
         plotter: The plotting object to display pyvista/vtk model.
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
                 * Output an image file,
-                  please enter a filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
+                  please enter a filename ending with
+                  `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
                 * Output a gif file, please enter a filename ending with `.gif`.
                 * Output a mp4 file, please enter a filename ending with `.mp4`.
         view_up: The normal to the orbital plane. Only available when filename ending with `.mp4` or `.gif`.
@@ -338,9 +339,25 @@ def output_plotter(
                 * `'panel'` : Show a panel widget.
 
     Returns:
+        cpo: List of camera position, focal point, and view up.
+             Returned only if filename is None or filename ending with
+             `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
         img: Numpy array of the last image.
-             Returned only if filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
+             Returned only if filename is None or filename ending with
+             `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
     """
+
+    def _to_graph(_screenshot, _jupyter_backend):
+        if jupyter is False:
+            cpo, img = plotter.show(
+                screenshot=_screenshot,
+                return_img=True,
+                return_cpos=True,
+                jupyter_backend=_jupyter_backend,
+            )
+            return cpo, img
+        else:
+            plotter.show(screenshot=_screenshot, jupyter_backend=_jupyter_backend)
 
     def _to_gif(_filename, _view_up):
         """Output plotter to gif file."""
@@ -371,16 +388,10 @@ def output_plotter(
 
         # Output the plotter in the format of the output file.
         if filename_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
-            if jupyter is False:
-                cpo, img = plotter.show(
-                    screenshot=filename,
-                    return_img=True,
-                    return_cpos=True,
-                    jupyter_backend=jupyter_backend,
-                )
-                return cpo, img
-            else:
-                plotter.show(screenshot=filename, jupyter_backend=jupyter_backend)
+            _to_graph(_screenshot=filename, _jupyter_backend=jupyter_backend)
+        elif filename_format in ["svg", "eps", "ps", "pdf", "tex"]:
+            plotter.save_graphic(filename, title="PyVista Export", raster=True, painter=True)
+            _to_graph(_screenshot=None, _jupyter_backend=jupyter_backend)
         elif filename_format == "gif":
             _to_gif(_filename=filename, _view_up=view_up)
             return None
@@ -391,7 +402,8 @@ def output_plotter(
             raise ValueError(
                 "\nFilename is wrong."
                 "\nIf outputting an image file, "
-                "please enter a filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`."
+                "please enter a filename ending with "
+                "`.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`."
                 "\nIf outputting a gif file, please enter a filename ending with `.gif`."
                 "\nIf outputting a mp4 file, please enter a filename ending with `.mp4`."
             )

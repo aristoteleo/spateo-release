@@ -157,7 +157,8 @@ def three_d_plot(
         key: The key under which are the labels.
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
                 * Output an image file,
-                  please enter a filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
+                  please enter a filename ending with
+                  `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
                 * Output a gif file, please enter a filename ending with `.gif`.
                 * Output a mp4 file, please enter a filename ending with `.mp4`.
         jupyter: Whether to plot in jupyter notebook.
@@ -224,9 +225,14 @@ def three_d_plot(
                 * Output a html file, please enter a filename ending with `.html`.
                 * Output an obj file, please enter a filename ending with `.obj`.
                 * Output a vtkjs file, please enter a filename without format.
+
     Returns:
+        cpo: List of camera position, focal point, and view up.
+             Returned only if filename is None or filename ending with
+             `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
         img: Numpy array of the last image.
-             Returned only if filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
+             Returned only if filename is None or filename ending with
+             `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
     """
     plotter_kws = dict(
         jupyter=False if jupyter is False else True,
@@ -380,9 +386,6 @@ def three_d_animate(
                 * Output a html file, please enter a filename ending with `.html`.
                 * Output an obj file, please enter a filename ending with `.obj`.
                 * Output a vtkjs file, please enter a filename without format.
-    Returns:
-        img: Numpy array of the last image.
-             Returned only if filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
     """
 
     plotter_kws = dict(
