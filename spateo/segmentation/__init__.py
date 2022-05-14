@@ -24,6 +24,7 @@ from .icell import mask_cells_from_stain, mask_nuclei_from_stain, score_and_mask
 from .label import (
     augment_labels,
     expand_labels,
+    find_peaks,
     label_connected_components,
     watershed,
     watershed_markers,
