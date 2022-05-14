@@ -425,7 +425,7 @@ def _find_peaks(mask: np.ndarray, min_distance: int) -> Tuple[np.ndarray, np.nda
     peak_idx = feature.peak_local_max(distance_transform, min_distance=min_distance, p_norm=2)
     peaks = np.zeros(mask.shape, dtype=int)
     for label, (i, j) in enumerate(peak_idx):
-        peaks[i, j] = label
+        peaks[i, j] = label + 1
     return distance_transform, peaks
 
 
