@@ -17,7 +17,7 @@ from ..logging import logger_manager as lm
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def gen_cluster_image(
     adata: AnnData,
-    bin_size: int = None,
+    bin_size: Optional[int] = None,
     spatial_key: str = "spatial",
     cluster_key: str = "scc",
     label_mapping_key: str = "cluster_img_label",
@@ -161,8 +161,7 @@ def set_domains(
     spatial_key: str = "spatial",
     cluster_key: str = "scc",
     domain_key_prefix: str = "domain",
-    bin_size_high: int = None,
-    bin_size_low: int = None,
+    bin_size_low: Optional[int] = None,
     k_size: float = 2,
     min_area: float = 9,
 ) -> None:
@@ -171,25 +170,23 @@ def set_domains(
     Args:
         adata_high_res: The anndata object in high spatial resolution.
         adata_low_res: The anndata object in low spatial resolution.
-        spatial_key: The key to the spatial coordinate of each bucket. Should be consistent in both `adata_high_res` and
-            `adata_low_res`.
+        spatial_key: The key `.obsm` to the spatial coordinate of each bucket. Should be consistent in both
+            `adata_high_res` and `adata_low_res`.
         cluster_key: The key in `.obs` to the spatial cluster.
         domain_key_prefix: The key prefix in `.obs` that will be used to store the spatial domain for each bucket.
-        bin_size_high: The size of the binning, for adata_high_res.
-        bin_size_low: The size of the binning, for adata_low_res (if provided).
+        bin_size_low: The binning size of the adata_low_res object (when provided).
         k_size: kernel size of the elliptic structuring element.
         min_area: minimal area threshold corresponding to the resulting contour(s).
 
     Returns:
-        Nothing but update the `adata_high_res` with the `domain` in `domain_key_prefix + cluster_key`.
+        Nothing but update the `adata_high_res` with the `domain` in `domain_key_prefix` + "_" + `cluster_key`.
     """
 
     domain_key = domain_key_prefix + "_" + cluster_key
 
     if adata_low_res is None:
         adata_low_res = adata_high_res
-    if bin_size_high is None:
-        bin_size_high = adata_high_res.uns["bin_size"]
+
     if bin_size_low is None:
         bin_size_low = adata_low_res.uns["bin_size"]
 
@@ -206,7 +203,7 @@ def set_domains(
     cluster_ids = [str(c) for c in cluster_ids]
 
     u, count = np.unique(adata_low_res.obs["cluster_img_label"], return_counts=True)
-    count_sort_ind = np.argsort(-count)
+    # `cluster_img_label` is produced from  `cluster_key`, so use the same count_sort_ind
     cluster_labels = u[count_sort_ind]
     cluster_labels = [c for c in cluster_labels]
 
@@ -220,63 +217,7 @@ def set_domains(
             x = adata_high_res.obsm[spatial_key][j, 0]
             y = adata_high_res.obsm[spatial_key][j, 1]
             for k in range(len(ctrs)):
-                if cv2.pointPolygonTest(ctrs[k], (y, x), False) >= 0:
+                if cv2.pointPolygonTest(ctrs[k], (x, y), False) >= 0:
                     adata_high_res.obs[domain_key][j] = cluster_ids[i]
-
-
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def gen_contour_img(
-    adata: AnnData,
-    bin_size: int = None,
-    spatial_key: str = "spatial",
-    label_key: str = "cluster_img_label",
-    show: bool = True,
-    save_fig: str = "plot_contour_img",
-) -> None:
-    """Generate an image with contours of each spatial domains.
-
-    Args:
-        adata (AnnData): The adata object used to create the image.
-        bin_size (int, optional): The size of the binning. Defaults to None.
-        spatial_key (str, optional): The key name of the spatial coordinates. Defaults to "spatial".
-        label_key (str, optional): The key name of the image label values. Defaults to "cluster_img_label".
-        show (bool, optional): Visualize the result. Defaults to True.
-        save_fig (str, optional): Save image to path or filename. Defaults to "plot_contour_img".
-    """
-
-    import matplotlib.pyplot as plt
-
-    # Check numpngw package
-    try:
-        from numpngw import write_png
-    except ImportError:
-        raise ImportError("You need to install the package `numpngw`. \nInstall pyacvd via `pip install numpngw`")
-
-    label_list = np.unique(adata.obs[label_key])
-    labels = np.zeros(len(adata))
-    for i in range(len(label_list)):
-        labels[adata.obs[label_key] == label_list[i]] = i + 1
-
-    label_img = np.zeros(
-        (
-            int(max(adata.obsm[spatial_key][:, 0] // bin_size)) + 1,
-            int(max(adata.obsm[spatial_key][:, 1] // bin_size)) + 1,
-        )
-    )
-    for i in range(len(adata)):
-        label_img[
-            int(adata.obsm[spatial_key][i, 0] // bin_size), int(adata.obsm[spatial_key][i, 1] // bin_size)
-        ] = labels[i]
-
-    contour_img = label_img.copy()
-    contour_img[:, :] = 255
-    for i in np.unique(label_img):
-        if i == 0:
-            continue
-        label_img_gray = np.where(label_img == i, 0, 1).astype("uint8")
-        _, thresh = cv2.threshold(label_img_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        contour, _ = cv2.findContours(thresh, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
-        contour_img = cv2.drawContours(contour_img, contour[:], -1, 0.5, 1)
-    if show:
-        plt.imshow(contour_img, cmap="Blues")
-    write_png(save_fig + ".png", contour_img.astype("uint8"))
+                    # assume one bucket to one domain mapping
+                    break
