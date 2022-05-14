@@ -25,6 +25,7 @@ from .label import (
     augment_labels,
     expand_labels,
     find_peaks,
+    find_peaks_from_mask,
     label_connected_components,
     watershed,
     watershed_markers,

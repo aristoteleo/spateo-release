@@ -10,6 +10,7 @@ from anndata import AnnData
 from joblib import Parallel, delayed
 from numba import njit
 from skimage import feature, filters, measure, segmentation
+from sympy import Segment
 from tqdm import tqdm
 
 from ..configuration import SKM, config
@@ -409,28 +410,64 @@ def label_connected_components(
     SKM.set_layer_data(adata, out_layer, labels)
 
 
-def _find_peaks(mask: np.ndarray, min_distance: int) -> Tuple[np.ndarray, np.ndarray]:
-    """Find peaks of distance transform from a boolean mask. Used to obtain Watershed
-    markers from a mask.
+def _find_peaks(X: np.ndarray, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
+    """Find peaks from an arbitrary image.
+
+    This function is a wrapper around :func:`feature.peak_local_max`.
 
     Args:
-        mask: Boolean mask from which to find peaks
-        min_distance: Minimum distance between peaks
+        X: Array to find peaks from
+        **kwargs: Keyword arguments to pass to :func:`feature.peak_local_max`.
 
     Returns:
-        The distance transform matrix and Numpy array of the same size as `mask`
-        where each peak is labeled with a unique positive integer.
+        Numpy array of the same size as `X` where each peak is labeled with a unique positive
+        integer.
     """
-    distance_transform = cv2.distanceTransform(mask.astype(np.uint8), cv2.DIST_L2, 3)
-    peak_idx = feature.peak_local_max(distance_transform, min_distance=min_distance, p_norm=2)
-    peaks = np.zeros(mask.shape, dtype=int)
+    _kwargs = dict(p_norm=2)
+    _kwargs.update(kwargs)
+    peak_idx = feature.peak_local_max(X, **_kwargs)
+    peaks = np.zeros(X.shape, dtype=int)
     for label, (i, j) in enumerate(peak_idx):
         peaks[i, j] = label + 1
-    return distance_transform, peaks
+    return peaks
 
 
 @SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
 def find_peaks(
+    adata: AnnData,
+    layer: str,
+    k: int,
+    min_distance: int,
+    mask_layer: Optional[str] = None,
+    out_layer: Optional[str] = None,
+):
+    """Find peaks from an array.
+
+    Args:
+        adata: Input AnnData
+        layer: Layer to use as values to find peaks from.
+        k: Apply a Gaussian blur with this kernel size prior to peak detection.
+        min_distance: Minimum distance, in pixels, between peaks.
+        mask_layer: Find peaks only in regions specified by the mask.
+        out_layer: Layer to save identified peaks as markers. By default, uses
+            `{layer}_markers`.
+    """
+    X = SKM.select_layer_data(adata, layer, make_dense=True)
+    if X.dtype == np.dtype(bool):
+        raise SegmentationError(
+            f"Layer {layer} contains a boolean array. Please use `st.cs.find_peaks_from_mask` instead."
+        )
+
+    X = utils.conv2d(X, k, mode="gauss")
+    peaks = _find_peaks(X, min_distance=min_distance)
+    if mask_layer:
+        peaks *= SKM.select_layer_data(adata, mask_layer)
+    out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.MARKERS_SUFFIX)
+    SKM.set_layer_data(adata, out_layer, peaks)
+
+
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
+def find_peaks_from_mask(
     adata: AnnData,
     layer: str,
     min_distance: int,
@@ -453,8 +490,11 @@ def find_peaks(
     if mask_layer not in adata.layers:
         mask_layer = layer
     mask = SKM.select_layer_data(adata, mask_layer)
+    if mask.dtype != np.dtype(bool):
+        raise SegmentationError(f"Only boolean masks are supported for this function, but got {mask.dtype} instead.")
     lm.main_info(f"Finding peaks with minimum distance {min_distance}.")
-    distances, peaks = _find_peaks(mask, min_distance)
+    distances = cv2.distanceTransform(mask.astype(np.uint8), cv2.DIST_L2, 3)
+    peaks = _find_peaks(distances, min_distance=min_distance)
 
     distances_layer = distances_layer or SKM.gen_new_layer_key(layer, SKM.DISTANCES_SUFFIX)
     SKM.set_layer_data(adata, distances_layer, distances)
