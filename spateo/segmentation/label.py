@@ -122,8 +122,7 @@ def watershed_markers(
     if _layer1 not in adata.layers and _layer2 not in adata.layers and layer not in adata.layers:
         raise SegmentationError(
             f'Neither "{_layer1}", "{_layer2}", nor "{layer}" are present in AnnData. '
-            "Please run either `st.pp.segmentation.icell.mask_nuclei_from_stain` "
-            "or `st.pp.segmentation.score_and_mask_pixels` first."
+            "Please run either `st.cs.mask_nuclei_from_stain` or `st.cs.score_and_mask_pixels` first."
         )
     _layer = layer
     if _layer1 in adata.layers:
@@ -170,6 +169,12 @@ def watershed(
     lm.main_info("Running Watershed.")
     # Markers should always be included in the mask.
     labels = _watershed(X, mask | (markers > 0), markers, k)
+    areas = np.bincount(labels)
+    if (areas[1:] > 10000).any():
+        lm.main_warning(
+            "Some labels have area greater than 10000. If you are segmenting based on RNA, consider "
+            "using `st.cs.label_connected_components` instead."
+        )
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, labels)
 
