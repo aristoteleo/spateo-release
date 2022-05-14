@@ -161,7 +161,7 @@ class NegativeBinomialMixture(PyroModule):
         ]
         # As of 2022/05/14, Pyro's ZeroInflatedNegativeBinomial model has a bug when calculating the mean of the
         # distribution when it was initialized with gate_logits.
-        means = [(1 - logits_to_probs(dist.gate_logits)) * dist.base_dist.mean for dist in dists]
+        means = [(1 - logits_to_probs(dist.gate_logits, is_binary=True)) * dist.base_dist.mean for dist in dists]
 
         weights = dist.Categorical(logits=torch.tensor(w)).probs.numpy()
         conds = []
