@@ -106,6 +106,7 @@ class SpateoAdataKeyManager:
     LABELS_LAYER_KEY = "labels"
     MASK_SUFFIX = "mask"
     MARKERS_SUFFIX = "markers"
+    DISTANCES_SUFFIX = "distances"
     BINS_SUFFIX = "bins"
     LABELS_SUFFIX = "labels"
     SCORES_SUFFIX = "scores"

@@ -66,7 +66,7 @@ class TestLabel(TestMixin, TestCase):
 
     def test_watershed_adata(self):
         with mock.patch("spateo.segmentation.label._watershed") as _watershed:
-            _watershed.return_value = np.random.random((3, 3))
+            _watershed.return_value = (np.random.random((3, 3)) * 10).astype(int)
             adata = create_random_adata(["nuclei", "nuclei_mask", "nuclei_markers"], (3, 3))
             adata.layers["nuclei_mask"] = adata.layers["nuclei_mask"] > 0.5
             k = mock.MagicMock()

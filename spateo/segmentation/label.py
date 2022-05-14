@@ -2,14 +2,14 @@
 mask.
 """
 import math
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Tuple
 
 import cv2
 import numpy as np
 from anndata import AnnData
 from joblib import Parallel, delayed
 from numba import njit
-from skimage import filters, measure, segmentation
+from skimage import feature, filters, measure, segmentation
 from tqdm import tqdm
 
 from ..configuration import SKM, config
@@ -122,8 +122,7 @@ def watershed_markers(
     if _layer1 not in adata.layers and _layer2 not in adata.layers and layer not in adata.layers:
         raise SegmentationError(
             f'Neither "{_layer1}", "{_layer2}", nor "{layer}" are present in AnnData. '
-            "Please run either `st.pp.segmentation.icell.mask_nuclei_from_stain` "
-            "or `st.pp.segmentation.score_and_mask_pixels` first."
+            "Please run either `st.cs.mask_nuclei_from_stain` or `st.cs.score_and_mask_pixels` first."
         )
     _layer = layer
     if _layer1 in adata.layers:
@@ -170,6 +169,12 @@ def watershed(
     lm.main_info("Running Watershed.")
     # Markers should always be included in the mask.
     labels = _watershed(X, mask | (markers > 0), markers, k)
+    areas = np.bincount(labels.flatten())
+    if (areas[1:] > 10000).any():
+        lm.main_warning(
+            "Some labels have area greater than 10000. If you are segmenting based on RNA, consider "
+            "using `st.cs.label_connected_components` instead."
+        )
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, labels)
 
@@ -402,6 +407,59 @@ def label_connected_components(
     labels = _label_connected_components(mask, area_threshold, k, min_area, n_iter, distance, max_area, seed_labels)
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.LABELS_SUFFIX)
     SKM.set_layer_data(adata, out_layer, labels)
+
+
+def _find_peaks(mask: np.ndarray, min_distance: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Find peaks of distance transform from a boolean mask. Used to obtain Watershed
+    markers from a mask.
+
+    Args:
+        mask: Boolean mask from which to find peaks
+        min_distance: Minimum distance between peaks
+
+    Returns:
+        The distance transform matrix and Numpy array of the same size as `mask`
+        where each peak is labeled with a unique positive integer.
+    """
+    distance_transform = cv2.distanceTransform(mask.astype(np.uint8), cv2.DIST_L2, 3)
+    peak_idx = feature.peak_local_max(distance_transform, min_distance=min_distance, p_norm=2)
+    peaks = np.zeros(mask.shape, dtype=int)
+    for label, (i, j) in enumerate(peak_idx):
+        peaks[i, j] = label
+    return distance_transform, peaks
+
+
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
+def find_peaks(
+    adata: AnnData,
+    layer: str,
+    min_distance: int,
+    distances_layer: Optional[str] = None,
+    markers_layer: Optional[str] = None,
+):
+    """Find peaks from a boolean mask. Used to obatin Watershed markers.
+
+    Args:
+        adata: Input AnnData
+        layer: Layer containing boolean mask. This will default to `{layer}_mask`.
+            If not present in the provided AnnData, this argument used as a literal.
+        min_distance: Minimum distance, in pixels, between peaks.
+        distances_layer: Layer to save distance from each pixel to the nearest zero (False)
+            pixel (a.k.a. distance transform). By default, uses `{layer}_distances`.
+        markers_layer: Layer to save identified peaks as markers. By default, uses
+            `{layer}_markers`.
+    """
+    mask_layer = SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
+    if mask_layer not in adata.layers:
+        mask_layer = layer
+    mask = SKM.select_layer_data(adata, mask_layer)
+    lm.main_info(f"Finding peaks with minimum distance {min_distance}.")
+    distances, peaks = _find_peaks(mask, min_distance)
+
+    distances_layer = distances_layer or SKM.gen_new_layer_key(layer, SKM.DISTANCES_SUFFIX)
+    SKM.set_layer_data(adata, distances_layer, distances)
+    markers_layer = markers_layer or SKM.gen_new_layer_key(layer, SKM.MARKERS_SUFFIX)
+    SKM.set_layer_data(adata, markers_layer, peaks)
 
 
 def _augment_labels(source_labels: np.ndarray, target_labels: np.ndarray) -> np.ndarray:
