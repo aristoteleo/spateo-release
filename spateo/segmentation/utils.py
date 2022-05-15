@@ -315,7 +315,7 @@ def label_overlap(X: np.ndarray, Y: np.ndarray) -> sparse.csr_matrix:
     return _label_overlap(X.flatten(), Y.flatten()).tocsr()
 
 
-def clahe(X: np.ndarray, clip_limit: float = 1.0, tile_grid: Tuple[int, int] = (50, 50)) -> np.ndarray:
+def clahe(X: np.ndarray, clip_limit: float = 1.0, tile_grid: Tuple[int, int] = (100, 100)) -> np.ndarray:
     """Contrast-limited adaptive histogram equalization (CLAHE).
 
     Args:

@@ -26,8 +26,8 @@ from .label import (
     expand_labels,
     find_peaks,
     find_peaks_from_mask,
+    find_peaks_with_erosion,
     label_connected_components,
     watershed,
-    watershed_markers,
 )
 from .qc import generate_random_labels, generate_random_labels_like, select_qc_regions

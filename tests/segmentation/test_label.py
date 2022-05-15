@@ -32,7 +32,7 @@ class TestLabel(TestMixin, TestCase):
         expected[:2, 3] = 1
         np.testing.assert_array_equal(expected, label._expand_labels(X, 3, 9))
 
-    def test_watershed_markers_with_scores(self):
+    def test_find_peaks_with_erosion_with_scores(self):
         with mock.patch("spateo.segmentation.label.utils.safe_erode") as safe_erode:
             safe_erode.return_value = np.random.random((3, 3))
             adata = create_random_adata(["unspliced_scores", "unspliced_mask"], (3, 3))
@@ -42,13 +42,13 @@ class TestLabel(TestMixin, TestCase):
             n_iter = mock.MagicMock()
             float_k = mock.MagicMock()
             float_threshold = mock.MagicMock()
-            label.watershed_markers(adata, "unspliced", k, square, min_area, n_iter, float_k, float_threshold)
+            label.find_peaks_with_erosion(adata, "unspliced", k, square, min_area, n_iter, float_k, float_threshold)
             np.testing.assert_array_equal(adata.layers["unspliced_markers"], safe_erode.return_value)
 
             safe_erode.assert_called_once_with(mock.ANY, k, square, min_area, n_iter, float_k, float_threshold)
             np.testing.assert_array_equal(adata.layers["unspliced_scores"], safe_erode.call_args[0][0])
 
-    def test_watershed_markers_with_mask(self):
+    def test_find_peaks_with_erosion_with_mask(self):
         with mock.patch("spateo.segmentation.label.utils.safe_erode") as safe_erode:
             safe_erode.return_value = np.random.random((3, 3))
             adata = create_random_adata(["unspliced_mask"], (3, 3))
@@ -58,7 +58,7 @@ class TestLabel(TestMixin, TestCase):
             n_iter = mock.MagicMock()
             float_k = mock.MagicMock()
             float_threshold = mock.MagicMock()
-            label.watershed_markers(adata, "unspliced", k, square, min_area, n_iter, float_k, float_threshold)
+            label.find_peaks_with_erosion(adata, "unspliced", k, square, min_area, n_iter, float_k, float_threshold)
             np.testing.assert_array_equal(adata.layers["unspliced_markers"], safe_erode.return_value)
 
             safe_erode.assert_called_once_with(mock.ANY, k, square, min_area, n_iter, float_k, float_threshold)

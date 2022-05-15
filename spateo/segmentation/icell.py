@@ -212,14 +212,18 @@ def _score_pixels(
         k: Kernel size for convolution.
         method: Method to use. Valid methods are:
             gauss: Gaussian blur
-            moran:
+            moran: Moran's I based method
             EM: EM algorithm to estimate cell and background expression
                 parameters.
-            EM+gauss: EM algorithm followed by Gaussian blur.
+            EM+gauss: Negative binomial EM algorithm followed by Gaussian blur.
             EM+BP: EM algorithm followed by belief propagation to estimate the
                 marginal probabilities of cell and background.
-            VI+gauss:
-            VI+BP
+            VI+gauss: Negative binomial VI algorithm followed by Gaussian blur.
+                Note that VI also supports the zero-inflated negative binomial (ZINB)
+                by providing `zero_inflated=True`.
+            VI+BP: VI algorithm followed by belief propagation. Note that VI also
+                supports the zero-inflated negative binomial (ZINB) by providing
+                `zero_inflated=True`.
         moran_kwargs: Keyword arguments to the :func:`moran.run_moran` function.
         em_kwargs: Keyword arguments to the :func:`em.run_em` function.
         bp_kwargs: Keyword arguments to the :func:`bp.run_bp` function.
@@ -317,7 +321,7 @@ def score_and_mask_pixels(
     adata: AnnData,
     layer: str,
     k: int,
-    method: Literal["gauss", "EM", "EM+gauss", "EM+BP", "VI+gauss", "VI+BP"],
+    method: Literal["gauss", "moran", "EM", "EM+gauss", "EM+BP", "VI+gauss", "VI+BP"],
     moran_kwargs: Optional[dict] = None,
     em_kwargs: Optional[dict] = None,
     vi_kwargs: Optional[dict] = None,
@@ -385,7 +389,7 @@ def score_and_mask_pixels(
 
     if not threshold:
         lm.main_debug("Finding Otsu threshold.")
-        threshold = filters.threshold_multiotsu(scores)[1] if "bp" in method else filters.threshold_otsu(scores)
+        threshold = filters.threshold_otsu(scores)
 
     lm.main_info(f"Applying threshold {threshold}.")
     mk = mk or (k + 2 if any(m in method for m in ("em", "vi")) else max(k - 2, 3))

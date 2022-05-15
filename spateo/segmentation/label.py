@@ -89,7 +89,7 @@ def _watershed(
 
 
 @SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
-def watershed_markers(
+def find_peaks_with_erosion(
     adata: AnnData,
     layer: str = SKM.STAIN_LAYER_KEY,
     k: int = 3,
@@ -100,7 +100,7 @@ def watershed_markers(
     float_threshold: Optional[float] = None,
     out_layer: Optional[str] = None,
 ):
-    """Find markers for used in Watershed.
+    """Find peaks for use in Watershed via iterative erosion.
 
     Args:
         adata: Input Anndata
