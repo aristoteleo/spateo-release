@@ -84,6 +84,7 @@ tutorials/index
 Technicals <technicals/index>
 API <autoapi/spateo/index>
 references
-contributing/index
+contributing
+contributors
 GitHub <https://github.com/aristoteleo/spateo-release>
 ```
