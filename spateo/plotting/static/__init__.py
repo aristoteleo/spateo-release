@@ -16,4 +16,5 @@ from .three_d_plot import (
     save_plotter,
     three_d_animate,
     three_d_plot,
+    three_d_plot_multi_cpos,
 )
