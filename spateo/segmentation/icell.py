@@ -335,25 +335,29 @@ def score_and_mask_pixels(
         adata: Input Anndata
         layer: Layer that contains UMI counts to use
         k: Kernel size for convolution
-        method: Method to use. Valid methods are:
+        method: Method to use to obtain per-pixel scores. Valid methods are:
             gauss: Gaussian blur
-            moran:
+            moran: Moran's I based method
             EM: EM algorithm to estimate cell and background expression
                 parameters.
-            EM+gauss: EM algorithm followed by Gaussian blur.
+            EM+gauss: Negative binomial EM algorithm followed by Gaussian blur.
             EM+BP: EM algorithm followed by belief propagation to estimate the
                 marginal probabilities of cell and background.
-            VI+gauss:
-            VI+BP
+            VI+gauss: Negative binomial VI algorithm followed by Gaussian blur.
+                Note that VI also supports the zero-inflated negative binomial (ZINB)
+                by providing `zero_inflated=True`.
+            VI+BP: VI algorithm followed by belief propagation. Note that VI also
+                supports the zero-inflated negative binomial (ZINB) by providing
+                `zero_inflated=True`.
         moran_kwargs: Keyword arguments to the :func:`moran.run_moran` function.
         em_kwargs: Keyword arguments to the :func:`em.run_em` function.
         bp_kwargs: Keyword arguments to the :func:`bp.run_bp` function.
         threshold: Score cutoff, above which pixels are considered occupied.
             By default, a threshold is automatically determined by using
-            the first value of the 3-class Multiotsu method.
+            Otsu thresholding.
         mk: Kernel size of morphological open and close operations to reduce
             noise in the mask. Defaults to `k`+2 if EM or VI is run. Otherwise,
-            defaults to 3.
+            defaults to `k`-2.
         bins_layer: Layer containing assignment of pixels into bins. Each bin
             is considered separately. Defaults to `{layer}_bins`. This can be
             set to `False` to disable binning, even if the layer exists.
