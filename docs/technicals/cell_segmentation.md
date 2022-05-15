@@ -36,7 +36,7 @@ The goal is to find a transformation from the source coordinates to the target c
 The displacements for each of the control points are also optimized using PyTorch. Internally, the [`thin_plate_spline`](https://kornia.readthedocs.io/en/latest/_modules/kornia/geometry/transform/thin_plate_spline.html) module in the [Kornia](https://kornia.github.io/) library is used for TPS calculations.
 
 
-## Stain segmentaion
+## Stain segmentation
 
 **Segmentation functions**
 

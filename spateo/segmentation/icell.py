@@ -389,7 +389,7 @@ def score_and_mask_pixels(
 
     if not threshold:
         lm.main_debug("Finding Otsu threshold.")
-        threshold = filters.threshold_multiotsu(scores)[1] if "bp" in method else filters.threshold_otsu(scores)
+        threshold = filters.threshold_otsu(scores)
 
     lm.main_info(f"Applying threshold {threshold}.")
     mk = mk or (k + 2 if any(m in method for m in ("em", "vi")) else max(k - 2, 3))
