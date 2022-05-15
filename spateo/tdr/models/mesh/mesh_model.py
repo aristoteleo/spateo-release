@@ -88,6 +88,7 @@ def construct_cells(
 def construct_surface(
     pc: PolyData,
     key_added: str = "groups",
+    label: str = "surface",
     color: Optional[str] = "gainsboro",
     alpha: Union[float, int] = 1.0,
     uniform_pc: bool = False,
@@ -106,6 +107,7 @@ def construct_surface(
     Args:
         pc: A point cloud.
         key_added: The key under which to add the labels.
+        label: The label of reconstructed surface mesh model.
         color: Color to use for plotting mesh. The default `color` is `'gainsboro'`.
         alpha: The opacity of the color to use for plotting mesh. The default `alpha` is `0.8`.
         uniform_pc: Generates a uniform point cloud with a larger number of points.
@@ -135,8 +137,8 @@ def construct_surface(
 
     Returns:
         uniform_surf: A reconstructed surface mesh, which contains the following properties:
-            `uniform_surf.cell_data[key_added]`, the "surface" array;
-            `uniform_surf.cell_data[f'{key_added}_rgba']`, the rgba colors of the "surface" array.
+            `uniform_surf.cell_data[key_added]`, the `label` array;
+            `uniform_surf.cell_data[f'{key_added}_rgba']`, the rgba colors of the `label` array.
         clipped_pc: A point cloud, which contains the following properties:
             `clipped_pc.point_data["obs_index"]`, the obs_index of each coordinate in the original adata.
             `clipped_pc.point_data[key_added]`, the `groupby` information.
@@ -222,7 +224,7 @@ def construct_surface(
         uniform_surf = smooth_mesh(mesh=uniform_surf, n_iter=smooth)
 
     # Add labels and the colormap of the surface mesh.
-    labels = np.array(["surface"] * uniform_surf.n_cells).astype(str)
+    labels = np.array([label] * uniform_surf.n_cells).astype(str)
     add_model_labels(
         model=uniform_surf,
         labels=labels,
