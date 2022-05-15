@@ -73,7 +73,7 @@ def digitize(
         ]
 
 
-def gridding(
+def soft_gridding(
     adata,
     layer_num: int,
     column_num: int,

@@ -99,6 +99,7 @@ def extract_cluster_contours(
     k_size: float = 2,
     min_area: float = 9,
     show: bool = True,
+    close_kernel=cv2.MORPH_ELLIPSE,  # need var-type
 ) -> Tuple[NDArray, NDArray[np.uint8], NDArray]:
     """Extract contour(s) for area(s) formed by buckets of the same identified cluster.
 
@@ -128,8 +129,8 @@ def extract_cluster_contours(
     else:
         cluster_image_close = np.where(np.isin(cluster_image_close, cluster_labels), cluster_image_close, 0)
 
-    lm.main_info("Use MORPH_ELLIPSE to close cluster morphology.")
-    kernal = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+    lm.main_info("Close cluster morphology.")
+    kernal = cv2.getStructuringElement(close_kernel, (k_size, k_size))
     cluster_image_close = cv2.morphologyEx(cluster_image_close, cv2.MORPH_CLOSE, kernal)
 
     lm.main_info("Remove small region.")
