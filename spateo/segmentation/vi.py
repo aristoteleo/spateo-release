@@ -13,7 +13,7 @@ from pyro.infer import SVI, TraceEnum_ELBO
 from pyro.infer.autoguide import AutoDelta
 from pyro.nn import PyroModule, PyroParam
 from pyro.optim import Adam
-from torch.distributions.utils import probs_to_logits
+from torch.distributions.utils import logits_to_probs, probs_to_logits
 from tqdm import tqdm
 
 from ..errors import SegmentationError
@@ -59,12 +59,10 @@ class NegativeBinomialMixture(PyroModule):
     def dist(self, assignment, train=False):
         params = self.get_params(train)
         counts, logits = params["counts"], params["logits"]
-        if self.zero_inflated:
-            z = params["z"]
-            return dist.ZeroInflatedNegativeBinomial(
-                counts[assignment], logits=logits[assignment], gate_logits=z[assignment], validate_args=False
-            )
-        return dist.NegativeBinomial(counts[assignment], logits=logits[assignment], validate_args=False)
+        z = params.get("z", probs_to_logits(torch.zeros(self.n)))
+        return dist.ZeroInflatedNegativeBinomial(
+            counts[assignment], logits=logits[assignment], gate_logits=z[assignment], validate_args=False
+        )
 
     def init_best_params(self, n_init):
         best_log_prob = -np.inf
@@ -80,6 +78,7 @@ class NegativeBinomialMixture(PyroModule):
             if log_prob.sum() > best_log_prob:
                 best_log_prob = log_prob.sum()
                 best_params = self.get_params(True, False)
+
         if self.zero_inflated:
             self.z = PyroParam(best_params["z"])
         self.w = PyroParam(best_params["w"])
@@ -105,7 +104,7 @@ class NegativeBinomialMixture(PyroModule):
 
         # Is there a better way to initialize the dropout param?
         if self.zero_inflated:
-            self.z = PyroParam(torch.randn(self.n))
+            self.z = PyroParam(probs_to_logits(torch.zeros(self.n).float(), is_binary=True))
 
     def optimizer(self):
         if self.__optimizer is None:
@@ -152,22 +151,21 @@ class NegativeBinomialMixture(PyroModule):
     def conditionals(params, x, use_weights=False):
         pyro.clear_param_store()
         zero_inflated = "z" in params
-        z, w, counts, logits = params.get("z"), params["w"], params["counts"], params["logits"]
+        w, counts, logits = params["w"], params["counts"], params["logits"]
+        n = len(w)
+        z = params.get("z", probs_to_logits(torch.zeros(n)))
         x = torch.tensor(x.astype(np.float32))
-        n = len(counts)
-        dists = (
-            [dist.NegativeBinomial(c, logits=l, validate_args=False) for c, l in zip(counts, logits)]
-            if not zero_inflated
-            else [
-                dist.ZeroInflatedNegativeBinomial(c, logits=l, gate_logits=torch.tensor(_z), validate_args=False)
-                for _z, c, l in zip(z, counts, logits)
-            ]
-        )
+        dists = [
+            dist.ZeroInflatedNegativeBinomial(c, logits=l, gate_logits=torch.tensor(_z), validate_args=False)
+            for _z, c, l in zip(z, counts, logits)
+        ]
+        # As of 2022/05/14, Pyro's ZeroInflatedNegativeBinomial model has a bug when calculating the mean of the
+        # distribution when it was initialized with gate_logits.
+        means = [(1 - logits_to_probs(dist.gate_logits, is_binary=True)) * dist.base_dist.mean for dist in dists]
+
         weights = dist.Categorical(logits=torch.tensor(w)).probs.numpy()
         conds = []
-        for i in sorted(
-            range(len(dists)), key=lambda i: -dists[i].log_prob(0.0).item() if zero_inflated else dists[i].mean.item()
-        ):
+        for i in sorted(range(len(dists)), key=lambda i: means[i]):
             cond = torch.exp(dists[i].log_prob(x)).numpy()
             if use_weights:
                 cond *= weights[i]

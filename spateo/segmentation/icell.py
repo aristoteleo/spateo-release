@@ -149,7 +149,8 @@ def _initial_nb_params(
     Returns:
         Dictionary containing initial `w`, `mu`, `var` parameters. If `bins` is also
         provided, the dictionary is nested with the outer dictionary containing each
-        bin label as the keys.
+        bin label as the keys. If `zero_inflated=True`, then the dictionary also contains
+        a `z` key.
     """
     samples = {}
     if bins is not None:
@@ -165,11 +166,30 @@ def _initial_nb_params(
         mask = _samples > threshold
         background_values = _samples[~mask]
         foreground_values = _samples[mask]
-        params[label] = dict(
-            w=tuple(np.array([_samples.size - mask.sum(), mask.sum()]) / _samples.size),
-            mu=(background_values.mean(), foreground_values.mean()),
-            var=(background_values.var(), foreground_values.var()),
-        )
+        w = np.array([_samples.size - mask.sum(), mask.sum()]) / _samples.size
+        mu = np.array([background_values.mean(), foreground_values.mean()])
+        var = np.array([background_values.var(), foreground_values.var()])
+        if (mu == 0).any():
+            raise SegmentationError("Estimated mean(s) equals to zero. Please increase `k`.")
+
+        # Negative binomial distribution requires variance > mean
+        if var[0] <= mu[0]:
+            lm.main_warning(
+                f"Estimated variance of background ({var[0]:.2e}) is less than the mean ({mu[0]:.2e}). "
+                "Initial variance will be arbitrarily set to 1.1x of the mean. "
+                "This is usually due to extreme sparsity. Please consider increasing `k` or using "
+                "the zero-inflated distribution."
+            )
+            var[0] = mu[0] * 1.1
+        if var[1] <= mu[1]:
+            lm.main_warning(
+                f"Estimated variance of foreground ({var[1]:.2e}) is less than the mean ({mu[1]:.2e}). "
+                "Initial variance will be arbitrarily set to 1.1x of the mean. "
+                "This is usually due to extreme sparsity. Please consider increasing `k` or using "
+                "the zero-inflated distribution."
+            )
+            var[1] = mu[1] * 1.1
+        params[label] = dict(w=tuple(w), mu=tuple(mu), var=tuple(var))
     return params[0] if bins is None else params
 
 
@@ -315,25 +335,29 @@ def score_and_mask_pixels(
         adata: Input Anndata
         layer: Layer that contains UMI counts to use
         k: Kernel size for convolution
-        method: Method to use. Valid methods are:
+        method: Method to use to obtain per-pixel scores. Valid methods are:
             gauss: Gaussian blur
-            moran:
+            moran: Moran's I based method
             EM: EM algorithm to estimate cell and background expression
                 parameters.
-            EM+gauss: EM algorithm followed by Gaussian blur.
+            EM+gauss: Negative binomial EM algorithm followed by Gaussian blur.
             EM+BP: EM algorithm followed by belief propagation to estimate the
                 marginal probabilities of cell and background.
-            VI+gauss:
-            VI+BP
+            VI+gauss: Negative binomial VI algorithm followed by Gaussian blur.
+                Note that VI also supports the zero-inflated negative binomial (ZINB)
+                by providing `zero_inflated=True`.
+            VI+BP: VI algorithm followed by belief propagation. Note that VI also
+                supports the zero-inflated negative binomial (ZINB) by providing
+                `zero_inflated=True`.
         moran_kwargs: Keyword arguments to the :func:`moran.run_moran` function.
         em_kwargs: Keyword arguments to the :func:`em.run_em` function.
         bp_kwargs: Keyword arguments to the :func:`bp.run_bp` function.
         threshold: Score cutoff, above which pixels are considered occupied.
             By default, a threshold is automatically determined by using
-            the first value of the 3-class Multiotsu method.
+            Otsu thresholding.
         mk: Kernel size of morphological open and close operations to reduce
             noise in the mask. Defaults to `k`+2 if EM or VI is run. Otherwise,
-            defaults to 3.
+            defaults to `k`-2.
         bins_layer: Layer containing assignment of pixels into bins. Each bin
             is considered separately. Defaults to `{layer}_bins`. This can be
             set to `False` to disable binning, even if the layer exists.
@@ -364,7 +388,7 @@ def score_and_mask_pixels(
         threshold = filters.threshold_multiotsu(scores)[1] if "bp" in method else filters.threshold_otsu(scores)
 
     lm.main_info(f"Applying threshold {threshold}.")
-    mk = mk or (k + 2 if any(m in method for m in ("em", "vi")) else 3)
+    mk = mk or (k + 2 if any(m in method for m in ("em", "vi")) else max(k - 2, 3))
     mask = utils.apply_threshold(scores, mk, threshold)
     if certain_layer:
         mask += certain_mask
