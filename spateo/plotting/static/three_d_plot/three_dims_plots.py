@@ -1,6 +1,9 @@
+import math
+import re
 from typing import List, Optional, Tuple, Union
 
 import matplotlib as mpl
+import numpy as np
 from pyvista import MultiBlock, Plotter, PolyData, UnstructuredGrid
 
 try:
@@ -272,6 +275,118 @@ def three_d_plot(
     p = create_plotter(off_screen=off_screen2, **plotter_kws)
     _add2plotter(plotter=p, **model_kws)
     p.camera_position = cpo
+
+    # Save the plotting object.
+    if plotter_filename is not None:
+        save_plotter(plotter=p, filename=plotter_filename)
+
+    # Output the plotting object.
+    return output_plotter(plotter=p, filename=filename, view_up=view_up, framerate=framerate, jupyter=jupyter)
+
+
+def three_d_plot_multi_cpos(
+    model: Union[PolyData, UnstructuredGrid, MultiBlock],
+    key: Optional[str] = None,
+    filename: Optional[str] = None,
+    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    off_screen: bool = False,
+    window_size: Optional[tuple] = None,
+    shape: Union[str, list, tuple] = None,
+    cpos: Optional[list] = None,
+    background: str = "white",
+    ambient: float = 0.2,
+    opacity: float = 1.0,
+    point_size: float = 5.0,
+    model_style: Literal["points", "surface", "wireframe"] = "surface",
+    legend_size: Optional[Tuple] = None,
+    legend_loc: Literal[
+        "upper right",
+        "upper left",
+        "lower left",
+        "lower right",
+        "center left",
+        "center right",
+        "lower center",
+        "upper center",
+        "center",
+    ] = "lower right",
+    outline: bool = False,
+    outline_width: float = 5.0,
+    outline_labels: bool = True,
+    text: Optional[str] = None,
+    text_font: Literal["times", "courier", "arial"] = "times",
+    text_size: Union[int, float] = 18,
+    text_color: Union[str, tuple, list, None] = None,
+    text_loc: Literal[
+        "lower_left",
+        "lower_right",
+        "upper_left",
+        "upper_right",
+        "lower_edge",
+        "upper_edge",
+        "right_edge",
+        "left_edge",
+    ] = "upper_left",
+    view_up: tuple = (0.5, 0.5, 1),
+    framerate: int = 15,
+    plotter_filename: Optional[str] = None,
+):
+
+    shape = (2, 3) if shape is None else shape
+    if isinstance(shape, (tuple, list)):
+        n_subplots = shape[0] * shape[1]
+        subplots = []
+        for i in range(n_subplots):
+            col = math.floor(i / shape[1])
+            ind = i - col * shape[1]
+            subplots.append([col, ind])
+    else:
+        shape_x, shape_y = re.split("[/|]", shape)
+        n_subplots = int(shape_x) * int(shape_y)
+        subplots = [i for i in range(n_subplots)]
+
+    if window_size is None:
+        win_x, win_y = (shape[1], shape[0]) if isinstance(shape, (tuple, list)) else (1, 1)
+        window_size = (1024 * win_x, 768 * win_y)
+
+    plotter_kws = dict(
+        jupyter=False if jupyter is False else True,
+        window_size=window_size,
+        background=background,
+        shape=shape,
+    )
+
+    model_kws = dict(
+        model=model,
+        key=key,
+        background=background,
+        ambient=ambient,
+        opacity=opacity,
+        point_size=point_size,
+        model_style=model_style,
+        legend_size=legend_size,
+        legend_loc=legend_loc,
+        outline=outline,
+        outline_width=outline_width,
+        outline_labels=outline_labels,
+        text=text,
+        text_font=text_font,
+        text_size=text_size,
+        text_color=text_color,
+        text_loc=text_loc,
+    )
+
+    # Set jupyter.
+    off_screen1, off_screen2, jupyter_backend = _set_jupyter(jupyter=jupyter, off_screen=off_screen)
+
+    # Create a plotting object to display pyvista/vtk model.
+    p = create_plotter(off_screen=off_screen1, **plotter_kws)
+    cpos = ["xy", "xz", "yz", "yx", "zx", "zy"] if cpos is None else cpos
+    for cpo, subplot_index in zip(cpos, subplots):
+        p.subplot(subplot_index[0], subplot_index[1])
+        _add2plotter(plotter=p, **model_kws)
+        p.camera_position = cpo
+        p.add_axes()
 
     # Save the plotting object.
     if plotter_filename is not None:
