@@ -154,7 +154,8 @@ def three_d_plot(
     plotter_filename: Optional[str] = None,
 ):
     """
-    Visualize reconstructed 3D models.
+    Visualize reconstructed 3D model.
+
     Args:
         model: A reconstructed model.
         key: The key under which are the labels.
@@ -290,9 +291,9 @@ def three_d_plot_multi_cpos(
     filename: Optional[str] = None,
     jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
     off_screen: bool = False,
-    window_size: Optional[tuple] = None,
-    shape: Union[str, list, tuple] = None,
     cpos: Optional[list] = None,
+    shape: Union[str, list, tuple] = None,
+    window_size: Optional[tuple] = None,
     background: str = "white",
     ambient: float = 0.2,
     opacity: float = 1.0,
@@ -331,7 +332,83 @@ def three_d_plot_multi_cpos(
     framerate: int = 15,
     plotter_filename: Optional[str] = None,
 ):
+    """
+    Multi-view visualization of reconstructed 3D model.
 
+    Args:
+        model: A reconstructed model.
+        key: The key under which are the labels.
+        filename: Filename of output file. Writer type is inferred from the extension of the filename.
+                * Output an image file,
+                  please enter a filename ending with
+                  `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
+                * Output a gif file, please enter a filename ending with `.gif`.
+                * Output a mp4 file, please enter a filename ending with `.mp4`.
+        jupyter: Whether to plot in jupyter notebook.
+                * `'none'` : Do not display in the notebook.
+                * `'pythreejs'` : Show a pythreejs widget
+                * `'static'` : Display a static figure.
+                * `'ipygany'` : Show an ipygany widget
+                * `'panel'` : Show a panel widget.
+        off_screen: Renders off-screen when True. Useful for automated screenshots.
+        cpos: The list of camera positions of the window.
+        shape: Number of sub-render windows inside the main window. Specify two across with shape=(2, 1) and a two by
+               two grid with shape=(2, 2). By default, there is only one render window. Can also accept a string descriptor
+               as shape. E.g.:
+               shape="3|1" means 3 plots on the left and 1 on the right,
+               shape="4/2" means 4 plots on top and 2 at the bottom.
+        window_size: Window size in pixels. The default window_size is `[1024, 768]`.
+        background: The background color of the window.
+        ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
+                 the actor when not directed at the light source emitted from the viewer.
+        opacity: Opacity of the model. If a single float value is given, it will be the global opacity of the model and
+                 uniformly applied everywhere - should be between 0 and 1.
+                 A string can also be specified to map the scalars range to a predefined opacity transfer function
+                 (options include: 'linear', 'linear_r', 'geom', 'geom_r').
+        point_size: Point size of any nodes in the dataset plotted.
+        model_style: Visualization style of the model. One of the following: style='surface', style='wireframe', style='points'.
+        legend_size: Two float tuple, each float between 0 and 1.
+                     For example (0.1, 0.1) would make the legend 10% the size of the entire figure window.
+                     If legend_size is None, legend_size will be adjusted adaptively.
+        legend_loc: The location of the legend in the window. Available `legend_loc` are:
+                * `'upper right'`
+                * `'upper left'`
+                * `'lower left'`
+                * `'lower right'`
+                * `'center left'`
+                * `'center right'`
+                * `'lower center'`
+                * `'upper center'`
+                * `'center'`
+        outline: Produce an outline of the full extent for the model.
+        outline_width: The width of outline.
+        outline_labels: Whether to add the length, width and height information of the model to the outline.
+        text: The text to add the rendering.
+        text_font: The font of the text. Available `text_font` are:
+                * `'times'`
+                * `'courier'`
+                * `'arial'`
+        text_size: The size of the text.
+        text_color: The color of the text.
+        text_loc: The location of the text in the window. Available `text_loc` are:
+                * `'lower_left'`
+                * `'lower_right'`
+                * `'upper_left'`
+                * `'upper_right'`
+                * `'lower_edge'`
+                * `'upper_edge'`
+                * `'right_edge'`
+                * `'left_edge'`
+        view_up: The normal to the orbital plane. Only available when filename ending with `.mp4` or `.gif`.
+        framerate: Frames per second. Only available when filename ending with `.mp4` or `.gif`.
+        plotter_filename: The filename of the file where the plotter is saved.
+                          Writer type is inferred from the extension of the filename.
+                * Output a gltf file, please enter a filename ending with `.gltf`.
+                * Output a html file, please enter a filename ending with `.html`.
+                * Output an obj file, please enter a filename ending with `.obj`.
+                * Output a vtkjs file, please enter a filename without format.
+
+    """
     shape = (2, 3) if shape is None else shape
     if isinstance(shape, (tuple, list)):
         n_subplots = shape[0] * shape[1]
@@ -440,6 +517,7 @@ def three_d_animate(
 ):
     """
     Visualize reconstructed 3D models.
+
     Args:
         models: A List of reconstructed models or a MultiBlock.
         key: The key under which are the labels.
