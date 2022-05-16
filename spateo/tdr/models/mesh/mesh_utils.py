@@ -50,16 +50,16 @@ def uniform_larger_pc(
     slices = []
     for z in coords_z:
         slice_coords = coords[coords[:, 2] == z]
+        slice_cloud = pv.PolyData(slice_coords)
         if len(slice_coords) >= 3:
-            slice_cloud = pv.PolyData(slice_coords)
             slice_plane = slice_cloud.delaunay_2d(alpha=alpha).triangulate().clean()
-            slices.append(slice_plane)
+            uniform_plane = uniform_mesh(mesh=slice_plane, nsub=nsub, nclus=nclus)
+            slices.append(uniform_plane)
         else:
-            raise ValueError(f"When the z-axis is {z}, the number of coordinates is less than 3 and cannot be uniform.")
-    slices_mesh = merge_models(models=slices)
-    uniform_slices_mesh = uniform_mesh(mesh=slices_mesh, nsub=nsub, nclus=nclus)
+            slices.append(slice_cloud)
 
-    new_pc = pv.PolyData(uniform_slices_mesh.points).clean()
+    slices_mesh = merge_models(models=slices)
+    new_pc = pv.PolyData(slices_mesh.points).clean()
     return new_pc
 
 

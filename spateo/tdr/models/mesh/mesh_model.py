@@ -105,7 +105,7 @@ def construct_surface(
     Surface mesh reconstruction based on 3D point cloud model.
 
     Args:
-        pc: A point cloud.
+        pc: A point cloud model.
         key_added: The key under which to add the labels.
         label: The label of reconstructed surface mesh model.
         color: Color to use for plotting mesh. The default `color` is `'gainsboro'`.
@@ -123,7 +123,7 @@ def construct_surface(
                 * `'alpha_shape'`: {"alpha": 2.0}
                 * `'ball_pivoting'`: {"radii": [1]}
                 * `'poisson'`: {'depth': 8, 'width'=0, 'scale'=1.1, 'linear_fit': False, 'density_threshold': 0.01}
-                * `'marching_cube'`: None
+                * `'marching_cube'`: {"levelset": 0}
         nsub: Number of subdivisions. Each subdivision creates 4 new triangles, so the number of resulting triangles is
               nface*4**nsub where nface is the current number of faces.
         nclus: Number of voronoi clustering.
@@ -198,9 +198,13 @@ def construct_surface(
             density_threshold=_cs_args["density_threshold"],
         )
     elif cs_method == "marching_cube":
+        _cs_args = {"levelset": 0}
+        if not (cs_args is None):
+            _cs_args.update(cs_args)
+
         from .reconstruction_methods import marching_cube_mesh
 
-        surf = marching_cube_mesh(pc=cloud)
+        surf = marching_cube_mesh(pc=cloud, levelset=_cs_args["levelset"])
 
     else:
         raise ValueError(
