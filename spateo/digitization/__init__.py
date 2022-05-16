@@ -4,4 +4,3 @@
 from .boundary import *
 from .contour import *
 from .gridding import *
-from .statistical import *

@@ -6,6 +6,7 @@ from .colorlabel import color_label
 from .contour import spatial_domains
 from .geo import geo
 from .lisa import lisa, lisa_quantiles
+from .polarity import *
 from .space import space
 from .three_d_plot import (
     add_legend,
