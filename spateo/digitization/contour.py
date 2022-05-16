@@ -13,7 +13,7 @@ from ..configuration import SKM
 from ..logging import logger_manager as lm
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def gen_cluster_image(
     adata: AnnData,
     bin_size: Optional[int] = None,
@@ -92,11 +92,12 @@ def gen_cluster_image(
 
 
 def extract_cluster_contours(
-    cluster_image,
+    cluster_image: np.ndarray,
     cluster_labels: Union[int, List],
     bin_size: int,
     k_size: float = 2,
     min_area: float = 9,
+    close_kernel: int = cv2.MORPH_ELLIPSE,
     show: bool = True,
 ) -> Tuple[Any, Any, np.ndarray]:
     """Extract contour(s) for area(s) formed by buckets of the same identified cluster.
@@ -107,6 +108,7 @@ def extract_cluster_contours(
         bin_size: The size of the binning.
         k_size: kernel size of the elliptic structuring element.
         min_area: minimal area threshold corresponding to the resulting contour(s).
+        close_kernel:  The value to indicate the structuring element. By default, we use a circular structuring element.
         show: Visualize the result.
 
     Returns:
@@ -127,8 +129,8 @@ def extract_cluster_contours(
     else:
         cluster_image_close = np.where(np.isin(cluster_image_close, cluster_labels), cluster_image_close, 0)
 
-    lm.main_info("Use MORPH_ELLIPSE to close cluster morphology.")
-    kernal = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+    lm.main_info("Close cluster morphology.")
+    kernal = cv2.getStructuringElement(close_kernel, (k_size, k_size))
     cluster_image_close = cv2.morphologyEx(cluster_image_close, cv2.MORPH_CLOSE, kernal)
 
     lm.main_info("Remove small region.")

@@ -71,7 +71,7 @@ def digitize(
         adata.obs[dgl_column_key][i] = of_column[int(adata.obsm[spatial_key][i, 0]), int(adata.obsm[spatial_key][i, 1])]
 
 
-def gridding(
+def soft_gridding(
     adata,
     layer_num: int,
     column_num: int,
