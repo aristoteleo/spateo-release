@@ -23,7 +23,7 @@ def gen_cluster_image(
     label_mapping_key: str = "cluster_img_label",
     show: bool = True,
     cmap: str = "tab20",
-) -> NDArray[np.uint8]:
+):
     """Generate images with spatial cluster(s) a distinct color prepared from the designated cmap.
 
     Args:
@@ -100,7 +100,7 @@ def extract_cluster_contours(
     min_area: float = 9,
     show: bool = True,
     close_kernel=cv2.MORPH_ELLIPSE,  # need var-type
-) -> Tuple[NDArray, NDArray[np.uint8], NDArray]:
+):
     """Extract contour(s) for area(s) formed by buckets of the same identified cluster.
 
     Args:
@@ -162,6 +162,7 @@ def set_domains(
     spatial_key: str = "spatial",
     cluster_key: str = "scc",
     domain_key_prefix: str = "domain",
+    bin_size_high: Optional[int] = None,
     bin_size_low: Optional[int] = None,
     k_size: float = 2,
     min_area: float = 9,
@@ -218,7 +219,7 @@ def set_domains(
             x = adata_high_res.obsm[spatial_key][j, 0]
             y = adata_high_res.obsm[spatial_key][j, 1]
             for k in range(len(ctrs)):
-                if cv2.pointPolygonTest(ctrs[k], (x, y), False) >= 0:
+                if cv2.pointPolygonTest(ctrs[k], (y, x), False) >= 0:
                     adata_high_res.obs[domain_key][j] = cluster_ids[i]
                     # assume one bucket to one domain mapping
                     break

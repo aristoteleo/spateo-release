@@ -71,12 +71,12 @@ def identify_boundary(
     boundary_line_img = np.where(tgt_img != 0, ctr_img, 0)
 
     lm.main_info(f"Saving boundary into adata.obs['{boundary_key}'] for visualization.")
-    adata.obs[boundary_key] = False
+    adata.obs[boundary_key] = " "
     for i in range(len(adata)):
         if boundary_line_img[int(adata.obsm[spatial_key][i, 0]), int(adata.obsm[spatial_key][i, 1])] != 0:
-            adata.obs["boundary_line"][i] = True
+            adata.obs["boundary_line"][i] = "Boundary Line"
 
-    return boundary_line_img
+    return boundary_line_img.astype(np.uint8)
 
 
 def boundary_gridding(
