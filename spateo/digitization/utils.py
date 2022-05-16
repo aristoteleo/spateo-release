@@ -6,7 +6,6 @@ from typing import List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
-from nptyping import NDArray
 from skimage import morphology
 
 from ..configuration import SKM

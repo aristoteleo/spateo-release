@@ -6,7 +6,6 @@ from typing import List, Optional, Tuple, Union
 import cv2
 import numpy as np
 from anndata import AnnData
-from nptyping import NDArray
 
 from .utils import *
 

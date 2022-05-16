@@ -6,7 +6,6 @@ from typing import List, Optional, Tuple, Union
 import cv2
 import numpy as np
 from anndata import AnnData
-from nptyping import NDArray
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
