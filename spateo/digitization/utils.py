@@ -146,10 +146,10 @@ def calc_op_field(
     edge_line_b,
     field_border,
     field_mask,
-    max_err=1e-5,
-    max_itr=1e5,
-    lp=1,
-    hp=100,
+    max_err: float = 1e-5,
+    max_itr: float = 1e5,
+    lp: int = 1,
+    hp: int = 100,
 ):
     """Calculate op_field (weights) for given boundary weights.
 

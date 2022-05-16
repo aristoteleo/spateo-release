@@ -18,6 +18,7 @@ def spatial_domains(
     label_key: str = "cluster_img_label",
     use_scale: bool = True,
     absolute: bool = False,
+    swap_x_y: bool = False,
     background: Union[None, str] = None,
     save_show_or_return: str = "show",
     save_kwargs: Dict = {},
@@ -30,8 +31,29 @@ def spatial_domains(
         bin_size: The size of the binning. Default to None.
         spatial_key: The key name of the spatial coordinates. Default to "spatial".
         label_key: The key name of the image label values. Default to "cluster_img_label".
+        use_scale: Whether or not to plot in physical units. Only valid when
+            appropriate scale keys are present in .uns
+        absolute: Whether to set the axes to be in absolute coordinates. By
+            default, relative coordinates are used (i.e. the axes start at
+            zero).
+        swap_x_y: Whether or not to swap the x, y values when using `pl.imshow`.
+        background: string or None (optional, default 'None`)
+            The color of the background. Usually this will be either
+            'white' or 'black', but any color name will work. Ideally
+            one wants to match this appropriately to the colors being
+            used for points etc. This is one of the things that themes
+            handle for you. Note that if theme
+            is passed then this value will be overridden by the
+            corresponding option of the theme.
         show: Visualize the result. Default to True.
-        save_fig: Save image to path or filename. Default to "plot_contour_img".
+        save_show_or_return: `str` {'save', 'show', 'return', 'both', 'all'} (default: `show`)
+            Whether to save, show or return the figure. If "both", it will save and plot the figure at the same time. If
+            "all", the figure will be saved, displayed and the associated axis and other object will be return.
+        save_kwargs: `dict` (default: `{}`)
+            A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
+            save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent":
+            True, "close": True, "verbose": True} as its parameters. Otherwise you can provide a dictionary that
+            properly modify those keys according to your needs.
         **kwargs: Additional keyword arguments are all passed to :func:`imshow`.
     """
     import matplotlib.pyplot as plt
@@ -69,7 +91,12 @@ def spatial_domains(
 
     fig, ax = plt.subplots(figsize=(5, 5), tight_layout=True)
     kwargs.update({"cmap": "Blues"})
-    im = ax.imshow(contour_img, **kwargs)
+
+    if swap_x_y:
+        im = ax.imshow(contour_img.T, **kwargs)
+    else:
+        im = ax.imshow(contour_img, **kwargs)
+
     ax.set_title(f"domain contour ({label_key})")
 
     unit = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY)

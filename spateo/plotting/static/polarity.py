@@ -7,7 +7,7 @@ import seaborn as sns
 from anndata import AnnData
 
 
-def digi_exp_plot(
+def polarity(
     adata: AnnData,
     gene_dict: dict,
     region_key: str,

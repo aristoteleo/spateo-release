@@ -2,12 +2,11 @@
 """
 
 import random
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
 from anndata import AnnData
-from nptyping import NDArray
 from skimage import morphology
 
 from ..configuration import SKM
@@ -23,7 +22,7 @@ def gen_cluster_image(
     label_mapping_key: str = "cluster_img_label",
     show: bool = True,
     cmap: str = "tab20",
-) -> NDArray[np.uint8]:
+) -> np.ndarray:
     """Generate images with spatial cluster(s) a distinct color prepared from the designated cmap.
 
     Args:
@@ -99,7 +98,7 @@ def extract_cluster_contours(
     k_size: float = 2,
     min_area: float = 9,
     show: bool = True,
-) -> Tuple[NDArray, NDArray[np.uint8], NDArray]:
+) -> Tuple[Any, Any, np.ndarray]:
     """Extract contour(s) for area(s) formed by buckets of the same identified cluster.
 
     Args:
@@ -121,7 +120,7 @@ def extract_cluster_contours(
     k_size = int(k_size * bin_size)
     min_area = int(min_area * bin_size * bin_size)
 
-    lm.main_info(f"Get selected areas in labels:{cluster_labels}.")
+    lm.main_info(f"Get selected areas with label id(s): {cluster_labels}.")
     cluster_image_close = cluster_image.copy()
     if type(cluster_labels) == int:
         cluster_image_close = np.where(cluster_image_close == cluster_labels, cluster_image_close, 0)
@@ -217,7 +216,7 @@ def set_domains(
             x = adata_high_res.obsm[spatial_key][j, 0]
             y = adata_high_res.obsm[spatial_key][j, 1]
             for k in range(len(ctrs)):
-                if cv2.pointPolygonTest(ctrs[k], (x, y), False) >= 0:
+                if cv2.pointPolygonTest(ctrs[k], (y, x), False) >= 0:
                     adata_high_res.obs[domain_key][j] = cluster_ids[i]
                     # assume one bucket to one domain mapping
                     break
