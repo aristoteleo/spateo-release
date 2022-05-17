@@ -348,7 +348,7 @@ def effective_L2_error(
     return np.sqrt(np.sum((op_field_j - op_field_i) ** 2 * field_mask) / np.sum(op_field_j**2 * field_mask))
 
 
-def calc_op_field(
+def domain_heat_eqn_solver(
     op_field,
     min_line,
     max_line,
@@ -361,7 +361,13 @@ def calc_op_field(
     lp: int = 1,
     hp: int = 100,
 ):
-    """Calculate op_field (weights) for given boundary weights.
+    """Given the boundaries and boundary conditions of a close spatial domain, solve heat equation (a simple partial
+    differential equation) to define the "heat" for each spatial pixel which can be used to digitize the
+    spatial domain into different layers or columns. Diffusitivity is set to be 1/4, thus the update rule is defined as:
+
+        grid_field[1:-1, 1:-1] = 0.25 * (
+            grid_field_pre[1:-1, 2:] + grid_field_pre[1:-1, :-2] + grid_field_pre[2:, 1:-1] + grid_field_pre[:-2, 1:-1]
+        )
 
     Args:
         op_field (_type_): _description_

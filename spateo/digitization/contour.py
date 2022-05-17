@@ -20,23 +20,25 @@ def gen_cluster_image(
     spatial_key: str = "spatial",
     cluster_key: str = "scc",
     label_mapping_key: str = "cluster_img_label",
-    show: bool = True,
     cmap: str = "tab20",
+    show: bool = True,
 ) -> np.ndarray:
-    """Generate images with spatial cluster(s) a distinct color prepared from the designated cmap.
+    """Generate images of spatial clusters with distinct labels.
 
     Args:
-        adata: The adata object used to create the image for cluster(s).
+        adata: The adata object used to create the image for clusters.
         bin_size: The size of the binning.
-        spatial_key: The key name of the spatial coordinates.
-        cluster_key: The key name of the spatial cluster.
-        label_mapping_key: The key name to store the mapping between cluster name and label index values.
-        show: Visualize the cluster image.
+        spatial_key:  The key name of the spatial coordinates in `adata.obs`
+        cluster_key: The key name of the spatial cluster in `adata.obs`
+        label_mapping_key: The key name to store the label index values, mapped from the cluster names in `adata.obs`.
+            Note that background is 0 so `label_mapping_key` starts from 1.
         cmap: The colormap that will be used to draw colors for the resultant cluster image(s).
+        show: Visualize the cluster image.
 
     Returns:
-        cluster_image: A numpy array or a list of numpy arrays that store the image of each cluster, each with a
-        distinct color.
+        cluster_label_image: A numpy array that stores the image of clusters, each with a distinct color. When `show`
+            is True, `plt.imshow(cluster_rgb_image)` will be used to plot the cluster each with distinct labels prepared
+            from the designated cmap.
     """
 
     import matplotlib.pyplot as plt
@@ -54,11 +56,11 @@ def gen_cluster_image(
         color_ls.append(tuple(np.array(colors[i][:3] * 255).astype(int)))
 
     random.seed(1)
-    color_ls_cut = random.sample(color_ls, len(np.unique(adata.obs[cluster_key])))
+    color_ls_sampled = random.sample(color_ls, len(np.unique(adata.obs[cluster_key])))
 
     lm.main_info(f"Saving integer labels for clusters into adata.obs['{label_mapping_key}'].")
 
-    # background is 0, so adata.obs[label_mapping] start from 1
+    # background is 0, so adata.obs[label_mapping_key] starts from 1
     adata.obs[label_mapping_key] = 0
     cluster_list = np.unique(adata.obs[cluster_key])
     for i in range(len(cluster_list)):
@@ -85,14 +87,14 @@ def gen_cluster_image(
         lm.main_info(f"Plot the cluster image with the color(s) in the color list.")
         cluster_rgb_image = np.zeros((max_coords[0], max_coords[1], 3), np.uint8)
         for i in np.unique(adata.obs[label_mapping_key]):
-            cluster_rgb_image[cluster_label_image == i] = color_ls_cut[i - 1]
+            cluster_rgb_image[cluster_label_image == i] = color_ls_sampled[i - 1]
         plt.imshow(cluster_rgb_image)
 
     return cluster_label_image
 
 
 def extract_cluster_contours(
-    cluster_image: np.ndarray,
+    cluster_label_image: np.ndarray,
     cluster_labels: Union[int, List],
     bin_size: int,
     k_size: float = 2,
@@ -103,7 +105,7 @@ def extract_cluster_contours(
     """Extract contour(s) for area(s) formed by buckets of the same identified cluster.
 
     Args:
-        cluster_image: the image that sets the pixels of the cluster of interests as the front color (background is 0).
+        cluster_label_image: the image that sets the pixels of the cluster of interests as the front color (background is 0).
         cluster_labels: The label values of clusters of interests.
         bin_size: The size of the binning.
         k_size: kernel size of the elliptic structuring element.
@@ -123,7 +125,7 @@ def extract_cluster_contours(
     min_area = int(min_area * bin_size * bin_size)
 
     lm.main_info(f"Get selected areas with label id(s): {cluster_labels}.")
-    cluster_image_close = cluster_image.copy()
+    cluster_image_close = cluster_label_image.copy()
     if type(cluster_labels) == int:
         cluster_image_close = np.where(cluster_image_close == cluster_labels, cluster_image_close, 0)
     else:
@@ -143,7 +145,7 @@ def extract_cluster_contours(
     lm.main_info("Extract contours.")
     contours, _ = cv2.findContours(cluster_image_close, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
-    cluster_image_contour = np.zeros((cluster_image.shape[0], cluster_image.shape[1]))
+    cluster_image_contour = np.zeros((cluster_label_image.shape[0], cluster_label_image.shape[1]))
     for i in range(len(contours)):
         cv2.drawContours(cluster_image_contour, contours, i, i + 1, bin_size)
 
@@ -166,15 +168,19 @@ def set_domains(
     k_size: float = 2,
     min_area: float = 9,
 ) -> None:
-    """Set the domains for each bucket based on spatial clusters.
+    """Set the domains for each bucket based on spatial clusters. use low resolution for boundary but high resolution
+        for domain
 
     Args:
-        adata_high_res: The anndata object in high spatial resolution.
-        adata_low_res: The anndata object in low spatial resolution.
-        spatial_key: The key `.obsm` to the spatial coordinate of each bucket. Should be consistent in both
+        adata_high_res: The anndata object in high spatial resolution. We would like to use adata with smaller binning
+            (single cell segmetnation) to define more fine grained spatial domains.
+        adata_low_res: The anndata object in low spatial resolution. When using data with  big binning, we often
+            produce better spatial domain clustering results with the `scc` method.
+        spatial_key: The key in `.obsm` of the spatial coordinate for each bucket. Should be consistent in both
             `adata_high_res` and `adata_low_res`.
         cluster_key: The key in `.obs` to the spatial cluster.
-        domain_key_prefix: The key prefix in `.obs` that will be used to store the spatial domain for each bucket.
+        domain_key_prefix: The key prefix in `.obs` that will be used to store the spatial domain for each bucket. The
+            full key name will be set as: `domain_key_prefix` + "_" + `cluster_key`
         bin_size_low: The binning size of the adata_low_res object (when provided).
         k_size: kernel size of the elliptic structuring element.
         min_area: minimal area threshold corresponding to the resulting contour(s).

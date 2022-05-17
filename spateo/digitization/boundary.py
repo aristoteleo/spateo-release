@@ -102,7 +102,7 @@ def boundary_gridding(
         # plt.imshow(img_ex)
 
         ext_bdl_list_tmp = ext_bdl_list.copy()
-        ext_bdl_list_tmp.append(ext_bdl_list_tmp[0])
+        ext_bdl_list_tmp.append(ext_bdl_list_tmp[0])  # because it is a loop
         edge_point_index = []
         for i in range(len(ext_bdl_list_tmp) - 1):
             max_manh_dist = max(
@@ -124,8 +124,8 @@ def boundary_gridding(
 
     bdl_seg_all_list = bdl_seg_inner_list[::-1] + [bdl_seg_ori] + bdl_seg_outer_list
     for i_layer in range(n_layer * 2):
-        curr_layer_num = i_layer % 3 + 1
-        curr_sign = (-1) ** (i_layer // 3 + 1)
+        curr_layer_num = i_layer % n_layer + 1
+        curr_sign = (-1) ** (i_layer // n_layer + 1)
 
         seg_grid_img = draw_seg_grid(boundary_line_img, bdl_seg_all_list[i_layer], bdl_seg_all_list[i_layer + 1])
 
