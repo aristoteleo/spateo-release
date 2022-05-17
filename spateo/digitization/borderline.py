@@ -117,66 +117,77 @@ def grid_borderline(
     spatial_key: str = "spatial",
     init: bool = False,
 ) -> None:
-    """Extend the borderline to both interior and exterior sides to create different layers, and segment such layers to
-        create different columns.
+    """Extend the borderline to either interior or exterior side to each create `layer_num` layers, and segment such
+        layers to `column_num` columns.
 
     Args:
         adata: The adata object to be used for identifying the interior/exterior layers and columns.
-        borderline_img:
-        borderline_list:
-        layer_num: Number of layers to extend on both side.
+        borderline_img: The matrix that stores the image information of the borderline between the source and target
+            cluster(s).
+        borderline_list: An order list of np.arrays of coordinates of the borderlines.
+        layer_num: Number of layers to extend on either interior or exterior side.
         column_num: Number of columns to segment for each layer.
-        layer_width: Layer/column boundary width. Only affect grid_label.
+        layer_width: Layer/column boundary width. This only affects grid_label.
         spatial_key: The key name in `adata.obsm` of the spatial coordinates. Default to "spatial". Passed to
             `fill_grid_label` function.
-        init: Whether to regenerate the `layer_label_key` and `column_label_key` in `fill_grid_label` function.
+        init: Whether to generate (and potentially overwrite) the `layer_label_key` and `column_label_key` in
+            `fill_grid_label` function.
 
     Returns:
-        Nothing but update adata object with the following keys in `.obs`:
+        Nothing but update the adata object with following keys in `.obs`:
         1. layer_label_key: this key points to layer labels.
         2. column_label_key: this key points to column labels.
     """
 
-    lm.main_info(f"Generating borderline line image.")
+    lm.main_info(f"Segment the initial borderline.")
+    bdl_seg_ori = segment_bd_line(borderline_list, column_num)
+
     bdl_seg_inner_list = []
     bdl_seg_outer_list = []
 
-    bdl_seg_ori = segment_bd_line(borderline_list, column_num)
-
-    lm.main_info(f"Generating borderline line image.")
+    lm.main_info(f"Prepare lists of interior/exterior line segments.")
     for i_layer in range(layer_num):
         curr_layer = i_layer + 1
         extend_width = layer_width * curr_layer
 
         img_ex, ext_bdl_list = extend_layer(borderline_img, borderline_list, extend_width=extend_width)
-        # plt.imshow(img_ex)
 
         ext_bdl_list_tmp = ext_bdl_list.copy()
         ext_bdl_list_tmp.append(ext_bdl_list_tmp[0])  # because it is a loop
-        edge_point_index = []
+
+        # store the indices of four end points of the interior and exterior borderlines.
+        end_points_indices = []
         for i in range(len(ext_bdl_list_tmp) - 1):
-            max_manh_dist = max(
+            max_bdl_dist = max(
                 abs(ext_bdl_list_tmp[i][0] - ext_bdl_list_tmp[i + 1][0]),
                 abs(ext_bdl_list_tmp[i][1] - ext_bdl_list_tmp[i + 1][1]),
             )
-            if max_manh_dist > 1:
-                edge_point_index.append(i)
+            # the consecutive points on the borderlines should be smaller than 1.
+            if max_bdl_dist > 1:
+                end_points_indices.append(i)
 
-        ext_bdl_inner = ext_bdl_list[edge_point_index[0] + 1 : edge_point_index[1] + 1]
-        ext_bdl_outer = ext_bdl_list[edge_point_index[1] + 1 :] + ext_bdl_list[: edge_point_index[0] + 1]
+        # the interior and exterior borders are arrranged accordingly in the ext_bdl_list.
+        ext_bdl_inner = ext_bdl_list[end_points_indices[0] + 1 : end_points_indices[1] + 1]
+        ext_bdl_outer = ext_bdl_list[end_points_indices[1] + 1 :] + ext_bdl_list[: end_points_indices[0] + 1]
+
+        # inverse ext_bdl_outer, so that interior and exterior are ordered in the same orientation.
         ext_bdl_outer = ext_bdl_outer[::-1]
 
+        # segment and appened interior lines
         ext_bdl_inner_seg = segment_bd_line(ext_bdl_inner, column_num)
         bdl_seg_inner_list.append(ext_bdl_inner_seg)
 
+        # segment and appened exterior line
         ext_bdl_outer_seg = segment_bd_line(ext_bdl_outer, column_num)
         bdl_seg_outer_list.append(ext_bdl_outer_seg)
 
-    lm.main_info(f"Generating borderline line image.")
+    lm.main_info(f"Assign the interior/exterior layers and columns, and grid labels for each bucket.")
+
+    # order borderlines from the most inside to most outside.
     bdl_seg_all_list = bdl_seg_inner_list[::-1] + [bdl_seg_ori] + bdl_seg_outer_list
     for i_layer in range(layer_num * 2):
         curr_layer_num = i_layer % layer_num + 1
-        curr_sign = (-1) ** (i_layer // layer_num + 1)
+        curr_sign = (-1) ** (i_layer // layer_num + 1)  # interior layers will have negative values.
 
         seg_grid_img = draw_seg_grid(borderline_img, bdl_seg_all_list[i_layer], bdl_seg_all_list[i_layer + 1])
 

@@ -24,6 +24,23 @@ def fill_grid_label(
     column_label_key: str = "column_label",
     init: bool = False,
 ):
+    """
+
+    Args:
+        adata:
+        spatial_key:
+        seg_grid_img:
+        bdl_seg_coor_x:
+        bdl_seg_coor_y:
+        curr_layer:
+        curr_sign:
+        layer_label_key:
+        column_label_key:
+        init:
+
+    Returns:
+
+    """
 
     # mask image should be 2 pixels wider and higher, according to cv2.floodFill
     layer_grid_img = seg_grid_img.copy()
@@ -78,6 +95,16 @@ def format_boundary_line(
     pt_start,
     pt_end,
 ):
+    """
+
+    Args:
+        boundary_line_img:
+        pt_start:
+        pt_end:
+
+    Returns:
+
+    """
     ctrs, _ = cv2.findContours(boundary_line_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
     formatted_bdl_img = np.zeros_like(boundary_line_img, dtype=np.uint8)
@@ -104,6 +131,18 @@ def draw_seg_grid(
     gridline_width=1,
     mode="grid",
 ):
+    """
+
+    Args:
+        boundary_line_img:
+        bdl_seg_coor_x:
+        bdl_seg_coor_y:
+        gridline_width:
+        mode:
+
+    Returns:
+
+    """
 
     seg_grid_img = np.zeros_like(boundary_line_img, dtype=np.uint8)
 
@@ -131,24 +170,34 @@ def euclidean_dist(
     return math.sqrt((point_x[0] - point_y[0]) ** 2 + (point_x[1] - point_y[1]) ** 2)
 
 
-def segment_bd_line(  # Refactor not completed
-    boundary_line_list,
-    n_column,
+def segment_bd_line(
+    borderline_list: List[np.ndarray, ...],
+    column_num: int,
 ):
+    """Segment the borderline into `column_num` even segments based on the arclength along the borderline.
+
+    Args:
+        borderline_list: An order list of np.arrays of coordinates of the borderlines.
+        column_num: Number of columns to segment for each layer.
+
+    Returns:
+
+    """
+
     dist_ls = []  # dist between sequence points
     peri_ls = []  # accumulate dist
     dist_per = []  # length for each segmentation part
     slice_index = []  # index for segmentation points
 
     perimeter = 0
-    for i in range(len(boundary_line_list) - 1):
-        dist_ls.append(euclidean_dist(boundary_line_list[i + 1], boundary_line_list[i]))
+    for i in range(len(borderline_list) - 1):
+        dist_ls.append(euclidean_dist(borderline_list[i + 1], borderline_list[i]))
         perimeter += dist_ls[i]
         peri_ls.append(perimeter)
 
-    len_per_slice = perimeter / n_column
+    len_per_slice = perimeter / column_num
     lm.main_info(
-        f"Line total length: {round(perimeter, 2)}. Segmenting into {n_column} columns, with {round(len_per_slice, 2)} each."
+        f"Line total length: {round(perimeter, 2)}. Segmenting into {column_num} columns, with {round(len_per_slice, 2)} each."
     )
 
     ls_ex_dist_add_ar = np.array(peri_ls)
@@ -177,7 +226,7 @@ def segment_bd_line(  # Refactor not completed
                 dist_per.append(ls_ex_dist_add_ar[i])
                 ls_ex_dist_add_ar = ls_ex_dist_add_ar - ls_ex_dist_add_ar[i]
 
-    ls_ar_slice = np.array(boundary_line_list)[slice_index]
+    ls_ar_slice = np.array(borderline_list)[slice_index]
 
     return ls_ar_slice  # segmentation point list
 
@@ -187,6 +236,16 @@ def extend_layer(
     boundary_line_list,
     extend_width=10,
 ):
+    """
+
+    Args:
+        boundary_line_img:
+        boundary_line_list:
+        extend_width:
+
+    Returns:
+
+    """
 
     lm.main_info(f"Generating layer area.")
     extend_layer_mask = np.zeros_like(boundary_line_img, dtype=np.uint8)
@@ -226,7 +285,17 @@ def field_contour_line(
     min_pnt,
     max_pnt,
 ):
+    """
 
+    Args:
+        ctr_seq:
+        pnt_pos:
+        min_pnt:
+        max_pnt:
+
+    Returns:
+
+    """
     ctr_seq_rev = ctr_seq[::-1].copy()
     min_idx = ctr_seq.index(min_pnt)
     max_idx = ctr_seq.index(max_pnt) + 1
