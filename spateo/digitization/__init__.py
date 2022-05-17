@@ -2,5 +2,5 @@
 """
 
 from .boundary import *
-from .contour import *
-from .gridding import *
+from .contour import extract_cluster_contours, gen_cluster_image, set_domains
+from .gridding import digitize, gridit

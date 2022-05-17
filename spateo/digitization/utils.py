@@ -358,8 +358,8 @@ def domain_heat_eqn_solver(
     field_mask,
     max_err: float = 1e-5,
     max_itr: float = 1e5,
-    lp: int = 1,
-    hp: int = 100,
+    lh: float = 1,
+    hh: float = 100,
 ):
     """Given the boundaries and boundary conditions of a close spatial domain, solve heat equation (a simple partial
     differential equation) to define the "heat" for each spatial pixel which can be used to digitize the
@@ -379,18 +379,18 @@ def domain_heat_eqn_solver(
         field_mask (_type_): _description_
         max_err (_type_, optional): _description_. Defaults to 1e-5.
         max_itr (_type_, optional): _description_. Defaults to 1e5.
-        lp (int, optional): _description_. Defaults to 1.
-        hp (int, optional): _description_. Defaults to 100.
+        lh: _description_. Defaults to 1.
+        hh: _description_. Defaults to 100.
 
     Returns:
         _type_: _description_
     """
 
     init_field = op_field.copy()
-    add_ep_boundary(init_field, min_line, lp)
-    add_ep_boundary(init_field, max_line, hp)
-    add_gp_boundary(init_field, edge_line_a, lp, hp)
-    add_gp_boundary(init_field, edge_line_b, lp, hp)
+    add_ep_boundary(init_field, min_line, lh)
+    add_ep_boundary(init_field, max_line, hh)
+    add_gp_boundary(init_field, edge_line_a, lh, hh)
+    add_gp_boundary(init_field, edge_line_b, lh, hh)
 
     err = 1
     itr = 0
