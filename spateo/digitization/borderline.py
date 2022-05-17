@@ -110,7 +110,7 @@ def get_borderline(
 def grid_borderline(
     adata: AnnData,
     borderline_img: np.ndarray,
-    borderline_list: List[np.ndarray, ...],
+    borderline_list: List,
     layer_num: int = 3,
     column_num: int = 25,
     layer_width: int = 10,

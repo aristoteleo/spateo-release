@@ -101,7 +101,7 @@ def extract_cluster_contours(
     min_area: float = 9,
     close_kernel: int = cv2.MORPH_ELLIPSE,
     show: bool = True,
-) -> Tuple[Tuple[np.ndarray, ...], np.ndarray, np.ndarray]:
+) -> Tuple[Tuple, np.ndarray, np.ndarray]:
     """Extract contour(s) for area(s) formed by buckets of the same spatial cluster.
 
     Args:

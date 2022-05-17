@@ -14,7 +14,7 @@ from .utils import *
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def digitize(
     adata: AnnData,
-    ctrs: Tuple[np.ndarray, ...],
+    ctrs: Tuple,
     ctr_idx: int,
     pnt_xy: Tuple[int, int],
     pnt_Xy: Tuple[int, int],
