@@ -109,8 +109,8 @@ def extract_cluster_contours(
             is 0).
         cluster_labels: The label value(s) of clusters of interests.
         bin_size: The size of the binning.
-        k_size: kernel size of the elliptic structuring element.
-        min_area: minimal area threshold corresponding to the resulting contour(s).
+        k_size: Kernel size of the elliptic structuring element.
+        min_area: Minimal area threshold corresponding to the resulting contour(s).
         close_kernel: The value to indicate the structuring element. By default, we use a circular structuring element.
         show: Visualize the result.
 
@@ -184,8 +184,8 @@ def set_domains(
         domain_key_prefix: The key prefix in `.obs` (in `adata_high_res`) that will be used to store the spatial domain
             for each bucket. The full key name will be set as: `domain_key_prefix` + "_" + `cluster_key`.
         bin_size_low: The binning size of the `adata_low_res` object (when provided).
-        k_size: kernel size of the elliptic structuring element.
-        min_area: minimal area threshold corresponding to the resulting contour(s).
+        k_size: Kernel size of the elliptic structuring element.
+        min_area: Minimal area threshold corresponding to the resulting contour(s).
 
     Returns:
         Nothing but update the `adata_high_res` with the `domain` in `domain_key_prefix` + "_" + `cluster_key`.
