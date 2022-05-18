@@ -173,11 +173,11 @@ def grid_borderline(
         # inverse ext_bdl_outer, so that interior and exterior are ordered in the same orientation.
         ext_bdl_outer = ext_bdl_outer[::-1]
 
-        # segment and appened interior lines
+        # segment and appended interior lines
         ext_bdl_inner_seg = segment_bd_line(ext_bdl_inner, column_num)
         bdl_seg_inner_list.append(ext_bdl_inner_seg)
 
-        # segment and appened exterior line
+        # segment and appended exterior line
         ext_bdl_outer_seg = segment_bd_line(ext_bdl_outer, column_num)
         bdl_seg_outer_list.append(ext_bdl_outer_seg)
 
@@ -191,6 +191,7 @@ def grid_borderline(
 
         seg_grid_img = draw_seg_grid(borderline_img, bdl_seg_all_list[i_layer], bdl_seg_all_list[i_layer + 1])
 
+        # this function returns layer_grid_img, column_grid_img
         fill_grid_label(
             adata,
             spatial_key,
