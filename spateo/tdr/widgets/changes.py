@@ -254,7 +254,7 @@ def changes_along_branch(
     NumNodes: int = 50,
     inplace: bool = False,
     **kwargs,
-) -> Tuple[Union[DataSet, PolyData, UnstructuredGrid], Optional[PolyData], PolyData]:
+) -> Tuple[Union[DataSet, PolyData, UnstructuredGrid], PolyData]:
 
     model = model.copy() if not inplace else model
     X = model.points if spatial_key is None else model[spatial_key]
@@ -269,4 +269,4 @@ def changes_along_branch(
     fit_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=key_added, inplace=True)
     tree_model = construct_tree_model(nodes=nodes, edges=edges)
 
-    return model, tree_model if not inplace else None, tree_model
+    return model if not inplace else None, tree_model
