@@ -165,6 +165,7 @@ def set_domains(
     spatial_key: str = "spatial",
     cluster_key: str = "scc",
     domain_key_prefix: str = "domain",
+    bin_size_high: Optional[int] = None,
     bin_size_low: Optional[int] = None,
     k_size: float = 2,
     min_area: float = 9,
@@ -183,7 +184,8 @@ def set_domains(
         cluster_key: The key in `.obs` (`adata_low_res`) to the spatial cluster.
         domain_key_prefix: The key prefix in `.obs` (in `adata_high_res`) that will be used to store the spatial domain
             for each bucket. The full key name will be set as: `domain_key_prefix` + "_" + `cluster_key`.
-        bin_size_low: The binning size of the `adata_low_res` object (when provided).
+        bin_size_low: The binning size of the `adata_high_res` object.
+        bin_size_low: The binning size of the `adata_low_res` object (only works when `adata_low_res` is provided).
         k_size: Kernel size of the elliptic structuring element.
         min_area: Minimal area threshold corresponding to the resulting contour(s).
 
@@ -193,10 +195,13 @@ def set_domains(
 
     domain_key = domain_key_prefix + "_" + cluster_key
 
+    if bin_size_high is None:
+        bin_size_high = adata_high_res.uns["bin_size"]
+
     if adata_low_res is None:
         adata_low_res = adata_high_res
-
-    if bin_size_low is None:
+        bin_size_low = bin_size_high
+    elif bin_size_low is None:
         bin_size_low = adata_low_res.uns["bin_size"]
 
     lm.main_info(f"Generate the cluster label image with `gen_cluster_image`.")
