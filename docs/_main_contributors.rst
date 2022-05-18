@@ -6,7 +6,7 @@
    * `Joseph Min <https://github.com/Lioscro>`_: main developer, data io, cell segmentation ☀
    * `Jiajun Yao <https://github.com/Yao-14>`_: main developer, 3D reconstruction ☀
    * `Zehua Jing <https://github.com/Jinerhal>`_: main developer, clustering, region of interests ☀
-   * `Lulu Zuo <https://github.com/luluZuo>`_: main developer, differential / ligand-receptor analysis *
+   * `Lulu Zuo <https://github.com/luluZuo>`_: main developer, differential / ligand-receptor analysis ☀
    * `Hailin Pan <https://github.com/HailinPan>`_: main developer, cell segmentation ☀
    * `Shuai Wang <https://github.com/WangShuai-3>`_: developer, plotting ☀
    * `Yinqi Bai <https://github.com/HailinPan>`_: developer, region of interests ☀
