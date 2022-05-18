@@ -15,4 +15,4 @@
    * `Xiang Rong <https://github.com/xiangrong7>`_: developer
    * `Shiping Liu <https://github.com/Shiping>`_: supervision, guidance and support
    * `Longqi Liu <https://twitter.com/MLongqi>`_: involved in initial discussion of *spateo*
-   * `Jonathan Weissman <https://twitter.com/falexwolf>`_ & lab: supervision, guidance and support
+   * `Jonathan Weissman <https://weissman.wi.mit.edu/>`_ & lab: supervision, guidance and support
