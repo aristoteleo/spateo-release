@@ -5,7 +5,8 @@ from .changes import (
     changes_along_line,
     changes_along_shape,
     construct_tree_model,
-    fit_points_to_branch,
+    map_gene_to_branch,
+    map_points_to_branch,
 )
 from .clip import interactive_box_clip, interactive_rectangle_clip
 from .ddrtree import DDRTree, cal_ncenter

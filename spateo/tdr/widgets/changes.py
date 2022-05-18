@@ -1,6 +1,7 @@
 from typing import Optional, Tuple, Union
 
 import numpy as np
+import pandas as pd
 import pyvista as pv
 from pyvista import DataSet, MultiBlock, PolyData, UnstructuredGrid
 
@@ -184,7 +185,7 @@ def SimplePPT_tree(
     return nodes, edges
 
 
-def fit_points_to_branch(
+def map_points_to_branch(
     model: Union[PolyData, UnstructuredGrid],
     nodes: np.ndarray,
     spatial_key: Optional[str] = None,
@@ -220,6 +221,48 @@ def fit_points_to_branch(
     return model if not inplace else None
 
 
+def map_gene_to_branch(
+    model: Union[PolyData, UnstructuredGrid],
+    tree: PolyData,
+    key: Union[str, list],
+    nodes_key: Optional[str] = "nodes",
+    inplace: bool = False,
+):
+    """
+    Find the closest principal tree node to any point in the model through KDTree.
+
+    Args:
+        model: A reconstruct model contains the gene expression label.
+        tree: A three-dims principal tree model contains the nodes label.
+        key: The key that corresponds to the gene expression.
+        nodes_key: The key that corresponds to the coordinates of the nodes in the tree.
+        inplace: Updates tree model in-place.
+
+    Returns:
+        A tree, which contains the following properties:
+            `tree.point_data[key]`, the gene expression array.
+    """
+    model = model.copy()
+
+    model_data = pd.DataFrame(model[nodes_key], columns=["nodes_id"])
+    key = [key] if isinstance(key, str) else key
+    for sub_key in key:
+        model_data[sub_key] = np.asarray(model[sub_key])
+    model_data = model_data.groupby(by="nodes_id").sum()
+    model_data["nodes_id"] = model_data.index
+    model_data.index = range(len(model_data.index))
+
+    tree = tree.copy() if not inplace else tree
+
+    tree_data = pd.DataFrame(tree[nodes_key], columns=["nodes_id"])
+    tree_data = pd.merge(tree_data, model_data, how="outer", on="nodes_id")
+    tree_data.fillna(value=0, inplace=True)
+    for sub_key in key:
+        tree.point_data[sub_key] = tree_data[sub_key].values
+
+    return tree if not inplace else None
+
+
 def construct_tree_model(
     nodes: np.ndarray,
     edges: np.ndarray,
@@ -237,6 +280,7 @@ def construct_tree_model(
          A three-dims principal tree model, which contains the following properties:
             `tree_model.point_data[key_added]`, the nodes labels array.
     """
+
     padding = np.empty(edges.shape[0], int) * 2
     padding[:] = 2
     edges_w_padding = np.vstack((padding, edges.T)).T
@@ -249,6 +293,7 @@ def construct_tree_model(
 def changes_along_branch(
     model: Union[PolyData, UnstructuredGrid],
     spatial_key: Optional[str] = None,
+    map_key: Union[str, list] = None,
     key_added: Optional[str] = "nodes",
     rd_method: Literal["ElPiGraph", "SimplePPT"] = "ElPiGraph",
     NumNodes: int = 50,
@@ -266,7 +311,10 @@ def changes_along_branch(
     else:
         raise ValueError("`rd_method` value is wrong." "\nAvailable `rd_method` are: `'ElPiGraph'`, `'SimplePPT'`.")
 
-    fit_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=key_added, inplace=True)
+    map_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=key_added, inplace=True)
     tree_model = construct_tree_model(nodes=nodes, edges=edges)
+
+    if not (map_key is None):
+        map_gene_to_branch(model=model, tree=tree_model, key=map_key, nodes_key=key_added, inplace=True)
 
     return model if not inplace else None, tree_model
