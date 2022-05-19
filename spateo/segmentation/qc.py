@@ -15,6 +15,7 @@ def select_qc_regions(
     n: int = 4,
     size: int = 2000,
     seed: Optional[int] = None,
+    use_scale: bool = True,
     absolute: bool = False,
 ):
     """Select regions to use for segmentation quality control purposes.
@@ -31,6 +32,10 @@ def select_qc_regions(
         n: Number of regions to select if `regions` is not provided.
         size: Width and height of each randomly selected region.
         seed: Random seed.
+        use_scale: Whether or not the provided `regions` are in scale units.
+            This option only has effect when `regions` are
+            provided. `False` means the provided coordinates are in terms of
+            pixels.
         absolute: Whether or not the provided `regions` are in terms of absolute
             X and Y coordinates. This option only has effect when `regions` are
             provided. `False` means the provided coordinates are relative with
@@ -58,6 +63,9 @@ def select_qc_regions(
         lm.main_info(f"Using regions provided with `regions` argument.")
         _regions = np.zeros((len(regions), 4), dtype=int)
         adata_bounds = SKM.get_agg_bounds(adata)
+        binsize = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_BINSIZE_KEY)
+        scale = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY) * binsize
+        unit = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY)
         for i, region in enumerate(regions):
             if len(region) == 4:
                 xmin, xmax, ymin, ymax = region
@@ -67,6 +75,12 @@ def select_qc_regions(
                 ymax = ymin + size
             else:
                 raise SegmentationError("`regions` must be a list of 4-element or 2-element tuples.")
+
+            if use_scale and unit is not None:
+                xmin /= scale
+                xmax /= scale
+                ymin /= scale
+                ymax /= scale
 
             # If absolute = False, adjust for anndata bounds
             if not absolute:

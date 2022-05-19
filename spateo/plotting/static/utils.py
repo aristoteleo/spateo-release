@@ -17,8 +17,9 @@ import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from shapely.wkb import loads
+from typing_extensions import Literal
 
-from spateo.configuration import _themes
+from ...configuration import _themes
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -1685,7 +1686,7 @@ def _convert_to_geo_dataframe(adata, basis):
 
 
 def save_return_show_fig_utils(
-    save_show_or_return: str,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"],
     show_legend: bool,
     background: str,
     prefix: str,

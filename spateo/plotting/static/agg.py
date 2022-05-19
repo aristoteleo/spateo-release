@@ -7,10 +7,12 @@ from typing import Dict, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 from anndata import AnnData
+from matplotlib import patches
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from scipy.sparse import issparse
 from skimage.color import label2rgb
+from typing_extensions import Literal
 
 from ...configuration import SKM
 from ...errors import PlottingError
@@ -27,9 +29,9 @@ def imshow(
     use_scale: bool = True,
     absolute: bool = False,
     labels: bool = False,
-    background: Union[None, str] = None,
-    save_show_or_return: str = "show",
-    save_kwargs: Dict = {},
+    background: Optional[str] = None,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[Dict] = None,
     **kwargs,
 ) -> Optional[Tuple[Figure, Axes]]:
     """Display raw data within an AnnData.
@@ -54,13 +56,13 @@ def imshow(
             handle for you. Note that if theme
             is passed then this value will be overridden by the
             corresponding option of the theme.
-        save_show_or_return: `str` {'save', 'show', 'return', 'both', 'all'} (default: `show`)
-            Whether to save, show or return the figure. If "both", it will save and plot the figure at the same time. If
+        save_show_or_return: Whether to save, show or return the figure.
+            If "both", it will save and plot the figure at the same time. If
             "all", the figure will be saved, displayed and the associated axis and other object will be return.
-        save_kwargs: `dict` (default: `{}`)
-            A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
-            save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent":
-            True, "close": True, "verbose": True} as its parameters. Otherwise you can provide a dictionary that
+        save_kwargs: A dictionary that will passed to the save_fig function.
+            By default it is an empty dictionary and the save_fig function will use the
+            {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True, "verbose": True}
+            as its parameters. Otherwise you can provide a dictionary that
             properly modify those keys according to your needs.
         **kwargs: Additional keyword arguments are all passed to :func:`imshow`.
 
@@ -120,8 +122,82 @@ def imshow(
         save_show_or_return=save_show_or_return,
         show_legend=False,
         background=_background,
-        prefix="scatters",
-        save_kwargs=save_kwargs,
+        prefix="imshow",
+        save_kwargs=save_kwargs or {},
+        total_panels=1,
+        fig=fig,
+        axes=ax,
+        return_all=False,
+        return_all_list=None,
+    )
+
+
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE)
+def box_qc_regions(
+    adata: AnnData,
+    layer: str = SKM.X_LAYER,
+    use_scale: bool = True,
+    box_kwargs: Optional[Dict] = None,
+    ax: Optional[Axes] = None,
+    background: Optional[str] = None,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[Dict] = None,
+    **kwargs,
+):
+    """Indicate selected QC regions with boxes on the full tissue.
+
+    Args:
+        adata: Input Anndata
+        layer: Layer to display
+        use_scale: Whether or not to plot in physical units. Only valid when
+            appropriate scale keys are present in .uns
+        box_kwargs: Keyword arguments to pass to :func:`patches.Rectangle`. By default,
+            the boxes will be transparent with red outlines of 1 point thickness.
+        ax: Axes to plot.
+        background: string or None (optional, default 'None`)
+            The color of the background. Usually this will be either
+            'white' or 'black', but any color name will work. Ideally
+            one wants to match this appropriately to the colors being
+            used for points etc. This is one of the things that themes
+            handle for you. Note that if theme
+            is passed then this value will be overridden by the
+            corresponding option of the theme.
+        save_show_or_return: Whether to save, show or return the figure.
+            If "both", it will save and plot the figure at the same time. If
+            "all", the figure will be saved, displayed and the associated axis and other object will be return.
+        save_kwargs: A dictionary that will passed to the save_fig function.
+            By default it is an empty dictionary and the save_fig function will use the
+            {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True, "verbose": True}
+            as its parameters. Otherwise you can provide a dictionary that
+            properly modify those keys according to your needs.
+        **kwargs: Additional keyword arguments are all passed to :func:`imshow`.
+    """
+    regions = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_QC_KEY)
+    unit = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY)
+
+    kwargs.update(dict(ax=ax, use_scale=use_scale, save_show_or_return="return"))
+    fig, ax = imshow(adata, layer, **kwargs)
+
+    scale = 1
+    if use_scale and unit is not None:
+        binsize = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_BINSIZE_KEY)
+        scale = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY) * binsize
+
+    _box_kwargs = dict(edgecolor="red", linewidth=1.0, fill=False)
+    _box_kwargs.update(box_kwargs or {})
+    for region in regions:
+        xmin, xmax, ymin, ymax = region
+        box = patches.Rectangle(
+            (ymin * scale, xmin * scale), (ymax - ymin + 1) * scale, (xmax - xmin + 1) * scale, **_box_kwargs
+        )
+        ax.add_patch(box)
+
+    return save_return_show_fig_utils(
+        save_show_or_return=save_show_or_return,
+        show_legend=False,
+        background=background,
+        prefix="box_qc_regions",
+        save_kwargs=save_kwargs or {},
         total_panels=1,
         fig=fig,
         axes=ax,
@@ -136,9 +212,9 @@ def qc_regions(
     layer: str = SKM.X_LAYER,
     axes: Optional[np.ndarray] = None,
     ncols: int = 1,
-    background: Union[None, str] = None,
-    save_show_or_return: str = "show",
-    save_kwargs: Dict = {},
+    background: Optional[str] = None,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[Dict] = None,
     **kwargs,
 ) -> Optional[Tuple[Figure, np.ndarray]]:
     """Display QC regions.
@@ -157,13 +233,13 @@ def qc_regions(
             handle for you. Note that if theme
             is passed then this value will be overridden by the
             corresponding option of the theme.
-        save_show_or_return: `str` {'save', 'show', 'return', 'both', 'all'} (default: `show`)
-            Whether to save, show or return the figure. If "both", it will save and plot the figure at the same time. If
+        save_show_or_return: Whether to save, show or return the figure.
+            If "both", it will save and plot the figure at the same time. If
             "all", the figure will be saved, displayed and the associated axis and other object will be return.
-        save_kwargs: `dict` (default: `{}`)
-            A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
-            save_fig function will use the {"path": None, "prefix": 'qc_regions', "dpi": None, "ext": 'pdf', "transparent":
-            True, "close": True, "verbose": True} as its parameters. Otherwise you can provide a dictionary that
+        save_kwargs: A dictionary that will passed to the save_fig function.
+            By default it is an empty dictionary and the save_fig function will use the
+            {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True, "verbose": True}
+            as its parameters. Otherwise you can provide a dictionary that
             properly modify those keys according to your needs.
         **kwargs: Additional keyword arguments are all passed to :func:`imshow`.
 
@@ -210,8 +286,8 @@ def qc_regions(
         save_show_or_return=save_show_or_return,
         show_legend=False,
         background=background,
-        prefix="scatters",
-        save_kwargs=save_kwargs,
+        prefix="qc_regions",
+        save_kwargs=save_kwargs or {},
         total_panels=1,
         fig=fig,
         axes=axes,
