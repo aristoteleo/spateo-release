@@ -187,6 +187,20 @@ def box_qc_regions(
     _box_kwargs.update(box_kwargs or {})
     for region in regions:
         xmin, xmax, ymin, ymax = region
+        if (
+            str(xmin) not in adata.obs_names
+            or str(xmax) not in adata.obs_names
+            or str(ymin) not in adata.var_names
+            or str(ymax) not in adata.var_names
+        ):
+            lm.main_warning(f"Region {region} not in AnnData bounds.")
+            continue
+
+        # Modify bounds to match anndata bounds
+        xmin = adata.obs_names.get_loc(str(xmin))
+        xmax = adata.obs_names.get_loc(str(xmax))
+        ymin = adata.var_names.get_loc(str(ymin))
+        ymax = adata.var_names.get_loc(str(ymax))
         box = patches.Rectangle(
             (ymin * scale, xmin * scale), (ymax - ymin + 1) * scale, (xmax - xmin + 1) * scale, **_box_kwargs
         )
@@ -264,16 +278,16 @@ def qc_regions(
         xmin, xmax, ymin, ymax = region
         if (
             str(xmin) not in adata.obs_names
-            or str(xmax - 1) not in adata.obs_names
+            or str(xmax) not in adata.obs_names
             or str(ymin) not in adata.var_names
-            or str(ymax - 1) not in adata.var_names
+            or str(ymax) not in adata.var_names
         ):
             lm.main_warning(f"Region {region} not in AnnData bounds.")
             continue
         imshow(
             adata[
-                adata.obs_names.get_loc(str(xmin)) : adata.obs_names.get_loc(str(xmax - 1)) + 1,
-                adata.var_names.get_loc(str(ymin)) : adata.var_names.get_loc(str(ymax - 1)) + 1,
+                adata.obs_names.get_loc(str(xmin)) : adata.obs_names.get_loc(str(xmax)) + 1,
+                adata.var_names.get_loc(str(ymin)) : adata.var_names.get_loc(str(ymax)) + 1,
             ],
             layer,
             ax=ax,
