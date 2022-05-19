@@ -9,10 +9,10 @@
    * `Lulu Zuo <https://github.com/luluZuo>`_: main developer, differential / ligand-receptor analysis ☀
    * `Hailin Pan <https://github.com/HailinPan>`_: main developer, cell segmentation ☀
    * `Shuai Wang <https://github.com/WangShuai-3>`_: developer, plotting ☀
-   * `Yinqi Bai <https://github.com/HailinPan>`_: developer, region of interests ☀
    * `Xuanxuan Zuo <https://github.com/xuanxuanzou>`_: developer
    * `Liaoxiao Yan <https://github.com/liaoxiaoyanscnu>`_: developer
    * `Xiang Rong <https://github.com/xiangrong7>`_: developer
-   * `Shiping Liu <https://github.com/Shiping>`_: supervision, guidance and support
    * `Longqi Liu <https://twitter.com/MLongqi>`_: involved in initial discussions of *spateo*
+   * `Shiping Liu <https://github.com/Shiping>`_: supervision, guidance and support
    * `Jonathan Weissman <https://weissman.wi.mit.edu/>`_ & lab: supervision, guidance and support
+   * `Yinqi Bai <https://github.com/HailinPan>`_: developer, supervision, guidance and support ☀
