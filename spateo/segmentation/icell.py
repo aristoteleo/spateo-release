@@ -162,20 +162,19 @@ def _initial_nb_params(
 
     params = {}
     for label, _samples in samples.items():
-        threshold = filters.threshold_otsu(_samples)
+        # Background must have at least 2 different values to prevent the mean from being zero.
+        threshold = max(filters.threshold_otsu(_samples), 1)
         mask = _samples > threshold
         background_values = _samples[~mask]
         foreground_values = _samples[mask]
         w = np.array([_samples.size - mask.sum(), mask.sum()]) / _samples.size
         mu = np.array([background_values.mean(), foreground_values.mean()])
         var = np.array([background_values.var(), foreground_values.var()])
-        if (mu == 0).any():
-            raise SegmentationError("Estimated mean(s) equals to zero. Please increase `k`.")
 
         # Negative binomial distribution requires variance > mean
         if var[0] <= mu[0]:
             lm.main_warning(
-                f"Estimated variance of background ({var[0]:.2e}) is less than the mean ({mu[0]:.2e}). "
+                f"Bin {label} estimated variance of background ({var[0]:.2e}) is less than the mean ({mu[0]:.2e}). "
                 "Initial variance will be arbitrarily set to 1.1x of the mean. "
                 "This is usually due to extreme sparsity. Please consider increasing `k` or using "
                 "the zero-inflated distribution."
@@ -183,7 +182,7 @@ def _initial_nb_params(
             var[0] = mu[0] * 1.1
         if var[1] <= mu[1]:
             lm.main_warning(
-                f"Estimated variance of foreground ({var[1]:.2e}) is less than the mean ({mu[1]:.2e}). "
+                f"Bin {label} estimated variance of foreground ({var[1]:.2e}) is less than the mean ({mu[1]:.2e}). "
                 "Initial variance will be arbitrarily set to 1.1x of the mean. "
                 "This is usually due to extreme sparsity. Please consider increasing `k` or using "
                 "the zero-inflated distribution."
