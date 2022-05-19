@@ -210,12 +210,12 @@ Each pixel has two possible states: occupied or unoccupied. The conditional prob
 A variety of labeling approaches can be used to identify individual cells from the RNA-based mask.
 
 ```{note}
-In testing, we have found that the connected components and Watershed labeling approaches for RNA-based segmentation perform poorly when using total RNA. Therefore, we recommend only using these approaches when using fairly sparse RNA, such as specific genes (i.e. nuclearly localized genes) or unspliced RNA.
+In testing, we have found that the [](#watershed) labeling approach for RNA-based segmentation perform poorly when using total RNA. Therefore, we recommend only using this approach when using fairly sparse RNA, such as specific genes (i.e. nuclearly localized genes) or unspliced RNA.
 ```
 
 #### Connected components
 
-[Connected-component labeling](https://en.wikipedia.org/wiki/Connected-component_labeling) may be used to identify cell labels. Traditionally, connected-component labeling simply labels each connected "blob" of pixels as a single label. However, Spateo includes a modified version of this algorithm, {py:func}`spateo.segmentation.label_connected_components`, that provides various options to control its behavior. `area_threshold=np.inf` may be provided to perform traditional connected-component labeling.
+[Connected-component labeling](https://en.wikipedia.org/wiki/Connected-component_labeling) may be used to identify cell labels. Traditionally, connected-component labeling simply labels each connected "blob" of pixels as a single label. However, Spateo includes a modified version of this algorithm, {py:func}`spateo.segmentation.label_connected_components`, that provides various options to control its behavior. `area_threshold=np.inf` may be provided to perform traditional connected-component labeling. 
 
 The key difference is the addition of an area-aware splitting procedure. Briefly, after obtaining initial labels via traditional connected-component labeling, we attempt to split components that are larger than `area_threshold` pixels (default `500`) by iteratively eroding these large components (this procedure will slowly "split" large connected components), while retaining components less than or equal to `min_area` (default `100`). Then, all large connected components have been split, these new, smaller components are dilated up to a distance of `distance`  (default `8`), up to a maximum area of `max_area` (default `400`).
 
