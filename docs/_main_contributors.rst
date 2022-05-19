@@ -3,7 +3,7 @@
    `Contributor chart <https://github.com/aristoteleo/spateo-release/graphs/contributors>`_ | ☀ = maintainer
 
    * `Xiaojie Qiu <https://github.com/Xiaojieqiu>`_: initial conception, main developer, diverse contributions ☀
-   * `Joseph Min <https://github.com/Lioscro>`_: main developer, data io, cell segmentation ☀
+   * `Joseph Min <https://github.com/Lioscro>`_: main developer, data io, cell segmentation and package engineering ☀
    * `Jiajun Yao <https://github.com/Yao-14>`_: main developer, 3D reconstruction ☀
    * `Zehua Jing <https://github.com/Jinerhal>`_: main developer, clustering, region of interests ☀
    * `Lulu Zuo <https://github.com/luluZuo>`_: main developer, differential / ligand-receptor analysis ☀
