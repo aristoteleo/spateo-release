@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
@@ -17,6 +17,7 @@ def select_qc_regions(
     seed: Optional[int] = None,
     use_scale: bool = True,
     absolute: bool = False,
+    weight_func: Optional[Callable[[AnnData], float]] = lambda adata: np.log1p(adata.X.sum()),
 ):
     """Select regions to use for segmentation quality control purposes.
 
@@ -40,6 +41,12 @@ def select_qc_regions(
             X and Y coordinates. This option only has effect when `regions` are
             provided. `False` means the provided coordinates are relative with
             respect to the coordinates in the provided `adata`.
+        weight_func: Weighting function when `regions` is not provided. The probability of
+            selecting each `size x size` region will be weighted by this function, which
+            accepts a single AnnData (the region) as its argument, and returns a single
+            float weight, such that higher weights mean higher probability. By default,
+            the log1p of the sum of the counts in the `X` layer is used. Set to `None`
+            to weight each region equally.
     """
     if not regions:
         lm.main_info(f"Randomly selecting {n} regions of shape {(size, size)}.")
@@ -53,7 +60,14 @@ def select_qc_regions(
             raise SegmentationError("No possible regions found. This may indicate the `size` argument is to big.")
 
         rng = np.random.default_rng(seed)
-        choices = indices[rng.choice(np.arange(indices.shape[0]), n, replace=False)]
+        if weight_func is None:
+            idx = rng.choice(np.arange(indices.shape[0]), n, replace=False)
+        else:
+            p = np.zeros(indices.shape[0])
+            for i, (x, y) in enumerate(indices):
+                p[i] = weight_func(adata[x : x + size, y : y + size])
+            idx = rng.choice(np.arange(indices.shape[0]), n, replace=False, p=p / p.sum())
+        choices = indices[idx]
 
         for i, (x, y) in enumerate(choices):
             xmin = int(adata.obs_names[x])
