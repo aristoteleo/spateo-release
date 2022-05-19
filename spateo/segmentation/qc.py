@@ -30,7 +30,7 @@ def select_qc_regions(
         regions: List of tuples in the form `(xmin, ymin)` or `(xmin, xmax, ymin, ymax)`.
             If the later, the `size` argument is used to compute the bounding box.
         n: Number of regions to select if `regions` is not provided.
-        size: Width and height of each randomly selected region.
+        size: Width and height, in pixels, of each randomly selected region.
         seed: Random seed.
         use_scale: Whether or not the provided `regions` are in scale units.
             This option only has effect when `regions` are
