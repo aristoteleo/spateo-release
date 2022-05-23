@@ -33,7 +33,7 @@ def _add2plotter(
     ambient: float = 0.2,
     opacity: float = 1.0,
     point_size: float = 5.0,
-    model_style: Literal["points", "surface", "wireframe"] = "surface",
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
         "upper right",
@@ -118,7 +118,7 @@ def three_d_plot(
     ambient: float = 0.2,
     opacity: float = 1.0,
     point_size: float = 5.0,
-    model_style: Literal["points", "surface", "wireframe"] = "surface",
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     initial_cpo: Union[str, list] = "iso",
     legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
@@ -298,7 +298,7 @@ def three_d_plot_multi_cpos(
     ambient: float = 0.2,
     opacity: float = 1.0,
     point_size: float = 5.0,
-    model_style: Literal["points", "surface", "wireframe"] = "surface",
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     legend_size: Optional[Tuple] = None,
     legend_loc: Literal[
         "upper right",
@@ -484,7 +484,7 @@ def three_d_animate(
     ambient: float = 0.2,
     opacity: float = 1.0,
     point_size: float = 5.0,
-    model_style: Literal["points", "surface", "wireframe"] = "surface",
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     initial_cpo: Union[str, list] = "iso",
     legend_size: Optional[Tuple] = None,
     legend_loc: Literal[

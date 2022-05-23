@@ -73,7 +73,7 @@ def _set_jupyter(
         jupyter_backend = jupyter
     else:
         raise ValueError(
-            "\n`jupyter` value is wrong."
+            "`jupyter` value is wrong."
             "\nAvailable `jupyter` value are: `True`, `False`, `'panel'`, `'none'`, `'pythreejs'`, `'static'`, `'ipygany'`."
         )
 
@@ -87,7 +87,7 @@ def add_model(
     ambient: float = 0.2,
     opacity: float = 1.0,
     point_size: float = 5.0,
-    model_style: Literal["points", "surface", "wireframe"] = "surface",
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
 ):
     """
     Add model(s) to the plotter.
@@ -106,7 +106,7 @@ def add_model(
         model_style: Visualization style of the model. One of the following: style='surface', style='wireframe', style='points'.
     """
 
-    def _add_model(_p, _model):
+    def _add_model(_p, _model, _style):
         """Add any PyVista/VTK model to the scene."""
 
         scalars = f"{key}_rgba" if key in _model.array_names else _model.active_scalars_name
@@ -116,19 +116,28 @@ def add_model(
             scalars=scalars,
             rgba=True,
             render_points_as_spheres=True,
-            style=model_style,
+            style=_style,
             point_size=point_size,
             ambient=ambient,
             opacity=opacity,
             smooth_shading=True,
         )
 
+    # Set model style.
+    model_style = [model_style] if isinstance(model_style, str) else model_style
     # Add model(s) to the plotter.
     if isinstance(model, MultiBlock):
-        for sub_model in model:
-            _add_model(_p=plotter, _model=sub_model)
+        n_model, n_ms = len(model), len(model_style)
+        if n_ms == 1:
+            for sub_model in model:
+                _add_model(_p=plotter, _model=sub_model, _style=model_style[0])
+        elif n_ms == n_model:
+            for sub_model, ms in zip(model, model_style):
+                _add_model(_p=plotter, _model=sub_model, _style=ms)
+        else:
+            raise ValueError("`model_style` value is wrong. Please check the number of model_style.")
     else:
-        _add_model(_p=plotter, _model=model)
+        _add_model(_p=plotter, _model=model, _style=model_style[0])
 
 
 def add_outline(
