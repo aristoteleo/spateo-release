@@ -473,6 +473,200 @@ def three_d_plot_multi_cpos(
     return output_plotter(plotter=p, filename=filename, view_up=view_up, framerate=framerate, jupyter=jupyter)
 
 
+def three_d_plot_multi_models(
+    models: MultiBlock,
+    key: Union[str, list] = None,
+    filename: Optional[str] = None,
+    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    off_screen: bool = False,
+    cpo: Union[str, list] = "iso",
+    shape: Union[str, list, tuple] = None,
+    window_size: Optional[tuple] = None,
+    background: str = "white",
+    ambient: float = 0.2,
+    opacity: float = 1.0,
+    point_size: float = 5.0,
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
+    legend_size: Optional[Tuple] = None,
+    legend_loc: Literal[
+        "upper right",
+        "upper left",
+        "lower left",
+        "lower right",
+        "center left",
+        "center right",
+        "lower center",
+        "upper center",
+        "center",
+    ] = "lower right",
+    outline: bool = False,
+    outline_width: float = 5.0,
+    outline_labels: bool = True,
+    text: Union[str, list] = None,
+    text_font: Literal["times", "courier", "arial"] = "times",
+    text_size: Union[int, float] = 18,
+    text_color: Union[str, tuple, list, None] = None,
+    text_loc: Literal[
+        "lower_left",
+        "lower_right",
+        "upper_left",
+        "upper_right",
+        "lower_edge",
+        "upper_edge",
+        "right_edge",
+        "left_edge",
+    ] = "upper_left",
+    view_up: tuple = (0.5, 0.5, 1),
+    framerate: int = 15,
+    plotter_filename: Optional[str] = None,
+):
+    """
+    Multi-view visualization of reconstructed 3D model.
+
+    Args:
+        models: A MultiBlock of reconstructed models.
+        key: The key under which are the labels.
+        filename: Filename of output file. Writer type is inferred from the extension of the filename.
+                * Output an image file,
+                  please enter a filename ending with
+                  `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
+                * Output a gif file, please enter a filename ending with `.gif`.
+                * Output a mp4 file, please enter a filename ending with `.mp4`.
+        jupyter: Whether to plot in jupyter notebook.
+                * `'none'` : Do not display in the notebook.
+                * `'pythreejs'` : Show a pythreejs widget
+                * `'static'` : Display a static figure.
+                * `'ipygany'` : Show an ipygany widget
+                * `'panel'` : Show a panel widget.
+        off_screen: Renders off-screen when True. Useful for automated screenshots.
+        cpo: Camera position of the window.
+        shape: Number of sub-render windows inside the main window. Specify two across with shape=(2, 1) and a two by
+               two grid with shape=(2, 2). By default, there is only one render window. Can also accept a string descriptor
+               as shape. E.g.:
+               shape="3|1" means 3 plots on the left and 1 on the right,
+               shape="4/2" means 4 plots on top and 2 at the bottom.
+        window_size: Window size in pixels. The default window_size is `[1024, 768]`.
+        background: The background color of the window.
+        ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
+                 the actor when not directed at the light source emitted from the viewer.
+        opacity: Opacity of the model. If a single float value is given, it will be the global opacity of the model and
+                 uniformly applied everywhere - should be between 0 and 1.
+                 A string can also be specified to map the scalars range to a predefined opacity transfer function
+                 (options include: 'linear', 'linear_r', 'geom', 'geom_r').
+        point_size: Point size of any nodes in the dataset plotted.
+        model_style: Visualization style of the model. One of the following: style='surface', style='wireframe', style='points'.
+        legend_size: Two float tuple, each float between 0 and 1.
+                     For example (0.1, 0.1) would make the legend 10% the size of the entire figure window.
+                     If legend_size is None, legend_size will be adjusted adaptively.
+        legend_loc: The location of the legend in the window. Available `legend_loc` are:
+                * `'upper right'`
+                * `'upper left'`
+                * `'lower left'`
+                * `'lower right'`
+                * `'center left'`
+                * `'center right'`
+                * `'lower center'`
+                * `'upper center'`
+                * `'center'`
+        outline: Produce an outline of the full extent for the model.
+        outline_width: The width of outline.
+        outline_labels: Whether to add the length, width and height information of the model to the outline.
+        text: The text to add the rendering.
+        text_font: The font of the text. Available `text_font` are:
+                * `'times'`
+                * `'courier'`
+                * `'arial'`
+        text_size: The size of the text.
+        text_color: The color of the text.
+        text_loc: The location of the text in the window. Available `text_loc` are:
+                * `'lower_left'`
+                * `'lower_right'`
+                * `'upper_left'`
+                * `'upper_right'`
+                * `'lower_edge'`
+                * `'upper_edge'`
+                * `'right_edge'`
+                * `'left_edge'`
+        view_up: The normal to the orbital plane. Only available when filename ending with `.mp4` or `.gif`.
+        framerate: Frames per second. Only available when filename ending with `.mp4` or `.gif`.
+        plotter_filename: The filename of the file where the plotter is saved.
+                          Writer type is inferred from the extension of the filename.
+                * Output a gltf file, please enter a filename ending with `.gltf`.
+                * Output a html file, please enter a filename ending with `.html`.
+                * Output an obj file, please enter a filename ending with `.obj`.
+                * Output a vtkjs file, please enter a filename without format.
+
+    """
+    n_model = len(models)
+    shape = (math.ceil(n_model / 5), 5) if shape is None else shape
+    if isinstance(shape, (tuple, list)):
+        n_subplots = shape[0] * shape[1]
+        subplots = []
+        for i in range(n_subplots):
+            col = math.floor(i / shape[1])
+            ind = i - col * shape[1]
+            subplots.append([col, ind])
+    else:
+        shape_x, shape_y = re.split("[/|]", shape)
+        n_subplots = int(shape_x) * int(shape_y)
+        subplots = [i for i in range(n_subplots)]
+
+    if window_size is None:
+        win_x, win_y = (shape[1], shape[0]) if isinstance(shape, (tuple, list)) else (1, 1)
+        window_size = (1024 * win_x, 768 * win_y)
+
+    keys = key if isinstance(key, list) else [key]
+    keys = keys * n_model if len(keys) == 1 else keys
+
+    cpos = cpo if isinstance(cpo, list) else [cpo]
+    cpos = cpos * n_model if len(cpos) == 1 else cpos
+
+    texts = text if isinstance(text, list) else [text]
+    texts = texts * n_model if len(texts) == 1 else texts
+
+    plotter_kws = dict(
+        jupyter=False if jupyter is False else True,
+        window_size=window_size,
+        background=background,
+        shape=shape,
+    )
+
+    model_kws = dict(
+        background=background,
+        ambient=ambient,
+        opacity=opacity,
+        point_size=point_size,
+        model_style=model_style,
+        legend_size=legend_size,
+        legend_loc=legend_loc,
+        outline=outline,
+        outline_width=outline_width,
+        outline_labels=outline_labels,
+        text_font=text_font,
+        text_size=text_size,
+        text_color=text_color,
+        text_loc=text_loc,
+    )
+
+    # Set jupyter.
+    off_screen1, off_screen2, jupyter_backend = _set_jupyter(jupyter=jupyter, off_screen=off_screen)
+
+    # Create a plotting object to display pyvista/vtk model.
+    p = create_plotter(off_screen=off_screen1, **plotter_kws)
+    for model, sub_key, sub_cpo, sub_text, subplot_index in zip(models, keys, cpos, texts, subplots):
+        p.subplot(subplot_index[0], subplot_index[1])
+        _add2plotter(model=model, plotter=p, key=sub_key, text=sub_text, **model_kws)
+        p.camera_position = sub_cpo
+        p.add_axes()
+
+    # Save the plotting object.
+    if plotter_filename is not None:
+        save_plotter(plotter=p, filename=plotter_filename)
+
+    # Output the plotting object.
+    return output_plotter(plotter=p, filename=filename, view_up=view_up, framerate=framerate, jupyter=jupyter)
+
+
 def three_d_animate(
     models: Union[List[PolyData or UnstructuredGrid], MultiBlock],
     key: Optional[str] = None,
