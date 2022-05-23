@@ -4,8 +4,7 @@ import numpy as np
 from pyvista import PolyData, UnstructuredGrid
 from sklearn.neighbors import KernelDensity
 
-from spateo.logging import logger_manager as lm
-
+from ...logging import logger_manager as lm
 from ..models import add_model_labels
 
 

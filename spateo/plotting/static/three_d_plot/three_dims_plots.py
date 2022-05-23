@@ -11,8 +11,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from spateo.tdr import collect_model
-
+from ....tdr import collect_model
 from .three_dims_plotter import (
     _set_jupyter,
     add_legend,

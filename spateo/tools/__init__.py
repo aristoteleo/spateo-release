@@ -1,5 +1,3 @@
-from spateo.tools.cluster.find_clusters import scc, spagcn_pyg
-
 from .architype import (
     archetypes,
     archetypes_genes,
@@ -8,6 +6,7 @@ from .architype import (
     get_genes_from_spatial_archetype,
 )
 from .cluster import *
+from .cluster.find_clusters import scc, spagcn_pyg
 from .cluster_degs import (
     find_all_cluster_degs,
     find_cluster_degs,
