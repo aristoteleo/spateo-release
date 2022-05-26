@@ -4,11 +4,11 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy import sparse
+from scipy.sparse import issparse
 from scipy.stats import gmean, pearsonr
 from typing_extensions import Literal
 
 from ..configuration import SKM
-from ..logging import logger_manager as lm
 
 
 # Niches
@@ -20,7 +20,8 @@ def niches(
     spatial_neighbors: str = "spatial_neighbors",
     spatial_distances: str = "spatial_distances",
     species: Literal["human", "mouse"] = "human",
-    system: Literal["niches_c2c", "niches_n2c"] = "niches_c2c",
+    system: Literal["niches_c2c", "niches_n2c"] = "niches_n2c",
+    method: Literal["gmean", "mean"] = "gmean",
 ) -> AnnData:
     """Performing cell-cell transformation on an anndata object, while also
        limiting the nearest neighbor per cell to k. This function returns
@@ -30,7 +31,7 @@ def niches(
        dimensional reduction of the row or column of this object.
 
     Our method is adapted from:
-        Robin Browaeys, Wouter Saelens & Yvan Saeys. NicheNet: modeling intercellular communication by linking ligands
+         Robin Browaeys, Wouter Saelens & Yvan Saeys. NicheNet: modeling intercellular communication by linking ligands
         to target genes. Nature Methods volume 17, pages159–162 (2020).
 
     Args:
@@ -61,7 +62,7 @@ def niches(
         lr_network = pd.read_csv(path + "lr_network.csv", index_col=0)
     else:
         lr_network = pd.read_csv(path + "lr_network_mouse.csv", index_col=0)
-
+    x_sparse = issparse(adata.X)
     # expressed lr_network
     ligand = lr_network["from"].unique()
     expressed_ligand = list(set(ligand) & set(adata.var_names))
@@ -73,7 +74,7 @@ def niches(
     if len(expressed_receptor) == 0:
         raise ValueError(f"No intersected receptor between your adata object" f" and lr_network dataset.")
     lr_network = lr_network[lr_network["to"].isin(expressed_receptor)]
-    ligand_matrix = adata[:, lr_network["from"]].X.A.T
+    ligand_matrix = adata[:, lr_network["from"]].X.A.T if x_sparse else adata[:, lr_network["from"]].X.T
 
     # spatial neighbors
     if spatial_neighbors not in adata.uns.keys():
@@ -91,6 +92,7 @@ def niches(
     k = adata.uns["spatial_neighbors"]["params"]["n_neighbors"]
 
     # construct c2c matrix
+    cell_pair = []  # bucket-bucket pair
     if system == "niches_c2c":
         X = np.zeros(shape=(ligand_matrix.shape[0], k * adata.n_obs))
         if weighted:
@@ -107,8 +109,6 @@ def niches(
             for i in range(ligand_matrix.shape[1]):
                 receptor_matrix = adata[nw["neighbors"][i], lr_network["to"]].X.A.T
                 X[:, i * k : (i + 1) * k] = receptor_matrix * ligand_matrix[:, i].reshape(-1, 1)
-        # bucket-bucket pair
-        cell_pair = []
         for i, cell_id in enumerate(nw["neighbors"]):
             cell_pair.append(adata.obs.index[i] + "-" + adata.obs.index[cell_id])
         cell_pair = [i for j in cell_pair for i in j]
@@ -123,12 +123,36 @@ def niches(
             row, col = np.diag_indices_from(nw["weights"])
             nw["weights"][row, col] = 1
             weight = np.zeros(shape=(adata.n_obs, k))
+            for i, row in enumerate(nw["weights"].A):
+                weight[i, :] = 1 / row[nw["neighbors"][i]]
             for i in range(ligand_matrix.shape[1]):
-                receptor_matrix = gmean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
+                if method == "gmean":
+                    receptor_matrix = (
+                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.A.T + 1) * weight[i, :], axis=1)
+                        if x_sparse
+                        else gmean((adata[nw["neighbors"][i], lr_network["to"]].X.T + 1) * weight[i, :], axis=1)
+                    )
+                else:
+                    receptor_matrix = (
+                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
+                        if x_sparse
+                        else np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.T * weight[i, :], axis=1)
+                    )
                 X[:, i] = receptor_matrix * ligand_matrix[:, i]
         else:
             for i in range(ligand_matrix.shape[1]):
-                receptor_matrix = gmean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T, axis=1)
+                if method == "gmean":
+                    receptor_matrix = (
+                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.A.T + 1), axis=1)
+                        if x_sparse
+                        else gmean((adata[nw["neighbors"][i], lr_network["to"]].X.T + 1), axis=1)
+                    )
+                else:
+                    receptor_matrix = (
+                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T, axis=1)
+                        if x_sparse
+                        else np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.T, axis=1)
+                    )
                 X[:, i] = receptor_matrix * ligand_matrix[:, i]
         # bucket-bucket pair
         cell_pair = []
@@ -161,7 +185,7 @@ def predict_ligand_activities(
 ) -> pd.DataFrame:
     """Function to predict the ligand activity.
 
-     Our method is adapted from:
+        Our method is adapted from:
         Micha Sam Brickman Raredon, Junchen Yang, Neeharika Kothapalli,  Naftali Kaminski, Laura E. Niklason,
         Yuval Kluger. Comprehensive visualization of cell-cell interactions in single-cell and spatial transcriptomics
         with NICHES. doi: https://doi.org/10.1101/2022.01.23.477401
@@ -175,7 +199,6 @@ def predict_ligand_activities(
             expressed genes in receiver cells (comparing cells in case and
             control group). Ligands activity prediction is based on this gene
             set. By default, all genes expressed in receiver cells is used.
-
     Returns:
         A pandas DataFrame of the predicted activity ligands.
 
@@ -267,7 +290,7 @@ def predict_ligand_activities(
     return res
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def predict_target_genes(
     adata: AnnData,
     path: str,
@@ -294,7 +317,6 @@ def predict_target_genes(
         top_target: `int` (default=300)
             Infer target genes of top-ranked ligands, and choose the top targets
             according to the general prior model.
-
     Returns:
         A pandas DataFrame of the predict target genes.
 
