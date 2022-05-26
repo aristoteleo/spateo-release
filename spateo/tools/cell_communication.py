@@ -1,10 +1,10 @@
 from typing import List, Optional
 
-import dynamo as dyn
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy import sparse
+from scipy.sparse import issparse
 from scipy.stats import gmean, pearsonr
 from typing_extensions import Literal
 
@@ -12,7 +12,7 @@ from ..configuration import SKM
 
 
 # Niches
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def niches(
     adata: AnnData,
     path: str,
@@ -29,6 +29,10 @@ def niches(
        -bucket pairs, while the rows ligand-receptor mechanisms. This resultant
        anndated object allows flexible downstream manipulations such as the
        dimensional reduction of the row or column of this object.
+
+    Our method is adapted from:
+         Robin Browaeys, Wouter Saelens & Yvan Saeys. NicheNet: modeling intercellular communication by linking ligands
+        to target genes. Nature Methods volume 17, pages159–162 (2020).
 
     Args:
         path: Path to ligand_receptor network of NicheNet (prior lr_network).
@@ -55,7 +59,6 @@ def niches(
     """
     # prior lr_network
     if species == "human":
-        # lr_network = pd.read_csv(path + :"lr_network_cellphone.csv",index_col=0)
         lr_network = pd.read_csv(path + "lr_network.csv", index_col=0)
     else:
         lr_network = pd.read_csv(path + "lr_network_mouse.csv", index_col=0)
@@ -89,6 +92,7 @@ def niches(
     k = adata.uns["spatial_neighbors"]["params"]["n_neighbors"]
 
     # construct c2c matrix
+    cell_pair = []  # bucket-bucket pair
     if system == "niches_c2c":
         X = np.zeros(shape=(ligand_matrix.shape[0], k * adata.n_obs))
         if weighted:
@@ -105,8 +109,6 @@ def niches(
             for i in range(ligand_matrix.shape[1]):
                 receptor_matrix = adata[nw["neighbors"][i], lr_network["to"]].X.A.T
                 X[:, i * k : (i + 1) * k] = receptor_matrix * ligand_matrix[:, i].reshape(-1, 1)
-        # bucket-bucket pair
-        cell_pair = []
         for i, cell_id in enumerate(nw["neighbors"]):
             cell_pair.append(adata.obs.index[i] + "-" + adata.obs.index[cell_id])
         cell_pair = [i for j in cell_pair for i in j]
@@ -172,7 +174,7 @@ def niches(
 
 
 # NicheNet
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def predict_ligand_activities(
     adata: AnnData,
     path: str,
@@ -182,6 +184,12 @@ def predict_ligand_activities(
     species: Literal["human", "mouse"] = "human",
 ) -> pd.DataFrame:
     """Function to predict the ligand activity.
+
+        Our method is adapted from:
+        Micha Sam Brickman Raredon, Junchen Yang, Neeharika Kothapalli,  Naftali Kaminski, Laura E. Niklason,
+        Yuval Kluger. Comprehensive visualization of cell-cell interactions in single-cell and spatial transcriptomics
+        with NICHES. doi: https://doi.org/10.1101/2022.01.23.477401
+
     Args:
         path: Path to ligand_target_matrix, lr_network (human and mouse).
         adata: An Annodata object.
@@ -198,7 +206,6 @@ def predict_ligand_activities(
     # load ligand_target_matrix
     if species == "human":
         ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix.csv", index_col=0)
-        # lr_network = pd.read_csv(path + "lr_network_cellphone.csv", index_col=0)
         lr_network = pd.read_csv(path + "lr_network.csv", index_col=0)
     else:
         ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix_mouse.csv", index_col=0)
