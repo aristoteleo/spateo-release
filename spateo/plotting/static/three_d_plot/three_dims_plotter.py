@@ -83,11 +83,11 @@ def _set_jupyter(
 def add_model(
     plotter: Plotter,
     model: Union[PolyData, UnstructuredGrid, MultiBlock],
-    key: Optional[str] = None,
+    key: Union[str, list] = None,
     ambient: float = 0.2,
     opacity: float = 1.0,
-    point_size: float = 5.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
+    model_size: float = 5.0,
 ):
     """
     Add model(s) to the plotter.
@@ -102,42 +102,42 @@ def add_model(
                  uniformly applied everywhere - should be between 0 and 1.
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
-        point_size: Point size of any nodes in the dataset plotted.
         model_style: Visualization style of the model. One of the following: style='surface', style='wireframe', style='points'.
+        model_size: If model_style=`points`, point size of any nodes in the dataset plotted.
+                    If model_style=`wireframe`, thickness of lines.
     """
 
-    def _add_model(_p, _model, _style):
+    def _add_model(_p, _model, _key, _style):
         """Add any PyVista/VTK model to the scene."""
 
-        scalars = f"{key}_rgba" if key in _model.array_names else _model.active_scalars_name
-
+        scalars = f"{_key}_rgba" if _key in _model.array_names else _model.active_scalars_name
         _p.add_mesh(
             _model,
             scalars=scalars,
             rgba=True,
             render_points_as_spheres=True,
             style=_style,
-            point_size=point_size,
+            point_size=model_size,
+            line_width=model_size,
             ambient=ambient,
             opacity=opacity,
             smooth_shading=True,
         )
 
-    # Set model style.
-    model_style = [model_style] if isinstance(model_style, str) else model_style
     # Add model(s) to the plotter.
     if isinstance(model, MultiBlock):
-        n_model, n_ms = len(model), len(model_style)
-        if n_ms == 1:
-            for sub_model in model:
-                _add_model(_p=plotter, _model=sub_model, _style=model_style[0])
-        elif n_ms == n_model:
-            for sub_model, ms in zip(model, model_style):
-                _add_model(_p=plotter, _model=sub_model, _style=ms)
-        else:
-            raise ValueError("`model_style` value is wrong. Please check the number of model_style.")
+        n_model = len(model)
+        # Set model style and key.
+        mss = model_style if isinstance(model_style, list) else [model_style]
+        mss = mss * n_model if len(mss) == 1 else mss
+
+        keys = key if isinstance(key, list) else [key]
+        keys = keys * n_model if len(keys) == 1 else keys
+
+        for sub_model, sub_ms, sub_key in zip(model, mss, keys):
+            _add_model(_p=plotter, _model=sub_model, _key=sub_key, _style=sub_ms)
     else:
-        _add_model(_p=plotter, _model=model, _style=model_style[0])
+        _add_model(_p=plotter, _model=model, _key=key, _style=model_style)
 
 
 def add_outline(
@@ -145,9 +145,10 @@ def add_outline(
     model: Union[PolyData, UnstructuredGrid, MultiBlock],
     outline_width: float = 5.0,
     outline_color: Union[str, tuple] = "black",
-    labels: bool = True,
+    show_labels: bool = True,
     labels_size: int = 16,
     labels_color: Union[str, tuple] = "white",
+    labels_font: Literal["times", "courier", "arial"] = "times",
 ):
     """
     Produce an outline of the full extent for the model.
@@ -158,15 +159,19 @@ def add_outline(
         model: A reconstructed model.
         outline_width: The width of the outline.
         outline_color: The color of the outline.
-        labels: Whether to add the length, width and height information of the model to the outline.
+        show_labels: Whether to add the length, width and height information of the model to the outline.
         labels_size: The size of the label font.
         labels_color: The color of the label.
+        labels_font: The font of the text. Available `labels_font` are:
+                * `'times'`
+                * `'courier'`
+                * `'arial'`
     """
 
     model_outline = model.outline()
     plotter.add_mesh(model_outline, color=outline_color, line_width=outline_width)
 
-    if labels is True:
+    if show_labels is True:
         mo_points = np.asarray(model_outline.points)
         model_x = mo_points[:, 0].max() - mo_points[:, 0].min()
         model_y = mo_points[:, 1].max() - mo_points[:, 1].min()
@@ -188,7 +193,7 @@ def add_outline(
             labels=momid_labels,
             bold=True,
             font_size=labels_size,
-            font_family="arial",
+            font_family=labels_font,
             shape="rounded_rect",
             shape_color=outline_color,
             show_points=False,
@@ -317,7 +322,13 @@ def add_text(
                 * `'right_edge'`
                 * `'left_edge'`
     """
-    plotter.add_text(text=text, font=text_font, color=text_color, font_size=text_size, position=text_loc)
+    plotter.add_text(
+        text=text,
+        font=text_font,
+        color=text_color,
+        font_size=text_size,
+        position=text_loc,
+    )
 
 
 def output_plotter(
