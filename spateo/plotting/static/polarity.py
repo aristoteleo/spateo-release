@@ -25,24 +25,31 @@ def polarity(
         _type_: _description_
     """
 
-    digi_region = []
-    gene_list = []
-    gene_mean = []
-
-    for i in np.unique(adata.obs[region_key]):
-        adata_tmp = adata[adata.obs[region_key] == i, :]
-        for anno in list(gene_dict.keys()):
-            for gene in gene_dict[anno]:
-                digi_region.append(i)
-                gene_list.append(gene + " " + anno)
-                gene_mean.append(np.mean(adata_tmp[:, gene].X))
-
-    df_plt = pd.DataFrame({region_key: digi_region, "Gene": gene_list, "Mean expression": gene_mean})
+    digi_region = np.array([])
+    gene_list = np.array([])
+    gene_mean = np.array([])
 
     if mode == "exp":
-        p = sns.lineplot(data=df_plt, x=region_key, y="Mean expression", hue="Gene")
+        for i in np.unique(adata.obs[region_key]):
+            adata_tmp = adata[adata.obs[region_key] == i, :]
+            for anno in list(gene_dict.keys()):
+                for gene in gene_dict[anno]:
+                    gene_mean_tmp = adata_tmp[:, gene].X.toarray().T[0]
+                    digi_region = np.append(digi_region, np.repeat(i, len(adata_tmp)))
+                    gene_list = np.append(gene_list, np.repeat(gene + " " + anno, len(adata_tmp)))
+                    gene_mean = np.append(gene_mean, gene_mean_tmp)
+        df_plt = pd.DataFrame({region_key: digi_region, "Gene": gene_list, "Mean expression": gene_mean})
+        ax = sns.lineplot(data=df_plt, x=region_key, y="Mean expression", hue="Gene")
     elif mode == "density":
+        for i in np.unique(adata.obs[region_key]):
+            adata_tmp = adata[adata.obs[region_key] == i, :]
+            for anno in list(gene_dict.keys()):
+                for gene in gene_dict[anno]:
+                    digi_region.append(i)
+                    gene_list.append(gene + " " + anno)
+                    gene_mean.append(np.mean(adata_tmp[:, gene].X))
+        df_plt = pd.DataFrame({region_key: digi_region, "Gene": gene_list, "Mean expression": gene_mean})
         p = sns.kdeplot(data=df_plt, x=region_key, weights="Mean expression", hue="Gene")
         p.set_xlim(0, max(adata.obs[region_key]))
 
-    return df_plt
+    return ax
