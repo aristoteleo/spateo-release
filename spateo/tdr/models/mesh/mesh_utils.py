@@ -144,3 +144,36 @@ def fix_mesh(mesh: PolyData) -> PolyData:
         )
 
     return fixed_mesh
+
+
+##############
+# clean mesh #
+##############
+
+
+def clean_mesh(mesh: PolyData) -> PolyData:
+    """Removes unused points and degenerate cells."""
+
+    sub_meshes = mesh.split_bodies()
+    n_mesh = len(sub_meshes)
+
+    if n_mesh == 1:
+        return mesh
+    else:
+        inside_number = []
+        for i, main_mesh in enumerate(sub_meshes[:-1]):
+            main_mesh = pv.PolyData(main_mesh.points, main_mesh.cells)
+            for j, check_mesh in enumerate(sub_meshes[i + 1 :]):
+                check_mesh = pv.PolyData(check_mesh.points, check_mesh.cells)
+                inside = check_mesh.select_enclosed_points(main_mesh, check_surface=False).threshold(0.5)
+                inside = pv.PolyData(inside.points, inside.cells)
+                if check_mesh == inside:
+                    inside_number.append(i + 1 + j)
+
+        cm_number = list(set([i for i in range(n_mesh)]).difference(set(inside_number)))
+        if len(cm_number) == 1:
+            cmesh = sub_meshes[cm_number[0]]
+        else:
+            cmesh = merge_models([sub_meshes[i] for i in cm_number])
+
+        return pv.PolyData(cmesh.points, cmesh.cells)

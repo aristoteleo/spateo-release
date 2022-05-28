@@ -10,7 +10,13 @@ except ImportError:
     from typing_extensions import Literal
 
 from ..utilities import add_model_labels, merge_models, scale_model
-from .mesh_utils import fix_mesh, smooth_mesh, uniform_larger_pc, uniform_mesh
+from .mesh_utils import (
+    clean_mesh,
+    fix_mesh,
+    smooth_mesh,
+    uniform_larger_pc,
+    uniform_mesh,
+)
 
 ###################################
 # Construct cell-level mesh model #
@@ -212,8 +218,11 @@ def construct_surface(
             "\nAvailable `cs_method` are: `'pyvista'`, `'alpha_shape'`, `'ball_pivoting'`, `'poisson'`, `'marching_cube'`."
         )
 
+    # Removes unused points and degenerate cells.
+    csurf = clean_mesh(mesh=surf)
+
     uniform_surfs = []
-    for sub_surf in surf.split_bodies():
+    for sub_surf in csurf.split_bodies():
         # Repair the surface mesh where it was extracted and subtle holes along complex parts of the mesh
         sub_fix_surf = fix_mesh(mesh=sub_surf.extract_surface())
 
@@ -227,6 +236,9 @@ def construct_surface(
     if not (smooth is None):
         uniform_surf = smooth_mesh(mesh=uniform_surf, n_iter=smooth)
 
+    # Scale the surface mesh.
+    uniform_surf = scale_model(model=uniform_surf, distance=scale_distance, scale_factor=scale_factor)
+
     # Add labels and the colormap of the surface mesh.
     labels = np.array([label] * uniform_surf.n_cells).astype(str)
     add_model_labels(
@@ -239,11 +251,8 @@ def construct_surface(
         inplace=True,
     )
 
-    # Scale the surface mesh.
-    uniform_surf = scale_model(model=uniform_surf, distance=scale_distance, scale_factor=scale_factor)
-
     # Clip the original pc using the reconstructed surface and reconstruct new point cloud.
     select_pc = pc.select_enclosed_points(surface=uniform_surf, check_surface=False)
-    # inside_pc = select_pc.threshold(0.5).extract_surface()
+    inside_pc = select_pc.threshold(0.5).extract_surface()
 
-    return uniform_surf, select_pc
+    return uniform_surf, inside_pc
