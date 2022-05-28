@@ -4,6 +4,9 @@
 
 [![documentation](https://readthedocs.org/projects/spateo-release/badge/?version=latest)](https://spateo-release.readthedocs.io/en/latest/)
 
+
+[Installation](https://spateo-release.readthedocs.io/en/latest/installation.html) - [Tutorials](https://spateo-release.readthedocs.io/en/latest/tutorials/index.html) - [API](https://spateo-release.readthedocs.io/en/latest/autoapi/spateo/index.html) - [Citation](https://linkinghub.elsevier.com/retrieve/pii/S0092-8674(22)00399-3) - [Technical](https://spateo-release.readthedocs.io/en/latest/technicals/index.html)
+  
 # spateo-release
 Spatiotemporal modeling of spatial transcriptomics 
 
