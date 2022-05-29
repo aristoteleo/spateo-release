@@ -253,6 +253,8 @@ def construct_surface(
 
     # Clip the original pc using the reconstructed surface and reconstruct new point cloud.
     select_pc = pc.select_enclosed_points(surface=uniform_surf, check_surface=False)
-    inside_pc = select_pc.threshold(0.5).extract_surface()
+    select_pc1 = select_pc.threshold(0.5).extract_surface()
+    select_pc2 = select_pc.threshold(0.5, invert=True).extract_surface()
+    inside_pc = select_pc1 if select_pc1.n_points > select_pc2.n_points else select_pc2
 
     return uniform_surf, inside_pc
