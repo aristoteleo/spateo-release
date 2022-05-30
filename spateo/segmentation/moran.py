@@ -3,19 +3,17 @@
 Adapted from code written by @HailinPan.
 """
 from typing import Optional, Tuple
-from anndata import AnnData
 
 import cv2
 import numpy as np
+from anndata import AnnData
 from scipy import signal, stats
 from skimage.filters import sobel, threshold_otsu
 from skimage.segmentation import watershed
 
-
-from . import utils
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-
+from . import utils
 
 
 def moranI(
@@ -83,7 +81,15 @@ def run_moran(X: np.ndarray, k: int = 7, p_threshold: float = 0.05, mask: Option
     return c
 
 
-def run_moran_and_mask_pixels(adata: AnnData, layer: str, k: int = 7, method: str = "edge-watershed", mk: int = 3, mask: Optional[np.ndarray] = None, mask_layer: Optional[str] = None) -> np.ndarray:
+def run_moran_and_mask_pixels(
+    adata: AnnData,
+    layer: str,
+    k: int = 7,
+    method: str = "edge-watershed",
+    mk: int = 3,
+    mask: Optional[np.ndarray] = None,
+    mask_layer: Optional[str] = None,
+) -> np.ndarray:
     """Compute scores using Moran's I method.
 
     Args:
@@ -115,67 +121,65 @@ def run_moran_and_mask_pixels(adata: AnnData, layer: str, k: int = 7, method: st
         m = binary_morani_result(c, pvalue, method=method)
 
     m = utils.mclose_mopen(m, mk)
-    
+
     mask_layer = mask_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
     SKM.set_layer_data(adata, mask_layer, m)
 
 
-def binary_morani_result(c: np.ndarray,
-                         p: np.ndarray,
-                         pvalue_cutoff: float = None,
-                         method: str = "edge-watershed", #edge-detection and watershed  'edge-watershed' or 'otsu'
-                         c_cutoff: float = None,
-                         tissue_mask: Optional[np.ndarray] = None) -> np.ndarray:
-    """Generate cell mask based on Moran's I.
-    """
+def binary_morani_result(
+    c: np.ndarray,
+    p: np.ndarray,
+    pvalue_cutoff: float = None,
+    method: str = "edge-watershed",  # edge-detection and watershed  'edge-watershed' or 'otsu'
+    c_cutoff: float = None,
+    tissue_mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Generate cell mask based on Moran's I."""
 
-
-
-    if pvalue_cutoff==None:
-        if method == 'otsu':
+    if pvalue_cutoff == None:
+        if method == "otsu":
             p = (p * 255).astype(np.uint8)
             if isinstance(tissue_mask, np.ndarray):
-                p2 = p[tissue_mask>0]
+                p2 = p[tissue_mask > 0]
             else:
                 p2 = p.flatten()
             pvalue_cutoff = threshold_otsu(hist=(np.bincount(p2), np.arange(256)))
-            #print(f'pvalue_cutoff: {pvalue_cutoff}')
-            p_cell_mask = np.where(p<=pvalue_cutoff, 255, 0).astype(np.uint8)
-        if method == 'edge-watershed':
+            # print(f'pvalue_cutoff: {pvalue_cutoff}')
+            p_cell_mask = np.where(p <= pvalue_cutoff, 255, 0).astype(np.uint8)
+        if method == "edge-watershed":
             edges = sobel(p)
             markers = np.zeros_like(p, np.int8)
             foreground, background = 1, 2
             markers[p > 0.95] = background
             markers[p < 1e-5] = foreground
             ws = watershed(edges, markers)  # np.int32
-            p_cell_mask = np.where(ws==1,255,0).astype(np.uint8)
-            #cv2.imwrite("p_cell_mask.tif", p_cell_mask)
+            p_cell_mask = np.where(ws == 1, 255, 0).astype(np.uint8)
+            # cv2.imwrite("p_cell_mask.tif", p_cell_mask)
     else:  # pvalue_cutoff = 0.05
         p_cell_mask = np.where(p <= pvalue_cutoff, 255, 0).astype(np.uint8)
 
-    if c_cutoff==None:
+    if c_cutoff == None:
         c = ((c - np.min(c)) / (np.max(c) - np.min(c)) * 255).astype(np.uint8)
         if isinstance(tissue_mask, np.ndarray):
-            c2 = c[(p_cell_mask==255) & (tissue_mask>0)]
+            c2 = c[(p_cell_mask == 255) & (tissue_mask > 0)]
         else:
-            c2 = c[p_cell_mask==255]
+            c2 = c[p_cell_mask == 255]
         counts = np.bincount(c2)
         if counts[0] == 0:
             counts[0] = 1
         if counts[-1] == 0:
             counts[-1] = 1
         c_cutoff = threshold_otsu(hist=(counts, np.arange(256)))
-        #for i in counts:
+        # for i in counts:
         #    print(i)
-        #print(f'c_cutoff after adjust to 0-255: {c_cutoff}')
+        # print(f'c_cutoff after adjust to 0-255: {c_cutoff}')
 
-        #cv2.imwrite("c_255.tif", c)
-
+        # cv2.imwrite("c_255.tif", c)
 
     # out
     if isinstance(tissue_mask, np.ndarray):
-        cell_mask = np.where((p_cell_mask==255) & (c>=c_cutoff) & (tissue_mask>0), 255, 0).astype(np.uint8)
+        cell_mask = np.where((p_cell_mask == 255) & (c >= c_cutoff) & (tissue_mask > 0), 255, 0).astype(np.uint8)
     else:
         cell_mask = np.where((p_cell_mask == 255) & (c >= c_cutoff), 255, 0).astype(np.uint8)
 
-    return(cell_mask.astype(np.bool))
+    return cell_mask.astype(np.bool)
