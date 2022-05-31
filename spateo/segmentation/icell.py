@@ -359,7 +359,7 @@ def score_and_mask_pixels(
         threshold: Score cutoff, above which pixels are considered occupied.
             By default, a threshold is automatically determined by using
             Otsu thresholding.
-        use_knee: Whether to use knee point as threshold. By default is False. If 
+        use_knee: Whether to use knee point as threshold. By default is False. If
             True, threshold would be ignored.
         mk: Kernel size of morphological open and close operations to reduce
             noise in the mask. Defaults to `k`+2 if EM or VI is run. Otherwise,
@@ -393,7 +393,7 @@ def score_and_mask_pixels(
         lm.main_debug("Finding Otsu threshold.")
         threshold = filters.threshold_otsu(scores)
         lm.main_info(f"Applying threshold {threshold}.")
-        
+
     mk = mk or (k + 2 if any(m in method for m in ("em", "vi")) else max(k - 2, 3))
     if use_knee:
         threshold = None
