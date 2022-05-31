@@ -172,6 +172,6 @@ class TestICell(TestMixin, TestCase):
             np.testing.assert_array_equal(adata.layers["certain"] > 0, _score_pixels.call_args[0][7])
             np.testing.assert_array_equal(adata.layers["unspliced_bins"], _score_pixels.call_args[0][8])
 
-            #apply_threshold.assert_called_once_with(mock.ANY, mk, threshold)
+            # apply_threshold.assert_called_once_with(mock.ANY, mk, threshold)
             np.testing.assert_array_equal(_score_pixels.return_value, apply_threshold.call_args[0][0])
             np.testing.assert_array_equal(adata.layers["unspliced_mask"], apply_threshold.return_value)

@@ -396,9 +396,8 @@ def score_and_mask_pixels(
 
     mk = mk or (k + 2 if any(m in method for m in ("em", "vi")) else max(k - 2, 3))
     if use_knee:
-        mask = utils.apply_threshold(scores, mk)
-    else:
-        mask = utils.apply_threshold(scores, mk, threshold)
+        threshold = None
+    mask = utils.apply_threshold(scores, mk, threshold)
     if certain_layer:
         mask += certain_mask
     mask_layer = mask_layer or SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
