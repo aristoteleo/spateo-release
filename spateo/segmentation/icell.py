@@ -326,6 +326,7 @@ def score_and_mask_pixels(
     vi_kwargs: Optional[dict] = None,
     bp_kwargs: Optional[dict] = None,
     threshold: Optional[float] = None,
+    use_knee: Optional[bool] = False,
     mk: Optional[int] = None,
     bins_layer: Optional[Union[Literal[False], str]] = None,
     certain_layer: Optional[str] = None,
@@ -358,6 +359,8 @@ def score_and_mask_pixels(
         threshold: Score cutoff, above which pixels are considered occupied.
             By default, a threshold is automatically determined by using
             Otsu thresholding.
+        use_knee: Whether to use knee point as threshold. By default is False. If 
+            True, threshold would be ignored.
         mk: Kernel size of morphological open and close operations to reduce
             noise in the mask. Defaults to `k`+2 if EM or VI is run. Otherwise,
             defaults to `k`-2.
@@ -386,12 +389,14 @@ def score_and_mask_pixels(
     scores_layer = scores_layer or SKM.gen_new_layer_key(layer, SKM.SCORES_SUFFIX)
     SKM.set_layer_data(adata, scores_layer, scores)
 
-    if not threshold:
+    if not threshold and not use_knee:
         lm.main_debug("Finding Otsu threshold.")
         threshold = filters.threshold_otsu(scores)
-
-    lm.main_info(f"Applying threshold {threshold}.")
+        lm.main_info(f"Applying threshold {threshold}.")
+        
     mk = mk or (k + 2 if any(m in method for m in ("em", "vi")) else max(k - 2, 3))
+    if use_knee:
+        threshold = None
     mask = utils.apply_threshold(scores, mk, threshold)
     if certain_layer:
         mask += certain_mask
