@@ -4,12 +4,15 @@ from typing import Optional, Tuple, Union
 
 import cv2
 import numpy as np
+from anndata import AnnData
 from kneed import KneeLocator
 from scipy import signal, sparse
 from tqdm import tqdm
 from typing_extensions import Literal
 
+from ..configuration import SKM
 from ..errors import SegmentationError
+from ..logging import logger_manager as lm
 
 
 def circle(k: int) -> np.ndarray:
@@ -328,3 +331,44 @@ def clahe(X: np.ndarray, clip_limit: float = 1.0, tile_grid: Tuple[int, int] = (
         Equalized image
     """
     return cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid).apply(X)
+
+
+def cal_cell_area(cell_labels: np.ndarray):
+    """Calculate spot numbers for each cell.
+
+    Args:
+        cell_labels: cell labels.
+    Returns:
+        dict
+    """
+    areas = {}
+    for row in cell_labels:
+        for item in row:
+            if item == 0:
+                continue
+            if item not in areas:
+                areas[item] = 0
+            areas[item] += 1
+    return areas
+
+
+def filter_cell_labels_by_area(adata: AnnData, layer: str, area_cutoff: int = 7):
+    """Filter out cells with area less than `area_cutoff`
+
+    Args:
+        adata: Input Anndata
+        layer: Layer that contains UMI counts to use
+        area_cutoff: cells with area less than this cutoff would be dicarded.
+    """
+    X = SKM.select_layer_data(adata, layer, make_dense=True)
+    cells = np.unique(X)
+    cells = [i for i in cells if i > 0]
+    lm.main_info(f"Cell number before filtering is {len(cells)}")
+
+    areas = cal_cell_area(X)
+    filtered_cells = [k for k, v in areas.items() if v < area_cutoff]
+    X = np.where(np.isin(X, filtered_cells), 0, X)
+    SKM.set_layer_data(adata, layer, X)
+    cells = np.unique(X)
+    cells = [i for i in cells if i > 0]
+    lm.main_info(f"Cell number after filtering is {len(cells)}")
