@@ -54,7 +54,7 @@ def pv_mesh(pc: PolyData, alpha: float = 2.0) -> PolyData:
 ###########################
 
 
-def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0):
+def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_factor: Union[int, float] = 2):
     """
     Computes a triangle mesh from a point cloud based on the marching cube algorithm.
     Algorithm Overview:
@@ -65,6 +65,7 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0):
     Args:
         pc: A point cloud model.
         levelset: The levelset of iso-surface. It is recommended to set levelset to 0 or 0.5.
+        mc_scale_factor: The scale of the model. The scaled model is used to construct the mesh model.
 
     Returns:
         A mesh model.
@@ -79,9 +80,9 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0):
     z_arr = np.asarray(pc.points[:, 2])
     z_unique = np.sort(np.unique(z_arr))
     z_diff = np.diff(z_unique).astype(float)
-    mc_scale_factor = np.max(z_diff) * 2
+    mc_sf = np.max(z_diff) * mc_scale_factor
 
-    pc = scale_model(model=pc, scale_factor=1 / mc_scale_factor)
+    pc = scale_model(model=pc, scale_factor=1 / mc_sf)
     pc_points = np.asarray(pc.points)
     pc_points_int = np.ceil(pc_points).astype(np.int64)
 
@@ -112,7 +113,7 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0):
 
     mesh = pv.PolyData(v, f.ravel()).extract_surface().triangulate()
     mesh.clean(inplace=True)
-    mesh = scale_model(model=mesh, scale_factor=mc_scale_factor)
+    mesh = scale_model(model=mesh, scale_factor=mc_sf)
 
     return mesh
 
