@@ -16,7 +16,7 @@ to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else np.asarr
 
 
 def compute_pca_components(
-    matrix: Union[np.ndarray, spmatrix], save_curve_img: Optional[str] = None
+    matrix: Union[np.ndarray, spmatrix], random_state: Optional[int] = 1, save_curve_img: Optional[str] = None
 ) -> Tuple[Any, int, float]:
     """
     Calculate the inflection point of the PCA curve to
@@ -34,7 +34,7 @@ def compute_pca_components(
     matrix[np.isnan(matrix)] = 0
 
     # Principal component analysis (PCA).
-    pca = PCA(n_components=None)
+    pca = PCA(n_components=None, random_state=random_state)
     pcs = pca.fit_transform(matrix)
 
     # Percentage of variance explained by each of the selected components.
@@ -65,6 +65,7 @@ def pca_spateo(
     pca_key: Optional[str] = "X_pca",
     genes: Union[list, None] = None,
     layer: Union[str, None] = None,
+    random_state: Optional[int] = 1,
 ):
     """
     Do PCA for dimensional reduction.
@@ -107,10 +108,10 @@ def pca_spateo(
         lm.main_info("Runing PCA on user provided data...")
 
     if n_pca_components is None:
-        pcs, n_pca_components, _ = compute_pca_components(adata.X, save_curve_img=None)
+        pcs, n_pca_components, _ = compute_pca_components(adata.X, random_state=random_state, save_curve_img=None)
     else:
         matrix = to_dense_matrix(matrix)
-        pca = PCA(n_components=n_pca_components)
+        pca = PCA(n_components=n_pca_components, random_state=random_state)
         pcs = pca.fit_transform(matrix)
 
     adata.obsm[pca_key] = pcs[:, :n_pca_components]
