@@ -7,5 +7,6 @@ from .model_utils import (
     multiblock2model,
     rotate_model,
     scale_model,
+    split_model,
     translate_model,
 )

@@ -15,7 +15,7 @@ except ImportError:
 
 
 def merge_models(
-    models: List[PolyData or UnstructuredGrid],
+    models: List[PolyData or UnstructuredGrid or DataSet],
 ) -> PolyData or UnstructuredGrid:
     """Merge all models in the `models` list. The format of all models must be the same."""
 
@@ -27,7 +27,7 @@ def merge_models(
 
 
 def collect_model(
-    models: List[PolyData or UnstructuredGrid],
+    models: List[PolyData or UnstructuredGrid or DataSet],
     models_name: Optional[List[str]] = None,
 ) -> MultiBlock:
     """
@@ -61,6 +61,23 @@ def multiblock2model(model, message=None):
         )
     models = [model[name] for name in model.keys()]
     return merge_models(models=models)
+
+
+###############
+# Split model #
+###############
+
+
+def split_model(
+    model: Union[PolyData, UnstructuredGrid, DataSet],
+    label: Optional[bool] = False,
+) -> MultiBlock:
+    """
+    Find, label, and split connected bodies/volumes.
+    This splits different connected bodies into blocks in a pyvista.MultiBlock dataset.
+    """
+
+    return model.split_bodies(label=label)
 
 
 ###############

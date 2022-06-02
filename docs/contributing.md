@@ -42,11 +42,4 @@ All tests must pass for a pull request to be accepted!
 
 ## Tutorials
 
-All tutorials are located in the [spateo-tutorials](https://github.com/aristoteleo/spateo-tutorials) GitHub repo. We also provide a Jupyter Notebook template for tutorials below.
-
-```{eval-rst}
-.. nbgallery::
-
-   /tutorials/notebooks/template
-
-```
+All tutorials are located in the [spateo-tutorials](https://github.com/aristoteleo/spateo-tutorials) GitHub repo. We also provide a Jupyter Notebook template for tutorials [here](https://github.com/aristoteleo/spateo-tutorials/blob/main/template.ipynb).

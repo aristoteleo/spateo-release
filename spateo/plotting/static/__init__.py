@@ -1,6 +1,6 @@
 """Spatiotemporal modeling of spatial transcriptomics
 """
-from .agg import imshow, qc_regions
+from .agg import box_qc_regions, imshow, qc_regions
 from .bbs import delaunay, polygon
 from .colorlabel import color_label
 from .contour import spatial_domains
@@ -17,5 +17,6 @@ from .three_d_plot import (
     output_plotter,
     save_plotter,
     three_d_animate,
+    three_d_multi_plot,
     three_d_plot,
 )

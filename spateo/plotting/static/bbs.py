@@ -10,6 +10,7 @@ from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from shapely.geometry import MultiPolygon, Polygon
+from typing_extensions import Literal
 
 from .utils import save_return_show_fig_utils
 
@@ -22,9 +23,9 @@ def polygon(
     ec: str = "#000000",
     fig: Optional[Figure] = None,
     ax: Optional[Axes] = None,
-    background: Union[None, str] = None,
-    save_show_or_return: str = "show",
-    save_kwargs: Dict = {},
+    background: Optional[str] = None,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[Dict] = None,
 ):
     """Plot the polygon identified by the alpha hull method.
 
@@ -42,13 +43,13 @@ def polygon(
             handle for you. Note that if theme
             is passed then this value will be overridden by the
             corresponding option of the theme.
-        save_show_or_return: `str` {'save', 'show', 'return', 'both', 'all'} (default: `show`)
-            Whether to save, show or return the figure. If "both", it will save and plot the figure at the same time. If
+        save_show_or_return: Whether to save, show or return the figure.
+            If "both", it will save and plot the figure at the same time. If
             "all", the figure will be saved, displayed and the associated axis and other object will be return.
-        save_kwargs: `dict` (default: `{}`)
-            A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
-            save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent":
-            True, "close": True, "verbose": True} as its parameters. Otherwise you can provide a dictionary that
+        save_kwargs: A dictionary that will passed to the save_fig function.
+            By default it is an empty dictionary and the save_fig function will use the
+            {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True, "verbose": True}
+            as its parameters. Otherwise you can provide a dictionary that
             properly modify those keys according to your needs.
 
     Returns:
@@ -82,7 +83,7 @@ def polygon(
         show_legend=False,
         background=_background,
         prefix="scatters",
-        save_kwargs=save_kwargs,
+        save_kwargs=save_kwargs or {},
         total_panels=1,
         fig=fig,
         axes=ax,
@@ -98,9 +99,9 @@ def delaunay(
     title: Optional[str] = None,
     fig: Optional[Figure] = None,
     ax: Optional[Axes] = None,
-    background: Union[None, str] = None,
-    save_show_or_return: str = "show",
-    save_kwargs: Dict = {},
+    background: Optional[str] = None,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[Dict] = None,
 ):
     """Plot the Delaunay triangulation result.
 
@@ -119,13 +120,13 @@ def delaunay(
             handle for you. Note that if theme
             is passed then this value will be overridden by the
             corresponding option of the theme.
-        save_show_or_return: `str` {'save', 'show', 'return', 'both', 'all'} (default: `show`)
-            Whether to save, show or return the figure. If "both", it will save and plot the figure at the same time. If
+        save_show_or_return: Whether to save, show or return the figure.
+            If "both", it will save and plot the figure at the same time. If
             "all", the figure will be saved, displayed and the associated axis and other object will be return.
-        save_kwargs: `dict` (default: `{}`)
-            A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
-            save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent":
-            True, "close": True, "verbose": True} as its parameters. Otherwise you can provide a dictionary that
+        save_kwargs: A dictionary that will passed to the save_fig function.
+            By default it is an empty dictionary and the save_fig function will use the
+            {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True, "verbose": True}
+            as its parameters. Otherwise you can provide a dictionary that
             properly modify those keys according to your needs.
 
     Returns:
@@ -158,7 +159,7 @@ def delaunay(
         show_legend=False,
         background=_background,
         prefix="scatters",
-        save_kwargs=save_kwargs,
+        save_kwargs=save_kwargs or {},
         total_panels=1,
         fig=fig,
         axes=ax,

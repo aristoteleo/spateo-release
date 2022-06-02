@@ -112,6 +112,27 @@ def dataframe_to_labels(df: pd.DataFrame, column: str, shape: Optional[Tuple[int
     """
     shape = shape or (df["x"].max() + 1, df["y"].max() + 1)
     labels = np.zeros(shape, dtype=int)
+
+    for label, _df in df.drop_duplicates(subset=[column, "x", "y"]).groupby(column):
+        if label <= 0:
+            continue
+        labels[(_df["x"].values, _df["y"].values)] = label
+    return labels
+
+
+def dataframe_to_filled_labels(df: pd.DataFrame, column: str, shape: Optional[Tuple[int, int]] = None) -> np.ndarray:
+    """Convert a BGI dataframe that contains cell labels to a (filled) labels matrix.
+
+    Args:
+        df: Read dataframe, as returned by :func:`read_bgi_as_dataframe`.
+        columns: Column that contains cell labels as positive integers. Any labels
+            that are non-positive are ignored.
+
+    Returns:
+        Labels matrix
+    """
+    shape = shape or (df["x"].max() + 1, df["y"].max() + 1)
+    labels = np.zeros(shape, dtype=int)
     for label, _df in df.drop_duplicates(subset=[column, "x", "y"]).groupby(column):
         if label <= 0:
             continue
@@ -193,7 +214,7 @@ def read_bgi_agg(
     # Construct labels matrix if present
     labels = None
     if "label" in data.columns:
-        lm.main_info("Cell label column detected. Converting to labels matrix.")
+        lm.main_warning("Using the `label_column` option may result in disconnected labels.")
         labels = dataframe_to_labels(data, "label", shape)
         layers[SKM.LABELS_LAYER_KEY] = labels
 
@@ -312,6 +333,9 @@ def read_bgi(
         binsize = 1
         data = data[data["label"] > 0]
         if add_props:
+            lm.main_warning(
+                "Using `label_column` as cell labels with `add_props=True` may result in incorrect contours."
+            )
             props = get_points_props(data[["x", "y", "label"]])
 
     elif binsize is not None:

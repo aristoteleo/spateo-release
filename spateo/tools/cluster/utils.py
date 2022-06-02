@@ -57,7 +57,7 @@ def compute_pca_components(
     return pcs, new_n_components, new_components_stored
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def pca_spateo(
     adata: AnnData,
     X_data=None,
@@ -117,7 +117,7 @@ def pca_spateo(
     adata.obsm[pca_key] = pcs[:, :n_pca_components]
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def sctransform(
     adata: AnnData,
     rlib_path: str,
@@ -191,7 +191,7 @@ def sctransform(
             plt.savefig(save_sct_img_2, dpi=100)
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def pearson_residuals(
     adata: AnnData,
     n_top_genes: Optional[int] = 3000,
@@ -238,7 +238,7 @@ def pearson_residuals(
     adata.obsm["pearson_residuals"] = residuals
 
 
-# @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adatas")
 def integrate(
     adatas: List[AnnData],
     batch_key: str = "slices",
@@ -285,7 +285,7 @@ def integrate(
     return integrated_adata
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def harmony_debatch(
     adata: AnnData,
     key: str,
@@ -370,7 +370,7 @@ def ecp_silhouette(
     return silhouette_score(matrix, cluster_labels, metric="euclidean")
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def spatial_adj_dyn(
     adata: AnnData,
     spatial_key: str = "spatial",

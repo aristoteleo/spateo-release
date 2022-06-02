@@ -73,7 +73,7 @@ def _set_jupyter(
         jupyter_backend = jupyter
     else:
         raise ValueError(
-            "\n`jupyter` value is wrong."
+            "`jupyter` value is wrong."
             "\nAvailable `jupyter` value are: `True`, `False`, `'panel'`, `'none'`, `'pythreejs'`, `'static'`, `'ipygany'`."
         )
 
@@ -83,11 +83,11 @@ def _set_jupyter(
 def add_model(
     plotter: Plotter,
     model: Union[PolyData, UnstructuredGrid, MultiBlock],
-    key: Optional[str] = None,
+    key: Union[str, list] = None,
     ambient: float = 0.2,
     opacity: float = 1.0,
-    point_size: float = 5.0,
-    model_style: Literal["points", "surface", "wireframe"] = "surface",
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
+    model_size: float = 5.0,
 ):
     """
     Add model(s) to the plotter.
@@ -102,22 +102,23 @@ def add_model(
                  uniformly applied everywhere - should be between 0 and 1.
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
-        point_size: Point size of any nodes in the dataset plotted.
         model_style: Visualization style of the model. One of the following: style='surface', style='wireframe', style='points'.
+        model_size: If model_style=`points`, point size of any nodes in the dataset plotted.
+                    If model_style=`wireframe`, thickness of lines.
     """
 
-    def _add_model(_p, _model):
+    def _add_model(_p, _model, _key, _style):
         """Add any PyVista/VTK model to the scene."""
 
-        scalars = f"{key}_rgba" if key in _model.array_names else _model.active_scalars_name
-
+        scalars = f"{_key}_rgba" if _key in _model.array_names else _model.active_scalars_name
         _p.add_mesh(
             _model,
             scalars=scalars,
             rgba=True,
             render_points_as_spheres=True,
-            style=model_style,
-            point_size=point_size,
+            style=_style,
+            point_size=model_size,
+            line_width=model_size,
             ambient=ambient,
             opacity=opacity,
             smooth_shading=True,
@@ -125,10 +126,18 @@ def add_model(
 
     # Add model(s) to the plotter.
     if isinstance(model, MultiBlock):
-        for sub_model in model:
-            _add_model(_p=plotter, _model=sub_model)
+        n_model = len(model)
+        # Set model style and key.
+        mss = model_style if isinstance(model_style, list) else [model_style]
+        mss = mss * n_model if len(mss) == 1 else mss
+
+        keys = key if isinstance(key, list) else [key]
+        keys = keys * n_model if len(keys) == 1 else keys
+
+        for sub_model, sub_ms, sub_key in zip(model, mss, keys):
+            _add_model(_p=plotter, _model=sub_model, _key=sub_key, _style=sub_ms)
     else:
-        _add_model(_p=plotter, _model=model)
+        _add_model(_p=plotter, _model=model, _key=key, _style=model_style)
 
 
 def add_outline(
@@ -136,9 +145,10 @@ def add_outline(
     model: Union[PolyData, UnstructuredGrid, MultiBlock],
     outline_width: float = 5.0,
     outline_color: Union[str, tuple] = "black",
-    labels: bool = True,
+    show_labels: bool = True,
     labels_size: int = 16,
     labels_color: Union[str, tuple] = "white",
+    labels_font: Literal["times", "courier", "arial"] = "times",
 ):
     """
     Produce an outline of the full extent for the model.
@@ -149,15 +159,19 @@ def add_outline(
         model: A reconstructed model.
         outline_width: The width of the outline.
         outline_color: The color of the outline.
-        labels: Whether to add the length, width and height information of the model to the outline.
+        show_labels: Whether to add the length, width and height information of the model to the outline.
         labels_size: The size of the label font.
         labels_color: The color of the label.
+        labels_font: The font of the text. Available `labels_font` are:
+                * `'times'`
+                * `'courier'`
+                * `'arial'`
     """
 
     model_outline = model.outline()
     plotter.add_mesh(model_outline, color=outline_color, line_width=outline_width)
 
-    if labels is True:
+    if show_labels is True:
         mo_points = np.asarray(model_outline.points)
         model_x = mo_points[:, 0].max() - mo_points[:, 0].min()
         model_y = mo_points[:, 1].max() - mo_points[:, 1].min()
@@ -179,7 +193,7 @@ def add_outline(
             labels=momid_labels,
             bold=True,
             font_size=labels_size,
-            font_family="arial",
+            font_family=labels_font,
             shape="rounded_rect",
             shape_color=outline_color,
             show_points=False,
@@ -308,7 +322,13 @@ def add_text(
                 * `'right_edge'`
                 * `'left_edge'`
     """
-    plotter.add_text(text=text, font=text_font, color=text_color, font_size=text_size, position=text_loc)
+    plotter.add_text(
+        text=text,
+        font=text_font,
+        color=text_color,
+        font_size=text_size,
+        position=text_loc,
+    )
 
 
 def output_plotter(
@@ -325,7 +345,8 @@ def output_plotter(
         plotter: The plotting object to display pyvista/vtk model.
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
                 * Output an image file,
-                  please enter a filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
+                  please enter a filename ending with
+                  `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
                 * Output a gif file, please enter a filename ending with `.gif`.
                 * Output a mp4 file, please enter a filename ending with `.mp4`.
         view_up: The normal to the orbital plane. Only available when filename ending with `.mp4` or `.gif`.
@@ -338,9 +359,25 @@ def output_plotter(
                 * `'panel'` : Show a panel widget.
 
     Returns:
+        cpo: List of camera position, focal point, and view up.
+             Returned only if filename is None or filename ending with
+             `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
         img: Numpy array of the last image.
-             Returned only if filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`.
+             Returned only if filename is None or filename ending with
+             `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`.
     """
+
+    def _to_graph(_screenshot, _jupyter_backend):
+        if jupyter is False:
+            cpo, img = plotter.show(
+                screenshot=_screenshot,
+                return_img=True,
+                return_cpos=True,
+                jupyter_backend=_jupyter_backend,
+            )
+            return cpo, img
+        else:
+            plotter.show(screenshot=_screenshot, jupyter_backend=_jupyter_backend)
 
     def _to_gif(_filename, _view_up):
         """Output plotter to gif file."""
@@ -371,16 +408,10 @@ def output_plotter(
 
         # Output the plotter in the format of the output file.
         if filename_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
-            if jupyter is False:
-                cpo, img = plotter.show(
-                    screenshot=filename,
-                    return_img=True,
-                    return_cpos=True,
-                    jupyter_backend=jupyter_backend,
-                )
-                return cpo, img
-            else:
-                plotter.show(screenshot=filename, jupyter_backend=jupyter_backend)
+            _to_graph(_screenshot=filename, _jupyter_backend=jupyter_backend)
+        elif filename_format in ["svg", "eps", "ps", "pdf", "tex"]:
+            plotter.save_graphic(filename, title="PyVista Export", raster=True, painter=True)
+            _to_graph(_screenshot=None, _jupyter_backend=jupyter_backend)
         elif filename_format == "gif":
             _to_gif(_filename=filename, _view_up=view_up)
             return None
@@ -391,7 +422,8 @@ def output_plotter(
             raise ValueError(
                 "\nFilename is wrong."
                 "\nIf outputting an image file, "
-                "please enter a filename ending with `.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`."
+                "please enter a filename ending with "
+                "`.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`."
                 "\nIf outputting a gif file, please enter a filename ending with `.gif`."
                 "\nIf outputting a mp4 file, please enter a filename ending with `.mp4`."
             )

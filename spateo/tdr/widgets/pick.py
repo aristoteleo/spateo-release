@@ -174,8 +174,8 @@ def overlap_pc_pick(
     """
 
     select_pc = pc.select_enclosed_points(surface=mesh, check_surface=False)
-    inside_pc = select_pc.threshold(0.5)
-    outside_pc = select_pc.threshold(0.5, invert=True)
+    inside_pc = select_pc.threshold(0.5, scalars="SelectedPoints")
+    outside_pc = select_pc.threshold(0.5, invert=True, scalars="SelectedPoints")
 
     return inside_pc, outside_pc
 

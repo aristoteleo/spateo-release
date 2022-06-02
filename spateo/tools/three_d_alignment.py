@@ -10,8 +10,8 @@ from ..configuration import SKM
 from ..logging import logger_manager as lm
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slice1", optional=True)
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slice2", optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slice1")
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slice2")
 def pairwise_align(
     slice1: AnnData,
     slice2: AnnData,

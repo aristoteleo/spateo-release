@@ -7,7 +7,7 @@ This code contains methods to reconstruct the mesh model based on the 3D point c
     5. poisson reconstruction
 """
 
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import numpy as np
 import pyvista as pv
@@ -54,7 +54,7 @@ def pv_mesh(pc: PolyData, alpha: float = 2.0) -> PolyData:
 ###########################
 
 
-def marching_cube_mesh(pc: PolyData):
+def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0):
     """
     Computes a triangle mesh from a point cloud based on the marching cube algorithm.
     Algorithm Overview:
@@ -64,6 +64,7 @@ def marching_cube_mesh(pc: PolyData):
 
     Args:
         pc: A point cloud model.
+        levelset: The levelset of iso-surface. It is recommended to set levelset to 0 or 0.5.
 
     Returns:
         A mesh model.
@@ -97,7 +98,8 @@ def marching_cube_mesh(pc: PolyData):
     volume_array[pc_points_int[:, 0], pc_points_int[:, 1], pc_points_int[:, 2]] = 1
 
     # Extract the iso-surface based on marching cubes algorithm.
-    vertices, triangles = mcubes.marching_cubes(volume_array, 0)
+    # volume_array = mcubes.smooth(volume_array)
+    vertices, triangles = mcubes.marching_cubes(volume_array, levelset)
 
     if len(vertices) == 0:
         raise ValueError(f"The point cloud cannot generate a surface mesh with `marching_cube` method.")
@@ -111,6 +113,7 @@ def marching_cube_mesh(pc: PolyData):
     mesh = pv.PolyData(v, f.ravel()).extract_surface().triangulate()
     mesh.clean(inplace=True)
     mesh = scale_model(model=mesh, scale_factor=mc_scale_factor)
+
     return mesh
 
 

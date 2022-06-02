@@ -62,6 +62,7 @@ def voxelize_mesh(
     mesh: Union[PolyData, UnstructuredGrid],
     voxel_pc: Union[PolyData, UnstructuredGrid] = None,
     key_added: str = "groups",
+    label: str = "voxel",
     color: Optional[str] = "gainsboro",
     alpha: Union[float, int] = 1.0,
     smooth: Optional[int] = 200,
@@ -73,14 +74,15 @@ def voxelize_mesh(
         mesh: A surface mesh model.
         voxel_pc: A voxel model which contains the `voxel_pc.cell_data['obs_index']` and `voxel_pc.cell_data[key_added]`.
         key_added: The key under which to add the labels.
+        label: The label of reconstructed voxel model.
         color: Color to use for plotting mesh. The default color is `'gainsboro'`.
         alpha: The opacity of the color to use for plotting model. The default alpha is `0.8`.
         smooth: The smoothness of the voxel model.
 
     Returns:
         voxel_model: A reconstructed voxel model, which contains the following properties:
-            `voxel_model.cell_data[key_added]`, the "volume" array;
-            `voxel_model.cell_data[f'{key_added}_rgba']`,  the rgba colors of the "volume" array.
+            `voxel_model.cell_data[key_added]`, the `label` array;
+            `voxel_model.cell_data[f'{key_added}_rgba']`,  the rgba colors of the `label` array.
             `voxel_model.cell_data['obs_index']`, the cell labels if not (voxel_pc is None).
     """
 
@@ -88,7 +90,7 @@ def voxelize_mesh(
     voxel_model = pv.voxelize(mesh, density=density, check_surface=False)
 
     # Add labels and the colormap of the volumetric mesh
-    labels = np.array(["voxel"] * voxel_model.n_cells).astype(str)
+    labels = np.array([label] * voxel_model.n_cells).astype(str)
     add_model_labels(
         model=voxel_model,
         labels=labels,

@@ -1,8 +1,6 @@
 from typing import Optional, Union
 
 import numpy as np
-import pandas as pd
-import scipy.sparse as sp
 from scipy.cluster.vq import kmeans2
 from scipy.linalg import eig
 from scipy.sparse import csr_matrix
@@ -103,7 +101,7 @@ def sqdist(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 def DDRTree(
     X: np.ndarray,
-    maxIter: int = 10,
+    maxIter: int = 20,
     sigma: Union[int, float] = 0.001,
     gamma: Union[int, float] = 10,
     eps: int = 0,
@@ -122,7 +120,7 @@ def DDRTree(
         Lambda: Regularization parameter for inverse graph embedding.
         sigma: Bandwidth parameter.
         gamma: Regularization parameter for k-means.
-        ncenter :(int)
+        ncenter: number of nodes allowed in the regularization graph
 
     Returns:
         A tuple of Z, Y, stree, R, W, Q, C, objs
@@ -138,13 +136,13 @@ def DDRTree(
     # initialization
     W = pca_projection(np.dot(X, X.T), dim)
     Z = np.dot(W.T, X)
+    Z = np.real(Z).astype(np.float64)
 
     if ncenter is None:
         K = N
         Y = Z.T[0:K].T
     else:
         K = ncenter
-
         Y, _ = kmeans2(Z.T, K)
         Y = Y.T
 

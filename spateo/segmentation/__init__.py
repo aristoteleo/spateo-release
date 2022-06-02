@@ -24,8 +24,10 @@ from .icell import mask_cells_from_stain, mask_nuclei_from_stain, score_and_mask
 from .label import (
     augment_labels,
     expand_labels,
+    find_peaks,
+    find_peaks_from_mask,
+    find_peaks_with_erosion,
     label_connected_components,
     watershed,
-    watershed_markers,
 )
 from .qc import generate_random_labels, generate_random_labels_like, select_qc_regions

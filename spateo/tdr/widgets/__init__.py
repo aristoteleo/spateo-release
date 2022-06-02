@@ -1,4 +1,13 @@
-from .changes import changes_along_line, changes_along_shape
+from .changes import (
+    ElPiGraph_tree,
+    SimplePPT_tree,
+    changes_along_branch,
+    changes_along_line,
+    changes_along_shape,
+    construct_tree_model,
+    map_gene_to_branch,
+    map_points_to_branch,
+)
 from .clip import interactive_box_clip, interactive_rectangle_clip
 from .ddrtree import DDRTree, cal_ncenter
 from .deep_interpolation import DataSampler, DeepInterpolation

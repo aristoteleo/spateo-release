@@ -3,9 +3,8 @@ from typing import Union
 import anndata
 import numpy as np
 
-from spateo.tools.utils import compute_smallest_distance
-
 from ...configuration import SKM
+from ...tools.utils import compute_smallest_distance
 from .scatters import scatters
 
 # from .scatters import (
@@ -20,7 +19,7 @@ from .scatters import scatters
 
 
 # @docstrings.with_indent(4)
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def space(
     adata: anndata.AnnData,
     color: Union[list, str, None] = None,
