@@ -110,7 +110,7 @@ def ElPiGraph_tree(
     except ImportError:
         raise ImportError(
             "You need to install the package `elpigraph-python`."
-            "\nInstall elpigraph-python via `pip install git+https://github.com/j-bac/elpigraph-python.git`."
+            "\nInstall elpigraph-python via `pip install elpigraph-python`."
         )
 
     ElPiGraph_kwargs = {
