@@ -111,11 +111,18 @@ def add_model(
         """Add any PyVista/VTK model to the scene."""
 
         scalars = f"{_key}_rgba" if _key in _model.array_names else _model.active_scalars_name
+        if _style == "points":
+            render_spheres, render_tubes = True, False
+        elif _style == "wireframe":
+            render_spheres, render_tubes = False, True
+        else:
+            render_spheres, render_tubes = False, False
         _p.add_mesh(
             _model,
             scalars=scalars,
             rgba=True,
-            render_points_as_spheres=True,
+            render_points_as_spheres=render_spheres,
+            render_lines_as_tubes=render_tubes,
             style=_style,
             point_size=model_size,
             line_width=model_size,
