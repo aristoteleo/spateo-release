@@ -152,11 +152,12 @@ def select_polygon(
     def key_press_event(event):
         if event.key == "escape":
             mask_im.set_data(np.zeros_like(mask_placeholder))
+            del adata.layers[out_layer]
             fig.canvas.draw()
 
     lasso = PolygonSelector(ax=ax, onselect=onselect)
     fig.canvas.mpl_connect("key_press_event", key_press_event)
-    ax.set_title("Draw polygon with mouse.\nPress Esc to reset selection.")
+    ax.set_title("Draw polygon with mouse.\nHold Ctrl to click and drag vertices.\nPress Esc to reset selection.")
 
     if background is None:
         _background = rcParams.get("figure.facecolor")
