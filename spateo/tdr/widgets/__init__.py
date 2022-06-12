@@ -1,5 +1,6 @@
 from .changes import (
     ElPiGraph_tree,
+    Principal_Curve,
     SimplePPT_tree,
     changes_along_branch,
     changes_along_line,
@@ -9,7 +10,6 @@ from .changes import (
     map_points_to_branch,
 )
 from .clip import interactive_box_clip, interactive_rectangle_clip
-from .ddrtree import DDRTree, cal_ncenter
 from .deep_interpolation import DataSampler, DeepInterpolation
 from .interpolation_nn import *
 from .interpolations import deep_intepretation, kernel_interpolation
@@ -23,4 +23,5 @@ from .pick import (
     three_d_pick,
 )
 from .slice import interactive_slice, three_d_slice
+from .tree import NLPCA, DDRTree, cal_ncenter
 from .vtk_interpolate import interpolate_model

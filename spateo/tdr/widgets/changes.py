@@ -10,8 +10,8 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from .ddrtree import DDRTree, cal_ncenter
 from .slice import euclidean_distance, three_d_slice
+from .tree import NLPCA, DDRTree, cal_ncenter
 
 ####################################
 # Changes along a vector direction #
@@ -185,6 +185,65 @@ def SimplePPT_tree(
     return nodes, edges
 
 
+def Principal_Curve(
+    X: np.ndarray,
+    NumNodes: int = 50,
+    scale_factor: Union[int, float] = 1,
+    **kwargs,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    This is the global module that contains principal curve and nonlinear principal component analysis algorithms that
+    work to optimize a line over an entire dataset.
+    Reference: Chen et al. (2016), Constraint local principal curve: Concept, algorithms and applications.
+
+    Args:
+        X: DxN, data matrix list.
+        NumNodes: Number of nodes for the construction layers. Defaults to 25. The more complex the curve, the higher
+                  this number should be.
+        scale_factor:
+        **kwargs: Other parameters used in global algorithms. For details, please see:
+                  https://github.com/artusoma/prinPy/blob/master/prinpy/glob.py
+
+    Returns:
+        nodes: The nodes in the principal tree.
+        edges: The edges between nodes in the principal tree.
+    """
+
+    PrinCurve_kwargs = {
+        "epochs": 500,
+        "lr": 0.01,
+        "verbose": 0,
+    }
+    PrinCurve_kwargs.update(kwargs)
+
+    raw_X = np.asarray(X)
+    dims = raw_X.shape[1]
+
+    new_X = raw_X.copy() / scale_factor
+    trans = []
+    for i in range(dims):
+        sub_trans = new_X[:, i].min()
+        new_X[:, i] = new_X[:, i] - sub_trans
+        trans.append(sub_trans)
+    # create solver
+    pca_project = NLPCA()
+    # transform data for better training with the neural net using built in preprocessor.
+    # fit the data
+    pca_project.fit(new_X, nodes=NumNodes, **PrinCurve_kwargs)
+    # project the current data. This returns a projection index for each point and points to plot the curve.
+    _, curve_pts = pca_project.project(new_X)
+    curve_pts = np.unique(curve_pts, axis=0)
+    for i in range(dims):
+        curve_pts[:, i] = curve_pts[:, i] + trans[i]
+
+    nodes = curve_pts[:, :3] * scale_factor
+    n_nodes = nodes.shape[0]
+    edges = np.asarray([np.arange(0, n_nodes, 1), np.arange(1, n_nodes + 1, 1)]).T
+    edges[-1, 1] = n_nodes - 1
+
+    return nodes, edges
+
+
 def map_points_to_branch(
     model: Union[PolyData, UnstructuredGrid],
     nodes: np.ndarray,
@@ -281,8 +340,7 @@ def construct_tree_model(
             `tree_model.point_data[key_added]`, the nodes labels array.
     """
 
-    padding = np.empty(edges.shape[0], int) * 2
-    padding[:] = 2
+    padding = np.array([2] * edges.shape[0], int)
     edges_w_padding = np.vstack((padding, edges.T)).T
     tree_model = pv.PolyData(nodes, edges_w_padding)
     tree_model.point_data[key_added] = np.arange(0, len(nodes), 1)
@@ -295,7 +353,7 @@ def changes_along_branch(
     spatial_key: Optional[str] = None,
     map_key: Union[str, list] = None,
     key_added: Optional[str] = "nodes",
-    rd_method: Literal["ElPiGraph", "SimplePPT"] = "ElPiGraph",
+    rd_method: Literal["ElPiGraph", "SimplePPT", "PrinCurve"] = "ElPiGraph",
     NumNodes: int = 50,
     inplace: bool = False,
     **kwargs,
@@ -308,8 +366,12 @@ def changes_along_branch(
         nodes, edges = ElPiGraph_tree(X=X, NumNodes=NumNodes, **kwargs)
     elif rd_method == "SimplePPT":
         nodes, edges = SimplePPT_tree(X=X, NumNodes=NumNodes, **kwargs)
+    elif rd_method == "PrinCurve":
+        nodes, edges = Principal_Curve(X=X, NumNodes=NumNodes, **kwargs)
     else:
-        raise ValueError("`rd_method` value is wrong." "\nAvailable `rd_method` are: `'ElPiGraph'`, `'SimplePPT'`.")
+        raise ValueError(
+            "`rd_method` value is wrong." "\nAvailable `rd_method` are: `'ElPiGraph'`, `'SimplePPT'`, `'PrinCurve'`."
+        )
 
     map_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=key_added, inplace=True)
     tree_model = construct_tree_model(nodes=nodes, edges=edges)
