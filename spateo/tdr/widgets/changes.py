@@ -233,6 +233,7 @@ def Principal_Curve(
     # project the current data. This returns a projection index for each point and points to plot the curve.
     _, curve_pts = pca_project.project(new_X)
     curve_pts = np.unique(curve_pts, axis=0)
+    curve_pts = np.einsum("ij->ij", curve_pts[curve_pts[:, -1].argsort(), :])
     for i in range(dims):
         curve_pts[:, i] = curve_pts[:, i] + trans[i]
 
