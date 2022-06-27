@@ -231,7 +231,7 @@ def pearson_residuals(
 
     if not (n_top_genes is None):
         compute_highly_variable_genes(adata, n_top_genes=n_top_genes, recipe="pearson_residuals", inplace=True)
-        adata = adata[:, adata.var.highly_variable]
+        adata = adata[:, adata.var.gene_highly_variable]
 
     X = adata.X.copy()
     residuals = compute_pearson_residuals(X, theta=theta, clip=clip, check_values=check_values)
