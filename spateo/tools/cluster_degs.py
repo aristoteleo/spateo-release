@@ -167,21 +167,26 @@ def find_cluster_degs(
     control_cells = adata.obs[group].isin(control_groups)
 
     all_cells = np.hstack((np.where(test_cells)[0], np.where(control_cells)[0]))
+
+    if genes is not None:
+        genes = genes
+    else:
+        genes = adata.var_names
+
     if X_data is not None:
         if X_data.shape[0] != len(all_cells):
             lm.main_exception(
                 f"The input X_data has {X_data.shape[0]} cells but the total number of cells from the "
                 f"control and test groups is {len(all_cells)}"
             )
+        if X_data.shape[1] != len(genes):
+            lm.main_exception(
+                f"The input X_data has {X_data.shape[1]} cells but the total number of genes from {genes}"
+            )
 
         X_data = X_data
     else:
-        X_data = adata[all_cells, :].X if layer is None else adata[all_cells, :].layers[layer]
-
-    if genes is not None:
-        genes = genes
-    else:
-        genes = adata.var_names
+        X_data = adata[all_cells, genes].X if layer is None else adata[all_cells, genes].layers[layer]
 
     sparse = issparse(X_data)
 
@@ -413,21 +418,25 @@ def find_all_cluster_degs(
         are not the top marker genes. To identify top `n` marker genes, Use
         `st.tl.cluster_degs.top_n_degs(adata, group='louvain')`.
     """
+    if genes is not None:
+        genes = genes
+    else:
+        genes = adata.var_names
+
     if X_data is not None:
         if X_data.shape[0] != len(adata.n_obs):
             lm.main_exception(
                 f"The input X_data has {X_data.shape[0]} cells but the total number of cells from the "
                 f"adata object is {adata.n_obs}"
             )
+        if X_data.shape[1] != len(genes):
+            lm.main_exception(
+                f"The input X_data has {X_data.shape[1]} cells but the total number of genes from {genes}"
+            )
 
         X_data = X_data
     else:
-        X_data = adata.X if layer is None else adata.layers[layer]
-
-    if genes is not None:
-        genes = genes
-    else:
-        genes = adata.var_names
+        X_data = adata[:, genes].X if layer is None else adata[:, genes].layers[layer]
 
     if group not in adata.obs.keys():
         lm.main_exception(f"group {group} is not a valid key for .obs in your adata object.")
