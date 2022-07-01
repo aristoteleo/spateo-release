@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -447,8 +447,8 @@ def find_all_cluster_degs(
     if len(cluster_set) < 2:
         lm.main_exception(f"the number of groups for the argument {group} must be at least two.")
 
-    de_tables = [None] * len(cluster_set)
-    de_genes = {}
+    deg_tables = [None] * len(cluster_set)
+    deg_lists = [None] * len(cluster_set)
     if len(cluster_set) > 2:
 
         def single_group(i, test_group, cluster_set, adata, genes, X_data, group, de_tables, de_genes):
@@ -463,17 +463,18 @@ def find_all_cluster_degs(
                 group=group,
             )
 
-            de_tables[i] = de.copy()
-            de_genes[i] = [k for k, v in Counter(de["gene"]).items() if v >= 1]
+            deg_list = [k for k, v in Counter(de["gene"]).items() if v >= 1]
 
-            return de_tables, de_genes
+            return de, deg_list
 
-        de_tables, de_genes = zip(
+        deg_tuple, deg_names_tuple = zip(
             *Parallel(n_jobs)(
-                delayed(single_group)(i, test_group, cluster_set, adata, genes, X_data, group, de_tables, de_genes)
+                delayed(single_group)(i, test_group, cluster_set, adata, genes, X_data, group, deg_tables, deg_lists)
                 for i, test_group in enumerate(cluster_set)
             )
         )
+        deg_tables, deg_lists = list(deg_tuple), list(deg_names_tuple)
+
     else:
         de = find_cluster_degs(
             adata,
@@ -483,15 +484,15 @@ def find_all_cluster_degs(
             X_data=X_data,
             group=group,
         )
-        de_tables[0] = de.copy()
-        de_genes[0] = [k for k, v in Counter(de["gene"]).items() if v >= 1]
+        deg_tables[0] = de.copy()
+        deg_dict[0] = [k for k, v in Counter(de["gene"]).items() if v >= 1]
 
     if copy:
         adata_1 = adata.copy()
-        adata_1.uns["cluster_markers"] = {"deg_tables": de_tables, "de_genes": de_genes}
+        adata_1.uns["cluster_markers"] = {"deg_tables": deg_tables, "deg_list": deg_dict}
         return adata_1
     else:
-        adata.uns["cluster_markers"] = {"deg_tables": de_tables, "de_genes": de_genes}
+        adata.uns["cluster_markers"] = {"deg_tables": deg_tables, "deg_list": deg_dict}
 
     return adata
 
@@ -500,6 +501,7 @@ def find_all_cluster_degs(
 def top_n_degs(
     adata: AnnData,
     group: str,
+    custom_score_func: Union[None, Callable] = None,
     sort_by: Union[str, List[str]] = "cosine_score",
     top_n_genes=10,
     only_deg_list: bool = True,
@@ -511,6 +513,20 @@ def top_n_degs(
         group: The column key/name that identifies the grouping information (for
             example, clusters that correspond to different cell types) of
             buckets. This will be used for calculating group-specific genes.
+        custom_score_func: A custom function to calculate the score based on
+            the DEG analyses result. Note the columns in adata.uns["cluster_markers"]["deg_tables"]
+            includes:
+               * "test_group",
+               * "control_group",
+               * "ratio_expr",
+               * "diff_ratio_expr",
+               * "person_score",
+               * "cosine_score",
+               * "jsd_adj_score",
+               * "log2fc",
+               * "combined_score",
+               * "pval",
+               * "qval".
         sort_by: `str` or `list`
             Column name or names to sort by.
         top_n_genes: `int`
@@ -523,10 +539,17 @@ def top_n_degs(
             "No info of cluster markers stored in your adata.Running `find_all_cluster_degs` with default parameters."
         )
 
-    deg_table = adata.uns["cluster_markers"]["deg_tables"][0][0]
+    deg_table = []
 
-    for i in range(len(adata.obs[group].unique()) - 1):
-        deg_table = deg_table.append(adata.uns["cluster_markers"]["deg_tables"][i + 1][i + 1])
+    for i in range(len(adata.obs[group].unique())):
+        cur_table = adata.uns["cluster_markers"]["deg_tables"][i]
+
+        if custom_score_func is not None:
+            cur_table["custom_score"] = custom_score_func(deg_table)
+
+        deg_table.append(cur_table)
+
+    sort_by = sort_by if custom_score_func is None else "custom_score"
     deg_table = deg_table.groupby("test_group").apply(lambda grp: grp.nlargest(top_n_genes, sort_by))
 
     if only_deg_list:
