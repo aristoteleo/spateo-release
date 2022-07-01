@@ -485,14 +485,14 @@ def find_all_cluster_degs(
             group=group,
         )
         deg_tables[0] = de.copy()
-        deg_dict[0] = [k for k, v in Counter(de["gene"]).items() if v >= 1]
+        deg_lists[0] = [k for k, v in Counter(de["gene"]).items() if v >= 1]
 
     if copy:
         adata_1 = adata.copy()
-        adata_1.uns["cluster_markers"] = {"deg_tables": deg_tables, "deg_list": deg_dict}
+        adata_1.uns["cluster_markers"] = {"deg_tables": deg_tables, "deg_list": deg_lists}
         return adata_1
     else:
-        adata.uns["cluster_markers"] = {"deg_tables": deg_tables, "deg_list": deg_dict}
+        adata.uns["cluster_markers"] = {"deg_tables": deg_tables, "deg_list": deg_lists}
 
     return adata
 
