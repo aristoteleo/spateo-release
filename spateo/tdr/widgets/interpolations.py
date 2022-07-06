@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple
 
 import numpy as np
 from anndata import AnnData
@@ -12,22 +12,25 @@ from .deep_interpolation import DataSampler, DeepInterpolation
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def kernel_interpolation(
-    adata: Union[AnnData, None] = None,
-    genes: Union[None, List] = None,
-    X: Union[None, np.ndarray] = None,
-    Y: Union[None, np.ndarray] = None,
+    adata: Optional[AnnData] = None,
+    genes: Optional[List] = None,
+    X: Optional[np.ndarray] = None,
+    Y: Optional[np.ndarray] = None,
+    NX: Optional[np.ndarray] = None,
     grid_num: List = [50, 50, 50],
     lambda_: float = 0.02,
     lstsq_method: str = "scipy",
     **kwargs,
 ) -> AnnData:
     """Learn a continuous mapping from space to gene expression pattern with the Kernel method (sparseVFC).
+
     Args:
         adata: AnnData object that contains spatial (numpy.ndarray) in the `obsm` attribute.
         genes: Gene list whose interpolate expression across space needs to learned. If Y is provided, genes will only
             be used to retrive the gene annotation info.
         X: The spatial coordinates of each data point.
         Y: The gene expression of the corresponding data point.
+        NX: The spatial coordinates of new data point. If NX is None, generate new points based on grid_num.
         grid_num: Number of grid to generate. Default is 50 for each dimension. Must be non-negative.
         lambda_: Represents the trade-off between the goodness of data fit and regularization. Larger Lambda_ put more
             weights on regularization.
@@ -44,12 +47,13 @@ def kernel_interpolation(
 
     X, Y, Grid, grid_in_hull = get_X_Y_grid(adata=adata, X=X, Y=Y, grid_num=grid_num)
 
-    res = SparseVFC(X, Y, Grid, lambda_=lambda_, lstsq_method=lstsq_method, **kwargs)
+    predict_X = Grid if NX is None else NX
+    res = SparseVFC(X, Y, predict_X, lambda_=lambda_, lstsq_method=lstsq_method, **kwargs)
 
     lm.main_info("Creating an adata object with the interpolated expression...")
     interp_adata = AnnData(
-        X=res["grid_V"][grid_in_hull],
-        obsm={"spatial": res["grid"][grid_in_hull]},
+        X=res["grid_V"][grid_in_hull] if NX is None else res["grid_V"],
+        obsm={"spatial": res["grid"][grid_in_hull] if NX is None else NX},
         var=adata[:, genes].var if genes is not None and Y.shape[1] == len(genes) else None,
     )
 
@@ -60,10 +64,11 @@ def kernel_interpolation(
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def deep_intepretation(
-    adata: Union[AnnData, None] = None,
-    genes: Union[None, List] = None,
-    X: Union[None, np.ndarray] = None,
-    Y: Union[None, np.ndarray] = None,
+    adata: Optional[AnnData] = None,
+    genes: Optional[List] = None,
+    X: Optional[np.ndarray] = None,
+    Y: Optional[np.ndarray] = None,
+    NX: Optional[np.ndarray] = None,
     grid_num: List = [50, 50, 50],
     **kwargs,
 ) -> AnnData:
@@ -75,6 +80,7 @@ def deep_intepretation(
             be used to retrive the gene annotation info.
         X: The spatial coordinates of each data point.
         Y: The gene expression of the corresponding data point.
+        NX: The spatial coordinates of new data point. If NX is None, generate new points based on grid_num.
         grid_num: Number of grid to generate. Default is 50 for each dimension. Must be non-negative.
         **kwargs: Additional parameters that will be passed to the training step of the deep neural net.
 
@@ -99,11 +105,12 @@ def deep_intepretation(
         max_iter=1000, data_batch_size=5000, autoencoder_batch_size=50, data_lr=1e-4, autoencoder_lr=1e-4, **kwargs
     )
 
-    Grid_Y = NN_model.predict(input_x=Grid[grid_in_hull])
+    predict_X = Grid[grid_in_hull] if NX is None else NX
+    predict_Y = NN_model.predict(input_x=predict_X)
 
     interp_adata = AnnData(
-        X=Grid_Y,
-        obsm={"spatial": Grid[grid_in_hull]},
+        X=predict_Y,
+        obsm={"spatial": predict_X},
         var=adata[:, genes].var if genes is not None and Y.shape[1] == len(genes) else None,
     )
 
@@ -112,10 +119,10 @@ def deep_intepretation(
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def get_X_Y_grid(
-    adata: Union[AnnData, None] = None,
-    genes: Union[None, List] = None,
-    X: Union[None, np.ndarray] = None,
-    Y: Union[None, np.ndarray] = None,
+    adata: Optional[AnnData] = None,
+    genes: Optional[List] = None,
+    X: Optional[np.ndarray] = None,
+    Y: Optional[np.ndarray] = None,
     grid_num: List = [50, 50, 50],
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Prepare the X (spatial coordinates), Y (gene expression) and grid points for the kernel or deep model.
