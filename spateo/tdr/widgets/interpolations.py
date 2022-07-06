@@ -22,7 +22,6 @@ def kernel_interpolation(
     **kwargs,
 ) -> AnnData:
     """Learn a continuous mapping from space to gene expression pattern with the Kernel method (sparseVFC).
-
     Args:
         adata: AnnData object that contains spatial (numpy.ndarray) in the `obsm` attribute.
         genes: Gene list whose interpolate expression across space needs to learned. If Y is provided, genes will only
