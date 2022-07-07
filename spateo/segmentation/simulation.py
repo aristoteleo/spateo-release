@@ -123,7 +123,7 @@ def simulate_cells(
     f_do, f_mu, f_var = foreground_params
     b_do, b_mu, b_var = background_params
     if f_var < f_mu or b_var < b_mu:
-        raise SegmentationError("Variance must be less than mean.")
+        raise SegmentationError("Variance must be larger than mean.")
     f_n, f_p = muvar_to_np(f_mu, f_var)
     b_n, b_p = muvar_to_np(b_mu, b_var)
 
