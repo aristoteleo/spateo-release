@@ -64,6 +64,8 @@ def _create_labels(
             # Compute shifted locations for each of the overlapping labels.
             for ov_label in overlapping:
                 ov_idx = ov_label - 1
+                if ov_idx not in indices_to_add:
+                    indices_to_add.append(int(ov_idx))
                 ov_x, ov_y = xs[ov_idx], ys[ov_idx]
                 diff_x = ov_x - x
                 diff_y = ov_y - y
