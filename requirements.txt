@@ -7,6 +7,7 @@ dynamo-release>=1.0.9
 fbgbp>=0.2.0
 folium>=0.12.1
 geopandas>=0.10.2
+ipywidgets>=7.7.1
 kneed>=0.7.0
 kornia>=0.6.4
 loompy>=3.0.5
@@ -41,5 +42,3 @@ torch>=1.10.1+cu113
 typing_extensions>=4.0.1
 umap-learn>=0.5.1
 vtk>=9.1.0
-ipywidgets>=7.7.1
-
