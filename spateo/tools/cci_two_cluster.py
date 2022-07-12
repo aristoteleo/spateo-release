@@ -8,21 +8,22 @@
 """
 
 
+import random
+from typing import List, Optional, Tuple
 
-from anndata import AnnData
 import numpy as np
 import pandas as pd
+from anndata import AnnData
 from scipy import sparse
 from scipy.sparse import issparse
-from scipy.stats import pearsonr, gmean
-import random
-from typing import List, Optional,Tuple
+from scipy.stats import gmean, pearsonr
 from typing_extensions import Literal
+
 
 def find_cci_two_group(
     adata: AnnData,
     path: str,
-    species: Literal["human", "mouse","drosophila","zebrafish","axolotl"] = "human",
+    species: Literal["human", "mouse", "drosophila", "zebrafish", "axolotl"] = "human",
     layer: Tuple[None, str] = None,
     group: str = None,
     lr_pair: list = None,
@@ -56,7 +57,7 @@ def find_cci_two_group(
         spatial_distances : neighbor_key {spatial_distances} in adata.obsp.keys().
         filter_lr: filter ligand and receptor based on specfic expressed in sender groups
             and receiver groups.'inner',specfic both in sender groups and receiver groups,
-            'outer',specfic in sender groups or receiver groups. 
+            'outer',specfic in sender groups or receiver groups.
         top: the number of top expressed fraction in given sender groups(receiver groups)
             for each gene(ligand or receptor).
 
@@ -68,27 +69,26 @@ def find_cci_two_group(
     # prior lr_network
     if species == "human":
         lr_network = pd.read_csv(path + "lr_network_human.csv", index_col=0)
-        lr_network['lr_pair'] = lr_network['from'].str.cat(lr_network['to'],sep='-')
+        lr_network["lr_pair"] = lr_network["from"].str.cat(lr_network["to"], sep="-")
     elif species == "mouse":
         lr_network = pd.read_csv(path + "lr_network_mouse.csv", index_col=0)
-        lr_network['lr_pair'] = lr_network['from'].str.cat(lr_network['to'],sep='-')
+        lr_network["lr_pair"] = lr_network["from"].str.cat(lr_network["to"], sep="-")
     elif species == "drosophila":
         lr_network = pd.read_csv(path + "lr_network_drosophila.csv", index_col=0)
-        lr_network['lr_pair'] = lr_network['from'].str.cat(lr_network['to'],sep='-')
+        lr_network["lr_pair"] = lr_network["from"].str.cat(lr_network["to"], sep="-")
     elif species == "zebrafish":
         lr_network = pd.read_csv(path + "lr_network_zebrafish.csv", index_col=0)
-        lr_network['lr_pair'] = lr_network['from'].str.cat(lr_network['to'],sep='-')
+        lr_network["lr_pair"] = lr_network["from"].str.cat(lr_network["to"], sep="-")
     elif species == "axolotl":
         lr_network = pd.read_csv(path + "lr_network_axolotl.csv", index_col=0)
-        lr_network['lr_pair'] = lr_network['human_ligand'].str.cat(lr_network['human_receptor'],sep='-')
+        lr_network["lr_pair"] = lr_network["human_ligand"].str.cat(lr_network["human_receptor"], sep="-")
     # layer
     if layer is None:
         adata.X = adata.X
     else:
         adata.X = adata.layers[layer]
-        
-    x_sparse = issparse(adata.X)
 
+    x_sparse = issparse(adata.X)
 
     ### filter lr
     if lr_pair is None:
@@ -105,98 +105,93 @@ def find_cci_two_group(
         lr_network = lr_network[lr_network["to"].isin(expressed_receptor)]
 
         # ligand_sender_spec
-        adata_l = adata[:, lr_network['from']]
+        adata_l = adata[:, lr_network["from"]]
         for g in adata.obs[group].unique():
-            adata_l.var[g+'_frac'] = adata_l[adata_l.obs[group] == g].X.A.sum(axis=0)/adata_l.X.A.sum(axis=0) 
-        dfl = adata_l.var[adata_l.var[sender_group+'_frac'] > 0]
-        ligand_sender_spec = dfl.sort_values(by=sender_group+'_frac', ascending=False)[:top].index
-        lr_network_l = lr_network.loc[lr_network['from'].isin(ligand_sender_spec.tolist())]
+            adata_l.var[g + "_frac"] = adata_l[adata_l.obs[group] == g].X.A.sum(axis=0) / adata_l.X.A.sum(axis=0)
+        dfl = adata_l.var[adata_l.var[sender_group + "_frac"] > 0]
+        ligand_sender_spec = dfl.sort_values(by=sender_group + "_frac", ascending=False)[:top].index
+        lr_network_l = lr_network.loc[lr_network["from"].isin(ligand_sender_spec.tolist())]
 
         # rceptor_receiver_spec
-        adata_r = adata[:, lr_network['to']]
+        adata_r = adata[:, lr_network["to"]]
         for g in adata.obs[group].unique():
-            adata_r.var[g+'_frac'] = adata_r[adata_r.obs[group] == g].X.A.sum(axis=0)/adata_r.X.A.sum(axis=0) 
-        dfr = adata_r.var[adata_r.var[receiver_group+'_frac'] > 0]
-        receptor_receiver_spec = dfr.sort_values(by=receiver_group+'_frac', ascending=False)[:top].index
-        lr_network_r = lr_network.loc[lr_network['to'].isin(receptor_receiver_spec.tolist())]
+            adata_r.var[g + "_frac"] = adata_r[adata_r.obs[group] == g].X.A.sum(axis=0) / adata_r.X.A.sum(axis=0)
+        dfr = adata_r.var[adata_r.var[receiver_group + "_frac"] > 0]
+        receptor_receiver_spec = dfr.sort_values(by=receiver_group + "_frac", ascending=False)[:top].index
+        lr_network_r = lr_network.loc[lr_network["to"].isin(receptor_receiver_spec.tolist())]
 
-        if filter_lr == 'inner':
+        if filter_lr == "inner":
             # inner merge
-            lr_network_inner = lr_network_l.merge(lr_network_r, how='inner', on=['from','to'])
-            lr_network = lr_network.loc[lr_network['from'].isin(lr_network_inner['from'].tolist()) & lr_network['to'].isin(lr_network_inner['to'].tolist())]
-        elif filter_lr == 'outer':
+            lr_network_inner = lr_network_l.merge(lr_network_r, how="inner", on=["from", "to"])
+            lr_network = lr_network.loc[
+                lr_network["from"].isin(lr_network_inner["from"].tolist())
+                & lr_network["to"].isin(lr_network_inner["to"].tolist())
+            ]
+        elif filter_lr == "outer":
             # outer merge
-            lr_network = pd.concat([lr_network_l, lr_network_r],axis=0, join='outer')
-            lr_network.drop_duplicates(keep='first',inplace=True)
+            lr_network = pd.concat([lr_network_l, lr_network_r], axis=0, join="outer")
+            lr_network.drop_duplicates(keep="first", inplace=True)
     else:
-        lr_network = lr_network.loc[lr_network['lr_pair'].isin(lr_pair)]
-        
-    
+        lr_network = lr_network.loc[lr_network["lr_pair"].isin(lr_pair)]
+
     ### find cell_pair
-    # cell_pair_all   
+    # cell_pair_all
     sender_id = adata[adata.obs[group].isin([sender_group])].obs.index
     receiver_id = adata[adata.obs[group].isin([receiver_group])].obs.index
-    cell_pair_all = len(sender_id)*len(receiver_id)/2
-    
+    cell_pair_all = len(sender_id) * len(receiver_id) / 2
+
     # spatial constrain cell pair
     nw = {}
     nw = {"neighbors": adata.uns["spatial_neighbors"]["indices"], "weights": adata.obsp["spatial_distances"]}
     k = adata.uns["spatial_neighbors"]["params"]["n_neighbors"]
-    
+
     # cell_pair:all cluster spatial constrain cell pair
     cell_pair = []
     for i, cell_id in enumerate(nw["neighbors"]):
         cell_pair.append(adata.obs.index[i] + "-" + adata.obs.index[cell_id])
     cell_pair = [i for j in cell_pair for i in j]
     cell_pair = pd.DataFrame({"cell_pair_name": cell_pair})
-    cell_pair[['cell_sender', 'cell_receiver']] = cell_pair['cell_pair_name'].str.split('-', 2, expand=True)
+    cell_pair[["cell_sender", "cell_receiver"]] = cell_pair["cell_pair_name"].str.split("-", 2, expand=True)
     # cell_pair:sender_group
-    cell_pair = cell_pair.loc[cell_pair['cell_sender'].isin(sender_id.tolist())]
+    cell_pair = cell_pair.loc[cell_pair["cell_sender"].isin(sender_id.tolist())]
     # cell_pair:receiver_group
-    cell_pair = cell_pair.loc[cell_pair['cell_receiver'].isin(receiver_id.tolist())]
+    cell_pair = cell_pair.loc[cell_pair["cell_receiver"].isin(receiver_id.tolist())]
     # filter cell pairs
-    if cell_pair.shape[0]< min_pairs:
-        raise ValueError(
-            f"cell pairs found between", sender_group, "and", receiver_group,"less than min_pairs"
-            )
-    if cell_pair.shape[0]/cell_pair_all < min_pairs_ratio:
-        raise ValueError(
-            f"cell pairs found between", sender_group, "and", receiver_group,"less than min_pairs_ratio"
-            )
-
+    if cell_pair.shape[0] < min_pairs:
+        raise ValueError(f"cell pairs found between", sender_group, "and", receiver_group, "less than min_pairs")
+    if cell_pair.shape[0] / cell_pair_all < min_pairs_ratio:
+        raise ValueError(f"cell pairs found between", sender_group, "and", receiver_group, "less than min_pairs_ratio")
 
     ### calculate score
     # real lr_cp_exp_score
-    ligand_data = adata[cell_pair['cell_sender'],lr_network['from']]
-    receptor_data = adata[cell_pair['cell_receiver'],lr_network['to']]
+    ligand_data = adata[cell_pair["cell_sender"], lr_network["from"]]
+    receptor_data = adata[cell_pair["cell_receiver"], lr_network["to"]]
     lr_data = ligand_data.X.A * receptor_data.X.A
-    lr_co_exp_ratio = np.apply_along_axis(lambda x:np.sum(x>0)/x.size,0, lr_data)
-    lr_co_exp_num = np.apply_along_axis(lambda x:np.sum(x>0),0, lr_data)
-    lr_network['lr_co_exp_num'] = lr_co_exp_num
-    lr_network['lr_co_exp_ratio'] = lr_co_exp_ratio
-    
-    # permutation test 
-    per_data = np.zeros((lr_network.shape[0],num))
+    lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, lr_data)
+    lr_co_exp_num = np.apply_along_axis(lambda x: np.sum(x > 0), 0, lr_data)
+    lr_network["lr_co_exp_num"] = lr_co_exp_num
+    lr_network["lr_co_exp_ratio"] = lr_co_exp_ratio
+
+    # permutation test
+    per_data = np.zeros((lr_network.shape[0], num))
     for i in range(num):
         random.seed(i)
-        cell_id = random.sample(adata.obs.index.tolist(),k=cell_pair.shape[0]*2)
-        per_sender_id = cell_id[0:cell_pair.shape[0]]
-        per_receiver_id = cell_id[cell_pair.shape[0]:cell_pair.shape[0]*2]
-        per_ligand_data = adata[per_sender_id, lr_network['from']]
-        per_receptor_data = adata[per_receiver_id, lr_network['to']]
+        cell_id = random.sample(adata.obs.index.tolist(), k=cell_pair.shape[0] * 2)
+        per_sender_id = cell_id[0 : cell_pair.shape[0]]
+        per_receiver_id = cell_id[cell_pair.shape[0] : cell_pair.shape[0] * 2]
+        per_ligand_data = adata[per_sender_id, lr_network["from"]]
+        per_receptor_data = adata[per_receiver_id, lr_network["to"]]
         per_lr_data = per_ligand_data.X.A * per_receptor_data.X.A
-        per_lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0)/x.size, 0, per_lr_data)
+        per_lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, per_lr_data)
         per_data[:, i] = per_lr_co_exp_ratio
-    
-    per_data = pd.DataFrame(per_data)
-    per_data.index = lr_network['from']
-    per_data['real'] = lr_network['lr_co_exp_ratio'].tolist()
-    lr_network['lr_co_exp_ratio_pvalue'] = per_data.apply(lambda x: sum(x[0: num] > x['real'])/num, axis=1).tolist()
-    lr_network = lr_network.loc[lr_network['lr_co_exp_ratio_pvalue'] < pvalue]
-    lr_network['sr_pair'] = sender_group+'-'+receiver_group
-    
-    res = {}
-    res = {'cell_pair':cell_pair,'lr_pair':lr_network}
-    return res
 
-    
+    per_data = pd.DataFrame(per_data)
+    per_data.index = lr_network["from"]
+    per_data["real"] = lr_network["lr_co_exp_ratio"].tolist()
+    lr_network["lr_co_exp_ratio_pvalue"] = per_data.apply(lambda x: sum(x[0:num] > x["real"]) / num, axis=1).tolist()
+    lr_network = lr_network.loc[lr_network["lr_co_exp_ratio_pvalue"] < pvalue]
+    lr_network["sr_pair"] = sender_group + "-" + receiver_group
+
+    res = {}
+    res = {"cell_pair": cell_pair, "lr_pair": lr_network}
+    return res
