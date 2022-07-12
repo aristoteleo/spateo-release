@@ -12,6 +12,7 @@ from .cluster_degs import (
     find_cluster_degs,
     find_spatial_cluster_degs,
 )
+from .cluster_lasso import *
 from .coarse_align import AffineTrans, align_slices_pca, pca_align, procrustes
 
 # from .image import add_image_layer
@@ -19,4 +20,4 @@ from .coarse_align import AffineTrans, align_slices_pca, pca_align, procrustes
 from .lisa import GM_lag_model, lisa_geo_df, local_moran_i
 from .spatial_degs import moran_i
 from .three_d_alignment import slice_alignment, slice_alignment_bigBin
-from .cluster_lasso import *
+from .cci_two_cluster import find_cci_two_group
