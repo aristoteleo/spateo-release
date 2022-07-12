@@ -41,3 +41,5 @@ torch>=1.10.1+cu113
 typing_extensions>=4.0.1
 umap-learn>=0.5.1
 vtk>=9.1.0
+ipywidgets>=7.7.1
+
