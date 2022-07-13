@@ -195,6 +195,7 @@ def sctransform(
 def pearson_residuals(
     adata: AnnData,
     n_top_genes: Optional[int] = 3000,
+    subset: bool = False,
     theta: float = 100,
     clip: Optional[float] = None,
     check_values: bool = True,
@@ -212,6 +213,7 @@ def pearson_residuals(
     Args:
         adata: An anndata object.
         n_top_genes: Number of highly-variable genes to keep.
+        subset: Inplace subset to highly-variable genes if `True` otherwise merely indicate highly variable genes.
         theta: The negative binomial overdispersion parameter theta for Pearson residuals.
                Higher values correspond to less overdispersion (var = mean + mean^2/theta), and `theta=np.Inf`
                corresponds to a Poisson model.
@@ -230,8 +232,9 @@ def pearson_residuals(
     )
 
     if not (n_top_genes is None):
-        compute_highly_variable_genes(adata, n_top_genes=n_top_genes, recipe="pearson_residuals", inplace=True)
-        adata = adata[:, adata.var.highly_variable]
+        compute_highly_variable_genes(
+            adata, n_top_genes=n_top_genes, recipe="pearson_residuals", inplace=True, subset=subset
+        )
 
     X = adata.X.copy()
     residuals = compute_pearson_residuals(X, theta=theta, clip=clip, check_values=check_values)
