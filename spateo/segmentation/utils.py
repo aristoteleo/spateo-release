@@ -7,14 +7,13 @@ import numpy as np
 from anndata import AnnData
 from kneed import KneeLocator
 from scipy import signal, sparse
+from skimage.segmentation import find_boundaries
 from tqdm import tqdm
 from typing_extensions import Literal
 
 from ..configuration import SKM
 from ..errors import SegmentationError
 from ..logging import logger_manager as lm
-from skimage.segmentation import find_boundaries
-
 
 
 def circle(k: int) -> np.ndarray:
@@ -374,7 +373,7 @@ def filter_cell_labels_by_area(adata: AnnData, layer: str, area_cutoff: int = 7)
     cells = np.unique(X)
     cells = [i for i in cells if i > 0]
     lm.main_info(f"Cell number after filtering is {len(cells)}")
-    
+
 
 def get_cell_shape(adata: AnnData, layer: str, thickness: int = 1, out_layer: Optional[str] = None):
     """Set cell boundaries as 255 with thickness as `thickness`.
@@ -387,14 +386,14 @@ def get_cell_shape(adata: AnnData, layer: str, thickness: int = 1, out_layer: Op
     """
     labels = SKM.select_layer_data(adata, layer, make_dense=True)
     lm.main_info(f"Set cell boundaries as value of 255")
-    
+
     bound = np.zeros_like(labels, dtype=np.uint8)
     for i in range(thickness):
-        labels = np.where(bound==0, labels, 0)
-        bound_one = find_boundaries(labels, mode='inner').astype(np.uint8)
+        labels = np.where(bound == 0, labels, 0)
+        bound_one = find_boundaries(labels, mode="inner").astype(np.uint8)
         bound += bound_one
 
-    bound = bound*255
+    bound = bound * 255
 
     out_layer = out_layer or SKM.gen_new_layer_key(layer, SKM.BOUNDARY_SUFFIX)
     SKM.set_layer_data(adata, out_layer, bound)
