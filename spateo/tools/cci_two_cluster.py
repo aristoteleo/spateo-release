@@ -157,7 +157,7 @@ def find_cci_two_group(
     # cell_pair:all cluster spatial constrain cell pair
     cell_pair = []
     for i, cell_id in enumerate(nw["neighbors"]):
-        # - something will be used, use >-<in stead
+        # - sometimes will be used in adata.var_names, use >-<in stead
         cell_pair.append(str(adata.obs.index[i]) + ">-<" + i for i in adata.obs.index[cell_id])
     cell_pair = [i for j in cell_pair for i in j]
     cell_pair = pd.DataFrame({"cell_pair_name": cell_pair})
