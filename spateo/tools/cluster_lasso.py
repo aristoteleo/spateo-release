@@ -17,7 +17,12 @@ from ipywidgets import HBox, VBox, interactive
 
 
 class Lasso:
-    """Lasso an region of intrest(ROI) based on spatial cluster."""
+    """Lasso an region of interest (ROI) based on spatial cluster.
+
+    Examples:
+        L = st.tl.Lasso(adata)
+        L.vi_plot(group='group', group_color='group_color')
+    """
 
     __sub_inde = []
     sub_adata = None
@@ -25,7 +30,7 @@ class Lasso:
     def __init__(self, adata):
         """
         Args:
-            adata: An Annodata object.
+            adata: An Anndata object.
         """
         self.adata = adata
 
@@ -36,14 +41,16 @@ class Lasso:
         group_color: Optional[str] = None,
     ):
         """Plot spatial cluster result and lasso ROI.
+
         Args:
-            key: The column key in .obsm, default is 'spatial'.
+            key: The column key in .obsm, default to be 'spatial'.
             group: The column key/name that identifies the grouping information
                 (for example, clusters that correspond to different cell types)
                 of buckets.
-            group_color: The column key in .uns, relate to group color.
+            group_color: The key in .uns, corresponds to a dictionary that map group names to group colors.
+
         Returns:
-            adata: subset of adata.
+            sub_adata: subset of adata.
         """
         if group and group_color:
 
@@ -63,16 +70,15 @@ class Lasso:
             scatter.marker.opacity = 0.5
             f.layout.plot_bgcolor = "rgb(255,255,255)"
             f.layout.autosize = True
-            f.layout.yaxis = dict(
-                showticklabels=False,
-                autorange=True,
-            )
-            f.layout.xaxis = dict(
-                showticklabels=False,
-                autorange=True,
-            )
 
-            # Create a table FigureWidget that updates on selection from points in the scatter plot of xf
+            axis_dict = dict(
+                showticklabels=False,
+                autorange=True,
+            )
+            f.layout.yaxis = axis_dict
+            f.layout.xaxis = axis_dict
+
+            # Create a table FigureWidget that updates on selection from points in the scatter plot of f
             t = go.FigureWidget(
                 [
                     go.Table(
@@ -107,4 +113,4 @@ class Lasso:
             return VBox((f, t))
 
         else:
-            raise ValueError(f"No arguments 'group' or 'group_color'")
+            raise ValueError(f"adata.obsm doesn't have {group} or {group_color} is not in adata.uns")
