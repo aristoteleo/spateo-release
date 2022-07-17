@@ -6,8 +6,7 @@ import ot
 import pandas as pd
 import torch
 from anndata import AnnData
-from scipy.sparse import csgraph, csr_matrix, issparse
-from scipy.spatial import distance, distance_matrix
+from scipy.sparse import issparse
 from sklearn.decomposition import NMF
 
 from ..logging import logger_manager as lm
@@ -347,7 +346,7 @@ def center_align(
     R = 0
     R_diff = 100
     while R_diff > threshold and iteration_count < max_iter:
-        print("Iteration: " + str(iteration_count))
+        lm.main_info(message=f"{iteration_count} iteration of center alignment.", indent_level=1)
 
         new_pis = []
         r = []
@@ -383,9 +382,11 @@ def center_align(
         R_new = np.dot(r, lmbda)
         iteration_count += 1
         R_diff = abs(R - R_new)
-        print("Objective ", R_new)
-        print("Difference: " + str(R_diff) + "\n")
         R = R_new
+
+        lm.main_info(message=f"Objective: {R_new}", indent_level=2)
+        lm.main_info(message=f"Difference: {R_diff}", indent_level=2)
+
     center_sample = init_center_sample.copy()
     center_sample.X = np.dot(W, H)
     center_sample.uns["paste_W"] = W
