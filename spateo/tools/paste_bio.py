@@ -104,7 +104,7 @@ def check_spatial_coords(sample: AnnData, spatial_key: str = "spatial") -> np.nd
     if isinstance(coordinates, pd.DataFrame):
         coordinates = coordinates.values
 
-    coordinates = coordinates.astype(np.float64)
+    coordinates = np.asarray(coordinates, dtype=np.float64)
     return coordinates
 
 
@@ -193,8 +193,8 @@ def pairwise_align(
         M = kl_divergence_backend(A_X + 0.01, B_X + 0.01)
 
     # init distributions
-    a = np.ones((sampleA.shape[0],)) / sampleA.shape[0] if a_distribution is None else a_distribution
-    b = np.ones((sampleB.shape[0],)) / sampleB.shape[0] if b_distribution is None else b_distribution
+    a = np.ones((sampleA.shape[0],)) / sampleA.shape[0] if a_distribution is None else np.asarray(a_distribution)
+    b = np.ones((sampleB.shape[0],)) / sampleB.shape[0] if b_distribution is None else np.asarray(b_distribution)
     a = nx.from_numpy(a.astype(np.float64))
     b = nx.from_numpy(b.astype(np.float64))
 
