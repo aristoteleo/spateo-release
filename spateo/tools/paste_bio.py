@@ -303,10 +303,12 @@ def center_align(
         - List of pairwise alignment mappings of the center sample (rows) to each input sample (columns).
     """
 
-    def _generate_center_sample(W, H, genes, coords):
+    def _generate_center_sample(W, H, genes, coords, layer):
         center_sample = AnnData(np.dot(W, H))
         center_sample.var.index = genes
         center_sample.obsm[spatial_key] = coords
+        if layer != "X":
+            center_sample.layers[layer] = center_sample.X
         return center_sample
 
     if lmbda is None:
@@ -352,7 +354,7 @@ def center_align(
         r = []
         for i in range(len(samples)):
             p, r_q = pairwise_align(
-                sampleA=_generate_center_sample(W=W, H=H, genes=common_genes, coords=center_coords),
+                sampleA=_generate_center_sample(W=W, H=H, genes=common_genes, coords=center_coords, layer=layer),
                 sampleB=samples[i],
                 layer=layer,
                 spatial_key=spatial_key,
