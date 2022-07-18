@@ -19,4 +19,11 @@ from .coarse_align import AffineTrans, align_slices_pca, pca_align, procrustes
 from .lisa import GM_lag_model, lisa_geo_df, local_moran_i
 from .paste_bio import center_align, generalized_procrustes_analysis, pairwise_align
 from .spatial_degs import moran_i
-from .three_dims_align import models_align, slices_align, slices_align_ref
+from .three_dims_align import (
+    models_align,
+    models_align_ref,
+    rigid_transform_2D,
+    rigid_transform_3D,
+    slices_align,
+    slices_align_ref,
+)
