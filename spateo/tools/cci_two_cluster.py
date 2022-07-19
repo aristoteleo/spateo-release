@@ -114,7 +114,7 @@ def find_cci_two_group(
         # ligand_sender_spec
         adata_l = adata[:, lr_network["from"]]
         for g in adata.obs[group].unique():
-            frac = (adata_l[adata_l.obs[group] == g].X > 0).sum(axis=0) / adata_l.X.sum(axis=0)
+            frac = (adata_l[adata_l.obs[group] == g].X > 0).sum(axis=0) / (adata_l.X > 0).sum(axis=0)
             adata_l.var[g + "_frac"] = frac.A1 if x_sparse else frac
         dfl = adata_l.var[adata_l.var[sender_group + "_frac"] > 0]
         ligand_sender_spec = dfl.sort_values(by=sender_group + "_frac", ascending=False)[:top].index
