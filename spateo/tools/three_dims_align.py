@@ -147,6 +147,7 @@ def slices_align_ref(
     slices: List[AnnData],
     slices_ref: Optional[List[AnnData]],
     n_sampling: Optional[int] = 1000,
+    sample_method: str = "trn",
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
@@ -166,6 +167,7 @@ def slices_align_ref(
         slices: List of slices (AnnData Object).
         slices_ref: List of slices (AnnData Object) with a small number of coordinates.
         n_sampling: When `slices_ref` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
+        sample_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
@@ -184,7 +186,7 @@ def slices_align_ref(
         for s in slices:
             slice_ref = s.copy()
             sampling = dyn.tl.sample(
-                arr=np.asarray(slice_ref.obs_names), n=n_sampling, method="trn", X=slice_ref.obsm[spatial_key]
+                arr=np.asarray(slice_ref.obs_names), n=n_sampling, method=sample_method, X=slice_ref.obsm[spatial_key]
             )
             slice_ref = slice_ref[sampling, :]
             slices_ref.append(slice_ref)
@@ -313,6 +315,7 @@ def models_align_ref(
     models: List[AnnData],
     models_ref: Optional[List[AnnData]] = None,
     n_sampling: Optional[int] = 1000,
+    sample_method: str = "trn",
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
@@ -338,6 +341,7 @@ def models_align_ref(
         models: List of models to use in the center alignment.
         models_ref: List of models (AnnData Object) with a small number of coordinates.
         n_sampling: When `models_ref` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
+        sample_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
@@ -375,7 +379,7 @@ def models_align_ref(
         for m in models:
             model_ref = m.copy()
             model_sampling = dyn.tl.sample(
-                arr=np.asarray(model_ref.obs_names), n=n_sampling, method="trn", X=model_ref.obsm[spatial_key]
+                arr=np.asarray(model_ref.obs_names), n=n_sampling, method=sample_method, X=model_ref.obsm[spatial_key]
             )
             model_ref = model_ref[model_sampling, :]
             models_ref.append(model_ref)
