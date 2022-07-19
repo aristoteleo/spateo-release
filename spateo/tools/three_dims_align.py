@@ -1,6 +1,6 @@
-import random
 from typing import List, Optional, Tuple
 
+import dynamo as dyn
 import numpy as np
 from anndata import AnnData
 
@@ -143,7 +143,7 @@ def slices_align(
 def slices_align_ref(
     slices: List[AnnData],
     slices_ref: Optional[List[AnnData]],
-    n_random_coords: Optional[int] = 1000,
+    n_sampling: Optional[int] = 1000,
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
@@ -162,7 +162,7 @@ def slices_align_ref(
     Args:
         slices: List of slices (AnnData Object).
         slices_ref: List of slices (AnnData Object) with a small number of coordinates.
-        n_random_coords: When `slices_ref` is None, new data containing n_random_coords coordinate points will be automatically generated for alignment.
+        n_sampling: When `slices_ref` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
@@ -181,7 +181,10 @@ def slices_align_ref(
         slices_ref = []
         for s in slices:
             slice_ref = s.copy()
-            slice_ref = slice_ref[random.sample(list(slice_ref.obs_names), n_random_coords), :]
+            sampling = dyn.tl.sample(
+                arr=np.asarray(slice_ref.obs_names), n=n_sampling, method="trn", X=slice_ref.obsm[spatial_key]
+            )
+            slice_ref = slice_ref[sampling, :]
             slices_ref.append(slice_ref)
 
     # Align spatial coordinates of slices with a small number of coordinates.
@@ -302,7 +305,7 @@ def models_align_ref(
     init_center_model: AnnData,
     models: List[AnnData],
     models_ref: Optional[List[AnnData]] = None,
-    n_random_coords: Optional[int] = 1000,
+    n_sampling: Optional[int] = 1000,
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
@@ -327,7 +330,7 @@ def models_align_ref(
         init_center_model: Model to use as the initialization for center alignment; Make sure to include gene expression and spatial information.
         models: List of models to use in the center alignment.
         models_ref: List of models (AnnData Object) with a small number of coordinates.
-        n_random_coords: When `models_ref` is None, new data containing n_random_coords coordinate points will be automatically generated for alignment.
+        n_sampling: When `models_ref` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
@@ -353,12 +356,21 @@ def models_align_ref(
     """
 
     if models_ref is None:
-        init_center_model = init_center_model[random.sample(list(init_center_model.obs_names), n_random_coords), :]
+        center_sampling = dyn.tl.sample(
+            arr=np.asarray(init_center_model.obs_names),
+            n=n_sampling,
+            method="trn",
+            X=init_center_model.obsm[spatial_key],
+        )
+        init_center_model = init_center_model[center_sampling, :]
 
         models_ref = []
         for m in models:
             model_ref = m.copy()
-            model_ref = model_ref[random.sample(list(model_ref.obs_names), n_random_coords), :]
+            model_sampling = dyn.tl.sample(
+                arr=np.asarray(model_ref.obs_names), n=n_sampling, method="trn", X=model_ref.obsm[spatial_key]
+            )
+            model_ref = model_ref[model_sampling, :]
             models_ref.append(model_ref)
 
     new_center_model, align_models_ref = models_align(
