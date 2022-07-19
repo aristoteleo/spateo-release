@@ -6,7 +6,7 @@ from anndata import AnnData
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-from .paste_bio import center_align, generalized_procrustes_analysis, pairwise_align
+from .paste import center_align, generalized_procrustes_analysis, pairwise_align
 
 
 def rigid_transform_2D(
