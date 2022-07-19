@@ -172,9 +172,8 @@ def slices_align_ref(
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
 
     Returns:
-        Tuple of two elements. The first contains a list of slices after alignment.
-        The second contains a list of slices with a small number of coordinates
-        after alignment.
+        align_slices_ref: List of slices_ref (AnnData Object) after alignment.
+        align_slices: List of slices (AnnData Object) after alignment.
     """
 
     if slices_ref is None:
@@ -350,7 +349,7 @@ def models_align_ref(
 
     Returns:
         new_center_model: The center model.
-        align_models_ref: List of models (AnnData Object) after alignment.
+        align_models_ref: List of models_ref (AnnData Object) after alignment.
         align_models: List of models (AnnData Object) after alignment.
 
     """
