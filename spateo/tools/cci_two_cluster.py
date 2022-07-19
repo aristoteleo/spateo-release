@@ -18,7 +18,10 @@ from scipy.sparse import issparse
 from scipy.stats import gmean, pearsonr
 from typing_extensions import Literal
 
+from ..configuration import SKM
 
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def find_cci_two_group(
     adata: AnnData,
     path: str,

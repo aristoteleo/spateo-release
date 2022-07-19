@@ -77,6 +77,7 @@ def rigid_transform_3D(
     return np.asarray(new_coords.T)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slices")
 def slices_align(
     slices: List[AnnData],
     layer: str = "X",
@@ -140,6 +141,8 @@ def slices_align(
     return align_slices
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slices")
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slices_ref", optional=True)
 def slices_align_ref(
     slices: List[AnnData],
     slices_ref: Optional[List[AnnData]],
@@ -215,6 +218,8 @@ def slices_align_ref(
     return align_slices, align_slices_ref
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "init_center_model")
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models")
 def models_align(
     init_center_model: AnnData,
     models: List[AnnData],
@@ -300,6 +305,9 @@ def models_align(
     return new_center_model, align_models
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "init_center_model")
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models")
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models_ref", optional=True)
 def models_align_ref(
     init_center_model: AnnData,
     models: List[AnnData],

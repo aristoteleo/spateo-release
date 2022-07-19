@@ -9,11 +9,10 @@
 
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objs as go
 import plotly.offline as py
-from ipywidgets import HBox, VBox, interactive
+from ipywidgets import VBox
 
 
 class Lasso:
