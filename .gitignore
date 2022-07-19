@@ -51,7 +51,7 @@ docs/source/_autosummary
 /dist/
 
 .coverage
-test_2d.py
+test.py
 
 # Docker related:
 node_modules/
