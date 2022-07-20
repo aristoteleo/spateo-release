@@ -90,7 +90,7 @@ def check_backend(device: str = "cpu"):
     return device, backend
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sample")
+# @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sample")
 def check_spatial_coords(sample: AnnData, spatial_key: str = "spatial") -> np.ndarray:
     """
     Check spatial coordinate information.
@@ -110,7 +110,7 @@ def check_spatial_coords(sample: AnnData, spatial_key: str = "spatial") -> np.nd
     return coordinates
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sample")
+# @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sample")
 def check_exp(sample: AnnData, layer: str = "X") -> np.ndarray:
     """
     Check expression matrix.
@@ -134,8 +134,8 @@ def check_exp(sample: AnnData, layer: str = "X") -> np.ndarray:
 ######################################
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sampleA")
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sampleB")
+# @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sampleA")
+# @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sampleB")
 def pairwise_align(
     sampleA: AnnData,
     sampleB: AnnData,
@@ -262,8 +262,8 @@ def center_NMF(n_components, random_seed, dissimilarity="kl"):
     return model
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "init_center_sample")
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "samples")
+# @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "init_center_sample")
+# @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "samples")
 def center_align(
     init_center_sample: AnnData,
     samples: List[AnnData],
