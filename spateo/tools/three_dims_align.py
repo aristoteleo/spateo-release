@@ -25,14 +25,15 @@ def rigid_transform_2D(
     Returns:
         The 2D coordinate matrix after transformation
     """
-    try:
-        import nudged
-    except:
-        raise ImportError("You need to install the package `nudged`." "\nInstall nudged via `pip install nudged`")
 
-    trans = nudged.estimate(coords_refA.tolist(), coords_refB.tolist())
-    new_coords = trans.transform(coords.tolist())
-    return np.asarray(new_coords)
+    coords_refA = np.c_[coords_refA, np.zeros(shape=(coords_refA.shape[0], 1))]
+    coords_refB = np.c_[coords_refB, np.zeros(shape=(coords_refB.shape[0], 1))]
+
+    coords = np.c_[coords, np.zeros(shape=(coords.shape[0], 1))]
+
+    new_coords = rigid_transform_3D(coords=coords, coords_refA=coords_refA, coords_refB=coords_refB)
+
+    return np.asarray(new_coords[:, :2])
 
 
 def rigid_transform_3D(
