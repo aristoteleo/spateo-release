@@ -39,7 +39,7 @@ def find_cci_two_group(
     min_pairs_ratio: float = 0.01,
     num: int = 1000,
     pvalue: float = 0.05,
-) -> AnnData:
+) -> dict:
     """Performing cell-cell transformation on an anndata object, while also
        limiting the nearest neighbor per cell to n_neighbors. This function returns
        another anndata object, in which the columns of the matrix are bucket
@@ -71,9 +71,7 @@ def find_cci_two_group(
             for each gene(ligand or receptor).
 
     Returns:
-        An anndata of Niches, which rows are mechanisms and columns are all
-        possible cell x cell interactions.
-
+        result_dict: a dictionary where the key is 'cell_pair' and 'lr_pair'.
     """
     # prior lr_network
     if species == "human":
@@ -161,7 +159,7 @@ def find_cci_two_group(
     cell_pair = []
     for i, cell_id in enumerate(nw["neighbors"]):
         # - sometimes will be used in adata.obs_names, use >-<in stead
-        cell_pair.append(str(adata.obs.index[i]) + ">-<" + i for i in adata.obs.index[cell_id])
+        cell_pair.append(str(adata.obs.index[i]) + ">-<" + adata.obs.index[cell_id])
     cell_pair = [i for j in cell_pair for i in j]
     cell_pair = pd.DataFrame({"cell_pair_name": cell_pair})
     cell_pair[["cell_sender", "cell_receiver"]] = cell_pair["cell_pair_name"].str.split(">-<", 2, expand=True)
