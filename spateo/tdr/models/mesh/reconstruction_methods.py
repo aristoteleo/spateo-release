@@ -84,6 +84,8 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_f
 
     pc = scale_model(model=pc, scale_factor=1 / mc_sf)
     pc_points = np.asarray(pc.points)
+    move_zero = np.min(pc_points, axis=0)
+    pc_points = pc_points - move_zero
     pc_points_int = np.ceil(pc_points).astype(np.int64)
 
     rmd = pc_points_int - pc_points
@@ -107,7 +109,7 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_f
 
     vertices = vertices - rmd_mean
 
-    v = np.asarray(vertices).astype(np.float64)
+    v = np.asarray(vertices).astype(np.float64) + move_zero
     f = np.asarray(triangles).astype(np.int64)
     f = np.c_[np.full(len(f), 3), f]
 
