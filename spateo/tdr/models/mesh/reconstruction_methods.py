@@ -123,7 +123,9 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_f
 
     # Transform.
     scale_pc = scale_model(model=scale_pc, scale_factor=mc_sf)
-    mesh.points = rigid_transform_3D(coords=np.asarray(mesh.points), coords_refA=np.asarray(scale_pc.points), coords_refB=raw_points)
+    mesh.points = rigid_transform_3D(
+        coords=np.asarray(mesh.points), coords_refA=np.asarray(scale_pc.points), coords_refB=raw_points
+    )
     return mesh
 
 
