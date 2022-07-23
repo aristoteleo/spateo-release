@@ -84,10 +84,10 @@ def add_model(
     plotter: Plotter,
     model: Union[PolyData, UnstructuredGrid, MultiBlock],
     key: Union[str, list] = None,
-    ambient: float = 0.2,
-    opacity: float = 1.0,
+    ambient: Union[float, list] = 0.2,
+    opacity: Union[float, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
-    model_size: float = 5.0,
+    model_size: Union[float, list] = 5.0,
 ):
     """
     Add model(s) to the plotter.
@@ -107,7 +107,7 @@ def add_model(
                     If model_style=`wireframe`, thickness of lines.
     """
 
-    def _add_model(_p, _model, _key, _style):
+    def _add_model(_p, _model, _key, _style, _ambient, _opacity, _model_size):
         """Add any PyVista/VTK model to the scene."""
 
         scalars = f"{_key}_rgba" if _key in _model.array_names else _model.active_scalars_name
@@ -124,27 +124,52 @@ def add_model(
             render_points_as_spheres=render_spheres,
             render_lines_as_tubes=render_tubes,
             style=_style,
-            point_size=model_size,
-            line_width=model_size,
-            ambient=ambient,
-            opacity=opacity,
+            point_size=_model_size,
+            line_width=_model_size,
+            ambient=_ambient,
+            opacity=_opacity,
             smooth_shading=True,
         )
 
     # Add model(s) to the plotter.
     if isinstance(model, MultiBlock):
         n_model = len(model)
-        # Set model style and key.
-        mss = model_style if isinstance(model_style, list) else [model_style]
-        mss = mss * n_model if len(mss) == 1 else mss
 
         keys = key if isinstance(key, list) else [key]
         keys = keys * n_model if len(keys) == 1 else keys
 
-        for sub_model, sub_ms, sub_key in zip(model, mss, keys):
-            _add_model(_p=plotter, _model=sub_model, _key=sub_key, _style=sub_ms)
+        mts = model_style if isinstance(model_style, list) else [model_style]
+        mts = mts * n_model if len(mts) == 1 else mts
+
+        mss = model_size if isinstance(model_size, list) else [model_size]
+        mss = mss * n_model if len(mss) == 1 else mss
+
+        ams = ambient if isinstance(ambient, list) else [ambient]
+        ams = ams * n_model if len(ams) == 1 else ams
+
+        ops = opacity if isinstance(opacity, list) else [opacity]
+        ops = ops * n_model if len(ops) == 1 else ops
+
+        for sub_model, sub_key, sub_mt, sub_ms, sub_am, sub_op in zip(model, keys, mts, mss, ams, ops):
+            _add_model(
+                _p=plotter,
+                _model=sub_model,
+                _key=sub_key,
+                _style=sub_mt,
+                _model_size=sub_ms,
+                _ambient=sub_am,
+                _opacity=sub_op,
+            )
     else:
-        _add_model(_p=plotter, _model=model, _key=key, _style=model_style)
+        _add_model(
+            _p=plotter,
+            _model=model,
+            _key=key,
+            _style=model_style,
+            _model_size=model_size,
+            _ambient=ambient,
+            _opacity=opacity,
+        )
 
 
 def add_outline(
