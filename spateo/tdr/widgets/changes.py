@@ -257,7 +257,7 @@ def map_points_to_branch(
     Find the closest principal tree node to any point in the model through KDTree.
 
     Args:
-        model: A reconstruct model.
+        model: A reconstructed model.
         nodes: The nodes in the principal tree.
         spatial_key: The key that corresponds to the coordinates of the point in the model. If spatial_key is None,
                      the coordinates are model.points.
@@ -292,7 +292,7 @@ def map_gene_to_branch(
     Find the closest principal tree node to any point in the model through KDTree.
 
     Args:
-        model: A reconstruct model contains the gene expression label.
+        model: A reconstructed model contains the gene expression label.
         tree: A three-dims principal tree model contains the nodes label.
         key: The key that corresponds to the gene expression.
         nodes_key: The key that corresponds to the coordinates of the nodes in the tree.
@@ -359,7 +359,7 @@ def calc_tree_length(
         tree_model: A three-dims principal tree model.
 
     Returns:
-        The length of tree model.
+        The length of the tree model.
     """
     from scipy.spatial.distance import cdist
 
@@ -385,7 +385,23 @@ def changes_along_branch(
     inplace: bool = False,
     **kwargs,
 ) -> Tuple[Union[DataSet, PolyData, UnstructuredGrid], PolyData, float]:
+    """
+    Find the closest tree node to any point in the model.
 
+    Args:
+        model:  A reconstructed model.
+        spatial_key: If spatial_key is None, the spatial coordinates are in model.points, otherwise in model[spatial_key].
+        map_key:  The key in model that corresponds to the gene expression.
+        key_added: The key that corresponds to the coordinates of the nodes in the tree.
+        rd_method: The method of constructing a tree.
+        NumNodes: Number of nodes for the tree model.
+        inplace: Updates model in-place.
+
+    Returns:
+        model: Updated model if inplace is True.
+        tree_model: A three-dims principal tree model.
+        tree_length: The length of the tree model.
+    """
     model = model.copy() if not inplace else model
     X = model.points if spatial_key is None else model[spatial_key]
 
