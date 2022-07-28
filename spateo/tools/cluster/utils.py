@@ -245,6 +245,7 @@ def pearson_residuals(
 def integrate(
     adatas: List[AnnData],
     batch_key: str = "slices",
+    fill_value: Union[int, float] = 0,
 ) -> AnnData:
     """
     Concatenating all anndata objects.
@@ -252,6 +253,7 @@ def integrate(
     Args:
         adatas: AnnData matrices to concatenate with.
         batch_key: Add the batch annotation to :attr:`obs` using this key.
+        fill_value: Scalar value to fill newly missing values in arrays with.
     Returns:
         integrated_adata: The concatenated AnnData, where adata.obs[batch_key] stores a categorical variable labeling the batch.
     """
@@ -274,7 +276,12 @@ def integrate(
     # Concatenating obs and var data.
     batch_ca = [adata.obs[batch_key][0] for adata in adatas]
     integrated_adata = adatas[0].concatenate(
-        *adatas[1:], batch_key=batch_key, batch_categories=batch_ca, join="outer", fill_value=0, uns_merge="unique"
+        *adatas[1:],
+        batch_key=batch_key,
+        batch_categories=batch_ca,
+        join="outer",
+        fill_value=fill_value,
+        uns_merge="unique",
     )
 
     # Add Concatenated obsm data and varm data to integrated anndata object.
