@@ -349,6 +349,32 @@ def construct_tree_model(
     return tree_model
 
 
+def calc_tree_length(
+    tree_model: Union[UnstructuredGrid, PolyData],
+) -> float:
+    """
+    Calculate the length of a tree model.
+
+    Args:
+        tree_model: A three-dims principal tree model.
+
+    Returns:
+        The length of tree model.
+    """
+    from scipy.spatial.distance import cdist
+
+    tree_length = (
+        cdist(
+            XA=np.asarray(tree_model.points[:-1, :]),
+            XB=np.asarray(tree_model.points[1:, :]),
+            metric="euclidean",
+        )
+        .diagonal()
+        .sum()
+    )
+    return tree_length
+
+
 def changes_along_branch(
     model: Union[PolyData, UnstructuredGrid],
     spatial_key: Optional[str] = None,
@@ -358,7 +384,7 @@ def changes_along_branch(
     NumNodes: int = 50,
     inplace: bool = False,
     **kwargs,
-) -> Tuple[Union[DataSet, PolyData, UnstructuredGrid], PolyData]:
+) -> Tuple[Union[DataSet, PolyData, UnstructuredGrid], PolyData, float]:
 
     model = model.copy() if not inplace else model
     X = model.points if spatial_key is None else model[spatial_key]
@@ -376,8 +402,9 @@ def changes_along_branch(
 
     map_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=key_added, inplace=True)
     tree_model = construct_tree_model(nodes=nodes, edges=edges)
+    tree_length = calc_tree_length(tree_model=tree_model)
 
     if not (map_key is None):
         map_gene_to_branch(model=model, tree=tree_model, key=map_key, nodes_key=key_added, inplace=True)
 
-    return model if not inplace else None, tree_model
+    return model if not inplace else None, tree_model, tree_length
