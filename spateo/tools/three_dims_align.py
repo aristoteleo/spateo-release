@@ -84,6 +84,7 @@ def slices_align(
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
+    pre_key_added: str = "pre_align_spatial",
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
@@ -98,6 +99,7 @@ def slices_align(
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
+        pre_key_added: adata.obsm key under which to add coordinates of points in previous slice that correspond to points in this slice.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
@@ -134,6 +136,7 @@ def slices_align(
         )
         sliceA.obsm[key_added] = sliceA_coodrs
         sliceB.obsm[key_added] = sliceB_coodrs
+        sliceB.obsm[pre_key_added] = sliceA_coodrs[pi.argmax(axis=0)]
 
         if i == 0:
             align_slices.append(sliceA)
@@ -228,7 +231,8 @@ def models_align(
     models: List[AnnData],
     layer: str = "X",
     spatial_key: str = "spatial",
-    key_added: str = "align_spatial",
+    key_added: str = "3d_align_spatial",
+    center_key_added: str = "center_3d_align_spatial",
     lmbda: Optional[np.ndarray] = None,
     alpha: float = 0.1,
     n_components: int = 15,
@@ -252,6 +256,7 @@ def models_align(
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
+        center_key_added: adata.obsm key under which to add coordinates of points in center_model that correspond to points in this model.
         lmbda: List of probability weights assigned to each slice; If ``None``, use uniform weights.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
         n_components: Number of components in NMF decomposition.
@@ -300,6 +305,7 @@ def models_align(
             center_model.obsm[key_added], model.obsm[key_added], pi
         )
         model.obsm[key_added] = model_coords
+        model.obsm[center_key_added] = center_coords[pi.argmax(axis=0)]
         align_models.append(model)
 
     new_center_model = init_center_model.copy()
