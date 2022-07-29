@@ -10,19 +10,11 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-try:
-    from dijkstar import Graph, find_path
-except ImportError:
-    raise ImportError(
-        "You need to install the package `dijkstar`." "\nInstall dijkstar via `pip install --upgrade dijkstar`"
-    )
-
 from ..logging import logger_manager as lm
 
 
 class LiveWireSegmentation(object):
     def __init__(self, image: Optional = None, smooth_image: bool = False, threshold_gradient_image: bool = False):
-
         super(LiveWireSegmentation, self).__init__()
 
         # init internal containers
@@ -90,6 +82,14 @@ class LiveWireSegmentation(object):
         self.edges = self.edges.astype(float)
 
     def _compute_graph(self):
+
+        try:
+            from dijkstar import Graph
+        except ImportError:
+            raise ImportError(
+                "You need to install the package `dijkstar`." "\nInstall dijkstar via `pip install --upgrade dijkstar`"
+            )
+
         vertex = self.edges
         h, w = self.edges.shape[1::-1]
 
@@ -121,6 +121,13 @@ class LiveWireSegmentation(object):
         self.G = graph
 
     def compute_shortest_path(self, startPt, endPt):
+        try:
+            from dijkstar import find_path
+        except ImportError:
+            raise ImportError(
+                "You need to install the package `dijkstar`." "\nInstall dijkstar via `pip install --upgrade dijkstar`"
+            )
+
         if self.image is None:
             raise AttributeError("Load an image first!")
 
