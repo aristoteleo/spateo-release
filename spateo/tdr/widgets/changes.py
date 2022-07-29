@@ -10,6 +10,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+from ..models.another_models import construct_tree_model
 from .slice import euclidean_distance, three_d_slice
 from .tree import NLPCA, DDRTree, cal_ncenter
 
@@ -321,32 +322,6 @@ def map_gene_to_branch(
         tree.point_data[sub_key] = tree_data[sub_key].values
 
     return tree if not inplace else None
-
-
-def construct_tree_model(
-    nodes: np.ndarray,
-    edges: np.ndarray,
-    key_added: Optional[str] = "nodes",
-) -> PolyData:
-    """
-    Construct a principal tree model.
-
-    Args:
-        nodes: The nodes in the principal tree.
-        edges: The edges between nodes in the principal tree.
-        key_added: The key under which to add the nodes labels.
-
-    Returns:
-         A three-dims principal tree model, which contains the following properties:
-            `tree_model.point_data[key_added]`, the nodes labels array.
-    """
-
-    padding = np.array([2] * edges.shape[0], int)
-    edges_w_padding = np.vstack((padding, edges.T)).T
-    tree_model = pv.PolyData(nodes, edges_w_padding)
-    tree_model.point_data[key_added] = np.arange(0, len(nodes), 1)
-
-    return tree_model
 
 
 def calc_tree_length(
