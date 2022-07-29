@@ -371,7 +371,7 @@ def models_align_ref(
         center_sampling = dyn.tl.sample(
             arr=np.asarray(init_center_model.obs_names),
             n=n_sampling,
-            method="trn",
+            method=sampling_method,
             X=init_center_model.obsm[spatial_key],
         )
         init_center_model = init_center_model[center_sampling, :]
