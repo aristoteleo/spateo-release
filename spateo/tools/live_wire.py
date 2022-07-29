@@ -9,7 +9,13 @@ from itertools import cycle
 from typing import List, Optional, Tuple
 
 import numpy as np
-from dijkstar import Graph, find_path
+
+try:
+    from dijkstar import Graph, find_path
+except ImportError:
+    raise ImportError(
+        "You need to install the package `dijkstar`." "\nInstall dijkstar via `pip install --upgrade dijkstar`"
+    )
 
 from ..logging import logger_manager as lm
 
