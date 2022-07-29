@@ -13,6 +13,7 @@ from .cluster_degs import (
     find_all_cluster_degs,
     find_cluster_degs,
     find_spatial_cluster_degs,
+    top_n_degs,
 )
 from .cluster_lasso import *
 from .coarse_align import AffineTrans, align_slices_pca, pca_align, procrustes
