@@ -15,7 +15,7 @@ from ..utilities import add_model_labels, collect_model, merge_models
 def construct_line(
     start_point: Union[list, tuple, np.ndarray],
     end_point: Union[list, tuple, np.ndarray],
-    resolution: int = 1,
+    style: Literal["line", "arrow"] = "line",
 ) -> PolyData:
     """
     Create a 3D line model.
@@ -23,31 +23,47 @@ def construct_line(
     Args:
         start_point: Start location in [x, y, z] of the line.
         end_point: End location in [x, y, z] of the line.
-        resolution: Number of pieces to divide line into.
+        style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
 
     Returns:
         Line mesh.
     """
 
-    line = pv.Line(pointa=start_point, pointb=end_point, resolution=resolution)
-    return line
+    if style == "line":
+        model = pv.Line(pointa=start_point, pointb=end_point, resolution=1)
+    elif style == "arrow":
+        model = pv.Arrow(start=start_point, direction=end_point - start_point, scale="auto", tip_length=0.1, tip_radius=0.02,
+                         shaft_radius=0.01)
+    else:
+        raise ValueError("`style` value is wrong.")
+
+    return model
 
 
 def construct_polyline(
     points: Union[list, np.ndarray],
+    style: Literal["line", "arrow"] = "line",
 ) -> PolyData:
     """
     Create a 3D polyline model.
 
     Args:
         points: List of points defining a broken line.
+        style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
 
     Returns:
         Line mesh.
     """
 
-    line = pv.MultipleLines(points=points)
-    return line
+    if style == "line":
+        model = pv.MultipleLines(points=points)
+    elif style == "arrow":
+        arrows = [construct_line(start_point=start_point, end_point=end_point, style=style) for start_point, end_point in zip(points[:-1], points[1:])]
+        model = merge_models(models=arrows)
+    else:
+        raise ValueError("`style` value is wrong.")
+
+    return model
 
 
 def construct_align_lines(
@@ -56,6 +72,7 @@ def construct_align_lines(
     key_added: str = "check_alignment",
     label: Union[str, list] = "align_mapping",
     color: str = "gainsboro",
+    style: Literal["line", "arrow"] = "line",
 ) -> PolyData:
     """
     Construct alignment lines between models after model alignment.
@@ -66,6 +83,7 @@ def construct_align_lines(
         key_added: The key under which to add the labels.
         label: The label of alignment lines model.
         color: Color to use for plotting model.
+        style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
 
     Returns:
         Alignment lines model.
@@ -75,7 +93,7 @@ def construct_align_lines(
 
     lines_model = []
     for m1p, m2p, l in zip(model1_points, model2_points, labels):
-        line = construct_line(start_point=m1p, end_point=m2p, resolution=1)
+        line = construct_line(start_point=m1p, end_point=m2p, style=style)
         add_model_labels(
             model=line,
             key_added=key_added,
@@ -95,6 +113,7 @@ def construct_axis_line(
     key_added: str = "axis",
     label: str = "axis_line",
     color: str = "gainsboro",
+    style: Literal["line", "arrow"] = "line",
 ) -> PolyData:
     """
     Construct axis line.
@@ -104,12 +123,13 @@ def construct_axis_line(
         key_added: The key under which to add the labels.
         label: The label of axis line model.
         color: Color to use for plotting model.
+        style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
 
     Returns:
         Axis line model.
     """
 
-    axis_line = construct_polyline(points=axis_points)
+    axis_line = construct_polyline(points=axis_points, style=style)
     add_model_labels(
         model=axis_line,
         key_added=key_added,
