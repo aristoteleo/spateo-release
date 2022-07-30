@@ -16,6 +16,9 @@ def construct_line(
     start_point: Union[list, tuple, np.ndarray],
     end_point: Union[list, tuple, np.ndarray],
     style: Literal["line", "arrow"] = "line",
+    key_added: str = "line",
+    label: str = "line",
+    color: str = "gainsboro",
 ) -> PolyData:
     """
     Create a 3D line model.
@@ -24,9 +27,12 @@ def construct_line(
         start_point: Start location in [x, y, z] of the line.
         end_point: End location in [x, y, z] of the line.
         style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
+        key_added: The key under which to add the labels.
+        label: The label of lines model.
+        color: Color to use for plotting model.
 
     Returns:
-        Line mesh.
+        Line model.
     """
 
     if style == "line":
@@ -43,12 +49,24 @@ def construct_line(
     else:
         raise ValueError("`style` value is wrong.")
 
+    add_model_labels(
+        model=model,
+        key_added=key_added,
+        labels=np.asarray([label] * model.n_points),
+        where="point_data",
+        colormap=color,
+        inplace=True,
+    )
+
     return model
 
 
 def construct_polyline(
     points: Union[list, np.ndarray],
     style: Literal["line", "arrow"] = "line",
+    key_added: str = "line",
+    label: str = "polyline",
+    color: str = "gainsboro",
 ) -> PolyData:
     """
     Create a 3D polyline model.
@@ -56,6 +74,9 @@ def construct_polyline(
     Args:
         points: List of points defining a broken line.
         style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
+        key_added: The key under which to add the labels.
+        label: The label of lines model.
+        color: Color to use for plotting model.
 
     Returns:
         Line mesh.
@@ -63,9 +84,19 @@ def construct_polyline(
 
     if style == "line":
         model = pv.MultipleLines(points=points)
+        add_model_labels(
+            model=model,
+            key_added=key_added,
+            labels=np.asarray([label] * model.n_points),
+            where="point_data",
+            colormap=color,
+            inplace=True,
+        )
     elif style == "arrow":
         arrows = [
-            construct_line(start_point=start_point, end_point=end_point, style=style)
+            construct_line(
+                start_point=start_point, end_point=end_point, style=style, key_added=key_added, label=label, color=color
+            )
             for start_point, end_point in zip(points[:-1], points[1:])
         ]
         model = merge_models(models=arrows)
@@ -78,10 +109,10 @@ def construct_polyline(
 def construct_align_lines(
     model1_points: np.ndarray,
     model2_points: np.ndarray,
+    style: Literal["line", "arrow"] = "line",
     key_added: str = "check_alignment",
     label: Union[str, list] = "align_mapping",
     color: str = "gainsboro",
-    style: Literal["line", "arrow"] = "line",
 ) -> PolyData:
     """
     Construct alignment lines between models after model alignment.
@@ -89,10 +120,10 @@ def construct_align_lines(
     Args:
         model1_points: Start location in model1 of the line.
         model2_points: End location in model2 of the line.
+        style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
         key_added: The key under which to add the labels.
         label: The label of alignment lines model.
         color: Color to use for plotting model.
-        style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
 
     Returns:
         Alignment lines model.
@@ -102,15 +133,7 @@ def construct_align_lines(
 
     lines_model = []
     for m1p, m2p, l in zip(model1_points, model2_points, labels):
-        line = construct_line(start_point=m1p, end_point=m2p, style=style)
-        add_model_labels(
-            model=line,
-            key_added=key_added,
-            labels=np.asarray([l] * line.n_points),
-            where="point_data",
-            colormap=color,
-            inplace=True,
-        )
+        line = construct_line(start_point=m1p, end_point=m2p, style=style, key_added=key_added, label=l, color=color)
         lines_model.append(line)
 
     lines_model = merge_models(lines_model)
@@ -119,32 +142,25 @@ def construct_align_lines(
 
 def construct_axis_line(
     axis_points: np.ndarray,
+    style: Literal["line", "arrow"] = "line",
     key_added: str = "axis",
     label: str = "axis_line",
     color: str = "gainsboro",
-    style: Literal["line", "arrow"] = "line",
 ) -> PolyData:
     """
     Construct axis line.
 
     Args:
         axis_points:  List of points defining an axis.
+        style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
         key_added: The key under which to add the labels.
         label: The label of axis line model.
         color: Color to use for plotting model.
-        style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
 
     Returns:
         Axis line model.
     """
 
-    axis_line = construct_polyline(points=axis_points, style=style)
-    add_model_labels(
-        model=axis_line,
-        key_added=key_added,
-        labels=np.asarray([label] * axis_line.n_points),
-        where="point_data",
-        colormap=color,
-        inplace=True,
-    )
+    axis_line = construct_polyline(points=axis_points, style=style, key_added=key_added, label=label, color=color)
+
     return axis_line
