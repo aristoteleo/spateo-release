@@ -32,8 +32,14 @@ def construct_line(
     if style == "line":
         model = pv.Line(pointa=start_point, pointb=end_point, resolution=1)
     elif style == "arrow":
-        model = pv.Arrow(start=start_point, direction=end_point - start_point, scale="auto", tip_length=0.1, tip_radius=0.02,
-                         shaft_radius=0.01)
+        model = pv.Arrow(
+            start=start_point,
+            direction=end_point - start_point,
+            scale="auto",
+            tip_length=0.1,
+            tip_radius=0.02,
+            shaft_radius=0.01,
+        )
     else:
         raise ValueError("`style` value is wrong.")
 
@@ -58,7 +64,10 @@ def construct_polyline(
     if style == "line":
         model = pv.MultipleLines(points=points)
     elif style == "arrow":
-        arrows = [construct_line(start_point=start_point, end_point=end_point, style=style) for start_point, end_point in zip(points[:-1], points[1:])]
+        arrows = [
+            construct_line(start_point=start_point, end_point=end_point, style=style)
+            for start_point, end_point in zip(points[:-1], points[1:])
+        ]
         model = merge_models(models=arrows)
     else:
         raise ValueError("`style` value is wrong.")
