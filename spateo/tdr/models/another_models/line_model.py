@@ -90,27 +90,31 @@ def construct_align_lines(
     return lines_model
 
 
-def construct_tree_model(
-    nodes: np.ndarray,
-    edges: np.ndarray,
-    key_added: Optional[str] = "nodes",
+def construct_axis_line(
+    axis_points: np.ndarray,
+    key_added: str = "axis",
+    label: str = "axis_line",
+    color: str = "gainsboro",
 ) -> PolyData:
     """
-    Construct a principal tree model.
+    Construct axis line.
 
     Args:
-        nodes: The nodes in the principal tree.
-        edges: The edges between nodes in the principal tree.
-        key_added: The key under which to add the nodes labels.
+        axis_points:  List of points defining an axis.
+        key_added: The key under which to add the labels.
+        label: The label of axis line model.
+        color: Color to use for plotting model.
 
     Returns:
-         A three-dims principal tree model, which contains the following properties:
-            `tree_model.point_data[key_added]`, the nodes labels array.
+        Axis line model.
     """
-
-    padding = np.array([2] * edges.shape[0], int)
-    edges_w_padding = np.vstack((padding, edges.T)).T
-    tree_model = pv.PolyData(nodes, edges_w_padding)
-    tree_model.point_data[key_added] = np.arange(0, len(nodes), 1)
-
-    return tree_model
+    axis_line = construct_polyline(points=axis_points)
+    add_model_labels(
+        model=axis_line,
+        key_added=key_added,
+        labels=np.asarray([label] * axis_line.n_points),
+        where="point_data",
+        colormap=color,
+        inplace=True,
+    )
+    return axis_line
