@@ -108,6 +108,7 @@ def construct_axis_line(
     Returns:
         Axis line model.
     """
+
     axis_line = construct_polyline(points=axis_points)
     add_model_labels(
         model=axis_line,

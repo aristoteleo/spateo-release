@@ -10,6 +10,12 @@ from .mesh import (
     uniform_larger_pc,
     uniform_mesh,
 )
+from .other_models import (
+    construct_align_lines,
+    construct_axis_line,
+    construct_line,
+    construct_polyline,
+)
 from .pc import construct_pc
 from .utilities import (
     add_model_labels,
