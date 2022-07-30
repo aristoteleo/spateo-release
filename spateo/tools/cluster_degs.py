@@ -186,7 +186,7 @@ def find_cluster_degs(
 
         X_data = X_data
     else:
-        X_data = adata[all_cells, genes].X if layer is None else adata[all_cells, genes].layers[layer]
+        X_data = adata[:, genes].X if layer is None else adata[:, genes].layers[layer]
 
     sparse = issparse(X_data)
 
