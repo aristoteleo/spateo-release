@@ -439,7 +439,8 @@ def models_spatial_mapping(
     models: List[AnnData],
     model_spatial_key: str = "3d_align_spatial",
     mid_spatial_key: str = "center_3d_align_spatial",
-    key_added: str = "pre_3d_align_spatial",
+    key_added1: str = "latter_3d_align_spatial",
+    key_added2: str = "pre_3d_align_spatial",
 ) -> List[AnnData]:
     """
     Corresponding coordinates between models based on intermediate coordinates.
@@ -448,7 +449,8 @@ def models_spatial_mapping(
         models: List of Anndata objects.
         model_spatial_key: The key in `.obsm` that corresponds to the model spatial coordinate.
         mid_spatial_key: The key in `.obsm` that corresponds to the intermediate spatial coordinate.
-        key_added: adata.obsm key under which to add the corresponding coordinates in the previous model.
+        key_added1: adata.obsm key under which to add the corresponding coordinates in the latter model.
+        key_added2: adata.obsm key under which to add the corresponding coordinates in the previous model.
 
     Returns:
         mapping_models: List of models (AnnData Objects) after mapping.
@@ -465,20 +467,18 @@ def models_spatial_mapping(
         )
         models_data.append(model_coords_data)
 
-    mapping_models = []
     for i in lm.progress_logger(range(len(models) - 1), progress_name="Mapping spatial"):
 
-        modelA = models[i].copy()
-        modelA_data = models_data[i].copy()
+        modelA = models[i]
+        modelA_data = models_data[i]
 
-        modelB = models[i + 1].copy()
-        modelB_data = models_data[i + 1].copy()
+        modelB = models[i + 1]
+        modelB_data = models_data[i + 1]
 
-        mapping_data = pd.merge(modelB_data, modelA_data, on=["mid_x", "mid_y", "mid_z"], how="inner")
-        modelB.obsm[key_added] = mapping_data[[f"model{i}_x", f"model{i}_y", f"model{i}_z"]].values
+        mapping_data1 = pd.merge(modelA_data, modelB_data, on=["mid_x", "mid_y", "mid_z"], how="inner")
+        modelA.obsm[key_added1] = mapping_data1[[f"model{i + 1}_x", f"model{i + 1}_y", f"model{i + 1}_z"]].values
 
-        if i == 0:
-            mapping_models.append(modelA)
-        mapping_models.append(modelB)
+        mapping_data2 = pd.merge(modelB_data, modelA_data, on=["mid_x", "mid_y", "mid_z"], how="inner")
+        modelB.obsm[key_added2] = mapping_data2[[f"model{i}_x", f"model{i}_y", f"model{i}_z"]].values
 
-    return mapping_models
+    return models
