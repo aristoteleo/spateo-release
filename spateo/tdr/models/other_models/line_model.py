@@ -144,7 +144,12 @@ def construct_tree(
     elif style == "arrow":
         arrows = [
             construct_line(
-                start_point=points[i[0]], end_point=points[i[1]], style=style, key_added=key_added, label=label, color=color
+                start_point=points[i[0]],
+                end_point=points[i[1]],
+                style=style,
+                key_added=key_added,
+                label=label,
+                color=color,
             )
             for i in edges
         ]
