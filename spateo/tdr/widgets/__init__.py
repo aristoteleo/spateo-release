@@ -5,7 +5,6 @@ from .changes import (
     changes_along_branch,
     changes_along_line,
     changes_along_shape,
-    construct_tree_model,
     map_gene_to_branch,
     map_points_to_branch,
 )
