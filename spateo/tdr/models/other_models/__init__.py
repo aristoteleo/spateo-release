@@ -3,4 +3,5 @@ from .line_model import (
     construct_axis_line,
     construct_line,
     construct_polyline,
+    construct_tree
 )

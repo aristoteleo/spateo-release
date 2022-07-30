@@ -10,6 +10,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+from ..models.other_models import construct_tree
 from .slice import euclidean_distance, three_d_slice
 from .tree import NLPCA, DDRTree, cal_ncenter
 
@@ -245,32 +246,6 @@ def Principal_Curve(
     return nodes, edges
 
 
-def construct_tree_model(
-    nodes: np.ndarray,
-    edges: np.ndarray,
-    key_added: Optional[str] = "nodes",
-) -> PolyData:
-    """
-    Construct a principal tree model.
-
-    Args:
-        nodes: The nodes in the principal tree.
-        edges: The edges between nodes in the principal tree.
-        key_added: The key under which to add the nodes labels.
-
-    Returns:
-         A three-dims principal tree model, which contains the following properties:
-            `tree_model.point_data[key_added]`, the nodes labels array.
-    """
-
-    padding = np.array([2] * edges.shape[0], int)
-    edges_w_padding = np.vstack((padding, edges.T)).T
-    tree_model = pv.PolyData(nodes, edges_w_padding)
-    tree_model.point_data[key_added] = np.arange(0, len(nodes), 1)
-
-    return tree_model
-
-
 def map_points_to_branch(
     model: Union[PolyData, UnstructuredGrid],
     nodes: np.ndarray,
@@ -379,9 +354,12 @@ def changes_along_branch(
     model: Union[PolyData, UnstructuredGrid],
     spatial_key: Optional[str] = None,
     map_key: Union[str, list] = None,
-    key_added: Optional[str] = "nodes",
+    nodes_key: str = "nodes",
+    key_added: str = "tree",
+    label: str = "tree",
     rd_method: Literal["ElPiGraph", "SimplePPT", "PrinCurve"] = "ElPiGraph",
     NumNodes: int = 50,
+    color: str = "gainsboro",
     inplace: bool = False,
     **kwargs,
 ) -> Tuple[Union[DataSet, PolyData, UnstructuredGrid], PolyData, float]:
@@ -392,9 +370,12 @@ def changes_along_branch(
         model:  A reconstructed model.
         spatial_key: If spatial_key is None, the spatial coordinates are in model.points, otherwise in model[spatial_key].
         map_key:  The key in model that corresponds to the gene expression.
-        key_added: The key that corresponds to the coordinates of the nodes in the tree.
+        nodes_key: The key that corresponds to the coordinates of the nodes in the tree.
+        key_added: The key that corresponds to tree label.
+        label: The label of tree model.
         rd_method: The method of constructing a tree.
         NumNodes: Number of nodes for the tree model.
+        color: Color to use for plotting tree model.
         inplace: Updates model in-place.
 
     Returns:
@@ -416,11 +397,12 @@ def changes_along_branch(
             "`rd_method` value is wrong." "\nAvailable `rd_method` are: `'ElPiGraph'`, `'SimplePPT'`, `'PrinCurve'`."
         )
 
-    map_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=key_added, inplace=True)
-    tree_model = construct_tree_model(nodes=nodes, edges=edges)
+    map_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=nodes_key, inplace=True)
+    tree_model = construct_tree(points=nodes, edges=edges, key_added=key_added, label=label, style="line", color=color)
+    tree_model.point_data[nodes_key] = np.arange(0, len(nodes), 1)
     tree_length = calc_tree_length(tree_model=tree_model)
 
     if not (map_key is None):
-        map_gene_to_branch(model=model, tree=tree_model, key=map_key, nodes_key=key_added, inplace=True)
+        map_gene_to_branch(model=model, tree=tree_model, key=map_key, nodes_key=nodes_key, inplace=True)
 
     return model if not inplace else None, tree_model, tree_length

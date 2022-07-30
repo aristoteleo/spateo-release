@@ -106,6 +106,55 @@ def construct_polyline(
     return model
 
 
+def construct_tree(
+    points: np.ndarray,
+    edges: np.ndarray,
+    style: Literal["line", "arrow"] = "line",
+    key_added: str = "tree",
+    label: str = "tree",
+    color: str = "gainsboro",
+) -> PolyData:
+    """
+    Create a 3D tree model of multiple discontinuous line segments.
+
+    Args:
+        points: List of points defining a tree.
+        edges: The edges between points in the tree.
+        style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
+        key_added: The key under which to add the labels.
+        label: The label of tree model.
+        color: Color to use for plotting model.
+
+    Returns:
+        Tree model.
+    """
+
+    if style == "line":
+        padding = np.array([2] * edges.shape[0], int)
+        edges_w_padding = np.vstack((padding, edges.T)).T
+        model = pv.PolyData(points, edges_w_padding)
+        add_model_labels(
+            model=model,
+            key_added=key_added,
+            labels=np.asarray([label] * model.n_points),
+            where="point_data",
+            colormap=color,
+            inplace=True,
+        )
+    elif style == "arrow":
+        arrows = [
+            construct_line(
+                start_point=points[i[0]], end_point=points[i[1]], style=style, key_added=key_added, label=label, color=color
+            )
+            for i in edges
+        ]
+        model = merge_models(models=arrows)
+    else:
+        raise ValueError("`style` value is wrong.")
+
+    return model
+
+
 def construct_align_lines(
     model1_points: np.ndarray,
     model2_points: np.ndarray,
