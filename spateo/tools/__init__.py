@@ -31,3 +31,8 @@ from .three_dims_align import (
     slices_align_ref,
 )
 
+from .live_wire import (
+    compute_shortest_path,
+    live_wire,
+)
+
