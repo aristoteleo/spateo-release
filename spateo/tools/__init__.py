@@ -27,6 +27,7 @@ from .spatial_degs import moran_i
 from .three_dims_align import (
     models_align,
     models_align_ref,
+    models_spatial_mapping,
     rigid_transform_2D,
     rigid_transform_3D,
     slices_align,
