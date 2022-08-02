@@ -155,12 +155,12 @@ def AffineTrans(
     np.fill_diagonal(T_t, 1)
     np.fill_diagonal(T_r, 1)
 
-    T_t[0, 2], T_t[1, 2] = -centroid_x[0], -centroid_y[0]
+    T_t[0, 2], T_t[1, 2] = -centroid_x, -centroid_y
 
     if R is None:
         sin_theta, cos_theta = np.sin(theta), np.cos(theta)
-        T_r[0, 0], T_r[0, 1] = cos_theta, sin_theta
-        T_r[1, 0], T_r[1, 1] = -sin_theta, cos_theta
+        T_r[0, 0], T_r[0, 1] = cos_theta, -sin_theta
+        T_r[1, 0], T_r[1, 1] = sin_theta, cos_theta
     else:
         T_r[:2, :2] = R
 
@@ -198,7 +198,7 @@ def pca_align(X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 def align_slices_pca(
     adata: anndata.AnnData,
     spatial_key: str = "spatial",
-    inplace: bool = True,
+    inplace: bool = False,
     result_key: Tuple[None, str] = None,
 ) -> None:
     """Coarsely align the slices based on the major axis, identified via PCA
@@ -211,26 +211,32 @@ def align_slices_pca(
         Nothing but updates the
     """
 
-    coords = adata.obsm[spatial_key]
+    coords = adata.obsm[spatial_key].copy()
     x, y = coords[:, 0], coords[:, 1]
 
-    adata_concave_hull, _ = alpha_shape(x, y, alpha=1)
+    try:
+        adata_concave_hull, _ = alpha_shape(x, y, alpha=1)
 
-    if type(adata_concave_hull) == shapely.geometry.multipolygon.MultiPolygon:
-        alpha_shape_x, alpha_shape_y = adata_concave_hull[0].exterior.xy
-    else:
-        alpha_shape_x, alpha_shape_y = adata_concave_hull.exterior.xy
+        if type(adata_concave_hull) == shapely.geometry.multipolygon.MultiPolygon:
+            alpha_shape_x, alpha_shape_y = adata_concave_hull[0].exterior.xy
+        else:
+            alpha_shape_x, alpha_shape_y = adata_concave_hull.exterior.xy
 
-    centroid_x, centroid_y = adata_concave_hull.centroid.coords.xy
+        centroid_x, centroid_y = adata_concave_hull.centroid.coords.xy
+        centroid_x, centroid_y = centroid_x[0], centroid_y[0]
 
-    adata.uns["bbs"] = {"x": alpha_shape_x, "y": alpha_shape_y, "centoroid_x": x, "centroid_y": y}
+        adata.uns["bbs"] = {"x": alpha_shape_x, "y": alpha_shape_y, "centroid_x": centroid_x, "centroid_y": centroid_y}
+    except:
+        centroid_x, centroid_y = np.nanmedian(coords, 0)
+        adata.uns["bbs"] = {"x": None, "y": None, "centroid_x": centroid_x, "centroid_y": centroid_y}
 
     coords_correct, R = pca_align(coords)
-    spatial_corrected = AffineTrans(
+    _, _, spatial_corrected = AffineTrans(
         coords[:, 0],
         coords[:, 1],
         centroid_x,
         centroid_y,
+        None,
         R,
     )
 
@@ -238,10 +244,10 @@ def align_slices_pca(
     _, _, coords_correct_processed = AffineTrans(
         spatial_corrected[:, 0],
         spatial_corrected[:, 1],
-        [0, 0],
-        [0, 0],
-        None,
+        0,
+        0,
         np.pi / 2,
+        None,
     )
     # reflect vertically
     coords_correct_processed[:, 1] = -coords_correct_processed[:, 1]
