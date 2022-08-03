@@ -22,12 +22,18 @@ from .coarse_align import AffineTrans, align_slices_pca, pca_align, procrustes
 # from .interpolation_utils import *
 from .lisa import GM_lag_model, lisa_geo_df, local_moran_i
 from .live_wire import LiveWireSegmentation, compute_shortest_path, live_wire
-from .paste import center_align, generalized_procrustes_analysis, pairwise_align
+from .paste import (
+    center_align,
+    generalized_procrustes_analysis,
+    mapping_aligned_coords,
+    mapping_center_coords,
+    pairwise_align,
+)
 from .spatial_degs import moran_i
 from .three_dims_align import (
+    get_align_labels,
     models_align,
     models_align_ref,
-    models_spatial_mapping,
     rigid_transform_2D,
     rigid_transform_3D,
     slices_align,

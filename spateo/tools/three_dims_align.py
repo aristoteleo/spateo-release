@@ -1,12 +1,19 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import dynamo as dyn
 import numpy as np
+import pandas as pd
 from anndata import AnnData
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-from .paste import center_align, generalized_procrustes_analysis, pairwise_align
+from .paste import (
+    center_align,
+    generalized_procrustes_analysis,
+    mapping_aligned_coords,
+    mapping_center_coords,
+    pairwise_align,
+)
 
 
 def rigid_transform_2D(
@@ -134,10 +141,8 @@ def slices_align(
         sliceA_coodrs, sliceB_coodrs = generalized_procrustes_analysis(
             X=sliceA.obsm[key_added], Y=sliceB.obsm[key_added], pi=pi
         )
-        sliceA.obsm[key_added] = sliceA_coodrs
         sliceB.obsm[key_added] = sliceB_coodrs
-        sliceB.obsm[f"{pre_key_added}_index"] = pi.argmax(axis=0)
-        sliceB.obsm[pre_key_added] = sliceA_coodrs[pi.argmax(axis=0)]
+        sliceB.uns[key_added] = mapping_aligned_coords(X=sliceA_coodrs, Y=sliceB_coodrs, pi=pi)
 
         if i == 0:
             align_slices.append(sliceA)
@@ -156,7 +161,6 @@ def slices_align_ref(
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
-    pre_key_added: str = "pre_align_spatial",
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
@@ -177,7 +181,6 @@ def slices_align_ref(
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
-        pre_key_added: adata.obsm key under which to add coordinates of points in previous slice that correspond to points in this slice.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
@@ -204,7 +207,6 @@ def slices_align_ref(
         layer=layer,
         spatial_key=spatial_key,
         key_added=key_added,
-        pre_key_added=pre_key_added,
         alpha=alpha,
         numItermax=numItermax,
         numItermaxEmd=numItermaxEmd,
@@ -223,6 +225,7 @@ def slices_align_ref(
         )
 
         align_slice.obsm[key_added] = align_slice_coords
+        align_slice.uns[key_added] = slice_ref.uns[key_added]
         align_slices.append(align_slice)
 
     return align_slices, align_slices_ref
@@ -236,7 +239,6 @@ def models_align(
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "3d_align_spatial",
-    center_key_added: str = "center_3d_align_spatial",
     lmbda: Optional[np.ndarray] = None,
     alpha: float = 0.1,
     n_components: int = 15,
@@ -260,7 +262,6 @@ def models_align(
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
-        center_key_added: adata.obsm key under which to add coordinates of points in center_model that correspond to points in this model.
         lmbda: List of probability weights assigned to each slice; If ``None``, use uniform weights.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
         n_components: Number of components in NMF decomposition.
@@ -308,10 +309,30 @@ def models_align(
         center_coords, model_coords = generalized_procrustes_analysis(
             center_model.obsm[key_added], model.obsm[key_added], pi
         )
+
         model.obsm[key_added] = model_coords
-        model.obsm[f"{center_key_added}_index"] = pi.argmax(axis=0)
-        model.obsm[center_key_added] = center_coords[pi.argmax(axis=0)]
+        mapping_dict = mapping_aligned_coords(X=center_coords, Y=model_coords, pi=pi)
+        model.uns[key_added] = {}
+        model.uns[key_added]["center_align_spatial_coords"] = mapping_dict["align_spatial_coords"]
+        model.uns[key_added]["center_map_spatial_coords"] = mapping_dict["map_spatial_coords"]
+        model.uns[key_added]["center_pi_value"] = mapping_dict["pi_value"]
+        model.uns[key_added]["center_pi_index"] = mapping_dict["pi_index"]
+
         align_models.append(model)
+
+    for i in range(len(align_models) - 1):
+        modelA = align_models[i]
+        modelB = align_models[i + 1]
+
+        mapping_dict = mapping_center_coords(
+            X=modelA.uns[key_added]["center_align_spatial_coords"].copy(),
+            Y=modelB.uns[key_added]["center_align_spatial_coords"].copy(),
+            mid_X=modelA.uns[key_added]["center_pi_index"][:, [0]].copy(),
+            mid_Y=modelB.uns[key_added]["center_pi_index"][:, [0]].copy(),
+            pi_value_X=modelA.uns[key_added]["center_pi_value"].copy(),
+            pi_value_Y=modelB.uns[key_added]["center_pi_value"].copy(),
+        )
+        modelB.uns[key_added].update(mapping_dict)
 
     new_center_model = init_center_model.copy()
     new_center_model.obsm[key_added] = center_coords
@@ -331,7 +352,6 @@ def models_align_ref(
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
-    center_key_added: str = "center_3d_align_spatial",
     lmbda: Optional[np.ndarray] = None,
     alpha: float = 0.1,
     n_components: int = 15,
@@ -358,7 +378,6 @@ def models_align_ref(
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
-        center_key_added: adata.obsm key under which to add coordinates of points in center_model that correspond to points in this model.
         lmbda: List of probability weights assigned to each slice; If ``None``, use uniform weights.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
         n_components: Number of components in NMF decomposition.
@@ -403,7 +422,6 @@ def models_align_ref(
         layer=layer,
         spatial_key=spatial_key,
         key_added=key_added,
-        center_key_added=center_key_added,
         lmbda=lmbda,
         alpha=alpha,
         n_components=n_components,
@@ -430,55 +448,27 @@ def models_align_ref(
         )
 
         align_model.obsm[key_added] = align_model_coords
+        align_model.uns[key_added] = model_ref.uns[key_added]
         align_models.append(align_model)
 
     return new_center_model, align_models_ref, align_models
 
 
-def models_spatial_mapping(
-    models: List[AnnData],
-    model_spatial_key: str = "3d_align_spatial",
-    mid_spatial_key: str = "center_3d_align_spatial",
-    key_added1: str = "latter_3d_align_spatial",
-    key_added2: str = "pre_3d_align_spatial",
-) -> List[AnnData]:
-    """
-    Corresponding coordinates between models based on intermediate coordinates.
+def get_align_labels(
+    model: AnnData,
+    align_X: np.ndarray,
+    key: Union[str, List[str]],
+    spatial_key: str = "align_spatial",
+    decimals: int = 2,
+) -> pd.DataFrame:
+    """Obtain the label information in anndata.obs[key] corresponding to the align_X coordinate."""
 
-    Args:
-        models: List of Anndata objects.
-        model_spatial_key: The key in `.obsm` that corresponds to the model spatial coordinate.
-        mid_spatial_key: The key in `.obsm` that corresponds to the intermediate spatial coordinate.
-        key_added1: adata.obsm key under which to add the corresponding coordinates in the latter model.
-        key_added2: adata.obsm key under which to add the corresponding coordinates in the previous model.
+    key = [key] if isinstance(key, str) else key
 
-    Returns:
-        mapping_models: List of models (AnnData Objects) after mapping.
-    """
+    cols = ["x", "y", "z"] if align_X.shape[1] == 3 else ["x", "y"]
+    X_data = pd.DataFrame(model.obsm[spatial_key], columns=cols).round(decimals=decimals)
+    Y_data = pd.DataFrame(align_X.copy(), columns=cols).round(decimals=decimals)
 
-    import pandas as pd
-
-    models = models.copy()
-    models_data = []
-    for i, model in enumerate(models):
-        model_coords = np.concatenate([model.obsm[model_spatial_key], model.obsm[mid_spatial_key]], axis=1)
-        model_coords_data = pd.DataFrame(
-            model_coords, columns=[f"model{i}_x", f"model{i}_y", f"model{i}_z", "mid_x", "mid_y", "mid_z"]
-        )
-        models_data.append(model_coords_data)
-
-    for i in lm.progress_logger(range(len(models) - 1), progress_name="Mapping spatial"):
-
-        modelA = models[i]
-        modelA_data = models_data[i]
-
-        modelB = models[i + 1]
-        modelB_data = models_data[i + 1]
-
-        mapping_data1 = pd.merge(modelA_data, modelB_data, on=["mid_x", "mid_y", "mid_z"], how="inner")
-        modelA.obsm[key_added1] = mapping_data1[[f"model{i + 1}_x", f"model{i + 1}_y", f"model{i + 1}_z"]].values
-
-        mapping_data2 = pd.merge(modelB_data, modelA_data, on=["mid_x", "mid_y", "mid_z"], how="inner")
-        modelB.obsm[key_added2] = mapping_data2[[f"model{i}_x", f"model{i}_y", f"model{i}_z"]].values
-
-    return models
+    X_data[key] = model.obs[key].values
+    merge_data = pd.merge(Y_data, X_data, on=cols, how="inner")
+    return merge_data[key]

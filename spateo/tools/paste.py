@@ -433,3 +433,100 @@ def generalized_procrustes_analysis(X, Y, pi):
     Y = R.dot(Y.T).T
 
     return X, Y
+
+
+#######################################
+# Mapping aligned spatial coordinates #
+#######################################
+
+
+def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> dict:
+    """
+    Optimal mapping coordinates between X and Y.
+
+    Args:
+        X: Aligned spatial coordinates.
+        Y: Aligned spatial coordinates.
+        pi: Mapping between the two layers output by PASTE.
+
+    Returns:
+        A dict of align_spatial_coords, map_spatial_coords, pi_index, pi_value.
+            align_spatial_coords is the Y coordinate aligned with X coordinates.
+            map_spatial_coords is X coordinates aligned with Y coordinates.
+            pi_index is index between optimal mapping points in the pi matrix.
+            pi_value is the value of optimal mapping points.
+    """
+
+    X = X.copy()
+    Y = Y.copy()
+    pi = pi.copy()
+
+    # Obtain the optimal mapping between points
+    pi_index = np.argwhere(pi == pi.max(axis=0))
+    pi_X_ind = pi_index[:, 0]
+    pi_Y_ind = pi_index[:, 1]
+    ind = np.lexsort((pi_X_ind, pi_Y_ind))
+    pi_index_new = np.asarray([[pi_X_ind[i], pi_Y_ind[i]] for i in ind])
+    pi_value = pi[pi_index_new[:, 0], pi_index_new[:, 1]]
+
+    # Obtain the spatial coordinates
+    align_spatial_coords = Y[pi_index_new[:, 1]]
+    map_spatial_coords = X[pi_index_new[:, 0]]
+
+    return {
+        "align_spatial_coords": align_spatial_coords,
+        "map_spatial_coords": map_spatial_coords,
+        "pi_index": pi_index_new,
+        "pi_value": pi_value.astype(np.float64).reshape(-1, 1),
+    }
+
+
+def mapping_center_coords(
+    X: np.ndarray,
+    Y: np.ndarray,
+    mid_X: np.ndarray,
+    mid_Y: np.ndarray,
+    pi_value_X: Optional[np.ndarray] = None,
+    pi_value_Y: Optional[np.ndarray] = None,
+) -> dict:
+    """
+    Optimal mapping coordinates between X and Y based on intermediate coordinates.
+
+    Args:
+        X: Aligned spatial coordinates.
+        Y: Aligned spatial coordinates.
+        mid_X: Aligned spatial coordinates related to X of the center model.
+        mid_Y: Aligned spatial coordinates related to Y of the center model.
+        pi_value_X: The value of optimal mapping points related to X.
+        pi_value_Y: The value of optimal mapping points related to Y.
+
+    Returns:
+        A dict of align_spatial_coords, map_spatial_coords, pi_value.
+            align_spatial_coords is the Y coordinate aligned with X coordinates.
+            map_spatial_coords is X coordinates aligned with Y coordinates.
+            pi_value is the value of optimal mapping points.
+    """
+
+    assert mid_X.shape[1] == mid_Y.shape[1], "mid_X.shape[1] is not equal to mid_Y.shape[1]"
+    raw_X_cols = [f"X_{i}" for i in range(X.shape[1])]
+    raw_Y_cols = [f"Y_{i}" for i in range(Y.shape[1])]
+    mid_cols = [f"mid_{i}" for i in range(mid_X.shape[1])]
+
+    X_cols = raw_X_cols.copy() + mid_cols
+    X_data = pd.DataFrame(np.concatenate([X.copy(), mid_X.copy()], axis=1), columns=X_cols)
+    if not (pi_value_X is None):
+        X_data["pi_value_X"] = pi_value_X.astype(np.float64).copy()
+
+    Y_cols = raw_Y_cols.copy() + mid_cols
+    Y_data = pd.DataFrame(np.concatenate([Y.copy(), mid_Y.copy()], axis=1), columns=Y_cols)
+    if not (pi_value_Y is None):
+        Y_data["pi_value_Y"] = pi_value_Y.astype(np.float64).copy()
+
+    mapping_data = pd.merge(Y_data, X_data, on=mid_cols, how="inner")
+    mapping_data["pi_value"] = mapping_data[["pi_value_X"]].values * mapping_data[["pi_value_Y"]].values
+
+    return {
+        "align_spatial_coords": mapping_data[raw_Y_cols].values,
+        "map_spatial_coords": mapping_data[raw_X_cols].values,
+        "pi_value": mapping_data["pi_value"].astype(np.float64).values,
+    }
