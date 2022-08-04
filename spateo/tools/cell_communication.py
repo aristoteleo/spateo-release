@@ -1,3 +1,4 @@
+import importlib
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -15,7 +16,7 @@ from ..configuration import SKM
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def niches(
     adata: AnnData,
-    path: str,
+    path: Tuple[None, str] = None,
     layer: Tuple[None, str] = None,
     weighted: bool = False,
     spatial_neighbors: str = "spatial_neighbors",
@@ -36,8 +37,6 @@ def niches(
         Yuval Kluger. Comprehensive visualization of cell-cell interactions in single-cell and spatial transcriptomics
         with NICHES. doi: https://doi.org/10.1101/2022.01.23.477401
 
-
-
     Args:
         adata: An Annodata object.
         path: Path to ligand_receptor network of NicheNet (prior lr_network).
@@ -46,9 +45,11 @@ def niches(
             whether to supply the edge weights according to the actual spatial
             distance(just as weighted kNN). Defult is 'False', means all neighbor
             edge weights equal to 1, others is 0.
-        spatial_neighbors : neighbor_key {spatial_neighbors} in adata.uns.keys(),
-        spatial_distances : neighbor_key {spatial_distances} in adata.obsp.keys().
-        system: 'niches_n2n'(defult)
+        spatial_neighbors: neighbor_key {spatial_neighbors} in adata.uns.keys(),
+        spatial_distances: neighbor_key {spatial_distances} in adata.obsp.keys().
+        species: the species of interests. This also determines the species of the
+            ligand/receptor pairs.
+        system: 'niches_n2n' (defult)
             cell-cell signaling ('niches_c2c'), defined as the signals passed between
             cells, determined by the product of the ligand expression of the sending
             cell and the receptor expression of the receiving cell, and system-cell
@@ -56,13 +57,15 @@ def niches(
             determined by taking the geometric mean of the ligand profiles of the
             surrounding cells and the receptor profile of the receiving cell.similarly,
             'niches_c2n','niches_n2n'.
-
+        method: The method used to process the ligand/receptor expression of each cell
+            after convolved by neighborhood expressions.
 
     Returns:
         An anndata of Niches, which rows are mechanisms and columns are all
         possible cell x cell interactions.
 
     """
+    path = importlib.resources.path("spateo", "data") if path is None else path
 
     # prior lr_network
     if species == "human":
@@ -96,11 +99,13 @@ def niches(
     # expressed lr_network
     ligand = lr_network["from"].unique()
     expressed_ligand = list(set(ligand) & set(adata.var_names))
+
     if len(expressed_ligand) == 0:
         raise ValueError(f"No intersected ligand between your adata object" f" and lr_network dataset.")
     lr_network = lr_network[lr_network["from"].isin(expressed_ligand)]
     receptor = lr_network["to"].unique()
     expressed_receptor = list(set(receptor) & set(adata.var_names))
+
     if len(expressed_receptor) == 0:
         raise ValueError(f"No intersected receptor between your adata object" f" and lr_network dataset.")
     lr_network = lr_network[lr_network["to"].isin(expressed_receptor)]
@@ -112,6 +117,7 @@ def niches(
             f"No spatial_key {spatial_neighbors} exists in adata,"
             f"using 'dyn.tl.neighbors' to calulate the spatial neighbors first."
         )
+
     if spatial_distances not in adata.obsp.keys():
         raise ValueError(
             f"No spatial_key {spatial_distances} exists in adata,"
@@ -138,6 +144,7 @@ def niches(
             for i in range(ligand_matrix.shape[1]):
                 receptor_matrix = adata[nw["neighbors"][i], lr_network["to"]].X.A.T
                 X[:, i * k : (i + 1) * k] = receptor_matrix * ligand_matrix[:, i].reshape(-1, 1)
+
         # bucket-bucket pair
         cell_pair = []
         for i, cell_id in enumerate(nw["neighbors"]):
@@ -197,6 +204,7 @@ def niches(
                         else np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.T, axis=1)
                     )
                 X[:, i] = receptor_matrix * ligand_matrix[:, i]
+
         # bucket-bucket pair
         cell_pair = []
         for i, cell_id in enumerate(nw["neighbors"]):
@@ -288,6 +296,7 @@ def niches(
                 X[:, i] = np.array(receptor_matrix).reshape(receptor_matrix.shape[0]) * np.array(ligand_matrix).reshape(
                     ligand_matrix.shape[0]
                 )
+
         # bucket-bucket pair
         cell_pair = []
         for i, cell_id in enumerate(nw["neighbors"]):
@@ -325,8 +334,8 @@ def predict_ligand_activities(
         to target genes. Nature Methods volume 17, pages159–162 (2020).
 
     Args:
-        path: Path to ligand_target_matrix, lr_network (human and mouse).
         adata: An Annodata object.
+        path: Path to ligand_target_matrix, lr_network (human and mouse).
         sender_cells: Ligand cells.
         receiver_cells: Receptor cells.
         geneset: The genes set of interest. This may be the differentially
@@ -335,10 +344,15 @@ def predict_ligand_activities(
             set. By default, all genes expressed in receiver cells is used.
         ratio_expr_thresh: The minimum percentage of buckets expressing the ligand
             (target) in sender(receiver) cells.
+        species: the species of interests. This also determines the species of the
+            ligand/receptor pairs.
+
     Returns:
         A pandas DataFrame of the predicted activity ligands.
-
     """
+
+    path = importlib.resources.path("spateo", "data") if path is None else path
+
     # load ligand_target_matrix
     if species == "human":
         ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix_human_nichenet.csv", index_col=0)
@@ -346,6 +360,7 @@ def predict_ligand_activities(
     else:
         ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix_mouse_nichenet.csv", index_col=0)
         lr_network = pd.read_csv(path + "lr_network_mouse.csv", index_col=0)
+
     ligand_target_matrix = ligand_target_matrix.T  # row:ligand,col:target gene
     lr_network = lr_network.loc[lr_network["from"].isin(ligand_target_matrix.index)]
 
@@ -360,12 +375,16 @@ def predict_ligand_activities(
     # Define a set of potential ligands
     ligands = lr_network["from"].unique()
     expressed_ligand = list(set(ligands) & set(expressed_genes_sender))
+
     if len(expressed_ligand) == 0:
         raise ValueError(f"No intersected ligand between your adata object and lr_network dataset.")
+
     receptor = lr_network["to"].unique()
     expressed_receptor = list(set(receptor) & set(expressed_genes_receiver))
+
     if len(expressed_receptor) == 0:
         raise ValueError(f"No intersected receptor between your adata object and lr_network dataset.")
+
     lr_network_expressed = lr_network[
         lr_network["from"].isin(expressed_ligand) & lr_network["to"].isin(expressed_receptor)
     ]
@@ -378,7 +397,9 @@ def predict_ligand_activities(
         response_expressed_genes_df = response_expressed_genes_df.rename(columns={0: "gene"})
         response_expressed_genes_df["avg_expr"] = np.mean(adata[receiver_cells, response_expressed_genes].X.A, axis=0)
         lt_matrix = ligand_target_matrix[potential_ligands.tolist()].loc[response_expressed_genes_df["gene"].tolist()]
+
         de = []
+
         for ligand in lt_matrix:
             pear_coef = pearsonr(lt_matrix[ligand], response_expressed_genes_df["avg_expr"])[0]
             pear_pvalue = pearsonr(lt_matrix[ligand], response_expressed_genes_df["avg_expr"])[1]
@@ -393,6 +414,7 @@ def predict_ligand_activities(
         # Define the gene set of interest and a background of genes
         gene_io = list(set(geneset) & set(ligand_target_matrix.index))
         background_expressed_genes = list(set(expressed_genes_receiver) & set(ligand_target_matrix.index))
+
         # Perform NicheNet’s ligand activity analysis on the gene set of interest
         gene_io = pd.DataFrame(gene_io)
         gene_io["logical"] = 1
@@ -401,12 +423,16 @@ def predict_ligand_activities(
         background = background_expressed_genes[~(background_expressed_genes[0].isin(gene_io))]
         background = background.rename(columns={0: "gene"})
         background["logical"] = 0
+
         # response gene vector
         response = pd.concat([gene_io, background], axis=0, join="outer")
+
         # lt_matrix potential score
         lt_matrix = ligand_target_matrix[potential_ligands.tolist()].loc[response["gene"].tolist()]
+
         # predict ligand activity by pearson coefficient.
         de = []
+
         for ligand in lt_matrix:
             pear_coef = pearsonr(lt_matrix[ligand], response["logical"])[0]
             pear_pvalue = pearsonr(lt_matrix[ligand], response["logical"])[1]
@@ -417,6 +443,7 @@ def predict_ligand_activities(
                     pear_pvalue,
                 )
             )
+
     res = pd.DataFrame(
         de,
         columns=[
@@ -425,6 +452,7 @@ def predict_ligand_activities(
             "pearson_pvalue",
         ],
     )
+
     return res
 
 
@@ -442,27 +470,33 @@ def predict_target_genes(
     """Function to predict the target genes.
 
     Args:
-        lt_matrix_path: Path to ligand_target_matrix of NicheNet.
         adata: An Annodata object.
+        lt_matrix_path: Path to ligand_target_matrix of NicheNet.
         sender_cells: Ligand cells.
         receiver_cells: Receptor cells.
         geneset: The genes set of interest. This may be the differentially
             expressed genes in receiver cells (comparing cells in case and
             control group). Ligands activity prediction is based on this gene
             set. By default, all genes expressed in receiver cells is used.
+        species: the species of interests. This also determines the species of the
+            ligand/receptor pairs.
         top_ligand: `int` (default=20)
             select 20 top-ranked ligands for further biological interpretation.
         top_target: `int` (default=300)
             Infer target genes of top-ranked ligands, and choose the top targets
             according to the general prior model.
+
     Returns:
         A pandas DataFrame of the predict target genes.
-
     """
+
+    path = importlib.resources.path("spateo", "data") if path is None else path
+
     if species == "human":
         ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix.csv", index_col=0)
     else:
         ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix_mouse.csv", index_col=0)
+
     predict_ligand = predict_ligand_activities(
         adata=adata,
         path=path,
@@ -471,9 +505,11 @@ def predict_target_genes(
         geneset=geneset,
         species=species,
     )
+
     predict_ligand.sort_values(by="pearson_coef", axis=0, ascending=False, inplace=True)
     predict_ligand_top = predict_ligand[:top_ligand]["ligand"]
     res = pd.DataFrame(columns=("ligand", "targets", "weights"))
+
     for ligand in ligand_target_matrix[predict_ligand_top]:
         top_n_score = ligand_target_matrix[ligand].sort_values(ascending=False)[:top_target]
         if geneset is None:
@@ -485,6 +521,7 @@ def predict_target_genes(
         else:
             gene_io = list(set(geneset) & set(ligand_target_matrix.index))
             targets = list(set(top_n_score.index) & set(gene_io))
+
         res = pd.concat(
             [
                 res,
@@ -495,4 +532,5 @@ def predict_target_genes(
             axis=0,
             join="outer",
         )
+
     return res
