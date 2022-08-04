@@ -204,11 +204,15 @@ def align_slices_pca(
     """Coarsely align the slices based on the major axis, identified via PCA
 
     Args:
-        adata: the input adata object that contains the spatial key in .obsm
-        inplace: whether the spatial coordinates will be inplace updated or a new key `spatial_
+        adata: the input adata object that contains the spatial key in .obsm.
+        spatial_key: the key in .obsm that points to the spatial information.
+        inplace: whether the spatial coordinates will be inplace updated or a new key `spatial_.
+        result_key: when inplace is False, this points to the key in .obsm that stores the corrected spatial
+            coordinates.
 
     Returns:
-        Nothing but updates the
+        Nothing but updates the spatial coordinates either inplace or with the `result_key` key based on the major axis
+        identified via PCA.
     """
 
     coords = adata.obsm[spatial_key].copy()
