@@ -91,10 +91,10 @@ def slices_align(
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
-    pre_key_added: str = "pre_align_spatial",
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
+    dtype: str = "float32",
     device: str = "cpu",
     **kwargs,
 ) -> List[AnnData]:
@@ -106,10 +106,10 @@ def slices_align(
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
-        pre_key_added: adata.obsm key under which to add coordinates of points in previous slice that correspond to points in this slice.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
+        dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
 
     Returns:
@@ -133,6 +133,7 @@ def slices_align(
             alpha=alpha,
             numItermax=numItermax,
             numItermaxEmd=numItermaxEmd,
+            dtype=dtype,
             device=device,
             **kwargs,
         )
@@ -141,6 +142,8 @@ def slices_align(
         sliceA_coodrs, sliceB_coodrs = generalized_procrustes_analysis(
             X=sliceA.obsm[key_added], Y=sliceB.obsm[key_added], pi=pi
         )
+
+        sliceA.obsm[key_added] = sliceA_coodrs
         sliceB.obsm[key_added] = sliceB_coodrs
         sliceB.uns[key_added] = mapping_aligned_coords(X=sliceA_coodrs, Y=sliceB_coodrs, pi=pi)
 
@@ -164,6 +167,7 @@ def slices_align_ref(
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
+    dtype: str = "float32",
     device: str = "cpu",
     **kwargs,
 ) -> Tuple[List[AnnData], List[AnnData]]:
@@ -184,6 +188,7 @@ def slices_align_ref(
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
+        dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
 
     Returns:
@@ -210,22 +215,24 @@ def slices_align_ref(
         alpha=alpha,
         numItermax=numItermax,
         numItermaxEmd=numItermaxEmd,
+        dtype=dtype,
         device=device,
         **kwargs,
     )
 
     align_slices = []
-    for slice_ref, align_slice_ref, s in zip(slices_ref, align_slices_ref, slices):
+    for i, (slice_ref, align_slice_ref, s) in enumerate(zip(slices_ref, align_slices_ref, slices)):
         align_slice = s.copy()
 
         align_slice_coords = rigid_transform_2D(
             coords=s.obsm[spatial_key],
-            coords_refA=slice_ref.obsm[spatial_key],
-            coords_refB=align_slice_ref.obsm[key_added],
+            coords_refA=slice_ref.obsm[spatial_key].copy(),
+            coords_refB=align_slice_ref.obsm[key_added].copy(),
         )
 
         align_slice.obsm[key_added] = align_slice_coords
-        align_slice.uns[key_added] = slice_ref.uns[key_added]
+        if i != 0:
+            align_slice.uns[key_added] = align_slice_ref.uns[key_added]
         align_slices.append(align_slice)
 
     return align_slices, align_slices_ref
@@ -251,6 +258,7 @@ def models_align(
     random_seed: Optional[int] = None,
     pis_init: Optional[List[np.ndarray]] = None,
     distributions: Optional[List[np.ndarray]] = None,
+    dtype: str = "float32",
     device: str = "cpu",
 ) -> Tuple[AnnData, List[AnnData]]:
     """
@@ -274,6 +282,7 @@ def models_align(
         random_seed: Set random seed for reproducibility.
         pis_init: Initial list of mappings between 'A' and 'slices' to solver. Otherwise, default will automatically calculate mappings.
         distributions: Distributions of spots for each slice. Otherwise, default is uniform.
+        dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
 
     Returns:
@@ -301,13 +310,14 @@ def models_align(
         random_seed=random_seed,
         pis_init=pis_init,
         distributions=distributions,
+        dtype=dtype,
         device=device,
     )
 
     align_models = []
     for model, pi in zip(models, pis):
         center_coords, model_coords = generalized_procrustes_analysis(
-            center_model.obsm[key_added], model.obsm[key_added], pi
+            center_model.obsm[key_added].copy(), model.obsm[key_added].copy(), pi.copy()
         )
 
         model.obsm[key_added] = model_coords
@@ -364,6 +374,7 @@ def models_align_ref(
     random_seed: Optional[int] = None,
     pis_init: Optional[List[np.ndarray]] = None,
     distributions: Optional[List[np.ndarray]] = None,
+    dtype: str = "float32",
     device: str = "cpu",
 ) -> Tuple[AnnData, List[AnnData], List[AnnData]]:
     """
@@ -390,6 +401,7 @@ def models_align_ref(
         random_seed: Set random seed for reproducibility.
         pis_init: Initial list of mappings between 'A' and 'slices' to solver. Otherwise, default will automatically calculate mappings.
         distributions: Distributions of spots for each slice. Otherwise, default is uniform.
+        dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
 
     Returns:
@@ -434,21 +446,23 @@ def models_align_ref(
         random_seed=random_seed,
         pis_init=pis_init,
         distributions=distributions,
+        dtype=dtype,
         device=device,
     )
 
     align_models = []
-    for model_ref, align_model_ref, m in zip(models_ref, align_models_ref, models):
+    for i, (model_ref, align_model_ref, m) in enumerate(zip(models_ref, align_models_ref, models)):
         align_model = m.copy()
 
         align_model_coords = rigid_transform_3D(
             coords=m.obsm[spatial_key],
-            coords_refA=model_ref.obsm[spatial_key],
-            coords_refB=align_model_ref.obsm[key_added],
+            coords_refA=model_ref.obsm[spatial_key].copy(),
+            coords_refB=align_model_ref.obsm[key_added].copy(),
         )
 
         align_model.obsm[key_added] = align_model_coords
-        align_model.uns[key_added] = model_ref.uns[key_added]
+        if i != 0:
+            align_model.uns[key_added] = align_model_ref.uns[key_added]
         align_models.append(align_model)
 
     return new_center_model, align_models_ref, align_models
@@ -467,8 +481,10 @@ def get_align_labels(
 
     cols = ["x", "y", "z"] if align_X.shape[1] == 3 else ["x", "y"]
     X_data = pd.DataFrame(model.obsm[spatial_key], columns=cols).round(decimals=decimals)
-    Y_data = pd.DataFrame(align_X.copy(), columns=cols).round(decimals=decimals)
-
     X_data[key] = model.obs[key].values
+    X_data.drop_duplicates(inplace=True, keep="first")
+
+    Y_data = pd.DataFrame(align_X.copy(), columns=cols).round(decimals=decimals)
     merge_data = pd.merge(Y_data, X_data, on=cols, how="inner")
+
     return merge_data[key]

@@ -65,16 +65,17 @@ def kl_divergence_backend(X, Y):
     return D
 
 
-def check_backend(device: str = "cpu"):
+def check_backend(device: str = "cpu", dtype: str = "float32"):
     """
     Check the proper backend for the device.
 
     Args:
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
+        dtype: The floating-point number type. Only float32 and float64.
 
     Returns:
-        device: The device used to run the program.
         backend: The proper backend.
+        type_as: The type_as.device is the device used to run the program and the type_as.dtype is the floating-point number type.
     """
     if device == "cpu":
         backend = ot.backend.NumpyBackend()
@@ -85,9 +86,10 @@ def check_backend(device: str = "cpu"):
             backend = ot.backend.TorchBackend()
         else:
             backend = ot.backend.NumpyBackend()
-            device = "cpu"
             lm.main_info(message="GPU is not available, resorting to torch cpu.", indent_level=2)
-    return device, backend
+
+    type_as = backend.__type_list__[0] if dtype == "float32" else backend.__type_list__[1]
+    return backend, type_as
 
 
 # @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sample")
@@ -102,12 +104,11 @@ def check_spatial_coords(sample: AnnData, spatial_key: str = "spatial") -> np.nd
     Returns:
         The spatial coordinates.
     """
-    coordinates = sample.obsm[spatial_key]
+    coordinates = sample.obsm[spatial_key].copy()
     if isinstance(coordinates, pd.DataFrame):
         coordinates = coordinates.values
 
-    coordinates = np.asarray(coordinates, dtype=np.float64)
-    return coordinates
+    return np.asarray(coordinates)
 
 
 # @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sample")
@@ -123,9 +124,8 @@ def check_exp(sample: AnnData, layer: str = "X") -> np.ndarray:
         The expression matrix.
     """
 
-    exp_martix = sample.X if layer == "X" else sample.layers[layer]
+    exp_martix = sample.X.copy() if layer == "X" else sample.layers[layer].copy()
     exp_martix = to_dense_matrix(exp_martix)
-    exp_martix = exp_martix.astype(np.float64)
     return exp_martix
 
 
@@ -149,6 +149,7 @@ def pairwise_align(
     norm: bool = False,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
+    dtype: str = "float32",
     device: str = "cpu",
 ) -> Tuple[np.ndarray, Optional[int]]:
     """
@@ -164,9 +165,10 @@ def pairwise_align(
         G_init (array-like, optional): Initial mapping to be used in FGW-OT, otherwise default is uniform mapping.
         a_distribution (array-like, optional): Distribution of sampleA spots, otherwise default is uniform.
         b_distribution (array-like, optional): Distribution of sampleB spots, otherwise default is uniform.
+        norm: If ``True``, scales spatial distances such that neighboring spots are at distance 1. Otherwise, spatial distances remain unchanged.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
-        norm: If ``True``, scales spatial distances such that neighboring spots are at distance 1. Otherwise, spatial distances remain unchanged.
+        dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
 
     Returns:
@@ -175,22 +177,22 @@ def pairwise_align(
     """
 
     # Determine if gpu or cpu is being used
-    device, nx = check_backend(device=device)
+    nx, type_as = check_backend(device=device, dtype=dtype)
 
     # subset for common genes
     common_genes = filter_common_genes(sampleA.var.index, sampleB.var.index)
     sampleA, sampleB = sampleA[:, common_genes], sampleB[:, common_genes]
 
     # Calculate spatial distances
-    coordinatesA = nx.from_numpy(check_spatial_coords(sample=sampleA, spatial_key=spatial_key))
-    coordinatesB = nx.from_numpy(check_spatial_coords(sample=sampleB, spatial_key=spatial_key))
+    coordinatesA = nx.from_numpy(check_spatial_coords(sample=sampleA, spatial_key=spatial_key), type_as=type_as)
+    coordinatesB = nx.from_numpy(check_spatial_coords(sample=sampleB, spatial_key=spatial_key), type_as=type_as)
 
     D_A = ot.dist(coordinatesA, coordinatesA, metric="euclidean")
     D_B = ot.dist(coordinatesB, coordinatesB, metric="euclidean")
 
     # Calculate expression dissimilarity
-    A_X = nx.from_numpy(check_exp(sample=sampleA, layer=layer))
-    B_X = nx.from_numpy(check_exp(sample=sampleB, layer=layer))
+    A_X = nx.from_numpy(check_exp(sample=sampleA, layer=layer), type_as=type_as)
+    B_X = nx.from_numpy(check_exp(sample=sampleB, layer=layer), type_as=type_as)
 
     if dissimilarity.lower() == "euclidean" or dissimilarity.lower() == "euc":
         M = ot.dist(A_X, B_X)
@@ -200,8 +202,8 @@ def pairwise_align(
     # init distributions
     a = np.ones((sampleA.shape[0],)) / sampleA.shape[0] if a_distribution is None else np.asarray(a_distribution)
     b = np.ones((sampleB.shape[0],)) / sampleB.shape[0] if b_distribution is None else np.asarray(b_distribution)
-    a = nx.from_numpy(a.astype(np.float64))
-    b = nx.from_numpy(b.astype(np.float64))
+    a = nx.from_numpy(a, type_as=type_as)
+    b = nx.from_numpy(b, type_as=type_as)
 
     if norm:
         D_A /= nx.min(D_A[D_A > 0])
@@ -213,7 +215,7 @@ def pairwise_align(
     if G_init is None:
         G0 = a[:, None] * b[None, :]
     else:
-        G_init = nx.from_numpy(G_init.astype(np.float64))
+        G_init = nx.from_numpy(G_init, type_as=type_as)
         G0 = (1 / nx.sum(G_init)) * G_init
 
     pi, log = ot.gromov.cg(
@@ -281,6 +283,7 @@ def center_align(
     random_seed: Optional[int] = None,
     pis_init: Optional[List[np.ndarray]] = None,
     distributions: Optional[List[np.ndarray]] = None,
+    dtype: str = "float32",
     device: str = "cpu",
 ) -> Tuple[AnnData, List[np.ndarray]]:
     """
@@ -303,6 +306,7 @@ def center_align(
         random_seed: Set random seed for reproducibility.
         pis_init: Initial list of mappings between 'A' and 'slices' to solver. Otherwise, default will automatically calculate mappings.
         distributions: Distributions of spots for each slice. Otherwise, default is uniform.
+        dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
 
     Returns:
@@ -372,6 +376,7 @@ def center_align(
                 b_distribution=distributions[i],
                 numItermax=numItermax,
                 numItermaxEmd=numItermaxEmd,
+                dtype=dtype,
                 device=device,
             )
             new_pis.append(p)

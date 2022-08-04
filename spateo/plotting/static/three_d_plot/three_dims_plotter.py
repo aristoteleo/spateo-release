@@ -112,11 +112,11 @@ def add_model(
 
         scalars = f"{_key}_rgba" if _key in _model.array_names else _model.active_scalars_name
         if _style == "points":
-            render_spheres, render_tubes = True, False
+            render_spheres, render_tubes, smooth_shading = True, False, True
         elif _style == "wireframe":
-            render_spheres, render_tubes = False, True
+            render_spheres, render_tubes, smooth_shading = False, True, False
         else:
-            render_spheres, render_tubes = False, False
+            render_spheres, render_tubes, smooth_shading = False, False, True
         _p.add_mesh(
             _model,
             scalars=scalars,
@@ -128,7 +128,7 @@ def add_model(
             line_width=_model_size,
             ambient=_ambient,
             opacity=_opacity,
-            smooth_shading=True,
+            smooth_shading=smooth_shading,
         )
 
     # Add model(s) to the plotter.

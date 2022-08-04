@@ -52,8 +52,8 @@ def construct_line(
     add_model_labels(
         model=model,
         key_added=key_added,
-        labels=np.asarray([label] * model.n_points),
-        where="point_data",
+        labels=np.asarray([label] * model.n_cells),
+        where="cell_data",
         colormap=color,
         inplace=True,
     )
@@ -61,48 +61,83 @@ def construct_line(
     return model
 
 
-def construct_polyline(
-    points: Union[list, np.ndarray],
-    style: Literal["line", "arrow"] = "line",
+def construct_multi_lines(
+    points: np.ndarray,
+    edges: np.ndarray,
     key_added: str = "line",
-    label: str = "polyline",
-    color: str = "gainsboro",
+    label: Union[str, list, np.ndarray] = "multi_lines",
+    color: Union[str, list, dict, np.ndarray] = "gainsboro",
 ) -> PolyData:
     """
-    Create a 3D polyline model.
+    Create multiple 3D lines model.
 
     Args:
-        points: List of points defining a broken line.
-        style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
+        points: List of points.
+        edges: The edges between points.
         key_added: The key under which to add the labels.
-        label: The label of lines model.
+        label: The label of line models.
         color: Color to use for plotting model.
 
     Returns:
-        Line mesh.
+        Multiple-lines model.
     """
 
-    if style == "line":
-        model = pv.MultipleLines(points=points)
-        add_model_labels(
-            model=model,
-            key_added=key_added,
-            labels=np.asarray([label] * model.n_points),
-            where="point_data",
-            colormap=color,
-            inplace=True,
-        )
-    elif style == "arrow":
-        arrows = [
-            construct_line(
-                start_point=start_point, end_point=end_point, style=style, key_added=key_added, label=label, color=color
-            )
-            for start_point, end_point in zip(points[:-1], points[1:])
-        ]
-        model = merge_models(models=arrows)
-    else:
-        raise ValueError("`style` value is wrong.")
+    padding = np.array([2] * edges.shape[0], int)
+    edges_w_padding = np.vstack((padding, edges.T)).T
+    model = pv.PolyData(points, edges_w_padding)
 
+    labels = np.asarray([label] * edges.shape[0]) if isinstance(label, str) else label
+    assert len(labels) == edges.shape[0], "The number of labels is not equal to the number of edges."
+
+    add_model_labels(
+        model=model,
+        key_added=key_added,
+        labels=labels,
+        where="cell_data",
+        colormap=color,
+        inplace=True,
+    )
+
+    return model
+
+
+def construct_multi_arrows(
+    points: np.ndarray,
+    edges: np.ndarray,
+    key_added: str = "arrow",
+    label: Union[str, list, np.ndarray] = "multi_arrows",
+    color: Union[str, list, dict, np.ndarray] = "gainsboro",
+) -> PolyData:
+    """
+    Create multiple 3D arrows model.
+
+    Args:
+        points: List of points.
+        edges: The edges between points.
+        key_added: The key under which to add the labels.
+        label: The label of arrow model.
+        color: Color to use for plotting model.
+
+    Returns:
+        Multiple-arrows model.
+    """
+
+    labels = np.asarray([label] * edges.shape[0]) if isinstance(label, str) else label
+    assert len(labels) == edges.shape[0], "The number of labels is not equal to the number of edges."
+
+    arrows = [
+        construct_line(
+            start_point=points[edge[0]],
+            end_point=points[edge[1]],
+            style="arrow",
+            key_added=key_added,
+            label=l,
+            color=color,
+        )
+        for edge, l in zip(edges, labels)
+    ]
+
+    model = merge_models(models=arrows)
     return model
 
 
@@ -111,8 +146,8 @@ def construct_tree(
     edges: np.ndarray,
     style: Literal["line", "arrow"] = "line",
     key_added: str = "tree",
-    label: str = "tree",
-    color: str = "gainsboro",
+    label: Union[str, list, np.ndarray] = "tree",
+    color: Union[str, list, dict, np.ndarray] = "gainsboro",
 ) -> PolyData:
     """
     Create a 3D tree model of multiple discontinuous line segments.
@@ -130,30 +165,9 @@ def construct_tree(
     """
 
     if style == "line":
-        padding = np.array([2] * edges.shape[0], int)
-        edges_w_padding = np.vstack((padding, edges.T)).T
-        model = pv.PolyData(points, edges_w_padding)
-        add_model_labels(
-            model=model,
-            key_added=key_added,
-            labels=np.asarray([label] * model.n_points),
-            where="point_data",
-            colormap=color,
-            inplace=True,
-        )
+        model = construct_multi_lines(points=points, edges=edges, key_added=key_added, label=label, color=color)
     elif style == "arrow":
-        arrows = [
-            construct_line(
-                start_point=points[i[0]],
-                end_point=points[i[1]],
-                style=style,
-                key_added=key_added,
-                label=label,
-                color=color,
-            )
-            for i in edges
-        ]
-        model = merge_models(models=arrows)
+        model = construct_multi_arrows(points=points, edges=edges, key_added=key_added, label=label, color=color)
     else:
         raise ValueError("`style` value is wrong.")
 
@@ -165,8 +179,8 @@ def construct_align_lines(
     model2_points: np.ndarray,
     style: Literal["line", "arrow"] = "line",
     key_added: str = "check_alignment",
-    label: Union[str, list] = "align_mapping",
-    color: str = "gainsboro",
+    label: Union[str, list, np.ndarray] = "align_mapping",
+    color: Union[str, list, dict, np.ndarray] = "gainsboro",
 ) -> PolyData:
     """
     Construct alignment lines between models after model alignment.
@@ -182,16 +196,18 @@ def construct_align_lines(
     Returns:
         Alignment lines model.
     """
+
     assert model1_points.shape == model2_points.shape, "model1_points.shape is not equal to model2_points.shape"
-    labels = [label] * model1_points.shape[0] if isinstance(label, str) else label
+    spoints_shape = model1_points.shape[0]
+    epoints_shape = model2_points.shape[0]
 
-    lines_model = []
-    for m1p, m2p, l in zip(model1_points, model2_points, labels):
-        line = construct_line(start_point=m1p, end_point=m2p, style=style, key_added=key_added, label=l, color=color)
-        lines_model.append(line)
+    points = np.concatenate([model1_points, model2_points], axis=0)
+    edges_x = np.arange(spoints_shape).reshape(-1, 1)
+    edges_y = np.arange(spoints_shape, spoints_shape + epoints_shape).reshape(-1, 1)
+    edges = np.concatenate([edges_x, edges_y], axis=1)
 
-    lines_model = merge_models(lines_model)
-    return lines_model
+    model = construct_tree(points=points, edges=edges, style=style, key_added=key_added, label=label, color=color)
+    return model
 
 
 def construct_axis_line(
@@ -205,7 +221,7 @@ def construct_axis_line(
     Construct axis line.
 
     Args:
-        axis_points:  List of points defining an axis.
+        axis_points: List of points defining an axis.
         style: Line style. According to whether there is an arrow, it is divided into `'line'` and `'arrow'`.
         key_added: The key under which to add the labels.
         label: The label of axis line model.
@@ -215,6 +231,10 @@ def construct_axis_line(
         Axis line model.
     """
 
-    axis_line = construct_polyline(points=axis_points, style=style, key_added=key_added, label=label, color=color)
+    start_point = axis_points.min(axis=0)
+    end_point = axis_points.max(axis=0)
+    axis_line = construct_line(
+        start_point=start_point, end_point=end_point, style=style, key_added=key_added, label=label, color=color
+    )
 
     return axis_line

@@ -14,7 +14,9 @@ from .other_models import (
     construct_align_lines,
     construct_axis_line,
     construct_line,
-    construct_polyline,
+    construct_multi_arrows,
+    construct_multi_lines,
+    construct_tree,
 )
 from .pc import construct_pc
 from .utilities import (
