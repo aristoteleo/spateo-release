@@ -39,7 +39,9 @@ def niches(
 
     Args:
         adata: An Annodata object.
-        path: Path to ligand_receptor network of NicheNet (prior lr_network).
+        path: Path to ligand_receptor network of NicheNet (prior lr_network). Default
+            is None and the systems database package folder installed with this package
+            will be used.
         layer: the key to the layer. If it is None, adata.X will be used by default.
         weighted: 'False' (defult)
             whether to supply the edge weights according to the actual spatial
@@ -65,7 +67,7 @@ def niches(
         possible cell x cell interactions.
 
     """
-    path = importlib.resources.path("spateo", "data") if path is None else path
+    path = importlib.resources.path("spateo", "tools/database") if path is None else path
 
     # prior lr_network
     if species == "human":
@@ -320,7 +322,7 @@ def niches(
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def predict_ligand_activities(
     adata: AnnData,
-    path: str,
+    path: Tuple[None, str] = None,
     sender_cells: Optional[List[str]] = None,
     receiver_cells: Optional[List[str]] = None,
     geneset: Optional[List[str]] = None,
@@ -335,7 +337,9 @@ def predict_ligand_activities(
 
     Args:
         adata: An Annodata object.
-        path: Path to ligand_target_matrix, lr_network (human and mouse).
+        path: Path to ligand_receptor network of NicheNet (prior lr_network). Default
+            is None and the systems database package folder installed with this package
+            will be used.
         sender_cells: Ligand cells.
         receiver_cells: Receptor cells.
         geneset: The genes set of interest. This may be the differentially
@@ -351,7 +355,7 @@ def predict_ligand_activities(
         A pandas DataFrame of the predicted activity ligands.
     """
 
-    path = importlib.resources.path("spateo", "data") if path is None else path
+    path = importlib.resources.path("spateo", "tools/database") if path is None else path
 
     # load ligand_target_matrix
     if species == "human":
@@ -459,7 +463,7 @@ def predict_ligand_activities(
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, optional=True)
 def predict_target_genes(
     adata: AnnData,
-    path: str,
+    path: Tuple[None, str] = None,
     sender_cells: Optional[List[str]] = None,
     receiver_cells: Optional[List[str]] = None,
     geneset: Optional[List[str]] = None,
@@ -471,7 +475,9 @@ def predict_target_genes(
 
     Args:
         adata: An Annodata object.
-        lt_matrix_path: Path to ligand_target_matrix of NicheNet.
+        path: Path to ligand_target_matrix of NicheNet (prior lr_network). Default
+            is None and the systems database package folder installed with this package
+            will be used.
         sender_cells: Ligand cells.
         receiver_cells: Receptor cells.
         geneset: The genes set of interest. This may be the differentially
@@ -490,7 +496,7 @@ def predict_target_genes(
         A pandas DataFrame of the predict target genes.
     """
 
-    path = importlib.resources.path("spateo", "data") if path is None else path
+    path = importlib.resources.path("spateo", "tools/database") if path is None else path
 
     if species == "human":
         ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix.csv", index_col=0)
