@@ -139,13 +139,16 @@ def slices_align(
         )
 
         # Calculate new coordinates of two slices
-        sliceA_coodrs, sliceB_coodrs = generalized_procrustes_analysis(
+        sliceA_coodrs, sliceB_coodrs, mapping_dict = generalized_procrustes_analysis(
             X=sliceA.obsm[key_added], Y=sliceB.obsm[key_added], pi=pi
         )
 
         sliceA.obsm[key_added] = sliceA_coodrs
+        sliceA.uns[key_added] = {"mapping_relations": {"t": mapping_dict["tX"], "R": None}}
+
         sliceB.obsm[key_added] = sliceB_coodrs
         sliceB.uns[key_added] = mapping_aligned_coords(X=sliceA_coodrs, Y=sliceB_coodrs, pi=pi)
+        sliceB.uns[key_added]["mapping_relations"] = {"t": mapping_dict["tY"], "R": mapping_dict["R"]}
 
         if i == 0:
             align_slices.append(sliceA)
@@ -221,18 +224,15 @@ def slices_align_ref(
     )
 
     align_slices = []
-    for i, (slice_ref, align_slice_ref, s) in enumerate(zip(slices_ref, align_slices_ref, slices)):
+    for i, (align_slice_ref, s) in enumerate(zip(align_slices_ref, slices)):
         align_slice = s.copy()
 
-        align_slice_coords = rigid_transform_2D(
-            coords=s.obsm[spatial_key],
-            coords_refA=slice_ref.obsm[spatial_key].copy(),
-            coords_refB=align_slice_ref.obsm[key_added].copy(),
-        )
+        t = align_slice_ref.uns[key_added]["mapping_relations"]["t"]
+        R = align_slice_ref.uns[key_added]["mapping_relations"]["R"]
 
-        align_slice.obsm[key_added] = align_slice_coords
-        if i != 0:
-            align_slice.uns[key_added] = align_slice_ref.uns[key_added]
+        align_slice_coords = align_slice.obsm[spatial_key].copy() - t
+        align_slice.obsm[key_added] = align_slice_coords if R is None else R.dot(align_slice_coords.T).T
+        align_slice.uns[key_added] = align_slice_ref.uns[key_added]
         align_slices.append(align_slice)
 
     return align_slices, align_slices_ref
@@ -316,18 +316,20 @@ def models_align(
 
     align_models = []
     for model, pi in zip(models, pis):
-        center_coords, model_coords = generalized_procrustes_analysis(
+        center_coords, model_coords, mapping_dict1 = generalized_procrustes_analysis(
             center_model.obsm[key_added].copy(), model.obsm[key_added].copy(), pi.copy()
         )
 
-        model.obsm[key_added] = model_coords
-        mapping_dict = mapping_aligned_coords(X=center_coords, Y=model_coords, pi=pi)
-        model.uns[key_added] = {}
-        model.uns[key_added]["center_align_spatial_coords"] = mapping_dict["align_spatial_coords"]
-        model.uns[key_added]["center_map_spatial_coords"] = mapping_dict["map_spatial_coords"]
-        model.uns[key_added]["center_pi_value"] = mapping_dict["pi_value"]
-        model.uns[key_added]["center_pi_index"] = mapping_dict["pi_index"]
+        center_model.obsm[key_added] = center_coords
+        center_model.uns[key_added] = {"mapping_relations": {"t": mapping_dict1["tX"], "R": None}}
 
+        model.obsm[key_added] = model_coords
+        model.uns[key_added] = mapping_aligned_coords(X=center_coords, Y=model_coords, pi=pi)
+        model.uns[key_added]["center_align_spatial_coords"] = model.uns[key_added].pop("align_spatial_coords")
+        model.uns[key_added]["center_map_spatial_coords"] = model.uns[key_added].pop("map_spatial_coords")
+        model.uns[key_added]["center_pi_value"] = model.uns[key_added].pop("pi_value")
+        model.uns[key_added]["center_pi_index"] = model.uns[key_added].pop("pi_index")
+        model.uns[key_added]["mapping_relations"] = {"t": mapping_dict1["tY"], "R": mapping_dict1["R"]}
         align_models.append(model)
 
     for i in range(len(align_models) - 1):
@@ -345,7 +347,8 @@ def models_align(
         modelB.uns[key_added].update(mapping_dict)
 
     new_center_model = init_center_model.copy()
-    new_center_model.obsm[key_added] = center_coords
+    new_center_model.obsm[key_added] = center_model.obsm[key_added]
+    new_center_model.uns[key_added] = center_model.uns[key_added]
 
     return new_center_model, align_models
 
@@ -451,18 +454,15 @@ def models_align_ref(
     )
 
     align_models = []
-    for i, (model_ref, align_model_ref, m) in enumerate(zip(models_ref, align_models_ref, models)):
+    for i, (align_model_ref, m) in enumerate(zip(align_models_ref, models)):
         align_model = m.copy()
 
-        align_model_coords = rigid_transform_3D(
-            coords=m.obsm[spatial_key],
-            coords_refA=model_ref.obsm[spatial_key].copy(),
-            coords_refB=align_model_ref.obsm[key_added].copy(),
-        )
+        t = align_model_ref.uns[key_added]["mapping_relations"]["t"]
+        R = align_model_ref.uns[key_added]["mapping_relations"]["R"]
 
-        align_model.obsm[key_added] = align_model_coords
-        if i != 0:
-            align_model.uns[key_added] = align_model_ref.uns[key_added]
+        align_model_coords = align_model.obsm[spatial_key].copy() - t
+        align_model.obsm[key_added] = align_model_coords if R is None else R.dot(align_model_coords.T).T
+        align_model.uns[key_added] = align_model_ref.uns[key_added]
         align_models.append(align_model)
 
     return new_center_model, align_models_ref, align_models

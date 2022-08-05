@@ -425,8 +425,9 @@ def generalized_procrustes_analysis(X, Y, pi):
         X: np array of spatial coordinates.
         Y: np array of spatial coordinates.
         pi: mapping between the two layers output by PASTE.
+
     Returns:
-        Aligned spatial coordinates of X, Y.
+        Aligned spatial coordinates of X, Y and the mapping relations.
     """
     tX = pi.sum(axis=1).dot(X)
     tY = pi.sum(axis=0).dot(Y)
@@ -436,8 +437,9 @@ def generalized_procrustes_analysis(X, Y, pi):
     U, S, Vt = np.linalg.svd(H)
     R = Vt.T.dot(U.T)
     Y = R.dot(Y.T).T
+    mapping_dict = {"tX": tX, "tY": tY, "R": R}
 
-    return X, Y
+    return X, Y, mapping_dict
 
 
 #######################################
