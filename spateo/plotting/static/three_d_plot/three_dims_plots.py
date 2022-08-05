@@ -372,21 +372,22 @@ def three_d_multi_plot(
 
     """
     models = model if isinstance(model, MultiBlock) else [model]
-    n_model = len(models)
     keys = key if isinstance(key, list) else [key]
-    n_key = len(keys)
     cpos = cpo if isinstance(cpo, list) else [cpo]
-    n_cpo = len(cpos)
-    styles = model_style if isinstance(model_style, list) else [model_style]
-    n_styles = len(styles)
+    mts = model_style if isinstance(model_style, list) else [model_style]
+    mss = model_size if isinstance(model_size, list) else [model_size]
+    ams = ambient if isinstance(ambient, list) else [ambient]
+    ops = opacity if isinstance(opacity, list) else [opacity]
     texts = text if isinstance(text, list) else [text]
-    n_text = len(texts)
 
-    n_window = max(n_model, n_key, n_cpo, n_styles, n_text)
+    n_window = max(len(models), len(keys), len(cpos), len(mts), len(mss), len(ams), len(ops), len(texts))
     models = collect_model([models[0].copy() for i in range(n_window)]) if len(models) == 1 else models
     keys = keys * n_window if len(keys) == 1 else keys
     cpos = cpos * n_window if len(cpos) == 1 else cpos
-    styles = styles * n_window if len(styles) == 1 else styles
+    mts = mts * n_window if len(mts) == 1 else mts
+    mss = mss * n_window if len(mss) == 1 else mss
+    ams = ams * n_window if len(ams) == 1 else ams
+    ops = ops * n_window if len(ops) == 1 else ops
     texts = texts * n_window if len(texts) == 1 else texts
 
     shape = (math.ceil(n_window / 4), n_window if n_window < 4 else 4) if shape is None else shape
@@ -415,9 +416,6 @@ def three_d_multi_plot(
 
     model_kwargs = dict(
         background=background,
-        ambient=ambient,
-        opacity=opacity,
-        model_size=model_size,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
         show_outline=show_outline,
@@ -430,10 +428,21 @@ def three_d_multi_plot(
 
     # Create a plotting object to display pyvista/vtk model.
     p = create_plotter(off_screen=off_screen1, **plotter_kws)
-    for model, sub_key, sub_cpo, sub_style, sub_text, subplot_index in zip(models, keys, cpos, styles, texts, subplots):
+    for sub_model, sub_key, sub_cpo, sub_mt, sub_ms, sub_am, sub_op, sub_text, subplot_index in zip(
+        models, keys, cpos, mts, mss, ams, ops, texts, subplots
+    ):
         p.subplot(subplot_index[0], subplot_index[1])
         wrap_to_plotter(
-            plotter=p, model=model, key=sub_key, cpo=sub_cpo, text=sub_text, model_style=sub_style, **model_kwargs
+            plotter=p,
+            model=sub_model,
+            key=sub_key,
+            cpo=sub_cpo,
+            text=sub_text,
+            model_style=sub_mt,
+            model_size=sub_ms,
+            ambient=sub_am,
+            opacity=sub_op,
+            **model_kwargs
         )
         p.add_axes()
 
