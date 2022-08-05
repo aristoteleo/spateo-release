@@ -107,6 +107,8 @@ def slices_align(
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
+                When α = 0 only the gene expression data is taken into account,
+                while when α =1 only the spatial coordinates are taken into account.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
         dtype: The floating-point number type. Only float32 and float64.
@@ -189,6 +191,8 @@ def slices_align_ref(
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
         key_added: adata.obsm key under which to add the registered spatial coordinate.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
+                When α = 0 only the gene expression data is taken into account,
+                while when α =1 only the spatial coordinates are taken into account.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
         dtype: The floating-point number type. Only float32 and float64.
@@ -272,6 +276,8 @@ def models_align(
         key_added: adata.obsm key under which to add the registered spatial coordinate.
         lmbda: List of probability weights assigned to each slice; If ``None``, use uniform weights.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
+                When α = 0 only the gene expression data is taken into account,
+                while when α =1 only the spatial coordinates are taken into account.
         n_components: Number of components in NMF decomposition.
         threshold: Threshold for convergence of W and H during NMF decomposition.
         max_iter: Maximum number of iterations for our center alignment algorithm.
@@ -394,6 +400,8 @@ def models_align_ref(
         key_added: adata.obsm key under which to add the registered spatial coordinate.
         lmbda: List of probability weights assigned to each slice; If ``None``, use uniform weights.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
+                When α = 0 only the gene expression data is taken into account,
+                while when α =1 only the spatial coordinates are taken into account.
         n_components: Number of components in NMF decomposition.
         threshold: Threshold for convergence of W and H during NMF decomposition.
         max_iter: Maximum number of iterations for our center alignment algorithm.

@@ -161,6 +161,8 @@ def pairwise_align(
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinates.
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
+                When α = 0 only the gene expression data is taken into account,
+                while when α =1 only the spatial coordinates are taken into account.
         dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
         G_init (array-like, optional): Initial mapping to be used in FGW-OT, otherwise default is uniform mapping.
         a_distribution (array-like, optional): Distribution of sampleA spots, otherwise default is uniform.
@@ -296,6 +298,8 @@ def center_align(
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
         lmbda: List of probability weights assigned to each slice; If ``None``, use uniform weights.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
+                When α = 0 only the gene expression data is taken into account,
+                while when α =1 only the spatial coordinates are taken into account.
         n_components: Number of components in NMF decomposition.
         threshold: Threshold for convergence of W and H during NMF decomposition.
         max_iter: Maximum number of iterations for our center alignment algorithm.
