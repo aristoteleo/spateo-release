@@ -377,13 +377,16 @@ def three_d_multi_plot(
     n_key = len(keys)
     cpos = cpo if isinstance(cpo, list) else [cpo]
     n_cpo = len(cpos)
+    styles = model_style if isinstance(model_style, list) else [model_style]
+    n_styles = len(styles)
     texts = text if isinstance(text, list) else [text]
     n_text = len(texts)
 
-    n_window = max(n_model, n_key, n_cpo, n_text)
+    n_window = max(n_model, n_key, n_cpo, n_styles, n_text)
     models = collect_model([models[0].copy() for i in range(n_window)]) if len(models) == 1 else models
     keys = keys * n_window if len(keys) == 1 else keys
     cpos = cpos * n_window if len(cpos) == 1 else cpos
+    styles = styles * n_window if len(styles) == 1 else styles
     texts = texts * n_window if len(texts) == 1 else texts
 
     shape = (math.ceil(n_window / 4), n_window if n_window < 4 else 4) if shape is None else shape
@@ -414,7 +417,6 @@ def three_d_multi_plot(
         background=background,
         ambient=ambient,
         opacity=opacity,
-        model_style=model_style,
         model_size=model_size,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
@@ -428,9 +430,11 @@ def three_d_multi_plot(
 
     # Create a plotting object to display pyvista/vtk model.
     p = create_plotter(off_screen=off_screen1, **plotter_kws)
-    for model, sub_key, sub_cpo, sub_text, subplot_index in zip(models, keys, cpos, texts, subplots):
+    for model, sub_key, sub_cpo, sub_style, sub_text, subplot_index in zip(models, keys, cpos, styles, texts, subplots):
         p.subplot(subplot_index[0], subplot_index[1])
-        wrap_to_plotter(plotter=p, model=model, key=sub_key, cpo=sub_cpo, text=sub_text, **model_kwargs)
+        wrap_to_plotter(
+            plotter=p, model=model, key=sub_key, cpo=sub_cpo, text=sub_text, model_style=sub_style, **model_kwargs
+        )
         p.add_axes()
 
     # Save the plotting object.
