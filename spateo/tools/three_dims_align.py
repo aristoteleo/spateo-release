@@ -481,18 +481,18 @@ def get_align_labels(
     align_X: np.ndarray,
     key: Union[str, List[str]],
     spatial_key: str = "align_spatial",
-    decimals: int = 2,
 ) -> pd.DataFrame:
     """Obtain the label information in anndata.obs[key] corresponding to the align_X coordinate."""
 
     key = [key] if isinstance(key, str) else key
 
     cols = ["x", "y", "z"] if align_X.shape[1] == 3 else ["x", "y"]
-    X_data = pd.DataFrame(model.obsm[spatial_key], columns=cols).round(decimals=decimals)
+    X_data = pd.DataFrame(model.obsm[spatial_key], columns=cols)
     X_data[key] = model.obs[key].values
     X_data.drop_duplicates(inplace=True, keep="first")
 
-    Y_data = pd.DataFrame(align_X.copy(), columns=cols).round(decimals=decimals)
+    Y_data = pd.DataFrame(align_X.copy(), columns=cols)
+    Y_data["map_index"] = Y_data.index
     merge_data = pd.merge(Y_data, X_data, on=cols, how="inner")
 
-    return merge_data[key]
+    return merge_data
