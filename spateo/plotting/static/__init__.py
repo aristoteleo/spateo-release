@@ -1,12 +1,14 @@
 """Spatiotemporal modeling of spatial transcriptomics
 """
 from .agg import box_qc_regions, imshow, qc_regions
+from .align import multi_slices
 from .bbs import delaunay, polygon
 from .colorlabel import color_label
 from .contour import spatial_domains
 from .geo import geo
 from .lisa import lisa, lisa_quantiles
 from .polarity import *
+from .scatters import scatters
 from .space import space
 from .three_d_plot import (
     add_legend,
