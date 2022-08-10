@@ -2,7 +2,6 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import pyvista as pv
 from pyvista import DataSet, MultiBlock, PolyData, UnstructuredGrid
 
 try:
@@ -10,7 +9,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ..models.other_models import construct_tree
+from ..models.other_models import construct_lines
 from .slice import euclidean_distance, three_d_slice
 from .tree import NLPCA, DDRTree, cal_ncenter
 
@@ -398,7 +397,7 @@ def changes_along_branch(
         )
 
     map_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=nodes_key, inplace=True)
-    tree_model = construct_tree(points=nodes, edges=edges, key_added=key_added, label=label, style="line", color=color)
+    tree_model = construct_lines(points=nodes, edges=edges, key_added=key_added, label=label, color=color)
     tree_model.point_data[nodes_key] = np.arange(0, len(nodes), 1)
     tree_length = calc_tree_length(tree_model=tree_model)
 
