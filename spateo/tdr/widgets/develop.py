@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 import numpy as np
+
 from .interpolations import get_X_Y_grid
 
 
@@ -40,7 +41,7 @@ def develop_trajectory(
 
     grid_dict = {
         "spatial": res["grid"][grid_in_hull] if NX is None else NX,
-        "direction": res["grid_V"][grid_in_hull] if NX is None else res["grid_V"]
+        "direction": res["grid_V"][grid_in_hull] if NX is None else res["grid_V"],
     }
 
     return grid_dict

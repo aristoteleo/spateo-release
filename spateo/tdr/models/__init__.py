@@ -12,12 +12,12 @@ from .mesh import (
 )
 from .other_models import (
     construct_align_lines,
+    construct_arrow,
+    construct_arrows,
     construct_axis_line,
     construct_line,
     construct_lines,
     construct_vectorfield,
-    construct_arrows,
-    construct_arrow
 )
 from .pc import construct_pc
 from .utilities import (

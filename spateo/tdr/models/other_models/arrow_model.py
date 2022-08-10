@@ -2,8 +2,8 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 import pyvista as pv
-from pyvista import PolyData
 from anndata import AnnData
+from pyvista import PolyData
 
 try:
     from typing import Literal
@@ -77,10 +77,7 @@ def construct_arrow(
     """
 
     model = _construct_arrow(
-        start_point=start_point,
-        direction=direction,
-        scale="auto" if arrow_scale is None else arrow_scale,
-        **kwargs
+        start_point=start_point, direction=direction, scale="auto" if arrow_scale is None else arrow_scale, **kwargs
     )
 
     add_model_labels(
