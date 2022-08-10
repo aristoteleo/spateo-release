@@ -24,3 +24,4 @@ from .pick import (
 from .slice import interactive_slice, three_d_slice
 from .tree import NLPCA, DDRTree, cal_ncenter
 from .vtk_interpolate import interpolate_model
+from .develop import develop_trajectory

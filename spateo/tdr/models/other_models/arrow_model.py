@@ -141,7 +141,7 @@ def construct_arrows(
     return glyph
 
 
-def construct_vector(
+def construct_vectorfield(
     model: PolyData,
     vector_key: str,
     arrows_scale_key: Optional[str] = None,
