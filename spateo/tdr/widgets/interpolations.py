@@ -117,7 +117,6 @@ def deep_intepretation(
     return interp_adata
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def get_X_Y_grid(
     adata: Optional[AnnData] = None,
     genes: Optional[List] = None,

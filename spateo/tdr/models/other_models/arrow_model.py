@@ -96,10 +96,13 @@ def construct_arrows(
     start_points: np.ndarray,
     direction: np.ndarray = None,
     arrows_scale: Optional[np.ndarray] = None,
+    n_sampling: Optional[int] = None,
+    sampling_method: str = "trn",
     factor: float = 1.0,
     key_added: str = "arrow",
     label: Union[str, list, np.ndarray] = "arrows",
     color: Union[str, list, dict, np.ndarray] = "gainsboro",
+    **kwargs
 ) -> PolyData:
     """
     Create multiple 3D arrows model.
@@ -108,6 +111,10 @@ def construct_arrows(
         start_points: List of Start location in [x, y, z] of the arrows.
         direction: Direction the arrows points to in [x, y, z].
         arrows_scale: Scale factor of the entire object.
+        n_sampling: n_sampleing is the number of coordinates to keep after sampling. If there are too many coordinates
+                    in start_points, the generated arrows model will be too complex   and unsightly, so sampling is
+                    used to reduce the number of coordinates.
+        sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
         factor: Scale factor applied to scaling array.
         key_added: The key under which to add the labels.
         label: The label of arrows model.
@@ -116,12 +123,25 @@ def construct_arrows(
     Returns:
         Arrows model.
     """
+    import dynamo as dyn
+
+    if not (n_sampling is None):
+        index_arr = np.arange(0, start_points.shape[0])
+        sampling_arr = dyn.tl.sample(
+            arr=index_arr,
+            n=n_sampling,
+            method=sampling_method,
+            X=start_points,
+        )
+        start_points = start_points[sampling_arr, :]
+        direction = direction[sampling_arr, :]
+        arrows_scale = None if arrows_scale is None else arrows_scale[sampling_arr, :]
 
     model = pv.PolyData(start_points)
     model.point_data["direction"] = direction
     model.point_data["scale"] = np.linalg.norm(direction.copy(), axis=1) if arrows_scale is None else arrows_scale
 
-    glyph = model.glyph(orient="direction", geom=_construct_arrow(), scale="scale", factor=factor)
+    glyph = model.glyph(orient="direction", geom=_construct_arrow(**kwargs), scale="scale", factor=factor)
 
     labels = np.asarray([label] * glyph.n_points) if isinstance(label, str) else label
     assert len(labels) == glyph.n_points, "The number of labels is not equal to the number of edges."
