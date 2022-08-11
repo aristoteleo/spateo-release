@@ -159,7 +159,7 @@ def three_d_plot(
     text: Optional[str] = None,
     text_kwargs: Optional[dict] = None,
     view_up: tuple = (0.5, 0.5, 1),
-    framerate: int = 15,
+    framerate: int = 24,
     plotter_filename: Optional[str] = None,
 ):
     """
@@ -299,7 +299,7 @@ def three_d_multi_plot(
     text: Union[str, list] = None,
     text_kwargs: Optional[dict] = None,
     view_up: tuple = (0.5, 0.5, 1),
-    framerate: int = 15,
+    framerate: int = 24,
     plotter_filename: Optional[str] = None,
 ):
     """
@@ -479,7 +479,7 @@ def three_d_animate(
     outline_kwargs: Optional[dict] = None,
     text: Optional[str] = None,
     text_kwargs: Optional[dict] = None,
-    framerate: int = 15,
+    framerate: int = 24,
     plotter_filename: Optional[str] = None,
 ):
     """
@@ -569,13 +569,13 @@ def three_d_animate(
     blocks_name = blocks.keys()
 
     # Create a plotting object to display the end model of blocks.
-    end_block = blocks[blocks_name[-1]]
+    end_block = blocks[blocks_name[-1]].copy()
     p = create_plotter(off_screen=off_screen1, **plotter_kws)
     wrap_to_plotter(plotter=p, model=end_block, key=key, cpo=cpo, **model_kwargs)
-    cpo = p.show(return_cpos=True, cpos=cpo, jupyter_backend="none")
+    cpo = p.show(return_cpos=True, cpos=cpo)
 
     # Create another plotting object to save pyvista/vtk model.
-    start_block = blocks[blocks_name[0]]
+    start_block = blocks[blocks_name[0]].copy()
     p = create_plotter(off_screen=off_screen2, **plotter_kws)
     wrap_to_plotter(plotter=p, model=start_block, key=key, cpo=cpo, **model_kwargs)
 
@@ -588,7 +588,6 @@ def three_d_animate(
     for block_name in blocks_name[1:]:
         block = blocks[block_name]
         start_block.overwrite(block)
-        wrap_to_plotter(plotter=p, model=start_block, key=key, cpo=cpo, **model_kwargs)
         p.write_frame()
 
     # Save the plotting object.

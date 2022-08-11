@@ -20,11 +20,6 @@ def read_model(filename: str):
     """
     model = pv.read(filename)
 
-    if "vtkOriginalPointIds" in model.point_data.keys():
-        del model.point_data["vtkOriginalPointIds"]
-    if "vtkOriginalCellIds" in model.cell_data.keys():
-        del model.cell_data["vtkOriginalCellIds"]
-
     return model
 
 
