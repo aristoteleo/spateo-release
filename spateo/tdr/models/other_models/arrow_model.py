@@ -16,10 +16,10 @@ from ..utilities import add_model_labels
 def _construct_arrow(
     start_point: Union[list, tuple, np.ndarray] = (0.0, 0.0, 0.0),
     direction: Union[list, tuple, np.ndarray] = (1.0, 0.0, 0.0),
-    tip_length: float = 0.1,
-    tip_radius: float = 0.02,
+    tip_length: float = 0.25,
+    tip_radius: float = 0.1,
     tip_resolution: int = 20,
-    shaft_radius: float = 0.01,
+    shaft_radius: float = 0.05,
     shaft_resolution: int = 20,
     scale: Optional[Union[str, float]] = "auto",
 ) -> PolyData:
