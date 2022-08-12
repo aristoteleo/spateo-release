@@ -274,7 +274,7 @@ def three_d_plot(
         filename=filename,
         view_up=view_up,
         framerate=framerate,
-        jupyter=jupyter,
+        jupyter=jupyter_backend,
     )
 
 
@@ -456,7 +456,7 @@ def three_d_multi_plot(
         filename=filename,
         view_up=view_up,
         framerate=framerate,
-        jupyter=jupyter,
+        jupyter=jupyter_backend,
     )
 
 
@@ -572,7 +572,7 @@ def three_d_animate(
     end_block = blocks[blocks_name[-1]].copy()
     p = create_plotter(off_screen=off_screen1, **plotter_kws)
     wrap_to_plotter(plotter=p, model=end_block, key=key, cpo=cpo, **model_kwargs)
-    cpo = p.show(return_cpos=True, cpos=cpo)
+    cpo = p.show(return_cpos=True, jupyter_backend="none", cpos=cpo)
 
     # Create another plotting object to save pyvista/vtk model.
     start_block = blocks[blocks_name[0]].copy()
@@ -593,3 +593,6 @@ def three_d_animate(
     # Save the plotting object.
     if plotter_filename is not None:
         save_plotter(plotter=p, filename=plotter_filename)
+
+    # Close the plotting object.
+    p.close()
