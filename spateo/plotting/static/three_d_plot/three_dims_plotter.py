@@ -64,7 +64,7 @@ def _set_jupyter(
 ):
     if jupyter is False:
         off_screen1, off_screen2 = off_screen, True
-        jupyter_backend = None
+        jupyter_backend = "none"
     elif jupyter is True:
         off_screen1, off_screen2 = True, off_screen
         jupyter_backend = "static"

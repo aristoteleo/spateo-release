@@ -59,7 +59,7 @@ def construct_arrow(
     key_added: str = "arrow",
     label: str = "arrow",
     color: str = "gainsboro",
-    **kwargs
+    **kwargs,
 ) -> PolyData:
     """
     Create a 3D arrow model.
@@ -71,6 +71,7 @@ def construct_arrow(
         key_added: The key under which to add the labels.
         label: The label of arrow model.
         color: Color to use for plotting model.
+        **kwargs: Additional parameters that will be passed to _construct_arrow function.
 
     Returns:
         Arrow model.
@@ -102,7 +103,7 @@ def construct_arrows(
     key_added: str = "arrow",
     label: Union[str, list, np.ndarray] = "arrows",
     color: Union[str, list, dict, np.ndarray] = "gainsboro",
-    **kwargs
+    **kwargs,
 ) -> PolyData:
     """
     Create multiple 3D arrows model.
@@ -119,6 +120,7 @@ def construct_arrows(
         key_added: The key under which to add the labels.
         label: The label of arrows model.
         color: Color to use for plotting model.
+        **kwargs: Additional parameters that will be passed to _construct_arrow function.
 
     Returns:
         Arrows model.
@@ -166,6 +168,7 @@ def construct_vectorfield(
     key_added: str = "vector",
     label: Union[str, list, np.ndarray] = "vector",
     color: Union[str, list, dict, np.ndarray] = "gainsboro",
+    **kwargs,
 ) -> PolyData:
     """
     Create 3D vector field model.
@@ -178,6 +181,7 @@ def construct_vectorfield(
         key_added: The key under which to add the labels.
         label: The label of arrows model.
         color: Color to use for plotting model.
+        **kwargs: Additional parameters that will be passed to construct_arrows function.
 
     Returns:
         3D vector field model.
@@ -191,4 +195,5 @@ def construct_vectorfield(
         key_added=key_added,
         label=label,
         color=color,
+        **kwargs,
     )

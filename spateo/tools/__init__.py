@@ -34,8 +34,8 @@ from .three_dims_align import (
     get_align_labels,
     models_align,
     models_align_ref,
+    models_center_align,
+    models_center_align_ref,
     rigid_transform_2D,
     rigid_transform_3D,
-    slices_align,
-    slices_align_ref,
 )

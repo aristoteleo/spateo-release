@@ -460,10 +460,11 @@ def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> dict
         Y: Aligned spatial coordinates.
         pi: Mapping between the two layers output by PASTE.
 
+
     Returns:
         A dict of align_spatial_coords, map_spatial_coords, pi_index, pi_value.
-            align_spatial_coords is the Y coordinate aligned with X coordinates.
-            map_spatial_coords is X coordinates aligned with Y coordinates.
+            mapping_X is X coordinates aligned with Y coordinates.
+            mapping_Y is the Y coordinate aligned with X coordinates.
             pi_index is index between optimal mapping points in the pi matrix.
             pi_value is the value of optimal mapping points.
     """
@@ -480,13 +481,9 @@ def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> dict
     pi_index_new = np.asarray([[pi_X_ind[i], pi_Y_ind[i]] for i in ind])
     pi_value = pi[pi_index_new[:, 0], pi_index_new[:, 1]]
 
-    # Obtain the spatial coordinates
-    align_spatial_coords = Y[pi_index_new[:, 1]]
-    map_spatial_coords = X[pi_index_new[:, 0]]
-
     return {
-        "align_spatial_coords": align_spatial_coords,
-        "map_spatial_coords": map_spatial_coords,
+        "mapping_X": X[pi_index_new[:, 0]],
+        "mapping_Y": Y[pi_index_new[:, 1]],
         "pi_index": pi_index_new,
         "pi_value": pi_value.astype(np.float64).reshape(-1, 1),
     }
@@ -537,7 +534,7 @@ def mapping_center_coords(
     mapping_data["pi_value"] = mapping_data[["pi_value_X"]].values * mapping_data[["pi_value_Y"]].values
 
     return {
-        "align_spatial_coords": mapping_data[raw_Y_cols].values,
-        "map_spatial_coords": mapping_data[raw_X_cols].values,
+        "mapping_X": mapping_data[raw_X_cols].values,
+        "mapping_Y": mapping_data[raw_Y_cols].values,
         "pi_value": mapping_data["pi_value"].astype(np.float64).values,
     }

@@ -85,12 +85,13 @@ def rigid_transform_3D(
     return np.asarray(new_coords.T)
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slices")
-def slices_align(
-    slices: List[AnnData],
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models")
+def models_align(
+    models: List[AnnData],
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
+    mapping_key_added: str = "models_align",
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
@@ -99,13 +100,14 @@ def slices_align(
     **kwargs,
 ) -> List[AnnData]:
     """
-    Align spatial coordinates of slices.
+    Align spatial coordinates of models.
 
     Args:
-        slices: List of slices (AnnData Object).
-        layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
+        models: List of models (AnnData Object).
+        layer: If `'X'`, uses `.X` to calculate dissimilarity between spots, otherwise uses the representation given by `.layers[layer]`.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
-        key_added: adata.obsm key under which to add the registered spatial coordinate.
+        key_added: `.obsm` key under which to add the aligned spatial coordinate.
+        mapping_key_added: `.uns` key under which to add the alignment info.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
                 When α = 0 only the gene expression data is taken into account,
                 while when α =1 only the spatial coordinates are taken into account.
@@ -113,23 +115,24 @@ def slices_align(
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
         dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
+        **kwargs: Additional parameters that will be passed to pairwise_align function.
 
     Returns:
-        List of slices (AnnData Object) after alignment.
+        List of models (AnnData Object) after alignment.
     """
-    for s in slices:
-        s.obsm[key_added] = s.obsm[spatial_key]
+    for m in models:
+        m.obsm[key_added] = m.obsm[spatial_key]
 
-    align_slices = []
-    for i in lm.progress_logger(range(len(slices) - 1), progress_name="Slices alignment"):
+    align_models = [model.copy() for model in models]
+    for i in lm.progress_logger(range(len(align_models) - 1), progress_name="Models alignment"):
 
-        sliceA = slices[i].copy() if i == 0 else align_slices[i].copy()
-        sliceB = slices[i + 1].copy()
+        modelA = align_models[i]
+        modelB = align_models[i + 1]
 
-        # Calculate and returns optimal alignment of two slices.
+        # Calculate and returns optimal alignment of two models.
         pi, _ = pairwise_align(
-            sampleA=sliceA,
-            sampleB=sliceB,
+            sampleA=modelA.copy(),
+            sampleB=modelB.copy(),
             spatial_key=key_added,
             layer=layer,
             alpha=alpha,
@@ -140,35 +143,39 @@ def slices_align(
             **kwargs,
         )
 
-        # Calculate new coordinates of two slices
-        sliceA_coodrs, sliceB_coodrs, mapping_dict = generalized_procrustes_analysis(
-            X=sliceA.obsm[key_added], Y=sliceB.obsm[key_added], pi=pi
+        # Calculate new coordinates of two models
+        modelA_coords, modelB_coords, mapping_dict = generalized_procrustes_analysis(
+            X=modelA.obsm[key_added], Y=modelB.obsm[key_added], pi=pi
         )
 
-        sliceA.obsm[key_added] = sliceA_coodrs
-        sliceA.uns[key_added] = {"mapping_relations": {"t": mapping_dict["tX"], "R": None}}
+        modelA.obsm[key_added] = modelA_coords
+        modelB.obsm[key_added] = modelB_coords
 
-        sliceB.obsm[key_added] = sliceB_coodrs
-        sliceB.uns[key_added] = mapping_aligned_coords(X=sliceA_coodrs, Y=sliceB_coodrs, pi=pi)
-        sliceB.uns[key_added]["mapping_relations"] = {"t": mapping_dict["tY"], "R": mapping_dict["R"]}
+        mapping_coords_dict = mapping_aligned_coords(X=modelA_coords, Y=modelB_coords, pi=pi)
 
-        if i == 0:
-            align_slices.append(sliceA)
-        align_slices.append(sliceB)
+        modelA.uns[f"latter_{mapping_key_added}"] = mapping_coords_dict.copy()
+        modelA.uns[f"latter_{mapping_key_added}"]["mapping_relations"] = {"t": mapping_dict["tX"], "R": None}
 
-    return align_slices
+        modelB.uns[f"former_{mapping_key_added}"] = mapping_coords_dict.copy()
+        modelB.uns[f"former_{mapping_key_added}"]["mapping_relations"] = {
+            "t": mapping_dict["tY"],
+            "R": mapping_dict["R"],
+        }
+
+    return align_models
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slices")
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "slices_ref", optional=True)
-def slices_align_ref(
-    slices: List[AnnData],
-    slices_ref: Optional[List[AnnData]],
-    n_sampling: Optional[int] = 1000,
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models")
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models_ref", optional=True)
+def models_align_ref(
+    models: List[AnnData],
+    models_ref: Optional[List[AnnData]] = None,
+    n_sampling: Optional[int] = 2000,
     sampling_method: str = "trn",
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
+    mapping_key_added: str = "models_align",
     alpha: float = 0.1,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
@@ -177,19 +184,17 @@ def slices_align_ref(
     **kwargs,
 ) -> Tuple[List[AnnData], List[AnnData]]:
     """
-    Align the spatial coordinates of one slice list through the affine transformation matrix obtained from another slice list.
-    If there are too many slice coordinates to be aligned, this method can be selected.
-    First select the slices with fewer coordinates for alignment, and then calculate the affine transformation matrix.
-    Secondly, the required slices are aligned through the calculated affine transformation matrix.
+    Align the spatial coordinates of one model list through the affine transformation matrix obtained from another model list.
 
     Args:
-        slices: List of slices (AnnData Object).
-        slices_ref: List of slices (AnnData Object) with a small number of coordinates.
-        n_sampling: When `slices_ref` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
+        models: List of models (AnnData Object).
+        models_ref: Another list of models (AnnData Object).
+        n_sampling: When `models_ref` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
         sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
-        layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
+        layer: If `'X'`, uses `.X` to calculate dissimilarity between spots, otherwise uses the representation given by `.layers[layer]`.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
-        key_added: adata.obsm key under which to add the registered spatial coordinate.
+        key_added: `.obsm` key under which to add the aligned spatial coordinate.
+        mapping_key_added: `.uns` key under which to add the alignment info.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
                 When α = 0 only the gene expression data is taken into account,
                 while when α =1 only the spatial coordinates are taken into account.
@@ -197,28 +202,30 @@ def slices_align_ref(
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
         dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
+        **kwargs: Additional parameters that will be passed to pairwise_align function.
 
     Returns:
-        align_slices_ref: List of slices_ref (AnnData Object) after alignment.
-        align_slices: List of slices (AnnData Object) after alignment.
+        align_models: List of models (AnnData Object) after alignment.
+        align_models_ref: List of models_ref (AnnData Object) after alignment.
     """
 
-    if slices_ref is None:
-        slices_ref = []
-        for s in slices:
-            slice_ref = s.copy()
+    if models_ref is None:
+        models_ref = []
+        for m in models:
+            model_ref = m.copy()
             sampling = dyn.tl.sample(
-                arr=np.asarray(slice_ref.obs_names), n=n_sampling, method=sampling_method, X=slice_ref.obsm[spatial_key]
+                arr=np.asarray(model_ref.obs_names), n=n_sampling, method=sampling_method, X=model_ref.obsm[spatial_key]
             )
-            slice_ref = slice_ref[sampling, :]
-            slices_ref.append(slice_ref)
+            slice_ref = model_ref[sampling, :]
+            models_ref.append(slice_ref)
 
     # Align spatial coordinates of slices with a small number of coordinates.
-    align_slices_ref = slices_align(
-        slices=slices_ref,
+    align_models_ref = models_align(
+        models=models_ref,
         layer=layer,
         spatial_key=spatial_key,
         key_added=key_added,
+        mapping_key_added=mapping_key_added,
         alpha=alpha,
         numItermax=numItermax,
         numItermaxEmd=numItermaxEmd,
@@ -227,29 +234,31 @@ def slices_align_ref(
         **kwargs,
     )
 
-    align_slices = []
-    for i, (align_slice_ref, s) in enumerate(zip(align_slices_ref, slices)):
-        align_slice = s.copy()
+    align_models = [model.copy() for model in models]
+    for i, (align_model_ref, align_model) in enumerate(zip(align_models_ref, align_models)):
+        _mapping_key = f"latter_{mapping_key_added}" if i == 0 else f"former_{mapping_key_added}"
+        t = align_model_ref.uns[_mapping_key]["mapping_relations"]["t"]
+        R = align_model_ref.uns[_mapping_key]["mapping_relations"]["R"]
 
-        t = align_slice_ref.uns[key_added]["mapping_relations"]["t"]
-        R = align_slice_ref.uns[key_added]["mapping_relations"]["R"]
+        align_model_coords = align_model.obsm[spatial_key].copy() - t
+        align_model.obsm[key_added] = align_model_coords if R is None else R.dot(align_model_coords.T).T
 
-        align_slice_coords = align_slice.obsm[spatial_key].copy() - t
-        align_slice.obsm[key_added] = align_slice_coords if R is None else R.dot(align_slice_coords.T).T
-        align_slice.uns[key_added] = align_slice_ref.uns[key_added]
-        align_slices.append(align_slice)
+        for key in [f"former_{mapping_key_added}", f"latter_{mapping_key_added}"]:
+            if key in align_model_ref.uns_keys():
+                align_model.uns[key] = align_model_ref.uns[key]
 
-    return align_slices, align_slices_ref
+    return align_models, align_models_ref
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "init_center_model")
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models")
-def models_align(
+def models_center_align(
     init_center_model: AnnData,
     models: List[AnnData],
     layer: str = "X",
     spatial_key: str = "spatial",
-    key_added: str = "3d_align_spatial",
+    key_added: str = "align_spatial",
+    mapping_key_added: str = "models_align",
     lmbda: Optional[np.ndarray] = None,
     alpha: float = 0.1,
     n_components: int = 15,
@@ -270,11 +279,12 @@ def models_align(
 
     Args:
         init_center_model: AnnData object to use as the initialization for center alignment; Make sure to include gene expression and spatial information.
-        models: List of AnnData objects  to use in the center alignment.
-        layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
+        models: List of AnnData objects to use in the center alignment.
+        layer: If `'X'`, uses `.X` to calculate dissimilarity between spots, otherwise uses the representation given by `.layers[layer]`.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
-        key_added: adata.obsm key under which to add the registered spatial coordinate.
-        lmbda: List of probability weights assigned to each slice; If ``None``, use uniform weights.
+        key_added: `.obsm` key under which to add the aligned spatial coordinate.
+        mapping_key_added: `.uns` key under which to add the alignment info.
+        lmbda: List of probability weights assigned to each slice; If `None`, use uniform weights.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
                 When α = 0 only the gene expression data is taken into account,
                 while when α =1 only the spatial coordinates are taken into account.
@@ -283,10 +293,10 @@ def models_align(
         max_iter: Maximum number of iterations for our center alignment algorithm.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
-        dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
-        norm: If ``True``, scales spatial distances such that neighboring spots are at distance 1. Otherwise, spatial distances remain unchanged.
+        dissimilarity: Expression dissimilarity measure: `'kl'` or `'euclidean'`.
+        norm: If `True`, scales spatial distances such that neighboring spots are at distance 1. Otherwise, spatial distances remain unchanged.
         random_seed: Set random seed for reproducibility.
-        pis_init: Initial list of mappings between 'A' and 'slices' to solver. Otherwise, default will automatically calculate mappings.
+        pis_init: Initial list of mappings between 'A' and 'models' to solver. Otherwise, default will automatically calculate mappings.
         distributions: Distributions of spots for each slice. Otherwise, default is uniform.
         dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
@@ -320,37 +330,35 @@ def models_align(
         device=device,
     )
 
-    align_models = []
-    for model, pi in zip(models, pis):
-        center_coords, model_coords, mapping_dict1 = generalized_procrustes_analysis(
+    align_models = [model.copy() for model in models]
+    for model, pi in zip(align_models, pis):
+        center_coords, model_coords, mapping_dict = generalized_procrustes_analysis(
             center_model.obsm[key_added].copy(), model.obsm[key_added].copy(), pi.copy()
         )
-
         center_model.obsm[key_added] = center_coords
-        center_model.uns[key_added] = {"mapping_relations": {"t": mapping_dict1["tX"], "R": None}}
-
         model.obsm[key_added] = model_coords
-        model.uns[key_added] = mapping_aligned_coords(X=center_coords, Y=model_coords, pi=pi)
-        model.uns[key_added]["center_align_spatial_coords"] = model.uns[key_added].pop("align_spatial_coords")
-        model.uns[key_added]["center_map_spatial_coords"] = model.uns[key_added].pop("map_spatial_coords")
-        model.uns[key_added]["center_pi_value"] = model.uns[key_added].pop("pi_value")
-        model.uns[key_added]["center_pi_index"] = model.uns[key_added].pop("pi_index")
-        model.uns[key_added]["mapping_relations"] = {"t": mapping_dict1["tY"], "R": mapping_dict1["R"]}
-        align_models.append(model)
+
+        center_model.uns[mapping_key_added] = {"mapping_relations": {"t": mapping_dict["tX"], "R": None}}
+        model.uns[f"center_{mapping_key_added}"] = mapping_aligned_coords(X=center_coords, Y=model_coords, pi=pi)
+        model.uns[f"center_{mapping_key_added}"]["mapping_relations"] = {
+            "t": mapping_dict["tY"],
+            "R": mapping_dict["R"],
+        }
 
     for i in range(len(align_models) - 1):
         modelA = align_models[i]
         modelB = align_models[i + 1]
 
-        mapping_dict = mapping_center_coords(
-            X=modelA.uns[key_added]["center_align_spatial_coords"].copy(),
-            Y=modelB.uns[key_added]["center_align_spatial_coords"].copy(),
-            mid_X=modelA.uns[key_added]["center_pi_index"][:, [0]].copy(),
-            mid_Y=modelB.uns[key_added]["center_pi_index"][:, [0]].copy(),
-            pi_value_X=modelA.uns[key_added]["center_pi_value"].copy(),
-            pi_value_Y=modelB.uns[key_added]["center_pi_value"].copy(),
+        mapping_coords_dict = mapping_center_coords(
+            X=modelA.uns[f"center_{mapping_key_added}"]["mapping_X"].copy(),
+            Y=modelB.uns[f"center_{mapping_key_added}"]["mapping_X"].copy(),
+            mid_X=modelA.uns[f"center_{mapping_key_added}"]["pi_index"][:, [0]].copy(),
+            mid_Y=modelB.uns[f"center_{mapping_key_added}"]["pi_index"][:, [0]].copy(),
+            pi_value_X=modelA.uns[f"center_{mapping_key_added}"]["pi_value"].copy(),
+            pi_value_Y=modelB.uns[f"center_{mapping_key_added}"]["pi_value"].copy(),
         )
-        modelB.uns[key_added].update(mapping_dict)
+        modelA.uns[f"latter_{mapping_key_added}"] = mapping_coords_dict.copy()
+        modelB.uns[f"former_{mapping_key_added}"] = mapping_coords_dict.copy()
 
     new_center_model = init_center_model.copy()
     new_center_model.obsm[key_added] = center_model.obsm[key_added]
@@ -362,7 +370,7 @@ def models_align(
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "init_center_model")
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models")
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models_ref", optional=True)
-def models_align_ref(
+def models_center_align_ref(
     init_center_model: AnnData,
     models: List[AnnData],
     models_ref: Optional[List[AnnData]] = None,
@@ -371,6 +379,7 @@ def models_align_ref(
     layer: str = "X",
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
+    mapping_key_added: str = "models_align",
     lmbda: Optional[np.ndarray] = None,
     alpha: float = 0.1,
     n_components: int = 15,
@@ -395,10 +404,11 @@ def models_align_ref(
         models_ref: List of AnnData objects with a small number of coordinates.
         n_sampling: When `models_ref` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
         sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
-        layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
+        layer: If `'X'`, uses `.X` to calculate dissimilarity between spots, otherwise uses the representation given by `.layers[layer]`.
         spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
-        key_added: adata.obsm key under which to add the registered spatial coordinate.
-        lmbda: List of probability weights assigned to each slice; If ``None``, use uniform weights.
+        key_added: `.obsm` key under which to add the aligned spatial coordinate.
+        mapping_key_added: `.uns` key under which to add the alignment info.
+        lmbda: List of probability weights assigned to each slice; If `None`, use uniform weights.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
                 When α = 0 only the gene expression data is taken into account,
                 while when α =1 only the spatial coordinates are taken into account.
@@ -407,18 +417,18 @@ def models_align_ref(
         max_iter: Maximum number of iterations for our center alignment algorithm.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
-        dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
-        norm: If ``True``, scales spatial distances such that neighboring spots are at distance 1. Otherwise, spatial distances remain unchanged.
+        dissimilarity: Expression dissimilarity measure: `'kl'` or `'euclidean'`.
+        norm: If `True`, scales spatial distances such that neighboring spots are at distance 1. Otherwise, spatial distances remain unchanged.
         random_seed: Set random seed for reproducibility.
-        pis_init: Initial list of mappings between 'A' and 'slices' to solver. Otherwise, default will automatically calculate mappings.
+        pis_init: Initial list of mappings between 'A' and 'models' to solver. Otherwise, default will automatically calculate mappings.
         distributions: Distributions of spots for each slice. Otherwise, default is uniform.
         dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
 
     Returns:
         new_center_model: The center model.
-        align_models_ref: List of models_ref (AnnData Object) after alignment.
         align_models: List of models (AnnData Object) after alignment.
+        align_models_ref: List of models_ref (AnnData Object) after alignment.
     """
 
     if models_ref is None:
@@ -439,12 +449,13 @@ def models_align_ref(
             model_ref = model_ref[model_sampling, :]
             models_ref.append(model_ref)
 
-    new_center_model, align_models_ref = models_align(
+    new_center_model, align_models_ref = models_center_align(
         init_center_model=init_center_model,
         models=models_ref,
         layer=layer,
         spatial_key=spatial_key,
         key_added=key_added,
+        mapping_key_added=mapping_key_added,
         lmbda=lmbda,
         alpha=alpha,
         n_components=n_components,
@@ -465,15 +476,17 @@ def models_align_ref(
     for i, (align_model_ref, m) in enumerate(zip(align_models_ref, models)):
         align_model = m.copy()
 
-        t = align_model_ref.uns[key_added]["mapping_relations"]["t"]
-        R = align_model_ref.uns[key_added]["mapping_relations"]["R"]
+        t = align_model_ref.uns[f"center_{mapping_key_added}"]["mapping_relations"]["t"]
+        R = align_model_ref.uns[f"center_{mapping_key_added}"]["mapping_relations"]["R"]
 
         align_model_coords = align_model.obsm[spatial_key].copy() - t
         align_model.obsm[key_added] = align_model_coords if R is None else R.dot(align_model_coords.T).T
-        align_model.uns[key_added] = align_model_ref.uns[key_added]
+        for key in [f"former_{mapping_key_added}", f"latter_{mapping_key_added}", f"center_{mapping_key_added}"]:
+            if key in align_model_ref.uns_keys():
+                align_model.uns[key] = align_model_ref.uns[key]
         align_models.append(align_model)
 
-    return new_center_model, align_models_ref, align_models
+    return new_center_model, align_models, align_models_ref
 
 
 def get_align_labels(
