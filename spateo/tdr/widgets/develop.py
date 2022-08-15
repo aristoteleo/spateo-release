@@ -66,7 +66,7 @@ def _develop_vectorfield(
 
 def develop_vectorfield(
     adata: AnnData,
-    align_key: str = "3d_align_spatial",
+    mapping_key: str = "model_align",
     key_added: str = "DevVecFld",
     NX: Optional[np.ndarray] = None,
     grid_num: List = [50, 50, 50],
@@ -79,7 +79,7 @@ def develop_vectorfield(
 
     Args:
         adata: AnnData object that contains the cell coordinates of the two states after alignment.
-        align_key: The key from the adata uns that corresponds to the aligned cell coordinates.
+        mapping_key: The key from the adata uns that corresponds to the aligned cell coordinates.
         key_added: The key that will be used for the vector field key in adata.uns.
         NX: The spatial coordinates of new data point. If NX is None, generate new points based on grid_num.
         grid_num: Number of grid to generate. Default is 50 for each dimension. Must be non-negative.
@@ -117,9 +117,9 @@ def develop_vectorfield(
 
     adata = adata if inplace else adata.copy()
 
-    align_spatial_data = adata.uns[align_key].copy()
-    stage1_coords = np.asarray(align_spatial_data["map_spatial_coords"], dtype=float)
-    stage2_coords = np.asarray(align_spatial_data["align_spatial_coords"], dtype=float)
+    align_spatial_data = adata.uns[mapping_key].copy()
+    stage1_coords = np.asarray(align_spatial_data["mapping_X"], dtype=float)
+    stage2_coords = np.asarray(align_spatial_data["mapping_Y"], dtype=float)
 
     adata.uns[key_added] = _develop_vectorfield(
         stage1_X=stage1_coords,
