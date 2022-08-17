@@ -135,28 +135,40 @@ def develop_vectorfield(
 
 
 def develop_trajectory(
-    stage1_X: Optional[np.ndarray] = None,
-    stage2_X: Optional[np.ndarray] = None,
-    NX: Optional[np.ndarray] = None,
-    grid_num: List = [50, 50, 50],
-    lambda_: float = 0.02,
-    lstsq_method: str = "scipy",
+    adata: AnnData,
+    vf_key: str = "VecFld_develop",
+    key_added: str = "develop",
+    layer: str = "X",
+    direction: str = "forward",
+    interpolation_num: int = 250,
+    average: bool = False,
+    inverse_transform: bool = False,
+    inplace: bool = True,
+    cores: int = 1,
     **kwargs,
-) -> dict:
-    """Learn a continuous mapping from stage1 to stage2 with the Kernel method (sparseVFC).
-
-    Args:
-        stage1_X: The spatial coordinates of each data point of stage1.
-        stage2_X: The spatial coordinates of each data point of stage2.
-        NX: The spatial coordinates of new data point. If NX is None, generate new points based on grid_num.
-        grid_num: Number of grid to generate. Default is 50 for each dimension. Must be non-negative.
-        lambda_: Represents the trade-off between the goodness of data fit and regularization. Larger Lambda_ put more
-                 weights on regularization.
-        lstsq_method: The name of the linear least square solver, can be either 'scipy` or `douin`.
-        **kwargs: Additional parameters that will be passed to SparseVFC function.
-
-    Returns:
-        A dictionary which contains:
-            spatial: Grid coordinates.
-            direction: Prediction of development direction of the grid.
+):
     """
+    """
+    import dynamo as dyn
+
+    adata = adata if inplace else adata.copy()
+
+    tmp_adata = adata.copy()
+    tmp_adata.uns[f"VecFld_{key_added}"] = tmp_adata.uns[vf_key]
+    tmp_adata.obsm[f"X_{key_added}"] = tmp_adata.uns[f"VecFld_{key_added}"]["X"]
+
+    dyn.pd.fate(
+       tmp_adata,
+       init_cells=tmp_adata.obs_names.tolist(),
+       basis=key_added,
+       layer=layer,
+       interpolation_num=interpolation_num,
+       direction=direction,
+       inverse_transform=inverse_transform,
+       average=average,
+       cores=cores,
+       **kwargs
+    )
+
+    adata.uns[f"fate_{key_added}"] = tmp_adata.uns[f"fate_{key_added}"]
+    return None if inplace else adata
