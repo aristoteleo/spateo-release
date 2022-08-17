@@ -147,8 +147,7 @@ def develop_trajectory(
     cores: int = 1,
     **kwargs,
 ):
-    """
-    """
+    """ """
     import dynamo as dyn
 
     adata = adata if inplace else adata.copy()
@@ -158,16 +157,16 @@ def develop_trajectory(
     tmp_adata.obsm[f"X_{key_added}"] = tmp_adata.uns[f"VecFld_{key_added}"]["X"]
 
     dyn.pd.fate(
-       tmp_adata,
-       init_cells=tmp_adata.obs_names.tolist(),
-       basis=key_added,
-       layer=layer,
-       interpolation_num=interpolation_num,
-       direction=direction,
-       inverse_transform=inverse_transform,
-       average=average,
-       cores=cores,
-       **kwargs
+        tmp_adata,
+        init_cells=tmp_adata.obs_names.tolist(),
+        basis=key_added,
+        layer=layer,
+        interpolation_num=interpolation_num,
+        direction=direction,
+        inverse_transform=inverse_transform,
+        average=average,
+        cores=cores,
+        **kwargs,
     )
 
     adata.uns[f"fate_{key_added}"] = tmp_adata.uns[f"fate_{key_added}"]
