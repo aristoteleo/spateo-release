@@ -15,6 +15,7 @@ from .other_models import (
     construct_arrow,
     construct_arrows,
     construct_axis_line,
+    construct_cells_trajectory,
     construct_line,
     construct_lines,
     construct_vectorfield,

@@ -1,8 +1,7 @@
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 import numpy as np
 import pyvista as pv
-from anndata import AnnData
 from pyvista import PolyData
 
 try:

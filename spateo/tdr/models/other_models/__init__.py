@@ -12,3 +12,4 @@ from .line_model import (
     construct_lines,
     generate_edges,
 )
+from .trajectory_model import construct_cells_trajectory

@@ -151,12 +151,12 @@ def models_align(
         modelA.obsm[key_added] = modelA_coords
         modelB.obsm[key_added] = modelB_coords
 
-        mapping_coords_dict = mapping_aligned_coords(X=modelA_coords, Y=modelB_coords, pi=pi)
+        mapping_A_dict, mapping_B_dict = mapping_aligned_coords(X=modelA_coords, Y=modelB_coords, pi=pi)
 
-        modelA.uns[f"latter_{mapping_key_added}"] = mapping_coords_dict.copy()
+        modelA.uns[f"latter_{mapping_key_added}"] = mapping_A_dict.copy()
         modelA.uns[f"latter_{mapping_key_added}"]["mapping_relations"] = {"t": mapping_dict["tX"], "R": None}
 
-        modelB.uns[f"former_{mapping_key_added}"] = mapping_coords_dict.copy()
+        modelB.uns[f"former_{mapping_key_added}"] = mapping_B_dict.copy()
         modelB.uns[f"former_{mapping_key_added}"]["mapping_relations"] = {
             "t": mapping_dict["tY"],
             "R": mapping_dict["R"],
@@ -339,7 +339,7 @@ def models_center_align(
         model.obsm[key_added] = model_coords
 
         center_model.uns[mapping_key_added] = {"mapping_relations": {"t": mapping_dict["tX"], "R": None}}
-        model.uns[f"center_{mapping_key_added}"] = mapping_aligned_coords(X=center_coords, Y=model_coords, pi=pi)
+        model.uns[f"center_{mapping_key_added}"] = mapping_aligned_coords(X=center_coords, Y=model_coords, pi=pi)[1]
         model.uns[f"center_{mapping_key_added}"]["mapping_relations"] = {
             "t": mapping_dict["tY"],
             "R": mapping_dict["R"],
@@ -350,8 +350,8 @@ def models_center_align(
         modelB = align_models[i + 1]
 
         mapping_coords_dict = mapping_center_coords(
-            X=modelA.uns[f"center_{mapping_key_added}"]["mapping_X"].copy(),
-            Y=modelB.uns[f"center_{mapping_key_added}"]["mapping_X"].copy(),
+            X=modelA.uns[f"center_{mapping_key_added}"]["mapping_Y"].copy(),
+            Y=modelB.uns[f"center_{mapping_key_added}"]["mapping_Y"].copy(),
             mid_X=modelA.uns[f"center_{mapping_key_added}"]["pi_index"][:, [0]].copy(),
             mid_Y=modelB.uns[f"center_{mapping_key_added}"]["pi_index"][:, [0]].copy(),
             pi_value_X=modelA.uns[f"center_{mapping_key_added}"]["pi_value"].copy(),

@@ -67,7 +67,7 @@ def _develop_vectorfield(
 def develop_vectorfield(
     adata: AnnData,
     mapping_key: str = "model_align",
-    key_added: str = "DevVecFld",
+    key_added: str = "VecFld_develop",
     NX: Optional[np.ndarray] = None,
     grid_num: List = [50, 50, 50],
     lambda_: float = 0.02,
@@ -160,35 +160,3 @@ def develop_trajectory(
             spatial: Grid coordinates.
             direction: Prediction of development direction of the grid.
     """
-
-
-def cells_development(
-    stages_X: List[np.ndarray],
-    n_spacing: int = 100,
-    key_added: str = "develop",
-    label: str = "cells_develop",
-    color: str = "skyblue",
-) -> MultiBlock:
-
-    cells_points = []
-    for i in range(len(stages_X) - 1):
-        stage1_X = stages_X[i].copy()
-        stage2_X = stages_X[i + 1].copy()
-        spacing = (stage2_X - stage1_X) / n_spacing
-        cells_points.extend([stage1_X.copy() + j * spacing for j in range(n_spacing)])
-    cells_points.append(stages_X[-1])
-
-    cells_models = []
-    for points in cells_points:
-        model = pv.PolyData(points)
-        add_model_labels(
-            model=model,
-            key_added=key_added,
-            labels=np.asarray([label] * model.n_points),
-            where="point_data",
-            colormap=color,
-            inplace=True,
-        )
-        cells_models.append(model)
-
-    return collect_model(models=cells_models)

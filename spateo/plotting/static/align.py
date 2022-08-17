@@ -1,12 +1,16 @@
 import math
-from typing import List, Literal, Optional, Union
+from typing import List, Optional, Union
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import seaborn as sns
 from anndata import AnnData
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 from ...tools.cluster.utils import integrate, to_dense_matrix
 from ...tools.utils import compute_smallest_distance

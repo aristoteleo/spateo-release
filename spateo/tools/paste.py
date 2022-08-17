@@ -451,7 +451,7 @@ def generalized_procrustes_analysis(X, Y, pi):
 #######################################
 
 
-def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> dict:
+def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> Tuple[dict, dict]:
     """
     Optimal mapping coordinates between X and Y.
 
@@ -462,7 +462,7 @@ def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> dict
 
 
     Returns:
-        A dict of align_spatial_coords, map_spatial_coords, pi_index, pi_value.
+        Two dicts of mapping_X, mapping_Y, pi_index, pi_value.
             mapping_X is X coordinates aligned with Y coordinates.
             mapping_Y is the Y coordinate aligned with X coordinates.
             pi_index is index between optimal mapping points in the pi matrix.
@@ -474,19 +474,38 @@ def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> dict
     pi = pi.copy()
 
     # Obtain the optimal mapping between points
-    pi_index = np.argwhere(pi == pi.max(axis=0))
-    pi_X_ind = pi_index[:, 0]
-    pi_Y_ind = pi_index[:, 1]
-    ind = np.lexsort((pi_X_ind, pi_Y_ind))
-    pi_index_new = np.asarray([[pi_X_ind[i], pi_Y_ind[i]] for i in ind])
-    pi_value = pi[pi_index_new[:, 0], pi_index_new[:, 1]]
+    X_max_index = np.argwhere((pi.T == pi.T.max(axis=0)).T)
+    X_pi_value = pi[X_max_index[:, 0], X_max_index[:, 1]].reshape(-1, 1)
 
-    return {
-        "mapping_X": X[pi_index_new[:, 0]],
-        "mapping_Y": Y[pi_index_new[:, 1]],
-        "pi_index": pi_index_new,
-        "pi_value": pi_value.astype(np.float64).reshape(-1, 1),
-    }
+    Y_max_index = np.argwhere(pi == pi.max(axis=0))
+    Y_pi_value = pi[Y_max_index[:, 0], Y_max_index[:, 1]].reshape(-1, 1)
+
+    mappings = []
+    for max_index, pi_value, subset in zip(
+        [X_max_index, Y_max_index], [X_pi_value, Y_pi_value], ["index_x", "index_y"]
+    ):
+        mapping_data = pd.DataFrame(
+            np.concatenate([max_index, pi_value], axis=1),
+            columns=["index_x", "index_y", "pi_value"],
+        ).astype(
+            dtype={
+                "index_x": np.int32,
+                "index_y": np.int32,
+                "pi_value": np.float64,
+            }
+        )
+        mapping_data.sort_values(by=[subset, "pi_value"], ascending=[True, False], inplace=True)
+        mapping_data.drop_duplicates(subset=[subset], keep="first", inplace=True)
+        mappings.append(
+            {
+                "mapping_X": X[mapping_data["index_x"].values],
+                "mapping_Y": Y[mapping_data["index_y"].values],
+                "pi_index": mapping_data["pi_value"].values,
+                "pi_value": mapping_data[["index_x", "index_y"]].values,
+            }
+        )
+
+    return mappings[0], mappings[1]
 
 
 def mapping_center_coords(
@@ -509,9 +528,9 @@ def mapping_center_coords(
         pi_value_Y: The value of optimal mapping points related to Y.
 
     Returns:
-        A dict of align_spatial_coords, map_spatial_coords, pi_value.
-            align_spatial_coords is the Y coordinate aligned with X coordinates.
-            map_spatial_coords is X coordinates aligned with Y coordinates.
+        A dict of mapping_X, mapping_Y, pi_value.
+            mapping_X is the Y coordinate aligned with X coordinates.
+            mapping_Y is X coordinates aligned with Y coordinates.
             pi_value is the value of optimal mapping points.
     """
 
