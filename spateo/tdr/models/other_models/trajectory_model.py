@@ -58,6 +58,27 @@ def construct_trajectory(
     tip_color: str = "orangered",
     alpha: float = 1.0,
 ) -> PolyData:
+    """
+    Reconstruction of cell development trajectory model based on cell fate prediction.
+
+    Args:
+        adata: AnnData object that contains the fate prediction in the `.uns` attribute.
+        fate_key: The key under which are the active fate information.
+        n_sampling: n_sampleing is the number of coordinates to keep after sampling. If there are too many coordinates
+                    in start_points, the generated arrows model will be too complex   and unsightly, so sampling is
+                    used to reduce the number of coordinates.
+        sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
+        key_added: The key under which to add the labels.
+        label: The label of trajectory model.
+        tip_factor: Scale factor applied to scaling the tips.
+        tip_radius: Radius of the tips.
+        trajectory_color: Color to use for plotting trajectories.
+        tip_color: Color to use for plotting tips.
+        alpha: The opacity of the color to use for plotting model.
+
+    Returns:
+        trajectory_model: 3D cell development trajectory model.
+    """
 
     from dynamo.tools.sampling import sample
 
