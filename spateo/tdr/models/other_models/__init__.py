@@ -1,9 +1,4 @@
-from .arrow_model import (
-    _construct_arrow,
-    construct_arrow,
-    construct_arrows,
-    construct_vectorfield,
-)
+from .arrow_model import _construct_arrow, construct_arrow, construct_arrows
 from .line_model import (
     _construct_line,
     construct_align_lines,
@@ -13,3 +8,5 @@ from .line_model import (
     generate_edges,
 )
 from .trajectory_model import construct_cells_trajectory
+from .uniform_model import construct_bounding_box, construct_space
+from .vectorfield_model import construct_vector_arrows, construct_vector_streamlines

@@ -9,6 +9,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+from ....logging import logger_manager as lm
 from ..utilities import add_model_labels
 
 
@@ -55,9 +56,10 @@ def construct_arrow(
     start_point: Union[list, tuple, np.ndarray],
     direction: Union[list, tuple, np.ndarray],
     arrow_scale: Optional[Union[int, float]] = None,
-    key_added: str = "arrow",
+    key_added: Optional[str] = "arrow",
     label: str = "arrow",
     color: str = "gainsboro",
+    alpha: float = 1.0,
     **kwargs,
 ) -> PolyData:
     """
@@ -70,6 +72,7 @@ def construct_arrow(
         key_added: The key under which to add the labels.
         label: The label of arrow model.
         color: Color to use for plotting model.
+        alpha: The opacity of the color to use for plotting model.
         **kwargs: Additional parameters that will be passed to _construct_arrow function.
 
     Returns:
@@ -80,14 +83,16 @@ def construct_arrow(
         start_point=start_point, direction=direction, scale="auto" if arrow_scale is None else arrow_scale, **kwargs
     )
 
-    add_model_labels(
-        model=model,
-        key_added=key_added,
-        labels=np.asarray([label] * model.n_points),
-        where="point_data",
-        colormap=color,
-        inplace=True,
-    )
+    if not (key_added is None):
+        add_model_labels(
+            model=model,
+            key_added=key_added,
+            labels=np.asarray([label] * model.n_points),
+            where="point_data",
+            colormap=color,
+            alphamap=alpha,
+            inplace=True,
+        )
 
     return model
 
@@ -99,9 +104,10 @@ def construct_arrows(
     n_sampling: Optional[int] = None,
     sampling_method: str = "trn",
     factor: float = 1.0,
-    key_added: str = "arrow",
+    key_added: Optional[str] = "arrow",
     label: Union[str, list, np.ndarray] = "arrows",
     color: Union[str, list, dict, np.ndarray] = "gainsboro",
+    alpha: Union[float, int, list, dict, np.ndarray] = 1.0,
     **kwargs,
 ) -> PolyData:
     """
@@ -119,16 +125,18 @@ def construct_arrows(
         key_added: The key under which to add the labels.
         label: The label of arrows model.
         color: Color to use for plotting model.
+        alpha: The opacity of the color to use for plotting model.
         **kwargs: Additional parameters that will be passed to _construct_arrow function.
 
     Returns:
         Arrows model.
     """
-    import dynamo as dyn
+
+    from dynamo.tools.sampling import sample
 
     if not (n_sampling is None):
         index_arr = np.arange(0, start_points.shape[0])
-        sampling_arr = dyn.tl.sample(
+        sampling_arr = sample(
             arr=index_arr,
             n=n_sampling,
             method=sampling_method,
@@ -137,6 +145,12 @@ def construct_arrows(
         start_points = start_points[sampling_arr, :]
         direction = direction[sampling_arr, :]
         arrows_scale = None if arrows_scale is None else arrows_scale[sampling_arr, :]
+    else:
+        if len(start_points) > 500:
+            lm.main_warning(
+                f"The number of start_points is more than 500. You may want to "
+                f"lower the max number of arrows to draw."
+            )
 
     model = pv.PolyData(start_points)
     model.point_data["direction"] = direction
@@ -147,52 +161,15 @@ def construct_arrows(
     labels = np.asarray([label] * glyph.n_points) if isinstance(label, str) else label
     assert len(labels) == glyph.n_points, "The number of labels is not equal to the number of edges."
 
-    add_model_labels(
-        model=glyph,
-        key_added=key_added,
-        labels=np.asarray([label] * glyph.n_points),
-        where="point_data",
-        colormap=color,
-        inplace=True,
-    )
+    if not (key_added is None):
+        add_model_labels(
+            model=glyph,
+            key_added=key_added,
+            labels=np.asarray([label] * glyph.n_points),
+            where="point_data",
+            colormap=color,
+            alphamap=alpha,
+            inplace=True,
+        )
 
     return glyph
-
-
-def construct_vectorfield(
-    model: PolyData,
-    vector_key: str,
-    arrows_scale_key: Optional[str] = None,
-    factor: float = 1.0,
-    key_added: str = "vector",
-    label: Union[str, list, np.ndarray] = "vector",
-    color: Union[str, list, dict, np.ndarray] = "gainsboro",
-    **kwargs,
-) -> PolyData:
-    """
-    Create 3D vector field model.
-
-    Args:
-        model: A model that provides coordinate information and vector information for constructing vector field models.
-        vector_key: The key under which are the vector information.
-        arrows_scale_key: The key under which are scale factor of the entire object.
-        factor: Scale factor applied to scaling array.
-        key_added: The key under which to add the labels.
-        label: The label of arrows model.
-        color: Color to use for plotting model.
-        **kwargs: Additional parameters that will be passed to construct_arrows function.
-
-    Returns:
-        3D vector field model.
-    """
-
-    return construct_arrows(
-        start_points=np.asarray(model.points),
-        direction=np.asarray(model[vector_key]),
-        arrows_scale=None if arrows_scale_key is None else np.asarray(model[arrows_scale_key]),
-        factor=factor,
-        key_added=key_added,
-        label=label,
-        color=color,
-        **kwargs,
-    )

@@ -48,6 +48,7 @@ def _develop_vectorfield(
             iteration: Number of the last iteration.
             tecr_vec: Vector of relative energy changes rate comparing to previous step.
             E_traj: Vector of energy at each iteration.
+            method: The method of learning vector field. Here method == 'sparsevfc'.
         Here the most important results are X, V, grid and grid_V.
             X: Cell coordinates of the current state.
             V: Prediction of development direction of the X.
@@ -61,6 +62,7 @@ def _develop_vectorfield(
 
     predict_X = Grid if NX is None else NX
     res = SparseVFC(stage1_X, stage2_X, predict_X, lambda_=lambda_, lstsq_method=lstsq_method, **kwargs)
+    res["method"] = "sparsevfc"
     return res
 
 
@@ -90,7 +92,7 @@ def develop_vectorfield(
         **kwargs: Additional parameters that will be passed to SparseVFC function.
 
     Returns:
-        An `annData` object is updated/copied with the `key_added` dictionary in the `uns` attribute.
+        An `AnnData` object is updated/copied with the `key_added` dictionary in the `.uns` attribute.
         The `key_added` dictionary which contains:
             X: Current state.
             valid_ind: The indices of cells that have finite velocity values.
@@ -108,6 +110,7 @@ def develop_vectorfield(
             iteration: Number of the last iteration.
             tecr_vec: Vector of relative energy changes rate comparing to previous step.
             E_traj: Vector of energy at each iteration.
+            method: The method of learning vector field. Here method == 'sparsevfc'.
         Here the most important results are X, V, grid and grid_V.
             X: Cell coordinates of the current state.
             V: Prediction of development direction of the X.
@@ -142,32 +145,64 @@ def develop_trajectory(
     direction: str = "forward",
     interpolation_num: int = 250,
     average: bool = False,
-    inverse_transform: bool = False,
-    inplace: bool = True,
     cores: int = 1,
+    inplace: bool = True,
     **kwargs,
-):
-    """ """
-    import dynamo as dyn
+) -> Optional[AnnData]:
+    """
+    Prediction of cell development trajectory based on reconstructed vector field.
+
+    Args:
+        adata: AnnData object that contains the reconstructed vector field function in the `.uns` attribute.
+        vf_key: The key in `.uns` that corresponds to the reconstructed vector field.
+        key_added: The key (`fate_{key_added}`) under which to add the dictionary Fate (includes `t` and `prediction` keys).
+        layer: Which layer of the data will be used for predicting cell fate with the reconstructed vector field function.
+        direction: The direction to predict the cell fate. One of the `forward`, `backward` or `both` string.
+        interpolation_num:  The number of uniformly interpolated time points.
+        average: The method to calculate the average cell state at each time step, can be one of `origin` or
+                 `trajectory`. If `origin` used, the average expression state from the init_cells will be calculated and
+                 the fate prediction is based on this state. If `trajectory` used, the average expression states of all
+                 cells predicted from the vector field function at each time point will be used. If `average` is
+                 `False`, no averaging will be applied.
+        cores: Number of cores to calculate path integral for predicting cell fate. If cores is set to be > 1,
+               multiprocessing will be used to parallel the fate prediction.
+        inplace: Whether to copy `adata` or modify it inplace.
+        **kwargs: Additional parameters that will be passed into the fate function.
+
+    Returns:
+        An `AnnData` object is updated/copied with the `fate_{key_added}` dictionary in the `.uns` attribute.
+        The  `fate_{key_added}`  dictionary which contains:
+            t: The time at which the cell state are predicted.
+            prediction: Predicted cells states at different time points. Row order corresponds to the element order in
+                        t. If init_states corresponds to multiple cells, the expression dynamics over time for each cell
+                        is concatenated by rows. That is, the final dimension of prediction is (len(t) * n_cells,
+                        n_features). n_cells: number of cells; n_features: number of genes or number of low dimensional
+                        embeddings. Of note, if the average is set to be True, the average cell state at each time point
+                        is calculated for all cells.
+    """
+    from dynamo.prediction.fate import fate
 
     adata = adata if inplace else adata.copy()
+    if vf_key not in adata.uns_keys():
+        raise Exception(
+            f"You need to first perform sparseVFC before fate prediction, please run"
+            f"st.tdr.develop_vectorfield(adata, key_added='{vf_key}' before running this function."
+        )
+    if f"VecFld_{key_added}" not in adata.uns_keys():
+        adata.uns[f"VecFld_{key_added}"] = adata.uns[vf_key]
+    if f"X_{key_added}" not in adata.obsm_keys():
+        adata.obsm[f"X_{key_added}"] = adata.uns[f"VecFld_{key_added}"]["X"]
 
-    tmp_adata = adata.copy()
-    tmp_adata.uns[f"VecFld_{key_added}"] = tmp_adata.uns[vf_key]
-    tmp_adata.obsm[f"X_{key_added}"] = tmp_adata.uns[f"VecFld_{key_added}"]["X"]
-
-    dyn.pd.fate(
-        tmp_adata,
-        init_cells=tmp_adata.obs_names.tolist(),
+    fate(
+        adata,
+        init_cells=adata.obs_names.tolist(),
         basis=key_added,
         layer=layer,
         interpolation_num=interpolation_num,
         direction=direction,
-        inverse_transform=inverse_transform,
         average=average,
         cores=cores,
         **kwargs,
     )
 
-    adata.uns[f"fate_{key_added}"] = tmp_adata.uns[f"fate_{key_added}"]
     return None if inplace else adata

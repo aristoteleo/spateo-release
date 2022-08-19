@@ -15,10 +15,13 @@ from .other_models import (
     construct_arrow,
     construct_arrows,
     construct_axis_line,
+    construct_bounding_box,
     construct_cells_trajectory,
     construct_line,
     construct_lines,
-    construct_vectorfield,
+    construct_space,
+    construct_vector_arrows,
+    construct_vector_streamlines,
 )
 from .pc import construct_pc
 from .utilities import (
