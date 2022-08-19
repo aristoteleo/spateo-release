@@ -80,8 +80,8 @@ def construct_trajectory(
     else:
         if n_cells > 200:
             lm.main_warning(
-             f"The number of cells with fate prediction is more than 200. You may want to "
-             f"lower the max number of cell trajectories to draw."
+                f"The number of cells with fate prediction is more than 200. You may want to "
+                f"lower the max number of cell trajectories to draw."
             )
 
     cells_states = adata.uns[fate_key]["prediction"]
@@ -91,7 +91,13 @@ def construct_trajectory(
     for ind in index_arr:
         trajectory_points = np.concatenate([init_states[[ind]], cells_states[ind].T], axis=0)
         n_states = len(trajectory_points)
-        trajectory_edges = np.concatenate([np.arange(se_ind, se_ind + n_states - 1).reshape(-1, 1), np.arange(se_ind+1, se_ind + n_states).reshape(-1, 1)], axis=1)
+        trajectory_edges = np.concatenate(
+            [
+                np.arange(se_ind, se_ind + n_states - 1).reshape(-1, 1),
+                np.arange(se_ind + 1, se_ind + n_states).reshape(-1, 1),
+            ],
+            axis=1,
+        )
         se_ind += n_states
 
         trajectories_points.append(trajectory_points)
@@ -100,13 +106,13 @@ def construct_trajectory(
         tips_vectors.append(trajectory_points[-1] - trajectory_points[-2])
 
     streamlines = construct_lines(
-            points=np.concatenate(trajectories_points, axis=0),
-            edges=np.concatenate(trajectories_edges, axis=0),
-            key_added=key_added,
-            label=label,
-            color=trajectory_color,
-            alpha=alpha
-        )
+        points=np.concatenate(trajectories_points, axis=0),
+        edges=np.concatenate(trajectories_edges, axis=0),
+        key_added=key_added,
+        label=label,
+        color=trajectory_color,
+        alpha=alpha,
+    )
 
     arrows = construct_arrows(
         start_points=np.asarray(tips_points),
