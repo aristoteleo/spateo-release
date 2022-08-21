@@ -49,37 +49,49 @@ def wrap_to_plotter(
         model: A reconstructed model.
         key: The key under which are the labels.
         background: The background color of the window.
-        cpo: Camera position of the active render window. Available ``cpo`` are
+        cpo: Camera position of the active render window. Available ``cpo`` are:
+
                 * Iterable containing position, focal_point, and view up.
-                    E.g.: `[(2.0, 5.0, 13.0), (0.0, 0.0, 0.0), (-0.7, -0.5, 0.3)]`.
+                    ``E.g.: [(2.0, 5.0, 13.0), (0.0, 0.0, 0.0), (-0.7, -0.5, 0.3)].``
                 * Iterable containing a view vector.
-                    E.g.: `[-1.0, 2.0, -5.0]`.
+                    ``E.g.: [-1.0, 2.0, -5.0].``
                 * A string containing the plane orthogonal to the view direction.
-                    E.g.: `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`.
+                    ``E.g.: 'xy', 'xz', 'yz', 'yx', 'zx', 'zy', 'iso'.``
         ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
                  the actor when not directed at the light source emitted from the viewer.
-        opacity: Opacity of the model. If a single float value is given, it will be the global opacity of the model and
-                 uniformly applied everywhere - should be between 0 and 1.
+        opacity: Opacity of the model.
+
+                 If a single float value is given, it will be the global opacity of the model and uniformly applied
+                 everywhere - should be between 0 and 1.
+
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
-        model_style: Visualization style of the model. One of the following: style='surface', style='wireframe', style='points'.
-        model_size: If model_style=`points`, point size of any nodes in the dataset plotted.
-                    If model_style=`wireframe`, thickness of lines.
+        model_style: Visualization style of the model. One of the following:
+
+                     * model_style = ``'surface'``,
+                     * model_style = ``'wireframe'``,
+                     * model_style = ``'points'``.
+        model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
+
+                    If ``model_style = 'wireframe'``, thickness of lines.
         show_legend: whether to add a legend to the plotter.
-        legend_kwargs: A dictionary that will be pass to the `add_legend` function.
+        legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
+
                        By default, it is an empty dictionary and the `add_legend` function will use the
-                       {"legend_size": None, "legend_loc": "lower right"} as its parameters. Otherwise,
+                      ``{"legend_size": None, "legend_loc": "lower right"}`` as its parameters. Otherwise,
                        you can provide a dictionary that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
-        outline_kwargs: A dictionary that will be pass to the `add_outline` function.
+        outline_kwargs: A dictionary that will be pass to the ``add_outline`` function.
+
                         By default, it is an empty dictionary and the `add_legend` function will use the
-                        {"outline_width": 5.0, "outline_color": "black", "show_labels": True, "labels_size": 16,
-                        "labels_color": "white", "labels_font": "times"} as its parameters. Otherwise,
+                        ``{"outline_width": 5.0, "outline_color": "black", "show_labels": True, "labels_size": 16,
+                        "labels_color": "white", "labels_font": "times"}`` as its parameters. Otherwise,
                         you can provide a dictionary that properly modify those keys according to your needs.
         text: The text to add the rendering.
-        text_kwargs: A dictionary that will be pass to the `add_text` function.
-                     By default, it is an empty dictionary and the `add_legend` function will use the
-                     {"text_font": "times", "text_size": 18, "text_color": "black", "text_loc": "upper_left"}
+        text_kwargs: A dictionary that will be pass to the ``add_text`` function.
+
+                     By default, it is an empty dictionary and the ``add_legend`` function will use the
+                     ``{"text_font": "times", "text_size": 18, "text_color": "black", "text_loc": "upper_left"}``
                      as its parameters. Otherwise, you can provide a dictionary that properly modify those keys
                      according to your needs.
     """
