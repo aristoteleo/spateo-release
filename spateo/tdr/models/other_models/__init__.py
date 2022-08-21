@@ -7,6 +7,11 @@ from .line_model import (
     construct_lines,
     generate_edges,
 )
-from .trajectory_model import construct_cells_trajectory
+from .trajectory_model import (
+    construct_cells_development,
+    construct_cells_development_X,
+    construct_trajectory,
+    construct_trajectory_X,
+)
 from .uniform_model import construct_bounding_box, construct_space
 from .vectorfield_model import construct_vector_arrows, construct_vector_streamlines

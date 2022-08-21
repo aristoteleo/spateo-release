@@ -33,13 +33,13 @@ def construct_vector_arrows(
         model: A model that provides coordinate information and vector information for constructing vector field models.
         vf_key: The key under which are the vector information.
         arrows_scale_key: The key under which are scale factor of the entire object.
-        n_sampling: n_sampleing is the number of coordinates to keep after sampling. If there are too many coordinates
-                    in start_points, the generated arrows model will be too complex   and unsightly, so sampling is
+        n_sampling: n_sampling is the number of coordinates to keep after sampling. If there are too many coordinates
+                    in start_points, the generated arrows model will be too complex and unsightly, so sampling is
                     used to reduce the number of coordinates.
         sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
         factor: Scale factor applied to scaling array.
         key_added: The key under which to add the labels.
-        label: The label of arrows model.
+        label: The label of arrows models.
         color: Color to use for plotting model.
         alpha: The opacity of the color to use for plotting model.
         **kwargs: Additional parameters that will be passed to construct_arrows function.
@@ -88,7 +88,7 @@ def construct_vector_streamlines(
         tip_factor: Scale factor applied to scaling the tips.
         tip_radius: Radius of the tips.
         key_added: The key under which to add the labels.
-        label: The label of arrows model.
+        label: The label of arrows models.
         stream_color: Color to use for plotting streamlines.
         tip_color: Color to use for plotting tips.
         alpha: The opacity of the color to use for plotting model.

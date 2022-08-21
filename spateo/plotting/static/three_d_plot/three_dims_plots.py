@@ -462,6 +462,8 @@ def three_d_multi_plot(
 
 def three_d_animate(
     models: Union[List[PolyData or UnstructuredGrid], MultiBlock],
+    stable_model: Optional[Union[PolyData, UnstructuredGrid, MultiBlock]] = None,
+    stable_kwargs: Optional[dict] = None,
     key: Optional[str] = None,
     filename: str = "animate.mp4",
     jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
@@ -487,6 +489,20 @@ def three_d_animate(
 
     Args:
         models: A List of reconstructed models or a MultiBlock.
+        stable_model: The model that do not change with time in animation.
+        stable_kwargs: Parameters for plotting stable model. Available `stable_kwargs` are:
+                * `'key'`
+                * `'ambient'`
+                * `'opacity'`
+                * `'model_style'`
+                * `'model_size'`
+                * `'background'`
+                * `'show_legend'`
+                * `'legend_kwargs'`
+                * `'show_outline'`
+                * `'outline_kwargs'`
+                * `'text'`
+                * `'text_kwargs'`
         key: The key under which are the labels.
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
                 * Output a gif file, please enter a filename ending with `.gif`.
@@ -560,7 +576,9 @@ def three_d_animate(
         text=text,
         text_kwargs=text_kwargs,
     )
-
+    stable_kwargs = model_kwargs if stable_kwargs is None else stable_kwargs
+    if "key" not in stable_kwargs.keys():
+        stable_kwargs["key"] = key
     # Set jupyter.
     off_screen1, off_screen2, jupyter_backend = _set_jupyter(jupyter=jupyter, off_screen=off_screen)
 
@@ -571,12 +589,14 @@ def three_d_animate(
     # Create a plotting object to display the end model of blocks.
     end_block = blocks[blocks_name[-1]].copy()
     p = create_plotter(off_screen=off_screen1, **plotter_kws)
+    wrap_to_plotter(plotter=p, model=stable_model, cpo=cpo, **stable_kwargs)
     wrap_to_plotter(plotter=p, model=end_block, key=key, cpo=cpo, **model_kwargs)
     cpo = p.show(return_cpos=True, jupyter_backend="none", cpos=cpo)
 
     # Create another plotting object to save pyvista/vtk model.
     start_block = blocks[blocks_name[0]].copy()
     p = create_plotter(off_screen=off_screen2, **plotter_kws)
+    wrap_to_plotter(plotter=p, model=stable_model, cpo=cpo, **stable_kwargs)
     wrap_to_plotter(plotter=p, model=start_block, key=key, cpo=cpo, **model_kwargs)
 
     filename_format = filename.split(".")[-1]

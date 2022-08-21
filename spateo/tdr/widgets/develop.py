@@ -144,6 +144,7 @@ def develop_trajectory(
     layer: str = "X",
     direction: str = "forward",
     interpolation_num: int = 250,
+    t_end: Optional[Union[int, float]] = None,
     average: bool = False,
     cores: int = 1,
     inplace: bool = True,
@@ -159,6 +160,7 @@ def develop_trajectory(
         layer: Which layer of the data will be used for predicting cell fate with the reconstructed vector field function.
         direction: The direction to predict the cell fate. One of the `forward`, `backward` or `both` string.
         interpolation_num:  The number of uniformly interpolated time points.
+        t_end: The length of the time period from which to predict cell state forward or backward over time.
         average: The method to calculate the average cell state at each time step, can be one of `origin` or
                  `trajectory`. If `origin` used, the average expression state from the init_cells will be calculated and
                  the fate prediction is based on this state. If `trajectory` used, the average expression states of all
@@ -199,10 +201,16 @@ def develop_trajectory(
         basis=key_added,
         layer=layer,
         interpolation_num=interpolation_num,
+        t_end=t_end,
         direction=direction,
         average=average,
         cores=cores,
         **kwargs,
     )
+
+    cells_states = adata.uns[f"fate_{key_added}"]["prediction"]
+    cells_times = adata.uns[f"fate_{key_added}"]["t"]
+    adata.uns[f"fate_{key_added}"]["prediction"] = {i: cell_states.T for i, cell_states in enumerate(cells_states)}
+    adata.uns[f"fate_{key_added}"]["t"] = {i: cell_times for i, cell_times in enumerate(cells_times)}
 
     return None if inplace else adata
