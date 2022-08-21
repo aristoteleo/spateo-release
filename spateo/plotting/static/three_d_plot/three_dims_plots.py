@@ -49,13 +49,13 @@ def wrap_to_plotter(
         model: A reconstructed model.
         key: The key under which are the labels.
         background: The background color of the window.
-        cpo: Camera position of the active render window. Available `cpo` are:
-                * Iterable containing position, focal_point, and view up. E.g.:
-                    `[(2.0, 5.0, 13.0), (0.0, 0.0, 0.0), (-0.7, -0.5, 0.3)]`
-                * Iterable containing a view vector. E.g.:
-                   ` [-1.0, 2.0, -5.0]`
-                * A string containing the plane orthogonal to the view direction. E.g.:
-                    `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
+        cpo: Camera position of the active render window. Available ``cpo`` are
+                * Iterable containing position, focal_point, and view up.
+                    E.g.: `[(2.0, 5.0, 13.0), (0.0, 0.0, 0.0), (-0.7, -0.5, 0.3)]`.
+                * Iterable containing a view vector.
+                    E.g.: `[-1.0, 2.0, -5.0]`.
+                * A string containing the plane orthogonal to the view direction.
+                    E.g.: `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`.
         ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
                  the actor when not directed at the light source emitted from the viewer.
         opacity: Opacity of the model. If a single float value is given, it will be the global opacity of the model and
@@ -520,7 +520,7 @@ def three_d_animate(
                 * Iterable containing position, focal_point, and view up. E.g.:
                     `[(2.0, 5.0, 13.0), (0.0, 0.0, 0.0), (-0.7, -0.5, 0.3)]`
                 * Iterable containing a view vector. E.g.:
-                   ` [-1.0, 2.0, -5.0]`
+                   `[-1.0, 2.0, -5.0]`
                 * A string containing the plane orthogonal to the view direction. E.g.:
                     `'xy'`, `'xz'`, `'yz'`, `'yx'`, `'zx'`, `'zy'`, `'iso'`
         ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
