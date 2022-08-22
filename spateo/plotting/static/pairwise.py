@@ -1,3 +1,5 @@
+"""NOTES: code still needs touched up- but putting a pull request through to start putting code into the main repo.
+- DZ"""
 """Plots for pairwise comparison analyses between groups of samples"""
 from spateo.utils import Label, interlabel_connections
 

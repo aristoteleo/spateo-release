@@ -43,7 +43,7 @@ def copy_adata(adata: AnnData) -> AnnData:
 # Normalizing sparse arrays:
 def row_normalize(graph: sp.csr_matrix,
                   copy: bool = False,
-                  verbose: bool = True):
+                  verbose: bool = True) -> sp.csr_matrix:
     """
     Normalize a compressed sparse row (CSR) matrix by row- written for sparse pairwise distance arrays, but can be
     applied to any sparse matrix.
@@ -60,7 +60,13 @@ def row_normalize(graph: sp.csr_matrix,
         graph : scipy sparse matrix
             Input array (or the copy of the input array) post-normalization
     """
+    logger = lm.get_main_logger()
+
     if copy:
+        logger.info(
+            "Deep copying AnnData object and working on the new copy. Original AnnData object will not be modified.",
+            indent_level=1,
+        )
         graph = graph.copy()
 
     data = graph.data
@@ -72,7 +78,10 @@ def row_normalize(graph: sp.csr_matrix,
         if row_sum != 0:
             data[start_ptr:end_ptr] /= row_sum
 
+
         if verbose:
+            logger.info(f"Computed normalized sum from ptr {start_ptr} to {end_ptr}. "
+                        f"Total entries: {end_ptr - start_ptr}, sum: {np.sum(graph.data[start_ptr:end_ptr])}")
             print(f"normalized sum from ptr {start_ptr} to {end_ptr} "
                   f"({end_ptr - start_ptr} entries)",
                   np.sum(graph.data[start_ptr:end_ptr]))
