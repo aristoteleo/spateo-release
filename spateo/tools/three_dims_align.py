@@ -104,17 +104,18 @@ def models_align(
 
     Args:
         models: List of models (AnnData Object).
-        layer: If `'X'`, uses `.X` to calculate dissimilarity between spots, otherwise uses the representation given by `.layers[layer]`.
-        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
-        key_added: `.obsm` key under which to add the aligned spatial coordinate.
+        layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        spatial_key: The key in ``.obsm`` that corresponds to the raw spatial coordinate.
+        key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         mapping_key_added: `.uns` key under which to add the alignment info.
-        alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
-                When α = 0 only the gene expression data is taken into account,
-                while when α =1 only the spatial coordinates are taken into account.
+        alpha: Alignment tuning parameter. Note: 0 <= alpha <= 1.
+
+               When ``alpha = 0`` only the gene expression data is taken into account,
+               while when ``alpha =1`` only the spatial coordinates are taken into account.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
-        dtype: The floating-point number type. Only float32 and float64.
-        device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
+        dtype: The floating-point number type. Only ``float32`` and ``float64``.
+        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``
         **kwargs: Additional parameters that will be passed to pairwise_align function.
 
     Returns:
@@ -189,19 +190,20 @@ def models_align_ref(
     Args:
         models: List of models (AnnData Object).
         models_ref: Another list of models (AnnData Object).
-        n_sampling: When `models_ref` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
-        sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
-        layer: If `'X'`, uses `.X` to calculate dissimilarity between spots, otherwise uses the representation given by `.layers[layer]`.
-        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
-        key_added: `.obsm` key under which to add the aligned spatial coordinate.
+        n_sampling: When ``models_ref`` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
+        sampling_method: The method to sample data points, can be one of ``["trn", "kmeans", "random"]``.
+        layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        spatial_key: The key in ``.obsm`` that corresponds to the raw spatial coordinate.
+        key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         mapping_key_added: `.uns` key under which to add the alignment info.
-        alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
-                When α = 0 only the gene expression data is taken into account,
-                while when α =1 only the spatial coordinates are taken into account.
+        alpha: Alignment tuning parameter. Note: 0 <= alpha <= 1.
+
+               When ``alpha = 0`` only the gene expression data is taken into account,
+               while when ``alpha =1`` only the spatial coordinates are taken into account.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
-        dtype: The floating-point number type. Only float32 and float64.
-        device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
+        dtype: The floating-point number type. Only ``float32`` and ``float64``.
+        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``
         **kwargs: Additional parameters that will be passed to pairwise_align function.
 
     Returns:
@@ -280,26 +282,31 @@ def models_center_align(
     Args:
         init_center_model: AnnData object to use as the initialization for center alignment; Make sure to include gene expression and spatial information.
         models: List of AnnData objects to use in the center alignment.
-        layer: If `'X'`, uses `.X` to calculate dissimilarity between spots, otherwise uses the representation given by `.layers[layer]`.
-        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
-        key_added: `.obsm` key under which to add the aligned spatial coordinate.
+        layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        spatial_key: The key in ``.obsm`` that corresponds to the raw spatial coordinate.
+        key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         mapping_key_added: `.uns` key under which to add the alignment info.
         lmbda: List of probability weights assigned to each slice; If `None`, use uniform weights.
-        alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
-                When α = 0 only the gene expression data is taken into account,
-                while when α =1 only the spatial coordinates are taken into account.
+        alpha: Alignment tuning parameter. Note: 0 <= alpha <= 1.
+
+               When ``alpha = 0`` only the gene expression data is taken into account,
+               while when ``alpha =1`` only the spatial coordinates are taken into account.
         n_components: Number of components in NMF decomposition.
         threshold: Threshold for convergence of W and H during NMF decomposition.
         max_iter: Maximum number of iterations for our center alignment algorithm.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
-        dissimilarity: Expression dissimilarity measure: `'kl'` or `'euclidean'`.
-        norm: If `True`, scales spatial distances such that neighboring spots are at distance 1. Otherwise, spatial distances remain unchanged.
+        dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
+        norm: If ``norm = True``, scales spatial distances such that neighboring spots are at distance 1.
+
+              Otherwise, spatial distances remain unchanged.
         random_seed: Set random seed for reproducibility.
-        pis_init: Initial list of mappings between 'A' and 'models' to solver. Otherwise, default will automatically calculate mappings.
+        pis_init: Initial list of mappings between ``A`` and ``models`` to solver.
+
+                  Otherwise, default will automatically calculate mappings.
         distributions: Distributions of spots for each slice. Otherwise, default is uniform.
-        dtype: The floating-point number type. Only float32 and float64.
-        device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
+        dtype: The floating-point number type. Only ``float32`` and ``float64``.
+        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``
 
     Returns:
         new_center_model: The center model.
@@ -399,31 +406,36 @@ def models_center_align_ref(
     Align the spatial coordinates of one model list to the central model through the affine transformation matrix obtained from another model list.
 
     Args:
-        init_center_model: Anndata object to use as the initialization for center alignment; Make sure to include gene expression and spatial information.
-        models: List of Anndata objects to use in the center alignment.
+        init_center_model: AnnData object to use as the initialization for center alignment; Make sure to include gene expression and spatial information.
+        models: List of AnnData objects to use in the center alignment.
         models_ref: List of AnnData objects with a small number of coordinates.
         n_sampling: When `models_ref` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
         sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
-        layer: If `'X'`, uses `.X` to calculate dissimilarity between spots, otherwise uses the representation given by `.layers[layer]`.
-        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinate.
-        key_added: `.obsm` key under which to add the aligned spatial coordinate.
+        layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        spatial_key: The key in ``.obsm`` that corresponds to the raw spatial coordinate.
+        key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         mapping_key_added: `.uns` key under which to add the alignment info.
         lmbda: List of probability weights assigned to each slice; If `None`, use uniform weights.
-        alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
-                When α = 0 only the gene expression data is taken into account,
-                while when α =1 only the spatial coordinates are taken into account.
+        alpha: Alignment tuning parameter. Note: 0 <= alpha <= 1.
+
+               When ``alpha = 0`` only the gene expression data is taken into account,
+               while when ``alpha =1`` only the spatial coordinates are taken into account.
         n_components: Number of components in NMF decomposition.
         threshold: Threshold for convergence of W and H during NMF decomposition.
         max_iter: Maximum number of iterations for our center alignment algorithm.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
-        dissimilarity: Expression dissimilarity measure: `'kl'` or `'euclidean'`.
-        norm: If `True`, scales spatial distances such that neighboring spots are at distance 1. Otherwise, spatial distances remain unchanged.
+        dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
+        norm: If ``norm = True``, scales spatial distances such that neighboring spots are at distance 1.
+
+              Otherwise, spatial distances remain unchanged.
         random_seed: Set random seed for reproducibility.
-        pis_init: Initial list of mappings between 'A' and 'models' to solver. Otherwise, default will automatically calculate mappings.
+        pis_init: Initial list of mappings between ``A`` and ``models`` to solver.
+
+                  Otherwise, default will automatically calculate mappings.
         distributions: Distributions of spots for each slice. Otherwise, default is uniform.
-        dtype: The floating-point number type. Only float32 and float64.
-        device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
+        dtype: The floating-point number type. Only ``float32`` and ``float64``.
+        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``
 
     Returns:
         new_center_model: The center model.
