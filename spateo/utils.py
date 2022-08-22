@@ -79,9 +79,9 @@ def row_normalize(graph: sp.csr_matrix,
             data[start_ptr:end_ptr] /= row_sum
 
 
+        logger.info(f"Computed normalized sum from ptr {start_ptr} to {end_ptr}. "
+                    f"Total entries: {end_ptr - start_ptr}, sum: {np.sum(graph.data[start_ptr:end_ptr])}")
         if verbose:
-            logger.info(f"Computed normalized sum from ptr {start_ptr} to {end_ptr}. "
-                        f"Total entries: {end_ptr - start_ptr}, sum: {np.sum(graph.data[start_ptr:end_ptr])}")
             print(f"normalized sum from ptr {start_ptr} to {end_ptr} "
                   f"({end_ptr - start_ptr} entries)",
                   np.sum(graph.data[start_ptr:end_ptr]))
@@ -186,12 +186,17 @@ class Label(object):
         Convert an array of labels to a num_labels x num_samples sparse one-hot matrix
         Labels MUST be integers starting from 0, but can have gaps in between e.g. [0,1,5,9]
         """
-
+        logger = lm.get_main_logger()
         # Initialize the fields of the sparse matrix
         indptr = np.zeros((self.num_labels + 1,), dtype=np.int32)
         indices = np.zeros((self.num_samples,), dtype=np.int32)
         data = np.ones_like(indices, dtype=np.int32)
 
+
+        logger.info(f"Info about dataset: {self.num_samples} samples and {self.num_labels} labels in data of shape "
+                    f"{data.shape}\n"
+                    f"Index pointer of shape {indptr.shape}\n"
+                    f"Indices of shape {indices.shape}\n")
         if verbose:
             print(f"\n--- {self.num_labels} labels, "
                   f"{self.num_samples} samples ---\n"
@@ -209,6 +214,9 @@ class Label(object):
             current_ptr = previous_ptr + label_count
             indptr[n + 1] = current_ptr
 
+
+            logger.info(f"Finished updating indices for label {label}...previous pointer {previous_ptr}, "
+                        f"current pointer: {current_ptr}")
             if verbose:
                 print(f"indices for label {label}: {label_indices}\n"
                       f"previous pointer: {previous_ptr}, "
@@ -277,6 +285,9 @@ def expand_labels(label: Label,
         exp_labels : class: `~Label`
             Instance of class 'Label' following expansion
     """
+    logger = lm.get_main_logger()
+
+    logger.info(f"Expanding labels with ids: {label.ids} so that ids range from 0 to {max_label_id}")
     if verbose:
         print(f"Expanding labels with ids: {label.ids} so that ids range from 0 to {max_label_id}\n")
 
@@ -336,9 +347,13 @@ def match_labels(labels_1: Label,
             Instance of class 'Label' for the second set of labels, following expansion and matching to the first set
             of labels
     """
+    logger = lm.get_main_logger()
+
     max_id = max(labels_1.max_id, labels_2.max_id)
     num_extra_labels = labels_2.num_labels - labels_1.num_labels
 
+    logger.info(f"Matching {labels_2.num_labels} labels from dataset 2 against {labels_1.num_labels} labels from "
+                f"dataset 1.")
     if verbose:
         print(f"Matching {labels_2.num_labels} labels against {labels_1.num_labels} labels.\n"
               f"highest label ID in both is {max_id}.\n")
@@ -360,6 +375,8 @@ def match_labels(labels_1: Label,
     for index_1, index_2 in zip(labels_match_1, labels_match_2):
         label_1 = labels_1.ids[index_1]
         label_2 = labels_2.ids[index_2]
+        logger.info(f"Assigning {label_1} from dataset 1 against {label_2} from dataset 2. {available_labels} left to "
+                    f"assign.")
         if verbose:
             print(f"Assigning first set's {label_1} to "
                   f"second set's {label_2}.\n"
@@ -455,6 +472,8 @@ def match_label_series(label_list: List[Label],
         max_num_labels : int
             The number of unique labels for the object in the input list that had the most labels
     """
+    logger = lm.get_main_logger()
+
     num_label_list = [label.num_labels for label in label_list]
     max_num_labels = max(num_label_list)
     sort_indices = np.argsort(num_label_list)
@@ -465,6 +484,7 @@ def match_label_series(label_list: List[Label],
     ordered_relabels = []
 
     if least_labels_first:
+        logger.info(f"Expanding each set of labels to match dataset w/ maximum number of labels.")
         ordered_relabels.append(expand_labels(label_list[sort_indices[0]], max_num_labels - 1))
         if verbose:
             print(f"First label, expanded label ids: "
@@ -475,6 +495,7 @@ def match_label_series(label_list: List[Label],
         # Already has max number of labels, no need to expand
         ordered_relabels.append(label_list[sort_indices[0]])
 
+    logger.info(f"Starting from dataset with fewest labels, matching to dataset with next fewest labels and so on.")
     for index in sort_indices[1:]:
         current_label = label_list[index]
         previous_label = ordered_relabels[-1]
