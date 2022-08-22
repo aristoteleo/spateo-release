@@ -156,20 +156,18 @@ def construct_arrows(
     model.point_data["direction"] = direction
     model.point_data["scale"] = np.linalg.norm(direction.copy(), axis=1) if arrows_scale is None else arrows_scale
 
-    glyph = model.glyph(orient="direction", geom=_construct_arrow(**kwargs), scale="scale", factor=factor)
-
-    labels = np.asarray([label] * glyph.n_points) if isinstance(label, str) else label
-    assert len(labels) == glyph.n_points, "The number of labels is not equal to the number of edges."
-
+    labels = np.asarray([label] * model.n_points) if isinstance(label, str) else label
+    assert len(labels) == model.n_points, "The number of labels is not equal to the number of start points."
     if not (key_added is None):
         add_model_labels(
-            model=glyph,
+            model=model,
             key_added=key_added,
-            labels=np.asarray([label] * glyph.n_points),
+            labels=labels,
             where="point_data",
             colormap=color,
             alphamap=alpha,
             inplace=True,
         )
 
+    glyph = model.glyph(orient="direction", geom=_construct_arrow(**kwargs), scale="scale", factor=factor)
     return glyph

@@ -43,7 +43,7 @@ def add_model_labels(
 
     model = model.copy() if not inplace else model
 
-    new_labels = labels.copy().astype(object)
+    new_labels = np.asarray(labels).copy().astype(object)
     raw_labels_hex = new_labels.copy()
     raw_labels_alpha = new_labels.copy()
     cu_arr = np.unique(new_labels)

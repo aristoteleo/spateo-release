@@ -8,9 +8,9 @@ from .line_model import (
     generate_edges,
 )
 from .trajectory_model import (
-    construct_cells_development,
-    construct_cells_development_X,
-    construct_trajectory,
+    construct_development_fate,
+    construct_development_X,
+    construct_trajectory_fate,
     construct_trajectory_X,
 )
 from .uniform_model import construct_bounding_box, construct_space
