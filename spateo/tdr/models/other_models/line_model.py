@@ -74,8 +74,8 @@ def construct_lines(
     edges: np.ndarray,
     key_added: Optional[str] = "line",
     label: Union[str, list, np.ndarray] = "lines",
-    color: Union[str, list, dict, np.ndarray] = "gainsboro",
-    alpha: Union[float, int, list, dict, np.ndarray] = 1.0,
+    color: Union[str, list, dict] = "gainsboro",
+    alpha: Union[float, int, list, dict] = 1.0,
 ) -> PolyData:
     """
     Create 3D lines model.
@@ -98,7 +98,6 @@ def construct_lines(
 
     labels = np.asarray([label] * points.shape[0]) if isinstance(label, str) else label
     assert len(labels) == points.shape[0], "The number of labels is not equal to the number of points."
-
     if not (key_added is None):
         add_model_labels(
             model=model,

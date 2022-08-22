@@ -137,7 +137,7 @@ def develop_vectorfield(
     return None if inplace else adata
 
 
-def develop_trajectory(
+def develop_fate(
     adata: AnnData,
     vf_key: str = "VecFld_develop",
     key_added: str = "develop",

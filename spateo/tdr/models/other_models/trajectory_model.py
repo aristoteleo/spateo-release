@@ -11,13 +11,13 @@ from .arrow_model import construct_arrows
 from .line_model import construct_lines
 
 
-def construct_cells_development_X(
+def construct_development_X(
     stages_X: List[np.ndarray],
-    n_spacing: int = 1,
+    n_spacing: Optional[int] = None,
     key_added: str = "develop",
-    label: str = "cells_develop",
-    color: str = "skyblue",
-    alpha: float = 1.0,
+    label: Optional[Union[str, list]] = None,
+    color: Union[str, list, dict] = "skyblue",
+    alpha: Union[float, list, dict] = 1.0,
 ) -> MultiBlock:
     """
     Reconstruction of cell-level cell developmental change model based on the cell fate prediction results. Here we only
@@ -25,9 +25,9 @@ def construct_cells_development_X(
 
     Args:
         stages_X: The three-dimensional coordinates of the cells at different developmental stages.
-        n_spacing: Subdivided into `n_spacing` time points between two periods.
+        n_spacing: Subdivided into ``n_spacing`` time points between two periods.
         key_added: The key under which to add the labels.
-        label: The label of cell developmental change model.
+        label: The label of cell developmental change model. If ``label == None``, the label will be automatically generated.
         color: Color to use for plotting model.
         alpha: The opacity of the color to use for plotting model.
 
@@ -35,23 +35,43 @@ def construct_cells_development_X(
         A MultiBlock contains cell models for all stages.
     """
 
-    cells_points = []
-    for i in range(len(stages_X) - 1):
-        stage1_X = stages_X[i].copy()
-        stage2_X = stages_X[i + 1].copy()
-        spacing = (stage2_X - stage1_X) / n_spacing
-        cells_points.extend([stage1_X.copy() + j * spacing for j in range(n_spacing)])
-    cells_points.append(stages_X[-1])
+    if n_spacing is None:
+        cells_points = stages_X
+    else:
+        cells_points = []
+        for i in range(len(stages_X) - 1):
+            stage1_X = stages_X[i].copy()
+            stage2_X = stages_X[i + 1].copy()
+            spacing = (stage2_X - stage1_X) / n_spacing
+            cells_points.extend([stage1_X.copy() + j * spacing for j in range(n_spacing)])
+        cells_points.append(stages_X[-1])
 
+    # Set label
+    if isinstance(label, (str, int, float)) or label is None:
+        label = "cell_state" if label is None else label
+        labels = [np.asarray([f"{label}_{i}"] * pts.shape[0]) for i, pts in enumerate(cells_points)]
+    elif isinstance(label, list) and len(label) == len(cells_points):
+        labels = (
+            label
+            if isinstance(label[0], list)
+            else [np.asarray([la] * pts.shape[0]) for la, pts in zip(label, cells_points)]
+        )
+    else:
+        raise ValueError("`label` value is wrong.")
+
+    # Set color
+    colors = color if isinstance(color, list) else [color] * len(cells_points)
+
+    # Generate point cloud models
     cells_models = []
-    for points in cells_points:
-        model = pv.PolyData(points)
+    for pts, la, co in zip(cells_points, labels, colors):
+        model = pv.PolyData(pts)
         add_model_labels(
             model=model,
             key_added=key_added,
-            labels=np.asarray([label] * model.n_points),
+            labels=la,
             where="point_data",
-            colormap=color,
+            colormap=co,
             alphamap=alpha,
             inplace=True,
         )
@@ -60,16 +80,16 @@ def construct_cells_development_X(
     return collect_model(models=cells_models)
 
 
-def construct_cells_development(
+def construct_development_fate(
     adata: AnnData,
     fate_key: str = "fate_develop",
     n_steps: int = 100,
     logspace: bool = False,
     t_end: Optional[Union[int, float]] = None,
     key_added: str = "develop",
-    label: str = "cells_develop",
-    color: str = "skyblue",
-    alpha: float = 1.0,
+    label: Optional[Union[str, list]] = None,
+    color: Union[str, list, dict] = "skyblue",
+    alpha: Union[float, list, dict] = 1.0,
 ) -> MultiBlock:
     """
     Reconstruction of cell-level cell developmental change model based on the cell fate prediction results. Here we only
@@ -84,7 +104,7 @@ def construct_cells_development(
                   time points.
         t_end: The length of the time period from which to predict cell state forward or backward over time.
         key_added: The key under which to add the labels.
-        label: The label of cell developmental change model.
+        label: The label of cell developmental change model. If ``label == None``, the label will be automatically generated.
         color: Color to use for plotting model.
         alpha: The opacity of the color to use for plotting model.
 
@@ -123,8 +143,8 @@ def construct_cells_development(
         pts = [displace(cur_pts, time_vec[i])[1].tolist() for cur_pts in pts]
         stages_X.append(np.asarray(pts))
 
-    cells_developmental_model = construct_cells_development_X(
-        stages_X=stages_X, n_spacing=1, key_added=key_added, label=label, color=color, alpha=alpha
+    cells_developmental_model = construct_development_X(
+        stages_X=stages_X, n_spacing=None, key_added=key_added, label=label, color=color, alpha=alpha
     )
 
     return cells_developmental_model
@@ -136,12 +156,12 @@ def construct_trajectory_X(
     n_sampling: Optional[int] = None,
     sampling_method: str = "trn",
     key_added: str = "trajectory",
-    label: str = "cell_trajectory",
+    label: Optional[Union[str, list]] = None,
     tip_factor: Union[int, float] = 10,
     tip_radius: float = 0.2,
-    trajectory_color: str = "gainsboro",
-    tip_color: str = "orangered",
-    alpha: float = 1.0,
+    trajectory_color: Union[str, list, dict] = "gainsboro",
+    tip_color: Union[str, list, dict] = "gainsboro",
+    alpha: Union[float, list, dict] = 1.0,
 ) -> PolyData:
     """
     Reconstruction of cell developmental trajectory model.
@@ -167,10 +187,16 @@ def construct_trajectory_X(
 
     from dynamo.tools.sampling import sample
 
-    if init_states is None:
-        init_states = np.asarray([cell_states[0] for cell_states in cells_states])
-
+    init_states = np.asarray([cell_states[0] for cell_states in cells_states]) if init_states is None else init_states
     index_arr = np.arange(0, len(init_states))
+
+    if isinstance(label, (str, int, float)) or label is None:
+        labels = ["trajectory"] * len(index_arr) if label is None else [label] * len(index_arr)
+    elif isinstance(label, (list, np.ndarray)) and len(label) == len(index_arr):
+        labels = label
+    else:
+        raise ValueError("`label` value is wrong.")
+
     if not (n_sampling is None):
         index_arr = sample(
             arr=index_arr,
@@ -186,8 +212,8 @@ def construct_trajectory_X(
             )
 
     se_ind = 0
-    tips_points, tips_vectors = [], []
-    trajectories_points, trajectories_edges = [], []
+    tips_points, tips_vectors, tips_labels = [], [], []
+    trajectories_points, trajectories_edges, trajectories_labels = [], [], []
     for ind in index_arr:
         trajectory_points = (
             cells_states[ind]
@@ -203,17 +229,19 @@ def construct_trajectory_X(
             axis=1,
         )
         se_ind += n_states
-
         trajectories_points.append(trajectory_points)
         trajectories_edges.append(trajectory_edges)
+        trajectories_labels.extend([labels[ind]] * n_states)
+
         tips_points.append(trajectory_points[-1])
         tips_vectors.append(trajectory_points[-1] - trajectory_points[-2])
+        tips_labels.append(labels[ind])
 
     streamlines = construct_lines(
         points=np.concatenate(trajectories_points, axis=0),
         edges=np.concatenate(trajectories_edges, axis=0),
         key_added=key_added,
-        label=label,
+        label=np.asarray(trajectories_labels),
         color=trajectory_color,
         alpha=alpha,
     )
@@ -226,7 +254,7 @@ def construct_trajectory_X(
         tip_length=1,
         tip_radius=tip_radius,
         key_added=key_added,
-        label=label,
+        label=np.asarray(tips_labels),
         color=tip_color,
         alpha=alpha,
     )
@@ -235,7 +263,7 @@ def construct_trajectory_X(
     return trajectory_model
 
 
-def construct_trajectory(
+def construct_trajectory_fate(
     adata: AnnData,
     fate_key: str = "fate_develop",
     n_sampling: Optional[int] = None,
