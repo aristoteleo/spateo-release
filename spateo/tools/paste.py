@@ -460,7 +460,6 @@ def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> Tupl
         Y: Aligned spatial coordinates.
         pi: Mapping between the two layers output by PASTE.
 
-
     Returns:
         Two dicts of mapping_X, mapping_Y, pi_index, pi_value.
             mapping_X is X coordinates aligned with Y coordinates.
@@ -500,60 +499,61 @@ def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> Tupl
             {
                 "mapping_X": X[mapping_data["index_x"].values],
                 "mapping_Y": Y[mapping_data["index_y"].values],
-                "pi_index": mapping_data["pi_value"].values,
-                "pi_value": mapping_data[["index_x", "index_y"]].values,
+                "pi_index": mapping_data[["index_x", "index_y"]].values,
+                "pi_value": mapping_data["pi_value"].values,
             }
         )
 
     return mappings[0], mappings[1]
 
 
-def mapping_center_coords(
-    X: np.ndarray,
-    Y: np.ndarray,
-    mid_X: np.ndarray,
-    mid_Y: np.ndarray,
-    pi_value_X: Optional[np.ndarray] = None,
-    pi_value_Y: Optional[np.ndarray] = None,
-) -> dict:
+def mapping_center_coords(modelA: AnnData, modelB: AnnData, center_key: str) -> dict:
     """
     Optimal mapping coordinates between X and Y based on intermediate coordinates.
 
     Args:
-        X: Aligned spatial coordinates.
-        Y: Aligned spatial coordinates.
-        mid_X: Aligned spatial coordinates related to X of the center model.
-        mid_Y: Aligned spatial coordinates related to Y of the center model.
-        pi_value_X: The value of optimal mapping points related to X.
-        pi_value_Y: The value of optimal mapping points related to Y.
+        modelA: modelA aligned with center model.
+        modelB: modelB aligned with center model.
+        center_key: The key in ``.uns`` that corresponds to the alignment info between modelA/modelB and center model.
 
     Returns:
-        A dict of mapping_X, mapping_Y, pi_value.
-            mapping_X is the Y coordinate aligned with X coordinates.
-            mapping_Y is X coordinates aligned with Y coordinates.
+        A dict of raw_X, raw_Y, mapping_X, mapping_Y, pi_value.
+            raw_X is the raw X coordinates.
+            raw_Y is the raw Y coordinates.
+            mapping_X is the Y coordinates aligned with X coordinates.
+            mapping_Y is the X coordinates aligned with Y coordinates.
             pi_value is the value of optimal mapping points.
     """
 
-    assert mid_X.shape[1] == mid_Y.shape[1], "mid_X.shape[1] is not equal to mid_Y.shape[1]"
-    raw_X_cols = [f"X_{i}" for i in range(X.shape[1])]
-    raw_Y_cols = [f"Y_{i}" for i in range(Y.shape[1])]
-    mid_cols = [f"mid_{i}" for i in range(mid_X.shape[1])]
+    modelA_dict = modelA.uns[center_key].copy()
+    modelB_dict = modelB.uns[center_key].copy()
 
-    X_cols = raw_X_cols.copy() + mid_cols
-    X_data = pd.DataFrame(np.concatenate([X.copy(), mid_X.copy()], axis=1), columns=X_cols)
-    if not (pi_value_X is None):
-        X_data["pi_value_X"] = pi_value_X.astype(np.float64).copy()
+    mapping_X_cols = [f"mapping_X_{i}" for i in range(modelA_dict["mapping_Y"].shape[1])]
+    raw_X_cols = [f"raw_X_{i}" for i in range(modelA_dict["raw_Y"].shape[1])]
+    mapping_Y_cols = [f"mapping_Y_{i}" for i in range(modelB_dict["mapping_Y"].shape[1])]
+    raw_Y_cols = [f"raw_Y_{i}" for i in range(modelB_dict["raw_Y"].shape[1])]
 
-    Y_cols = raw_Y_cols.copy() + mid_cols
-    Y_data = pd.DataFrame(np.concatenate([Y.copy(), mid_Y.copy()], axis=1), columns=Y_cols)
-    if not (pi_value_Y is None):
-        Y_data["pi_value_Y"] = pi_value_Y.astype(np.float64).copy()
+    X_cols = mapping_X_cols.copy() + raw_X_cols.copy() + ["mid"]
+    X_data = pd.DataFrame(
+        np.concatenate([modelA_dict["raw_Y"], modelA_dict["mapping_Y"], modelA_dict["pi_index"][:, [0]]], axis=1),
+        columns=X_cols,
+    )
+    X_data["pi_value_X"] = modelA_dict["pi_value"].astype(np.float64)
 
-    mapping_data = pd.merge(Y_data, X_data, on=mid_cols, how="inner")
+    Y_cols = mapping_Y_cols.copy() + raw_Y_cols.copy() + ["mid"]
+    Y_data = pd.DataFrame(
+        np.concatenate([modelB_dict["raw_Y"], modelB_dict["mapping_Y"], modelB_dict["pi_index"][:, [0]]], axis=1),
+        columns=Y_cols,
+    )
+    Y_data["pi_value_Y"] = modelB_dict["pi_value"].astype(np.float64)
+
+    mapping_data = pd.merge(Y_data, X_data, on=["mid"], how="inner")
     mapping_data["pi_value"] = mapping_data[["pi_value_X"]].values * mapping_data[["pi_value_Y"]].values
 
     return {
-        "mapping_X": mapping_data[raw_X_cols].values,
-        "mapping_Y": mapping_data[raw_Y_cols].values,
+        "raw_X": mapping_data[raw_X_cols].values,
+        "raw_Y": mapping_data[raw_Y_cols].values,
+        "mapping_X": mapping_data[mapping_X_cols].values,
+        "mapping_Y": mapping_data[mapping_Y_cols].values,
         "pi_value": mapping_data["pi_value"].astype(np.float64).values,
     }
