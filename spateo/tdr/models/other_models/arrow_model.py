@@ -134,17 +134,14 @@ def construct_arrows(
 
     from dynamo.tools.sampling import sample
 
+    index_arr = np.arange(0, start_points.shape[0])
     if not (n_sampling is None):
-        index_arr = np.arange(0, start_points.shape[0])
-        sampling_arr = sample(
+        index_arr = sample(
             arr=index_arr,
             n=n_sampling,
             method=sampling_method,
             X=start_points,
         )
-        start_points = start_points[sampling_arr, :]
-        direction = direction[sampling_arr, :]
-        arrows_scale = None if arrows_scale is None else arrows_scale[sampling_arr, :]
     else:
         if len(start_points) > 500:
             lm.main_warning(
@@ -152,12 +149,14 @@ def construct_arrows(
                 f"lower the max number of arrows to draw."
             )
 
+    start_points = start_points[index_arr, :].copy()
+    direction = direction[index_arr, :].copy()
     model = pv.PolyData(start_points)
     model.point_data["direction"] = direction
-    model.point_data["scale"] = np.linalg.norm(direction.copy(), axis=1) if arrows_scale is None else arrows_scale
+    model.point_data["scale"] = np.linalg.norm(direction, axis=1) if arrows_scale is None else arrows_scale[index_arr, :]
 
-    labels = np.asarray([label] * model.n_points) if isinstance(label, str) else label
-    assert len(labels) == model.n_points, "The number of labels is not equal to the number of start points."
+    labels = np.asarray([label] * len(start_points)) if isinstance(label, str) else np.asarray(label)[index_arr]
+    assert len(labels) == len(start_points), "The number of labels is not equal to the number of start points."
     if not (key_added is None):
         add_model_labels(
             model=model,
