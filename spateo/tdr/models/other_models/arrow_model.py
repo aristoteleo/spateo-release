@@ -34,7 +34,7 @@ def _construct_arrow(
         tip_resolution: Number of faces around the tip.
         shaft_radius: Radius of the shaft.
         shaft_resolution: Number of faces around the shaft.
-        scale: Scale factor of the entire object. 'auto' scales to length of direction array.
+        scale: Scale factor of the entire object. ``'auto'`` scales to length of direction array.
 
     Returns:
         Arrow model.
@@ -73,7 +73,7 @@ def construct_arrow(
         label: The label of arrow model.
         color: Color to use for plotting model.
         alpha: The opacity of the color to use for plotting model.
-        **kwargs: Additional parameters that will be passed to _construct_arrow function.
+        **kwargs: Additional parameters that will be passed to ``_construct_arrow`` function.
 
     Returns:
         Arrow model.
@@ -118,15 +118,15 @@ def construct_arrows(
         direction: Direction the arrows points to in [x, y, z].
         arrows_scale: Scale factor of the entire object.
         n_sampling: n_sampling is the number of coordinates to keep after sampling. If there are too many coordinates
-                    in start_points, the generated arrows model will be too complex   and unsightly, so sampling is
+                    in start_points, the generated arrows model will be too complex and unsightly, so sampling is
                     used to reduce the number of coordinates.
-        sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
+        sampling_method: The method to sample data points, can be one of ``['trn', 'kmeans', 'random']``.
         factor: Scale factor applied to scaling array.
         key_added: The key under which to add the labels.
         label: The label of arrows models.
         color: Color to use for plotting model.
         alpha: The opacity of the color to use for plotting model.
-        **kwargs: Additional parameters that will be passed to _construct_arrow function.
+        **kwargs: Additional parameters that will be passed to ``_construct_arrow`` function.
 
     Returns:
         Arrows model.

@@ -35,14 +35,15 @@ def construct_cells(
     Reconstructing cells from point clouds.
 
     Args:
-        pc: A point cloud object, including `pc.point_data["obs_index"]`.
-        geometry: The geometry of generating cells. Available `geometry` are:
-                * `'cube'`
-                * `'sphere'`
-                * `'ellipsoid'`
+        pc: A point cloud object, including ``pc.point_data["obs_index"]``.
+        geometry: The geometry of generating cells. Available ``geometry`` are:
+
+                * geometry = ``'cube'``
+                * geometry = ``'sphere'``
+                * geometry = ``'ellipsoid'``
         cell_size: A numpy.ndarray object including the relative radius/length size of each cell.
         xyz_scale: The scale factor for the x-axis, y-axis and z-axis.
-        n_scale: The 'squareness' parameter in the x-y plane adn z axis. Only works if geometry == `'ellipsoid'`.
+        n_scale: The ``squareness`` parameter in the x-y plane adn z axis. Only works if ``geometry = 'ellipsoid'``.
         factor: Scale factor applied to scaling array.
 
     Returns:
@@ -114,41 +115,42 @@ def construct_surface(
         pc: A point cloud model.
         key_added: The key under which to add the labels.
         label: The label of reconstructed surface mesh model.
-        color: Color to use for plotting mesh. The default `color` is `'gainsboro'`.
-        alpha: The opacity of the color to use for plotting mesh. The default `alpha` is `0.8`.
+        color: Color to use for plotting mesh. The default ``color`` is ``'gainsboro'``.
+        alpha: The opacity of the color to use for plotting mesh. The default ``alpha`` is ``0.8``.
         uniform_pc: Generates a uniform point cloud with a larger number of points.
         uniform_pc_alpha: Specify alpha (or distance) value to control output of this filter.
-        cs_method: The methods of generating a surface mesh. Available `cs_method` are:
-                * `'pyvista'`: Generate a 3D tetrahedral mesh based on pyvista.
-                * `'alpha_shape'`: Computes a triangle mesh on the alpha shape algorithm.
-                * `'ball_pivoting'`: Computes a triangle mesh based on the Ball Pivoting algorithm.
-                * `'poisson'`: Computes a triangle mesh based on thee Screened Poisson Reconstruction.
-                * `'marching_cube'`: Computes a triangle mesh based on the marching cube algorithm.
-        cs_args: Parameters for various surface reconstruction methods. Available `cs_args` are:
-                * `'pyvista'`: {"alpha": 0}
-                * `'alpha_shape'`: {"alpha": 2.0}
-                * `'ball_pivoting'`: {"radii": [1]}
-                * `'poisson'`: {'depth': 8, 'width'=0, 'scale'=1.1, 'linear_fit': False, 'density_threshold': 0.01}
-                * `'marching_cube'`: {"levelset": 0, "mc_scale_factor": 1}
+        cs_method: The methods of generating a surface mesh. Available ``cs_method`` are:
+
+                * ``'pyvista'``: Generate a 3D tetrahedral mesh based on pyvista.
+                * ``'alpha_shape'``: Computes a triangle mesh on the alpha shape algorithm.
+                * ``'ball_pivoting'``: Computes a triangle mesh based on the Ball Pivoting algorithm.
+                * ``'poisson'``: Computes a triangle mesh based on thee Screened Poisson Reconstruction.
+                * ``'marching_cube'``: Computes a triangle mesh based on the marching cube algorithm.
+        cs_args: Parameters for various surface reconstruction methods. Available ``cs_args`` are:
+                * ``'pyvista'``: {'alpha': 0}
+                * ``'alpha_shape'``: {'alpha': 2.0}
+                * ``'ball_pivoting'``: {'radii': [1]}
+                * ``'poisson'``: {'depth': 8, 'width'=0, 'scale'=1.1, 'linear_fit': False, 'density_threshold': 0.01}
+                * ``'marching_cube'``: {'levelset': 0, 'mc_scale_factor': 1}
         nsub: Number of subdivisions. Each subdivision creates 4 new triangles, so the number of resulting triangles is
               nface*4**nsub where nface is the current number of faces.
         nclus: Number of voronoi clustering.
         smooth: Number of iterations for Laplacian smoothing.
-        scale_distance: The distance by which the model is scaled. If `distance` is float, the model is scaled same
-                        distance along the xyz axis; when the `scale factor` is list, the model is scaled along the xyz
-                        axis at different distance. If `distance` is None, there will be no scaling based on distance.
-        scale_factor: The scale by which the model is scaled. If `scale factor` is float, the model is scaled along the
-                      xyz axis at the same scale; when the `scale factor` is list, the model is scaled along the xyz
-                      axis at different scales. If `scale_factor` is None, there will be no scaling based on scale factor.
+        scale_distance: The distance by which the model is scaled. If ``scale_distance`` is float, the model is scaled same
+                        distance along the xyz axis; when the ``scale factor`` is list, the model is scaled along the xyz
+                        axis at different distance. If ``scale_distance`` is None, there will be no scaling based on distance.
+        scale_factor: The scale by which the model is scaled. If ``scale factor`` is float, the model is scaled along the
+                      xyz axis at the same scale; when the ``scale factor`` is list, the model is scaled along the xyz
+                      axis at different scales. If ``scale_factor`` is None, there will be no scaling based on scale factor.
 
     Returns:
         uniform_surf: A reconstructed surface mesh, which contains the following properties:
-            `uniform_surf.cell_data[key_added]`, the `label` array;
-            `uniform_surf.cell_data[f'{key_added}_rgba']`, the rgba colors of the `label` array.
-        clipped_pc: A point cloud, which contains the following properties:
-            `clipped_pc.point_data["obs_index"]`, the obs_index of each coordinate in the original adata.
-            `clipped_pc.point_data[key_added]`, the `groupby` information.
-            `clipped_pc.point_data[f'{key_added}_rgba']`, the rgba colors of the `groupby` information.
+            ``uniform_surf.cell_data[key_added]``, the ``label`` array;
+            ``uniform_surf.cell_data[f'{key_added}_rgba']``, the rgba colors of the ``label`` array.
+        inside_pc: A point cloud, which contains the following properties:
+            ``inside_pc.point_data['obs_index']``, the obs_index of each coordinate in the original adata.
+            ``inside_pc.point_data[key_added]``, the ``groupby`` information.
+            ``inside_pc.point_data[f'{key_added}_rgba']``, the rgba colors of the ``groupby`` information.
     """
 
     # Generates a uniform point cloud with a larger number of points or not.

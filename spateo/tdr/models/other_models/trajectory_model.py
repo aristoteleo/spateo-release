@@ -96,7 +96,7 @@ def construct_development_fate(
     need to enter the three-dimensional coordinates of the cells at different developmental stages.
 
     Args:
-        adata: AnnData object that contains the fate prediction in the `.uns` attribute.
+        adata: AnnData object that contains the fate prediction in the ``.uns`` attribute.
         fate_key: The key under which are the active fate information.
         n_steps: The number of times steps fate prediction will take.
         logspace: Whether or to sample time points linearly on log space. If not, the sorted unique set of all times
@@ -172,7 +172,7 @@ def construct_trajectory_X(
         n_sampling: n_sampling is the number of coordinates to keep after sampling. If there are too many coordinates
                     in start_points, the generated arrows model will be too complex and unsightly, so sampling is
                     used to reduce the number of coordinates.
-        sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
+        sampling_method: The method to sample data points, can be one of ``['trn', 'kmeans', 'random']``.
         key_added: The key under which to add the labels.
         label: The label of trajectory model.
         tip_factor: Scale factor applied to scaling the tips.
@@ -280,12 +280,12 @@ def construct_trajectory_fate(
     Reconstruction of cell developmental trajectory model based on cell fate prediction.
 
     Args:
-        adata: AnnData object that contains the fate prediction in the `.uns` attribute.
+        adata: AnnData object that contains the fate prediction in the ``.uns`` attribute.
         fate_key: The key under which are the active fate information.
-        n_sampling: n_sampleing is the number of coordinates to keep after sampling. If there are too many coordinates
+        n_sampling: n_sampling is the number of coordinates to keep after sampling. If there are too many coordinates
                     in start_points, the generated arrows model will be too complex and unsightly, so sampling is
                     used to reduce the number of coordinates.
-        sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
+        sampling_method: The method to sample data points, can be one of ``['trn', 'kmeans', 'random']``.
         key_added: The key under which to add the labels.
         label: The label of trajectory model.
         tip_factor: Scale factor applied to scaling the tips.
