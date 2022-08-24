@@ -81,14 +81,12 @@ def _morphofield(
 
     from dynamo.vectorfield.scVectorField import SparseVFC
 
-    lm.main_info("morphofield: Calculating and predicting vector field.", indent_level=1)
-
     if not (NX is None):
         predict_X = NX
     else:
         if grid_num is None:
             grid_num = [50, 50, 50]
-            lm.main_warning(f"grid_num and NX are both None, using `grid_num = [50,50,50]`.", indent_level=2)
+            lm.main_warning(f"grid_num and NX are both None, using `grid_num = [50,50,50]`.", indent_level=1)
         _, _, Grid, grid_in_hull = get_X_Y_grid(X=X.copy(), Y=V.copy(), grid_num=grid_num)
         predict_X = Grid
 
@@ -97,7 +95,7 @@ def _morphofield(
         if len(restart_seed) != restart_num:
             lm.main_warning(
                 f"The length of {restart_seed} is different from {restart_num}, " f"using `np.range(restart_num) * 100",
-                indent_level=2,
+                indent_level=1,
             )
             restart_seed = np.arange(restart_num) * 100
 
@@ -131,7 +129,7 @@ def _morphofield(
                 lm.main_info(
                     f"Current cosine correlation ({round(res, 5)}) between input velocities and learned velocities is less than "
                     f"{min_vel_corr}. Make a {restart_counter}-th vector field reconstruction trial.",
-                    indent_level=2,
+                    indent_level=1,
                 )
             else:
                 vf_dict = cur_vf_dict
@@ -142,7 +140,7 @@ def _morphofield(
                 lm.main_warning(
                     f"Cosine correlation between ({round(res, 5)}) input velocities and learned velocities is less than"
                     f" {min_vel_corr} after {restart_num} trials of vector field reconstruction.",
-                    indent_level=2,
+                    indent_level=1,
                 )
                 vf_dict = cur_vf_list[np.argmax(np.array(res_list))]
 
