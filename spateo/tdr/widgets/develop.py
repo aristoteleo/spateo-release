@@ -67,9 +67,9 @@ def _develop_vectorfield(
     _, _, Grid, grid_in_hull = get_X_Y_grid(X=stage1_X.copy(), Y=stage2_X.copy(), grid_num=grid_num)
 
     predict_X = Grid if NX is None else NX
-    res = SparseVFC(stage1_X, stage2_X, predict_X, lambda_=lambda_, lstsq_method=lstsq_method, **kwargs)
-    res["method"] = "sparsevfc"
-    return res
+    vf_dict = SparseVFC(stage1_X, stage2_X, predict_X, lambda_=lambda_, lstsq_method=lstsq_method, **kwargs)
+    vf_dict["method"] = "sparsevfc"
+    return vf_dict
 
 
 def develop_vectorfield(
