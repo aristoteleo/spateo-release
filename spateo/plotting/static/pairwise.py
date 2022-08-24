@@ -10,6 +10,8 @@ from typing import Union
 import numpy as np
 import scipy
 
+from anndata import AnnData
+
 import matplotlib as mpl
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.ticker import StrMethodFormatter

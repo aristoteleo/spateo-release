@@ -105,6 +105,7 @@ class Label(object):
                  ) -> None:
 
         self.verbose = verbose
+        logger = lm.get_main_logger()
 
         # Check type, dimensions, ensure all elements non-negative
         if isinstance(labels_dense, list):
@@ -112,19 +113,24 @@ class Label(object):
         elif isinstance(labels_dense, np.ndarray):
             pass
         else:
+            logger.error(f"Labels provided are of type {type(labels_dense)}. Should be list or 1-dimensional ndarray.")
             raise TypeError(
                 f"Labels provided are of type {type(labels_dense)}. "
                 f"Should be list or 1-dimensional numpy ndarray.\n"
             )
 
-        assert labels_dense.ndim == 1, (
-            f"Label array has {labels_dense.ndim} dimensions, "
-            f"should be 1-dimensional."
-        )
-        assert np.issubdtype(labels_dense.dtype, np.integer), (
-            f"Label array data type is {labels_dense.dtype}, "
-            f"should be integer."
-        )
+        if labels_dense.ndim != 1:
+            logger.error(f"Label array has {labels_dense.ndim} dimensions, should be 1-dimensional.")
+            raise ValueError(
+                f"Label array has {labels_dense.ndim} dimensions, "
+                f"should be 1-dimensional."
+            )
+
+        if not np.issubdtype(labels_dense.dtype, np.integer):
+            raise TypeError(
+                f"Label array data type is {labels_dense.dtype}, "
+                f"should be integer."
+            )
         assert np.amin(labels_dense) >= 0, (
             f"Some of the labels have negative values.\n"
             f"All labels must be 0 or positive integers.\n"
