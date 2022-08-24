@@ -1,9 +1,9 @@
 """
 Functions for finding nearest neighbors and the distances between them in spatial transcriptomics data.
 """
-from typing import Optional, Tuple, Union
+from typing import Tuple, Union
 
-import anndata
+from anndata import AnnData
 import numpy as np
 import scipy
 from sklearn.neighbors import NearestNeighbors
@@ -14,11 +14,62 @@ from ..logging import logger_manager as lm
 from ..utils import row_normalize
 
 
+# ------------------------------------------ Wrapper ------------------------------------------ #
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def weighted_spatial_graph(
+    adata: AnnData,
+    spatial_key: str = "spatial",
+    fixed: str = "n_neighbors",
+    n_neighbors: int = 10,
+    decay_type: str = "reciprocal",
+    p: float = 0.05,
+    sigma: float = 100,
+) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
+    """
+    Given AnnData object, compute distance array with either a fixed number of neighbors for each spot or a fixed
+    search radius for each spot.
+    Args:
+        adata : class ~`anndata.AnnData`
+        spatial_key : str, default 'spatial'
+            Key in .obsm containing coordinates for each spot
+        fixed : str, default 'n_neighbors'
+            Options: 'n_neighbors', 'radius'- sets either fixed number of neighbors or fixed search radius for each spot
+        n_neighbors : int, default 10
+            Number of neighbors each spot has. Unused unless 'fixed' is 'n_neighbors'
+        decay_type : str, default "reciprocal"
+            Sets method by which edge weights are defined. Options: "reciprocal", "ranked", "uniform".
+            Unused unless 'fixed' is 'n_neighbors'
+        p : float, default 0.05
+            Cutoff for Gaussian (used to find where distribution drops below p * (max_value)). Unused unless 'fixed' is
+            'radius'
+        sigma : float, default 100
+            Standard deviation of the Gaussian. Unused unless 'fixed' is 'radius'
+    Returns:
+         out_graph : scipy.sparse.csr_matrix, shape [n_samples, n_samples]
+            Weighted nearest neighbors graph
+        distance_graph : scipy.sparse.csr_matrix, shape [n_samples, n_samples]
+            Unweighted graph
+    """
+    logger = lm.get_main_logger()
+    if fixed == "n_neighbors":
+        weights_graph, distance_graph = generate_spatial_weights_fixed_nbrs(
+            adata.obsm[spatial_key], num_neighbors=n_neighbors, decay_type=decay_type, verbose=False
+        )
+    elif fixed == "radius":
+        weights_graph, distance_graph = generate_spatial_weights_fixed_radius(
+            adata.obsm[spatial_key], p=p, sigma=sigma, verbose=False
+        )
+    else:
+        logger.error("Invalid argument given to 'fixed'. Options: 'n_neighbors', 'radius'.")
+        raise ValueError("Invalid argument given to 'fixed'. Options: 'n_neighbors', 'radius'.")
+
+    return weights_graph, distance_graph
+
+
 # ------------------------------------------ Cell-cell/spot-spot distance ------------------------------------------ #
-def remove_greater_than(graph: scipy.sparse.csr_matrix,
-                        threshold: float,
-                        copy: bool = False,
-                        verbose: bool = False) -> scipy.sparse.csr_matrix:
+def remove_greater_than(
+    graph: scipy.sparse.csr_matrix, threshold: float, copy: bool = False, verbose: bool = False
+) -> scipy.sparse.csr_matrix:
     """
     Remove values greater than a threshold from a sparse matrix
 
@@ -37,8 +88,7 @@ def remove_greater_than(graph: scipy.sparse.csr_matrix,
     greater_indices = np.where(graph.data > threshold)[0]
 
     if verbose:
-        print(f"CSR data field:\n{graph.data}\n"
-              f"compressed indices of values > threshold:\n{greater_indices}\n")
+        print(f"CSR data field:\n{graph.data}\n" f"compressed indices of values > threshold:\n{greater_indices}\n")
 
     graph.data = np.delete(graph.data, greater_indices)
     graph.indices = np.delete(graph.indices, greater_indices)
@@ -49,19 +99,23 @@ def remove_greater_than(graph: scipy.sparse.csr_matrix,
     graph.indptr[1:] -= cum_hist
 
     if verbose:
-        print(f"\nCumulative histogram:\n{cum_hist}\n"
-              f"\n___ New CSR ___\n"
-              f"pointers:\n{graph.indptr}\n"
-              f"indices:\n{graph.indices}\n"
-              f"data:\n{graph.data}\n")
+        print(
+            f"\nCumulative histogram:\n{cum_hist}\n"
+            f"\n___ New CSR ___\n"
+            f"pointers:\n{graph.indptr}\n"
+            f"indices:\n{graph.indices}\n"
+            f"data:\n{graph.data}\n"
+        )
 
     return graph
 
-def generate_spatial_distance_graph(locations: np.ndarray,
-                                    nbr_object: NearestNeighbors = None,
-                                    num_neighbors: Union[None, int] = None,
-                                    radius: Union[None, float] = None,
-                                    ) -> scipy.sparse.csr_matrix:
+
+def generate_spatial_distance_graph(
+    locations: np.ndarray,
+    nbr_object: NearestNeighbors = None,
+    num_neighbors: Union[None, int] = None,
+    radius: Union[None, float] = None,
+) -> scipy.sparse.csr_matrix:
     """
     Creates graph based on distance in space.
 
@@ -80,13 +134,11 @@ def generate_spatial_distance_graph(locations: np.ndarray,
 
     if num_neighbors is None and radius is None:
         logger.error("Number of neighbors or search radius for each spot must be provided.")
-        raise ValueError(
-            "Number of neighbors or search radius for each spot must be provided."
-        )
+        raise ValueError("Number of neighbors or search radius for each spot must be provided.")
 
     if nbr_object is None:
         # set up neighbour object
-        nbrs = NearestNeighbors(algorithm='ball_tree').fit(locations)
+        nbrs = NearestNeighbors(algorithm="ball_tree").fit(locations)
     else:  # use provided sklearn NN object
         nbrs = nbr_object
 
@@ -95,28 +147,25 @@ def generate_spatial_distance_graph(locations: np.ndarray,
         return nbrs.radius_neighbors_graph(radius=radius, mode="distance")
 
     else:
-        assert isinstance(num_neighbors, int), (
-            f"Number of neighbors {num_neighbors} is not an integer"
-        )
+        assert isinstance(num_neighbors, int), f"Number of neighbors {num_neighbors} is not an integer"
 
         graph_out = nbrs.kneighbors_graph(n_neighbors=num_neighbors, mode="distance")
 
         if radius is not None:
-            assert isinstance(radius, (float, int)), (
-                f"Radius {radius} is not an integer or float"
-            )
+            assert isinstance(radius, (float, int)), f"Radius {radius} is not an integer or float"
 
             graph_out = remove_greater_than(graph_out, radius, copy=False, verbose=False)
 
         return graph_out
 
 
-def generate_spatial_weights_fixed_nbrs(locations: np.ndarray,
-                                        num_neighbors: int = 10,
-                                        decay_type: str = "reciprocal",
-                                        nbr_object: NearestNeighbors = None,
-                                        verbose: bool = False,
-                                        ) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
+def generate_spatial_weights_fixed_nbrs(
+    locations: np.ndarray,
+    num_neighbors: int = 10,
+    decay_type: str = "reciprocal",
+    nbr_object: NearestNeighbors = None,
+    verbose: bool = False,
+) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
     """
     Starting from a k-nearest neighbor graph, generate a sparse graph (csr format) with weighted edges, where edge
     weights decay with distance.
@@ -151,9 +200,7 @@ def generate_spatial_weights_fixed_nbrs(locations: np.ndarray,
     elif decay_type == "reciprocal":
         graph_out.data = 1 / graph_out.data
     elif decay_type == "ranked":
-        linear_weights = np.exp(
-            -1 * (np.arange(1, num_neighbors + 1) * 1.5 / num_neighbors) ** 2
-        )
+        linear_weights = np.exp(-1 * (np.arange(1, num_neighbors + 1) * 1.5 / num_neighbors) ** 2)
 
         indptr, data = graph_out.indptr, graph_out.data
 
@@ -172,8 +219,7 @@ def generate_spatial_weights_fixed_nbrs(locations: np.ndarray,
     else:
         logger.error(f"Weights decay type <{decay_type}> not recognised. Should be 'uniform', 'reciprocal' or 'ranked'")
         raise ValueError(
-            f"Weights decay type <{decay_type}> not recognised.\n"
-            f"Should be 'uniform', 'reciprocal' or 'ranked'."
+            f"Weights decay type <{decay_type}> not recognised.\n" f"Should be 'uniform', 'reciprocal' or 'ranked'."
         )
 
     out_graph = row_normalize(graph_out, verbose=verbose)
@@ -186,7 +232,7 @@ def gaussian_weight_2d(distance: float, sigma: float):
     Normalized by 2*pi*sigma-squared
     """
     sigma_squared = float(sigma) ** 2
-    return np.exp(-0.5 * distance ** 2 / sigma_squared) / (sigma_squared * 2 * np.pi)
+    return np.exp(-0.5 * distance**2 / sigma_squared) / (sigma_squared * 2 * np.pi)
 
 
 def p_equiv_radius(p: float, sigma: float):
@@ -195,16 +241,17 @@ def p_equiv_radius(p: float, sigma: float):
     sigma
     """
     assert p < 1.0, f"p was {p}, must be less than 1"
-    return np.sqrt(-2 * sigma ** 2 * np.log(p))
+    return np.sqrt(-2 * sigma**2 * np.log(p))
 
 
-def generate_spatial_weights_fixed_radius(locations: np.ndarray,
-                                          p: float = 0.05,
-                                          sigma: float = 100,
-                                          nbr_object: NearestNeighbors = None,
-                                          max_num_neighbors: int = None,
-                                          verbose: bool = False,
-                                          ) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
+def generate_spatial_weights_fixed_radius(
+    locations: np.ndarray,
+    p: float = 0.05,
+    sigma: float = 100,
+    nbr_object: NearestNeighbors = None,
+    max_num_neighbors: int = None,
+    verbose: bool = False,
+) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
     """
     Starting from a radius-based neighbor graph, generate a sparse graph (csr format) with weighted edges, where edge
     weights decay with distance.
@@ -228,14 +275,12 @@ def generate_spatial_weights_fixed_radius(locations: np.ndarray,
     # Selecting r for neighbor graph construction:
     r = p_equiv_radius(p, sigma)
     if verbose:
-        print(f"Equivalent radius for removing {p} of "
-              f"gaussian distribution with sigma {sigma} is: {r}\n")
+        print(f"Equivalent radius for removing {p} of " f"gaussian distribution with sigma {sigma} is: {r}\n")
 
     # Define the nearest neighbor graph:
-    distance_graph = generate_spatial_distance_graph(locations,
-                                                     nbr_object=nbr_object,
-                                                     num_neighbors=max_num_neighbors,
-                                                     radius=r)
+    distance_graph = generate_spatial_distance_graph(
+        locations, nbr_object=nbr_object, num_neighbors=max_num_neighbors, radius=r
+    )
     graph_out = distance_graph.copy()
 
     # Convert distances to weights
@@ -243,9 +288,6 @@ def generate_spatial_weights_fixed_radius(locations: np.ndarray,
 
     out_graph = row_normalize(graph_out, verbose=verbose)
     return out_graph, distance_graph
-
-
-
 
 
 # ----------- (Identical to generate_spatial_weights_fixed_nbrs, but specific to STGNN) ---------- #
@@ -266,9 +308,7 @@ def calculate_distance(position: np.ndarray) -> np.ndarray:
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def construct_pairwise(adata: anndata.AnnData,
-                       spatial_key: str = 'spatial',
-                       n_neighbors: int = 3):
+def construct_pairwise(adata: AnnData, spatial_key: str = "spatial", n_neighbors: int = 3):
     """
     Constructing spot-to-spot nearest neighbors graph
 
@@ -284,7 +324,7 @@ def construct_pairwise(adata: anndata.AnnData,
     distance_matrix = calculate_distance(position)
     n_spot = distance_matrix.shape[0]
 
-    adata.obsm['distance_matrix'] = distance_matrix
+    adata.obsm["distance_matrix"] = distance_matrix
 
     # find k-nearest neighbors
     interaction = np.zeros([n_spot, n_spot])
@@ -295,18 +335,17 @@ def construct_pairwise(adata: anndata.AnnData,
             y = distance[t]
             interaction[i, y] = 1
 
-    adata.obsm['graph_neigh'] = interaction
+    adata.obsm["graph_neigh"] = interaction
 
     # transform adj to symmetrical adj
     adj = interaction
     adj = adj + adj.T
     adj = np.where(adj > 1, 1, adj)
 
-    adata.obsm['adj'] = adj
+    adata.obsm["adj"] = adj
 
 
-def normalize_adj(adj: np.ndarray,
-                  exclude_self: bool = True) -> np.ndarray:
+def normalize_adj(adj: np.ndarray, exclude_self: bool = True) -> np.ndarray:
     """
     Symmetrically normalize adjacency matrix, set diagonal to 1 and return processed adjacency array.
 
@@ -319,7 +358,7 @@ def normalize_adj(adj: np.ndarray,
     adj = scipy.sparse.coo_matrix(adj)
     rowsum = np.array(adj.sum(1))
     d_inv_sqrt = np.power(rowsum, -0.5).flatten()
-    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.
+    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.0
     d_mat_inv_sqrt = scipy.sparse.diags(d_inv_sqrt)
     adj = adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt)
     adj_proc = adj.toarray() + np.eye(adj.shape[0])

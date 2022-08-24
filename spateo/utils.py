@@ -37,11 +37,8 @@ def copy_adata(adata: AnnData) -> AnnData:
     return data
 
 
-
 # --------------------------------------- Normalizing sparse arrays --------------------------------------- #
-def row_normalize(graph: scipy.sparse.csr_matrix,
-                  copy: bool = False,
-                  verbose: bool = True) -> scipy.sparse.csr_matrix:
+def row_normalize(graph: scipy.sparse.csr_matrix, copy: bool = False, verbose: bool = True) -> scipy.sparse.csr_matrix:
     """
     Normalize a compressed sparse row (CSR) matrix by row- written for sparse pairwise distance arrays, but can be
     applied to any sparse matrix.
@@ -76,16 +73,17 @@ def row_normalize(graph: scipy.sparse.csr_matrix,
         if row_sum != 0:
             data[start_ptr:end_ptr] /= row_sum
 
-
-        logger.info(f"Computed normalized sum from ptr {start_ptr} to {end_ptr}. "
-                    f"Total entries: {end_ptr - start_ptr}, sum: {np.sum(graph.data[start_ptr:end_ptr])}")
+        logger.info(
+            f"Computed normalized sum from ptr {start_ptr} to {end_ptr}. "
+            f"Total entries: {end_ptr - start_ptr}, sum: {np.sum(graph.data[start_ptr:end_ptr])}"
+        )
         if verbose:
-            print(f"normalized sum from ptr {start_ptr} to {end_ptr} "
-                  f"({end_ptr - start_ptr} entries)",
-                  np.sum(graph.data[start_ptr:end_ptr]))
+            print(
+                f"normalized sum from ptr {start_ptr} to {end_ptr} " f"({end_ptr - start_ptr} entries)",
+                np.sum(graph.data[start_ptr:end_ptr]),
+            )
 
     return graph
-
 
 
 # --------------------------------------- Label class --------------------------------------- #
@@ -99,11 +97,13 @@ class Label(object):
         Optional mapping of numerical labels (keys) to strings (values)
 
     """
-    def __init__(self,
-                 labels_dense: Union[np.ndarray, list],
-                 str_map: Union[None, dict] = None,
-                 verbose: bool = True,
-                 ) -> None:
+
+    def __init__(
+        self,
+        labels_dense: Union[np.ndarray, list],
+        str_map: Union[None, dict] = None,
+        verbose: bool = True,
+    ) -> None:
 
         self.verbose = verbose
         logger = lm.get_main_logger()
@@ -122,23 +122,16 @@ class Label(object):
 
         if labels_dense.ndim != 1:
             logger.error(f"Label array has {labels_dense.ndim} dimensions, should be 1-dimensional.")
-            raise ValueError(
-                f"Label array has {labels_dense.ndim} dimensions, "
-                f"should be 1-dimensional."
-            )
+            raise ValueError(f"Label array has {labels_dense.ndim} dimensions, " f"should be 1-dimensional.")
 
         if not np.issubdtype(labels_dense.dtype, np.integer):
             logger.error(f"Label array data type is {labels_dense.dtype}, should be integer.")
-            raise TypeError(
-                f"Label array data type is {labels_dense.dtype}, "
-                f"should be integer."
-            )
+            raise TypeError(f"Label array data type is {labels_dense.dtype}, " f"should be integer.")
 
         if np.amin(labels_dense) < 0:
             logger.error(f"Some of the labels have negative values. All labels must be 0 or positive integers.")
             raise ValueError(
-                f"Some of the labels have negative values.\n"
-                f"All labels must be 0 or positive integers.\n"
+                f"Some of the labels have negative values.\n" f"All labels must be 0 or positive integers.\n"
             )
 
         # Initialize attributes
@@ -166,12 +159,8 @@ class Label(object):
         self.onehot = None
         self.normalized_onehot = None
 
-
     def __repr__(self) -> str:
-        return (
-            f"{self.num_labels} labels, {self.num_samples} samples, "
-            f"ids: {self.ids}, counts: {self.counts}"
-        )
+        return f"{self.num_labels} labels, {self.num_samples} samples, " f"ids: {self.ids}, counts: {self.counts}"
 
     def __str__(self) -> str:
         return (
@@ -180,7 +169,6 @@ class Label(object):
             f"number of samples: {self.num_samples}\n"
             f"ids: {self.ids}, counts: {self.counts},\n"
         )
-
 
     def get_onehot(self) -> scipy.sparse.csr_matrix:
         """
@@ -192,34 +180,29 @@ class Label(object):
 
         return self.onehot
 
-
     def get_normalized_onehot(self) -> scipy.sparse.csr_matrix:
         """
         Return normalized one-hot sparse array of labels.
         """
         if self.normalized_onehot is None:
-            self.normalized_onehot = self.generate_normalized_onehot(
-                verbose=False
-            )
+            self.normalized_onehot = self.generate_normalized_onehot(verbose=False)
 
         return self.normalized_onehot
 
-
-    def generate_normalized_onehot(self,
-                                   verbose: bool = False,
-                                   ) -> scipy.sparse.csr_matrix:
+    def generate_normalized_onehot(
+        self,
+        verbose: bool = False,
+    ) -> scipy.sparse.csr_matrix:
         """
         Generate a normalized onehot matrix where each row is normalized by the count of that label
         e.g. a row [0 1 1 0 0] will be converted to [0 0.5 0.5 0 0]
         """
-        return row_normalize(self.get_onehot().astype(np.float64),
-                             copy=True,
-                             verbose=verbose)
+        return row_normalize(self.get_onehot().astype(np.float64), copy=True, verbose=verbose)
 
-
-    def generate_onehot(self,
-                        verbose: bool = False,
-                        ) -> scipy.sparse.csr_matrix:
+    def generate_onehot(
+        self,
+        verbose: bool = False,
+    ) -> scipy.sparse.csr_matrix:
         """
         Convert an array of labels to a num_labels x num_samples sparse one-hot matrix
         Labels MUST be integers starting from 0, but can have gaps in between e.g. [0,1,5,9]
@@ -231,12 +214,13 @@ class Label(object):
         data = np.ones_like(indices, dtype=np.int32)
 
         if verbose:
-            print(f"\n--- {self.num_labels} labels, "
-                  f"{self.num_samples} samples ---\n"
-                  f"initalized {indptr.shape} index ptr: {indptr}\n"
-                  f"initalized {indices.shape} indices: {indices}\n"
-                  f"initalized {data.shape} data: {data}\n")
-
+            print(
+                f"\n--- {self.num_labels} labels, "
+                f"{self.num_samples} samples ---\n"
+                f"initalized {indptr.shape} index ptr: {indptr}\n"
+                f"initalized {indices.shape} indices: {indices}\n"
+                f"initalized {data.shape} data: {data}\n"
+            )
 
         # Update index pointer and indices row by row
         for n, label in enumerate(self.ids):
@@ -248,9 +232,11 @@ class Label(object):
             indptr[n + 1] = current_ptr
 
             if verbose:
-                print(f"indices for label {label}: {label_indices}\n"
-                      f"previous pointer: {previous_ptr}, "
-                      f"current pointer: {current_ptr}\n")
+                print(
+                    f"indices for label {label}: {label_indices}\n"
+                    f"previous pointer: {previous_ptr}, "
+                    f"current pointer: {current_ptr}\n"
+                )
 
             if current_ptr > previous_ptr:
                 indices[previous_ptr:current_ptr] = label_indices
@@ -265,11 +251,12 @@ def _rand_binary_array(array_length, num_onbits):
     return array
 
 
-def expand_labels(label: Label,
-                  max_label_id: int,
-                  sort_labels: bool = False,
-                  verbose: bool = False,
-                  ) -> Label:
+def expand_labels(
+    label: Label,
+    max_label_id: int,
+    sort_labels: bool = False,
+    verbose: bool = False,
+) -> Label:
     """
     Spread out label IDs such that they range evenly from 0 to max_label_id, e.g. [0 1 2] -> [0 5 10]
     Useful if you need to be consistent with other label sets with many more label IDs.
@@ -299,21 +286,24 @@ def expand_labels(label: Label,
     expanded_ids[1:] += np.cumsum(extra)  # only add to 2nd label and above
 
     if verbose:
-        print(f"Label ids zerod: {ids_zeroed}.\n"
-              f"{multiple} to be inserted between each id: {inserted}\n"
-              f"{remainder} extra rows to be randomly inserted: {extra}\n"
-              f"New ids: {expanded_ids}")
+        print(
+            f"Label ids zerod: {ids_zeroed}.\n"
+            f"{multiple} to be inserted between each id: {inserted}\n"
+            f"{remainder} extra rows to be randomly inserted: {extra}\n"
+            f"New ids: {expanded_ids}"
+        )
 
     expanded_dense = (expanded_ids @ label.get_onehot()).astype(np.int32)
 
     return Label(expanded_dense, verbose=label.verbose)
 
 
-def match_labels(labels_1: Label,
-                 labels_2: Label,
-                 extra_labels_assignment: str = "random",
-                 verbose: bool = False,
-                 ) -> Label:
+def match_labels(
+    labels_1: Label,
+    labels_2: Label,
+    extra_labels_assignment: str = "random",
+    verbose: bool = False,
+) -> Label:
     """
     Match second set of labels to first, returning a new Label object
     Uses scipy's version of the Hungarian algorithm (linear_sum_assigment)
@@ -324,8 +314,10 @@ def match_labels(labels_1: Label,
 
     logger.info(f"Matching {labels_2.num_labels} labels against {labels_1.num_labels} labels.")
     if verbose:
-        print(f"Matching {labels_2.num_labels} labels against {labels_1.num_labels} labels.\n"
-              f"highest label ID in both is {max_id}.\n")
+        print(
+            f"Matching {labels_2.num_labels} labels against {labels_1.num_labels} labels.\n"
+            f"highest label ID in both is {max_id}.\n"
+        )
 
     onehot_1, onehot_2 = labels_1.get_onehot(), labels_2.get_onehot()
     cost_matrix = (onehot_1 @ onehot_2.T).toarray()
@@ -345,9 +337,9 @@ def match_labels(labels_1: Label,
         label_1 = labels_1.ids[index_1]
         label_2 = labels_2.ids[index_2]
         if verbose:
-            print(f"Assigning first set's {label_1} to "
-                  f"second set's {label_2}.\n"
-                  f"labels_left: {available_labels}")
+            print(
+                f"Assigning first set's {label_1} to " f"second set's {label_2}.\n" f"labels_left: {available_labels}"
+            )
         relabeled_ids[index_2] = label_1
         available_labels.remove(label_1)
 
@@ -364,10 +356,12 @@ def match_labels(labels_1: Label,
             relabeled_ids[unmatched_indices] = np.random.choice(available_labels, size=num_extra_labels, replace=False)
 
         elif extra_labels_assignment == "greedy":
-            def _insert_label(array: np.ndarray,
-                              max_length: int,
-                              added_labels: list = [],
-                              ) -> Tuple[np.ndarray, int, list]:
+
+            def _insert_label(
+                array: np.ndarray,
+                max_length: int,
+                added_labels: list = [],
+            ) -> Tuple[np.ndarray, int, list]:
                 """
                 Insert a label in the middle of the largest interval
                 Assumes array is already sorted!
@@ -397,9 +391,7 @@ def match_labels(labels_1: Label,
 
         else:
             logger.error(f"Extra labels assignment method not recognised, should be random or greedy.")
-            raise ValueError(
-                f"Extra labels assignment method not recognised, should be random or greedy.\n"
-            )
+            raise ValueError(f"Extra labels assignment method not recognised, should be random or greedy.\n")
 
         if verbose:
             print(f"\nRelabeled labels: {relabeled_ids}\n")
@@ -408,11 +400,12 @@ def match_labels(labels_1: Label,
     return Label(relabeled_dense, verbose=labels_2.verbose)
 
 
-def match_label_series(label_list: List[Label],
-                       least_labels_first: bool = True,
-                       extra_labels_assignment: str = "greedy",
-                       verbose: bool = False,
-                       ) -> Tuple[List[Label], int]:
+def match_label_series(
+    label_list: List[Label],
+    least_labels_first: bool = True,
+    extra_labels_assignment: str = "greedy",
+    verbose: bool = False,
+) -> Tuple[List[Label], int]:
     """
     Match a list of labels to each other, one after another in order of increasing (if least_labels_first is true)
     or decreasing (least_labels_first set to false) number of label ids.
@@ -423,8 +416,10 @@ def match_label_series(label_list: List[Label],
     max_num_labels = max(num_label_list)
     sort_indices = np.argsort(num_label_list)
 
-    logger.info(f"\nMaximum number of labels across all datasets = {max_num_labels}\n"
-                f"Indices of sorted list: {sort_indices}\n")
+    logger.info(
+        f"\nMaximum number of labels across all datasets = {max_num_labels}\n"
+        f"Indices of sorted list: {sort_indices}\n"
+    )
 
     ordered_relabels = []
 
@@ -432,8 +427,7 @@ def match_label_series(label_list: List[Label],
         ordered_relabels.append(expand_labels(label_list[sort_indices[0]], max_num_labels - 1))
         logger.info(f"First label, expanded label ids: {ordered_relabels[0]}")
         if verbose:
-            print(f"First label, expanded label ids: "
-                  f"{ordered_relabels[0]}")
+            print(f"First label, expanded label ids: " f"{ordered_relabels[0]}")
     else:
         # Argsort is in ascending order, reverse it
         sort_indices = sort_indices[:, :, -1]
@@ -445,12 +439,11 @@ def match_label_series(label_list: List[Label],
         previous_label = ordered_relabels[-1]
         logger.info(f"Relabeling label set {index} with reference to label set {index-1}.")
         if verbose:
-            print(f"\nRelabeling:\n{current_label}\n"
-                  f"with reference to\n{previous_label}\n"
-                  + "-" * 70 + "\n")
+            print(f"\nRelabeling:\n{current_label}\n" f"with reference to\n{previous_label}\n" + "-" * 70 + "\n")
 
         relabeled = match_labels(
-            previous_label, current_label,
+            previous_label,
+            current_label,
             extra_labels_assignment=extra_labels_assignment,
             verbose=verbose,
         )
@@ -458,15 +451,15 @@ def match_label_series(label_list: List[Label],
         ordered_relabels.append(relabeled)
 
     sort_indices_list = list(sort_indices)
-    original_order_relabels = [ordered_relabels[sort_indices_list.index(n)]
-                               for n in range(len(label_list))]
+    original_order_relabels = [ordered_relabels[sort_indices_list.index(n)] for n in range(len(label_list))]
 
     return original_order_relabels, max_num_labels
 
 
-def interlabel_connections(label: Label,
-                           weights_matrix: Union[scipy.sparse.csr_matrix, np.ndarray],
-                           ) -> np.ndarray:
+def interlabel_connections(
+    label: Label,
+    weights_matrix: Union[scipy.sparse.csr_matrix, np.ndarray],
+) -> np.ndarray:
     """
     Compute connections strength between labels (based on pairwise distances), normalized by counts of each label
 
@@ -485,15 +478,11 @@ def interlabel_connections(label: Label,
 
     if weights_matrix.ndim != 2:
         logger.error(f"Weights matrix has {weights_matrix.ndim} dimensions, should be 2.")
-        raise ValueError(
-            f"weights matrix has {weights_matrix.ndim} dimensions, should be 2."
-        )
+        raise ValueError(f"weights matrix has {weights_matrix.ndim} dimensions, should be 2.")
 
     if weights_matrix.shape[0] != weights_matrix.shape[1] != label.num_samples:
         logger.error(f"Weights matrix dimensions do not match number of samples.")
-        raise ValueError(
-            f"weights matrix dimenisons do not match number of samples"
-        )
+        raise ValueError(f"weights matrix dimenisons do not match number of samples")
 
     normalized_onehot = label.generate_normalized_onehot(verbose=False)
 
@@ -510,10 +499,8 @@ def interlabel_connections(label: Label,
     return connections
 
 
-
 # --------------------------------------- Label Curation and Label Processing --------------------------------------- #
-def create_label_class(adata: AnnData,
-                       cat_key: Union[str, List[str]]) -> Union[Label, List[Label]]:
+def create_label_class(adata: AnnData, cat_key: Union[str, List[str]]) -> Union[Label, List[Label]]:
     """
     Wraps categorical labels into custom Label class for downstream processing.
 
