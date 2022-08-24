@@ -127,14 +127,18 @@ class Label(object):
             )
 
         if not np.issubdtype(labels_dense.dtype, np.integer):
+            logger.error(f"Label array data type is {labels_dense.dtype}, should be integer.")
             raise TypeError(
                 f"Label array data type is {labels_dense.dtype}, "
                 f"should be integer."
             )
-        assert np.amin(labels_dense) >= 0, (
-            f"Some of the labels have negative values.\n"
-            f"All labels must be 0 or positive integers.\n"
-        )
+
+        if np.amin(labels_dense) < 0:
+            logger.error(f"Some of the labels have negative values. All labels must be 0 or positive integers.")
+            raise ValueError(
+                f"Some of the labels have negative values.\n"
+                f"All labels must be 0 or positive integers.\n"
+            )
 
         # Initialize attributes
         self.dense = labels_dense
@@ -263,7 +267,7 @@ def _rand_binary_array(array_length, num_onbits):
 def expand_labels(label: Label,
                   max_label_id: int,
                   sort_labels: bool = False,
-                  verbose: bool = True,
+                  verbose: bool = False,
                   ) -> Label:
     """
     Spread out label IDs such that they range evenly from 0 to max_label_id, e.g. [0 1 2] -> [0 5 10]
@@ -271,6 +275,8 @@ def expand_labels(label: Label,
     This spreads labels out along the color spectrum/map so that the colors are not too similar to each other.
     Use sort_labels if the list of IDs are not already sorted (although IDs are typically already sorted)
     """
+    logger = lm.get_main_logger()
+    logger.info(f"Expanding labels with ids: {label.ids} so that ids range from 0 to {max_label_id}")
     if verbose:
         print(f"Expanding labels with ids: {label.ids} so that ids range from 0 to {max_label_id}\n")
 
@@ -305,15 +311,17 @@ def expand_labels(label: Label,
 def match_labels(labels_1: Label,
                  labels_2: Label,
                  extra_labels_assignment: str = "random",
-                 verbose: bool = True,
+                 verbose: bool = False,
                  ) -> Label:
     """
     Match second set of labels to first, returning a new Label object
     Uses scipy's version of the Hungarian algorithm (linear_sum_assigment)
     """
+    logger = lm.get_main_logger()
     max_id = max(labels_1.max_id, labels_2.max_id)
     num_extra_labels = labels_2.num_labels - labels_1.num_labels
 
+    logger.info(f"Matching {labels_2.num_labels} labels against {labels_1.num_labels} labels.")
     if verbose:
         print(f"Matching {labels_2.num_labels} labels against {labels_1.num_labels} labels.\n"
               f"highest label ID in both is {max_id}.\n")
@@ -387,6 +395,7 @@ def match_labels(labels_1: Label,
             relabeled_ids[unmatched_indices] = np.random.choice(added_labels, size=num_extra_labels, replace=False)
 
         else:
+            logger.error(f"Extra labels assignment method not recognised, should be random or greedy.")
             raise ValueError(
                 f"Extra labels assignment method not recognised, should be random or greedy.\n"
             )
@@ -401,24 +410,26 @@ def match_labels(labels_1: Label,
 def match_label_series(label_list: List[Label],
                        least_labels_first: bool = True,
                        extra_labels_assignment: str = "greedy",
-                       verbose: bool = True,
+                       verbose: bool = False,
                        ) -> Tuple[List[Label], int]:
     """
     Match a list of labels to each other, one after another in order of increasing (if least_labels_first is true)
     or decreasing (least_labels_first set to false) number of label ids.
     Returns the relabeled list in original order.
     """
+    logger = lm.get_main_logger()
     num_label_list = [label.num_labels for label in label_list]
     max_num_labels = max(num_label_list)
     sort_indices = np.argsort(num_label_list)
 
-    print(f"\nMaximum number of labels = {max_num_labels}\n"
-          f"Indices of sorted list: {sort_indices}\n")
+    logger.info(f"\nMaximum number of labels across all datasets = {max_num_labels}\n"
+                f"Indices of sorted list: {sort_indices}\n")
 
     ordered_relabels = []
 
     if least_labels_first:
         ordered_relabels.append(expand_labels(label_list[sort_indices[0]], max_num_labels - 1))
+        logger.info(f"First label, expanded label ids: {ordered_relabels[0]}")
         if verbose:
             print(f"First label, expanded label ids: "
                   f"{ordered_relabels[0]}")
@@ -431,6 +442,7 @@ def match_label_series(label_list: List[Label],
     for index in sort_indices[1:]:
         current_label = label_list[index]
         previous_label = ordered_relabels[-1]
+        logger.info(f"Relabeling label set {index} with reference to label set {index-1}.")
         if verbose:
             print(f"\nRelabeling:\n{current_label}\n"
                   f"with reference to\n{previous_label}\n"
@@ -468,21 +480,25 @@ def interlabel_connections(label: Label,
         connections : np.ndarray
             Pairwise connection strength array, shape [n_labels, n_labels]
     """
-    assert weights_matrix.ndim == 2, (
-        f"weights matrix has {weights_matrix.ndim} dimensions, should be 2."
-    )
+    logger = lm.get_main_logger()
 
-    assert weights_matrix.shape[0] == weights_matrix.shape[1] == label.num_samples, (
-        f"weights matrix dimenisons do not match number of samples"
-    )
+    if weights_matrix.ndim != 2:
+        logger.error(f"Weights matrix has {weights_matrix.ndim} dimensions, should be 2.")
+        raise ValueError(
+            f"weights matrix has {weights_matrix.ndim} dimensions, should be 2."
+        )
+
+    if weights_matrix.shape[0] != weights_matrix.shape[1] != label.num_samples:
+        logger.error(f"Weights matrix dimensions do not match number of samples.")
+        raise ValueError(
+            f"weights matrix dimenisons do not match number of samples"
+        )
 
     normalized_onehot = label.generate_normalized_onehot(verbose=False)
 
-    print(
-        f"\nmatrix multiplying labels x weights x labels-transpose "
-        f"({normalized_onehot.shape} "
-        f"x {weights_matrix.shape} "
-        f"x {normalized_onehot.T.shape})\n"
+    logger.info(
+        f"Matrix multiplying labels x weights x labels-transpose, shape {normalized_onehot.shape} x "
+        f"{weights_matrix.shape} x {normalized_onehot.T.shape}."
     )
 
     connections = normalized_onehot @ weights_matrix @ normalized_onehot.T
