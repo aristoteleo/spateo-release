@@ -2,7 +2,7 @@
 Functions for finding nearest neighbors and the distances between them in spatial transcriptomics data.
 """
 from typing import Optional, Union, Tuple
-import anndata
+from anndata import AnnData
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
 import scipy
@@ -11,6 +11,64 @@ from torch import Tensor, FloatTensor
 from ..configuration import SKM
 from ..logging import logger_manager as lm
 from ..utils import row_normalize
+
+
+# ------------------------------------------ Wrapper ------------------------------------------ #
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def weighted_spatial_graph(adata: AnnData,
+                           spatial_key: str = 'spatial',
+                           fixed: str = 'n_neighbors',
+                           n_neighbors: int = 10,
+                           decay_type: str = 'reciprocal',
+                           p: float = 0.05,
+                           sigma: float = 100) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
+    """
+    Given AnnData object, compute distance array with either a fixed number of neighbors for each spot or a fixed
+    search radius for each spot.
+
+    Args:
+        adata : class ~`anndata.AnnData`
+        spatial_key : str, default 'spatial'
+            Key in .obsm containing coordinates for each spot
+        fixed : str, default 'n_neighbors'
+            Options: 'n_neighbors', 'radius'- sets either fixed number of neighbors or fixed search radius for each spot
+        n_neighbors : int, default 10
+            Number of neighbors each spot has. Unused unless 'fixed' is 'n_neighbors'
+        decay_type : str, default "reciprocal"
+            Sets method by which edge weights are defined. Options: "reciprocal", "ranked", "uniform".
+            Unused unless 'fixed' is 'n_neighbors'
+        p : float, default 0.05
+            Cutoff for Gaussian (used to find where distribution drops below p * (max_value)). Unused unless 'fixed' is
+            'radius'
+        sigma : float, default 100
+            Standard deviation of the Gaussian. Unused unless 'fixed' is 'radius'
+
+    Returns:
+         out_graph : scipy.sparse.csr_matrix, shape [n_samples, n_samples]
+            Weighted nearest neighbors graph
+        distance_graph : scipy.sparse.csr_matrix, shape [n_samples, n_samples]
+            Unweighted graph
+    """
+    logger = lm.get_main_logger()
+    if fixed == 'n_neighbors':
+        weights_graph, distance_graph = generate_spatial_weights_fixed_nbrs(
+            adata.obsm[spatial_key],
+            num_neighbors=n_neighbors,
+            decay_type=decay_type,
+            verbose=False
+        )
+    elif fixed == 'radius':
+        weights_graph, distance_graph = generate_spatial_weights_fixed_radius(
+            adata.obsm[spatial_key],
+            p=p,
+            sigma=sigma,
+            verbose=False
+        )
+    else:
+        logger.error("Invalid argument given to 'fixed'. Options: 'n_neighbors', 'radius'.")
+        raise ValueError("Invalid argument given to 'fixed'. Options: 'n_neighbors', 'radius'.")
+
+    return weights_graph, distance_graph
 
 
 
@@ -65,16 +123,15 @@ def generate_spatial_distance_graph(locations: np.ndarray,
     """
     Creates graph based on distance in space.
 
-    Parameters
-    ----------
-    locations : np.ndarray, shape [n_samples, 2]
-        Spatial coordinates for each spot
-    nbr_object : optional sklearn.neighbors.NearestNeighbors object
-        Can optionally create a nearest neighbor object with custom functionality
-    num_neighbors : optional int
-        Number of neighbors for each spot
-    radius : optional float
-        Search radius around each spot
+    Args:
+        locations : np.ndarray, shape [n_samples, 2]
+            Spatial coordinates for each spot
+        nbr_object : optional sklearn.neighbors.NearestNeighbors object
+            Can optionally create a nearest neighbor object with custom functionality
+        num_neighbors : optional int
+            Number of neighbors for each spot
+        radius : optional float
+            Search radius around each spot
     """
     logger = lm.get_main_logger()
 
@@ -266,7 +323,7 @@ def calculate_distance(position: np.ndarray) -> np.ndarray:
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def construct_pairwise(adata: anndata.AnnData,
+def construct_pairwise(adata: AnnData,
                        spatial_key: str = 'spatial',
                        n_neighbors: int = 3):
     """
