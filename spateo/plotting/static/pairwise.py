@@ -1,9 +1,14 @@
-"""Plots for pairwise comparison analyses between groups of samples"""
+"""
+Plots for pairwise comparison analyses between groups of samples and across different conditions (e.g. biological
+conditions or using different clustering parameters).
+
+These functions build on the Label class- see spateo.utils.Label for documentation
+"""
 from ...utils import Label, interlabel_connections
 
-from typing import Union, Tuple
+from typing import Union
 import numpy as np
-import scipy.sparse as sp
+import scipy
 
 import matplotlib as mpl
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -14,7 +19,7 @@ plt.rcParams["figure.dpi"] = 300
 
 
 def plot_connections(label: Label,
-                     weights_matrix: Union[sp.csr_matrix, np.ndarray],
+                     weights_matrix: Union[scipy.sparse.csr_matrix, np.ndarray],
                      ax: Union[None, mpl.axes.Axes] = None,
                      figsize: tuple = (8, 8),
                      zero_self_connections: bool = True,

@@ -1,11 +1,8 @@
 from anndata import AnnData
-
-# Daniel Zhu
 from typing import Union, Tuple, List
 import copy
 import numpy as np
-import scipy.sparse as sp
-from scipy.optimize import linear_sum_assignment
+import scipy
 
 from .logging import logger_manager as lm
 
@@ -40,10 +37,10 @@ def copy_adata(adata: AnnData) -> AnnData:
 
 
 
-# Normalizing sparse arrays:
-def row_normalize(graph: sp.csr_matrix,
+# --------------------------------------- Normalizing sparse arrays --------------------------------------- #
+def row_normalize(graph: scipy.sparse.csr_matrix,
                   copy: bool = False,
-                  verbose: bool = True) -> sp.csr_matrix:
+                  verbose: bool = True) -> scipy.sparse.csr_matrix:
     """
     Normalize a compressed sparse row (CSR) matrix by row- written for sparse pairwise distance arrays, but can be
     applied to any sparse matrix.
@@ -89,21 +86,24 @@ def row_normalize(graph: sp.csr_matrix,
     return graph
 
 
-# Label processing:
+
+# --------------------------------------- Label class --------------------------------------- #
 class Label(object):
+    """
+    Given categorizations for a set of points, wrap into a Label class.
+
+    labels_dense : np.ndarray or list
+        Numerical labels
+    str_map : optional dictionary
+        Optional mapping of numerical labels (keys) to strings (values)
+
+    """
     def __init__(self,
                  labels_dense: Union[np.ndarray, list],
+                 str_map: Union[None, dict] = None,
                  verbose: bool = True,
                  ) -> None:
-        """
-        Wrapper class for handling categorical labels.
 
-        Args:
-            labels_dense : np.ndarray or list
-                Numpy array containing labels for each sample
-            verbose : bool, default True
-                Whether to display all messages associated w/ the operations of this class
-        """
         self.verbose = verbose
 
         # Check type, dimensions, ensure all elements non-negative
@@ -146,8 +146,15 @@ class Label(object):
         # Total number of labels
         self.num_labels = len(self.ids)
 
+        # Mapping from numerical labels to strings
+        if str_map is not None:
+            self.str_map = str_map
+            self.str_labels = list(map(self.str_map.get, labels_dense))
+            self.str_ids = list(map(self.str_map.get, self.ids))
+
         self.onehot = None
         self.normalized_onehot = None
+
 
     def __repr__(self) -> str:
         return (
@@ -164,14 +171,10 @@ class Label(object):
         )
 
 
-    def get_onehot(self) -> sp.csr_matrix:
+    def get_onehot(self) -> scipy.sparse.csr_matrix:
         """
-        Return one-hot sparse array of labels.
+        return one-hot sparse array of labels.
         If not already computed, generate the sparse array from dense label array
-
-        Returns:
-            onehot : scipy sparse matrix
-                Label array after converting to one-hot representation- shape [n_labels, n_samples]
         """
         if self.onehot is None:
             self.onehot = self.generate_onehot(verbose=False)
@@ -179,24 +182,43 @@ class Label(object):
         return self.onehot
 
 
+    def get_normalized_onehot(self) -> scipy.sparse.csr_matrix:
+        """
+        Return normalized one-hot sparse array of labels.
+        """
+        if self.normalized_onehot is None:
+            self.normalized_onehot = self.generate_normalized_onehot(
+                verbose=False
+            )
+
+        return self.normalized_onehot
+
+
+    def generate_normalized_onehot(self,
+                                   verbose: bool = False,
+                                   ) -> scipy.sparse.csr_matrix:
+        """
+        Generate a normalized onehot matrix where each row is normalized by the count of that label
+        e.g. a row [0 1 1 0 0] will be converted to [0 0.5 0.5 0 0]
+        """
+        return row_normalize(self.get_onehot().astype(np.float64),
+                             copy=True,
+                             verbose=verbose)
+
+
     def generate_onehot(self,
                         verbose: bool = False,
-                        ) -> sp.csr_matrix:
+                        ) -> scipy.sparse.csr_matrix:
         """
         Convert an array of labels to a num_labels x num_samples sparse one-hot matrix
         Labels MUST be integers starting from 0, but can have gaps in between e.g. [0,1,5,9]
         """
-        logger = lm.get_main_logger()
-        # Initialize the fields of the sparse matrix
+
+        # Initialize the fields of the CSR
         indptr = np.zeros((self.num_labels + 1,), dtype=np.int32)
         indices = np.zeros((self.num_samples,), dtype=np.int32)
         data = np.ones_like(indices, dtype=np.int32)
 
-
-        logger.info(f"Info about dataset: {self.num_samples} samples and {self.num_labels} labels in data of shape "
-                    f"{data.shape}\n"
-                    f"Index pointer of shape {indptr.shape}\n"
-                    f"Indices of shape {indices.shape}\n")
         if verbose:
             print(f"\n--- {self.num_labels} labels, "
                   f"{self.num_samples} samples ---\n"
@@ -214,9 +236,6 @@ class Label(object):
             current_ptr = previous_ptr + label_count
             indptr[n + 1] = current_ptr
 
-
-            logger.info(f"Finished updating indices for label {label}...previous pointer {previous_ptr}, "
-                        f"current pointer: {current_ptr}")
             if verbose:
                 print(f"indices for label {label}: {label_indices}\n"
                       f"previous pointer: {previous_ptr}, "
@@ -225,31 +244,7 @@ class Label(object):
             if current_ptr > previous_ptr:
                 indices[previous_ptr:current_ptr] = label_indices
 
-        return sp.csr_matrix((data, indices, indptr), shape=(self.num_labels, self.num_samples))
-
-
-    def get_normalized_onehot(self) -> sp.csr_matrix:
-        """
-        Return normalized one-hot sparse array of labels.
-        """
-        if self.normalized_onehot is None:
-            self.normalized_onehot = self.generate_normalized_onehot(
-                verbose=False
-            )
-
-        return self.normalized_onehot
-    
-    
-    def generate_normalized_onehot(self,
-                                   verbose: bool = False,
-                                   ) -> sp.csr_matrix:
-        """
-        Generate a normalized onehot matrix where each row is normalized by the count of that label
-        e.g. a row [0 1 1 0 0] will be converted to [0 0.5 0.5 0 0]
-        """
-        return row_normalize(self.get_onehot().astype(np.float64),
-                             copy=True,
-                             verbose=verbose)
+        return scipy.sparse.csr_matrix((data, indices, indptr), shape=(self.num_labels, self.num_samples))
 
 
 def _rand_binary_array(array_length, num_onbits):
@@ -265,29 +260,11 @@ def expand_labels(label: Label,
                   verbose: bool = True,
                   ) -> Label:
     """
-    Spread out (or contract) label IDs such that they range evenly from 0 to max_label_id, e.g. [0 1 2] -> [0 5 10]
+    Spread out label IDs such that they range evenly from 0 to max_label_id, e.g. [0 1 2] -> [0 5 10]
     Useful if you need to be consistent with other label sets with many more label IDs.
-    Also useful for spreading labels out along the color spectrum/map so that the colors are not too similar to each
-    other.
-
-    Args:
-        label : class: `~Label`
-            Instance of class 'Label', with one-hot dense label matrix in "dense", list of unique labels in "ids",
-            counts per label in "counts", etc.
-        max_label_id : int
-            Sets the desired largest label value
-        sort_labels : bool, default False
-            If the list of unique labels is not already sorted, set True to sort
-        verbose : bool, default True
-            Set True to display messages during execution
-
-    Returns:
-        exp_labels : class: `~Label`
-            Instance of class 'Label' following expansion
+    This spreads labels out along the color spectrum/map so that the colors are not too similar to each other.
+    Use sort_labels if the list of IDs are not already sorted (although IDs are typically already sorted)
     """
-    logger = lm.get_main_logger()
-
-    logger.info(f"Expanding labels with ids: {label.ids} so that ids range from 0 to {max_label_id}")
     if verbose:
         print(f"Expanding labels with ids: {label.ids} so that ids range from 0 to {max_label_id}\n")
 
@@ -316,9 +293,7 @@ def expand_labels(label: Label,
 
     expanded_dense = (expanded_ids @ label.get_onehot()).astype(np.int32)
 
-    exp_labels = Label(expanded_dense, verbose=label.verbose)
-
-    return exp_labels
+    return Label(expanded_dense, verbose=label.verbose)
 
 
 def match_labels(labels_1: Label,
@@ -329,31 +304,10 @@ def match_labels(labels_1: Label,
     """
     Match second set of labels to first, returning a new Label object
     Uses scipy's version of the Hungarian algorithm (linear_sum_assigment)
-
-    Args:
-        labels_1 : class: `~Label`
-            Instance of class 'Label' for the first set of labels, with one-hot dense label matrix in "dense",
-            list of unique labels in "ids", counts per label in "counts", etc.
-        labels_2 : class: `~Label`
-            Instance of class 'Label' for the second set of labels, with one-hot dense label matrix in "dense",
-            list of unique labels in "ids", counts per label in "counts", etc.
-        extra_labels_assignment : str, default "random"
-            Options: "random" or "greedy". If additional labels need to be added, specifies the method to add them
-        verbose : bool, default True
-            Set True to display messages during execution
-
-    Returns:
-        matched_labels : class: `~Label`
-            Instance of class 'Label' for the second set of labels, following expansion and matching to the first set
-            of labels
     """
-    logger = lm.get_main_logger()
-
     max_id = max(labels_1.max_id, labels_2.max_id)
     num_extra_labels = labels_2.num_labels - labels_1.num_labels
 
-    logger.info(f"Matching {labels_2.num_labels} labels from dataset 2 against {labels_1.num_labels} labels from "
-                f"dataset 1.")
     if verbose:
         print(f"Matching {labels_2.num_labels} labels against {labels_1.num_labels} labels.\n"
               f"highest label ID in both is {max_id}.\n")
@@ -361,7 +315,7 @@ def match_labels(labels_1: Label,
     onehot_1, onehot_2 = labels_1.get_onehot(), labels_2.get_onehot()
     cost_matrix = (onehot_1 @ onehot_2.T).toarray()
 
-    labels_match_1, labels_match_2 = linear_sum_assignment(cost_matrix, maximize=True)
+    labels_match_1, labels_match_2 = scipy.optimize.linear_sum_assignment(cost_matrix, maximize=True)
 
     if verbose:
         print("\nMatches:\n", list(zip(labels_match_1, labels_match_2)))
@@ -375,8 +329,6 @@ def match_labels(labels_1: Label,
     for index_1, index_2 in zip(labels_match_1, labels_match_2):
         label_1 = labels_1.ids[index_1]
         label_2 = labels_2.ids[index_2]
-        logger.info(f"Assigning {label_1} from dataset 1 against {label_2} from dataset 2. {available_labels} left to "
-                    f"assign.")
         if verbose:
             print(f"Assigning first set's {label_1} to "
                   f"second set's {label_2}.\n"
@@ -437,9 +389,7 @@ def match_labels(labels_1: Label,
             print(f"\nRelabeled labels: {relabeled_ids}\n")
 
     relabeled_dense = (relabeled_ids @ onehot_2).astype(np.int32)
-    matched_labels = Label(relabeled_dense, verbose=labels_2.verbose)
-
-    return matched_labels
+    return Label(relabeled_dense, verbose=labels_2.verbose)
 
 
 def match_label_series(label_list: List[Label],
@@ -448,32 +398,10 @@ def match_label_series(label_list: List[Label],
                        verbose: bool = True,
                        ) -> Tuple[List[Label], int]:
     """
-    Performs label matching given multiple (>2) sets of labels.
-
     Match a list of labels to each other, one after another in order of increasing (if least_labels_first is true)
     or decreasing (least_labels_first set to false) number of label ids.
     Returns the relabeled list in original order.
-
-    Args:
-        label_list : list containing class: `~Label` objects
-            Each entry in the list contains a different 'Label' object- this corresponds to i.e. labels from 3
-            different datasets
-        least_labels_first : bool, default True
-            Set True to start matching process with the object containing the fewest unique labels, continuing in
-            ascending order. If False will start with the object containing the most unique labels
-        extra_labels_assignment : str, default "random"
-            Options: "random" or "greedy". If additional labels need to be added, specifies the method to add them
-        verbose : bool, default True
-            Set True to display messages during execution
-
-    Returns:
-        original_order_relabels : list containing class: `~Label` objects
-            Returns the relabeled objects in the order in which they were provided
-        max_num_labels : int
-            The number of unique labels for the object in the input list that had the most labels
     """
-    logger = lm.get_main_logger()
-
     num_label_list = [label.num_labels for label in label_list]
     max_num_labels = max(num_label_list)
     sort_indices = np.argsort(num_label_list)
@@ -484,7 +412,6 @@ def match_label_series(label_list: List[Label],
     ordered_relabels = []
 
     if least_labels_first:
-        logger.info(f"Expanding each set of labels to match dataset w/ maximum number of labels.")
         ordered_relabels.append(expand_labels(label_list[sort_indices[0]], max_num_labels - 1))
         if verbose:
             print(f"First label, expanded label ids: "
@@ -495,7 +422,6 @@ def match_label_series(label_list: List[Label],
         # Already has max number of labels, no need to expand
         ordered_relabels.append(label_list[sort_indices[0]])
 
-    logger.info(f"Starting from dataset with fewest labels, matching to dataset with next fewest labels and so on.")
     for index in sort_indices[1:]:
         current_label = label_list[index]
         previous_label = ordered_relabels[-1]
@@ -520,7 +446,7 @@ def match_label_series(label_list: List[Label],
 
 
 def interlabel_connections(label: Label,
-                           weights_matrix: Union[sp.csr_matrix, np.ndarray],
+                           weights_matrix: Union[scipy.sparse.csr_matrix, np.ndarray],
                            ) -> np.ndarray:
     """
     Compute connections strength between labels (based on pairwise distances), normalized by counts of each label
@@ -555,7 +481,47 @@ def interlabel_connections(label: Label,
 
     connections = normalized_onehot @ weights_matrix @ normalized_onehot.T
 
-    if sp.issparse(connections):
+    if scipy.sparse.issparse(connections):
         connections = connections.toarray()
 
     return connections
+
+
+
+# --------------------------------------- Label Curation and Label Processing --------------------------------------- #
+def create_label_class(adata: AnnData,
+                       cat_key: Union[str, List[str]]) -> Union[Label, List[Label]]:
+    """
+    Wraps categorical labels into custom Label class for downstream processing.
+
+    Args:
+        adata : class ~`anndata.AnnData`
+        cat_key : str or list of str
+            Keys in .obs containing categorical labels. This function and the Label class provide the most utility when
+            this is used in conjunction with the results of multiple different runs of the Louvain algorithm
+
+    Returns:
+        label : class ~`Label` or list of ~`Label`
+            Either an object of Label class or a list where each element is an object of Label class. Will return a
+            list if given multiple arguments to 'cat_key'.
+    """
+    # Convert categorical labels to numerical and save mapping to have both numerical and categorical labels:
+    if isinstance(cat_key, str):
+        str_cat = np.unique(adata.obs[cat_key].values)
+        num_cat = range(len(str_cat))
+        map_dict = dict(zip(num_cat, str_cat))
+        all_num_labels = adata.obs[cat_key].replace(str_cat, num_cat)
+
+        label = Label(all_num_labels.to_numpy(), str_map=map_dict)
+        return label
+    else:
+        all_labels = []
+        for key in cat_key:
+            str_cat = np.unique(adata.obs[key].values)
+            num_cat = range(len(str_cat))
+            map_dict = dict(zip(num_cat, str_cat))
+            all_num_labels = adata.obs[key].replace(str_cat, num_cat)
+
+            label = Label(all_num_labels.to_numpy(), str_map=map_dict)
+            all_labels.append(label)
+        return all_labels
