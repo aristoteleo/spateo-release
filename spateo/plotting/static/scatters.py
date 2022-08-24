@@ -17,29 +17,13 @@ from pandas.api.types import is_categorical_dtype
 from typing_extensions import Literal
 
 from ...configuration import SKM, _themes, reset_rcParams
-from ...tools.utils import (
-    affine_transform,
-    calc_1nd_moment,
-    flatten,
-    gen_rotation_2d,
-    get_mapper,
-    update_dict,
-)
-from .utils import (
-    _datashade_points,
-    _get_adata_color_vec,
-    _matplotlib_points,
-    _select_font_color,
-    arrowed_spines,
-    deaxis_all,
-    despline_all,
-    is_cell_anno_column,
-    is_gene_name,
-    is_layer_keys,
-    is_list_of_lists,
-    save_fig,
-    save_return_show_fig_utils,
-)
+from ...tools.utils import (affine_transform, calc_1nd_moment, flatten,
+                            gen_rotation_2d, get_mapper, update_dict)
+from .utils import (_datashade_points, _get_adata_color_vec,
+                    _matplotlib_points, _select_font_color, arrowed_spines,
+                    deaxis_all, despline_all, is_cell_anno_column,
+                    is_gene_name, is_layer_keys, is_list_of_lists, save_fig,
+                    save_return_show_fig_utils)
 
 # from ..tools.moments import calc_1nd_moment
 # from ..docrep import DocstringProcessor

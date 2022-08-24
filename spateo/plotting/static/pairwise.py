@@ -4,19 +4,19 @@ conditions or using different clustering parameters).
 
 These functions build on the Label class- see spateo.utils.Label for documentation
 """
-from ...utils import Label, interlabel_connections
-
 from typing import Union
-import numpy as np
-import scipy
-
-from anndata import AnnData
 
 import matplotlib as mpl
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from matplotlib.ticker import StrMethodFormatter
 import matplotlib.pyplot as plt
+import numpy as np
+import scipy
+from anndata import AnnData
 from matplotlib.collections import PolyCollection
+from matplotlib.ticker import StrMethodFormatter
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+from ...utils import Label, interlabel_connections
+
 plt.rcParams["figure.dpi"] = 300
 
 

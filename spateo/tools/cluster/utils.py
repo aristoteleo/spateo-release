@@ -227,9 +227,7 @@ def pearson_residuals(
         Updates adata with the field ``adata.obsm["pearson_residuals"]``, containing pearson_residuals.
     """
     from dynamo.external.pearson_residual_recipe import (
-        compute_highly_variable_genes,
-        compute_pearson_residuals,
-    )
+        compute_highly_variable_genes, compute_pearson_residuals)
 
     if not (n_top_genes is None):
         compute_highly_variable_genes(

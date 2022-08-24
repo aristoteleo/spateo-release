@@ -1,17 +1,17 @@
 """
 Functions for finding nearest neighbors and the distances between them in spatial transcriptomics data.
 """
-from typing import Optional, Union, Tuple
+from typing import Optional, Tuple, Union
+
 import anndata
 import numpy as np
-from sklearn.neighbors import NearestNeighbors
 import scipy
-from torch import Tensor, FloatTensor
+from sklearn.neighbors import NearestNeighbors
+from torch import FloatTensor, Tensor
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
 from ..utils import row_normalize
-
 
 
 # ------------------------------------------ Cell-cell/spot-spot distance ------------------------------------------ #

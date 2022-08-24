@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple, Union
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import geopandas as gpd
+
 import matplotlib
 import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
@@ -950,7 +951,6 @@ def interactive(
     """
     import bokeh.plotting as bpl
     import bokeh.transform as btr
-
     # from bokeh.plotting import output_notebook, output_file, show
     import datashader as ds
     import holoviews as hv

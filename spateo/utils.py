@@ -1,8 +1,9 @@
-from anndata import AnnData
-from typing import Union, Tuple, List
 import copy
+from typing import List, Tuple, Union
+
 import numpy as np
 import scipy
+from anndata import AnnData
 
 from .logging import logger_manager as lm
 
