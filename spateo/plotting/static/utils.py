@@ -951,6 +951,7 @@ def interactive(
     """
     import bokeh.plotting as bpl
     import bokeh.transform as btr
+
     # from bokeh.plotting import output_notebook, output_file, show
     import datashader as ds
     import holoviews as hv

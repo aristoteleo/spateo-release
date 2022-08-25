@@ -4,7 +4,7 @@ conditions or using different clustering parameters).
 
 These functions build on the Label class- see spateo.utils.Label for documentation
 """
-from typing import Union, List, Tuple
+from typing import List, Tuple, Union
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -182,4 +182,4 @@ def plot_connections(
             ticklabels[n].set_color(id_colors[id])
 
     ax.set_title(title_str, fontsize=title_fontsize, fontweight="bold")
-    #plt.show()
+    # plt.show()
