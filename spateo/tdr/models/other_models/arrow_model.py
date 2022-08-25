@@ -34,7 +34,7 @@ def _construct_arrow(
         tip_resolution: Number of faces around the tip.
         shaft_radius: Radius of the shaft.
         shaft_resolution: Number of faces around the shaft.
-        scale: Scale factor of the entire object. 'auto' scales to length of direction array.
+        scale: Scale factor of the entire object. ``'auto'`` scales to length of direction array.
 
     Returns:
         Arrow model.
@@ -73,7 +73,7 @@ def construct_arrow(
         label: The label of arrow model.
         color: Color to use for plotting model.
         alpha: The opacity of the color to use for plotting model.
-        **kwargs: Additional parameters that will be passed to _construct_arrow function.
+        **kwargs: Additional parameters that will be passed to ``_construct_arrow`` function.
 
     Returns:
         Arrow model.
@@ -118,15 +118,15 @@ def construct_arrows(
         direction: Direction the arrows points to in [x, y, z].
         arrows_scale: Scale factor of the entire object.
         n_sampling: n_sampling is the number of coordinates to keep after sampling. If there are too many coordinates
-                    in start_points, the generated arrows model will be too complex   and unsightly, so sampling is
+                    in start_points, the generated arrows model will be too complex and unsightly, so sampling is
                     used to reduce the number of coordinates.
-        sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
+        sampling_method: The method to sample data points, can be one of ``['trn', 'kmeans', 'random']``.
         factor: Scale factor applied to scaling array.
         key_added: The key under which to add the labels.
         label: The label of arrows models.
         color: Color to use for plotting model.
         alpha: The opacity of the color to use for plotting model.
-        **kwargs: Additional parameters that will be passed to _construct_arrow function.
+        **kwargs: Additional parameters that will be passed to ``_construct_arrow`` function.
 
     Returns:
         Arrows model.
@@ -134,17 +134,14 @@ def construct_arrows(
 
     from dynamo.tools.sampling import sample
 
+    index_arr = np.arange(0, start_points.shape[0])
     if not (n_sampling is None):
-        index_arr = np.arange(0, start_points.shape[0])
-        sampling_arr = sample(
+        index_arr = sample(
             arr=index_arr,
             n=n_sampling,
             method=sampling_method,
             X=start_points,
         )
-        start_points = start_points[sampling_arr, :]
-        direction = direction[sampling_arr, :]
-        arrows_scale = None if arrows_scale is None else arrows_scale[sampling_arr, :]
     else:
         if len(start_points) > 500:
             lm.main_warning(
@@ -152,12 +149,16 @@ def construct_arrows(
                 f"lower the max number of arrows to draw."
             )
 
+    start_points = start_points[index_arr, :].copy()
+    direction = direction[index_arr, :].copy()
     model = pv.PolyData(start_points)
     model.point_data["direction"] = direction
-    model.point_data["scale"] = np.linalg.norm(direction.copy(), axis=1) if arrows_scale is None else arrows_scale
+    model.point_data["scale"] = (
+        np.linalg.norm(direction, axis=1) if arrows_scale is None else arrows_scale[index_arr, :]
+    )
 
-    labels = np.asarray([label] * model.n_points) if isinstance(label, str) else label
-    assert len(labels) == model.n_points, "The number of labels is not equal to the number of start points."
+    labels = np.asarray([label] * len(start_points)) if isinstance(label, str) else np.asarray(label)[index_arr]
+    assert len(labels) == len(start_points), "The number of labels is not equal to the number of start points."
     if not (key_added is None):
         add_model_labels(
             model=model,

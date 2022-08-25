@@ -37,8 +37,8 @@ def add_model_labels(
 
     Returns:
          A model, which contains the following properties:
-            `model.cell_data[key_added]` or `model.point_data[key_added]`, the labels array;
-            `model.cell_data[f'{key_added}_rgba']` or `model.point_data[f'{key_added}_rgba']`, the rgba colors of the labels.
+            ``model.cell_data[key_added]`` or ``model.point_data[key_added]``, the labels array;
+            ``model.cell_data[f'{key_added}_rgba']`` or ``model.point_data[f'{key_added}_rgba']``, the rgba colors of the labels.
     """
 
     model = model.copy() if not inplace else model

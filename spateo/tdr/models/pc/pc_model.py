@@ -32,19 +32,19 @@ def construct_pc(
 
     Args:
         adata: AnnData object.
-        spatial_key: The key in `.obsm` that corresponds to the spatial coordinate of each bucket.
-        groupby: The key that stores clustering or annotation information in adata.obs,
-                 a gene's name or a list of genes' name in adata.var.
+        spatial_key: The key in ``.obsm`` that corresponds to the spatial coordinate of each bucket.
+        groupby: The key that stores clustering or annotation information in ``.obs``,
+                 a gene name or a list of gene names in ``.var``.
         key_added: The key under which to add the labels.
         mask: The part that you don't want to be displayed.
-        colormap: Colors to use for plotting pcd. The default colormap is `'rainbow'`.
-        alphamap: The opacity of the colors to use for plotting pcd. The default alphamap is `1.0`.
+        colormap: Colors to use for plotting pcd. The default colormap is ``'rainbow'``.
+        alphamap: The opacity of the colors to use for plotting pcd. The default alphamap is ``1.0``.
 
     Returns:
         pc: A point cloud, which contains the following properties:
-            `pc.point_data[key_added]`, the `groupby` information.
-            `pc.point_data[f'{key_added}_rgba']`, the rgba colors of the `groupby` information.
-            `pc.point_data["obs_index"]`, the obs_index of each coordinate in the original adata.
+            ``pc.point_data[key_added]``, the ``groupby`` information.
+            ``pc.point_data[f'{key_added}_rgba']``, the rgba colors of the ``groupby`` information.
+            ``pc.point_data['obs_index']``, the obs_index of each coordinate in the original adata.
     """
 
     # create an initial pc.

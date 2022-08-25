@@ -15,7 +15,7 @@ def construct_development_X(
     stages_X: List[np.ndarray],
     n_spacing: Optional[int] = None,
     key_added: str = "develop",
-    label: Optional[Union[str, list]] = None,
+    label: Optional[Union[str, list, np.ndarray]] = None,
     color: Union[str, list, dict] = "skyblue",
     alpha: Union[float, list, dict] = 1.0,
 ) -> MultiBlock:
@@ -50,10 +50,10 @@ def construct_development_X(
     if isinstance(label, (str, int, float)) or label is None:
         label = "cell_state" if label is None else label
         labels = [np.asarray([f"{label}_{i}"] * pts.shape[0]) for i, pts in enumerate(cells_points)]
-    elif isinstance(label, list) and len(label) == len(cells_points):
+    elif isinstance(label, (list, np.ndarray)) and len(label) == len(cells_points):
         labels = (
             label
-            if isinstance(label[0], list)
+            if isinstance(label[0], (list, np.ndarray))
             else [np.asarray([la] * pts.shape[0]) for la, pts in zip(label, cells_points)]
         )
     else:
@@ -87,7 +87,7 @@ def construct_development_fate(
     logspace: bool = False,
     t_end: Optional[Union[int, float]] = None,
     key_added: str = "develop",
-    label: Optional[Union[str, list]] = None,
+    label: Optional[Union[str, list, np.ndarray]] = None,
     color: Union[str, list, dict] = "skyblue",
     alpha: Union[float, list, dict] = 1.0,
 ) -> MultiBlock:
@@ -96,7 +96,7 @@ def construct_development_fate(
     need to enter the three-dimensional coordinates of the cells at different developmental stages.
 
     Args:
-        adata: AnnData object that contains the fate prediction in the `.uns` attribute.
+        adata: AnnData object that contains the fate prediction in the ``.uns`` attribute.
         fate_key: The key under which are the active fate information.
         n_steps: The number of times steps fate prediction will take.
         logspace: Whether or to sample time points linearly on log space. If not, the sorted unique set of all times
@@ -124,7 +124,7 @@ def construct_development_fate(
     t = list(adata.uns[fate_key]["t"].values())
     flats = np.unique([int(item) for sublist in t for item in sublist])
     flats = np.hstack((0, flats))
-    flats = np.sort(flats[flats <= t_end])
+    flats = np.sort(flats) if t_end is None else np.sort(flats[flats <= t_end])
     time_vec = (
         np.logspace(0, np.log10(max(flats) + 1), n_steps) - 1
         if logspace
@@ -156,7 +156,7 @@ def construct_trajectory_X(
     n_sampling: Optional[int] = None,
     sampling_method: str = "trn",
     key_added: str = "trajectory",
-    label: Optional[Union[str, list]] = None,
+    label: Optional[Union[str, list, np.ndarray]] = None,
     tip_factor: Union[int, float] = 10,
     tip_radius: float = 0.2,
     trajectory_color: Union[str, list, dict] = "gainsboro",
@@ -172,7 +172,7 @@ def construct_trajectory_X(
         n_sampling: n_sampling is the number of coordinates to keep after sampling. If there are too many coordinates
                     in start_points, the generated arrows model will be too complex and unsightly, so sampling is
                     used to reduce the number of coordinates.
-        sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
+        sampling_method: The method to sample data points, can be one of ``['trn', 'kmeans', 'random']``.
         key_added: The key under which to add the labels.
         label: The label of trajectory model.
         tip_factor: Scale factor applied to scaling the tips.
@@ -269,7 +269,7 @@ def construct_trajectory_fate(
     n_sampling: Optional[int] = None,
     sampling_method: str = "trn",
     key_added: str = "trajectory",
-    label: str = "cell_trajectory",
+    label: Optional[Union[str, list, np.ndarray]] = None,
     tip_factor: Union[int, float] = 10,
     tip_radius: float = 0.2,
     trajectory_color: str = "gainsboro",
@@ -280,12 +280,12 @@ def construct_trajectory_fate(
     Reconstruction of cell developmental trajectory model based on cell fate prediction.
 
     Args:
-        adata: AnnData object that contains the fate prediction in the `.uns` attribute.
+        adata: AnnData object that contains the fate prediction in the ``.uns`` attribute.
         fate_key: The key under which are the active fate information.
-        n_sampling: n_sampleing is the number of coordinates to keep after sampling. If there are too many coordinates
+        n_sampling: n_sampling is the number of coordinates to keep after sampling. If there are too many coordinates
                     in start_points, the generated arrows model will be too complex and unsightly, so sampling is
                     used to reduce the number of coordinates.
-        sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
+        sampling_method: The method to sample data points, can be one of ``['trn', 'kmeans', 'random']``.
         key_added: The key under which to add the labels.
         label: The label of trajectory model.
         tip_factor: Scale factor applied to scaling the tips.

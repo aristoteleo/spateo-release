@@ -151,9 +151,18 @@ def models_align(
         mapping_A_dict, mapping_B_dict = mapping_aligned_coords(X=modelA_coords, Y=modelB_coords, pi=pi)
 
         modelA.uns[f"latter_{mapping_key_added}"] = mapping_A_dict.copy()
+        modelA.uns[f"latter_{mapping_key_added}"]["raw_X"] = modelA.obsm[spatial_key][mapping_A_dict["pi_index"][:, 0]]
+        modelA.uns[f"latter_{mapping_key_added}"]["raw_Y"] = modelB.obsm[spatial_key][mapping_A_dict["pi_index"][:, 1]]
+        modelA.uns[f"latter_{mapping_key_added}"]["mapping_relations"] = {"t": mapping_dict["tX"], "R": None}
         modelA.uns[f"latter_{mapping_key_added}"]["mapping_relations"] = {"t": mapping_dict["tX"], "R": None}
 
         modelB.uns[f"former_{mapping_key_added}"] = mapping_B_dict.copy()
+        modelB.uns[f"former_{mapping_key_added}"]["raw_X"] = modelA.obsm[spatial_key][
+            mapping_B_dict["pi_index"][:, 0].flatten()
+        ]
+        modelB.uns[f"former_{mapping_key_added}"]["raw_Y"] = modelB.obsm[spatial_key][
+            mapping_B_dict["pi_index"][:, 1].flatten()
+        ]
         modelB.uns[f"former_{mapping_key_added}"]["mapping_relations"] = {
             "t": mapping_dict["tY"],
             "R": mapping_dict["R"],
@@ -343,6 +352,12 @@ def models_center_align(
 
         center_model.uns[mapping_key_added] = {"mapping_relations": {"t": mapping_dict["tX"], "R": None}}
         model.uns[f"center_{mapping_key_added}"] = mapping_aligned_coords(X=center_coords, Y=model_coords, pi=pi)[1]
+        model.uns[f"center_{mapping_key_added}"]["raw_X"] = center_model.obsm[spatial_key][
+            model.uns[f"center_{mapping_key_added}"]["pi_index"][:, 0]
+        ]
+        model.uns[f"center_{mapping_key_added}"]["raw_Y"] = model.obsm[spatial_key][
+            model.uns[f"center_{mapping_key_added}"]["pi_index"][:, 1]
+        ]
         model.uns[f"center_{mapping_key_added}"]["mapping_relations"] = {
             "t": mapping_dict["tY"],
             "R": mapping_dict["R"],
@@ -352,14 +367,7 @@ def models_center_align(
         modelA = align_models[i]
         modelB = align_models[i + 1]
 
-        mapping_coords_dict = mapping_center_coords(
-            X=modelA.uns[f"center_{mapping_key_added}"]["mapping_Y"].copy(),
-            Y=modelB.uns[f"center_{mapping_key_added}"]["mapping_Y"].copy(),
-            mid_X=modelA.uns[f"center_{mapping_key_added}"]["pi_index"][:, [0]].copy(),
-            mid_Y=modelB.uns[f"center_{mapping_key_added}"]["pi_index"][:, [0]].copy(),
-            pi_value_X=modelA.uns[f"center_{mapping_key_added}"]["pi_value"].copy(),
-            pi_value_Y=modelB.uns[f"center_{mapping_key_added}"]["pi_value"].copy(),
-        )
+        mapping_coords_dict = mapping_center_coords(modelA, modelB, center_key=f"center_{mapping_key_added}")
         modelA.uns[f"latter_{mapping_key_added}"] = mapping_coords_dict.copy()
         modelB.uns[f"former_{mapping_key_added}"] = mapping_coords_dict.copy()
 

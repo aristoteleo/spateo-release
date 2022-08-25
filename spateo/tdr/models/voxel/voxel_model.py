@@ -72,11 +72,11 @@ def voxelize_mesh(
 
     Args:
         mesh: A surface mesh model.
-        voxel_pc: A voxel model which contains the `voxel_pc.cell_data['obs_index']` and `voxel_pc.cell_data[key_added]`.
+        voxel_pc: A voxel model which contains the ``voxel_pc.cell_data['obs_index']`` and ``voxel_pc.cell_data[key_added]``.
         key_added: The key under which to add the labels.
         label: The label of reconstructed voxel model.
-        color: Color to use for plotting mesh. The default color is `'gainsboro'`.
-        alpha: The opacity of the color to use for plotting model. The default alpha is `0.8`.
+        color: Color to use for plotting mesh. The default color is ``'gainsboro'``.
+        alpha: The opacity of the color to use for plotting model. The default alpha is ``0.8``.
         smooth: The smoothness of the voxel model.
 
     Returns:
