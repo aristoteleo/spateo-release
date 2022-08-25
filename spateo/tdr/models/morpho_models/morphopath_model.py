@@ -157,7 +157,7 @@ def construct_trajectory_X(
     sampling_method: str = "trn",
     key_added: str = "trajectory",
     label: Optional[Union[str, list, np.ndarray]] = None,
-    tip_factor: Union[int, float] = 10,
+    tip_factor: Union[int, float] = 5,
     tip_radius: float = 0.2,
     trajectory_color: Union[str, list, dict] = "gainsboro",
     tip_color: Union[str, list, dict] = "gainsboro",
