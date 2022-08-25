@@ -7,12 +7,12 @@ These functions build on the Label class- see spateo.utils.Label for documentati
 from typing import List, Tuple, Union
 
 import matplotlib as mpl
+import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 from anndata import AnnData
 from matplotlib.collections import PolyCollection
-import matplotlib.patheffects as PathEffects
 from matplotlib.ticker import StrMethodFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 

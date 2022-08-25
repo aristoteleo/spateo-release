@@ -3,9 +3,9 @@ Functions for finding nearest neighbors and the distances between them in spatia
 """
 from typing import Tuple, Union
 
-from anndata import AnnData
 import numpy as np
 import scipy
+from anndata import AnnData
 from sklearn.neighbors import NearestNeighbors
 from torch import FloatTensor, Tensor
 
