@@ -11,16 +11,9 @@ except ImportError:
     from typing_extensions import Literal
 
 from ....tdr import collect_model
-from .three_dims_plotter import (
-    _set_jupyter,
-    add_legend,
-    add_model,
-    add_outline,
-    add_text,
-    create_plotter,
-    output_plotter,
-    save_plotter,
-)
+from .three_dims_plotter import (_set_jupyter, add_legend, add_model,
+                                 add_outline, add_text, create_plotter,
+                                 output_plotter, save_plotter)
 
 
 def wrap_to_plotter(
