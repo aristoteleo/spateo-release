@@ -7,9 +7,13 @@ from anndata import AnnData
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-from .paste import (center_align, generalized_procrustes_analysis,
-                    mapping_aligned_coords, mapping_center_coords,
-                    pairwise_align)
+from .paste import (
+    center_align,
+    generalized_procrustes_analysis,
+    mapping_aligned_coords,
+    mapping_center_coords,
+    pairwise_align,
+)
 
 
 def rigid_transform_2D(
