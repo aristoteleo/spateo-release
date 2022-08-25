@@ -4,15 +4,15 @@ conditions or using different clustering parameters).
 
 These functions build on the Label class- see spateo.utils.Label for documentation
 """
-from typing import Union, List, Tuple
+from typing import List, Tuple, Union
 
 import matplotlib as mpl
+import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 from anndata import AnnData
 from matplotlib.collections import PolyCollection
-import matplotlib.patheffects as PathEffects
 from matplotlib.ticker import StrMethodFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
@@ -182,4 +182,4 @@ def plot_connections(
             ticklabels[n].set_color(id_colors[id])
 
     ax.set_title(title_str, fontsize=title_fontsize, fontweight="bold")
-    #plt.show()
+    # plt.show()
