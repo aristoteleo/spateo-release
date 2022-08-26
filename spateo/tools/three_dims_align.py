@@ -116,7 +116,7 @@ def models_align(
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
         device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``
-        **kwargs: Additional parameters that will be passed to pairwise_align function.
+        **kwargs: Additional parameters that will be passed to ``pairwise_align`` function.
 
     Returns:
         List of models (AnnData Object) after alignment.
@@ -213,7 +213,7 @@ def models_align_ref(
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
         device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``
-        **kwargs: Additional parameters that will be passed to pairwise_align function.
+        **kwargs: Additional parameters that will be passed to ``pairwise_align`` function.
 
     Returns:
         align_models: List of models (AnnData Object) after alignment.

@@ -1,6 +1,7 @@
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
+import pandas as pd
 import pyvista as pv
 from anndata import AnnData
 from pyvista import MultiBlock
@@ -11,8 +12,90 @@ except ImportError:
     from typing_extensions import Literal
 
 from ...logging import logger_manager as lm
+from ...tools import pairwise_align
 from ..models import add_model_labels, collect_model
 from .interpolations import get_X_Y_grid
+
+
+def cell_directions(
+    adatas: List[AnnData],
+    layer: str = "X",
+    spatial_key: str = "align_spatial",
+    key_added: str = "mapping",
+    alpha: float = 0.001,
+    numItermax: int = 200,
+    numItermaxEmd: int = 100000,
+    dtype: str = "float32",
+    device: str = "cpu",
+    inplace: bool = True,
+    **kwargs,
+) -> List[AnnData]:
+    """
+    Obtain the optimal mapping relationship and developmental direction between cells for samples between continuous developmental stages.
+
+    Args:
+        adatas: AnnData object of samples from continuous developmental stages.
+        layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        spatial_key: The key in ``.obsm`` that corresponds to the spatial coordinate of each cell.
+        The key that will be used for the vector field key in ``.uns``.
+        key_added: The key that will be used in ``.obsm``.
+
+                  * ``X_{key_added}``-The ``X_{key_added}`` that will be used for the coordinates of the cell that maps optimally in the next stage.
+                  * ``V_{key_added}``-The ``V_{key_added}`` that will be used for the cell developmental directions.
+        alpha: Alignment tuning parameter. Note: 0 <= alpha <= 1.
+
+               When ``alpha = 0`` only the gene expression data is taken into account,
+               while when ``alpha =1`` only the spatial coordinates are taken into account.
+        numItermax: Max number of iterations for cg during FGW-OT.
+        numItermaxEmd: Max number of iterations for emd during FGW-OT.
+        dtype: The floating-point number type. Only ``float32`` and ``float64``.
+        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``
+        inplace: Whether to copy adata or modify it inplace.
+        **kwargs: Additional parameters that will be passed to ``pairwise_align`` function.
+
+    Returns:
+        An ``AnnData`` object is updated/copied with the ``X_{key_added}`` and ``V_{key_added}`` in the ``.obsm`` attribute.
+    """
+    mapping_adatas = adatas if inplace else [adata.copy() for adata in adatas]
+    for i in lm.progress_logger(range(len(mapping_adatas) - 1), progress_name="Cell Directions"):
+
+        adataA = mapping_adatas[i]
+        adataB = mapping_adatas[i + 1]
+
+        # Calculate and returns optimal alignment of two models.
+        pi, _ = pairwise_align(
+            sampleA=adataA.copy(),
+            sampleB=adataB.copy(),
+            spatial_key=spatial_key,
+            layer=layer,
+            alpha=alpha,
+            numItermax=numItermax,
+            numItermaxEmd=numItermaxEmd,
+            dtype=dtype,
+            device=device,
+            **kwargs,
+        )
+
+        max_index = np.argwhere((pi.T == pi.T.max(axis=0)).T)
+        pi_value = pi[max_index[:, 0], max_index[:, 1]].reshape(-1, 1)
+
+        mapping_data = pd.DataFrame(
+            np.concatenate([max_index, pi_value], axis=1),
+            columns=["index_x", "index_y", "pi_value"],
+        ).astype(
+            dtype={
+                "index_x": np.int32,
+                "index_y": np.int32,
+                "pi_value": np.float32,
+            }
+        )
+        mapping_data.sort_values(by=["index_x", "pi_value"], ascending=[True, False], inplace=True)
+        mapping_data.drop_duplicates(subset=["index_x"], keep="first", inplace=True)
+
+        adataA.obsm[f"X_{key_added}"] = adataB.obsm[spatial_key][mapping_data["index_y"].values]
+        adataA.obsm[f"V_{key_added}"] = adataA.obsm[f"X_{key_added}"] - adataA.obsm[spatial_key]
+
+    return None if inplace else mapping_adatas
 
 
 def _morphofield(
@@ -32,8 +115,8 @@ def _morphofield(
     Calculating and predicting the vector field during development by the Kernel method (sparseVFC).
 
     Args:
-        X: The spatial coordinates of each data point.
-        V: The developmental direction of each data point.
+        X: The spatial coordinates of each cell.
+        V: The developmental direction of each cell.
         NX: The spatial coordinates of new data point (grid). If ``NX`` is None, generate grid based on ``grid_num``.
         grid_num: The number of grids in each dimension for generating the grid velocity. Default is ``[50, 50, 50]``.
         M: The number of basis functions to approximate the vector field.
@@ -155,8 +238,8 @@ def _morphofield(
 
 def morphofield(
     adata: AnnData,
-    mapping_key: str = "model_align",
-    spatial_key: Literal["mapping", "raw"] = "mapping",
+    spatial_key: str = "align_spatial",
+    V_key: str = "V_mapping",
     key_added: str = "VecFld_morpho",
     NX: Optional[np.ndarray] = None,
     grid_num: Optional[List[int]] = None,
@@ -174,11 +257,8 @@ def morphofield(
 
     Args:
         adata: AnnData object that contains the cell coordinates of the two states after alignment.
-        mapping_key: The key from the ``.uns`` that corresponds to the cell coordinates.
-        spatial_key: The key from the ``.uns[mapping_key]`` that corresponds to the cell coordinates.
-
-                     If ``spatial_key = 'mapping'``, the vector field is constructed using the aligned coordinates.
-                     If ``spatial_key = 'raw'``, the vector field is constructed using the raw coordinates.
+        spatial_key: The key from the ``.obsm`` that corresponds to the spatial coordinates of each cell.
+        V_key: The key from the ``.obsm`` that corresponds to the developmental direction of each cell.
         key_added: The key that will be used for the vector field key in ``.uns``.
         NX: The spatial coordinates of new data point. If NX is None, generate new points based on grid_num.
         grid_num: The number of grids in each dimension for generating the grid velocity. Default is ``[50, 50, 50]``.
@@ -193,6 +273,7 @@ def morphofield(
                       be trapped in some local optimal.
         restart_num: The number of retrials for vector field reconstructions.
         restart_seed: A list of seeds for each retrial. Must be the same length as ``restart_num`` or None.
+        inplace: Whether to copy adata or modify it inplace.
         **kwargs: Additional parameters that will be passed to ``SparseVFC`` function.
 
     Returns:
@@ -228,14 +309,9 @@ def morphofield(
     """
 
     adata = adata if inplace else adata.copy()
-
-    align_spatial_data = adata.uns[mapping_key].copy()
-    X = np.asarray(align_spatial_data[f"{spatial_key}_X"], dtype=float)
-    V = np.asarray(align_spatial_data[f"{spatial_key}_Y"], dtype=float) - X
-
     adata.uns[key_added] = _morphofield(
-        X=X,
-        V=V,
+        X=np.asarray(adata.obsm[spatial_key], dtype=float),
+        V=np.asarray(adata.obsm[V_key], dtype=float),
         NX=NX,
         grid_num=grid_num,
         M=M,
