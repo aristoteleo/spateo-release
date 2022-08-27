@@ -2,9 +2,7 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import pyvista as pv
 from anndata import AnnData
-from pyvista import MultiBlock
 
 try:
     from typing import Literal
@@ -13,7 +11,6 @@ except ImportError:
 
 from ...logging import logger_manager as lm
 from ...tools import pairwise_align
-from ..models import add_model_labels, collect_model
 from .interpolations import get_X_Y_grid
 
 
@@ -29,7 +26,7 @@ def cell_directions(
     device: str = "cpu",
     inplace: bool = True,
     **kwargs,
-) -> List[AnnData]:
+) -> Optional[List[AnnData]]:
     """
     Obtain the optimal mapping relationship and developmental direction between cells for samples between continuous developmental stages.
 
@@ -98,7 +95,7 @@ def cell_directions(
     return None if inplace else mapping_adatas
 
 
-def _morphofield(
+def morphofield_X(
     X: np.ndarray,
     V: np.ndarray,
     NX: Optional[np.ndarray] = None,
@@ -309,7 +306,7 @@ def morphofield(
     """
 
     adata = adata if inplace else adata.copy()
-    adata.uns[key_added] = _morphofield(
+    adata.uns[key_added] = morphofield_X(
         X=np.asarray(adata.obsm[spatial_key], dtype=float),
         V=np.asarray(adata.obsm[V_key], dtype=float),
         NX=NX,
@@ -322,6 +319,178 @@ def morphofield(
         restart_seed=restart_seed,
         **kwargs,
     )
+
+    return None if inplace else adata
+
+
+def _generate_vf_class(adata: AnnData, vf_key: str):
+    from dynamo.vectorfield.scVectorField import SvcVectorField
+
+    vector_field_class = SvcVectorField()
+    vector_field_class.from_adata(adata, basis=None, vf_key=vf_key)
+    return vector_field_class
+
+
+def morphofield_curvature(
+    adata: AnnData,
+    vf_key: str = "VecFld_morpho",
+    key_added: str = "curvature",
+    formula: int = 2,
+    method: str = "analytical",
+    inplace: bool = True,
+) -> Optional[AnnData]:
+    """
+    Calculate curvature for each cell with the reconstructed vector field function.
+
+    Args:
+        adata: AnnData object that contains the reconstructed vector field.
+        vf_key: The key in ``.uns`` that corresponds to the reconstructed vector field.
+        key_added: The key that will be used for the curvature key in ``.obs`` and ``.obsm``.
+        formula: Which formula of curvature will be used, there are two formulas, so formula can be either ``{1, 2}``.
+                 By default it is 2 and returns both the curvature vectors and the norm of the curvature. The formula
+                 one only gives the norm of the curvature.
+        method: The method that will be used for calculating curvature field, either ``'analytical'`` or ``'numerical'``.
+
+                ``'analytical'`` method uses the analytical expressions for calculating curvature while ``'numerical'``
+                method uses numdifftools, a numerical differentiation tool, for computing curvature. ``'analytical'``
+                method is much more efficient.
+        inplace: Whether to copy adata or modify it inplace.
+
+    Returns:
+        An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` and ``.obsm`` attribute.
+
+        The  ``key_added`` in the ``.obs`` which contains curvature.
+        The  ``key_added`` in the ``.obsm`` which contains curvature vectors.
+
+    """
+
+    adata = adata if inplace else adata.copy()
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+
+    X, V = vector_field_class.get_data()
+    adata.obs[key_added], adata.obsm[key_added] = vector_field_class.compute_curvature(
+        X=X, formula=formula, method=method
+    )
+    return None if inplace else adata
+
+
+def morphofield_acceleration(
+    adata: AnnData,
+    vf_key: str = "VecFld_morpho",
+    key_added: str = "acceleration",
+    method: str = "analytical",
+    inplace: bool = True,
+) -> Optional[AnnData]:
+    """
+    Calculate acceleration for each cell with the reconstructed vector field function.
+
+    Args:
+        adata: AnnData object that contains the reconstructed vector field.
+        vf_key: The key in ``.uns`` that corresponds to the reconstructed vector field.
+        key_added: The key that will be used for the acceleration key in ``.obs`` and ``.obsm``.
+        method: The method that will be used for calculating acceleration field, either ``'analytical'`` or ``'numerical'``.
+
+                ``'analytical'`` method uses the analytical expressions for calculating acceleration while ``'numerical'``
+                method uses numdifftools, a numerical differentiation tool, for computing acceleration. ``'analytical'``
+                method is much more efficient.
+        inplace: Whether to copy adata or modify it inplace.
+
+    Returns:
+        An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` and ``.obsm`` attribute.
+
+        The  ``key_added`` in the ``.obs`` which contains acceleration.
+        The  ``key_added`` in the ``.obsm`` which contains acceleration vectors.
+
+    """
+
+    adata = adata if inplace else adata.copy()
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+
+    X, V = vector_field_class.get_data()
+    adata.obs[key_added], adata.obsm[key_added] = vector_field_class.compute_acceleration(X=X, method=method)
+    return None if inplace else adata
+
+
+def morphofield_torsion(
+    adata: AnnData,
+    vf_key: str = "VecFld_morpho",
+    key_added: str = "torsion",
+    method: str = "analytical",
+    inplace: bool = True,
+) -> Optional[AnnData]:
+    """
+    Calculate torsion for each cell with the reconstructed vector field function.
+
+    Args:
+        adata: AnnData object that contains the reconstructed vector field.
+        vf_key: The key in ``.uns`` that corresponds to the reconstructed vector field.
+        key_added: The key that will be used for the torsion key in ``.obs`` and ``.obsm``.
+        method: The method that will be used for calculating torsion field, either ``'analytical'`` or ``'numerical'``.
+
+                ``'analytical'`` method uses the analytical expressions for calculating torsion while ``'numerical'``
+                method uses numdifftools, a numerical differentiation tool, for computing torsion. ``'analytical'``
+                method is much more efficient.
+        inplace: Whether to copy adata or modify it inplace.
+
+    Returns:
+        An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` and ``.uns`` attribute.
+
+        The  ``key_added`` in the ``.obs`` which contains torsion.
+        The  ``key_added`` in the ``.uns`` which contains torsion vectors.
+    """
+
+    adata = adata if inplace else adata.copy()
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+
+    X, V = vector_field_class.get_data()
+    torsion_mat = vector_field_class.compute_torsion(X=X, method=method)
+    torsion = np.array([np.linalg.norm(i) for i in torsion_mat])
+
+    adata.obs[key_added] = torsion
+    adata.uns[key_added] = torsion_mat
+
+    return None if inplace else adata
+
+
+def morphofield_jacobian(
+    adata: AnnData,
+    vf_key: str = "VecFld_morpho",
+    key_added: str = "jacobian",
+    method: str = "analytical",
+    inplace: bool = True,
+) -> Optional[AnnData]:
+    """
+    Calculate jacobian for each cell with the reconstructed vector field function.
+
+    Args:
+        adata: AnnData object that contains the reconstructed vector field.
+        vf_key: The key in ``.uns`` that corresponds to the reconstructed vector field.
+        key_added: The key that will be used for the jacobian key in ``.obs`` and ``.obsm``.
+        method: The method that will be used for calculating jacobian field, either ``'analytical'`` or ``'numerical'``.
+
+                ``'analytical'`` method uses the analytical expressions for calculating jacobian while ``'numerical'``
+                method uses numdifftools, a numerical differentiation tool, for computing jacobian. ``'analytical'``
+                method is much more efficient.
+        inplace: Whether to copy adata or modify it inplace.
+
+    Returns:
+        An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` and ``.uns`` attribute.
+
+        The  ``key_added`` in the ``.obs`` which contains jacobian.
+        The  ``key_added`` in the ``.uns`` which contains jacobian vectors.
+    """
+
+    adata = adata if inplace else adata.copy()
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+
+    cell_idx = np.arange(adata.n_obs)
+    X, V = vector_field_class.get_data()
+    Jac_func = vector_field_class.get_Jacobian(X=X, method=method)
+    Js = Jac_func(X[cell_idx])
+    Js_det = [np.linalg.det(Js[:, :, i]) for i in np.arange(Js.shape[2])]
+
+    adata.obs[key_added] = Js_det
+    adata.uns[key_added] = {"jacobian": Js, "cell_idx": cell_idx}
 
     return None if inplace else adata
 
@@ -377,19 +546,20 @@ def morphopath(
     from dynamo.prediction.fate import fate
 
     adata = adata if inplace else adata.copy()
-    if vf_key not in adata.uns_keys():
+    fate_adata = adata.copy()
+    if vf_key not in fate_adata.uns_keys():
         raise Exception(
             f"You need to first perform sparseVFC before fate prediction, please run"
             f"st.tdr.develop_vectorfield(adata, key_added='{vf_key}' before running this function."
         )
-    if f"VecFld_{key_added}" not in adata.uns_keys():
-        adata.uns[f"VecFld_{key_added}"] = adata.uns[vf_key]
-    if f"X_{key_added}" not in adata.obsm_keys():
-        adata.obsm[f"X_{key_added}"] = adata.uns[f"VecFld_{key_added}"]["X"]
+    if f"VecFld_{key_added}" not in fate_adata.uns_keys():
+        fate_adata.uns[f"VecFld_{key_added}"] = fate_adata.uns[vf_key]
+    if f"X_{key_added}" not in fate_adata.obsm_keys():
+        fate_adata.obsm[f"X_{key_added}"] = fate_adata.uns[f"VecFld_{key_added}"]["X"]
 
     fate(
-        adata,
-        init_cells=adata.obs_names.tolist(),
+        fate_adata,
+        init_cells=fate_adata.obs_names.tolist(),
         basis=key_added,
         layer=layer,
         interpolation_num=interpolation_num,
@@ -399,8 +569,7 @@ def morphopath(
         cores=cores,
         **kwargs,
     )
-    adata.uns[key_added] = adata.uns[f"fate_{key_added}"].copy()
-    del adata.uns[f"fate_{key_added}"]
+    adata.uns[key_added] = fate_adata.uns[f"fate_{key_added}"].copy()
 
     cells_states = adata.uns[key_added]["prediction"]
     cells_times = adata.uns[key_added]["t"]

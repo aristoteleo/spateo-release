@@ -12,7 +12,16 @@ from .clip import interactive_box_clip, interactive_rectangle_clip
 from .deep_interpolation import DataSampler, DeepInterpolation
 from .interpolation_nn import *
 from .interpolations import deep_intepretation, get_X_Y_grid, kernel_interpolation
-from .morphogenesis import _morphofield, cell_directions, morphofield, morphopath
+from .morphogenesis import (
+    cell_directions,
+    morphofield,
+    morphofield_acceleration,
+    morphofield_curvature,
+    morphofield_jacobian,
+    morphofield_torsion,
+    morphofield_X,
+    morphopath,
+)
 from .morphology import model_morphology, pc_KDE
 from .nn_losses import *
 from .pick import (
