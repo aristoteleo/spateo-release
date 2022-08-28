@@ -436,7 +436,7 @@ def morphofield_torsion(
         An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` and ``.uns`` attribute.
 
         The  ``key_added`` in the ``.obs`` which contains torsion.
-        The  ``key_added`` in the ``.uns`` which contains torsion vectors.
+        The  ``key_added`` in the ``.uns`` which contains torsion matrix.
     """
 
     adata = adata if inplace else adata.copy()
@@ -477,20 +477,20 @@ def morphofield_jacobian(
         An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` and ``.uns`` attribute.
 
         The  ``key_added`` in the ``.obs`` which contains jacobian.
-        The  ``key_added`` in the ``.uns`` which contains jacobian vectors.
+        The  ``key_added`` in the ``.uns`` which contains jacobian matrix.
     """
 
     adata = adata if inplace else adata.copy()
     vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+    X, V = vector_field_class.get_data()
+    Jac_func = vector_field_class.get_Jacobian(method=method)
 
     cell_idx = np.arange(adata.n_obs)
-    X, V = vector_field_class.get_data()
-    Jac_func = vector_field_class.get_Jacobian(X=X, method=method)
-    Js = Jac_func(X[cell_idx])
+    Js = Jac_func(x=X[cell_idx])
     Js_det = [np.linalg.det(Js[:, :, i]) for i in np.arange(Js.shape[2])]
 
     adata.obs[key_added] = Js_det
-    adata.uns[key_added] = {"jacobian": Js, "cell_idx": cell_idx}
+    adata.uns[key_added] = Js
 
     return None if inplace else adata
 
