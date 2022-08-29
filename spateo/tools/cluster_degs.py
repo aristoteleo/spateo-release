@@ -237,7 +237,7 @@ def find_cluster_degs(
 
             # pvals
             if len(control_vals.nonzero()[0]) > 0:
-                pvals = mannwhitneyu(test_vals, control_vals)[1][0]
+                pvals = mannwhitneyu(test_vals, control_vals)[1]
             else:
                 pvals = 1
 
@@ -285,11 +285,11 @@ def find_cluster_degs(
 
                 # log2fc
                 control_mean = np.mean(control_vals, axis=0) + 1e-9
-                log2fc = np.log2(test_mean / control_mean + 10e-5)[0]
+                log2fc = np.log2(test_mean / control_mean + 10e-5)
 
                 # pvals
                 if len(control_vals.nonzero()[0]) > 0:
-                    pvals = mannwhitneyu(test_vals, control_vals)[1][0]
+                    pvals = mannwhitneyu(test_vals, control_vals)[1]
                 else:
                     pvals = 1
 

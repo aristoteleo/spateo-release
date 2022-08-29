@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple, Union
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import geopandas as gpd
+
 import matplotlib
 import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
