@@ -331,6 +331,33 @@ def _generate_vf_class(adata: AnnData, vf_key: str):
     return vector_field_class
 
 
+def morphofield_velocity(
+    adata: AnnData,
+    vf_key: str = "VecFld_morpho",
+    key_added: str = "velocity",
+    inplace: bool = True,
+) -> Optional[AnnData]:
+    """
+    Calculate the velocity for each cell with the reconstructed vector field function.
+
+    Args:
+        adata: AnnData object that contains the reconstructed vector field.
+        vf_key: The key in ``.uns`` that corresponds to the reconstructed vector field.
+        key_added: The key that will be used for the velocity key in ``.obsm``.
+        inplace: Whether to copy adata or modify it inplace.
+
+    Returns:
+        An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obsm`` attribute which contains velocities.
+    """
+    adata = adata if inplace else adata.copy()
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+
+    init_states = adata.uns[vf_key]["X"]
+    adata.obsm[key_added] = vector_field_class.func(init_states)
+
+    return None if inplace else adata
+
+
 def morphofield_curvature(
     adata: AnnData,
     vf_key: str = "VecFld_morpho",

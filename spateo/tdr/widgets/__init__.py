@@ -19,6 +19,7 @@ from .morphogenesis import (
     morphofield_curvature,
     morphofield_jacobian,
     morphofield_torsion,
+    morphofield_velocity,
     morphofield_X,
     morphopath,
 )
