@@ -400,7 +400,6 @@ def morphofield_acceleration(
 
         The  ``key_added`` in the ``.obs`` which contains acceleration.
         The  ``key_added`` in the ``.obsm`` which contains acceleration vectors.
-
     """
 
     adata = adata if inplace else adata.copy()
@@ -477,7 +476,7 @@ def morphofield_jacobian(
         An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` and ``.uns`` attribute.
 
         The  ``key_added`` in the ``.obs`` which contains jacobian.
-        The  ``key_added`` in the ``.uns`` which contains jacobian matrix.
+        The  ``key_added`` in the ``.uns`` which contains jacobian tensor.
     """
 
     adata = adata if inplace else adata.copy()
