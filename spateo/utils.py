@@ -102,10 +102,7 @@ class Label(object):
         self,
         labels_dense: Union[np.ndarray, list],
         str_map: Union[None, dict] = None,
-        verbose: bool = True,
     ) -> None:
-
-        self.verbose = verbose
         logger = lm.get_main_logger()
 
         # Check type, dimensions, ensure all elements non-negative
@@ -176,7 +173,7 @@ class Label(object):
         If not already computed, generate the sparse array from dense label array
         """
         if self.onehot is None:
-            self.onehot = self.generate_onehot(verbose=False)
+            self.onehot = self.generate_onehot()
 
         return self.onehot
 
@@ -185,42 +182,36 @@ class Label(object):
         Return normalized one-hot sparse array of labels.
         """
         if self.normalized_onehot is None:
-            self.normalized_onehot = self.generate_normalized_onehot(verbose=False)
+            self.normalized_onehot = self.generate_normalized_onehot()
 
         return self.normalized_onehot
 
-    def generate_normalized_onehot(
-        self,
-        verbose: bool = False,
-    ) -> scipy.sparse.csr_matrix:
+    def generate_normalized_onehot(self) -> scipy.sparse.csr_matrix:
         """
         Generate a normalized onehot matrix where each row is normalized by the count of that label
         e.g. a row [0 1 1 0 0] will be converted to [0 0.5 0.5 0 0]
         """
-        return row_normalize(self.get_onehot().astype(np.float64), copy=True, verbose=verbose)
+        return row_normalize(self.get_onehot().astype(np.float64), copy=True)
 
-    def generate_onehot(
-        self,
-        verbose: bool = False,
-    ) -> scipy.sparse.csr_matrix:
+    def generate_onehot(self) -> scipy.sparse.csr_matrix:
         """
         Convert an array of labels to a num_labels x num_samples sparse one-hot matrix
         Labels MUST be integers starting from 0, but can have gaps in between e.g. [0,1,5,9]
         """
+        logger = lm.get_main_logger()
 
         # Initialize the fields of the CSR
         indptr = np.zeros((self.num_labels + 1,), dtype=np.int32)
         indices = np.zeros((self.num_samples,), dtype=np.int32)
         data = np.ones_like(indices, dtype=np.int32)
 
-        if verbose:
-            print(
-                f"\n--- {self.num_labels} labels, "
-                f"{self.num_samples} samples ---\n"
-                f"initalized {indptr.shape} index ptr: {indptr}\n"
-                f"initalized {indices.shape} indices: {indices}\n"
-                f"initalized {data.shape} data: {data}\n"
-            )
+        logger.info(
+            f"\n--- {self.num_labels} labels, "
+            f"{self.num_samples} samples ---\n"
+            f"initalized {indptr.shape} index ptr: {indptr}\n"
+            f"initalized {indices.shape} indices: {indices}\n"
+            f"initalized {data.shape} data: {data}\n"
+        )
 
         # Update index pointer and indices row by row
         for n, label in enumerate(self.ids):
@@ -231,12 +222,11 @@ class Label(object):
             current_ptr = previous_ptr + label_count
             indptr[n + 1] = current_ptr
 
-            if verbose:
-                print(
-                    f"indices for label {label}: {label_indices}\n"
-                    f"previous pointer: {previous_ptr}, "
-                    f"current pointer: {current_ptr}\n"
-                )
+            logger.info(
+                f"indices for label {label}: {label_indices}\n"
+                f"previous pointer: {previous_ptr}, "
+                f"current pointer: {current_ptr}\n"
+            )
 
             if current_ptr > previous_ptr:
                 indices[previous_ptr:current_ptr] = label_indices
@@ -255,7 +245,6 @@ def expand_labels(
     label: Label,
     max_label_id: int,
     sort_labels: bool = False,
-    verbose: bool = False,
 ) -> Label:
     """
     Spread out label IDs such that they range evenly from 0 to max_label_id, e.g. [0 1 2] -> [0 5 10]
@@ -265,8 +254,6 @@ def expand_labels(
     """
     logger = lm.get_main_logger()
     logger.info(f"Expanding labels with ids: {label.ids} so that ids range from 0 to {max_label_id}")
-    if verbose:
-        print(f"Expanding labels with ids: {label.ids} so that ids range from 0 to {max_label_id}\n")
 
     if sort_labels:
         ids = np.sort(copy.copy(label.ids))
@@ -285,24 +272,22 @@ def expand_labels(
     expanded_ids = ids_zeroed + inserted
     expanded_ids[1:] += np.cumsum(extra)  # only add to 2nd label and above
 
-    if verbose:
-        print(
-            f"Label ids zerod: {ids_zeroed}.\n"
-            f"{multiple} to be inserted between each id: {inserted}\n"
-            f"{remainder} extra rows to be randomly inserted: {extra}\n"
-            f"New ids: {expanded_ids}"
-        )
+    logger.info(
+        f"Label ids zerod: {ids_zeroed}.\n"
+        f"{multiple} to be inserted between each id: {inserted}\n"
+        f"{remainder} extra rows to be randomly inserted: {extra}\n"
+        f"New ids: {expanded_ids}"
+    )
 
     expanded_dense = (expanded_ids @ label.get_onehot()).astype(np.int32)
 
-    return Label(expanded_dense, verbose=label.verbose)
+    return Label(expanded_dense)
 
 
 def match_labels(
     labels_1: Label,
     labels_2: Label,
-    extra_labels_assignment: str = "random",
-    verbose: bool = False,
+    extra_labels_assignment: str = "random"
 ) -> Label:
     """
     Match second set of labels to first, returning a new Label object
@@ -312,20 +297,17 @@ def match_labels(
     max_id = max(labels_1.max_id, labels_2.max_id)
     num_extra_labels = labels_2.num_labels - labels_1.num_labels
 
-    logger.info(f"Matching {labels_2.num_labels} labels against {labels_1.num_labels} labels.")
-    if verbose:
-        print(
-            f"Matching {labels_2.num_labels} labels against {labels_1.num_labels} labels.\n"
-            f"highest label ID in both is {max_id}.\n"
-        )
+    logger.info(
+        f"Matching {labels_2.num_labels} labels against {labels_1.num_labels} labels.\n"
+        f"highest label ID in both is {max_id}.\n"
+    )
 
     onehot_1, onehot_2 = labels_1.get_onehot(), labels_2.get_onehot()
     cost_matrix = (onehot_1 @ onehot_2.T).toarray()
 
     labels_match_1, labels_match_2 = scipy.optimize.linear_sum_assignment(cost_matrix, maximize=True)
 
-    if verbose:
-        print("\nMatches:\n", list(zip(labels_match_1, labels_match_2)))
+    logger.info("\nMatches:\n", list(zip(labels_match_1, labels_match_2)))
 
     # Temporary list keeping track of which labels are still available for use
     available_labels = list(range(max_id + 1))
@@ -336,10 +318,10 @@ def match_labels(
     for index_1, index_2 in zip(labels_match_1, labels_match_2):
         label_1 = labels_1.ids[index_1]
         label_2 = labels_2.ids[index_2]
-        if verbose:
-            print(
-                f"Assigning first set's {label_1} to " f"second set's {label_2}.\n" f"labels_left: {available_labels}"
-            )
+
+        logger.info(
+            f"Assigning first set's {label_1} to " f"second set's {label_2}.\n" f"labels_left: {available_labels}"
+        )
         relabeled_ids[index_2] = label_1
         available_labels.remove(label_1)
 
@@ -383,28 +365,24 @@ def match_labels(
 
             sorted_matched = np.sort(relabeled_ids[relabeled_ids != -1])
 
-            if verbose:
-                print(f"already matched ids (sorted): {sorted_matched}")
+            logger.info(f"already matched ids (sorted): {sorted_matched}")
 
             _, _, added_labels = _insert_label(sorted_matched, labels_2.num_labels)
             relabeled_ids[unmatched_indices] = np.random.choice(added_labels, size=num_extra_labels, replace=False)
 
         else:
             logger.error(f"Extra labels assignment method not recognised, should be random or greedy.")
-            raise ValueError(f"Extra labels assignment method not recognised, should be random or greedy.\n")
 
-        if verbose:
-            print(f"\nRelabeled labels: {relabeled_ids}\n")
+        logger.info(f"\nRelabeled labels: {relabeled_ids}\n")
 
     relabeled_dense = (relabeled_ids @ onehot_2).astype(np.int32)
-    return Label(relabeled_dense, verbose=labels_2.verbose)
+    return Label(relabeled_dense)
 
 
 def match_label_series(
     label_list: List[Label],
     least_labels_first: bool = True,
-    extra_labels_assignment: str = "greedy",
-    verbose: bool = False,
+    extra_labels_assignment: str = "greedy"
 ) -> Tuple[List[Label], int]:
     """
     Match a list of labels to each other, one after another in order of increasing (if least_labels_first is true)
@@ -426,8 +404,6 @@ def match_label_series(
     if least_labels_first:
         ordered_relabels.append(expand_labels(label_list[sort_indices[0]], max_num_labels - 1))
         logger.info(f"First label, expanded label ids: {ordered_relabels[0]}")
-        if verbose:
-            print(f"First label, expanded label ids: " f"{ordered_relabels[0]}")
     else:
         # Argsort is in ascending order, reverse it
         sort_indices = sort_indices[:, :, -1]
@@ -437,15 +413,12 @@ def match_label_series(
     for index in sort_indices[1:]:
         current_label = label_list[index]
         previous_label = ordered_relabels[-1]
-        logger.info(f"Relabeling label set {index} with reference to label set {index-1}.")
-        if verbose:
-            print(f"\nRelabeling:\n{current_label}\n" f"with reference to\n{previous_label}\n" + "-" * 70 + "\n")
+        logger.info(f"\nRelabeling:\n{current_label}\n" f"with reference to\n{previous_label}\n" + "-" * 70 + "\n")
 
         relabeled = match_labels(
             previous_label,
             current_label,
-            extra_labels_assignment=extra_labels_assignment,
-            verbose=verbose,
+            extra_labels_assignment=extra_labels_assignment
         )
 
         ordered_relabels.append(relabeled)
@@ -478,11 +451,9 @@ def interlabel_connections(
 
     if weights_matrix.ndim != 2:
         logger.error(f"Weights matrix has {weights_matrix.ndim} dimensions, should be 2.")
-        raise ValueError(f"weights matrix has {weights_matrix.ndim} dimensions, should be 2.")
 
     if weights_matrix.shape[0] != weights_matrix.shape[1] != label.num_samples:
         logger.error(f"Weights matrix dimensions do not match number of samples.")
-        raise ValueError(f"weights matrix dimenisons do not match number of samples")
 
     normalized_onehot = label.generate_normalized_onehot(verbose=False)
 
