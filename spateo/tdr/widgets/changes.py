@@ -9,7 +9,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ..models.other_models import construct_lines
+from ..models.morpho_models import construct_lines
 from .slice import euclidean_distance, three_d_slice
 from .tree import NLPCA, DDRTree, cal_ncenter
 
