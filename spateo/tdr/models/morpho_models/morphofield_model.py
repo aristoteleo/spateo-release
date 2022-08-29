@@ -13,9 +13,9 @@ from ..utilities import add_model_labels, merge_models
 from .arrow_model import construct_arrows
 
 
-def construct_vector_arrows(
+def construct_field(
     model: PolyData,
-    vf_key: str,
+    vf_key: str = "VecFld_morpho",
     arrows_scale_key: Optional[str] = None,
     n_sampling: Optional[int] = None,
     sampling_method: str = "trn",
@@ -63,14 +63,14 @@ def construct_vector_arrows(
     )
 
 
-def construct_vector_streamlines(
+def construct_field_streams(
     model: PolyData,
-    vf_key: str,
+    vf_key: str = "VecFld_morpho",
     source_center: Optional[Tuple[float]] = None,
     source_radius: Optional[float] = None,
     tip_factor: Union[int, float] = 10,
     tip_radius: float = 0.2,
-    key_added: str = "v_stream",
+    key_added: str = "v_streams",
     label: Union[str, list, np.ndarray] = "vector field",
     stream_color: str = "gainsboro",
     tip_color: str = "orangered",

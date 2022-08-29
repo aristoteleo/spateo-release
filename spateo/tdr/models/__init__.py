@@ -10,21 +10,21 @@ from .mesh import (
     uniform_larger_pc,
     uniform_mesh,
 )
-from .other_models import (
+from .morpho_models import (
     construct_align_lines,
     construct_arrow,
     construct_arrows,
     construct_axis_line,
     construct_bounding_box,
-    construct_development_fate,
-    construct_development_X,
+    construct_field,
+    construct_field_streams,
+    construct_genesis,
+    construct_genesis_X,
     construct_line,
     construct_lines,
     construct_space,
-    construct_trajectory_fate,
+    construct_trajectory,
     construct_trajectory_X,
-    construct_vector_arrows,
-    construct_vector_streamlines,
 )
 from .pc import construct_pc
 from .utilities import (

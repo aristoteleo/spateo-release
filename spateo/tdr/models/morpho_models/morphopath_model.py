@@ -11,10 +11,10 @@ from .arrow_model import construct_arrows
 from .line_model import construct_lines
 
 
-def construct_development_X(
+def construct_genesis_X(
     stages_X: List[np.ndarray],
     n_spacing: Optional[int] = None,
-    key_added: str = "develop",
+    key_added: str = "genesis",
     label: Optional[Union[str, list, np.ndarray]] = None,
     color: Union[str, list, dict] = "skyblue",
     alpha: Union[float, list, dict] = 1.0,
@@ -80,13 +80,13 @@ def construct_development_X(
     return collect_model(models=cells_models)
 
 
-def construct_development_fate(
+def construct_genesis(
     adata: AnnData,
-    fate_key: str = "fate_develop",
+    fate_key: str = "fate_morpho",
     n_steps: int = 100,
     logspace: bool = False,
     t_end: Optional[Union[int, float]] = None,
-    key_added: str = "develop",
+    key_added: str = "genesis",
     label: Optional[Union[str, list, np.ndarray]] = None,
     color: Union[str, list, dict] = "skyblue",
     alpha: Union[float, list, dict] = 1.0,
@@ -118,7 +118,7 @@ def construct_development_fate(
     if fate_key not in adata.uns_keys():
         raise Exception(
             f"You need to first perform develop_trajectory prediction before animate the prediction, please run"
-            f"st.tdr.develop_trajectory(adata, key_added='{fate_key[5:]}' before running this function"
+            f"st.tdr.develop_trajectory(adata, key_added='{fate_key}' before running this function"
         )
 
     t = list(adata.uns[fate_key]["t"].values())
@@ -143,7 +143,7 @@ def construct_development_fate(
         pts = [displace(cur_pts, time_vec[i])[1].tolist() for cur_pts in pts]
         stages_X.append(np.asarray(pts))
 
-    cells_developmental_model = construct_development_X(
+    cells_developmental_model = construct_genesis_X(
         stages_X=stages_X, n_spacing=None, key_added=key_added, label=label, color=color, alpha=alpha
     )
 
@@ -157,7 +157,7 @@ def construct_trajectory_X(
     sampling_method: str = "trn",
     key_added: str = "trajectory",
     label: Optional[Union[str, list, np.ndarray]] = None,
-    tip_factor: Union[int, float] = 10,
+    tip_factor: Union[int, float] = 5,
     tip_radius: float = 0.2,
     trajectory_color: Union[str, list, dict] = "gainsboro",
     tip_color: Union[str, list, dict] = "gainsboro",
@@ -263,7 +263,7 @@ def construct_trajectory_X(
     return trajectory_model
 
 
-def construct_trajectory_fate(
+def construct_trajectory(
     adata: AnnData,
     fate_key: str = "fate_develop",
     n_sampling: Optional[int] = None,

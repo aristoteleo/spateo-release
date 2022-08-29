@@ -153,9 +153,7 @@ def construct_arrows(
     direction = direction[index_arr, :].copy()
     model = pv.PolyData(start_points)
     model.point_data["direction"] = direction
-    model.point_data["scale"] = (
-        np.linalg.norm(direction, axis=1) if arrows_scale is None else arrows_scale[index_arr, :]
-    )
+    model.point_data["scale"] = np.linalg.norm(direction, axis=1) if arrows_scale is None else arrows_scale[index_arr]
 
     labels = np.asarray([label] * len(start_points)) if isinstance(label, str) else np.asarray(label)[index_arr]
     assert len(labels) == len(start_points), "The number of labels is not equal to the number of start points."
