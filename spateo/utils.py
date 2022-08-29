@@ -284,11 +284,7 @@ def expand_labels(
     return Label(expanded_dense)
 
 
-def match_labels(
-    labels_1: Label,
-    labels_2: Label,
-    extra_labels_assignment: str = "random"
-) -> Label:
+def match_labels(labels_1: Label, labels_2: Label, extra_labels_assignment: str = "random") -> Label:
     """
     Match second set of labels to first, returning a new Label object
     Uses scipy's version of the Hungarian algorithm (linear_sum_assigment)
@@ -380,9 +376,7 @@ def match_labels(
 
 
 def match_label_series(
-    label_list: List[Label],
-    least_labels_first: bool = True,
-    extra_labels_assignment: str = "greedy"
+    label_list: List[Label], least_labels_first: bool = True, extra_labels_assignment: str = "greedy"
 ) -> Tuple[List[Label], int]:
     """
     Match a list of labels to each other, one after another in order of increasing (if least_labels_first is true)
@@ -415,11 +409,7 @@ def match_label_series(
         previous_label = ordered_relabels[-1]
         logger.info(f"\nRelabeling:\n{current_label}\n" f"with reference to\n{previous_label}\n" + "-" * 70 + "\n")
 
-        relabeled = match_labels(
-            previous_label,
-            current_label,
-            extra_labels_assignment=extra_labels_assignment
-        )
+        relabeled = match_labels(previous_label, current_label, extra_labels_assignment=extra_labels_assignment)
 
         ordered_relabels.append(relabeled)
 
