@@ -1,7 +1,12 @@
 """
 Functions to either scale single-cell data or normalize such that the row-wise sums are identical.
 """
-from typing import Dict, Iterable, Literal, Optional, Union
+from typing import Dict, Iterable, Optional, Union
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 import numpy as np
 import scipy
@@ -49,24 +54,17 @@ def normalize_total(
     normalized values for all other genes.
 
     Args:
-        adata : class `anndata.AnnData`
-            The annotated data matrix of shape `n_obs` × `n_vars`. Rows correspond to cells and columns to genes.
-        target_sum : optional float, default 1e4
-            If `None`, after normalization, each observation (cell) has a total count equal to the median of total
-            counts for observations (cells) before normalization
-        exclude_highly_expressed : bool, default False
-            Exclude (very) highly expressed genes for the computation of the normalization factor for each cell. A gene
-            is considered highly expressed if it has more than `max_fraction` of the total counts in at least one cell.
-        max_fraction : float, default 0.05
-            If `exclude_highly_expressed=True`, this is the cutoff threshold for excluding genes
-        key_added : optional str
-            Name of the field in `adata.obs` where the normalization factor is stored
-        layer : optional str
-            Layer to normalize instead of `X`. If `None`, `X` is normalized.
-        inplace : bool, default True
-            Whether to update `adata` or return dictionary with normalized copies of `adata.X` and `adata.layers`
-        copy : bool, default False
-            Whether to modify copied input object. Not compatible with inplace=False.
+        adata: The annotated data matrix of shape `n_obs` × `n_vars`. Rows correspond to cells and columns to genes.
+        target_sum: If `None`, after normalization, each observation (cell) has a total count equal to the median of
+            total counts for observations (cells) before normalization.
+        exclude_highly_expressed: Exclude (very) highly expressed genes for the computation of the normalization factor
+            for each cell. A gene is considered highly expressed if it has more than `max_fraction` of the total counts
+            in at least one cell.
+        max_fraction: If `exclude_highly_expressed=True`, this is the cutoff threshold for excluding genes.
+        key_added: Name of the field in `adata.obs` where the normalization factor is stored.
+        layer: Layer to normalize instead of `X`. If `None`, `X` is normalized.
+        inplace: Whether to update `adata` or return dictionary with normalized copies of `adata.X` and `adata.layers`.
+        copy: Whether to modify copied input object. Not compatible with inplace=False.
 
     Returns:
         Returns dictionary with normalized copies of `adata.X` and `adata.layers` or updates `adata` with normalized

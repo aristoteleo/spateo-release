@@ -16,7 +16,7 @@ from matplotlib.collections import PolyCollection
 from matplotlib.ticker import StrMethodFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from ...utils import Label, interlabel_connections
+from ...tools.labels import Label, interlabel_connections
 
 
 def plot_connections(

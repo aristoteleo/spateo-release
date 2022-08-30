@@ -22,34 +22,32 @@ def log1p(
     layer: Optional[str] = None,
     obsm: Optional[str] = None,
 ):
-    """
-    Computes the natural logarithm of the data matrix (unless different base is chosen using the `base` argument)
+    """Computes the natural logarithm of the data matrix (unless different base is chosen using the `base` argument)
 
     Args:
-        X : class `anndata.AnnData`, np.ndarray or sparse matrix
-            Either full AnnData object or .X. Rows correspond to cells and columns to genes.
-        base : optional int
-            Natural log is used by default
-        copy : bool, default False
-            If an :class:`~anndata.AnnData` is passed, determines whether a copy is returned.
-        layer : optional str
-            Layer to transform. If None, will transform .X. If given both argument to `layer` and `obsm`, argument to
+        X: Either full AnnData object or .X. Rows correspond to cells and columns to genes.
+        base: Natural log is used by default.
+        copy: If an :class:`~anndata.AnnData` is passed, determines whether a copy is returned.
+        layer: Layer to transform. If None, will transform .X. If given both argument to `layer` and `obsm`, argument to
             `layer` will take priority.
-        obsm : optional str
-            Entry in .obsm to transform. If None, will transform .X.
+        obsm: Entry in .obsm to transform. If None, will transform .X.
 
     Returns:
         If `copy` is True or input is numpy array/sparse matrix, returns updated data array. Otherwise, returns updated
         AnnData object.
     """
+    # if type(X) == AnnData:
+    #     if layer is None:
+    #         X = X.X.copy() if obsm is None else X.obsm[obsm].copy()
+    #     else:
+    #         X = X.layers[layer].copy()
+
     return log1p_array(X, copy=copy, base=base)
 
 
 @log1p.register(scipy.sparse.spmatrix)
 def log1p_sparse(X, *, base: Optional[int] = None, copy: bool = False):
-    """
-    Called if `log1p` is called with a sparse matrix input
-    """
+    """Called if `log1p` is called with a sparse matrix input."""
     X = check_array(X, accept_sparse=("csr", "csc"), dtype=(np.float64, np.float32), copy=copy)
     # Perform computation on the non-sparse components
     X.data = log1p(X.data, copy=False, base=base)
@@ -128,30 +126,22 @@ def scale(
     obsm: Optional[str] = None,
     return_mean_std: bool = False,
 ):
-    """
-    Scale variables to unit variance and optionally zero mean. Variables that are constant across all observations will
-    be set to 0.
+    """Scale variables to unit variance and optionally zero mean. Variables that are constant across all observations
+    will be set to 0.
 
     Args:
-        X : class `anndata.AnnData`, np.ndarray or sparse matrix
-            Either full AnnData object or .X. Rows correspond to cells and columns to genes.
-        zero_center : bool, default True
-            If False, will not center variables
-        max_value : optional float
-            Truncate to this value after scaling
-        copy : bool, default False
-            If an :class:`~anndata.AnnData` is passed, determines whether a copy is returned.
-        layer : optional str
-            Layer to transform. If None, will transform .X. If given both argument to `layer` and `obsm`, argument to
+        X: Either full AnnData object or .X. Rows correspond to cells and columns to genes.
+        zero_center: If False, will not center variables.
+        max_value: Truncate to this value after scaling.
+        copy: If an :class:`~anndata.AnnData` is passed, determines whether a copy is returned.
+        layer: Layer to transform. If None, will transform .X. If given both argument to `layer` and `obsm`, argument to
             `layer` will take priority.
-        obsm : optional str
-            Entry in .obsm to transform. If None, will transform .X.
-        return_mean_std : bool, default False
-            Set True to return computed feature means and feature standard deviations
+        obsm: Entry in .obsm to transform. If None, will transform .X.
+        return_mean_std: Set True to return computed feature means and feature standard deviations.
 
     Returns:
         Depending on `copy` returns or updates `adata` with a scaled `adata.X`, annotated with `'mean'` and `'std'` in
-        `adata.var`
+        `adata.var`.
     """
     return scale_array(X, zero_center=zero_center, max_value=max_value, copy=copy)
 
@@ -165,9 +155,7 @@ def scale_sparse(
     copy: bool = False,
     return_mean_std: bool = False,
 ):
-    """
-    Called if `log1p` is called with a sparse matrix input
-    """
+    """Called if `log1p` is called with a sparse matrix input"""
     logger = lm.get_main_logger()
 
     # If `zero_center`, need to densify the array since centering cannot be done in sparse arrays:
@@ -195,9 +183,7 @@ def scale_array(
     copy: bool = False,
     return_mean_std: bool = False,
 ):
-    """
-    Called if `log1p` is called with a numpy array input
-    """
+    """Called if `log1p` is called with a numpy array input"""
     logger = lm.get_main_logger()
 
     if copy:

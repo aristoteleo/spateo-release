@@ -7,6 +7,7 @@ from .colorlabel import color_label
 from .contour import spatial_domains
 from .geo import geo
 from .lisa import lisa, lisa_quantiles
+from .pairwise import plot_connections
 from .polarity import *
 from .scatters import scatters
 from .space import space
