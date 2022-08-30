@@ -42,10 +42,7 @@ def find_cci_two_group(
 ) -> dict:
     """Performing cell-cell transformation on an anndata object, while also
        limiting the nearest neighbor per cell to n_neighbors. This function returns
-       another anndata object, in which the columns of the matrix are bucket
-       -bucket pairs, while the rows ligand-receptor mechanisms. This resultant
-       anndated object allows flexible downstream manipulations such as the
-       dimensional reduction of the row or column of this object.
+       a dictionary, where the key is 'cell_pair' and 'lr_pair'.
 
     Args:
         adata: An Annodata object.
