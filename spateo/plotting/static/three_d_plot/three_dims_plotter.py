@@ -18,7 +18,7 @@ from ....logging import logger_manager as lm
 def create_plotter(
     jupyter: bool = False,
     off_screen: bool = False,
-    window_size: tuple = (1024, 768),
+    window_size: tuple = (512, 512),
     background: str = "white",
     shape: Union[str, list, tuple] = (1, 1),
 ) -> Plotter:
@@ -330,6 +330,7 @@ def add_legend(
     label_font_size: Optional[Union[int, float]] = None,
     font_color: str = "black",
     font_family: Literal["times", "courier", "arial"] = "arial",
+    title: Optional[str] = "",
     fmt="%.2f",
     n_labels: int = 5,
     vertical: bool = True,
@@ -356,6 +357,7 @@ def add_legend(
                 * ``font_family = times``
                 * ``font_family = courier``
                 * ``font_family = arial``
+        title: Title of the legend. Default '' which is rendered as an empty title.
         fmt: printf format for labels. Only available when colormap is not None.
         n_labels: Number of labels to use for the legend. Only available when colormap is not None.
         vertical: Use vertical or horizontal legend. Only available when colormap is not None.
@@ -386,7 +388,7 @@ def add_legend(
             plotter=plotter,
             legend_size=(0.1, 0.4) if legend_size is None else legend_size,
             legend_loc=(0.9, 0.3) if legend_loc is None else legend_loc,
-            title=key if isinstance(key, str) else key[0],
+            title=title,
             n_labels=n_labels,
             title_font_size=title_font_size,
             label_font_size=label_font_size,

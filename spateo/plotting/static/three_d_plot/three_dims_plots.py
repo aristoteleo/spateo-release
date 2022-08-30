@@ -121,11 +121,12 @@ def wrap_to_plotter(
     # Add a legend to the plotter.
     if show_legend:
         lg_kwargs = dict(
+            title=key if isinstance(key, str) else key[0],
             legend_size=None,
             legend_loc=None,
             font_color=cbg_rgb,
-            title_font_size=None,
-            label_font_size=None,
+            title_font_size=15,
+            label_font_size=12,
             font_family="arial",
             fmt="%.2f",
             n_labels=5,
@@ -133,6 +134,7 @@ def wrap_to_plotter(
         )
         if not (legend_kwargs is None):
             lg_kwargs.update((k, legend_kwargs[k]) for k in lg_kwargs.keys() & legend_kwargs.keys())
+
         add_legend(
             plotter=plotter,
             model=model,
@@ -159,7 +161,7 @@ def wrap_to_plotter(
     if not (text is None):
         t_kwargs = dict(
             font_family="arial",
-            font_size=18,
+            font_size=12,
             font_color=cbg_rgb,
             text_loc="upper_left",
         )
@@ -174,7 +176,7 @@ def three_d_plot(
     filename: Optional[str] = None,
     jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
     off_screen: bool = False,
-    window_size: tuple = (1024, 768),
+    window_size: tuple = (512, 512),
     background: str = "white",
     cpo: Union[str, list] = "iso",
     colormap: Optional[Union[str, list]] = None,
@@ -212,7 +214,7 @@ def three_d_plot(
                 * ``'ipygany'`` - Show an ipygany widget
                 * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
-        window_size: Window size in pixels. The default window_size is ``[1024, 768]``.
+        window_size: Window size in pixels. The default window_size is ``[512, 512]``.
         background: The background color of the window.
         cpo: Camera position of the active render window. Available ``cpo`` are:
 
@@ -379,7 +381,7 @@ def three_d_multi_plot(
 
                     ``E.g.: shape="3|1" means 3 plots on the left and 1 on the right,``
                     ``E.g.: shape="4/2" means 4 plots on top and 2 at the bottom.``
-        window_size: Window size in pixels. The default window_size is ``[1024, 768]``.
+        window_size: Window size in pixels. The default window_size is ``[512, 512]``.
         background: The background color of the window.
         cpo: Camera position of the active render window. Available ``cpo`` are:
 
@@ -540,7 +542,7 @@ def three_d_animate(
     filename: str = "animate.mp4",
     jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
     off_screen: bool = False,
-    window_size: tuple = (1024, 768),
+    window_size: tuple = (512, 512),
     background: str = "white",
     cpo: Union[str, list] = "iso",
     colormap: Optional[Union[str, list]] = None,
@@ -590,7 +592,7 @@ def three_d_animate(
                 * ``'ipygany'`` - Show an ipygany widget
                 * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
-        window_size: Window size in pixels. The default window_size is ``[1024, 768]``.
+        window_size: Window size in pixels. The default window_size is ``[512, 512]``.
         background: The background color of the window.
         cpo: Camera position of the active render window. Available ``cpo`` are:
 
