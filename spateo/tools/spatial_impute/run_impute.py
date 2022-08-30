@@ -54,13 +54,13 @@ def run_denoise_impute(
             # Generate two plots: one for observed data and one for imputed:
             print(f"{feat} Observed")
             size = 3000 / adata_orig.n_obs
-            space(adata_orig, color=feat, cmap='magma', figsize=(5, 5), dpi=300, pointsize=size, alpha=0.9)
+            space(adata_orig, color=feat, cmap="magma", figsize=(5, 5), dpi=300, pointsize=size, alpha=0.9)
 
             print(f"{feat} Imputed")
             size = 3000 / adata_orig.n_obs
-            space(adata_rex, color=feat, cmap='magma', figsize=(5, 5), dpi=300, pointsize=size, alpha=0.9)
+            space(adata_rex, color=feat, cmap="magma", figsize=(5, 5), dpi=300, pointsize=size, alpha=0.9)
 
-            '''
+            """
             # Generate two plots: one for observed data and one for imputed:
             to_plot_orig = adata_orig[:, feat].X
             if sp.issparse(to_plot_orig):
@@ -113,4 +113,4 @@ def run_denoise_impute(
             )
             ax.set_ylim(ax.get_ylim()[::-1])
             cbar = fig.colorbar(scatterplot)
-            plt.show()'''
+            plt.show()"""
