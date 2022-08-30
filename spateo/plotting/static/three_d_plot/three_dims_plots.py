@@ -672,9 +672,12 @@ def three_d_animate(
         text=text,
         text_kwargs=text_kwargs,
     )
-    stable_kwargs = model_kwargs if stable_kwargs is None else stable_kwargs
-    if "key" not in stable_kwargs.keys():
-        stable_kwargs["key"] = key
+
+    if not (stable_model is None):
+        stable_kwargs = model_kwargs if stable_kwargs is None else stable_kwargs
+        if "key" not in stable_kwargs.keys():
+            stable_kwargs["key"] = key
+
     # Set jupyter.
     off_screen1, off_screen2, jupyter_backend = _set_jupyter(jupyter=jupyter, off_screen=off_screen)
 
@@ -685,14 +688,16 @@ def three_d_animate(
     # Create a plotting object to display the end model of blocks.
     end_block = blocks[blocks_name[-1]].copy()
     p = create_plotter(off_screen=off_screen1, **plotter_kws)
-    wrap_to_plotter(plotter=p, model=stable_model, cpo=cpo, **stable_kwargs)
+    if not (stable_model is None):
+        wrap_to_plotter(plotter=p, model=stable_model, cpo=cpo, **stable_kwargs)
     wrap_to_plotter(plotter=p, model=end_block, key=key, cpo=cpo, **model_kwargs)
     cpo = p.show(return_cpos=True, jupyter_backend="none", cpos=cpo)
 
     # Create another plotting object to save pyvista/vtk model.
     start_block = blocks[blocks_name[0]].copy()
     p = create_plotter(off_screen=off_screen2, **plotter_kws)
-    wrap_to_plotter(plotter=p, model=stable_model, cpo=cpo, **stable_kwargs)
+    if not (stable_model is None):
+        wrap_to_plotter(plotter=p, model=stable_model, cpo=cpo, **stable_kwargs)
     wrap_to_plotter(plotter=p, model=start_block, key=key, cpo=cpo, **model_kwargs)
 
     filename_format = filename.split(".")[-1]
