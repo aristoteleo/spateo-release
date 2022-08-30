@@ -218,7 +218,7 @@ def generate_spatial_weights_fixed_nbrs(
             f"Weights decay type <{decay_type}> not recognised.\n" f"Should be 'uniform', 'reciprocal' or 'ranked'."
         )
 
-    out_graph = row_normalize(graph_out)
+    out_graph = row_normalize(graph_out, verbose=False)
     return out_graph, distance_graph
 
 

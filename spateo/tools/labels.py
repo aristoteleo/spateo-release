@@ -49,10 +49,11 @@ def row_normalize(
         if row_sum != 0:
             data[start_ptr:end_ptr] /= row_sum
 
-        logger.info(
-            f"Computed normalized sum from ptr {start_ptr} to {end_ptr}. "
-            f"Total entries: {end_ptr - start_ptr}, sum: {np.sum(graph.data[start_ptr:end_ptr])}"
-        )
+        if verbose:
+            logger.info(
+                f"Computed normalized sum from ptr {start_ptr} to {end_ptr}. "
+                f"Total entries: {end_ptr - start_ptr}, sum: {np.sum(graph.data[start_ptr:end_ptr])}"
+            )
 
     return graph
 
@@ -65,12 +66,14 @@ class Label(object):
 
     labels_dense: Numerical labels.
     str_map: Optional mapping of numerical labels (keys) to strings (values).
+    verbose: whether to print running info of row_normalize.
     """
 
     def __init__(
         self,
         labels_dense: Union[np.ndarray, list],
         str_map: Union[None, dict] = None,
+        verbose: bool = False,
     ) -> None:
         logger = lm.get_main_logger()
 
@@ -115,6 +118,8 @@ class Label(object):
         self.max_id = np.amax(self.ids)
         # Total number of labels
         self.num_labels = len(self.ids)
+        # Verbose
+        self.verbose = verbose
 
         # Mapping from numerical labels to strings
         if str_map is not None:
@@ -156,7 +161,7 @@ class Label(object):
         """Generate a normalized onehot matrix where each row is normalized by the count of that label
         e.g. a row [0 1 1 0 0] will be converted to [0 0.5 0.5 0 0]
         """
-        return row_normalize(self.get_onehot().astype(np.float64), copy=True)
+        return row_normalize(self.get_onehot().astype(np.float64), verbose=self.verbose, copy=True)
 
     def generate_onehot(self) -> scipy.sparse.csr_matrix:
         """Convert an array of labels to a num_labels x num_samples sparse one-hot matrix
@@ -186,11 +191,12 @@ class Label(object):
             current_ptr = previous_ptr + label_count
             indptr[n + 1] = current_ptr
 
-            logger.info(
-                f"indices for label {label}: {label_indices}\n"
-                f"previous pointer: {previous_ptr}, "
-                f"current pointer: {current_ptr}\n"
-            )
+            if self.verbose:
+                logger.info(
+                    f"indices for label {label}: {label_indices}\n"
+                    f"previous pointer: {previous_ptr}, "
+                    f"current pointer: {current_ptr}\n"
+                )
 
             if current_ptr > previous_ptr:
                 indices[previous_ptr:current_ptr] = label_indices
@@ -254,6 +260,7 @@ def match_labels(
     labels_1: Label,
     labels_2: Label,
     extra_labels_assignment: str = "random",
+    verbose: bool = False,
 ) -> Label:
     """Match second set of labels to first, returning a new Label object
     Uses scipy's version of the Hungarian algorithm (linear_sum_assigment)
@@ -284,9 +291,11 @@ def match_labels(
         label_1 = labels_1.ids[index_1]
         label_2 = labels_2.ids[index_2]
 
-        logger.info(
-            f"Assigning first set's {label_1} to " f"second set's {label_2}.\n" f"labels_left: {available_labels}"
-        )
+        if verbose:
+            logger.info(
+                f"Assigning first set's {label_1} to " f"second set's {label_2}.\n" f"labels_left: {available_labels}"
+            )
+
         relabeled_ids[index_2] = label_1
         available_labels.remove(label_1)
 

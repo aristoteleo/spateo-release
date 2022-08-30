@@ -4,7 +4,12 @@ conditions or using different clustering parameters).
 
 These functions build on the Label class- see spateo.utils.Label for documentation
 """
-from typing import Literal, Optional, Union
+from typing import Optional, Union
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 import matplotlib as mpl
 import matplotlib.patheffects as PathEffects
