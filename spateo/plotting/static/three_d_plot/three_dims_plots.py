@@ -29,6 +29,7 @@ def wrap_to_plotter(
     key: Union[str, list] = None,
     background: str = "white",
     cpo: Union[str, list] = "iso",
+    colormap: Optional[Union[str, list]] = None,
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
@@ -56,6 +57,9 @@ def wrap_to_plotter(
                     ``E.g.: [-1.0, 2.0, -5.0].``
                 * A string containing the plane orthogonal to the view direction.
                     ``E.g.: 'xy', 'xz', 'yz', 'yx', 'zx', 'zy', 'iso'.``
+        colormap: Name of the Matplotlib colormap to use when mapping the scalars.
+
+                  When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
         ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
                  the actor when not directed at the light source emitted from the viewer.
         opacity: Opacity of the model.
@@ -76,20 +80,20 @@ def wrap_to_plotter(
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
-                       ``{"legend_size": None, "legend_loc": "lower right"}`` as its parameters. Otherwise,
+                       ``{"legend_size": None, "legend_loc": None}`` as its parameters. Otherwise,
                        you can provide a dictionary that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
         outline_kwargs: A dictionary that will be pass to the ``add_outline`` function.
 
                         By default, it is an empty dictionary and the `add_legend` function will use the
-                        ``{"outline_width": 5.0, "outline_color": "black", "show_labels": True, "labels_size": 16,
-                        "labels_color": "white", "labels_font": "times"}`` as its parameters. Otherwise,
+                        ``{"outline_width": 5.0, "outline_color": "black", "show_labels": True, "font_size": 16,
+                        "font_color": "white", "font_family": "arial"}`` as its parameters. Otherwise,
                         you can provide a dictionary that properly modify those keys according to your needs.
         text: The text to add the rendering.
         text_kwargs: A dictionary that will be pass to the ``add_text`` function.
 
                      By default, it is an empty dictionary and the ``add_legend`` function will use the
-                     ``{"text_font": "times", "text_size": 18, "text_color": "black", "text_loc": "upper_left"}``
+                     ``{ "font_family": "arial", "font_size": 18, "font_color": "black", "text_loc": "upper_left"}``
                      as its parameters. Otherwise, you can provide a dictionary that properly modify those keys
                      according to your needs.
     """
@@ -102,6 +106,7 @@ def wrap_to_plotter(
         plotter=plotter,
         model=model,
         key=key,
+        colormap=colormap,
         ambient=ambient,
         opacity=opacity,
         model_size=model_size,
@@ -115,22 +120,27 @@ def wrap_to_plotter(
     if show_legend:
         lg_kwargs = {
             "legend_size": None,
-            "legend_loc": "lower right",
+            "legend_loc": None,
         }
         if not (legend_kwargs is None):
             lg_kwargs.update((k, legend_kwargs[k]) for k in lg_kwargs.keys() & legend_kwargs.keys())
-        legend_key = key if isinstance(key, str) else key[0]
-        add_legend(plotter=plotter, model=model, key=legend_key, **lg_kwargs)
+        add_legend(
+            plotter=plotter,
+            model=model,
+            key=key,
+            colormap=colormap,
+            **lg_kwargs,
+        )
 
-    # Add a outline to the plotter.
+    # Add an outline to the plotter.
     if show_outline:
         ol_kwargs = {
             "outline_width": 5.0,
             "outline_color": cbg_rgb,
             "show_labels": True,
-            "labels_size": 16,
-            "labels_color": bg_rgb,
-            "labels_font": "times",
+            "font_size": 16,
+            "font_color": bg_rgb,
+            "font_family": "arial",
         }
         if not (outline_kwargs is None):
             ol_kwargs.update((k, outline_kwargs[k]) for k in ol_kwargs.keys() & outline_kwargs.keys())
@@ -139,9 +149,9 @@ def wrap_to_plotter(
     # Add text to the plotter.
     if not (text is None):
         t_kwargs = {
-            "text_font": "times",
-            "text_size": 18,
-            "text_color": cbg_rgb,
+            "font_family": "arial",
+            "font_size": 18,
+            "font_color": cbg_rgb,
             "text_loc": "upper_left",
         }
         if not (text_kwargs is None):
@@ -158,6 +168,7 @@ def three_d_plot(
     window_size: tuple = (1024, 768),
     background: str = "white",
     cpo: Union[str, list] = "iso",
+    colormap: Optional[Union[str, list]] = None,
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
@@ -202,6 +213,9 @@ def three_d_plot(
                     ``E.g.: [-1.0, 2.0, -5.0].``
                 * A string containing the plane orthogonal to the view direction.
                     ``E.g.: 'xy', 'xz', 'yz', 'yx', 'zx', 'zy', 'iso'.``
+        colormap: Name of the Matplotlib colormap to use when mapping the scalars.
+
+                  When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
         ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
                  the actor when not directed at the light source emitted from the viewer.
         opacity: Opacity of the model.
@@ -222,20 +236,20 @@ def three_d_plot(
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
-                       ``{"legend_size": None, "legend_loc": "lower right"}`` as its parameters. Otherwise,
+                       ``{"legend_size": None, "legend_loc": None}`` as its parameters. Otherwise,
                        you can provide a dictionary that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
         outline_kwargs: A dictionary that will be pass to the ``add_outline`` function.
 
                         By default, it is an empty dictionary and the `add_legend` function will use the
-                        ``{"outline_width": 5.0, "outline_color": "black", "show_labels": True, "labels_size": 16,
-                        "labels_color": "white", "labels_font": "times"}`` as its parameters. Otherwise,
+                        ``{"outline_width": 5.0, "outline_color": "black", "show_labels": True, "font_size": 16,
+                        "font_color": "white", "font_family": "arial"}`` as its parameters. Otherwise,
                         you can provide a dictionary that properly modify those keys according to your needs.
         text: The text to add the rendering.
         text_kwargs: A dictionary that will be pass to the ``add_text`` function.
 
                      By default, it is an empty dictionary and the ``add_legend`` function will use the
-                     ``{"text_font": "times", "text_size": 18, "text_color": "black", "text_loc": "upper_left"}``
+                     ``{ "font_family": "arial", "font_size": 18, "font_color": "black", "text_loc": "upper_left"}``
                      as its parameters. Otherwise, you can provide a dictionary that properly modify those keys
                      according to your needs.
         view_up: The normal to the orbital plane. Only available when filename ending with ``.mp4`` or ``.gif``.
@@ -263,6 +277,7 @@ def three_d_plot(
     )
     model_kwargs = dict(
         background=background,
+        colormap=colormap,
         ambient=ambient,
         opacity=opacity,
         model_style=model_style,
@@ -311,6 +326,7 @@ def three_d_multi_plot(
     window_size: Optional[tuple] = None,
     background: str = "white",
     cpo: Union[str, list] = "iso",
+    colormap: Optional[Union[str, list]] = None,
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
@@ -362,6 +378,9 @@ def three_d_multi_plot(
                     ``E.g.: [-1.0, 2.0, -5.0].``
                 * A string containing the plane orthogonal to the view direction.
                     ``E.g.: 'xy', 'xz', 'yz', 'yx', 'zx', 'zy', 'iso'.``
+        colormap: Name of the Matplotlib colormap to use when mapping the scalars.
+
+                  When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
         ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
                  the actor when not directed at the light source emitted from the viewer.
         opacity: Opacity of the model.
@@ -382,20 +401,20 @@ def three_d_multi_plot(
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
-                       ``{"legend_size": None, "legend_loc": "lower right"}`` as its parameters. Otherwise,
+                       ``{"legend_size": None, "legend_loc": None}`` as its parameters. Otherwise,
                        you can provide a dictionary that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
         outline_kwargs: A dictionary that will be pass to the ``add_outline`` function.
 
                         By default, it is an empty dictionary and the `add_legend` function will use the
-                        ``{"outline_width": 5.0, "outline_color": "black", "show_labels": True, "labels_size": 16,
-                        "labels_color": "white", "labels_font": "times"}`` as its parameters. Otherwise,
+                        ``{"outline_width": 5.0, "outline_color": "black", "show_labels": True, "font_size": 16,
+                        "font_color": "white", "font_family": "arial"}`` as its parameters. Otherwise,
                         you can provide a dictionary that properly modify those keys according to your needs.
         text: The text to add the rendering.
         text_kwargs: A dictionary that will be pass to the ``add_text`` function.
 
                      By default, it is an empty dictionary and the ``add_legend`` function will use the
-                     ``{"text_font": "times", "text_size": 18, "text_color": "black", "text_loc": "upper_left"}``
+                     ``{ "font_family": "arial", "font_size": 18, "font_color": "black", "text_loc": "upper_left"}``
                      as its parameters. Otherwise, you can provide a dictionary that properly modify those keys
                      according to your needs.
         view_up: The normal to the orbital plane. Only available when filename ending with ``.mp4`` or ``.gif``.
@@ -413,16 +432,18 @@ def three_d_multi_plot(
     cpos = cpo if isinstance(cpo, list) else [cpo]
     mts = model_style if isinstance(model_style, list) else [model_style]
     mss = model_size if isinstance(model_size, list) else [model_size]
+    cmaps = colormap if isinstance(colormap, list) else [colormap]
     ams = ambient if isinstance(ambient, list) else [ambient]
     ops = opacity if isinstance(opacity, list) else [opacity]
     texts = text if isinstance(text, list) else [text]
 
-    n_window = max(len(models), len(keys), len(cpos), len(mts), len(mss), len(ams), len(ops), len(texts))
+    n_window = max(len(models), len(keys), len(cpos), len(mts), len(mss), len(cmaps), len(ams), len(ops), len(texts))
     models = collect_model([models[0].copy() for i in range(n_window)]) if len(models) == 1 else models
     keys = keys * n_window if len(keys) == 1 else keys
     cpos = cpos * n_window if len(cpos) == 1 else cpos
     mts = mts * n_window if len(mts) == 1 else mts
     mss = mss * n_window if len(mss) == 1 else mss
+    cmaps = cmaps * n_window if len(cmaps) == 1 else cmaps
     ams = ams * n_window if len(ams) == 1 else ams
     ops = ops * n_window if len(ops) == 1 else ops
     texts = texts * n_window if len(texts) == 1 else texts
@@ -465,8 +486,8 @@ def three_d_multi_plot(
 
     # Create a plotting object to display pyvista/vtk model.
     p = create_plotter(off_screen=off_screen1, **plotter_kws)
-    for sub_model, sub_key, sub_cpo, sub_mt, sub_ms, sub_am, sub_op, sub_text, subplot_index in zip(
-        models, keys, cpos, mts, mss, ams, ops, texts, subplots
+    for sub_model, sub_key, sub_cpo, sub_mt, sub_ms, sub_cmap, sub_am, sub_op, sub_text, subplot_index in zip(
+        models, keys, cpos, mts, mss, cmaps, ams, ops, texts, subplots
     ):
         p.subplot(subplot_index[0], subplot_index[1])
         wrap_to_plotter(
@@ -477,9 +498,10 @@ def three_d_multi_plot(
             text=sub_text,
             model_style=sub_mt,
             model_size=sub_ms,
+            colormap=sub_cmap,
             ambient=sub_am,
             opacity=sub_op,
-            **model_kwargs
+            **model_kwargs,
         )
         p.add_axes()
 
@@ -508,6 +530,7 @@ def three_d_animate(
     window_size: tuple = (1024, 768),
     background: str = "white",
     cpo: Union[str, list] = "iso",
+    colormap: Optional[Union[str, list]] = None,
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
@@ -564,6 +587,9 @@ def three_d_animate(
                     ``E.g.: [-1.0, 2.0, -5.0].``
                 * A string containing the plane orthogonal to the view direction.
                     ``E.g.: 'xy', 'xz', 'yz', 'yx', 'zx', 'zy', 'iso'.``
+        colormap: Name of the Matplotlib colormap to use when mapping the scalars.
+
+                  When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
         ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
                  the actor when not directed at the light source emitted from the viewer.
         opacity: Opacity of the model.
@@ -584,20 +610,20 @@ def three_d_animate(
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
-                       ``{"legend_size": None, "legend_loc": "lower right"}`` as its parameters. Otherwise,
+                       ``{"legend_size": None, "legend_loc": None}`` as its parameters. Otherwise,
                        you can provide a dictionary that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
         outline_kwargs: A dictionary that will be pass to the ``add_outline`` function.
 
                         By default, it is an empty dictionary and the `add_legend` function will use the
-                        ``{"outline_width": 5.0, "outline_color": "black", "show_labels": True, "labels_size": 16,
-                        "labels_color": "white", "labels_font": "times"}`` as its parameters. Otherwise,
+                        ``{"outline_width": 5.0, "outline_color": "black", "show_labels": True, "font_size": 16,
+                        "font_color": "white", "font_family": "arial"}`` as its parameters. Otherwise,
                         you can provide a dictionary that properly modify those keys according to your needs.
         text: The text to add the rendering.
         text_kwargs: A dictionary that will be pass to the ``add_text`` function.
 
                      By default, it is an empty dictionary and the ``add_legend`` function will use the
-                     ``{"text_font": "times", "text_size": 18, "text_color": "black", "text_loc": "upper_left"}``
+                     ``{ "font_family": "arial", "font_size": 18, "font_color": "black", "text_loc": "upper_left"}``
                      as its parameters. Otherwise, you can provide a dictionary that properly modify those keys
                      according to your needs.
         framerate: Frames per second. Only available when filename ending with ``.mp4`` or ``.gif``.
@@ -617,6 +643,7 @@ def three_d_animate(
     )
     model_kwargs = dict(
         background=background,
+        colormap=colormap,
         ambient=ambient,
         opacity=opacity,
         model_style=model_style,
