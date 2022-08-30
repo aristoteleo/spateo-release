@@ -121,7 +121,9 @@ def construct_genesis(
             f"st.tdr.develop_trajectory(adata, key_added='{fate_key}' before running this function"
         )
 
-    t = list(adata.uns[fate_key]["t"].values())
+    t_ind = np.asarray(list(adata.uns[fate_key]["t"].keys()), dtype=int)
+    t_sort_ind = np.argsort(t_ind)
+    t = list(adata.uns[fate_key]["t"].values())[t_sort_ind]
     flats = np.unique([int(item) for sublist in t for item in sublist])
     flats = np.hstack((0, flats))
     flats = np.sort(flats) if t_end is None else np.sort(flats[flats <= t_end])
@@ -160,7 +162,7 @@ def construct_trajectory_X(
     tip_factor: Union[int, float] = 5,
     tip_radius: float = 0.2,
     trajectory_color: Union[str, list, dict] = "gainsboro",
-    tip_color: Union[str, list, dict] = "gainsboro",
+    tip_color: Union[str, list, dict] = "orangered",
     alpha: Union[float, list, dict] = 1.0,
 ) -> PolyData:
     """
@@ -301,11 +303,14 @@ def construct_trajectory(
     if fate_key not in adata.uns_keys():
         raise Exception(
             f"You need to first perform develop_trajectory prediction before animate the prediction, please run"
-            f"st.tdr.develop_trajectory(adata, key_added='{fate_key[5:]}' before running this function"
+            f"st.tdr.morphopath(adata, key_added='{fate_key}' before running this function"
         )
 
     init_states = np.asarray(adata.uns[fate_key]["init_states"])
-    cells_states = np.asarray(list(adata.uns[fate_key]["prediction"].values()))
+
+    cell_states_ind = np.asarray(list(adata.uns[fate_key]["prediction"].keys()), dtype=int)
+    cell_states_sort_ind = np.argsort(cell_states_ind)
+    cells_states = np.asarray(list(adata.uns[fate_key]["prediction"].values()))[cell_states_sort_ind]
 
     trajectory_model = construct_trajectory_X(
         cells_states=cells_states,
