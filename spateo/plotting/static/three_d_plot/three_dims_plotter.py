@@ -270,11 +270,12 @@ def add_num_legend(
     title: Optional[str] = "",
     title_font_size: Optional[Union[int, float]] = None,
     label_font_size: Optional[Union[int, float]] = None,
+    font_color: str = "black",
     font_family: Literal["times", "courier", "arial"] = "arial",
     fmt="%.2f",
     n_labels: int = 5,
     legend_size: Union[tuple, list] = (0.1, 0.4),
-    legend_loc: Union[tuple, list] = (0.8, 0.2),
+    legend_loc: Union[tuple, list] = (0.9, 0.3),
     vertical: bool = True,
 ):
     """
@@ -285,13 +286,14 @@ def add_num_legend(
         title: Title of the legend. Default '' which is rendered as an empty title.
         title_font_size: Sets the size of the title font.
         label_font_size: Sets the size of the label font.
-        n_labels: Number of labels to use for the legend.
+        font_color: The color of the font.
         font_family: The font of the text. Available `font_family` are:
 
                 * ``font_family = times``
                 * ``font_family = courier``
                 * ``font_family = arial``
         fmt: printf format for labels.
+        n_labels: Number of labels to use for the legend.
         legend_size: The percentage (0 to 1) width and height of the window for the legend.
         legend_loc: The location of the legend in the window.
 
@@ -305,6 +307,7 @@ def add_num_legend(
         n_labels=n_labels,
         title_font_size=title_font_size,
         label_font_size=label_font_size,
+        color=font_color,
         font_family=font_family,
         use_opacity=True,
         width=legend_size[0],
@@ -323,7 +326,13 @@ def add_legend(
     colormap: Optional[Union[str, list]] = None,
     legend_size: Optional[Tuple] = None,
     legend_loc: Union[str, tuple, list] = None,
-    **kwargs,
+    title_font_size: Optional[Union[int, float]] = None,
+    label_font_size: Optional[Union[int, float]] = None,
+    font_color: str = "black",
+    font_family: Literal["times", "courier", "arial"] = "arial",
+    fmt="%.2f",
+    n_labels: int = 5,
+    vertical: bool = True,
 ):
     """
     Add a legend to the plotter.
@@ -337,7 +346,19 @@ def add_legend(
                   When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
         legend_size: The percentage (0 to 1) width and height of the window for the legend.
         legend_loc: The location of the legend in the window.
-        **kwargs: Additional parameters that will be passed into the ``add_num_legend`` function.
+        title_font_size: Sets the size of the title font. Only available when colormap is not None.
+        label_font_size: Sets the size of the label font. Only available when colormap is not None.
+        font_color: The color of the font. Only available when colormap is not None.
+        font_family: The font of the text. Only available when colormap is not None.
+
+                     Available `font_family` are:
+
+                * ``font_family = times``
+                * ``font_family = courier``
+                * ``font_family = arial``
+        fmt: printf format for labels. Only available when colormap is not None.
+        n_labels: Number of labels to use for the legend. Only available when colormap is not None.
+        vertical: Use vertical or horizontal legend. Only available when colormap is not None.
     """
     if colormap is None:
         assert key is not None, "When colormap is None, key cannot be None at the same time."
@@ -364,8 +385,15 @@ def add_legend(
         add_num_legend(
             plotter=plotter,
             legend_size=(0.1, 0.4) if legend_size is None else legend_size,
-            legend_loc=(0.8, 0.2) if legend_loc is None else legend_loc,
-            **kwargs,
+            legend_loc=(0.9, 0.3) if legend_loc is None else legend_loc,
+            title=key if isinstance(key, str) else key[0],
+            n_labels=n_labels,
+            title_font_size=title_font_size,
+            label_font_size=label_font_size,
+            font_color=font_color,
+            font_family=font_family,
+            fmt=fmt,
+            vertical=vertical,
         )
 
 
@@ -435,7 +463,7 @@ def add_text(
     plotter: Plotter,
     text: str,
     font_family: Literal["times", "courier", "arial"] = "arial",
-    font_size: Union[int, float] = 18,
+    font_size: Union[int, float] = 12,
     font_color: Union[str, tuple, list] = "black",
     text_loc: Literal[
         "lower_left",

@@ -80,8 +80,10 @@ def wrap_to_plotter(
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
-                       ``{"legend_size": None, "legend_loc": None}`` as its parameters. Otherwise,
-                       you can provide a dictionary that properly modify those keys according to your needs.
+                       ``{"legend_size": None, "legend_loc": None, "legend_size": None, "legend_loc": None,
+                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2f",
+                       "n_labels": 5, "vertical": True}`` as its parameters. Otherwise, you can provide a dictionary
+                       that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
         outline_kwargs: A dictionary that will be pass to the ``add_outline`` function.
 
@@ -118,10 +120,17 @@ def wrap_to_plotter(
 
     # Add a legend to the plotter.
     if show_legend:
-        lg_kwargs = {
-            "legend_size": None,
-            "legend_loc": None,
-        }
+        lg_kwargs = dict(
+            legend_size=None,
+            legend_loc=None,
+            font_color=cbg_rgb,
+            title_font_size=None,
+            label_font_size=None,
+            font_family="arial",
+            fmt="%.2f",
+            n_labels=5,
+            vertical=True,
+        )
         if not (legend_kwargs is None):
             lg_kwargs.update((k, legend_kwargs[k]) for k in lg_kwargs.keys() & legend_kwargs.keys())
         add_legend(
@@ -134,26 +143,26 @@ def wrap_to_plotter(
 
     # Add an outline to the plotter.
     if show_outline:
-        ol_kwargs = {
-            "outline_width": 5.0,
-            "outline_color": cbg_rgb,
-            "show_labels": True,
-            "font_size": 16,
-            "font_color": bg_rgb,
-            "font_family": "arial",
-        }
+        ol_kwargs = dict(
+            outline_width=5.0,
+            outline_color=cbg_rgb,
+            show_labels=True,
+            font_size=16,
+            font_color=bg_rgb,
+            font_family="arial",
+        )
         if not (outline_kwargs is None):
             ol_kwargs.update((k, outline_kwargs[k]) for k in ol_kwargs.keys() & outline_kwargs.keys())
         add_outline(plotter=plotter, model=model, **ol_kwargs)
 
     # Add text to the plotter.
     if not (text is None):
-        t_kwargs = {
-            "font_family": "arial",
-            "font_size": 18,
-            "font_color": cbg_rgb,
-            "text_loc": "upper_left",
-        }
+        t_kwargs = dict(
+            font_family="arial",
+            font_size=18,
+            font_color=cbg_rgb,
+            text_loc="upper_left",
+        )
         if not (text_kwargs is None):
             t_kwargs.update((k, text_kwargs[k]) for k in t_kwargs.keys() & text_kwargs.keys())
         add_text(plotter=plotter, text=text, **t_kwargs)
@@ -236,8 +245,10 @@ def three_d_plot(
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
-                       ``{"legend_size": None, "legend_loc": None}`` as its parameters. Otherwise,
-                       you can provide a dictionary that properly modify those keys according to your needs.
+                       ``{"legend_size": None, "legend_loc": None,  "legend_size": None, "legend_loc": None,
+                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2f",
+                       "n_labels": 5, "vertical": True}`` as its parameters. Otherwise, you can provide a dictionary
+                       that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
         outline_kwargs: A dictionary that will be pass to the ``add_outline`` function.
 
@@ -401,8 +412,10 @@ def three_d_multi_plot(
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
-                       ``{"legend_size": None, "legend_loc": None}`` as its parameters. Otherwise,
-                       you can provide a dictionary that properly modify those keys according to your needs.
+                       ``{"legend_size": None, "legend_loc": None,  "legend_size": None, "legend_loc": None,
+                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2f",
+                       "n_labels": 5, "vertical": True}`` as its parameters. Otherwise, you can provide a dictionary
+                       that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
         outline_kwargs: A dictionary that will be pass to the ``add_outline`` function.
 
@@ -610,8 +623,10 @@ def three_d_animate(
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
-                       ``{"legend_size": None, "legend_loc": None}`` as its parameters. Otherwise,
-                       you can provide a dictionary that properly modify those keys according to your needs.
+                       ``{"legend_size": None, "legend_loc": None,  "legend_size": None, "legend_loc": None,
+                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2f",
+                       "n_labels": 5, "vertical": True}`` as its parameters. Otherwise, you can provide a dictionary
+                       that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
         outline_kwargs: A dictionary that will be pass to the ``add_outline`` function.
 
