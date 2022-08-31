@@ -248,11 +248,7 @@ def add_str_legend(
     """
 
     legend_data = np.concatenate([labels.reshape(-1, 1), colors.reshape(-1, 1)], axis=1)
-    print(labels, colors)
-    print(legend_data)
-    print(legend_data[:, 0] != "mask")
     legend_data = legend_data[legend_data[:, 0] != "mask", :]
-    print(legend_data)
     assert len(legend_data) != 0, "No legend can be added, please set `show_legend=False`."
 
     legend_entries = np.sort(legend_data, axis=0)
