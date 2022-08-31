@@ -247,11 +247,11 @@ def add_str_legend(
                 * ``legend_loc = 'center'``
     """
 
-    legend_data = np.concatenate([labels.reshape(-1, 1), colors.reshape(-1, 1)], axis=1)
+    legend_data = np.concatenate([labels.reshape(-1, 1).astype(object), colors.reshape(-1, 1).astype(object)], axis=1)
     legend_data = legend_data[legend_data[:, 0] != "mask", :]
     assert len(legend_data) != 0, "No legend can be added, please set `show_legend=False`."
 
-    legend_entries = np.sort(legend_data, axis=0)
+    legend_entries = legend_data[np.lexsort(legend_data[:, ::-1].T)]
     if legend_size is None:
         legend_num = 10 if len(legend_entries) >= 10 else len(legend_entries)
         legend_size = (0.1 + 0.01 * legend_num, 0.1 + 0.012 * legend_num)
@@ -367,15 +367,19 @@ def add_legend(
 
         if isinstance(model, MultiBlock):
             keys = key if isinstance(key, list) else [key] * len(model)
-            legend_label_data = np.concatenate([np.asarray(m[k]) for m, k in zip(model, keys)]).reshape(-1, 1)
-            legend_color_data = np.concatenate(
-                [np.asarray([mpl.colors.to_hex(i) for i in m[f"{k}_rgba"]]) for m, k in zip(model, keys)]
-            ).reshape(-1, 1)
+
+            legend_label_data, legend_color_data = [], []
+            for m, k in zip(model, keys):
+                legend_label_data.append(np.asarray(m[k]).flatten())
+                legend_color_data.append(np.asarray([mpl.colors.to_hex(i) for i in m[f"{k}_rgba"]]).flatten())
+            legend_label_data = np.concatenate(legend_label_data, axis=0)
+            legend_color_data = np.concatenate(legend_color_data, axis=0)
         else:
-            legend_label_data = np.asarray(model[key]).reshape(-1, 1)
-            legend_color_data = np.asarray([mpl.colors.to_hex(i) for i in model[f"{key}_rgba"]]).reshape(-1, 1)
-        legend_data = np.concatenate([legend_label_data, legend_color_data], axis=1)
+            legend_label_data = np.asarray(model[key]).flatten()
+            legend_color_data = np.asarray([mpl.colors.to_hex(i) for i in model[f"{key}_rgba"]]).flatten()
+        legend_data = np.concatenate([legend_label_data.reshape(-1, 1), legend_color_data.reshape(-1, 1)], axis=1)
         unique_legend_data = np.unique(legend_data, axis=0)
+
         add_str_legend(
             plotter=plotter,
             labels=unique_legend_data[:, 0],

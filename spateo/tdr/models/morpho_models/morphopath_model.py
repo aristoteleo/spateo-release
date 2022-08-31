@@ -123,7 +123,7 @@ def construct_genesis(
 
     t_ind = np.asarray(list(adata.uns[fate_key]["t"].keys()), dtype=int)
     t_sort_ind = np.argsort(t_ind)
-    t = list(adata.uns[fate_key]["t"].values())[t_sort_ind]
+    t = np.asarray(list(adata.uns["fate_morpho"]["t"].values()))[t_sort_ind]
     flats = np.unique([int(item) for sublist in t for item in sublist])
     flats = np.hstack((0, flats))
     flats = np.sort(flats) if t_end is None else np.sort(flats[flats <= t_end])
