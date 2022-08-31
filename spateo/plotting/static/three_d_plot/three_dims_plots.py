@@ -121,7 +121,7 @@ def wrap_to_plotter(
     # Add a legend to the plotter.
     if show_legend:
         lg_kwargs = dict(
-            title=key if isinstance(key, str) else key[0],
+            title=key if isinstance(key, str) else key[-1],
             legend_size=None,
             legend_loc=None,
             font_color=cbg_rgb,
