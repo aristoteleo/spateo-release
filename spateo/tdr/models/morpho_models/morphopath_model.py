@@ -6,7 +6,7 @@ from anndata import AnnData
 from pyvista import MultiBlock, PolyData
 
 from ....logging import logger_manager as lm
-from ..utilities import add_model_labels, collect_model, merge_models
+from ..utilities import add_model_labels, collect_models, merge_models
 from .arrow_model import construct_arrows
 from .line_model import construct_lines
 
@@ -77,7 +77,7 @@ def construct_genesis_X(
         )
         cells_models.append(model)
 
-    return collect_model(models=cells_models)
+    return collect_models(models=cells_models)
 
 
 def construct_genesis(

@@ -11,7 +11,7 @@ except ImportError:
     from typing_extensions import Literal
 
 from ...logging import logger_manager as lm
-from ..models import collect_model, multiblock2model
+from ..models import collect_models, multiblock2model
 from .utils import _interactive_plotter
 
 ###############
@@ -242,4 +242,4 @@ def interactive_slice(
         )
     p.show(cpos="iso")
 
-    return collect_model(p.plane_sliced_meshes)
+    return collect_models(p.plane_sliced_meshes)

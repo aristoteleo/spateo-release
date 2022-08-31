@@ -10,7 +10,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ....tdr import collect_model
+from ....tdr import collect_models
 from .three_dims_plotter import (
     _set_jupyter,
     add_legend,
@@ -453,7 +453,7 @@ def three_d_multi_plot(
     texts = text if isinstance(text, list) else [text]
 
     n_window = max(len(models), len(keys), len(cpos), len(mts), len(mss), len(cmaps), len(ams), len(ops), len(texts))
-    models = collect_model([models[0].copy() for i in range(n_window)]) if len(models) == 1 else models
+    models = collect_models([models[0].copy() for i in range(n_window)]) if len(models) == 1 else models
     keys = keys * n_window if len(keys) == 1 else keys
     cpos = cpos * n_window if len(cpos) == 1 else cpos
     mts = mts * n_window if len(mts) == 1 else mts
@@ -682,7 +682,7 @@ def three_d_animate(
     off_screen1, off_screen2, jupyter_backend = _set_jupyter(jupyter=jupyter, off_screen=off_screen)
 
     # Check models.
-    blocks = collect_model(models) if isinstance(models, list) else models
+    blocks = collect_models(models) if isinstance(models, list) else models
     blocks_name = blocks.keys()
 
     # Create a plotting object to display the end model of blocks.

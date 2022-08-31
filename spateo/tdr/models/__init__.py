@@ -30,7 +30,7 @@ from .pc import construct_pc
 from .utilities import (
     add_model_labels,
     center_to_zero,
-    collect_model,
+    collect_models,
     merge_models,
     multiblock2model,
     read_model,
