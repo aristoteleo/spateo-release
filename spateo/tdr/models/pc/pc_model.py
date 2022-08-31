@@ -63,7 +63,7 @@ def construct_pc(
     elif groupby in obs_names:
         groups = np.asarray(adata.obs[groupby].map(lambda x: "mask" if x in mask_list else x).values)
     elif groupby in gene_names or set(groupby) <= gene_names:
-        groups = np.asarray(adata[:, groupby].X.sum(axis=1).flatten().round(2))
+        groups = np.asarray(adata[:, groupby].X.sum(axis=1).flatten())
     else:
         raise ValueError(
             "`groupby` value is wrong."

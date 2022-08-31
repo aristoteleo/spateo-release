@@ -51,7 +51,7 @@ def construct_field(
     return construct_arrows(
         start_points=np.asarray(model.points),
         direction=np.asarray(model[vf_key]),
-        arrows_scale=None if arrows_scale_key is None else np.asarray(model[arrows_scale_key]),
+        arrows_scale=np.ones(shape=(model.n_points,)) if arrows_scale_key is None else np.asarray(model[arrows_scale_key]),
         n_sampling=n_sampling,
         sampling_method=sampling_method,
         factor=factor,
