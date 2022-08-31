@@ -20,7 +20,7 @@ from torch.backends import cudnn
 from tqdm import tqdm
 
 from ...configuration import SKM
-from ...preprocessing.find_neighbors import construct_pairwise, normalize_adj
+from ..find_neighbors import construct_pairwise, normalize_adj
 
 
 # -------------------------------------------- Tensor operations -------------------------------------------- #
