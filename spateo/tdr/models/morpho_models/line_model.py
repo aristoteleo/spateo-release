@@ -96,7 +96,7 @@ def construct_lines(
     edges_w_padding = np.vstack((padding, edges.T)).T
     model = pv.PolyData(points, edges_w_padding)
 
-    labels = np.asarray([label] * points.shape[0]) if isinstance(label, str) else label
+    labels = np.asarray([label] * points.shape[0]) if isinstance(label, str) else np.asarray(label)
     assert len(labels) == points.shape[0], "The number of labels is not equal to the number of points."
     if not (key_added is None):
         add_model_labels(

@@ -242,7 +242,7 @@ def construct_surface(
     uniform_surf = scale_model(model=uniform_surf, distance=scale_distance, scale_factor=scale_factor)
 
     # Add labels and the colormap of the surface mesh.
-    labels = np.array([label] * uniform_surf.n_cells).astype(str)
+    labels = np.asarray([label] * uniform_surf.n_cells, dtype=str)
     add_model_labels(
         model=uniform_surf,
         labels=labels,

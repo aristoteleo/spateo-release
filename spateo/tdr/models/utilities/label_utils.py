@@ -42,14 +42,13 @@ def add_model_labels(
     """
 
     model = model.copy() if not inplace else model
+    labels = np.asarray(labels).flatten()
 
-    if labels.dtype in [str, object]:
-        new_labels = np.asarray(labels).copy().astype(object)
-        raw_labels_hex = new_labels.copy()
-        raw_labels_alpha = new_labels.copy()
-        cu_arr = np.unique(new_labels)
-        cu_arr = np.sort(cu_arr, axis=0)
+    if not np.issubdtype(labels.dtype, np.number):
 
+        cu_arr = np.sort(np.unique(labels), axis=0).astype(object)
+        raw_labels_hex = labels.copy().astype(object)
+        raw_labels_alpha = labels.copy().astype(object)
         raw_labels_hex[raw_labels_hex == "mask"] = mpl.colors.to_hex(mask_color)
         raw_labels_alpha[raw_labels_alpha == "mask"] = mask_alpha
 
@@ -89,18 +88,16 @@ def add_model_labels(
         labels_rgba = [mpl.colors.to_rgba(c, alpha=a) for c, a in zip(raw_labels_hex, raw_labels_alpha)]
         labels_rgba = np.array(labels_rgba).astype(np.float32)
 
-        # Added labels and rgba of the labels.
+        # Added rgba of the labels.
         if where == "point_data":
-            model.point_data[key_added] = labels
             model.point_data[f"{key_added}_rgba"] = labels_rgba
         else:
-            model.cell_data[key_added] = labels
             model.cell_data[f"{key_added}_rgba"] = labels_rgba
+
+    # Added labels.
+    if where == "point_data":
+        model.point_data[key_added] = labels
     else:
-        # Added labels.
-        if where == "point_data":
-            model.point_data[key_added] = labels
-        else:
-            model.cell_data[key_added] = labels
+        model.cell_data[key_added] = labels
 
     return model if not inplace else None
