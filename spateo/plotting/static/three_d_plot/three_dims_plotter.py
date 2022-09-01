@@ -149,13 +149,12 @@ def add_model(
                 rgba=True,
             )
         else:
-            added_kwargs = dict(
-                scalars=_key if _key in _model.array_names else _model.active_scalars_name,
+            added_kwargs = (
+                dict(scalars=_key if _key in _model.array_names else _model.active_scalars_name, cmap=_colormap)
+                if _colormap in list(mpl.colormaps())
+                else dict(color=_colormap)
             )
-            if _colormap in list(mpl.colormaps()):
-                added_kwargs["cmap"] = _colormap
-            else:
-                added_kwargs["color"] = _colormap
+
         mesh_kwargs.update(added_kwargs)
         _p.add_mesh(_model, **mesh_kwargs)
 
