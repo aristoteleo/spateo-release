@@ -16,7 +16,6 @@ import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
-from anndata import AnnData
 from matplotlib.collections import PolyCollection
 from matplotlib.ticker import StrMethodFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -32,6 +31,7 @@ def plot_connections(
     zero_self_connections: bool = True,
     normalize_by_self_connections: bool = False,
     shapes_style: bool = True,
+    label_outline: bool = False,
     max_scale: float = 0.46,
     colormap: Union[str, dict, "mpl.colormap"] = "Spectral",
     title_str="connection strengths between types",
@@ -59,6 +59,8 @@ def plot_connections(
             spots of that label
         shapes_style : bool, default True
             If True plots squares, if False plots heatmap
+        label_outline : bool, default False
+            If True, gives dark outline to axis tick label text
         max_scale : float, default 0.46
             Only used for the case that 'shape_style' is True, gives maximum size of square
         colormap : str, dict, or matplotlib.colormap
@@ -161,7 +163,8 @@ def plot_connections(
 
         ax.add_collection(collection)
 
-        ax.tick_params(labelbottom=False, labeltop=True, top=True, bottom=False)
+        # Remove ticks
+        ax.tick_params(labelbottom=False, labeltop=True, top=False, bottom=False, left=False)
         ax.xaxis.set_tick_params(pad=-2)
     else:
         # Heatmap of connection strengths
@@ -183,6 +186,8 @@ def plot_connections(
     ax.set_xticks(
         np.arange(label.num_labels),
     )
+    text_outline = [PathEffects.Stroke(linewidth=0.5, foreground="black", alpha=0.8)] if label_outline else None
+
     # If label has categorical labels associated, use those to label the axes instead:
     if label.str_map is not None:
         ax.set_xticklabels(
@@ -190,7 +195,7 @@ def plot_connections(
             fontsize=label_fontsize,
             fontweight="bold",
             rotation=90,
-            path_effects=[PathEffects.Stroke(linewidth=0.5, foreground="black", alpha=0.8)],
+            path_effects=text_outline,
         )
     else:
         ax.set_xticklabels(
@@ -198,7 +203,7 @@ def plot_connections(
             fontsize=label_fontsize,
             fontweight="bold",
             rotation=0,
-            path_effects=[PathEffects.Stroke(linewidth=0.5, foreground="black", alpha=0.8)],
+            path_effects=text_outline,
         )
 
     ax.set_yticks(np.arange(label.num_labels))
@@ -207,14 +212,14 @@ def plot_connections(
             label.str_ids,
             fontsize=label_fontsize,
             fontweight="bold",
-            path_effects=[PathEffects.Stroke(linewidth=0.5, foreground="black", alpha=0.8)],
+            path_effects=text_outline,
         )
     else:
         ax.set_yticklabels(
             label.ids,
             fontsize=label_fontsize,
             fontweight="bold",
-            path_effects=[PathEffects.Stroke(linewidth=0.5, foreground="black", alpha=0.8)],
+            path_effects=text_outline,
         )
 
     for ticklabels in [ax.get_xticklabels(), ax.get_yticklabels()]:

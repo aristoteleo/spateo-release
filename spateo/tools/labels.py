@@ -177,9 +177,9 @@ class Label(object):
         logger.info(
             f"\n--- {self.num_labels} labels, "
             f"{self.num_samples} samples ---\n"
-            f"initalized {indptr.shape} index ptr: {indptr}\n"
-            f"initalized {indices.shape} indices: {indices}\n"
-            f"initalized {data.shape} data: {data}\n"
+            #f"initalized {indptr.shape} index ptr: {indptr}\n"
+            #f"initalized {indices.shape} indices: {indices}\n"
+            #f"initalized {data.shape} data: {data}\n"
         )
 
         # Update index pointer and indices row by row
