@@ -59,11 +59,12 @@ def run_denoise_impute(
             # To be able to visualize side-by-side, temporarily append the smoothed feature to the original under a
             # different index in .var:
             adata_to_vis = adata_orig.copy()
-            adata_to_vis[:, feat + "_gcn"] = adata_rex[:, feat]
+            adata_to_vis.obs[feat + " denoised"] = adata_rex[:, feat].X
 
-            size = 0.35 if len(adata_to_vis) < 1000 else 0.1
+            size = 0.3 if len(adata_to_vis) < 3000 else 0.1
             if group_key is not None:
-                space(adata_to_vis, color=[feat, feat + "_gcn", group_key], ncols=2, cmap=cmap, dpi=300, pointsize=size,
-                      alpha=1)
+                space(adata_to_vis, color=[feat, feat + " denoised", group_key], ncols=3, cmap=cmap, dpi=300,
+                      pointsize=size, alpha=1)
             else:
-                space(adata_to_vis, color=[feat, feat + "_gcn"], ncols=2, cmap=cmap, dpi=300, pointsize=size, alpha=1)
+                space(adata_to_vis, color=[feat, feat + " denoised"], ncols=2, cmap=cmap, dpi=300, pointsize=size,
+                      alpha=1)

@@ -161,7 +161,7 @@ def plot_connections(
 
         ax.add_collection(collection)
 
-        ax.tick_params(labelbottom=False, labeltop=True)
+        ax.tick_params(labelbottom=False, labeltop=True, top=True, bottom=False)
         ax.xaxis.set_tick_params(pad=-2)
     else:
         # Heatmap of connection strengths
