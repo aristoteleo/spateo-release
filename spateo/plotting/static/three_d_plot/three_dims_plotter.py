@@ -90,7 +90,7 @@ def add_model(
     key: Union[str, list] = None,
     colormap: Optional[Union[str, list]] = None,
     ambient: Union[float, list] = 0.2,
-    opacity: Union[float, list] = 1.0,
+    opacity: Union[float, list, np.ndarray] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     model_size: Union[float, list] = 5.0,
 ):
@@ -109,7 +109,8 @@ def add_model(
         opacity: Opacity of the model.
 
                  If a single float value is given, it will be the global opacity of the model and uniformly applied
-                 everywhere - should be between 0 and 1.
+                 everywhere, elif a numpy.ndarray with single float values is given, it
+                 will be the opacity of each point. - should be between 0 and 1.
 
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
@@ -274,7 +275,7 @@ def add_num_legend(
     fmt="%.2e",
     n_labels: int = 5,
     legend_size: Union[tuple, list] = (0.1, 0.4),
-    legend_loc: Union[tuple, list] = (0.9, 0.3),
+    legend_loc: Union[tuple, list] = (0.85, 0.3),
     vertical: bool = True,
 ):
     """
@@ -390,7 +391,7 @@ def add_legend(
         add_num_legend(
             plotter=plotter,
             legend_size=(0.1, 0.4) if legend_size is None else legend_size,
-            legend_loc=(0.9, 0.3) if legend_loc is None else legend_loc,
+            legend_loc=(0.85, 0.3) if legend_loc is None else legend_loc,
             title=title,
             n_labels=n_labels,
             title_font_size=title_font_size,

@@ -3,6 +3,7 @@ import re
 from typing import List, Optional, Union
 
 import matplotlib as mpl
+import numpy as np
 from pyvista import MultiBlock, Plotter, PolyData, UnstructuredGrid
 
 try:
@@ -31,7 +32,7 @@ def wrap_to_plotter(
     cpo: Union[str, list] = "iso",
     colormap: Optional[Union[str, list]] = None,
     ambient: Union[float, list] = 0.2,
-    opacity: Union[float, list] = 1.0,
+    opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     model_size: Union[float, list] = 5.0,
     show_legend: bool = True,
@@ -65,7 +66,8 @@ def wrap_to_plotter(
         opacity: Opacity of the model.
 
                  If a single float value is given, it will be the global opacity of the model and uniformly applied
-                 everywhere - should be between 0 and 1.
+                 everywhere, elif a numpy.ndarray with single float values is given, it
+                 will be the opacity of each point. - should be between 0 and 1.
 
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
@@ -181,7 +183,7 @@ def three_d_plot(
     cpo: Union[str, list] = "iso",
     colormap: Optional[Union[str, list]] = None,
     ambient: Union[float, list] = 0.2,
-    opacity: Union[float, list] = 1.0,
+    opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     model_size: Union[float, list] = 5.0,
     show_legend: bool = True,
@@ -232,7 +234,8 @@ def three_d_plot(
         opacity: Opacity of the model.
 
                  If a single float value is given, it will be the global opacity of the model and uniformly applied
-                 everywhere - should be between 0 and 1.
+                 everywhere, elif a numpy.ndarray with single float values is given, it
+                 will be the opacity of each point. - should be between 0 and 1.
 
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
@@ -341,7 +344,7 @@ def three_d_multi_plot(
     cpo: Union[str, list] = "iso",
     colormap: Optional[Union[str, list]] = None,
     ambient: Union[float, list] = 0.2,
-    opacity: Union[float, list] = 1.0,
+    opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     model_size: Union[float, list] = 5.0,
     show_legend: bool = True,
@@ -399,7 +402,8 @@ def three_d_multi_plot(
         opacity: Opacity of the model.
 
                  If a single float value is given, it will be the global opacity of the model and uniformly applied
-                 everywhere - should be between 0 and 1.
+                 everywhere, elif a numpy.ndarray with single float values is given, it
+                 will be the opacity of each point. - should be between 0 and 1.
 
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
@@ -547,7 +551,7 @@ def three_d_animate(
     cpo: Union[str, list] = "iso",
     colormap: Optional[Union[str, list]] = None,
     ambient: Union[float, list] = 0.2,
-    opacity: Union[float, list] = 1.0,
+    opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     model_size: Union[float, list] = 5.0,
     show_legend: bool = True,
@@ -610,7 +614,8 @@ def three_d_animate(
         opacity: Opacity of the model.
 
                  If a single float value is given, it will be the global opacity of the model and uniformly applied
-                 everywhere - should be between 0 and 1.
+                 everywhere, elif a numpy.ndarray with single float values is given, it
+                 will be the opacity of each point. - should be between 0 and 1.
 
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
