@@ -81,7 +81,7 @@ def wrap_to_plotter(
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
                        ``{"legend_size": None, "legend_loc": None, "legend_size": None, "legend_loc": None,
-                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2f",
+                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2e",
                        "n_labels": 5, "vertical": True}`` as its parameters. Otherwise, you can provide a dictionary
                        that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
@@ -128,7 +128,7 @@ def wrap_to_plotter(
             title_font_size=15,
             label_font_size=12,
             font_family="arial",
-            fmt="%.2f",
+            fmt="%.2e",
             n_labels=5,
             vertical=True,
         )

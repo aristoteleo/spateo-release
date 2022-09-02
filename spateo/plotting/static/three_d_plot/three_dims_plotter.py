@@ -149,13 +149,12 @@ def add_model(
                 rgba=True,
             )
         else:
-            added_kwargs = dict(
-                scalars=_key if _key in _model.array_names else _model.active_scalars_name,
+            added_kwargs = (
+                dict(scalars=_key if _key in _model.array_names else _model.active_scalars_name, cmap=_colormap)
+                if _colormap in list(mpl.colormaps())
+                else dict(color=_colormap)
             )
-            if _colormap in list(mpl.colormaps()):
-                added_kwargs["cmap"] = _colormap
-            else:
-                added_kwargs["color"] = _colormap
+
         mesh_kwargs.update(added_kwargs)
         _p.add_mesh(_model, **mesh_kwargs)
 
@@ -272,7 +271,7 @@ def add_num_legend(
     label_font_size: Optional[Union[int, float]] = None,
     font_color: str = "black",
     font_family: Literal["times", "courier", "arial"] = "arial",
-    fmt="%.2f",
+    fmt="%.2e",
     n_labels: int = 5,
     legend_size: Union[tuple, list] = (0.1, 0.4),
     legend_loc: Union[tuple, list] = (0.9, 0.3),
@@ -326,12 +325,12 @@ def add_legend(
     colormap: Optional[Union[str, list]] = None,
     legend_size: Optional[Tuple] = None,
     legend_loc: Union[str, tuple, list] = None,
+    title: Optional[str] = "",
     title_font_size: Optional[Union[int, float]] = None,
     label_font_size: Optional[Union[int, float]] = None,
     font_color: str = "black",
     font_family: Literal["times", "courier", "arial"] = "arial",
-    title: Optional[str] = "",
-    fmt="%.2f",
+    fmt="%.2e",
     n_labels: int = 5,
     vertical: bool = True,
 ):
@@ -347,6 +346,7 @@ def add_legend(
                   When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
         legend_size: The percentage (0 to 1) width and height of the window for the legend.
         legend_loc: The location of the legend in the window.
+        title: Title of the legend. Default '' which is rendered as an empty title.
         title_font_size: Sets the size of the title font. Only available when colormap is not None.
         label_font_size: Sets the size of the label font. Only available when colormap is not None.
         font_color: The color of the font. Only available when colormap is not None.
@@ -357,7 +357,6 @@ def add_legend(
                 * ``font_family = times``
                 * ``font_family = courier``
                 * ``font_family = arial``
-        title: Title of the legend. Default '' which is rendered as an empty title.
         fmt: printf format for labels. Only available when colormap is not None.
         n_labels: Number of labels to use for the legend. Only available when colormap is not None.
         vertical: Use vertical or horizontal legend. Only available when colormap is not None.
