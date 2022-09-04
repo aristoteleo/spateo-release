@@ -5,8 +5,7 @@ from .architype import (
     find_spatially_related_genes,
     get_genes_from_spatial_archetype,
 )
-from .cci_two_cluster import find_cci_two_group
-from .cell_communication import niches, predict_ligand_activities, predict_target_genes
+from spateo.tools.cell_interaction.cci_two_cluster import find_cci_two_group
 from .cluster import *
 from .cluster.find_clusters import scc, spagcn_pyg
 from .cluster_degs import (

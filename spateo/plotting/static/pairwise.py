@@ -15,11 +15,14 @@ import matplotlib as mpl
 import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import scipy
+import seaborn as sns
 from matplotlib.collections import PolyCollection
 from matplotlib.ticker import StrMethodFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+from ...configuration import reset_rcParams
 from ...tools.labels import Label, interlabel_connections
 
 
@@ -245,3 +248,15 @@ def plot_connections(
         plt.show()
     elif save_show_or_return in ["return", "all"]:
         return (fig, ax)
+
+
+def heatmap(data: Union[np.ndarray, pd.DataFrame]):
+    """
+    Generates and plots heatmap from array or dataframe, where x- and y-axes are two variable categories (e.g. can be
+    cell type-gene or cell types on both axes), and the element magnitude is the relation between them.
+
+    Args:
+        data : np.ndarray or pd.DataFrame
+    """
+    reset_rcParams()
+

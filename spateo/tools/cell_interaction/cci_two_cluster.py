@@ -18,7 +18,7 @@ from scipy.sparse import issparse
 from scipy.stats import gmean, pearsonr
 from typing_extensions import Literal
 
-from ..configuration import SKM
+from ...configuration import SKM
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
