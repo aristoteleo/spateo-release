@@ -16,6 +16,7 @@ from .morphogenesis import (
     cell_directions,
     morphofield,
     morphofield_acceleration,
+    morphofield_curl,
     morphofield_curvature,
     morphofield_jacobian,
     morphofield_torsion,
