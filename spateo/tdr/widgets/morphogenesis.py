@@ -461,14 +461,21 @@ def morphofield_curl(
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
-        An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` attribute which contains curl.
+        An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` and ``.obsm`` attribute.
+
+        The  ``key_added`` in the ``.obs`` which contains magnitude of curl.
+        The  ``key_added`` in the ``.obsm`` which contains curl vectors.
     """
 
     adata = adata if inplace else adata.copy()
     vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
 
     X, V = vector_field_class.get_data()
-    adata.obs[key_added] = vector_field_class.compute_curl(X=X, method=method)
+    curl = vector_field_class.compute_curl(X=X, method=method)
+    curl_mag = np.array([np.linalg.norm(i) for i in curl])
+
+    adata.obs[key_added] = curl_mag
+    adata.obsm[key_added] = curl
 
     return None if inplace else adata
 
