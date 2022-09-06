@@ -1,6 +1,5 @@
 from typing import List, Optional, Tuple, Union
 
-import dynamo as dyn
 import numpy as np
 import pandas as pd
 from anndata import AnnData
@@ -219,12 +218,13 @@ def models_align_ref(
         align_models: List of models (AnnData Object) after alignment.
         align_models_ref: List of models_ref (AnnData Object) after alignment.
     """
+    from dynamo.tools.sampling import sample
 
     if models_ref is None:
         models_ref = []
         for m in models:
             model_ref = m.copy()
-            sampling = dyn.tl.sample(
+            sampling = sample(
                 arr=np.asarray(model_ref.obs_names), n=n_sampling, method=sampling_method, X=model_ref.obsm[spatial_key]
             )
             slice_ref = model_ref[sampling, :]
@@ -450,9 +450,10 @@ def models_center_align_ref(
         align_models: List of models (AnnData Object) after alignment.
         align_models_ref: List of models_ref (AnnData Object) after alignment.
     """
+    from dynamo.tools.sampling import sample
 
     if models_ref is None:
-        center_sampling = dyn.tl.sample(
+        center_sampling = sample(
             arr=np.asarray(init_center_model.obs_names),
             n=n_sampling,
             method=sampling_method,
@@ -463,7 +464,7 @@ def models_center_align_ref(
         models_ref = []
         for m in models:
             model_ref = m.copy()
-            model_sampling = dyn.tl.sample(
+            model_sampling = sample(
                 arr=np.asarray(model_ref.obs_names), n=n_sampling, method=sampling_method, X=model_ref.obsm[spatial_key]
             )
             model_ref = model_ref[model_sampling, :]
