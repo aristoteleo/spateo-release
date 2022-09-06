@@ -15,7 +15,7 @@ from patsy import dmatrix
 from pysal.lib import weights
 from pysal.model import spreg
 
-# For testing keep the absolute imports:
+# For testing purposes keep the absolute imports:
 from regression_utils import compute_wald_test, get_fisher_inverse, ols_fit
 
 from spateo.logging import logger_manager as lm
@@ -29,27 +29,6 @@ from ...logging import logger_manager as lm
 from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import construct_pairwise
 from ...tools.utils import update_dict"""
-
-
-# NOTE TO SELF: add train-test splitting and cross-validation?
-
-# NOTE TO SELF: output = predicted influence of spatially-lagged expression on expression at particular spot
-# X = cell type category, Y = expression of a gene (since it's a spatially-lagged model, the values of gene
-# expression @ each neighbor are implicitly considered)
-
-# NOTE ABOUT NCEM: references to "h_0" refer to array encoding cell type information, references to "h_1" refer to
-# the gene expression. The shape of the target batch is 8- it's a one-hot encoding for cell type, interaction batch
-# is 64- I'm assuming it's a flattened version of a cell type-pairwise interaction matrix? Their x block is thus
-# 72-dimensional (made up of targets + connections) and resulting parameters array is n_features x 72
-
-# ANOTHER NOTE ABOUT NCEM: the "target" array is for the spatial neighborhood of each spot- n_neighbors x
-# n_cell_types, the 1 corresponds to the cell type. My interpretation is that the "connections" array is populated
-# by 0 or 1 if, for each spatial neighborhood, both cell types of the pair can be found in the neighborhood?
-# TASK: figure out how the "connections" array is created: how "target" & "dmat_neighbors" intertwine to form
-# "connections"...for each row of target, imagine using the distributive property over the corresponding row of
-# dmat_neighbors such that a list gets filled in for each pair of elements- connections will have a 1 where both
-# target & dmat_neighbors are 1 representing that cell type A has an interaction e.g. w/ cell type B and E but not C
-# or D for each niche.
 
 # ------------------------------------------- Wrappers for model running ------------------------------------------- #
 class BaseInterpreter:
