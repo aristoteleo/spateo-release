@@ -63,8 +63,16 @@ def run_denoise_impute(
 
             size = 0.3 if len(adata_to_vis) < 3000 else 0.1
             if group_key is not None:
-                space(adata_to_vis, color=[feat, feat + " denoised", group_key], ncols=3, cmap=cmap, dpi=300,
-                      pointsize=size, alpha=1)
+                space(
+                    adata_to_vis,
+                    color=[feat, feat + " denoised", group_key],
+                    ncols=3,
+                    cmap=cmap,
+                    dpi=300,
+                    pointsize=size,
+                    alpha=1,
+                )
             else:
-                space(adata_to_vis, color=[feat, feat + " denoised"], ncols=2, cmap=cmap, dpi=300, pointsize=size,
-                      alpha=1)
+                space(
+                    adata_to_vis, color=[feat, feat + " denoised"], ncols=2, cmap=cmap, dpi=300, pointsize=size, alpha=1
+                )

@@ -253,10 +253,16 @@ def plot_connections(
 def heatmap(data: Union[np.ndarray, pd.DataFrame]):
     """
     Generates and plots heatmap from array or dataframe, where x- and y-axes are two variable categories (e.g. can be
-    cell type-gene or cell types on both axes), and the element magnitude is the relation between them.
+    cell type-gene or cell types on both axes), and the element magnitude is the relation between them
 
     Args:
         data : np.ndarray or pd.DataFrame
     """
     reset_rcParams()
 
+
+def volcano_plot():
+    """
+    Generates and plots volcano plot for visualization of the relative log-fold change and FDR-corrected p-values for
+    features between two groups
+    """

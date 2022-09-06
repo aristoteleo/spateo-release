@@ -1,11 +1,14 @@
 """
 Functions for finding nearest neighbors and the distances between them in spatial transcriptomics data.
 """
+import os
 from typing import Tuple, Union
 
 import numpy as np
+import pandas as pd
 import scipy
 from anndata import AnnData
+from scipy.spatial.distance import pdist, squareform
 from sklearn.neighbors import NearestNeighbors
 from torch import FloatTensor, Tensor
 
@@ -65,7 +68,7 @@ def weighted_spatial_graph(
     return weights_graph, distance_graph
 
 
-# ------------------------------------------ Cell-cell/bucket-bucket distance ------------------------------------------ #
+# --------------------------------------- Cell-cell/bucket-bucket distance --------------------------------------- #
 def remove_greater_than(
     graph: scipy.sparse.csr_matrix, threshold: float, copy: bool = False, verbose: bool = False
 ) -> scipy.sparse.csr_matrix:
@@ -283,6 +286,8 @@ def generate_spatial_weights_fixed_radius(
 # ----------- (Identical to generate_spatial_weights_fixed_nbrs, but specific to STGNN) ---------- #
 def calculate_distance(position: np.ndarray) -> np.ndarray:
     """Given array of x- and y-coordinates, compute pairwise distances between all samples"""
+    distance_matrix = squareform(pdist(position, metric="euclidean"))
+    """
     n_bucket = position.shape[0]
     distance_matrix = np.zeros([n_bucket, n_bucket])
 
@@ -292,7 +297,7 @@ def calculate_distance(position: np.ndarray) -> np.ndarray:
             y = position[j, :]
             d = np.sqrt(np.sum(np.square(x - y)))
             distance_matrix[i, j] = d
-            distance_matrix[j, i] = d
+            distance_matrix[j, i] = d"""
 
     return distance_matrix
 
@@ -302,6 +307,8 @@ def construct_pairwise(
     adata: AnnData,
     spatial_key: str = "spatial",
     n_neighbors: int = 8,
+    exclude_self: bool = True,
+    save_id: Union[None, str] = None,
 ) -> None:
     """Constructing bucket-to-bucket nearest neighbors graph.
 
@@ -309,6 +316,9 @@ def construct_pairwise(
         adata: An anndata object.
         spatial_key: Key in .obsm in which x- and y-coordinates are stored.
         n_neighbors: Number of nearest neighbors to compute for each bucket.
+        exclude_self: Set True to set elements along the diagonal to zero.
+        save_id: Optional string; if not None, will save distance matrix and neighbors matrix to path:
+        './neighbors/{save_id}_distance.csv' and path: './neighbors/{save_id}_neighbors.csv', respectively.
     """
     position = adata.obsm[spatial_key]
     # calculate distance matrix
@@ -326,12 +336,22 @@ def construct_pairwise(
             y = distance[t]
             interaction[i, y] = 1
 
+    if save_id is not None:
+        if not os.path.exists(os.path.join(os.getcwd(), "neighbors")):
+            os.makedirs(os.path.join(os.getcwd(), "neighbors"))
+        dist_df = pd.DataFrame(distance_matrix, index=list(adata.obs_names), columns=list(adata.obs_names))
+        dist_df.to_csv(os.path.join(os.getcwd(), f"neighbors/{save_id}_distance.csv"))
+        neighbors_df = pd.DataFrame(interaction, index=list(adata.obs_names), columns=list(adata.obs_names))
+        neighbors_df.to_csv(os.path.join(os.getcwd(), f"./neighbors/{save_id}_neighbors.csv"))
+
     adata.obsm["graph_neigh"] = interaction
 
     # transform adj to symmetrical adj
     adj = interaction
     adj = adj + adj.T
     adj = np.where(adj > 1, 1, adj)
+    if exclude_self:
+        np.fill_diagonal(adj, 0)
 
     adata.obsm["adj"] = adj
 
