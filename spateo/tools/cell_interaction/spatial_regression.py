@@ -30,7 +30,11 @@ from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import construct_pairwise
 from ...tools.utils import update_dict"""
 
-# ------------------------------------------- Wrappers for model running ------------------------------------------- #
+
+# ----------------------------- Master wrappers for performing each type of regression ----------------------------- #
+
+
+# --------------------------------------- Wrapper classes for model running --------------------------------------- #
 class BaseInterpreter:
     """
     Basis class for all spatially-aware and spatially-lagged regression models that can be implemented through this
