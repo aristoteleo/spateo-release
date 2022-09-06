@@ -398,6 +398,7 @@ def morphofield_curvature(
     adata.obs[key_added], adata.obsm[key_added] = vector_field_class.compute_curvature(
         X=X, formula=formula, method=method
     )
+
     return None if inplace else adata
 
 
@@ -434,6 +435,48 @@ def morphofield_acceleration(
 
     X, V = vector_field_class.get_data()
     adata.obs[key_added], adata.obsm[key_added] = vector_field_class.compute_acceleration(X=X, method=method)
+
+    return None if inplace else adata
+
+
+def morphofield_curl(
+    adata: AnnData,
+    vf_key: str = "VecFld_morpho",
+    key_added: str = "curl",
+    method: str = "analytical",
+    inplace: bool = True,
+) -> Optional[AnnData]:
+    """
+    Calculate curl for each cell with the reconstructed vector field function.
+
+    Args:
+        adata: AnnData object that contains the reconstructed vector field.
+        vf_key: The key in ``.uns`` that corresponds to the reconstructed vector field.
+        key_added: The key that will be used for the torsion key in ``.obs``.
+        method: The method that will be used for calculating torsion field, either ``'analytical'`` or ``'numerical'``.
+
+                ``'analytical'`` method uses the analytical expressions for calculating torsion while ``'numerical'``
+                method uses numdifftools, a numerical differentiation tool, for computing torsion. ``'analytical'``
+                method is much more efficient.
+        inplace: Whether to copy adata or modify it inplace.
+
+    Returns:
+        An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` and ``.obsm`` attribute.
+
+        The  ``key_added`` in the ``.obs`` which contains magnitude of curl.
+        The  ``key_added`` in the ``.obsm`` which contains curl vectors.
+    """
+
+    adata = adata if inplace else adata.copy()
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+
+    X, V = vector_field_class.get_data()
+    curl = vector_field_class.compute_curl(X=X, method=method)
+    curl_mag = np.array([np.linalg.norm(i) for i in curl])
+
+    adata.obs[key_added] = curl_mag
+    adata.obsm[key_added] = curl
+
     return None if inplace else adata
 
 
