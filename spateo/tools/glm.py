@@ -82,9 +82,10 @@ def glm_degs(
     sparse = issparse(X_data)
     deg_df = pd.DataFrame(index=genes, columns=["status", "family", "pval"])
     deg_dict = {}
-    for i, gene in lm.progress_logger(
-        enumerate(genes), progress_name="Detecting genes via Generalized Additive Models (GAMs)"
+    for i in lm.progress_logger(
+        range(len(genes)), progress_name="Detecting genes via Generalized Additive Models (GAMs)"
     ):
+        gene = genes[i]
         expression = X_data[:, i].A if sparse else X_data[:, i]
         df_factors["expression"] = expression
         try:
@@ -94,6 +95,8 @@ def glm_degs(
 
             df_factors_gene = df_factors.copy()
             df_factors_gene["mu"] = nb2_full.mu
+            df_factors_gene["resid_deviance"] = nb2_full.resid_deviance
+            df_factors_gene["resid_pearson"] = nb2_full.resid_pearson
             deg_dict[gene] = df_factors_gene
         except:
             deg_df.iloc[i, :] = ("fail", "NB2", 1)
@@ -102,8 +105,8 @@ def glm_degs(
     deg_df = deg_df.sort_values(by=["qval", "pval"])
 
     if not (qval_threshold is None):
-        cut_deg_df = deg_df[deg_df["qval"] <= qval_threshold]
-        cut_deg_dict = {gene: deg_dict[gene] for gene in deg_df["status"].values}
+        cut_deg_df = deg_df[deg_df["qval"] < qval_threshold]
+        cut_deg_dict = {gene: deg_dict[gene] for gene in cut_deg_df.index}
         adata.uns[key_added] = {"glm_result": cut_deg_df, "correlation": cut_deg_dict}
     else:
         adata.uns[key_added] = {"glm_result": deg_df, "correlation": deg_dict}
