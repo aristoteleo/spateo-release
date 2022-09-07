@@ -6,6 +6,7 @@ from .bbs import delaunay, polygon
 from .colorlabel import color_label
 from .contour import spatial_domains
 from .geo import geo
+from .glm import glm_abline
 from .lisa import lisa, lisa_quantiles
 from .pairwise import plot_connections
 from .polarity import *
