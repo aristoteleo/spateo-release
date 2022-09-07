@@ -22,19 +22,18 @@ def glm_abline(
     feature_x: str = None,
     feature_y: str = None,
     glm_key: str = "glm_degs",
-    point_size: Optional[float] = 1,
-    point_color: Optional[str] = "skyblue",
-    line_size: Optional[float] = 1,
-    line_color: Optional[str] = "black",
+    point_size: float = 1,
+    point_color: str = "skyblue",
+    line_size: float = 1,
+    line_color: str = "black",
+    ax_size: Union[tuple, list] = (3, 3),
+    background_color: str = "white",
     ncol: int = 4,
-    ax_height: Union[float, int] = 2,
-    ax_width: Union[float, int] = 3,
-    dpi: int = 100,
-    show_legend: bool = True,
     save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
     save_kwargs: Optional[dict] = None,
     **kwargs,
 ):
+
     assert not (gene is None), "``gene`` cannot be None."
     assert not (feature_x is None), "``feature_x`` cannot be None."
     assert not (feature_y is None), "``feature_y`` cannot be None."
@@ -45,19 +44,11 @@ def glm_abline(
     genes = list(gene) if isinstance(gene, list) else [gene]
     genes_data = [adata.uns[glm_key]["correlation"][g].copy() for g in genes]
 
+    ncol = len(genes) if len(genes) < ncol else ncol
     nrow = math.ceil(len(genes) / ncol)
-    fig = plt.figure(figsize=(ax_width * ncol, ax_height * nrow))
-    sns.set_theme(
-        context="paper",
-        style="white",
-        font="Arial",
-        font_scale=1,
-        rc={
-            "font.size": 10.0,
-            "font.family": ["sans-serif"],
-            "font.sans-serif": ["Arial", "sans-serif", "Helvetica", "DejaVu Sans", "Bitstream Vera Sans"],
-        },
-    )
+    fig = plt.figure(figsize=(ax_size[0] * ncol, ax_size[1] * nrow))
+
+    axes_list = []
     for i, data in enumerate(genes_data):
         ax = plt.subplot(nrow, ncol, i + 1)
         ax.set_title(f"Model Fit Plot of  {genes[i]}")
@@ -65,18 +56,20 @@ def glm_abline(
 
         fit_line = sm.OLS(data[feature_y], sm.add_constant(data[feature_x], prepend=True)).fit()
         abline_plot(model_results=fit_line, ax=ax, color=line_color, linewidth=line_size)
+        axes_list.append(ax)
 
-    plt.ylabel(feature_y)
-    plt.xlabel(feature_x)
-
+    fig.supxlabel(feature_x)
+    fig.supylabel(feature_y)
+    plt.tight_layout()
     return save_return_show_fig_utils(
         save_show_or_return=save_show_or_return,
-        show_legend=show_legend,
-        background="white",
-        prefix="multi_slices",
+        show_legend=False,
+        background=background_color,
+        prefix="glm_degs",
         save_kwargs=save_kwargs,
         total_panels=len(genes),
         fig=fig,
+        axes=axes_list,
         return_all=False,
         return_all_list=None,
     )
