@@ -5,10 +5,11 @@ from .align import multi_slices
 from .bbs import delaunay, polygon
 from .colorlabel import color_label
 from .contour import spatial_domains
+from .dotplot import Dotplot
 from .geo import geo
 from .glm import glm_abline
 from .lisa import lisa, lisa_quantiles
-from .pairwise import plot_connections
+from .interactions import plot_connections
 from .polarity import *
 from .scatters import scatters
 from .space import space

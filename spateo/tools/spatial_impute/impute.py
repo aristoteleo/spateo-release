@@ -14,13 +14,13 @@ import scipy
 import torch
 import torch.nn.functional as F
 from anndata import AnnData
-from impute_model import Encoder
 from torch import FloatTensor, Tensor, nn
 from torch.backends import cudnn
 from tqdm import tqdm
 
 from ...configuration import SKM
 from ..find_neighbors import construct_pairwise, normalize_adj
+from .impute_model import Encoder
 
 
 # -------------------------------------------- Tensor operations -------------------------------------------- #

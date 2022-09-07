@@ -373,6 +373,7 @@ def GM_lag_model(
     )
 
     group_name = adata.obs[group]
+    print(group_name)
     db = pd.DataFrame({"group": group_name})
     categories = np.array(adata.obs[group].unique().tolist() + ["others"])
     db["group"] = pd.Categorical(db["group"], categories=categories)

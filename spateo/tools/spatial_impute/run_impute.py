@@ -7,10 +7,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.sparse as sp
 from anndata import AnnData
-from impute import STGNN
 
 from ...configuration import SKM
 from ...plotting.static.space import space
+from .impute import STGNN
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)

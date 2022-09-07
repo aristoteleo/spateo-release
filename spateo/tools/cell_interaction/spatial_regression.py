@@ -1,9 +1,12 @@
 """
-Perform downstream characterization following spatially-informed regression to characterize niche impact on gene
+Suite of tools for spatially-aware as well as spatially-lagged linear regression
+
+Also performs downstream characterization following spatially-informed regression to characterize niche impact on gene
 expression
 """
 import os
 import time
+from itertools import product
 from random import sample
 from typing import List, Union
 
@@ -15,23 +18,28 @@ from patsy import dmatrix
 from pysal.lib import weights
 from pysal.model import spreg
 
+"""
 # For testing purposes keep the absolute imports:
 from regression_utils import compute_wald_test, get_fisher_inverse, ols_fit
 
 from spateo.logging import logger_manager as lm
 from spateo.preprocessing.transform import log1p
 from spateo.tools.find_neighbors import construct_pairwise
-from spateo.tools.utils import update_dict
+from spateo.tools.utils import update_dict"""
 
-"""
-from .regression_utils import compute_wald_test, get_fisher_inverse, ols_fit
 from ...logging import logger_manager as lm
 from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import construct_pairwise
-from ...tools.utils import update_dict"""
+from ...tools.utils import update_dict
+from .regression_utils import compute_wald_test, get_fisher_inverse, ols_fit
 
+# https://github.com/theislab/ncem_benchmarks
+# Things to include: compute_variance_decomposition
+# (from https://github.com/theislab/ncem/blob/1ed3ccead38f70fcdbcc6640971ddfa877ff62cd/ncem/data.py)
 
-# ----------------------------- Master wrappers for performing each type of regression ----------------------------- #
+# ----------------------- Grid search wrapper to test effect of different neighborhood sizes ----------------------- #
+# Cross validation splitting: https://github.com/vaasha/Machine-leaning-in-examples/blob/master/sklearn/cross-validation/Cross%20Validation.ipynb
+# As a non-spatial baseline: use only the one-hot cell-type array for regression
 
 
 # --------------------------------------- Wrapper classes for model running --------------------------------------- #
@@ -135,7 +143,10 @@ class BaseInterpreter:
         # Define reconstruction metrics:
         self.metrics = [mae, mse, nll, r_squared]
 
-    def prepare_data(self, mod_type: str = "category"):
+    def prepare_data(
+            self,
+            mod_type: str = "category"
+    ):
         """
         Handles any necessary data preparation, starting from given source AnnData object
 
@@ -180,6 +191,7 @@ class BaseInterpreter:
             elif self.drop_dummy in categories:
                 group_inds = np.where(db["group"] == self.drop_dummy)[0]
                 db.iloc[group_inds, :] = "others"
+                db = db["group"].cat.remove_unused_categories()
             else:
                 raise ValueError(
                     f"Dummy category ({self.drop_dummy}) provided is not in the " f"adata.obs[{self.group_key}]."
@@ -213,6 +225,8 @@ class BaseInterpreter:
             # each category are present within the neighborhood of each sample):
             dmat_neighbors = (adj > 0).astype("int").dot(X.values)
             self.X = pd.DataFrame(dmat_neighbors, columns=X.columns)
+            self.X = self.X.reindex(sorted(self.X.columns), axis=1)
+            self.n_features = self.X.shape[1]
 
             # To index all but the dummy column when fitting model:
             self.variable_names = self.X.columns.difference(drop_columns).to_list()
@@ -247,20 +261,36 @@ class BaseInterpreter:
             dmat_neighbors = (adj > 0).astype("int").dot(X.values)
 
             # Construct the category interaction matrix (1D array w/ n_categories ** 2 elements, encodes the niche of
-            # each sample by documenting the category-category spatial connections within the niche):
+            # each sample by documenting the category-category spatial connections within the niche- specifically,
+            # for each sample, records the category identity of its neighbors in space):
             data = {"categories": X, "dmat_neighbours": dmat_neighbors}
-            categories = np.asarray(dmatrix("target-1", data))
-            connections = np.asarray(dmatrix("target:dmat_neighbours-1", data))
-            """
-            # If mod_type is 'connections', use only the connections matrix as independent variables in the regression:
-            if mod_type == 'connections':
-                self.X = pd.DataFrame(connections, index=, columns=
-            # Otherwise if 'niche', combine connections and the one-hot category array as independent variables:
-            elif mod_type == 'niche':
-                self.X = np.concatenate([categories, connections], axis=1)
+            connections = np.asarray(dmatrix("categories:dmat_neighbours-1", data))
 
-        elif mod_type == 'ligand_lag':
-            # Adjust self.genes to those which can be found in the NicheNet database:"""
+            # If mod_type is 'connections', use only the connections matrix as independent variables in the regression:
+            if mod_type == "connections":
+                connections_cols = list(product(X.columns, X.columns))
+                connections_cols.sort(key=lambda x: x[1])
+                connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
+                self.X = pd.DataFrame(connections, columns=connections_cols)
+            # Otherwise if 'niche', combine two arrays:
+            # connections, encoding pairwise *spatial adjacencies* between categories for each sample, and
+            # dmat_neighbors, encoding *spatial prevalence* of each category within the neighborhood for each sample.
+            # Together, the two blocks contain information about the *composition* of the niche as well as its
+            # *connectivity*.
+            elif mod_type == "niche":
+                composition_df = pd.DataFrame(dmat_neighbors, columns=X.columns)
+
+                connections_cols = list(product(X.columns, X.columns))
+                connections_cols.sort(key=lambda x: x[1])
+                connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
+                connections_df = pd.DataFrame(connections, columns=connections_cols)
+                self.X = pd.concat([composition_df, connections_df], axis=1)
+
+            self.uniq_g = set(group_name)
+            self.uniq_g = list(np.sort(list(self.uniq_g)))
+
+        # elif mod_type == 'ligand_lag':
+        # Adjust self.genes to those which can be found in the NicheNet database:"""
 
         else:
             self.logger.error("Invalid argument to 'mod_type'.")
@@ -278,9 +308,9 @@ class BaseInterpreter:
         # Transform data matrix if 'log_transform' is True:
         if self.log_transform:
             if self.layer is None:
-                self.adata.X = log1p(self.adata)
+                log1p(self.adata)
             else:
-                self.adata.layers[self.layer] = log1p(self.adata.layers[self.layer])
+                log1p(self.adata.layers[self.layer])
 
     def compute_spatial_weights(self):
         """
@@ -307,11 +337,19 @@ class BaseInterpreter:
         # Row standardize spatial weights matrix:
         self.w.transform = "R"
 
-    def get_sender_receiver_effects(self, coeffs: pd.DataFrame, n_jobs: int = 30, significance_threshold: float = 0.05):
+    def get_sender_receiver_effects(
+            self,
+            coeffs: pd.DataFrame,
+            n_jobs: int = 30,
+            significance_threshold: float = 0.05
+    ):
         """
-        For each category and each feature, determine if the influence of said category in predicting said feature is
-        significant. Additionally, for each feature and each sender-receiver category pair, determines the log
-        fold-change that the sender induces in the feature for the receiver.
+        For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
+        significant.
+
+        Additionally, if the connections b/w categories are used as variables for regression,
+        for each feature and each sender-receiver category pair, determines the log fold-change that the sender
+        induces in the feature for the receiver.
 
         Only valid if the model specified uses the connections between categories as variables for the regression.
 
@@ -323,23 +361,73 @@ class BaseInterpreter:
             significance_threshold : float, default 0.5
                 p-value needed to call a sender-receiver relationship significant
         """
-        # coeffs, pred, resid = self.run_GM_lag(n_jobs)
+        if not "connections" in self.mod_type or not "niche" in self.mod_type:
+            self.logger.error(
+                "Type coupling analysis only valid if connections between categories are used as the "
+                "predictor variable."
+            )
+
         # Return only the numerical coefficients:
         coeffs = coeffs[[col for col in coeffs.columns if "coeff" in col]].values
-        # Remove the first column (the intercept):
-        coeffs = coeffs[:, 1:]
+        if "lag" in self.mod_type:
+            # Remove the first column (the intercept):
+            coeffs = coeffs[:, 1:]
 
-        # Get inverse Fisher information matrix:
-        inverse_fisher = get_fisher_inverse()
+        # Get inverse Fisher information matrix, with the y block containing all features that were used in regression):
+        y = self.adata[:, self.genes].X
+        inverse_fisher = get_fisher_inverse(self.X.values, y)
+
+        # Compute significance for each parameter:
+        is_significant, pvalues, qvalues = compute_wald_test(
+            params=coeffs, fisher_inv=inverse_fisher, significance_threshold=significance_threshold
+        )
+
+        # If niche-based model, extract the portion that corresponds to the interaction terms:
+        if self.mod_type == "niche":
+            interaction_shape = np.int(self.n_features**2)
+            is_significant = is_significant[self.n_features : interaction_shape + self.n_features, :]
+            pvalues = pvalues[self.n_features : interaction_shape + self.n_features, :]
+            qvalues = qvalues[self.n_features : interaction_shape + self.n_features, :]
+
+            # Compute the fold-change induced in the receiver by the sender for the case model type is "niche":
+            interaction_params = coeffs[:, self.n_features : interaction_shape + self.n_features]
+            self.fold_change = np.concatenate(
+                np.expand_dims(
+                    np.split(interaction_params.T, indices_or_sections=np.sqrt(interaction_params.T.shape[0]), axis=0),
+                    axis=0,
+                ),
+                axis=0,
+            )
+
+        else:
+            self.fold_change = np.concatenate(
+                np.expand_dims(np.split(coeffs.T, indices_or_sections=np.sqrt(coeffs.T.shape[0]), axis=0), axis=0),
+                axis=0,
+            )
+
+        self.pvalues = np.concatenate(
+            np.expand_dims(np.split(pvalues, indices_or_sections=np.sqrt(pvalues.shape[0]), axis=0), axis=0),
+            axis=0,
+        )
+        self.qvalues = np.concatenate(
+            np.expand_dims(np.split(qvalues, indices_or_sections=np.sqrt(qvalues.shape[0]), axis=0), axis=0),
+            axis=0,
+        )
+        self.is_significant = np.concatenate(
+            np.expand_dims(
+                np.split(is_significant, indices_or_sections=np.sqrt(is_significant.shape[0]), axis=0), axis=0
+            ),
+            axis=0,
+        )
 
     def type_coupling_analysis(
-        self,
+            self,
+
     ):
         """
         Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
-        categories; only valid if the model specified uses the connections between categories as variables for
+        categories. Only valid if the model specified uses the connections between categories as variables for the
         regression.
-        :return:
         """
 
 
@@ -347,7 +435,8 @@ class Category_Interpreter(BaseInterpreter):
     """
     Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
     prediction when instantiating a model for spatially-aware (but not spatially lagged) regression using categorical
-    variables to predict the value of gene expression.
+    variables (specifically, the prevalence of categories within spatial neighborhoods) to predict the value of gene
+    expression.
 
     The only keyword argument that is used for this class is 'n_neighbors'.
     """
@@ -360,11 +449,14 @@ class Category_Interpreter(BaseInterpreter):
         self.prepare_data(mod_type="category")
 
     def run_OLS(self, n_jobs: int = 30):
-        coeffs = Parallel(n_jobs)(delayed(ols_fit)(self.X, cur_g) for cur_g in self.genes)
+        coeffs = Parallel(n_jobs)(
+            delayed(ols_fit)(self.X, self.adata, self.variable_names, cur_g) for cur_g in self.genes
+        )
 
-        coeffs = pd.DataFrame(coeffs, index=self.genes)
-        print(coeffs)
-        # coeffs.columns =
+        coeffs = pd.DataFrame(coeffs, index=self.genes, columns=self.X.columns)
+        for cn in coeffs.columns:
+            self.adata.var.loc[:, cn] = coeffs[cn]
+        return coeffs
 
 
 class Connections_Interpreter(BaseInterpreter):
@@ -373,6 +465,7 @@ class Connections_Interpreter(BaseInterpreter):
     prediction when instantiating a model for spatially-aware (but not spatially lagged) regression using the
     connections between categories to predict the value of gene expression.
 
+    The only keyword argument that is used for this class is 'n_neighbors'.
     """
 
     def __init__(self, *args, **kwargs):
@@ -382,19 +475,38 @@ class Connections_Interpreter(BaseInterpreter):
         # Prepare data:
         self.prepare_data(mod_type="connections")
 
-        # Initialize entries in .var to store connections parameters Beta:
-
     def run_OLS(self, n_jobs: int = 30):
-        coeffs, pred, resid = Parallel(n_jobs)(delayed(ols_fit)(self.X, cur_g) for cur_g in self.genes)
+        coeffs = Parallel(n_jobs)(
+            delayed(ols_fit)(self.X, self.adata, self.variable_names, cur_g) for cur_g in self.genes
+        )
 
         coeffs = pd.DataFrame(coeffs, index=self.genes)
+        for cn in coeffs.columns:
+            self.adata.var.loc[:, cn] = coeffs[cn]
+        return coeffs
+
+
+class Niche_Interpreter(BaseInterpreter):
+    """
+    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
+    prediction when instantiating a model for spatially-aware regression using both the prevalence of and connections
+    between categories within spatial neighborhoods to predict the value of gene expression.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert self.group_key is not None, "Categorical labels required for this model."
+
+        self.prepare_data(mod_type="niche")
+
+    # def run_OLS(self, n_jobs: int = 30):
 
 
 class Lagged_Category_Interpreter(BaseInterpreter):
     """
     Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-lagged regression using categorical variables to predict the
-    value of gene expression.
+    prediction when instantiating a model for spatially-lagged regression using categorical variables (specifically,
+    the prevalence of categories within spatial neighborhoods) to predict the value of gene expression.
     """
 
     def __init__(self, *args, **kwargs):
@@ -413,7 +525,10 @@ class Lagged_Category_Interpreter(BaseInterpreter):
             self.adata.var[str(i) + "_GM_lag_zstat"] = None
             self.adata.var[str(i) + "_GM_lag_pval"] = None
 
-    def run_GM_lag(self, n_jobs: int = 30):
+    def run_GM_lag(
+            self,
+            n_jobs: int = 30
+    ):
         """Runs spatially lagged two-stage least squares model"""
 
         def _single(
@@ -515,13 +630,11 @@ class Lagged_Category_Interpreter(BaseInterpreter):
         resid = pd.DataFrame(resid, index=self.adata.obs_names, columns=self.genes)
 
         # Update AnnData object:
-        self.adata.obs.loc[:, "ypred"] = pred
-        self.adata.obs.loc[:, "resid"] = resid
+        self.adata.obsm["ypred"] = pred
+        self.adata.obsm["resid"] = resid
 
-        for ind, g in enumerate(["const"] + self.uniq_g + ["W_log_exp"]):
-            self.adata.var.loc[:, str(g) + "_GM_lag_coeff"] = coeffs.iloc[:, 0]
-            self.adata.var.loc[:, str(g) + "_GM_lag_zstat"] = coeffs.iloc[:, 1]
-            self.adata.var.loc[:, str(g) + "_GM_lag_pval"] = coeffs.iloc[:, 2]
+        for cn in coeffs.columns:
+            self.adata.var.loc[:, cn] = coeffs[cn]
 
         return coeffs, pred, resid
 

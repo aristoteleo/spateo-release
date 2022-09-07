@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numba
 import numpy as np
 import pandas as pd
+import scipy
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from shapely.wkb import loads
@@ -1736,3 +1737,51 @@ def save_return_show_fig_utils(
             return (fig, *return_all_list) if total_panels > 1 else (fig, *return_all_list)
         else:
             return (fig, axes) if total_panels > 1 else (fig, axes)
+
+
+# ---------------------------------------------------------------------------------------------------
+# for plotting: subset and reorder data array
+# ---------------------------------------------------------------------------------------------------
+def _get_array_values(
+        X: Union[np.ndarray, scipy.sparse.base.spmatrix],
+        dim_names: pd.Index,
+        keys: List[str],
+        axis: Literal[0, 1],
+        backed: bool,
+):
+    """
+    Subset and reorder data array, given array and corresponding array index.
+
+    Args:
+        X : np.ndarray or scipy sparse matrix
+        dim_names : pd.Index
+            Names of
+        keys : list of str
+            Index names to subset
+        axis : int, 0 or 1
+            Subset rows or columns of 'X' (0 for rows, 1 for columns)
+        backed : bool
+            Interfaces w/ AnnData objects; is True if AnnData is backed to disk
+
+    Returns:
+         matrix : np.ndarray
+    """
+    mutable_idxer = [slice(None), slice(None)]
+    idx = dim_names.get_indexer(keys)
+
+    if backed:
+        idx_order = np.argsort(idx)
+        rev_idxer = mutable_idxer.copy()
+        mutable_idxer[axis] = idx[idx_order]
+        rev_idxer[axis] = np.argsort(idx_order)
+        matrix = X[tuple(mutable_idxer)][tuple(rev_idxer)]
+    else:
+        mutable_idxer[axis] = idx
+        matrix = X[tuple(mutable_idxer)]
+
+    from scipy.sparse import issparse
+
+    if issparse(matrix):
+        matrix = matrix.toarray()
+
+    return matrix

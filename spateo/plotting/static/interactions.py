@@ -1,8 +1,6 @@
 """
-Plots for pairwise comparison analyses between groups of samples and across different conditions (e.g. biological
-conditions or using different clustering parameters).
-
-These functions build on the Label class- see spateo.utils.Label for documentation
+Plots to visualize results from cell-cell colocalization based analyses, as well as cell-cell communication
+inference-based analyses.
 """
 from typing import Optional, Union
 
@@ -253,12 +251,15 @@ def plot_connections(
 def heatmap(data: Union[np.ndarray, pd.DataFrame]):
     """
     Generates and plots heatmap from array or dataframe, where x- and y-axes are two variable categories (e.g. can be
-    cell type-gene or cell types on both axes), and the element magnitude is the relation between them
+    cell type-gene or cell types on both axes), and the element magnitude is the relation between them.
 
     Args:
         data : np.ndarray or pd.DataFrame
     """
     reset_rcParams()
+
+
+def
 
 
 def volcano_plot():
