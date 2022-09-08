@@ -957,3 +957,14 @@ class Dotplot:
             dot_max : float
                 The maximum dot size represented on the plot, given as a fraction of the maximum value in the data
         """
+        logger = lm.get_main_logger()
+
+        if dot_size.shape != dot_color.shape:
+            logger.error("Dot size and dot color dataframes are not the same size.")
+
+        if list(dot_size.index) != list(dot_color.index):
+            logger.error("Dot size and dot color dataframes do not have the same features.")
+
+        if list(dot_size.columns) != list(dot_color.columns):
+            logger.error("Dot size and dot color dataframes do not have the same categories.")
+

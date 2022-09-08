@@ -7,6 +7,7 @@ from typing import Tuple, Union
 import numpy as np
 import pandas as pd
 import scipy
+import sklearn
 from anndata import AnnData
 from scipy.spatial.distance import pdist, squareform
 from sklearn.neighbors import NearestNeighbors
@@ -17,17 +18,18 @@ from ..logging import logger_manager as lm
 from ..tools.labels import row_normalize
 
 
-# ------------------------------------------ Wrapper ------------------------------------------ #
+# ------------------------------------- Wrapper for weighted spatial graph ------------------------------------- #
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def weighted_spatial_graph(
     adata: AnnData,
     spatial_key: str = "spatial",
     fixed: str = "n_neighbors",
+    n_neighbors_method: str = "ball_tree",
     n_neighbors: int = 30,
     decay_type: str = "reciprocal",
     p: float = 0.05,
     sigma: float = 100,
-) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
+) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]:
     """Given an AnnData object, compute distance array with either a fixed number of neighbors for each bucket or a
     fixed search radius for each bucket.
 
@@ -36,6 +38,8 @@ def weighted_spatial_graph(
         spatial_key: Key in .obsm containing coordinates for each bucket.
         fixed: Options: 'n_neighbors', 'radius'- sets either fixed number of neighbors or fixed search radius for each
             bucket.
+        n_neighbors_method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
+            "ball_tree" and "kdtree". Unused unless 'fixed' is 'n_neighbors'.
         n_neighbors: Number of neighbors each bucket has. Unused unless 'fixed' is 'n_neighbors'.
         decay_type: Sets method by which edge weights are defined. Options: "reciprocal", "ranked", "uniform".
             Unused unless 'fixed' is 'n_neighbors'.
@@ -44,20 +48,24 @@ def weighted_spatial_graph(
         sigma: Standard deviation of the Gaussian. Unused unless 'fixed' is 'radius'.
 
     Returns:
-         out_graph: Weighted nearest neighbors graph with shape [n_samples, n_samples]
-
+        out_graph: Weighted nearest neighbors graph with shape [n_samples, n_samples]
         distance_graph: Unweighted graph with shape [n_samples, n_samples]
+        adata: Updated AnnData object containing 'spatial_distance' in .obsp and 'spatial_neighbors' in .uns.
     """
     logger = lm.get_main_logger()
     if fixed == "n_neighbors":
-        weights_graph, distance_graph = generate_spatial_weights_fixed_nbrs(
-            adata.obsm[spatial_key],
+        weights_graph, distance_graph, adata = generate_spatial_weights_fixed_nbrs(
+            adata,
+            spatial_key,
             num_neighbors=n_neighbors,
+            method=n_neighbors_method,
             decay_type=decay_type,
         )
     elif fixed == "radius":
-        weights_graph, distance_graph = generate_spatial_weights_fixed_radius(
-            adata.obsm[spatial_key],
+        weights_graph, distance_graph, adata = generate_spatial_weights_fixed_radius(
+            adata,
+            spatial_key,
+            method=n_neighbors_method,
             p=p,
             sigma=sigma,
         )
@@ -65,7 +73,7 @@ def weighted_spatial_graph(
         logger.error("Invalid argument given to 'fixed'. Options: 'n_neighbors', 'radius'.")
         raise ValueError("Invalid argument given to 'fixed'. Options: 'n_neighbors', 'radius'.")
 
-    return weights_graph, distance_graph
+    return weights_graph, distance_graph, adata
 
 
 # --------------------------------------- Cell-cell/bucket-bucket distance --------------------------------------- #
@@ -118,19 +126,23 @@ def remove_greater_than(
 def generate_spatial_distance_graph(
     locations: np.ndarray,
     nbr_object: NearestNeighbors = None,
+    method: str = "ball_tree",
     num_neighbors: Union[None, int] = None,
     radius: Union[None, float] = None,
-) -> scipy.sparse.csr_matrix:
+) -> Tuple[sklearn.neighbors.NearestNeighbors, scipy.sparse.csr_matrix]:
     """Creates graph based on distance in space.
 
     Args:
         locations: Spatial coordinates for each bucket with shape [n_samples, 2]
         nbr_object : An optional sklearn.neighbors.NearestNeighbors object. Can optionally create a nearest neighbor
             object with custom functionality.
+        method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
+            "ball_tree" and "kdtree".
         num_neighbors: Number of neighbors for each bucket.
         radius: Search radius around each bucket.
 
     Returns:
+        nbrs: sklearn NearestNeighbor object.
         graph_out: A sparse matrix of the spatial graph.
     """
     logger = lm.get_main_logger()
@@ -141,7 +153,7 @@ def generate_spatial_distance_graph(
 
     if nbr_object is None:
         # set up neighbour object
-        nbrs = NearestNeighbors(algorithm="ball_tree").fit(locations)
+        nbrs = NearestNeighbors(algorithm=method).fit(locations)
     else:  # use provided sklearn NN object
         nbrs = nbr_object
 
@@ -159,36 +171,85 @@ def generate_spatial_distance_graph(
 
             graph_out = remove_greater_than(graph_out, radius, copy=False, verbose=False)
 
-        return graph_out
+        return nbrs, graph_out
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def generate_spatial_weights_fixed_nbrs(
-    locations: np.ndarray,
+    adata: AnnData,
+    spatial_key: str = "spatial",
     num_neighbors: int = 10,
+    method: str = "ball_tree",
     decay_type: str = "reciprocal",
     nbr_object: NearestNeighbors = None,
-) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
-    """Starting from a k-nearest neighbor graph, generate a sparse graph (csr format) with weighted edges, where edge
-    weights decay with distance.
+) -> Union[Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]]:
+    """Starting from a k-nearest neighbor graph, generate a nearest neighbor graph.
 
     Args:
+        spatial_key: Key in .obsm where x- and y-coordinates are stored.
         num_neighbors: Number of neighbors each bucket has.
+        method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
+        "ball_tree" and "kdtree".
         decay_type: Sets method by which edge weights are defined. Options: "reciprocal", "ranked", "uniform".
 
     Returns:
         out_graph: Weighted k-nearest neighbors graph with shape [n_samples, n_samples].
         distance_graph: Unweighted graph with shape [n_samples, n_samples].
+        adata: Updated AnnData object containing 'spatial_distance' in .obsp and 'spatial_neighbors' in .uns.
     """
     logger = lm.get_main_logger()
 
+    if method not in ["ball_tree", "kdtree"]:
+        logger.error("Invalid argument passed to 'method'. Options: 'decay', 'kdtree'.")
+
+    # Get locations from AnnData:
+    locations = adata.obsm[spatial_key]
+
     # Define the nearest-neighbors graph
-    distance_graph = generate_spatial_distance_graph(
+    nbrs, distance_graph = generate_spatial_distance_graph(
         locations,
         nbr_object=nbr_object,
+        method=method,
         num_neighbors=num_neighbors,
         radius=None,
     )
 
+    # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
+    # NearestNeighbors run:
+    distances, knn = nbrs.kneighbors(locations)
+    n_obs, n_neighbors = knn.shape
+    distances = scipy.sparse.csr_matrix(
+        (
+            distances.flatten(),
+            (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
+        ),
+        shape=(n_obs, n_obs),
+    )
+    connectivities = distances.copy()
+    connectivities.data[connectivities.data > 0] = 1
+
+    distances.eliminate_zeros()
+    connectivities.eliminate_zeros()
+
+    logger.info_insert_adata("spatial_connectivities", adata_attr="obsp")
+    logger.info_insert_adata("spatial_distances", adata_attr="obsp")
+
+    adata.obsp["spatial_distances"] = distances
+    adata.obsp["spatial_connectivies"] = connectivities
+
+    logger.info_insert_adata("spatial_neighbors", adata_attr="uns")
+    logger.info_insert_adata("spatial_neighbors.indices", adata_attr="uns")
+    logger.info_insert_adata("spatial_neighbors.params", adata_attr="uns")
+
+    adata.uns["spatial_neighbors"] = {}
+    adata.uns["spatial_neighbors"]["indices"] = knn
+    adata.uns["spatial_neighbors"]["params"] = {
+        "n_neighbors": n_neighbors,
+        "method": method,
+        "metric": "euclidean"
+    }
+
+    # Compute spatial weights:
     graph_out = distance_graph.copy()
 
     # Convert distances to weights
@@ -222,7 +283,7 @@ def generate_spatial_weights_fixed_nbrs(
         )
 
     out_graph = row_normalize(graph_out, verbose=False)
-    return out_graph, distance_graph
+    return out_graph, distance_graph, adata
 
 
 def gaussian_weight_2d(distance: float, sigma: float):
@@ -241,29 +302,39 @@ def p_equiv_radius(p: float, sigma: float):
     return np.sqrt(-2 * sigma**2 * np.log(p))
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def generate_spatial_weights_fixed_radius(
-    locations: np.ndarray,
+    adata: AnnData,
+    spatial_key: str = "spatial",
     p: float = 0.05,
     sigma: float = 100,
     nbr_object: NearestNeighbors = None,
+    method: str = "ball_tree",
     max_num_neighbors: int = None,
     verbose: bool = False,
-) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
+) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]:
     """Starting from a radius-based neighbor graph, generate a sparse graph (csr format) with weighted edges, where edge
     weights decay with distance.
 
     Note that decay is assumed to follow a Gaussian distribution.
 
     Args:
+        spatial_key: Key in .obsm where x- and y-coordinates are stored.
         p: Cutoff for Gaussian (used to find where distribution drops below p * (max_value)).
         sigma: Standard deviation of the Gaussian.
+        method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
+            "ball_tree" and "kdtree".
         max_num_neighbors: Sets upper threshold on number of neighbors a bucket can have.
 
     Returns:
         out_graph: Weighted nearest neighbors graph with shape [n_samples, n_samples].
         distance_graph: Unweighted graph with shape [n_samples, n_samples].
+        adata: Updated AnnData object containing 'spatial_distance' in .obsp and 'spatial_neighbors' in .uns.
     """
     logger = lm.get_main_logger()
+
+    # Get locations from AnnData:
+    locations = adata.obsm[spatial_key]
 
     # Selecting r for neighbor graph construction:
     r = p_equiv_radius(p, sigma)
@@ -271,16 +342,52 @@ def generate_spatial_weights_fixed_radius(
         logger.info(f"Equivalent radius for removing {p} of " f"gaussian distribution with sigma {sigma} is: {r}\n")
 
     # Define the nearest neighbor graph:
-    distance_graph = generate_spatial_distance_graph(
+    nbrs, distance_graph = generate_spatial_distance_graph(
         locations, nbr_object=nbr_object, num_neighbors=max_num_neighbors, radius=r
     )
+
+    # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
+    # NearestNeighbors run:
+    distances, knn = nbrs.kneighbors(locations)
+    n_obs, n_neighbors = knn.shape
+    distances = scipy.sparse.csr_matrix(
+        (
+            distances.flatten(),
+            (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
+        ),
+        shape=(n_obs, n_obs),
+    )
+    connectivities = distances.copy()
+    connectivities.data[connectivities.data > 0] = 1
+
+    distances.eliminate_zeros()
+    connectivities.eliminate_zeros()
+
+    logger.info_insert_adata("spatial_connectivities", adata_attr="obsp")
+    logger.info_insert_adata("spatial_distances", adata_attr="obsp")
+
+    adata.obsp["spatial_distances"] = distances
+    adata.obsp["spatial_connectivies"] = connectivities
+
+    logger.info_insert_adata("spatial_neighbors", adata_attr="uns")
+    logger.info_insert_adata("spatial_neighbors.indices", adata_attr="uns")
+    logger.info_insert_adata("spatial_neighbors.params", adata_attr="uns")
+
+    adata.uns["spatial_neighbors"] = {}
+    adata.uns["spatial_neighbors"]["indices"] = knn
+    adata.uns["spatial_neighbors"]["params"] = {
+        "n_neighbors": n_neighbors,
+        "method": method,
+        "metric": "euclidean"
+    }
+
     graph_out = distance_graph.copy()
 
     # Convert distances to weights
     graph_out.data = gaussian_weight_2d(graph_out.data, sigma)
 
     out_graph = row_normalize(graph_out, verbose=verbose)
-    return out_graph, distance_graph
+    return out_graph, distance_graph, adata
 
 
 # ----------- (Identical to generate_spatial_weights_fixed_nbrs, but specific to STGNN) ---------- #
