@@ -143,10 +143,7 @@ class BaseInterpreter:
         # Define reconstruction metrics:
         self.metrics = [mae, mse, nll, r_squared]
 
-    def prepare_data(
-            self,
-            mod_type: str = "category"
-    ):
+    def prepare_data(self, mod_type: str = "category"):
         """
         Handles any necessary data preparation, starting from given source AnnData object
 
@@ -337,12 +334,7 @@ class BaseInterpreter:
         # Row standardize spatial weights matrix:
         self.w.transform = "R"
 
-    def get_sender_receiver_effects(
-            self,
-            coeffs: pd.DataFrame,
-            n_jobs: int = 30,
-            significance_threshold: float = 0.05
-    ):
+    def get_sender_receiver_effects(self, coeffs: pd.DataFrame, n_jobs: int = 30, significance_threshold: float = 0.05):
         """
         For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
         significant.
@@ -421,8 +413,7 @@ class BaseInterpreter:
         )
 
     def type_coupling_analysis(
-            self,
-
+        self,
     ):
         """
         Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
@@ -525,10 +516,7 @@ class Lagged_Category_Interpreter(BaseInterpreter):
             self.adata.var[str(i) + "_GM_lag_zstat"] = None
             self.adata.var[str(i) + "_GM_lag_pval"] = None
 
-    def run_GM_lag(
-            self,
-            n_jobs: int = 30
-    ):
+    def run_GM_lag(self, n_jobs: int = 30):
         """Runs spatially lagged two-stage least squares model"""
 
         def _single(

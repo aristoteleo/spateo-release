@@ -1,6 +1,6 @@
 """
 Plots to visualize results from cell-cell colocalization based analyses, as well as cell-cell communication
-inference-based analyses.
+inference-based analyses. Makes use of dotplot-generating functions
 """
 from typing import Optional, Union
 
@@ -21,6 +21,7 @@ from matplotlib.ticker import StrMethodFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from ...configuration import reset_rcParams
+from ...plotting.static.dotplot import Dotplot
 from ...tools.labels import Label, interlabel_connections
 
 
@@ -258,11 +259,9 @@ def heatmap(data: Union[np.ndarray, pd.DataFrame]):
     """
     reset_rcParams()
 
+    # def
 
-def
-
-
-def volcano_plot():
+    # def volcano_plot():
     """
     Generates and plots volcano plot for visualization of the relative log-fold change and FDR-corrected p-values for
     features between two groups

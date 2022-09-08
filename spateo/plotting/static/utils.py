@@ -1743,11 +1743,11 @@ def save_return_show_fig_utils(
 # for plotting: subset and reorder data array
 # ---------------------------------------------------------------------------------------------------
 def _get_array_values(
-        X: Union[np.ndarray, scipy.sparse.base.spmatrix],
-        dim_names: pd.Index,
-        keys: List[str],
-        axis: Literal[0, 1],
-        backed: bool,
+    X: Union[np.ndarray, scipy.sparse.base.spmatrix],
+    dim_names: pd.Index,
+    keys: List[str],
+    axis: Literal[0, 1],
+    backed: bool,
 ):
     """
     Subset and reorder data array, given array and corresponding array index.
@@ -1785,3 +1785,52 @@ def _get_array_values(
         matrix = matrix.toarray()
 
     return matrix
+
+
+# ---------------------------------------------------------------------------------------------------
+# for plotting: generating object to map from feature magnitudes to color intensities
+# ---------------------------------------------------------------------------------------------------
+def check_colormap(
+    vmin: Union[None, float] = None,
+    vmax: Union[None, float] = None,
+    vcenter: Union[None, float] = None,
+    norm: Union[None, matplotlib.colors.Normalize] = None,
+):
+    """
+    When plotting continuous variables, configure a normalizer object for the purposes of mapping the data to varying
+    color intensities.
+
+    Args:
+        vmin : optional float
+            The data value that defines 0.0 in the normalization. Defaults to the min value of the dataset.
+        vmax : optional float
+            The data value that defines 1.0 in the normalization. Defaults to the the max value of the dataset.
+        vcenter : optional float
+            The data value that defines 0.5 in the normalization
+        norm : optional `matplotlib.colors.Normalize` object
+            Optional already-initialized normalizing object that scales data, typically into the interval [0, 1],
+            for the purposes of mapping to color intensities for plotting. Do not pass both 'norm' and
+            'vmin'/'vmax', etc.
+
+    Returns:
+         normalize : `matplotlib.colors.Normalize` object
+            The normalizing object that scales data, typically into the interval [0, 1], for the purposes of
+            mapping to color intensities for plotting.
+    """
+    from matplotlib.colors import Normalize
+
+    try:
+        from matplotlib.colors import TwoSlopeNorm as DivNorm
+    except ImportError:
+        from matplotlib.colors import DivergingNorm as DivNorm
+
+    if norm is not None:
+        if (vmin is not None) or (vmax is not None) or (vcenter is not None):
+            raise ValueError("Passing both norm and vmin/vmax/vcenter is not allowed.")
+    else:
+        if vcenter is not None:
+            norm = DivNorm(vmin=vmin, vmax=vmax, vcenter=vcenter)
+        else:
+            norm = Normalize(vmin=vmin, vmax=vmax)
+
+    return norm

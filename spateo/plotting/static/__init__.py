@@ -8,8 +8,8 @@ from .contour import spatial_domains
 from .dotplot import Dotplot
 from .geo import geo
 from .glm import glm_abline
-from .lisa import lisa, lisa_quantiles
 from .interactions import plot_connections
+from .lisa import lisa, lisa_quantiles
 from .polarity import *
 from .scatters import scatters
 from .space import space
