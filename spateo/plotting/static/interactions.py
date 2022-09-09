@@ -21,7 +21,7 @@ from matplotlib.ticker import StrMethodFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from ...configuration import reset_rcParams
-from ...plotting.static.dotplot import Dotplot
+from ...plotting.static.dotplot import CCDotplot
 from ...tools.labels import Label, interlabel_connections
 
 
@@ -247,6 +247,13 @@ def plot_connections(
         plt.show()
     elif save_show_or_return in ["return", "all"]:
         return (fig, ax)
+
+
+def ligrec():
+    """
+    Dotplot for visualizing results of ligand-receptor interaction analysis
+
+    """
 
 
 def heatmap(data: Union[np.ndarray, pd.DataFrame]):

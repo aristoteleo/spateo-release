@@ -1790,7 +1790,7 @@ def _get_array_values(
 # ---------------------------------------------------------------------------------------------------
 # for plotting: generating object to map from feature magnitudes to color intensities
 # ---------------------------------------------------------------------------------------------------
-def check_colormap(
+def check_colornorm(
     vmin: Union[None, float] = None,
     vmax: Union[None, float] = None,
     vcenter: Union[None, float] = None,
@@ -1834,3 +1834,24 @@ def check_colormap(
             norm = Normalize(vmin=vmin, vmax=vmax)
 
     return norm
+
+
+# ---------------------------------------------------------------------------------------------------
+# for plotting: ensure no duplicate keyword arguments
+# ---------------------------------------------------------------------------------------------------
+def deduplicate_kwargs(kwargs_dict, **kwargs):
+    """
+    Given a dictionary of plot parameters (kwargs_dict) and any number of additional keyword arguments,
+    merge the parameters into a single consolidated dictionary to avoid argument duplication errors.
+    If kwargs_dict contains a key that matches any of the additional keyword arguments, only the value in kwargs_dict is
+    kept.
+
+    Args:
+        kwargs_dict : dict
+            Each key is a variable name and each value is the value of that variable
+        kwargs :
+            Any additional keyword arguments, the keywords of which may or may not already be in 'kwargs_dict'
+    """
+    kwargs.update(kwargs_dict)
+
+    return kwargs

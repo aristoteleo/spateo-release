@@ -19,6 +19,7 @@ from scipy.stats import gmean, pearsonr
 from typing_extensions import Literal
 
 from ...configuration import SKM
+from .cci_utils import fdr_correct
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
@@ -59,8 +60,8 @@ def find_cci_two_group(
         min_pairs: minimal number of cell pairs between cells from two groups.
         min_pairs_ratio: minimal ratio of cell pairs to theoretical cell pairs (n x M / 2) between cells
             from two groups.
-        num: number of permutations.
-        pvalue: the p-value threshold that will be used to filter for significant ligan-receptor pairs.
+        num: number of permutations. It is recommended that this number be at least 1000.
+        pvalue: the p-value threshold that will be used to filter for significant ligand-receptor pairs.
         filter_lr: filter ligand and receptor based on specific expressed in sender groups
             and receiver groups. 'inner': specific both in sender groups and receiver groups;
             'outer': specific in sender groups or receiver groups.
@@ -176,8 +177,15 @@ def find_cci_two_group(
     ligand_data = adata[cell_pair["cell_sender"], lr_network["from"]]
     receptor_data = adata[cell_pair["cell_receiver"], lr_network["to"]]
     lr_data = ligand_data.X.A * receptor_data.X.A if x_sparse else ligand_data.X * receptor_data.X
-    lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, lr_data)
-    lr_co_exp_num = np.apply_along_axis(lambda x: np.sum(x > 0), 0, lr_data)
+    if cell_pair.shape[0] == 0:
+        lr_prod = np.zeros(lr_network.shape[0])
+        lr_co_exp_ratio = np.zeros(lr_network.shape[0])
+        lr_co_exp_num = np.zeros(lr_network.shape[0])
+    else:
+        lr_prod = np.apply_along_axis(lambda x: np.mean(x), 0, lr_data)
+        lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, lr_data)
+        lr_co_exp_num = np.apply_along_axis(lambda x: np.sum(x > 0), 0, lr_data)
+    lr_network["lr_product"] = lr_prod
     lr_network["lr_co_exp_num"] = lr_co_exp_num
     lr_network["lr_co_exp_ratio"] = lr_co_exp_ratio
 
@@ -194,13 +202,24 @@ def find_cci_two_group(
             per_ligand_data.X.A * per_receptor_data.X.A if x_sparse else per_ligand_data.X * per_receptor_data.X
         )
         per_lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, per_lr_data)
-        per_data[:, i] = per_lr_co_exp_ratio
+        if np.isnan(per_lr_co_exp_ratio).all():
+            per_data[:, i] = np.zeros(lr_network.shape[0])
+        else:
+            per_data[:, i] = per_lr_co_exp_ratio
 
     per_data = pd.DataFrame(per_data)
     per_data.index = lr_network["from"]
     per_data["real"] = lr_network["lr_co_exp_ratio"].tolist()
-    lr_network["lr_co_exp_ratio_pvalue"] = per_data.apply(lambda x: sum(x[:num] > x["real"]) / num, axis=1).tolist()
-    lr_network = lr_network.loc[lr_network["lr_co_exp_ratio_pvalue"] < pvalue]
+    lr_network["lr_co_exp_ratio_pvalue"] = per_data.apply(lambda x: sum(x[:num] >= x["real"]) / num, axis=1).tolist()
+    lr_network["is_significant"] = lr_network["lr_co_exp_ratio_pvalue"] < pvalue
+
+    # Multiple hypothesis testing correction:
+    qvalues = fdr_correct(pd.DataFrame(lr_network["lr_co_exp_ratio_pvalue"]), corr_method="fdr_bh")
+    lr_network["lr_co_exp_ratio_qvalues"] = qvalues
+
+    # After multiple testing correction:
+    lr_network["is_significant_fdr"] = qvalues < pvalue
+    # lr_network = lr_network.loc[lr_network["lr_co_exp_ratio_pvalue"] < pvalue]
     lr_network["sr_pair"] = sender_group + "-" + receiver_group
 
     res = {"cell_pair": cell_pair, "lr_pair": lr_network}

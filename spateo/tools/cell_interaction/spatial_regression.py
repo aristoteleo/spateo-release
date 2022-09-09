@@ -3,20 +3,26 @@ Suite of tools for spatially-aware as well as spatially-lagged linear regression
 
 Also performs downstream characterization following spatially-informed regression to characterize niche impact on gene
 expression
+
+Developer note: implement null model
 """
 import os
 import time
 from itertools import product
 from random import sample
-from typing import List, Union
+from typing import List, Literal, Tuple, Union
 
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from joblib import Parallel, delayed
+from matplotlib import rcParams
 from patsy import dmatrix
 from pysal.lib import weights
 from pysal.model import spreg
+
+from ...configuration import SKM, config_spateo_rcParams, set_pub_style
+from ...plotting.static.utils import save_return_show_fig_utils
 
 """
 # For testing purposes keep the absolute imports:
@@ -32,14 +38,6 @@ from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import construct_pairwise
 from ...tools.utils import update_dict
 from .regression_utils import compute_wald_test, get_fisher_inverse, ols_fit
-
-# https://github.com/theislab/ncem_benchmarks
-# Things to include: compute_variance_decomposition
-# (from https://github.com/theislab/ncem/blob/1ed3ccead38f70fcdbcc6640971ddfa877ff62cd/ncem/data.py)
-
-# ----------------------- Grid search wrapper to test effect of different neighborhood sizes ----------------------- #
-# Cross validation splitting: https://github.com/vaasha/Machine-leaning-in-examples/blob/master/sklearn/cross-validation/Cross%20Validation.ipynb
-# As a non-spatial baseline: use only the one-hot cell-type array for regression
 
 
 # --------------------------------------- Wrapper classes for model running --------------------------------------- #
@@ -112,6 +110,8 @@ class BaseInterpreter:
         **kwargs,
     ):
         self.adata = adata
+        self.cell_names = self.adata.obs_names
+
         self.spatial_key = spatial_key
         self.group_key = group_key
         self.genes = genes
@@ -334,6 +334,12 @@ class BaseInterpreter:
         # Row standardize spatial weights matrix:
         self.w.transform = "R"
 
+    def generate_null(self):
+        """
+        Generates a null model by scrambling the names of the samples to generate null distributions of parameters
+        and R^2 scores
+        """
+
     def get_sender_receiver_effects(self, coeffs: pd.DataFrame, n_jobs: int = 30, significance_threshold: float = 0.05):
         """
         For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
@@ -390,7 +396,7 @@ class BaseInterpreter:
                 ),
                 axis=0,
             )
-
+        # Else if connection-based model, all regression coefficients already correspond to the interaction terms:
         else:
             self.fold_change = np.concatenate(
                 np.expand_dims(np.split(coeffs.T, indices_or_sections=np.sqrt(coeffs.T.shape[0]), axis=0), axis=0),
@@ -414,12 +420,74 @@ class BaseInterpreter:
 
     def type_coupling_analysis(
         self,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[int, int]] = None,
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
+        save_id: Union[None, str] = None,
+        save_kwargs: dict = {}
     ):
         """
         Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
         categories. Only valid if the model specified uses the connections between categories as variables for the
         regression.
+
+        A high number of differentially-expressed genes between a given sender-receiver pair means that the sender
+        being in the neighborhood of the receiver tends to correlate with differential expression levels of many of
+        the genes within the selection- much of the cellular variation in the receiver cell type can be attributed to
+        being in proximity with the sender.
+
+        Args:
+            fontsize : optional int
+                Size of figure title and axis labels
+            figsize : optional tuple of form (int, int)
+                Width and height of plotting window
+            save_show_or_return : str
+            Options: "save", "show", "return", "both", "all"
+                - "both" for save and show
+            save_id : optional str
+                Name of the saved figure, without the extension
+            save_kwargs : dict
+                A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
+                save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf',
+                "transparent": True, "close": True, "verbose": True} as its parameters. But to change any of these
+                parameters, this dictionary can be used to do so.
         """
+        if fontsize is None:
+            self.fontsize = rcParams.get("font.size")
+        else:
+            self.fontsize = fontsize
+        if figsize is None:
+            self.figsize = rcParams.get("figure.figsize")
+        else:
+            self.figsize = figsize
+
+        path = os.path.join(os.getcwd(), "/figures", save_id)
+        # Update save_kwargs with save path:
+        save_kwargs["path"] = path
+
+        if not hasattr(self, "is_sign"):
+            self.logger.warn("Significance dataframe does not exist- please run `get_sender_receiver_effects` first.")
+
+        sig_df = pd.DataFrame(
+            np.sum(self.is_sign, axis=-1),
+            columns=self.cell_names,
+            index=self.cell_names
+        )
+
+
+
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=True,
+            background="white",
+            prefix="type_coupling",
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None
+        )
 
 
 class Category_Interpreter(BaseInterpreter):

@@ -39,7 +39,7 @@ def weighted_spatial_graph(
         fixed: Options: 'n_neighbors', 'radius'- sets either fixed number of neighbors or fixed search radius for each
             bucket.
         n_neighbors_method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-            "ball_tree" and "kdtree". Unused unless 'fixed' is 'n_neighbors'.
+            "ball_tree" and "kd_tree". Unused unless 'fixed' is 'n_neighbors'.
         n_neighbors: Number of neighbors each bucket has. Unused unless 'fixed' is 'n_neighbors'.
         decay_type: Sets method by which edge weights are defined. Options: "reciprocal", "ranked", "uniform".
             Unused unless 'fixed' is 'n_neighbors'.
@@ -137,7 +137,7 @@ def generate_spatial_distance_graph(
         nbr_object : An optional sklearn.neighbors.NearestNeighbors object. Can optionally create a nearest neighbor
             object with custom functionality.
         method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-            "ball_tree" and "kdtree".
+            "ball_tree" and "kd_tree".
         num_neighbors: Number of neighbors for each bucket.
         radius: Search radius around each bucket.
 
@@ -189,7 +189,7 @@ def generate_spatial_weights_fixed_nbrs(
         spatial_key: Key in .obsm where x- and y-coordinates are stored.
         num_neighbors: Number of neighbors each bucket has.
         method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-        "ball_tree" and "kdtree".
+        "ball_tree" and "kd_tree".
         decay_type: Sets method by which edge weights are defined. Options: "reciprocal", "ranked", "uniform".
 
     Returns:
@@ -199,8 +199,8 @@ def generate_spatial_weights_fixed_nbrs(
     """
     logger = lm.get_main_logger()
 
-    if method not in ["ball_tree", "kdtree"]:
-        logger.error("Invalid argument passed to 'method'. Options: 'decay', 'kdtree'.")
+    if method not in ["ball_tree", "kd_tree"]:
+        logger.error("Invalid argument passed to 'method'. Options: 'ball_tree', 'kd_tree'.")
 
     # Get locations from AnnData:
     locations = adata.obsm[spatial_key]
@@ -243,11 +243,7 @@ def generate_spatial_weights_fixed_nbrs(
 
     adata.uns["spatial_neighbors"] = {}
     adata.uns["spatial_neighbors"]["indices"] = knn
-    adata.uns["spatial_neighbors"]["params"] = {
-        "n_neighbors": n_neighbors,
-        "method": method,
-        "metric": "euclidean"
-    }
+    adata.uns["spatial_neighbors"]["params"] = {"n_neighbors": n_neighbors, "method": method, "metric": "euclidean"}
 
     # Compute spatial weights:
     graph_out = distance_graph.copy()
@@ -323,7 +319,7 @@ def generate_spatial_weights_fixed_radius(
         p: Cutoff for Gaussian (used to find where distribution drops below p * (max_value)).
         sigma: Standard deviation of the Gaussian.
         method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-            "ball_tree" and "kdtree".
+            "ball_tree" and "kd_tree".
         max_num_neighbors: Sets upper threshold on number of neighbors a bucket can have.
 
     Returns:
@@ -375,11 +371,7 @@ def generate_spatial_weights_fixed_radius(
 
     adata.uns["spatial_neighbors"] = {}
     adata.uns["spatial_neighbors"]["indices"] = knn
-    adata.uns["spatial_neighbors"]["params"] = {
-        "n_neighbors": n_neighbors,
-        "method": method,
-        "metric": "euclidean"
-    }
+    adata.uns["spatial_neighbors"]["params"] = {"n_neighbors": n_neighbors, "method": method, "metric": "euclidean"}
 
     graph_out = distance_graph.copy()
 
