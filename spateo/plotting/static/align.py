@@ -27,7 +27,7 @@ def multi_slices(
     color: Optional[str] = "skyblue",
     palette: Optional[str] = None,
     alpha: float = 1.0,
-    ncol: int = 4,
+    ncols: int = 4,
     ax_height: float = 1,
     dpi: int = 100,
     show_legend: bool = True,
@@ -68,14 +68,14 @@ def multi_slices(
 
     # Set the arrangement of subgraphs
     slices_id = slices_data[slices_key].unique().tolist()
-    nrow = math.ceil(len(slices_id) / ncol)
+    nrows = math.ceil(len(slices_id) / ncols)
 
     # Set the aspect ratio of each subplot
     spatial_coords = slices_data[["x", "y"]].values.copy()
     ptp_vec = spatial_coords.ptp(0)
     aspect_ratio = ptp_vec[0] / ptp_vec[1]
 
-    ax_height = 2 if nrow == 1 and ax_height == 1 else ax_height
+    ax_height = 2 if nrows == 1 and ax_height == 1 else ax_height
     axsize = (ax_height * aspect_ratio, ax_height * 1.2)
 
     # Set multi-plot grid for plotting.
@@ -97,9 +97,9 @@ def multi_slices(
         hue=label,
         sharex=True,
         sharey=True,
-        height=axsize[1] * nrow,
+        height=axsize[1] * nrows,
         aspect=aspect_ratio,
-        col_wrap=ncol,
+        col_wrap=ncols,
         despine=False,
     )
 
@@ -112,7 +112,7 @@ def multi_slices(
             min_dist_list.append(compute_smallest_distance(coords=data[["x", "y"]].values, sample_num=sample_num))
 
         point_size = min(min_dist_list) * axsize[0] / ptp_vec[0] * dpi
-        point_size = point_size**2 * ncol * nrow
+        point_size = point_size**2 * ncols * nrows
 
     # Draw scatter plots.
     g.map_dataframe(
@@ -124,7 +124,7 @@ def multi_slices(
     if label_values.dtype in ["float16", "float32", "float64", "int16", "int32", "int64"]:
         from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-        ax = g.facet_axis(row_i=0, col_j=ncol - 1)
+        ax = g.facet_axis(row_i=0, col_j=ncols - 1)
         norm = mpl.colors.Normalize(vmin=None, vmax=None)
         mappable = mpl.cm.ScalarMappable(norm=norm, cmap=palette)
         mappable.set_array(label_values)
