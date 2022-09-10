@@ -67,7 +67,8 @@ def glm_degs(
             len(genes) == X_data.shape[1]
         ), "When providing X_data, the number of genes must be equal the columns of X_data."
     lm.main_warning(
-        "X_data must be the original counts matrix, please check if the input gene expression matrix is correct."
+        "X_data must be the size factor normalized gene expression matrix, please check if the input gene expression matrix is correct."
+        "If you don't have the size factor normalized gene expression matrix, please run `dynamo.pp.normalize_cell_expr_by_size_factors(skip_log = True)`."
     )
 
     md = patsy.ModelDesc.from_formula(fullModelFormulaStr)
