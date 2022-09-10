@@ -16,18 +16,21 @@ import numpy as np
 import pandas as pd
 import scipy
 import seaborn as sns
+from matplotlib import rcParams
 from matplotlib.collections import PolyCollection
 from matplotlib.ticker import StrMethodFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from ...configuration import reset_rcParams
+from ...configuration import config_spateo_rcParams
 from ...plotting.static.dotplot import CCDotplot
 from ...tools.labels import Label, interlabel_connections
 
 
 def plot_connections(
     label: Label,
-    weights_matrix: Union[scipy.sparse.csr_matrix, np.ndarray],
+    spatial_weights_matrix: Union[scipy.sparse.csr_matrix, np.ndarray],
+    expr_weights_matrix: Union[None, scipy.sparse.csr_matrix, np.ndarray] = None,
+    reverse_expr_plot_orientation: bool = False,
     ax: Union[None, mpl.axes.Axes] = None,
     figsize: tuple = (8, 8),
     zero_self_connections: bool = True,
@@ -36,20 +39,27 @@ def plot_connections(
     label_outline: bool = False,
     max_scale: float = 0.46,
     colormap: Union[str, dict, "mpl.colormap"] = "Spectral",
-    title_str="connection strengths between types",
-    title_fontsize: float = 12,
-    label_fontsize: float = 12,
+    title_str: Union[None, str] = None,
+    title_fontsize: Union[None, float] = None,
+    label_fontsize: Union[None, float] = None,
     save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
-    save_kwargs: Optional[dict] = None,
+    save_kwargs: Optional[dict] = {},
 ):
     """
-    Plot connections between labels- visualization of how closely labels are colocalized
+    Plot spatial_connections between labels- visualization of how closely labels are colocalized
 
     Args:
         label : class `Label`
             This class contains attributes related to the labeling of each sample
         weights_matrix : sparse matrix or numpy array
             Spatial distance matrix, weighted by distance between spots
+        expr_weights_matrix : optional sparse matrix or numpy array
+            Gene expression distance matrix, weighted by distance in transcriptomic or PCA space. If not given,
+            only the spatial distance matrix will be plotted. If given, will plot the spatial distance matrix in the
+            left plot and the gene expression distance matrix in the right plot.
+        reverse_expr_plot_orientation : bool, default False
+            If True, plot the gene expression connections in the form of a lower right triangle. If False,
+            gene expression connections will be an upper left triangle just like the spatial connections.
         ax : optional `matplotlib.Axes`
             Existing axes object, if applicable
         figsize : (int, int) tuple
@@ -57,8 +67,8 @@ def plot_connections(
         zero_self_connections : bool, default True
             Ignores intra-label interactions
         normalize_by_self_connections : bool, default False
-            Only used if 'zero_self_connections' is False. If True, normalize intra-label connections by the number of
-            spots of that label
+            Only used if 'zero_self_connections' is False. If True, normalize intra-label connections by
+            the number of spots of that label
         shapes_style : bool, default True
             If True plots squares, if False plots heatmap
         label_outline : bool, default False
@@ -92,19 +102,52 @@ def plot_connections(
     from ...plotting.static.utils import save_fig
     from ...tools.utils import update_dict
 
+    config_spateo_rcParams()
+    title_fontsize = rcParams.get("axes.titlesize") if title_fontsize is None else title_fontsize
+    label_fontsize = rcParams.get("axes.labelsize") if label_fontsize is None else label_fontsize
+
     if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
+        if expr_weights_matrix is not None:
+            figsize = (figsize[0] * 2.25, figsize[1])
+            fig, axes = plt.subplots(1, 2, figsize=figsize)
+            ax_sp, ax_expr = axes[0], axes[1]
+
+            if reverse_expr_plot_orientation:
+                # Allow subplot boundaries to technically be partially overlapping (for better visual)
+                box = ax_expr.get_position()
+                box.x0 = box.x0 - 0.3
+                box.x1 = box.x1 - 0.3
+                ax_expr.set_position(box)
+        else:
+            fig, ax_sp = plt.subplots(1, 1, figsize=figsize)
     else:
         ax = ax
+        if len(ax) > 1:
+            ax_sp, ax_expr = ax[0], ax[1]
+        else:
+            ax_sp = ax
         fig = ax.get_figure()
-    connections = interlabel_connections(label, weights_matrix)
+
+    # Compute spatial connections array:
+    spatial_connections = interlabel_connections(label, spatial_weights_matrix)
 
     if zero_self_connections:
-        np.fill_diagonal(connections, 0)
+        np.fill_diagonal(spatial_connections, 0)
     elif normalize_by_self_connections:
-        connections /= connections.diagonal()[:, np.newaxis]
+        spatial_connections /= spatial_connections.diagonal()[:, np.newaxis]
 
-    connections_max = np.amax(connections)
+    spatial_connections_max = np.amax(spatial_connections)
+
+    # Optionally, compute gene expression connections array:
+    if expr_weights_matrix is not None:
+        expr_connections = interlabel_connections(label, expr_weights_matrix)
+
+        if zero_self_connections:
+            np.fill_diagonal(expr_connections, 0)
+        elif normalize_by_self_connections:
+            expr_connections /= expr_connections.diagonal()[:, np.newaxis]
+
+        expr_connections_max = np.amax(expr_connections)
 
     # Set label colors:
     if isinstance(colormap, str):
@@ -122,6 +165,8 @@ def plot_connections(
     else:
         id_colors = {id: cmap(id / label.max_id) for id in label.ids}
 
+
+    # -------------------------------- Spatial Connections Plot- Setup -------------------------------- #
     if shapes_style:
         # Cell types/labels will be represented using triangles:
         left_triangle = np.array(
@@ -145,17 +190,17 @@ def plot_connections(
         polygon_list = []
         color_list = []
 
-        ax.set_ylim(-0.55, label.num_labels - 0.45)
-        ax.set_xlim(-0.55, label.num_labels - 0.45)
+        ax_sp.set_ylim(-0.55, label.num_labels - 0.45)
+        ax_sp.set_xlim(-0.55, label.num_labels - 0.45)
 
-        for label_1 in range(connections.shape[0]):
-            for label_2 in range(connections.shape[1]):
+        for label_1 in range(spatial_connections.shape[0]):
+            for label_2 in range(spatial_connections.shape[1]):
 
                 if label_1 <= label_2:
 
                     for triangle in [left_triangle, right_triangle]:
                         center = np.array((label_1, label_2))[np.newaxis, :]
-                        scale_factor = connections[label_1, label_2] / connections_max
+                        scale_factor = spatial_connections[label_1, label_2] / spatial_connections_max
                         offsets = triangle * max_scale * scale_factor
                         polygon_list.append(center + offsets)
 
@@ -163,36 +208,36 @@ def plot_connections(
 
         collection = PolyCollection(polygon_list, facecolors=color_list, edgecolors="face", linewidths=0)
 
-        ax.add_collection(collection)
+        ax_sp.add_collection(collection)
 
         # Remove ticks
-        ax.tick_params(labelbottom=False, labeltop=True, top=False, bottom=False, left=False)
-        ax.xaxis.set_tick_params(pad=-2)
+        ax_sp.tick_params(labelbottom=False, labeltop=True, top=False, bottom=False, left=False)
+        ax_sp.xaxis.set_tick_params(pad=-2)
     else:
         # Heatmap of connection strengths
-        heatmap = ax.imshow(connections, cmap=colormap, interpolation="nearest")
+        heatmap = ax_sp.imshow(spatial_connections, cmap=colormap, interpolation="nearest")
 
-        divider = make_axes_locatable(ax)
+        divider = make_axes_locatable(ax_sp)
         cax = divider.append_axes("right", size="5%", pad=0.1)
 
         fig.colorbar(heatmap, cax=cax)
         cax.tick_params(axis="both", which="major", labelsize=6, rotation=-45)
 
         # Change formatting if values too small
-        if connections_max < 0.001:
+        if spatial_connections_max < 0.001:
             cax.yaxis.set_major_formatter(StrMethodFormatter("{x:,.1e}"))
 
     # Formatting adjustments
-    ax.set_aspect("equal")
+    ax_sp.set_aspect("equal")
 
-    ax.set_xticks(
+    ax_sp.set_xticks(
         np.arange(label.num_labels),
     )
     text_outline = [PathEffects.Stroke(linewidth=0.5, foreground="black", alpha=0.8)] if label_outline else None
 
     # If label has categorical labels associated, use those to label the axes instead:
     if label.str_map is not None:
-        ax.set_xticklabels(
+        ax_sp.set_xticklabels(
             label.str_ids,
             fontsize=label_fontsize,
             fontweight="bold",
@@ -200,7 +245,7 @@ def plot_connections(
             path_effects=text_outline,
         )
     else:
-        ax.set_xticklabels(
+        ax_sp.set_xticklabels(
             label.ids,
             fontsize=label_fontsize,
             fontweight="bold",
@@ -208,31 +253,151 @@ def plot_connections(
             path_effects=text_outline,
         )
 
-    ax.set_yticks(np.arange(label.num_labels))
+    ax_sp.set_yticks(np.arange(label.num_labels))
     if label.str_map is not None:
-        ax.set_yticklabels(
+        ax_sp.set_yticklabels(
             label.str_ids,
             fontsize=label_fontsize,
             fontweight="bold",
             path_effects=text_outline,
         )
     else:
-        ax.set_yticklabels(
+        ax_sp.set_yticklabels(
             label.ids,
             fontsize=label_fontsize,
             fontweight="bold",
             path_effects=text_outline,
         )
 
-    for ticklabels in [ax.get_xticklabels(), ax.get_yticklabels()]:
+    for ticklabels in [ax_sp.get_xticklabels(), ax_sp.get_yticklabels()]:
         for n, id in enumerate(label.ids):
             ticklabels[n].set_color(id_colors[id])
 
-    ax.set_title(title_str, fontsize=title_fontsize, fontweight="bold")
+    title_str_sp = "Spatial Connections" if title_str is None else title_str
+    ax_sp.set_title(title_str_sp, fontsize=title_fontsize, fontweight="bold")
+
+    # ------------------------------ Optional Gene Expression Connections Plot- Setup ------------------------------ #
+    if expr_weights_matrix is not None:
+        if shapes_style:
+            polygon_list = []
+            color_list = []
+
+            ax_expr.set_ylim(-0.55, label.num_labels - 0.45)
+            ax_expr.set_xlim(-0.55, label.num_labels - 0.45)
+
+            for label_1 in range(expr_connections.shape[0]):
+                for label_2 in range(expr_connections.shape[1]):
+
+                    if label_1 <= label_2:
+                        for triangle in [left_triangle, right_triangle]:
+                            center = np.array((label_1, label_2))[np.newaxis, :]
+                            scale_factor = expr_connections[label_1, label_2] / expr_connections_max
+                            offsets = triangle * max_scale * scale_factor
+                            polygon_list.append(center + offsets)
+
+                        color_list += (id_colors[label.ids[label_2]], id_colors[label.ids[label_1]])
+
+                # Remove ticks
+                if reverse_expr_plot_orientation:
+                    ax_expr.tick_params(labelbottom=True, labeltop=False, labelleft=False, labelright=True,
+                                        top=False, bottom=False, left=False)
+                    # Flip x- and y-axes of the expression plot:
+                    ax_expr.invert_xaxis()
+                    ax_expr.invert_yaxis()
+                else:
+                    ax_expr.tick_params(labelbottom=False, labeltop=True, top=False, bottom=False, left=False)
+                ax_expr.xaxis.set_tick_params(pad=-2)
+
+            collection = PolyCollection(polygon_list, facecolors=color_list, edgecolors="face", linewidths=0)
+
+            ax_expr.add_collection(collection)
+        else:
+            # Heatmap of connection strengths
+            heatmap = ax_expr.imshow(expr_connections, cmap=colormap, interpolation="nearest")
+
+            divider = make_axes_locatable(ax_expr)
+            cax = divider.append_axes("right", size="5%", pad=0.1)
+
+            fig.colorbar(heatmap, cax=cax)
+            cax.tick_params(axis="both", which="major", labelsize=6, rotation=-45)
+
+            # Change formatting if values too small
+            if spatial_connections_max < 0.001:
+                cax.yaxis.set_major_formatter(StrMethodFormatter("{x:,.1e}"))
+
+        # Formatting adjustments
+        ax_expr.set_aspect("equal")
+
+        ax_expr.set_xticks(
+            np.arange(label.num_labels),
+        )
+        if reverse_expr_plot_orientation:
+            # Despine both spatial connections & gene expression connections plots:
+            ax_sp.spines['right'].set_visible(False)
+            ax_sp.spines['top'].set_visible(False)
+            ax_sp.spines['left'].set_visible(False)
+            ax_sp.spines['bottom'].set_visible(False)
+
+            ax_expr.spines['right'].set_visible(False)
+            ax_expr.spines['top'].set_visible(False)
+            ax_expr.spines['left'].set_visible(False)
+            ax_expr.spines['bottom'].set_visible(False)
+
+        text_outline = [PathEffects.Stroke(linewidth=0.5, foreground="black", alpha=0.8)] if label_outline else None
+
+        # If label has categorical labels associated, use those to label the axes instead:
+        if label.str_map is not None:
+            ax_expr.set_xticklabels(
+                label.str_ids,
+                fontsize=label_fontsize,
+                fontweight="bold",
+                rotation=90,
+                path_effects=text_outline,
+            )
+        else:
+            ax_expr.set_xticklabels(
+                label.ids,
+                fontsize=label_fontsize,
+                fontweight="bold",
+                rotation=0,
+                path_effects=text_outline,
+            )
+
+        ax_expr.set_yticks(np.arange(label.num_labels))
+        if label.str_map is not None:
+            ax_expr.set_yticklabels(
+                label.str_ids,
+                fontsize=label_fontsize,
+                fontweight="bold",
+                path_effects=text_outline,
+            )
+        else:
+            ax_expr.set_yticklabels(
+                label.ids,
+                fontsize=label_fontsize,
+                fontweight="bold",
+                path_effects=text_outline,
+            )
+
+        for ticklabels in [ax_expr.get_xticklabels(), ax_expr.get_yticklabels()]:
+            for n, id in enumerate(label.ids):
+                ticklabels[n].set_color(id_colors[id])
+
+        title_str_expr = "Gene Expression Similarity" if title_str is None else title_str
+        if reverse_expr_plot_orientation:
+            if label_fontsize <= 8:
+                y = -0.35
+            elif label_fontsize > 8:
+                y = -0.25
+        else:
+            y = None
+        ax_expr.set_title(title_str_expr, fontsize=title_fontsize, fontweight="bold", y=y)
+
+    prefix = "spatial_connections" if expr_weights_matrix is None else "spatial_and_expr_connections"
     if save_show_or_return in ["save", "both", "all"]:
         s_kwargs = {
             "path": None,
-            "prefix": "connections",
+            "prefix": prefix,
             "dpi": None,
             "ext": "pdf",
             "transparent": True,
@@ -246,6 +411,10 @@ def plot_connections(
     elif save_show_or_return in ["show", "both", "all"]:
         plt.show()
     elif save_show_or_return in ["return", "all"]:
+        if expr_weights_matrix is not None:
+            ax = axes
+        else:
+            ax = ax_sp
         return (fig, ax)
 
 
@@ -264,7 +433,7 @@ def heatmap(data: Union[np.ndarray, pd.DataFrame]):
     Args:
         data : np.ndarray or pd.DataFrame
     """
-    reset_rcParams()
+    config_spateo_rcParams()
 
     # def
 

@@ -12,8 +12,10 @@ from itertools import product
 from random import sample
 from typing import List, Literal, Tuple, Union
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from anndata import AnnData
 from joblib import Parallel, delayed
 from matplotlib import rcParams
@@ -37,7 +39,7 @@ from ...logging import logger_manager as lm
 from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import construct_pairwise
 from ...tools.utils import update_dict
-from .regression_utils import compute_wald_test, get_fisher_inverse, ols_fit
+from .regression_utils import compute_wald_test, get_fisher_inverse, ols_fit_predict
 
 
 # --------------------------------------- Wrapper classes for model running --------------------------------------- #
@@ -308,6 +310,11 @@ class BaseInterpreter:
                 log1p(self.adata)
             else:
                 log1p(self.adata.layers[self.layer])
+        else:
+            self.logger.warn(
+                "Linear regression models are not well suited to the distributional characteristics of "
+                "raw transcriptomic data- it is recommended to perform a log-transformation first."
+            )
 
     def compute_spatial_weights(self):
         """
@@ -334,255 +341,32 @@ class BaseInterpreter:
         # Row standardize spatial weights matrix:
         self.w.transform = "R"
 
-    def generate_null(self):
+    # ------------------------------ Parameters for spatially-aware and lagged models ------------------------------ #
+    def run_OLS(self, n_jobs: int = 30) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Generates a null model by scrambling the names of the samples to generate null distributions of parameters
-        and R^2 scores
+        Wrapper for ordinary least squares regression.
+
+        n_jobs : int, default 30
+            For parallel processing, number of tasks to run at once
+
+        Returns:
+            coeffs : pd.DataFrame, shape [n_features, n_params]
+                Contains fitted parameters for each feature
+            reconst: pd.DataFrame, shape [n_samples, n_features]
+                Contains predicted expression for each feature
         """
-
-    def get_sender_receiver_effects(self, coeffs: pd.DataFrame, n_jobs: int = 30, significance_threshold: float = 0.05):
-        """
-        For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
-        significant.
-
-        Additionally, if the connections b/w categories are used as variables for regression,
-        for each feature and each sender-receiver category pair, determines the log fold-change that the sender
-        induces in the feature for the receiver.
-
-        Only valid if the model specified uses the connections between categories as variables for the regression.
-
-        Args:
-            coeffs : pd.DataFrame
-                Contains coefficients from regression for each variable
-            n_jobs : int, default 30
-                Number of features to model at once
-            significance_threshold : float, default 0.5
-                p-value needed to call a sender-receiver relationship significant
-        """
-        if not "connections" in self.mod_type or not "niche" in self.mod_type:
-            self.logger.error(
-                "Type coupling analysis only valid if connections between categories are used as the "
-                "predictor variable."
-            )
-
-        # Return only the numerical coefficients:
-        coeffs = coeffs[[col for col in coeffs.columns if "coeff" in col]].values
-        if "lag" in self.mod_type:
-            # Remove the first column (the intercept):
-            coeffs = coeffs[:, 1:]
-
-        # Get inverse Fisher information matrix, with the y block containing all features that were used in regression):
-        y = self.adata[:, self.genes].X
-        inverse_fisher = get_fisher_inverse(self.X.values, y)
-
-        # Compute significance for each parameter:
-        is_significant, pvalues, qvalues = compute_wald_test(
-            params=coeffs, fisher_inv=inverse_fisher, significance_threshold=significance_threshold
+        results = Parallel(n_jobs)(
+            delayed(ols_fit_predict)(self.X, self.adata, self.variable_names, cur_g) for cur_g in self.genes
         )
-
-        # If niche-based model, extract the portion that corresponds to the interaction terms:
-        if self.mod_type == "niche":
-            interaction_shape = np.int(self.n_features**2)
-            is_significant = is_significant[self.n_features : interaction_shape + self.n_features, :]
-            pvalues = pvalues[self.n_features : interaction_shape + self.n_features, :]
-            qvalues = qvalues[self.n_features : interaction_shape + self.n_features, :]
-
-            # Compute the fold-change induced in the receiver by the sender for the case model type is "niche":
-            interaction_params = coeffs[:, self.n_features : interaction_shape + self.n_features]
-            self.fold_change = np.concatenate(
-                np.expand_dims(
-                    np.split(interaction_params.T, indices_or_sections=np.sqrt(interaction_params.T.shape[0]), axis=0),
-                    axis=0,
-                ),
-                axis=0,
-            )
-        # Else if connection-based model, all regression coefficients already correspond to the interaction terms:
-        else:
-            self.fold_change = np.concatenate(
-                np.expand_dims(np.split(coeffs.T, indices_or_sections=np.sqrt(coeffs.T.shape[0]), axis=0), axis=0),
-                axis=0,
-            )
-
-        self.pvalues = np.concatenate(
-            np.expand_dims(np.split(pvalues, indices_or_sections=np.sqrt(pvalues.shape[0]), axis=0), axis=0),
-            axis=0,
-        )
-        self.qvalues = np.concatenate(
-            np.expand_dims(np.split(qvalues, indices_or_sections=np.sqrt(qvalues.shape[0]), axis=0), axis=0),
-            axis=0,
-        )
-        self.is_significant = np.concatenate(
-            np.expand_dims(
-                np.split(is_significant, indices_or_sections=np.sqrt(is_significant.shape[0]), axis=0), axis=0
-            ),
-            axis=0,
-        )
-
-    def type_coupling_analysis(
-        self,
-        fontsize: Union[None, int] = None,
-        figsize: Union[None, Tuple[int, int]] = None,
-        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
-        save_id: Union[None, str] = None,
-        save_kwargs: dict = {}
-    ):
-        """
-        Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
-        categories. Only valid if the model specified uses the connections between categories as variables for the
-        regression.
-
-        A high number of differentially-expressed genes between a given sender-receiver pair means that the sender
-        being in the neighborhood of the receiver tends to correlate with differential expression levels of many of
-        the genes within the selection- much of the cellular variation in the receiver cell type can be attributed to
-        being in proximity with the sender.
-
-        Args:
-            fontsize : optional int
-                Size of figure title and axis labels
-            figsize : optional tuple of form (int, int)
-                Width and height of plotting window
-            save_show_or_return : str
-            Options: "save", "show", "return", "both", "all"
-                - "both" for save and show
-            save_id : optional str
-                Name of the saved figure, without the extension
-            save_kwargs : dict
-                A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
-                save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf',
-                "transparent": True, "close": True, "verbose": True} as its parameters. But to change any of these
-                parameters, this dictionary can be used to do so.
-        """
-        if fontsize is None:
-            self.fontsize = rcParams.get("font.size")
-        else:
-            self.fontsize = fontsize
-        if figsize is None:
-            self.figsize = rcParams.get("figure.figsize")
-        else:
-            self.figsize = figsize
-
-        path = os.path.join(os.getcwd(), "/figures", save_id)
-        # Update save_kwargs with save path:
-        save_kwargs["path"] = path
-
-        if not hasattr(self, "is_sign"):
-            self.logger.warn("Significance dataframe does not exist- please run `get_sender_receiver_effects` first.")
-
-        sig_df = pd.DataFrame(
-            np.sum(self.is_sign, axis=-1),
-            columns=self.cell_names,
-            index=self.cell_names
-        )
-
-
-
-        save_return_show_fig_utils(
-            save_show_or_return=save_show_or_return,
-            show_legend=True,
-            background="white",
-            prefix="type_coupling",
-            save_kwargs=save_kwargs,
-            total_panels=1,
-            fig=fig,
-            axes=ax,
-            return_all=False,
-            return_all_list=None
-        )
-
-
-class Category_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-aware (but not spatially lagged) regression using categorical
-    variables (specifically, the prevalence of categories within spatial neighborhoods) to predict the value of gene
-    expression.
-
-    The only keyword argument that is used for this class is 'n_neighbors'.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        assert self.group_key is not None, "Categorical labels required for this model."
-
-        # Prepare data:
-        self.prepare_data(mod_type="category")
-
-    def run_OLS(self, n_jobs: int = 30):
-        coeffs = Parallel(n_jobs)(
-            delayed(ols_fit)(self.X, self.adata, self.variable_names, cur_g) for cur_g in self.genes
-        )
+        coeffs = [item[0] for item in results]
+        reconst = [item[1] for item in results]
 
         coeffs = pd.DataFrame(coeffs, index=self.genes, columns=self.X.columns)
         for cn in coeffs.columns:
             self.adata.var.loc[:, cn] = coeffs[cn]
-        return coeffs
-
-
-class Connections_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-aware (but not spatially lagged) regression using the
-    connections between categories to predict the value of gene expression.
-
-    The only keyword argument that is used for this class is 'n_neighbors'.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        assert self.group_key is not None, "Categorical labels required for this model."
-
-        # Prepare data:
-        self.prepare_data(mod_type="connections")
-
-    def run_OLS(self, n_jobs: int = 30):
-        coeffs = Parallel(n_jobs)(
-            delayed(ols_fit)(self.X, self.adata, self.variable_names, cur_g) for cur_g in self.genes
-        )
-
-        coeffs = pd.DataFrame(coeffs, index=self.genes)
-        for cn in coeffs.columns:
-            self.adata.var.loc[:, cn] = coeffs[cn]
-        return coeffs
-
-
-class Niche_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-aware regression using both the prevalence of and connections
-    between categories within spatial neighborhoods to predict the value of gene expression.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        assert self.group_key is not None, "Categorical labels required for this model."
-
-        self.prepare_data(mod_type="niche")
-
-    # def run_OLS(self, n_jobs: int = 30):
-
-
-class Lagged_Category_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-lagged regression using categorical variables (specifically,
-    the prevalence of categories within spatial neighborhoods) to predict the value of gene expression.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        assert self.group_key is not None, "Categorical labels required for this model."
-
-        # Process the cell type array to use it as the input to the regression model:
-        self.prepare_data(mod_type="lag_category")
-
-        # Compute spatial weights matrix given user inputs:
-        self.compute_spatial_weights()
-
-        # Instantiate locations in AnnData object to store results from lag model:
-        for i in ["const"] + self.uniq_g + ["W_log_exp"]:
-            self.adata.var[str(i) + "_GM_lag_coeff"] = None
-            self.adata.var[str(i) + "_GM_lag_zstat"] = None
-            self.adata.var[str(i) + "_GM_lag_pval"] = None
+        # Nested list transforms into dataframe rows- instantiate and transpose to get to correct shape:
+        reconst = pd.DataFrame(reconst, index=self.genes, columns=self.cell_names).T
+        return coeffs, reconst
 
     def run_GM_lag(self, n_jobs: int = 30):
         """Runs spatially lagged two-stage least squares model"""
@@ -693,6 +477,265 @@ class Lagged_Category_Interpreter(BaseInterpreter):
             self.adata.var.loc[:, cn] = coeffs[cn]
 
         return coeffs, pred, resid
+
+    def generate_null(self):
+        """
+        Generates a null model by scrambling the names of the samples to generate null distributions of parameters
+        and R^2 scores
+        """
+
+    def get_sender_receiver_effects(self, coeffs: pd.DataFrame, n_jobs: int = 30, significance_threshold: float = 0.05):
+        """
+        For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
+        significant.
+
+        Additionally, if the connections b/w categories are used as variables for regression,
+        for each feature and each sender-receiver category pair, determines the log fold-change that the sender
+        induces in the feature for the receiver.
+
+        Only valid if the model specified uses the connections between categories as variables for the regression.
+
+        Args:
+            coeffs : pd.DataFrame
+                Contains coefficients from regression for each variable
+            n_jobs : int, default 30
+                Number of features to model at once
+            significance_threshold : float, default 0.5
+                p-value needed to call a sender-receiver relationship significant
+        """
+        if not "connections" in self.mod_type or not "niche" in self.mod_type:
+            self.logger.error(
+                "Type coupling analysis only valid if connections between categories are used as the "
+                "predictor variable."
+            )
+
+        # Return only the numerical coefficients:
+        coeffs = coeffs[[col for col in coeffs.columns if "coeff" in col]].values
+        if "lag" in self.mod_type:
+            # Remove the first column (the intercept):
+            coeffs = coeffs[:, 1:]
+
+        # Get inverse Fisher information matrix, with the y block containing all features that were used in regression):
+        y = self.adata[:, self.genes].X
+        inverse_fisher = get_fisher_inverse(self.X.values, y)
+
+        # Compute significance for each parameter:
+        is_significant, pvalues, qvalues = compute_wald_test(
+            params=coeffs, fisher_inv=inverse_fisher, significance_threshold=significance_threshold
+        )
+
+        # If niche-based model, extract the portion that corresponds to the interaction terms:
+        if self.mod_type == "niche":
+            interaction_shape = np.int(self.n_features**2)
+            is_significant = is_significant[self.n_features : interaction_shape + self.n_features, :]
+            pvalues = pvalues[self.n_features : interaction_shape + self.n_features, :]
+            qvalues = qvalues[self.n_features : interaction_shape + self.n_features, :]
+
+            # Compute the fold-change induced in the receiver by the sender for the case model type is "niche":
+            interaction_params = coeffs[:, self.n_features : interaction_shape + self.n_features]
+            self.fold_change = np.concatenate(
+                np.expand_dims(
+                    np.split(interaction_params.T, indices_or_sections=np.sqrt(interaction_params.T.shape[0]), axis=0),
+                    axis=0,
+                ),
+                axis=0,
+            )
+        # Else if connection-based model, all regression coefficients already correspond to the interaction terms:
+        else:
+            self.fold_change = np.concatenate(
+                np.expand_dims(np.split(coeffs.T, indices_or_sections=np.sqrt(coeffs.T.shape[0]), axis=0), axis=0),
+                axis=0,
+            )
+
+        self.pvalues = np.concatenate(
+            np.expand_dims(np.split(pvalues, indices_or_sections=np.sqrt(pvalues.shape[0]), axis=0), axis=0),
+            axis=0,
+        )
+        self.qvalues = np.concatenate(
+            np.expand_dims(np.split(qvalues, indices_or_sections=np.sqrt(qvalues.shape[0]), axis=0), axis=0),
+            axis=0,
+        )
+        self.is_significant = np.concatenate(
+            np.expand_dims(
+                np.split(is_significant, indices_or_sections=np.sqrt(is_significant.shape[0]), axis=0), axis=0
+            ),
+            axis=0,
+        )
+
+    def type_coupling_analysis(
+        self,
+        cmap: str = "Reds",
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[int, int]] = None,
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
+        save_id: Union[None, str] = None,
+        save_kwargs: dict = {},
+    ):
+        """
+        Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
+        categories. Only valid if the model specified uses the connections between categories as variables for the
+        regression.
+
+        A high number of differentially-expressed genes between a given sender-receiver pair means that the sender
+        being in the neighborhood of the receiver tends to correlate with differential expression levels of many of
+        the genes within the selection- much of the cellular variation in the receiver cell type can be attributed to
+        being in proximity with the sender.
+
+        Args:
+            cmap : str, default "Reds"
+                Name of Matplotlib color map to use
+            fontsize : optional int
+                Size of figure title and axis labels
+            figsize : optional tuple of form (int, int)
+                Width and height of plotting window
+            save_show_or_return : str
+            Options: "save", "show", "return", "both", "all"
+                - "both" for save and show
+            save_id : optional str
+                Name of the saved figure, without the extension
+            save_kwargs : dict
+                A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
+                save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf',
+                "transparent": True, "close": True, "verbose": True} as its parameters. But to change any of these
+                parameters, this dictionary can be used to do so.
+        """
+        if fontsize is None:
+            self.fontsize = rcParams.get("font.size")
+        else:
+            self.fontsize = fontsize
+        if figsize is None:
+            self.figsize = rcParams.get("figure.figsize")
+        else:
+            self.figsize = figsize
+
+        path = os.path.join(os.getcwd(), "/figures", save_id)
+        # Update save_kwargs with save path:
+        save_kwargs["path"] = path
+
+        if not hasattr(self, "is_sign"):
+            self.logger.warn("Significance dataframe does not exist- please run `get_sender_receiver_effects` first.")
+
+        sig_df = pd.DataFrame(np.sum(self.is_sign, axis=-1), columns=self.cell_names, index=self.cell_names)
+
+        np.fill_diagonal(sig_df.values, 0)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+        sns.heatmap(sig_df, cmap=cmap)
+        plt.xlabel("Sender")
+        plt.ylabel("Receiver")
+        plt.tight_layout()
+
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=True,
+            background="white",
+            prefix="type_coupling",
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None,
+        )
+
+    def sender_effect(
+        self,
+        receiver: str,
+        plot_mode: str = 'fold_change',
+        gene_subset: Union[None, List[str]] = None,
+        significance_threshold: float = 0.05,
+        cut_pvals: float = -5,
+        fontsize: Union[None, int] = None,
+        figsize: Tuple[float, float] = (6, 10),
+    ):
+        """
+        Computes and measures the effect that specific sender cell types have on specific genes in the receiver cell
+        type.
+
+        Args:
+
+        """
+
+    def sender_receiver_effect_volcanoplot(self):
+        """
+        Volcano plot to identify differentially expressed genes of a given receiver cell type in the presence of a
+        given sender cell type.
+
+        Args:
+
+        """
+
+
+class Category_Interpreter(BaseInterpreter):
+    """
+    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
+    prediction when instantiating a model for spatially-aware (but not spatially lagged) regression using categorical
+    variables (specifically, the prevalence of categories within spatial neighborhoods) to predict the value of gene
+    expression.
+
+    The only keyword argument that is used for this class is 'n_neighbors'.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert self.group_key is not None, "Categorical labels required for this model."
+
+        # Prepare data:
+        self.prepare_data(mod_type="category")
+
+
+class Connections_Interpreter(BaseInterpreter):
+    """
+    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
+    prediction when instantiating a model for spatially-aware (but not spatially lagged) regression using the
+    connections between categories to predict the value of gene expression.
+
+    The only keyword argument that is used for this class is 'n_neighbors'.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert self.group_key is not None, "Categorical labels required for this model."
+
+        # Prepare data:
+        self.prepare_data(mod_type="connections")
+
+
+class Niche_Interpreter(BaseInterpreter):
+    """
+    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
+    prediction when instantiating a model for spatially-aware regression using both the prevalence of and connections
+    between categories within spatial neighborhoods to predict the value of gene expression.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert self.group_key is not None, "Categorical labels required for this model."
+
+        self.prepare_data(mod_type="niche")
+
+
+class Lagged_Category_Interpreter(BaseInterpreter):
+    """
+    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
+    prediction when instantiating a model for spatially-lagged regression using categorical variables (specifically,
+    the prevalence of categories within spatial neighborhoods) to predict the value of gene expression.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert self.group_key is not None, "Categorical labels required for this model."
+
+        # Process the cell type array to use it as the input to the regression model:
+        self.prepare_data(mod_type="lag_category")
+
+        # Compute spatial weights matrix given user inputs:
+        self.compute_spatial_weights()
+
+        # Instantiate locations in AnnData object to store results from lag model:
+        for i in ["const"] + self.uniq_g + ["W_log_exp"]:
+            self.adata.var[str(i) + "_GM_lag_coeff"] = None
+            self.adata.var[str(i) + "_GM_lag_zstat"] = None
+            self.adata.var[str(i) + "_GM_lag_pval"] = None
 
 
 class Heterologous_Lagged_Interpreter(BaseInterpreter):

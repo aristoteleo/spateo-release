@@ -1,3 +1,10 @@
+"""
+Class containing functions for dealing with categorical labels.
+
+Contact Daniel Zhu w/ questions
+Github: @dzhu8
+"""
+
 import copy
 from typing import List, Tuple, Union
 

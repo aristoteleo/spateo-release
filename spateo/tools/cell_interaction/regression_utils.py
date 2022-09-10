@@ -1,7 +1,7 @@
 """
 Auxiliary functions to aid in the interpretation functions for the spatial and spatially-lagged regression models.
 """
-from typing import List, Union
+from typing import List, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -12,7 +12,9 @@ from anndata import AnnData
 
 # ------------------------------------------- Ordinary Least-Squares ------------------------------------------- #
 # Custom implementation of ordinary least-squares regression for an AnnData object:
-def ols_fit(X: pd.DataFrame, adata: AnnData, x_feats: List[str], y_feat: str, layer: Union[None, str] = None):
+def ols_fit(
+    X: pd.DataFrame, adata: AnnData, x_feats: List[str], y_feat: str, layer: Union[None, str] = None
+) -> np.ndarray:
     """
     Ordinary least squares regression for a single variable
 
@@ -32,7 +34,7 @@ def ols_fit(X: pd.DataFrame, adata: AnnData, x_feats: List[str], y_feat: str, la
 
     Returns:
         Beta : np.ndarray, shape [n_features, n_parameters]
-            Contains parameter for each column in x_
+            Contains parameter for each column in y_feat
     """
     # Beta = (X^T * X)^-1 * X^T * y
     if layer is None:
@@ -50,8 +52,47 @@ def ols_fit(X: pd.DataFrame, adata: AnnData, x_feats: List[str], y_feat: str, la
     return Beta
 
 
+def ols_predict(X: np.ndarray, params: np.ndarray) -> np.ndarray:
+    """Given predictor values and parameter values, reconstruct dependent expression"""
+    ypred = np.dot(X, params)
+    return ypred
+
+
+def ols_fit_predict(
+    X: pd.DataFrame, adata: AnnData, x_feats: List[str], y_feat: str, layer: Union[None, str] = None
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    For single variable, fits ordinary least squares model and then uses the fitted parameters to predict dependent
+    feature expression.
+
+    Args: see :func `ols_fit` docstring.
+
+    Returns:
+        Beta : np.ndarray, shape [n_features, n_parameters]
+            Contains parameter for each column in y_feat
+        rex : np.ndarray, shape [n_samples, n_y_feats]
+            Reconstructed independent variable values
+    """
+    # Beta = (X^T * X)^-1 * X^T * y
+    if layer is None:
+        X["log_expr"] = adata[:, y_feat].X.A
+    else:
+        X["log_expr"] = adata[:, y_feat].layers[layer].A
+    y = X["log_expr"].values
+
+    # Get values corresponding to the features to be used as regressors:
+    x = X[x_feats].values
+
+    res = np.matmul(np.linalg.pinv(np.matmul(x.T, x)), x.T)
+
+    Beta = np.matmul(res, y)
+
+    rex = ols_predict(x, Beta)
+    return Beta, rex
+
+
 # ------------------------------------------- Significance Testing ------------------------------------------- #
-def get_fisher_inverse(x: np.ndarray, y: np.ndarray):
+def get_fisher_inverse(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """
     Computes the Fisher matrix that measures the amount of information each feature in x provides about y- that is,
     whether the log-likelihood is sensitive to change in the parameter x.
@@ -74,7 +115,7 @@ def get_fisher_inverse(x: np.ndarray, y: np.ndarray):
     return inverse_fisher
 
 
-def wald_test(theta_mle: np.ndarray, theta_sd: np.ndarray, theta0: Union[float, np.ndarray] = 0):
+def wald_test(theta_mle: np.ndarray, theta_sd: np.ndarray, theta0: Union[float, np.ndarray] = 0) -> np.ndarray:
     """
     Perform single-coefficient Wald test, informing whether a given coefficient deviates significantly from the
     supplied reference value (theta0), based on the standard deviation of the posterior of the parameter estimate.
@@ -106,7 +147,7 @@ def wald_test(theta_mle: np.ndarray, theta_sd: np.ndarray, theta0: Union[float, 
     return pvals
 
 
-def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: float = 0.05):
+def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: float = 0.05) -> np.ndarray:
     """
     In the case of testing multiple hypotheses from the same experiment, perform multiple test correction to adjust
     q-values.
@@ -144,7 +185,7 @@ def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: fl
     return qval
 
 
-def _get_p_value(variables: np.array, fisher_inv: np.array, coef_loc_totest: int):
+def _get_p_value(variables: np.array, fisher_inv: np.array, coef_loc_totest: int) -> np.ndarray:
     """
     Computes p-values for differential expression for each feature
 
@@ -169,7 +210,9 @@ def _get_p_value(variables: np.array, fisher_inv: np.array, coef_loc_totest: int
     return pvalues
 
 
-def compute_wald_test(params: np.ndarray, fisher_inv: np.ndarray, significance_threshold: float = 0.01):
+def compute_wald_test(
+    params: np.ndarray, fisher_inv: np.ndarray, significance_threshold: float = 0.01
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Args:
         params : np.ndarray

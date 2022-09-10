@@ -403,7 +403,7 @@ def spateo_theme(background="white"):
 def config_spateo_rcParams(
     background="white",
     prop_cycle=zebrafish_256,
-    fontsize=8,
+    fontsize=6,
     color_map=None,
     frameon=None,
 ):
