@@ -25,7 +25,9 @@ def glm_degs(
     qval_threshold: Optional[float] = 0.05,
     inplace: bool = True,
 ):
-    """Differential genes expression tests using generalized linear regressions.
+    """Differential genes expression tests using generalized linear regressions. Here only size factor normalized gene
+    expression matrix can be used, and SCT/pearson residuals transformed gene expression can not be used.
+
     Tests each gene for differential expression as a function of integral time (the time estimated via the reconstructed
     vector field function) or pseudo-time using generalized additive models with natural spline basis. This function can
     also use other co-variates as specified in the full (i.e `~clusters`) and reduced model formula to identify differentially
@@ -34,9 +36,10 @@ def glm_degs(
     glm_degs supports performing deg analysis for any layer or normalized data in your adata object. That is you can either
     use the total, new, unspliced or velocity, etc. for the differential expression analysis.
 
+
     Args:
-        adata: An Anndata object
-        X_data: The user supplied data that will be used for differential expression analysis directly. (counts matrix)
+        adata: An Anndata object. The anndata object must contain a size factor normalized gene expression matrix.
+        X_data: The user supplied data that will be used for differential expression analysis directly.
         genes: The list of genes that will be used to subset the data for differential expression analysis. If ``genes = None``, all genes will be used.
         layer: The layer that will be used to retrieve data for dimension reduction and clustering. If ``layer = None``, ``.X`` is used.
         key_added: The key that will be used for the glm_degs key in ``.uns``.
