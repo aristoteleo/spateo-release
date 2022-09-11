@@ -5,12 +5,14 @@ Also performs downstream characterization following spatially-informed regressio
 expression
 
 Developer note: implement null model
+Developer note: for the sender/receiver effect functions, each row in pvalues, fold_change, etc. is a receiver,
+each column is a sender
 """
 import os
 import time
 from itertools import product
 from random import sample
-from typing import List, Literal, Tuple, Union
+from typing import List, Literal, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,15 +27,6 @@ from pysal.model import spreg
 
 from ...configuration import SKM, config_spateo_rcParams, set_pub_style
 from ...plotting.static.utils import save_return_show_fig_utils
-
-"""
-# For testing purposes keep the absolute imports:
-from regression_utils import compute_wald_test, get_fisher_inverse, ols_fit
-
-from spateo.logging import logger_manager as lm
-from spateo.preprocessing.transform import log1p
-from spateo.tools.find_neighbors import construct_pairwise
-from spateo.tools.utils import update_dict"""
 
 from ...logging import logger_manager as lm
 from ...preprocessing.transform import log1p
@@ -113,6 +106,8 @@ class BaseInterpreter:
     ):
         self.adata = adata
         self.cell_names = self.adata.obs_names
+        # Sort cell type categories (to keep order consistent for downstream applications):
+        self.celltype_names = sorted(list(set(adata.obs[group_key])))
 
         self.spatial_key = spatial_key
         self.group_key = group_key
@@ -533,6 +528,8 @@ class BaseInterpreter:
 
             # Compute the fold-change induced in the receiver by the sender for the case model type is "niche":
             interaction_params = coeffs[:, self.n_features : interaction_shape + self.n_features]
+            # Split array such that an nxn matrix is created, where n is 'n_features' (the number of cell type
+            # categories)
             self.fold_change = np.concatenate(
                 np.expand_dims(
                     np.split(interaction_params.T, indices_or_sections=np.sqrt(interaction_params.T.shape[0]), axis=0),
@@ -547,6 +544,8 @@ class BaseInterpreter:
                 axis=0,
             )
 
+        # Split array such that an nxn matrix is created, where n is 'n_features' (the number of cell type
+        # categories)
         self.pvalues = np.concatenate(
             np.expand_dims(np.split(pvalues, indices_or_sections=np.sqrt(pvalues.shape[0]), axis=0), axis=0),
             axis=0,
@@ -619,7 +618,13 @@ class BaseInterpreter:
 
         np.fill_diagonal(sig_df.values, 0)
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-        sns.heatmap(sig_df, cmap=cmap)
+        sns.heatmap(
+            sig_df,
+            square=True,
+            linecolor='grey',
+            linewidths=0.3,
+            cmap=cmap
+        )
         plt.xlabel("Sender")
         plt.ylabel("Receiver")
         plt.tight_layout()
@@ -640,28 +645,290 @@ class BaseInterpreter:
     def sender_effect(
         self,
         receiver: str,
-        plot_mode: str = 'fold_change',
+        plot_mode: str = "fold_change",
         gene_subset: Union[None, List[str]] = None,
         significance_threshold: float = 0.05,
         cut_pvals: float = -5,
         fontsize: Union[None, int] = None,
-        figsize: Tuple[float, float] = (6, 10),
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = 'seismic',
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {}
     ):
         """
-        Computes and measures the effect that specific sender cell types have on specific genes in the receiver cell
-        type.
+        Evaluates and visualizes the effect that each sender cell type has on specific genes in the receiver
+        cell type.
 
         Args:
-
+            receiver : str
+                Receiver cell type label
+            plot_mode : str, default "fold_change"
+                Options:
+                    - "qvals": elements of the plot represent statistical significance of the interaction
+                    - "fold_change": elements of the plot represent fold change induced in the receiver by the sender
+            gene_subset : optional list of str
+                Names of genes to subset for plot. If None, will use all genes that were used in the regression.
+            significance_threshold : float, default 0.05
+                Set non-significant fold changes to zero, where the threshold is given here
+            cut_pvals : float, default -5
+                Minimum allowable log10(pval)- anything below this will be clipped to this value
+            fontsize : optional int
+                Size of figure title and axis labels
+            figsize : optional tuple of form (int, int)
+                Width and height of plotting window
+            cmap : str, default "seismic"
+                Name of matplotlib colormap specifying colormap to use
+            save_show_or_return: Literal["save", "show", "return", "both", "all"], default "show"
+                Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs : optional dict
+                A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
         """
+        logger = lm.get_main_logger()
+        config_spateo_rcParams()
 
-    def sender_receiver_effect_volcanoplot(self):
+        if fontsize is None:
+            self.fontsize = rcParams.get("font.size")
+        else:
+            self.fontsize = fontsize
+        if figsize is None:
+            self.figsize = rcParams.get("figure.figsize")
+        else:
+            self.figsize = figsize
+
+        receiver_idx = self.celltype_names.index(receiver)
+
+        if plot_mode == 'qvals':
+            # In the analysis process, the receiving cell types become aligned along the column axis:
+            arr = np.log(self.qvalues[receiver_idx, :, :].copy())
+            arr[arr < cut_pvals] = cut_pvals
+            df = pd.DataFrame(
+                arr,
+                index=self.celltype_names,
+                columns=self.genes
+            )
+            if gene_subset:
+                df = df.drop(index=receiver)[gene_subset]
+
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            sns.heatmap(
+                df.T,
+                square=True,
+                linecolor='grey',
+                linewidths=0.3,
+                cbar_kws={'label': "$\log_{10}$ FDR-corrected pvalues"},
+                cmap=cmap, vmin=-5, vmax=0.
+            )
+        elif plot_mode == 'fold_change':
+            arr = self.fold_change[receiver_idx, :, :].copy()
+            arr[np.where(self.qvalues[receiver_idx, :, :] > significance_threshold)] = 0
+            df = pd.DataFrame(
+                arr,
+                index=self.celltype_names,
+                columns=self.genes
+            )
+            if gene_subset:
+                df = df.drop(index=receiver)[gene_subset]
+            vmax = np.max(np.abs(df.values))
+
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            sns.heatmap(
+                df.T,
+                square=True,
+                linecolor='grey',
+                linewidths=0.3,
+                cbar_kws={'label': "$\ln$ fold change",
+                          "location": "top"},
+                cmap=cmap, vmin=-vmax, vmax=vmax,
+            )
+        else:
+            logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'fold_change'.")
+
+        plt.xlabel("Sender cell type")
+        plt.title("Sender Effects on " + receiver)
+        plt.tight_layout()
+
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=True,
+            background="white",
+            prefix="sender_effect",
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None,
+        )
+
+    def receiver_effect(
+        self,
+        sender: str,
+        plot_mode: str = "fold_change",
+        gene_subset: Union[None, List[str]] = None,
+        significance_threshold: float = 0.05,
+        cut_pvals: float = -5,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = 'seismic',
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {}
+    ):
+        """
+        Evaluates and visualizes the effect that one specific sender cell type has on select genes in all possible
+        receiver cell types.
+
+        Args:
+            sender : str
+                Sender cell type label
+            plot_mode : str, default "fold_change"
+                Options:
+                    - "qvals": elements of the plot represent statistical significance of the interaction
+                    - "fold_change": elements of the plot represent fold change induced in the receiver by the sender
+            gene_subset : optional list of str
+                Names of genes to subset for plot. If None, will use all genes that were used in the regression.
+            significance_threshold : float, default 0.05
+                Set non-significant fold changes to zero, where the threshold is given here
+            cut_pvals : float, default -5
+                Minimum allowable log10(pval)- anything below this will be clipped to this value
+            fontsize : optional int
+                Size of figure title and axis labels
+            figsize : optional tuple of form (int, int)
+                Width and height of plotting window
+            cmap : str, default "seismic"
+                Name of matplotlib colormap specifying colormap to use
+            save_show_or_return: Literal["save", "show", "return", "both", "all"], default "show"
+                Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs : optional dict
+                A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+        """
+        logger = lm.get_main_logger()
+        config_spateo_rcParams()
+
+        if fontsize is None:
+            self.fontsize = rcParams.get("font.size")
+        else:
+            self.fontsize = fontsize
+        if figsize is None:
+            self.figsize = rcParams.get("figure.figsize")
+        else:
+            self.figsize = figsize
+
+        sender_idx = self.celltype_names.index(sender)
+
+        if plot_mode == 'qvals':
+            arr = np.log(self.qvalues[:, sender_idx, :].copy())
+            arr[arr < cut_pvals] = cut_pvals
+            df = pd.DataFrame(
+                arr,
+                index=self.celltype_names,
+                columns=self.genes
+            )
+            if gene_subset:
+                df = df.drop(index=sender)[gene_subset]
+
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            sns.heatmap(
+                df.T,
+                square=True,
+                linecolor='grey',
+                linewidths=0.3,
+                cbar_kws={'label': "$\log_{10}$ FDR-corrected pvalues"},
+                cmap=cmap, vmin=-5, vmax=0.
+            )
+
+        elif plot_mode == 'fold_change':
+            arr = self.fold_change[:, sender_idx, :].copy()
+            arr[np.where(self.qvalues[:, sender_idx, :] > significance_threshold)] = 0
+            df = pd.DataFrame(
+                arr,
+                index=self.celltype_names,
+                columns=self.genes
+            )
+            if gene_subset:
+                df = df.drop(index=sender)[gene_subset]
+            vmax = np.max(np.abs(df.values))
+
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            sns.heatmap(
+                df.T,
+                square=True,
+                linecolor='grey',
+                linewidths=0.3,
+                cbar_kws={'label': "$\ln$ fold change",
+                          "location": "top"},
+                cmap=cmap, vmin=-vmax, vmax=vmax,
+            )
+        else:
+            logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'fold_change'.")
+
+        plt.xlabel("Receiving cell type")
+        plt.title("{} effects on receivers".format(sender))
+        plt.tight_layout()
+
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=True,
+            background="white",
+            prefix="sender_effect",
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None,
+        )
+
+    def sender_receiver_effect_volcanoplot(
+        self,
+        receiver: str,
+        sender: str,
+        significance_threshold: float = 0.05,
+        fold_change_threshold: Union[None, float] = None,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = (4.5, 7.0),
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {}
+    ):
         """
         Volcano plot to identify differentially expressed genes of a given receiver cell type in the presence of a
         given sender cell type.
 
         Args:
+            receiver : str
 
+            sender : str
+
+            significance_threshold : float, default 0.05
+                Set non-significant fold changes to zero, where the threshold is given here
+            fold_change_threshold : optional float
+                Set absolute value fold-change threshold beyond which observations are marked as interesting. If not
+                given, will take the 95th percentile fold-change as
+            fontsize : optional int
+                Size of figure title and axis labels
+            figsize : tuple of form (int, int)
+                Width and height of plotting window
+            save_show_or_return: Literal["save", "show", "return", "both", "all"], default "show"
+                Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs : optional dict
+                A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
         """
 
 

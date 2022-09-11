@@ -69,7 +69,7 @@ def glm_fit(
     assert not (feature_x is None), "``feature_x`` cannot be None."
     assert not (feature_y is None), "``feature_y`` cannot be None."
     assert not (
-            feature_y is None and feature_fit is None
+        feature_y is None and feature_fit is None
     ), "``feature_y`` and ``feature_fit`` cannot be None at the same time."
     assert (
         glm_key in adata.uns

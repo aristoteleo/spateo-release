@@ -85,7 +85,7 @@ def generate_expr_weights(
     n_neighbors_method: str = "ball_tree",
     n_pca_components: int = 30,
     num_neighbors: int = 30,
-    decay_type: str = "reciprocal"
+    decay_type: str = "reciprocal",
 ) -> Union[Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]]:
     """Given an AnnData object, compute distance array in gene expression space.
 
@@ -168,8 +168,11 @@ def generate_expr_weights(
 
     adata.uns["expression_neighbors"] = {}
     adata.uns["expression_neighbors"]["indices"] = knn
-    adata.uns["expression_neighbors"]["params"] = {"n_neighbors": n_neighbors, "method": n_neighbors_method,
-                                                   "metric": "euclidean"}
+    adata.uns["expression_neighbors"]["params"] = {
+        "n_neighbors": n_neighbors,
+        "method": n_neighbors_method,
+        "metric": "euclidean",
+    }
 
     # Compute nonspatial (gene expression) weights:
     graph_out = distance_graph.copy()
@@ -207,7 +210,6 @@ def generate_expr_weights(
 
     out_graph = row_normalize(graph_out, verbose=False)
     return out_graph, distance_graph, adata
-
 
 
 # --------------------------------------- Cell-cell/bucket-bucket distance --------------------------------------- #

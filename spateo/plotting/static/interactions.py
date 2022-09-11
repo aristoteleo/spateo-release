@@ -165,7 +165,6 @@ def plot_connections(
     else:
         id_colors = {id: cmap(id / label.max_id) for id in label.ids}
 
-
     # -------------------------------- Spatial Connections Plot- Setup -------------------------------- #
     if shapes_style:
         # Cell types/labels will be represented using triangles:
@@ -299,8 +298,15 @@ def plot_connections(
 
                 # Remove ticks
                 if reverse_expr_plot_orientation:
-                    ax_expr.tick_params(labelbottom=True, labeltop=False, labelleft=False, labelright=True,
-                                        top=False, bottom=False, left=False)
+                    ax_expr.tick_params(
+                        labelbottom=True,
+                        labeltop=False,
+                        labelleft=False,
+                        labelright=True,
+                        top=False,
+                        bottom=False,
+                        left=False,
+                    )
                     # Flip x- and y-axes of the expression plot:
                     ax_expr.invert_xaxis()
                     ax_expr.invert_yaxis()
@@ -333,15 +339,15 @@ def plot_connections(
         )
         if reverse_expr_plot_orientation:
             # Despine both spatial connections & gene expression connections plots:
-            ax_sp.spines['right'].set_visible(False)
-            ax_sp.spines['top'].set_visible(False)
-            ax_sp.spines['left'].set_visible(False)
-            ax_sp.spines['bottom'].set_visible(False)
+            ax_sp.spines["right"].set_visible(False)
+            ax_sp.spines["top"].set_visible(False)
+            ax_sp.spines["left"].set_visible(False)
+            ax_sp.spines["bottom"].set_visible(False)
 
-            ax_expr.spines['right'].set_visible(False)
-            ax_expr.spines['top'].set_visible(False)
-            ax_expr.spines['left'].set_visible(False)
-            ax_expr.spines['bottom'].set_visible(False)
+            ax_expr.spines["right"].set_visible(False)
+            ax_expr.spines["top"].set_visible(False)
+            ax_expr.spines["left"].set_visible(False)
+            ax_expr.spines["bottom"].set_visible(False)
 
         text_outline = [PathEffects.Stroke(linewidth=0.5, foreground="black", alpha=0.8)] if label_outline else None
 
