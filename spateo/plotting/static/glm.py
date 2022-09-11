@@ -37,7 +37,7 @@ def glm_fit(
     **kwargs,
 ):
     """
-    Visualize glm_degs result.
+    Visualize the glm_degs result.
 
     Args:
         adata: An Anndata object contain glm_degs result in ``.uns[glm_key]``.
