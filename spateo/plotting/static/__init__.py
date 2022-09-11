@@ -18,6 +18,7 @@ from .three_d_plot import (
     add_outline,
     add_text,
     create_plotter,
+    jacobian,
     output_plotter,
     save_plotter,
     three_d_animate,
