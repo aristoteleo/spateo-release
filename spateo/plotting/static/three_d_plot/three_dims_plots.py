@@ -279,9 +279,11 @@ def three_d_plot(
                 * Output a vtkjs file, please enter a filename without format.
 
     Returns:
+
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.

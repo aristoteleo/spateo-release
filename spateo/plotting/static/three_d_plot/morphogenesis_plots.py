@@ -306,14 +306,6 @@ def feature(
                      according to your needs.
         **kwargs: Additional parameters that will be passed into the ``st.pl.three_d_plot`` function.
 
-    Returns:
-        cpo: List of camera position, focal point, and view up.
-             Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
-        img: Numpy array of the last image.
-             Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
-
     Examples:
 
         Visualize only in one model:
@@ -428,13 +420,14 @@ def torsion(
         **kwargs: Additional parameters that will be passed into the ``st.pl.feature`` function.
 
     Returns:
+
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
-
     Examples:
 
         Visualize only in one model:
@@ -532,9 +525,11 @@ def acceleration(
         **kwargs: Additional parameters that will be passed into the ``st.pl.feature`` function.
 
     Returns:
+
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
@@ -636,9 +631,11 @@ def curvature(
         **kwargs: Additional parameters that will be passed into the ``st.pl.feature`` function.
 
     Returns:
+
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
@@ -740,9 +737,11 @@ def curl(
         **kwargs: Additional parameters that will be passed into the ``st.pl.feature`` function.
 
     Returns:
+
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
