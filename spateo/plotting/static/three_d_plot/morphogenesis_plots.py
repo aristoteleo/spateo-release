@@ -226,10 +226,10 @@ def jacobian(
     )
 
 
-def torsion(
+def feature(
     adata: AnnData,
     model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
-    torsion_key: str = "torsion",
+    feature_key: str,
     filename: Optional[str] = None,
     jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
     off_screen: bool = False,
@@ -247,12 +247,12 @@ def torsion(
     **kwargs,
 ):
     """
-    Visualize the jacobian result.
+    Visualize the feature values.
 
     Args:
-        adata: An anndata object contain jacobian matrix in ``.uns[jacobian_key]``.
+        adata: An anndata object contain feature values in ``.obs[feature_key]``.
         model: A reconstructed model contains ``obs_index`` values.
-        torsion_key: The key in ``.uns`` that corresponds to the jacobian matrix in the anndata object.
+        feature_key: The key in ``.obs`` that corresponds to the feature values in the anndata object.
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
@@ -304,7 +304,128 @@ def torsion(
                      ``{ "font_family": "arial", "font_size": 12, "font_color": "black", "text_loc": "upper_left"}``
                      as its parameters. Otherwise, you can provide a dictionary that properly modify those keys
                      according to your needs.
-        **kwargs: Additional parameters that will be passed into the ``st.pl.three_d_multi_plot`` function.
+        **kwargs: Additional parameters that will be passed into the ``st.pl.three_d_plot`` function.
+
+    Returns:
+        cpo: List of camera position, focal point, and view up.
+             Returned only if filename is None or filename ending with
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+        img: Numpy array of the last image.
+             Returned only if filename is None or filename ending with
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
+    Examples:
+
+        Visualize only in one model:
+
+        st.pl.feature(
+            adata=stage_adata,
+            model=stage_pc,
+            feature_key="torsion",
+            jupyter="static",
+            model_style="points",
+            model_size=3
+        )
+
+        Visualize in multiple model:
+
+        st.pl.feature(
+            adata=stage_adata,
+            model=[stage_pc, trajectory_model],
+            feature_key="torsion",
+            jupyter="static",
+            model_style=["points", "wireframe"],
+            model_size=[3, 1]
+        )
+    """
+
+    adata, model = adata.copy(), model.copy()
+    feature_values = _check_key_in_adata(adata=adata, key=feature_key, where="obs")
+
+    models = model if isinstance(model, (MultiBlock, list)) else [model]
+    for m in models:
+        obs_index_ind = _check_index_in_adata(adata=adata, model=m)
+        m_feature_values = feature_values[obs_index_ind].copy()
+        add_model_labels(model=m, labels=m_feature_values, key_added=feature_key, where="point_data", inplace=True)
+
+    # Visualization.
+    colormap = _get_default_cmap() if colormap is None or colormap == "default_cmap" else colormap
+    return three_d_plot(
+        model=models,
+        key=feature_key,
+        filename=filename,
+        jupyter=jupyter,
+        off_screen=off_screen,
+        window_size=window_size,
+        background=background,
+        colormap=colormap,
+        ambient=ambient,
+        opacity=opacity,
+        model_style=model_style,
+        model_size=model_size,
+        show_legend=show_legend,
+        legend_kwargs=legend_kwargs,
+        text=f"\nFeature: {feature_key}" if text is True else text,
+        text_kwargs=text_kwargs,
+        **kwargs,
+    )
+
+
+def torsion(
+    adata: AnnData,
+    model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
+    torsion_key: str = "torsion",
+    filename: Optional[str] = None,
+    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    colormap: Optional[Union[str, list]] = "default_cmap",
+    ambient: Union[float, list] = 0.2,
+    opacity: Union[float, np.ndarray, list] = 1.0,
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "points",
+    model_size: Union[float, list] = 3.0,
+    **kwargs,
+):
+    """
+    Visualize the torsion result.
+
+    Args:
+        adata: An anndata object contain torsion values in ``.obs[torsion_key]``.
+        model: A reconstructed model contains ``obs_index`` values.
+        torsion_key: The key in ``.obs`` that corresponds to the torsion values in the anndata object.
+        filename: Filename of output file. Writer type is inferred from the extension of the filename.
+
+                * Output an image file,please enter a filename ending with
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                * Output a gif file, please enter a filename ending with ``.gif``.
+                * Output a mp4 file, please enter a filename ending with ``.mp4``.
+        jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
+
+                * ``'none'`` - Do not display in the notebook.
+                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'static'`` - Display a static figure.
+                * ``'ipygany'`` - Show an ipygany widget
+                * ``'panel'`` - Show a panel widget.
+        colormap: Name of the Matplotlib colormap to use when mapping the scalars.
+
+                  When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
+        ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
+                 the actor when not directed at the light source emitted from the viewer.
+        opacity: Opacity of the model.
+
+                 If a single float value is given, it will be the global opacity of the model and uniformly applied
+                 everywhere, elif a numpy.ndarray with single float values is given, it
+                 will be the opacity of each point. - should be between 0 and 1.
+
+                 A string can also be specified to map the scalars range to a predefined opacity transfer function
+                 (options include: 'linear', 'linear_r', 'geom', 'geom_r').
+        model_style: Visualization style of the model. One of the following:
+
+                * ``model_style = 'surface'``,
+                * ``model_style = 'wireframe'``,
+                * ``model_style = 'points'``.
+        model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
+
+                    If ``model_style = 'wireframe'``, thickness of lines.
+        **kwargs: Additional parameters that will be passed into the ``st.pl.feature`` function.
 
     Returns:
         cpo: List of camera position, focal point, and view up.
@@ -339,33 +460,328 @@ def torsion(
         )
     """
 
-    adata, model = adata.copy(), model.copy()
-    torsion_values = _check_key_in_adata(adata=adata, key=torsion_key, where="obs")
-
-    models = model if isinstance(model, (MultiBlock, list)) else [model]
-    for m in models:
-        obs_index_ind = _check_index_in_adata(adata=adata, model=m)
-        m_torsion_values = torsion_values[obs_index_ind].copy()
-        add_model_labels(model=m, labels=m_torsion_values, key_added="torsion", where="point_data", inplace=True)
-
-    # Visualization.
-    colormap = _get_default_cmap() if colormap is None or colormap == "default_cmap" else colormap
-    return three_d_plot(
-        model=models,
-        key="torsion",
+    return feature(
+        adata=adata,
+        model=model,
+        feature_key=torsion_key,
         filename=filename,
         jupyter=jupyter,
-        off_screen=off_screen,
-        window_size=window_size,
-        background=background,
         colormap=colormap,
         ambient=ambient,
         opacity=opacity,
         model_style=model_style,
         model_size=model_size,
-        show_legend=show_legend,
-        legend_kwargs=legend_kwargs,
-        text=f"\nFeature: torsion" if text is True else text,
-        text_kwargs=text_kwargs,
+        **kwargs,
+    )
+
+
+def acceleration(
+    adata: AnnData,
+    model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
+    acceleration_key: str = "acceleration",
+    filename: Optional[str] = None,
+    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    colormap: Optional[Union[str, list]] = "default_cmap",
+    ambient: Union[float, list] = 0.2,
+    opacity: Union[float, np.ndarray, list] = 1.0,
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "points",
+    model_size: Union[float, list] = 3.0,
+    **kwargs,
+):
+    """
+    Visualize the torsion result.
+
+    Args:
+        adata: An anndata object contain acceleration values in ``.obs[acceleration_key]``.
+        model: A reconstructed model contains ``obs_index`` values.
+        acceleration_key: The key in ``.obs`` that corresponds to the acceleration values in the anndata object.
+        filename: Filename of output file. Writer type is inferred from the extension of the filename.
+
+                * Output an image file,please enter a filename ending with
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                * Output a gif file, please enter a filename ending with ``.gif``.
+                * Output a mp4 file, please enter a filename ending with ``.mp4``.
+        jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
+
+                * ``'none'`` - Do not display in the notebook.
+                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'static'`` - Display a static figure.
+                * ``'ipygany'`` - Show an ipygany widget
+                * ``'panel'`` - Show a panel widget.
+        colormap: Name of the Matplotlib colormap to use when mapping the scalars.
+
+                  When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
+        ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
+                 the actor when not directed at the light source emitted from the viewer.
+        opacity: Opacity of the model.
+
+                 If a single float value is given, it will be the global opacity of the model and uniformly applied
+                 everywhere, elif a numpy.ndarray with single float values is given, it
+                 will be the opacity of each point. - should be between 0 and 1.
+
+                 A string can also be specified to map the scalars range to a predefined opacity transfer function
+                 (options include: 'linear', 'linear_r', 'geom', 'geom_r').
+        model_style: Visualization style of the model. One of the following:
+
+                * ``model_style = 'surface'``,
+                * ``model_style = 'wireframe'``,
+                * ``model_style = 'points'``.
+        model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
+
+                    If ``model_style = 'wireframe'``, thickness of lines.
+        **kwargs: Additional parameters that will be passed into the ``st.pl.feature`` function.
+
+    Returns:
+        cpo: List of camera position, focal point, and view up.
+             Returned only if filename is None or filename ending with
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+        img: Numpy array of the last image.
+             Returned only if filename is None or filename ending with
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
+    Examples:
+
+        Visualize only in one model:
+
+        st.pl.acceleration(
+            adata=stage_adata,
+            model=stage_pc,
+            acceleration_key="acceleration",
+            jupyter="static",
+            model_style="points",
+            model_size=3
+        )
+
+        Visualize in multiple model:
+
+        st.pl.acceleration(
+            adata=stage_adata,
+            model=[stage_pc, trajectory_model],
+            acceleration_key="acceleration",
+            jupyter="static",
+            model_style=["points", "wireframe"],
+            model_size=[3, 1]
+        )
+    """
+
+    return feature(
+        adata=adata,
+        model=model,
+        feature_key=acceleration_key,
+        filename=filename,
+        jupyter=jupyter,
+        colormap=colormap,
+        ambient=ambient,
+        opacity=opacity,
+        model_style=model_style,
+        model_size=model_size,
+        **kwargs,
+    )
+
+
+def curvature(
+    adata: AnnData,
+    model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
+    curvature_key: str = "curvature",
+    filename: Optional[str] = None,
+    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    colormap: Optional[Union[str, list]] = "default_cmap",
+    ambient: Union[float, list] = 0.2,
+    opacity: Union[float, np.ndarray, list] = 1.0,
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "points",
+    model_size: Union[float, list] = 3.0,
+    **kwargs,
+):
+    """
+    Visualize the curvature result.
+
+    Args:
+        adata: An anndata object contain curvature values in ``.obs[curvature_key]``.
+        model: A reconstructed model contains ``obs_index`` values.
+        curvature_key: The key in ``.obs`` that corresponds to the curvature values in the anndata object.
+        filename: Filename of output file. Writer type is inferred from the extension of the filename.
+
+                * Output an image file,please enter a filename ending with
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                * Output a gif file, please enter a filename ending with ``.gif``.
+                * Output a mp4 file, please enter a filename ending with ``.mp4``.
+        jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
+
+                * ``'none'`` - Do not display in the notebook.
+                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'static'`` - Display a static figure.
+                * ``'ipygany'`` - Show an ipygany widget
+                * ``'panel'`` - Show a panel widget.
+        colormap: Name of the Matplotlib colormap to use when mapping the scalars.
+
+                  When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
+        ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
+                 the actor when not directed at the light source emitted from the viewer.
+        opacity: Opacity of the model.
+
+                 If a single float value is given, it will be the global opacity of the model and uniformly applied
+                 everywhere, elif a numpy.ndarray with single float values is given, it
+                 will be the opacity of each point. - should be between 0 and 1.
+
+                 A string can also be specified to map the scalars range to a predefined opacity transfer function
+                 (options include: 'linear', 'linear_r', 'geom', 'geom_r').
+        model_style: Visualization style of the model. One of the following:
+
+                * ``model_style = 'surface'``,
+                * ``model_style = 'wireframe'``,
+                * ``model_style = 'points'``.
+        model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
+
+                    If ``model_style = 'wireframe'``, thickness of lines.
+        **kwargs: Additional parameters that will be passed into the ``st.pl.feature`` function.
+
+    Returns:
+        cpo: List of camera position, focal point, and view up.
+             Returned only if filename is None or filename ending with
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+        img: Numpy array of the last image.
+             Returned only if filename is None or filename ending with
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
+    Examples:
+
+        Visualize only in one model:
+
+        st.pl.curvature(
+            adata=stage_adata,
+            model=stage_pc,
+            curvature_key="curvature",
+            jupyter="static",
+            model_style="points",
+            model_size=3
+        )
+
+        Visualize in multiple model:
+
+        st.pl.curvature(
+            adata=stage_adata,
+            model=[stage_pc, trajectory_model],
+            curvature_key="curvature",
+            jupyter="static",
+            model_style=["points", "wireframe"],
+            model_size=[3, 1]
+        )
+    """
+
+    return feature(
+        adata=adata,
+        model=model,
+        feature_key=curvature_key,
+        filename=filename,
+        jupyter=jupyter,
+        colormap=colormap,
+        ambient=ambient,
+        opacity=opacity,
+        model_style=model_style,
+        model_size=model_size,
+        **kwargs,
+    )
+
+
+def curl(
+    adata: AnnData,
+    model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
+    curl_key: str = "curl",
+    filename: Optional[str] = None,
+    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    colormap: Optional[Union[str, list]] = "default_cmap",
+    ambient: Union[float, list] = 0.2,
+    opacity: Union[float, np.ndarray, list] = 1.0,
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "points",
+    model_size: Union[float, list] = 3.0,
+    **kwargs,
+):
+    """
+    Visualize the curl result.
+
+    Args:
+        adata: An anndata object contain curl values in ``.obs[curl_key]``.
+        model: A reconstructed model contains ``obs_index`` values.
+        curl_key: The key in ``.obs`` that corresponds to the curl values in the anndata object.
+        filename: Filename of output file. Writer type is inferred from the extension of the filename.
+
+                * Output an image file,please enter a filename ending with
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                * Output a gif file, please enter a filename ending with ``.gif``.
+                * Output a mp4 file, please enter a filename ending with ``.mp4``.
+        jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
+
+                * ``'none'`` - Do not display in the notebook.
+                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'static'`` - Display a static figure.
+                * ``'ipygany'`` - Show an ipygany widget
+                * ``'panel'`` - Show a panel widget.
+        colormap: Name of the Matplotlib colormap to use when mapping the scalars.
+
+                  When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
+        ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
+                 the actor when not directed at the light source emitted from the viewer.
+        opacity: Opacity of the model.
+
+                 If a single float value is given, it will be the global opacity of the model and uniformly applied
+                 everywhere, elif a numpy.ndarray with single float values is given, it
+                 will be the opacity of each point. - should be between 0 and 1.
+
+                 A string can also be specified to map the scalars range to a predefined opacity transfer function
+                 (options include: 'linear', 'linear_r', 'geom', 'geom_r').
+        model_style: Visualization style of the model. One of the following:
+
+                * ``model_style = 'surface'``,
+                * ``model_style = 'wireframe'``,
+                * ``model_style = 'points'``.
+        model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
+
+                    If ``model_style = 'wireframe'``, thickness of lines.
+        **kwargs: Additional parameters that will be passed into the ``st.pl.feature`` function.
+
+    Returns:
+        cpo: List of camera position, focal point, and view up.
+             Returned only if filename is None or filename ending with
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+        img: Numpy array of the last image.
+             Returned only if filename is None or filename ending with
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
+    Examples:
+
+        Visualize only in one model:
+
+        st.pl.curl(
+            adata=stage_adata,
+            model=stage_pc,
+            curl_key="curl",
+            jupyter="static",
+            model_style="points",
+            model_size=3
+        )
+
+        Visualize in multiple model:
+
+        st.pl.curl(
+            adata=stage_adata,
+            model=[stage_pc, trajectory_model],
+            curl_key="curl",
+            jupyter="static",
+            model_style=["points", "wireframe"],
+            model_size=[3, 1]
+        )
+    """
+
+    return feature(
+        adata=adata,
+        model=model,
+        feature_key=curl_key,
+        filename=filename,
+        jupyter=jupyter,
+        colormap=colormap,
+        ambient=ambient,
+        opacity=opacity,
+        model_style=model_style,
+        model_size=model_size,
         **kwargs,
     )
