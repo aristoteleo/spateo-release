@@ -446,7 +446,7 @@ def three_d_multi_plot(
                 * Output an obj file, please enter a filename ending with ``.obj``.
                 * Output a vtkjs file, please enter a filename without format.
     """
-    models = model if isinstance(model, MultiBlock) else [model]
+    models = model if isinstance(model, (MultiBlock, list)) else [model]
     keys = key if isinstance(key, list) else [key]
     cpos = cpo if isinstance(cpo, list) else [cpo]
     mts = model_style if isinstance(model_style, list) else [model_style]

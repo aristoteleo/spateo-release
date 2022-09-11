@@ -8,7 +8,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
 from ....tdr import add_model_labels, collect_models
-from .three_dims_plots import three_d_multi_plot
+from .three_dims_plots import three_d_multi_plot, three_d_plot
 
 try:
     from typing import Literal
@@ -72,6 +72,7 @@ def jacobian(
     off_screen: bool = False,
     shape: Union[str, list, tuple] = (3, 3),
     window_size: Optional[tuple] = (512 * 3, 512 * 3),
+    background: str = "black",
     colormap: Optional[Union[str, list]] = "default_cmap",
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
@@ -112,6 +113,7 @@ def jacobian(
                     ``E.g.: shape="3|1" means 3 plots on the left and 1 on the right,``
                     ``E.g.: shape="4/2" means 4 plots on top and 2 at the bottom.``
         window_size: Window size in pixels. The default window_size is ``[512*3, 512*3]``.
+        background: The background color of the window.
         colormap: Name of the Matplotlib colormap to use when mapping the scalars.
 
                   When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
@@ -184,21 +186,23 @@ def jacobian(
     adata, model = adata.copy(), model.copy()
     jacobian_martix = _check_key_in_adata(adata=adata, key=jacobian_key, where="uns")
 
+    # Add values in the jacobian matrix to the model separately.
     models = model if isinstance(model, (MultiBlock, list)) else collect_models([model])
     for m in models:
         obs_index_ind = _check_index_in_adata(adata=adata, model=m)
-        jacobian_martix = jacobian_martix[:, :, obs_index_ind]
-
-        # Add values in the jacobian matrix to the model separately.
-        j_keys = []
+        m_jacobian_martix = jacobian_martix[:, :, obs_index_ind].copy()
         for f_i, f in enumerate(["fx", "fy", "fz"]):
             for i_i, i in enumerate(["x", "y", "z"]):
-                sub_key = f"∂{f}/∂{i}"
-                sub_matrix = jacobian_martix[f_i, i_i, :]
-                add_model_labels(model=m, labels=sub_matrix, key_added=sub_key, where="point_data", inplace=True)
-                j_keys.append(sub_key)
+                add_model_labels(
+                    model=m,
+                    labels=m_jacobian_martix[f_i, i_i, :],
+                    key_added=f"∂{f}/∂{i}",
+                    where="point_data",
+                    inplace=True,
+                )
 
     # Visualization.
+    j_keys = [f"∂{f}/∂{i}" for f in ["fx", "fy", "fz"] for i in ["x", "y", "z"]]
     colormap = _get_default_cmap() if colormap is None or colormap == "default_cmap" else colormap
     return three_d_multi_plot(
         model=collect_models([models]),
@@ -208,6 +212,7 @@ def jacobian(
         off_screen=off_screen,
         shape=shape,
         window_size=window_size,
+        background=background,
         colormap=colormap,
         ambient=ambient,
         opacity=opacity,
@@ -215,7 +220,7 @@ def jacobian(
         model_size=[model_size],
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
-        text=j_keys if text is True else text,
+        text=[f"\njacobian: {i}" for i in j_keys] if text is True else text,
         text_kwargs=text_kwargs,
         **kwargs,
     )
@@ -223,20 +228,20 @@ def jacobian(
 
 def torsion(
     adata: AnnData,
-    model: Union[PolyData, UnstructuredGrid, MultiBlock],
-    jacobian_key: str = "jacobian",
+    model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
+    torsion_key: str = "torsion",
     filename: Optional[str] = None,
     jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
     off_screen: bool = False,
-    shape: Union[str, list, tuple] = (3, 3),
-    window_size: Optional[tuple] = (512 * 3, 512 * 3),
+    window_size: Optional[tuple] = (512, 512),
+    background: str = "black",
     colormap: Optional[Union[str, list]] = "default_cmap",
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "points",
     model_size: Union[float, list] = 3.0,
     show_legend: bool = True,
-    legend_kwargs: Optional[dict] = None,
+    legend_kwargs: Optional[dict] = dict(title=""),
     text: Union[bool, str] = True,
     text_kwargs: Optional[dict] = None,
     **kwargs,
@@ -247,7 +252,7 @@ def torsion(
     Args:
         adata: An anndata object contain jacobian matrix in ``.uns[jacobian_key]``.
         model: A reconstructed model contains ``obs_index`` values.
-        jacobian_key: The key in ``.uns`` that corresponds to the jacobian matrix in the anndata object.
+        torsion_key: The key in ``.uns`` that corresponds to the jacobian matrix in the anndata object.
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
@@ -262,14 +267,8 @@ def torsion(
                 * ``'ipygany'`` - Show an ipygany widget
                 * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
-        shape: Number of sub-render windows inside the main window. By default, there are nine render window.
-
-               * Specify two across with ``shape``=(2, 1) and a two by two grid with ``shape``=(2, 2).
-               * ``shape`` Can also accept a string descriptor as shape.
-
-                    ``E.g.: shape="3|1" means 3 plots on the left and 1 on the right,``
-                    ``E.g.: shape="4/2" means 4 plots on top and 2 at the bottom.``
-        window_size: Window size in pixels. The default window_size is ``[512*3, 512*3]``.
+        window_size: Window size in pixels. The default window_size is ``[512, 512]``.
+        background: The background color of the window.
         colormap: Name of the Matplotlib colormap to use when mapping the scalars.
 
                   When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
@@ -314,31 +313,51 @@ def torsion(
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
-    """
-    adata, model = adata.copy(), model.copy()
-    obs_index_ind = _check_index_in_adata(adata=adata, model=model)
-    jacobian_martix = _check_key_in_adata(adata=adata, key=jacobian_key, where="uns")
-    jacobian_martix = jacobian_martix[:, :, obs_index_ind]
 
-    # Add values in the jacobian matrix to the model separately.
-    j_keys = []
-    for f_i, f in enumerate(["fx", "fy", "fz"]):
-        for i_i, i in enumerate(["x", "y", "z"]):
-            sub_key = f"∂{f}/∂{i}"
-            sub_matrix = jacobian_martix[f_i, i_i, :]
-            add_model_labels(model=model, labels=sub_matrix, key_added=sub_key, where="point_data", inplace=True)
-            j_keys.append(sub_key)
+    Examples:
+
+        Visualize only in one model:
+
+        st.pl.torsion(
+            adata=stage_adata,
+            model=stage_pc,
+            torsion_key="torsion",
+            jupyter="static",
+            model_style="points",
+            model_size=3
+        )
+
+        Visualize in multiple model:
+
+        st.pl.torsion(
+            adata=stage_adata,
+            model=[stage_pc, trajectory_model],
+            torsion_key="torsion",
+            jupyter="static",
+            model_style=["points", "wireframe"],
+            model_size=[3, 1]
+        )
+    """
+
+    adata, model = adata.copy(), model.copy()
+    torsion_values = _check_key_in_adata(adata=adata, key=torsion_key, where="obs")
+
+    models = model if isinstance(model, (MultiBlock, list)) else [model]
+    for m in models:
+        obs_index_ind = _check_index_in_adata(adata=adata, model=m)
+        m_torsion_values = torsion_values[obs_index_ind].copy()
+        add_model_labels(model=m, labels=m_torsion_values, key_added="torsion", where="point_data", inplace=True)
 
     # Visualization.
     colormap = _get_default_cmap() if colormap is None or colormap == "default_cmap" else colormap
-    return three_d_multi_plot(
-        model=model,
-        key=j_keys,
+    return three_d_plot(
+        model=models,
+        key="torsion",
         filename=filename,
         jupyter=jupyter,
         off_screen=off_screen,
-        shape=shape,
         window_size=window_size,
+        background=background,
         colormap=colormap,
         ambient=ambient,
         opacity=opacity,
@@ -346,7 +365,7 @@ def torsion(
         model_size=model_size,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
-        text=j_keys if text is True else text,
+        text=f"\nFeature: torsion" if text is True else text,
         text_kwargs=text_kwargs,
         **kwargs,
     )
