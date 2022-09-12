@@ -1702,6 +1702,18 @@ def save_return_show_fig_utils(
     from ...configuration import reset_rcParams
     from ...tools.utils import update_dict
 
+    if save_show_or_return in ["show", "both", "all"]:
+        if show_legend:
+            plt.subplots_adjust(right=0.85)
+
+        # with warnings.catch_warnings():
+        #     warnings.simplefilter("ignore")
+        #     plt.tight_layout()
+
+        plt.show()
+        if background is not None:
+            reset_rcParams()
+
     if save_show_or_return in ["save", "both", "all"]:
         s_kwargs = {
             "path": None,
@@ -1717,18 +1729,8 @@ def save_return_show_fig_utils(
         save_fig(**s_kwargs)
         if background is not None:
             reset_rcParams()
-    elif save_show_or_return in ["show", "both", "all"]:
-        if show_legend:
-            plt.subplots_adjust(right=0.85)
 
-        # with warnings.catch_warnings():
-        #     warnings.simplefilter("ignore")
-        #     plt.tight_layout()
-
-        plt.show()
-        if background is not None:
-            reset_rcParams()
-    elif save_show_or_return in ["return", "all"]:
+    if save_show_or_return in ["return", "all"]:
         if background is not None:
             reset_rcParams()
 
