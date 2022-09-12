@@ -1702,6 +1702,22 @@ def save_return_show_fig_utils(
     from ...configuration import reset_rcParams
     from ...tools.utils import update_dict
 
+    if save_show_or_return in ["save", "both", "all"]:
+        s_kwargs = {
+            "path": None,
+            "prefix": prefix,
+            "dpi": None,
+            "ext": "pdf",
+            "transparent": True,
+            "close": True if save_show_or_return == "save" else False,
+            "verbose": True,
+        }
+        s_kwargs = update_dict(s_kwargs, save_kwargs)
+
+        save_fig(**s_kwargs)
+        if background is not None:
+            reset_rcParams()
+
     if save_show_or_return in ["show", "both", "all"]:
         if show_legend:
             plt.subplots_adjust(right=0.85)
@@ -1711,22 +1727,6 @@ def save_return_show_fig_utils(
         #     plt.tight_layout()
 
         plt.show()
-        if background is not None:
-            reset_rcParams()
-
-    if save_show_or_return in ["save", "both", "all"]:
-        s_kwargs = {
-            "path": None,
-            "prefix": prefix,
-            "dpi": None,
-            "ext": "pdf",
-            "transparent": True,
-            "close": True,
-            "verbose": True,
-        }
-        s_kwargs = update_dict(s_kwargs, save_kwargs)
-
-        save_fig(**s_kwargs)
         if background is not None:
             reset_rcParams()
 
