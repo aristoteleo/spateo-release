@@ -92,7 +92,7 @@ def add_model(
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, list, np.ndarray] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
-    model_size: Union[float, list] = 5.0,
+    model_size: Union[float, list] = 3.0,
 ):
     """
     Add model(s) to the plotter.
