@@ -23,6 +23,7 @@ def glm_degs(
     fullModelFormulaStr: str = "~cr(time, df=3)",
     reducedModelFormulaStr: str = "~1",
     qval_threshold: Optional[float] = 0.05,
+    llf_threshold: Optional[float] = -2000,
     inplace: bool = True,
 ):
     """Differential genes expression tests using generalized linear regressions. Here only size factor normalized gene
@@ -45,7 +46,8 @@ def glm_degs(
         key_added: The key that will be used for the glm_degs key in ``.uns``.
         fullModelFormulaStr: A formula string specifying the full model in differential expression tests (i.e. likelihood ratio tests) for each gene/feature.
         reducedModelFormulaStr: A formula string specifying the reduced model in differential expression tests (i.e. likelihood ratio tests) for each gene/feature.
-        qval_threshold: Only keep the glm test results whose qval is less than the ``qval_threshold``,
+        qval_threshold: Only keep the glm test results whose qval is less than the ``qval_threshold``.
+        llf_threshold: Only keep the glm test results whose log-likelihood is less than the ``llf_threshold``.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
@@ -84,7 +86,7 @@ def glm_degs(
     df_factors = adata.obs[factors]
 
     sparse = issparse(X_data)
-    deg_df = pd.DataFrame(index=genes, columns=["status", "family", "pval"])
+    deg_df = pd.DataFrame(index=genes, columns=["status", "family", "log-likelihood", "pval"])
     deg_dict = {}
     for i in lm.progress_logger(
         range(len(genes)), progress_name="Detecting genes via Generalized Additive Models (GAMs)"
@@ -95,21 +97,28 @@ def glm_degs(
         try:
             nb2_full, nb2_null = glm_test(df_factors, fullModelFormulaStr, reducedModelFormulaStr)
             pval = lrt(nb2_full, nb2_null)
-            deg_df.iloc[i, :] = ("ok", "NB2", pval)
+            deg_df.iloc[i, :] = ("ok", "NB2", nb2_full.llf, pval)
 
             df_factors_gene = df_factors.copy()
             df_factors_gene["mu"] = nb2_full.mu
+            # df_factors_gene["fitted_expression"] = nb2_full.predict() this is equal to nb2_full.mu
             df_factors_gene["resid_deviance"] = nb2_full.resid_deviance
             df_factors_gene["resid_pearson"] = nb2_full.resid_pearson
             deg_dict[gene] = df_factors_gene
         except:
-            deg_df.iloc[i, :] = ("fail", "NB2", 1)
+            deg_df.iloc[i, :] = ("fail", "NB2", "None", 1)
 
     deg_df["qval"] = multipletests(deg_df["pval"], method="fdr_bh")[1]
-    deg_df = deg_df.sort_values(by=["qval", "pval"])
+    deg_df = deg_df[deg_df["log-likelihood"] != "None"]
+    deg_df.dropna(axis=0, how="any", inplace=True)
+    deg_df[["log-likelihood", "pval", "qval"]] = deg_df[["log-likelihood", "pval", "qval"]].astype(np.float32)
+    deg_df = deg_df.sort_values(by=["qval", "pval", "log-likelihood"], ascending=[True, True, True])
 
-    if not (qval_threshold is None):
-        cut_deg_df = deg_df[deg_df["qval"] < qval_threshold]
+    if not (qval_threshold is None and llf_threshold is None):
+        cut_deg_df = deg_df[deg_df["qval"] <= qval_threshold] if not (qval_threshold is None) else deg_df
+        cut_deg_df = (
+            cut_deg_df[cut_deg_df["log-likelihood"] <= llf_threshold] if not (llf_threshold is None) else cut_deg_df
+        )
         cut_deg_dict = {gene: deg_dict[gene] for gene in cut_deg_df.index}
         adata.uns[key_added] = {"glm_result": cut_deg_df, "correlation": cut_deg_dict}
     else:
