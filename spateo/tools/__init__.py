@@ -1,3 +1,5 @@
+# Developer note: to do: remove mention of GM_lag_model from LISA
+
 from spateo.tools.cell_interaction.cci_two_cluster import find_cci_two_group
 
 from .architype import (

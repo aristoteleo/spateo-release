@@ -4,7 +4,11 @@ Suite of tools for spatially-aware as well as spatially-lagged linear regression
 Also performs downstream characterization following spatially-informed regression to characterize niche impact on gene
 expression
 
-Developer note: implement null model
+Developer note: may change from OLS to TSLS (the nonspatial version through spreg...) in the future. At least for now
+will stick w/ the OLS version, though
+Developer note: haven't been able to find a good network for Drosophila and Zebrafish yet, so spatially lagged models
+are restricted to human, mouse and axolotl. Might also be making a lot of assumptions about the axolotl,
+but the axolotl LR network has columns for human equivalents for all LR so I assumed there's enough homology there
 Developer note: for the sender/receiver effect functions, each row in pvalues, fold_change, etc. is a receiver,
 each column is a sender
 """
@@ -14,6 +18,7 @@ from itertools import product
 from random import sample
 from typing import List, Literal, Optional, Tuple, Union
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -49,13 +54,17 @@ class BaseInterpreter:
         spatial_key : str, default "spatial"
             Key in .obsm where x- and y-coordinates are stored
         genes : optional list
-            Subset to genes that will be used in the regression analysis
+            Subset to genes of interest: will be used as dependent variables in non-ligand-based regression analyses,
+            will be independent variables/exogenous variables
         drop_dummy : optional str
             Name of the category to be dropped (the "dummy variable") in the regression. The dummy category can aid
             in interpretation as all model coefficients can be taken to be in reference to the dummy category. If
             None, will randomly select a few samples to constitute the dummy group.
         layer : optional str
             Entry in .layers to use instead of .X
+        cci_dir : optional str
+            Full path to the directory containing cell-cell communication databases. Only used in the case of models
+            that use ligands for prediction.
         log_transform : bool, default False
             Set True if log-transformation should be applied to expression (otherwise, will assume
             preprocessing/log-transform was computed beforehand)
@@ -99,6 +108,7 @@ class BaseInterpreter:
         genes: Union[None, List] = None,
         drop_dummy: Union[None, str] = None,
         layer: Union[None, str] = None,
+        cci_dir: Union[None, str] = None,
         log_transform: bool = False,
         weights_mode: str = "knn",
         data_id: Union[None, str] = None,
@@ -114,6 +124,7 @@ class BaseInterpreter:
         self.genes = genes
         self.drop_dummy = drop_dummy
         self.layer = layer
+        self.cci_dir = cci_dir
         self.log_transform = log_transform
         self.weights_mode = weights_mode
         self.data_id = data_id
@@ -140,7 +151,13 @@ class BaseInterpreter:
         # Define reconstruction metrics:
         self.metrics = [mae, mse, nll, r_squared]
 
-    def prepare_data(self, mod_type: str = "category"):
+    def prepare_data(
+            self,
+            mod_type: str = "category",
+            ligands: Union[None, List[str]] = None,
+            receiving_genes: Union[None, List[str]] = None,
+            species: Literal["human", "mouse", "axolotl"] = "human"
+    ):
         """
         Handles any necessary data preparation, starting from given source AnnData object
 
@@ -159,8 +176,21 @@ class BaseInterpreter:
                     - het_lag: (NOT YET IMPLEMENTED) spatially-lagged, but considers neighbor expression of other
                     variables that are not the dependent
                     - ligand_lag: spatially-lagged, from database uses select ligand genes to perform regression on
-                    select receptor and receptor-downstream genes, and additionally considers neighbor expression of
+                    select receptor and/or receptor-downstream genes, and additionally considers neighbor expression of
                     the ligands
+                    - ligand_niche_lag: spatially-lagged, uses a combination of categories, spatial connections,
+                    ligand genes and ligand gene expression of the neighbors to perform regression on select
+                    receptor and/or receptor-downstream genes
+            ligands : optional list of str
+                Only used if 'mod_type' contains "ligand". Provides the list of ligands to use as predictors. If not
+                given, will attempt to subset self.genes
+            receiving_genes : optional list of str
+                Only used if 'mod_type' contains "ligand". Provides the list of receptor and/or receptor-downstream
+                genes to investigate. If not given, will search through self.genes (that was provided on
+                instantiating the object) for genes that correspond to the provided genes from 'ligands'.
+            species : str, default "human"
+                Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
+                "human", "mouse", "axolotl" (EVENTUALLY, WILL ALSO INCLUDE DROSOPHILA/ZEBRAFISH)
         """
         if "category" in mod_type:
             self.logger.info(f"Using {self.group_key} values to predict feature expression...")
@@ -194,7 +224,7 @@ class BaseInterpreter:
 
             self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
             X = pd.get_dummies(data=db, drop_first=False)
-            # Compute adjacency matrix- use the KNN value in self.sp_kwargs (which may have been passed as an
+            # Compute adjacency matrix- use the KNN value in 'sp_kwargs' (which may have been passed as an
             # argument when initializing the interpreter):
             if self.data_id is not None:
                 self.logger.info(f"Checking for pre-computed adjacency matrix for dataset {self.data_id}...")
@@ -243,7 +273,7 @@ class BaseInterpreter:
             self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
             X = pd.get_dummies(data=db, drop_first=False)
 
-            # Compute adjacency matrix- use the KNN value in self.sp_kwargs (which may have been passed as an
+            # Compute adjacency matrix- use the KNN value in 'sp_kwargs' (which may have been passed as an
             # argument when initializing the interpreter):
             construct_pairwise(
                 self.adata, spatial_key=self.spatial_key, n_neighbors=self.sp_kwargs["n_neighbors"], exclude_self=True
@@ -283,8 +313,31 @@ class BaseInterpreter:
             self.uniq_g = set(group_name)
             self.uniq_g = list(np.sort(list(self.uniq_g)))
 
-        # elif mod_type == 'ligand_lag':
-        # Adjust self.genes to those which can be found in the NicheNet database:"""
+        elif mod_type == 'ligand_lag':
+            # Load signaling network file and find appropriate subset (if 'species' is axolotl, use the human portion
+            # of the network):
+            nichenet_sig = pd.read_csv(os.path.join(self.cci_dir, "human_mouse_signaling_network.csv"), index_col=0)
+            if species not in ["human", "mouse", "axolotl"]:
+                self.logger.error("Invalid input to 'species'. Options: 'human', 'mouse', 'axolotl'.")
+            if species == "axolotl":
+                species = "human"
+            sig_set = nichenet_sig[nichenet_sig['species'] == species.title()]
+
+            # Set predictors and target- for consistency with field conventions, set ligands and ligand-downstream
+            # gene names to uppercase (the AnnData object is assumed to have :
+            # Use the argument provided to 'ligands' to set the predictor block:
+            if ligands is None:
+                ligands = [g.upper() for g in self.genes if g in sig_set['src']]
+
+
+
+            self.X = self.adata.X
+            # Set
+
+            # Notes to self:
+            # self.genes = array containing all variables to be used as dependent
+            # self.X = array containing all independent variables
+
 
         else:
             self.logger.error("Invalid argument to 'mod_type'.")
@@ -458,6 +511,7 @@ class BaseInterpreter:
         pred = [item[1] for item in results]
         resid = [item[2] for item in results]
 
+        # Coefficients and their significance:
         coeffs = pd.DataFrame(coeffs, index=self.genes)
         coeffs.columns = self.adata.var.loc[self.genes, :].columns
 
@@ -473,10 +527,14 @@ class BaseInterpreter:
 
         return coeffs, pred, resid
 
-    def generate_null(self):
+
+    # ------------------------- Downstream interpretation (mostly for interaction models) ------------------------- #
+    def visualize_params(self, coeffs: pd.DataFrame):
         """
-        Generates a null model by scrambling the names of the samples to generate null distributions of parameters
-        and R^2 scores
+        Generates heatmap of parameter values for visualization
+
+        coeffs :
+            Contains coefficients from regression for each variable
         """
 
     def get_sender_receiver_effects(self, coeffs: pd.DataFrame, n_jobs: int = 30, significance_threshold: float = 0.05):
@@ -757,7 +815,7 @@ class BaseInterpreter:
             save_show_or_return=save_show_or_return,
             show_legend=True,
             background="white",
-            prefix="sender_effect",
+            prefix="sender_effects_on_{}".format(receiver),
             save_kwargs=save_kwargs,
             total_panels=1,
             fig=fig,
@@ -881,7 +939,7 @@ class BaseInterpreter:
             save_show_or_return=save_show_or_return,
             show_legend=True,
             background="white",
-            prefix="sender_effect",
+            prefix="{}_effects_on_receiver".format(sender),
             save_kwargs=save_kwargs,
             total_panels=1,
             fig=fig,
@@ -907,11 +965,11 @@ class BaseInterpreter:
 
         Args:
             receiver : str
-
+                Receiver cell type label
             sender : str
-
+                Sender cell type label
             significance_threshold : float, default 0.05
-                Set non-significant fold changes to zero, where the threshold is given here
+                Set non-significant fold changes (given by q-values) to zero, where the threshold is given here
             fold_change_threshold : optional float
                 Set absolute value fold-change threshold beyond which observations are marked as interesting. If not
                 given, will take the 95th percentile fold-change as
@@ -930,7 +988,84 @@ class BaseInterpreter:
                 "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
                 keys according to your needs.
         """
+        logger = lm.get_main_logger()
+        config_spateo_rcParams()
 
+        if fontsize is None:
+            self.fontsize = rcParams.get("font.size")
+        else:
+            self.fontsize = fontsize
+        if figsize is None:
+            self.figsize = rcParams.get("figure.figsize")
+        else:
+            self.figsize = figsize
+
+        receiver_idx = self.celltype_names.index(receiver)
+        sender_idx = self.celltype_names.index(sender)
+
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        ax.grid(False)
+
+        # All non-significant features:
+        qval_filter = np.where(self.qvalues[receiver_idx, sender_idx, :] >= significance_threshold)
+        vmax = np.max(np.abs(self.fold_change[receiver_idx, sender_idx, :]))
+
+        sns.scatterplot(
+            x=self.fold_change[receiver_idx, sender_idx, :][qval_filter],
+            y=-np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter],
+            color='white', edgecolor='black', s=100, ax=ax)
+
+        # Identify subset that may be significant, but which doesn't pass the fold-change threshold:
+        qval_filter = np.where(self.qvalues[receiver_idx, sender_idx, :] < significance_threshold)
+        x = self.fold_change[receiver_idx, sender_idx, :][qval_filter]
+        fc_filter = np.where(x < fold_change_threshold)
+        y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter])
+        sns.scatterplot(
+            x=x[fc_filter],
+            y=y[fc_filter],
+            color='darkgrey', edgecolor='black', s=100, ax=ax)
+
+        # Identify subset that are significantly downregulated:
+        dreg_color = matplotlib.cm.get_cmap("winter")(0)
+        x = self.fold_change[receiver_idx, sender_idx, :][qval_filter]
+        fc_filter = np.where(x <= -fold_change_threshold)
+        y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter], neginf=-14.5)
+        sns.scatterplot(
+            x=x[fc_filter],
+            y=y[fc_filter],
+            color=dreg_color, edgecolor='black', s=100, ax=ax)
+
+        # Identify subset that are significantly upregulated:
+        ureg_color = matplotlib.cm.get_map("autumn")(0)
+        x = self.fold_change[receiver_idx, sender_idx, :][qval_filter]
+        fc_filter = np.where(x >= fold_change_threshold)
+        y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter], neginf=-14.5)
+        sns.scatterplot(
+            x=x[fc_filter],
+            y=y[fc_filter],
+            color=ureg_color, edgecolor='black', s=100, ax=ax)
+
+        # Plot configuration:
+        ax.set_xlim((-vmax * 1.1, vmax * 1.1))
+        ax.set_xlabel('$\ln$ fold change')
+        ax.set_ylabel('$-\log_{10}$ FDR-corrected pvalues')
+        plt.axvline(-fold_change_threshold, color='darkgrey', linestyle='--')
+        plt.axvline(fold_change_threshold, color='darkgrey', linestyle='--')
+        plt.axhline(-np.log10(significance_threshold), linestyle='--', color='darkgrey')
+
+        plt.tight_layout()
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=True,
+            background="white",
+            prefix="effect_of_{}_on_{}".format(sender, receiver),
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None,
+        )
 
 class Category_Interpreter(BaseInterpreter):
     """
@@ -957,6 +1092,8 @@ class Connections_Interpreter(BaseInterpreter):
     connections between categories to predict the value of gene expression.
 
     The only keyword argument that is used for this class is 'n_neighbors'.
+
+    To fit model, run :func `self.run_GM_lag`
     """
 
     def __init__(self, *args, **kwargs):
@@ -1023,14 +1160,12 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
     # Copy over the relevant PySal methods (for ref., TwoSLS, sp_att in utils, TwoSLS_sp/GM_Lag), except modify the call
     # to sp_att in TwoSLS_sp to use expression of a custom ligand of choice rather than self.predy
 
-    # Parallelized run for all genes:
-    # Resource on how to properly run Parallel in this scenario here:
-    # http://qingkaikong.blogspot.com/2016/12/python-parallel-method-in-class.html
+    # Modified version of the GM lag model defined in the base class:
+    def run_GM_lag(self, n_jobs: int = 30):
+
 
     # Functionalities to additionally include: gene relationships to genes in their spatial niche
 
-
-# Functionalities to additionally include: gene relationships to genes in their spatial niche
 
 # -------------------------------------------- Regression Metrics -------------------------------------------- #
 def mae(y_true, y_pred):
