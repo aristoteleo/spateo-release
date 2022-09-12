@@ -24,8 +24,9 @@ def glm_degs(
     reducedModelFormulaStr: str = "~1",
     qval_threshold: Optional[float] = 0.05,
     llf_threshold: Optional[float] = -2000,
+    ci_alpha: float = 0.05,
     inplace: bool = True,
-):
+) -> Optional[AnnData]:
     """Differential genes expression tests using generalized linear regressions. Here only size factor normalized gene
     expression matrix can be used, and SCT/pearson residuals transformed gene expression can not be used.
 
@@ -37,7 +38,6 @@ def glm_degs(
     glm_degs supports performing deg analysis for any layer or normalized data in your adata object. That is you can either
     use the total, new, unspliced or velocity, etc. for the differential expression analysis.
 
-
     Args:
         adata: An Anndata object. The anndata object must contain a size factor normalized gene expression matrix.
         X_data: The user supplied data that will be used for differential expression analysis directly.
@@ -48,6 +48,7 @@ def glm_degs(
         reducedModelFormulaStr: A formula string specifying the reduced model in differential expression tests (i.e. likelihood ratio tests) for each gene/feature.
         qval_threshold: Only keep the glm test results whose qval is less than the ``qval_threshold``.
         llf_threshold: Only keep the glm test results whose log-likelihood is less than the ``llf_threshold``.
+        ci_alpha: The significance level for the confidence interval. The default ``ci_alpha = .05`` returns a 95% confidence interval.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
@@ -96,6 +97,7 @@ def glm_degs(
         df_factors["expression"] = expression
         try:
             nb2_full, nb2_null = glm_test(df_factors, fullModelFormulaStr, reducedModelFormulaStr)
+
             pval = lrt(nb2_full, nb2_null)
             deg_df.iloc[i, :] = ("ok", "NB2", nb2_full.llf, pval)
 
@@ -104,6 +106,7 @@ def glm_degs(
             # df_factors_gene["fitted_expression"] = nb2_full.predict() this is equal to nb2_full.mu
             df_factors_gene["resid_deviance"] = nb2_full.resid_deviance
             df_factors_gene["resid_pearson"] = nb2_full.resid_pearson
+            df_factors_gene[["lower_ci", "upper_ci"]] = nb2_full.conf_int(alpha=ci_alpha)
             deg_dict[gene] = df_factors_gene
         except:
             deg_df.iloc[i, :] = ("fail", "NB2", "None", 1)
