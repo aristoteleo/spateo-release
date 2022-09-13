@@ -27,7 +27,7 @@ def glm_fit(
     show_ci: bool = True,
     show_legend: bool = True,
     point_size: float = 1,
-    point_color: str = "skyblue",
+    point_color: Union[str, np.ndarray, list] = "skyblue",
     line_size: float = 1,
     line_color: str = "black",
     ci_color: str = "gainsboro",
