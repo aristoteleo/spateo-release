@@ -42,7 +42,7 @@ def run_denoise_impute(
             If not None, will plot the observed gene expression values in addition to the expression values resulting
             from the reconstruction
         clip : optional float
-            Threshold below which imputed feature values will be set to 0, as a percentile
+            Threshold below which imputed feature values will be set to 0, as a percentile of the max value
         cmap : str, default 'magma'
             Colormap to use for visualization
     """

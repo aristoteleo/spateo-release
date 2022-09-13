@@ -22,8 +22,10 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy
 import seaborn as sns
 from anndata import AnnData
+from dynamo.tools.moments import calc_1nd_moment
 from joblib import Parallel, delayed
 from matplotlib import rcParams
 from patsy import dmatrix
@@ -34,8 +36,9 @@ from ...configuration import SKM, config_spateo_rcParams, set_pub_style
 from ...plotting.static.utils import save_return_show_fig_utils
 
 from ...logging import logger_manager as lm
+from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
-from ...tools.find_neighbors import construct_pairwise
+from ...tools.find_neighbors import construct_pairwise, transcriptomic_connectivity
 from ...tools.utils import update_dict
 from .regression_utils import compute_wald_test, get_fisher_inverse, ols_fit_predict
 
@@ -65,6 +68,8 @@ class BaseInterpreter:
         cci_dir : optional str
             Full path to the directory containing cell-cell communication databases. Only used in the case of models
             that use ligands for prediction.
+        smooth : bool, default False
+            To correct for dropout effects, leverage gene expression neighborhoods to smooth expression
         log_transform : bool, default False
             Set True if log-transformation should be applied to expression (otherwise, will assume
             preprocessing/log-transform was computed beforehand)
@@ -109,6 +114,7 @@ class BaseInterpreter:
         drop_dummy: Union[None, str] = None,
         layer: Union[None, str] = None,
         cci_dir: Union[None, str] = None,
+        smooth: bool = False,
         log_transform: bool = False,
         weights_mode: str = "knn",
         data_id: Union[None, str] = None,
@@ -125,6 +131,7 @@ class BaseInterpreter:
         self.drop_dummy = drop_dummy
         self.layer = layer
         self.cci_dir = cci_dir
+        self.smooth = smooth
         self.log_transform = log_transform
         self.weights_mode = weights_mode
         self.data_id = data_id
@@ -178,6 +185,9 @@ class BaseInterpreter:
                     - ligand_lag: spatially-lagged, from database uses select ligand genes to perform regression on
                     select receptor and/or receptor-downstream genes, and additionally considers neighbor expression of
                     the ligands
+                    - ligand_connection_lag: spatially-lagged, uses a combination of spatial connections,
+                    ligand genes and ligand gene expression of the neighbors to perform regression on select receptor
+                    and/or receptor-downstream genes
                     - ligand_niche_lag: spatially-lagged, uses a combination of categories, spatial connections,
                     ligand genes and ligand gene expression of the neighbors to perform regression on select
                     receptor and/or receptor-downstream genes
@@ -256,12 +266,12 @@ class BaseInterpreter:
             self.variable_names = self.X.columns.difference(drop_columns).to_list()
 
             # Get the names of all remaining groups:
-            self.uniq_g, group_name = (
+            self.param_labels, group_name = (
                 set(group_name).difference([self.drop_dummy]),
                 group_name.to_list(),
             )
 
-            self.uniq_g = list(np.sort(list(self.uniq_g)))
+            self.param_labels = list(np.sort(list(self.param_labels)))
 
         elif mod_type == "connections" or mod_type == "niche":
             # Convert groups/categories into one-hot array:
@@ -297,53 +307,79 @@ class BaseInterpreter:
                 connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
                 self.X = pd.DataFrame(connections, columns=connections_cols)
             # Otherwise if 'niche', combine two arrays:
-            # connections, encoding pairwise *spatial adjacencies* between categories for each sample, and
-            # dmat_neighbors, encoding *spatial prevalence* of each category within the neighborhood for each sample.
-            # Together, the two blocks contain information about the *composition* of the niche as well as its
-            # *connectivity*.
+            # connections, encoding pairwise *spatial adjacencies/spatial prevalence* between categories for each
+            # sample, and
+            # categories, encoding *identity* of the niche components
             elif mod_type == "niche":
-                composition_df = pd.DataFrame(dmat_neighbors, columns=X.columns)
+                category_df = pd.DataFrame(categories, columns=X.columns)
 
                 connections_cols = list(product(X.columns, X.columns))
                 connections_cols.sort(key=lambda x: x[1])
                 connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
                 connections_df = pd.DataFrame(connections, columns=connections_cols)
-                self.X = pd.concat([composition_df, connections_df], axis=1)
+                self.X = pd.concat([category_df, connections_df], axis=1)
 
-            self.uniq_g = set(group_name)
-            self.uniq_g = list(np.sort(list(self.uniq_g)))
+            # Set self.param_labels to reflect inclusion of the interactions in the case that connections are used:
+            uniq_cats = set(group_name)
+            self.param_labels = list(np.sort(list(uniq_cats))) + connections_cols
 
-        elif mod_type == 'ligand_lag':
+        elif mod_type == "ligand_lag":
             # Load signaling network file and find appropriate subset (if 'species' is axolotl, use the human portion
             # of the network):
-            nichenet_sig = pd.read_csv(os.path.join(self.cci_dir, "human_mouse_signaling_network.csv"), index_col=0)
+            signet = pd.read_csv(os.path.join(self.cci_dir, "human_mouse_signaling_network.csv"), index_col=0)
             if species not in ["human", "mouse", "axolotl"]:
                 self.logger.error("Invalid input to 'species'. Options: 'human', 'mouse', 'axolotl'.")
             if species == "axolotl":
                 species = "human"
-            sig_set = nichenet_sig[nichenet_sig['species'] == species.title()]
+            sig_set = signet[signet['species'] == species.title()]
 
             # Set predictors and target- for consistency with field conventions, set ligands and ligand-downstream
-            # gene names to uppercase (the AnnData object is assumed to have :
+            # gene names to uppercase (the AnnData object is assumed to follow this convention as well):
             # Use the argument provided to 'ligands' to set the predictor block:
             if ligands is None:
                 ligands = [g.upper() for g in self.genes if g in sig_set['src']]
+                ligands = self.adata[:, ligands].X.toarray() if scipy.sparse.issparse(self.adata.X)
+                self.X = pd.DataFrame(self.adata.X)
+
+            if receiving_genes is None:
+                "filler"
 
 
-
-            self.X = self.adata.X
             # Set
 
             # Notes to self:
-            # self.genes = array containing all variables to be used as dependent
+            # self.genes = array containing all variables to be used as dependent- to put this together,
+            # compute spatial lag
+            # self.param_labels = if niche lag model, to get this list, combine connections column names and ligand
+            # names
             # self.X = array containing all independent variables
 
-
+        elif mod_type == "ligand_connections_lag":
+            "filler"
         else:
             self.logger.error("Invalid argument to 'mod_type'.")
 
         # Save model type as an attribute so it can be accessed by other methods:
         self.mod_type = mod_type
+
+        # Normalize to size factor:
+        normalize_total(self.adata)
+
+        # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
+        if self.smooth:
+            self.logger.info("Smoothing gene expression...")
+            # Compute connectivity matrix if not already existing:
+            try:
+                conn = self.adata.obsp['connectivities']
+            except:
+                _, adata = transcriptomic_connectivity(self.adata, n_neighbors_method="ball_tree")
+                conn = adata.obsp['connectivities']
+            adata_smooth_norm, _ = calc_1nd_moment(self.adata.X, conn, normalize_W=True)
+            self.adata.layers["M_s"] = adata_smooth_norm
+
+            # Use smoothed layer for downstream processing:
+            self.adata.layers["raw"] = self.adata.X
+            self.adata.X = self.adata.layers["M_s"]
 
         # Filter gene names if specific gene names are provided. If not, use all genes referenced in .X:
         if self.genes is not None:
@@ -352,7 +388,6 @@ class BaseInterpreter:
             self.genes = self.adata.var.index
         self.adata = self.adata[:, self.genes]
 
-        # Transform data matrix if 'log_transform' is True:
         if self.log_transform:
             if self.layer is None:
                 log1p(self.adata)
@@ -436,7 +471,7 @@ class BaseInterpreter:
                 cur_g : str
                     Name of the feature to regress on
                 X : pd.DataFrame
-                    Variables used for the regression
+                    Values used for the regression
                 X_variable_names : list of str
                     Names of the variables used for the regression
                 uniq_g : list of str
@@ -469,6 +504,7 @@ class BaseInterpreter:
                     name_y="log_expr",
                     name_x=X_variable_names,
                 )
+                self.logger.info("Printing model summary: \n", model.summary)
                 y_pred = model.predy
                 resid = model.u
 
@@ -502,7 +538,7 @@ class BaseInterpreter:
         # Wrap regressions for all single genes:
         results = Parallel(n_jobs)(
             delayed(_single)(
-                cur_g, self.genes, self.X, self.variable_names, self.uniq_g, self.adata, self.w, self.layer
+                cur_g, self.X, self.variable_names, self.param_labels, self.adata, self.w, self.layer
             )
             for cur_g in self.genes
         )
@@ -515,8 +551,8 @@ class BaseInterpreter:
         coeffs = pd.DataFrame(coeffs, index=self.genes)
         coeffs.columns = self.adata.var.loc[self.genes, :].columns
 
-        pred = pd.DataFrame(pred, index=self.adata.obs_names, columns=self.genes)
-        resid = pd.DataFrame(resid, index=self.adata.obs_names, columns=self.genes)
+        pred = pd.DataFrame(np.hstack(pred), index=self.adata.obs_names, columns=self.genes)
+        resid = pd.DataFrame(np.hstack(resid), index=self.adata.obs_names, columns=self.genes)
 
         # Update AnnData object:
         self.adata.obsm["ypred"] = pred
@@ -537,7 +573,7 @@ class BaseInterpreter:
             Contains coefficients from regression for each variable
         """
 
-    def get_sender_receiver_effects(self, coeffs: pd.DataFrame, n_jobs: int = 30, significance_threshold: float = 0.05):
+    def get_sender_receiver_effects(self, coeffs: pd.DataFrame, significance_threshold: float = 0.05):
         """
         For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
         significant.
@@ -551,9 +587,7 @@ class BaseInterpreter:
         Args:
             coeffs : pd.DataFrame
                 Contains coefficients from regression for each variable
-            n_jobs : int, default 30
-                Number of features to model at once
-            significance_threshold : float, default 0.5
+                            significance_threshold : float, default 0.5
                 p-value needed to call a sender-receiver relationship significant
         """
         if not "connections" in self.mod_type or not "niche" in self.mod_type:
@@ -1118,30 +1152,6 @@ class Niche_Interpreter(BaseInterpreter):
         self.prepare_data(mod_type="niche")
 
 
-class Lagged_Category_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-lagged regression using categorical variables (specifically,
-    the prevalence of categories within spatial neighborhoods) to predict the value of gene expression.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        assert self.group_key is not None, "Categorical labels required for this model."
-
-        # Process the cell type array to use it as the input to the regression model:
-        self.prepare_data(mod_type="lag_category")
-
-        # Compute spatial weights matrix given user inputs:
-        self.compute_spatial_weights()
-
-        # Instantiate locations in AnnData object to store results from lag model:
-        for i in ["const"] + self.uniq_g + ["W_log_exp"]:
-            self.adata.var[str(i) + "_GM_lag_coeff"] = None
-            self.adata.var[str(i) + "_GM_lag_zstat"] = None
-            self.adata.var[str(i) + "_GM_lag_pval"] = None
-
-
 class Heterologous_Lagged_Interpreter(BaseInterpreter):
     """
     Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
@@ -1162,9 +1172,33 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
 
     # Modified version of the GM lag model defined in the base class:
     def run_GM_lag(self, n_jobs: int = 30):
-
+        "filler"
 
     # Functionalities to additionally include: gene relationships to genes in their spatial niche
+
+
+class Ligand_Lagged_Connections_Interpreter(BaseInterpreter):
+    """
+    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
+    prediction when instantiating a model for spatially-lagged regression using categorical variables (specifically,
+    the prevalence of categories within spatial neighborhoods) to predict the value of gene expression.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert self.group_key is not None, "Categorical labels required for this model."
+
+        # Process the cell type array to use it as the input to the regression model:
+        self.prepare_data(mod_type="ligand_lag_connections")
+
+        # Compute spatial weights matrix given user inputs:
+        self.compute_spatial_weights()
+
+        # Instantiate locations in AnnData object to store results from lag model:
+        for i in ["const"] + self.param_labels + ["W_log_exp"]:
+            self.adata.var[str(i) + "_GM_lag_coeff"] = None
+            self.adata.var[str(i) + "_GM_lag_zstat"] = None
+            self.adata.var[str(i) + "_GM_lag_pval"] = None
 
 
 # -------------------------------------------- Regression Metrics -------------------------------------------- #
@@ -1182,7 +1216,7 @@ def mae(y_true, y_pred):
         mae : float
             Mean absolute error value across all samples
     """
-    abs = np.absolute(y_true - y_pred)
+    abs = np.abs(y_true - y_pred)
     mean = np.mean(abs)
     return mean
 

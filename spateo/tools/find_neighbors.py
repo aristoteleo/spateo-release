@@ -86,7 +86,7 @@ def generate_expr_weights(
     n_pca_components: int = 30,
     num_neighbors: int = 30,
     decay_type: str = "reciprocal",
-) -> Union[Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]]:
+) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]:
     """Given an AnnData object, compute distance array in gene expression space.
 
     Args:
@@ -110,16 +110,12 @@ def generate_expr_weights(
     """
     logger = lm.get_main_logger()
 
-    if basis == "pca" and "X_pca" not in adata.obsm_keys():
-        logger.info("PCA to be used as basis, X_pca not found, computing PCA...", indent_level=2)
-        pca = PCA(
-            n_components=min(n_pca_components, adata.X.shape[1] - 1),
-            svd_solver="arpack",
-            random_state=0,
-        )
-        fit = pca.fit(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else pca.fit(adata.X)
-        X_pca = fit.transform(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else fit.transform(adata.X)
-        adata.obsm["X_pca"] = X_pca
+    nbrs, adata = transcriptomic_connectivity(adata, nbr_object, basis, n_neighbors_method, n_pca_components,
+                                              num_neighbors)
+
+    assert isinstance(num_neighbors, int), f"Number of neighbors {num_neighbors} is not an integer."
+
+    distance_graph = nbrs.kneighbors_graph(n_neighbors=num_neighbors, mode="distance")
 
     if basis == "X":
         X_data = adata.X
@@ -129,38 +125,8 @@ def generate_expr_weights(
     else:
         logger.error("Invalid option given to 'basis'. Options: 'pca', 'umap' or 'X'.")
 
-    if nbr_object is None:
-        # set up neighbour object
-        nbrs = NearestNeighbors(algorithm=n_neighbors_method).fit(X_data)
-    else:  # use provided sklearn NN object
-        nbrs = nbr_object
-
-    assert isinstance(num_neighbors, int), f"Number of neighbors {num_neighbors} is not an integer."
-
-    distance_graph = nbrs.kneighbors_graph(n_neighbors=num_neighbors, mode="distance")
-
-    # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
-    # NearestNeighbors run:
     distances, knn = nbrs.kneighbors(X_data)
     n_obs, n_neighbors = knn.shape
-    distances = scipy.sparse.csr_matrix(
-        (
-            distances.flatten(),
-            (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
-        ),
-        shape=(n_obs, n_obs),
-    )
-    connectivities = distances.copy()
-    connectivities.data[connectivities.data > 0] = 1
-
-    distances.eliminate_zeros()
-    connectivities.eliminate_zeros()
-
-    logger.info_insert_adata("expression_connectivities", adata_attr="obsp")
-    logger.info_insert_adata("expression_distances", adata_attr="obsp")
-
-    adata.obsp["expression_distances"] = distances
-    adata.obsp["expression_connectivies"] = connectivities
 
     logger.info_insert_adata("expression_neighbors", adata_attr="uns")
     logger.info_insert_adata("expression_neighbors.indices", adata_attr="uns")
@@ -210,6 +176,86 @@ def generate_expr_weights(
 
     out_graph = row_normalize(graph_out, verbose=False)
     return out_graph, distance_graph, adata
+
+
+def transcriptomic_connectivity(
+    adata: AnnData,
+    nbr_object: NearestNeighbors = None,
+    basis: str = "pca",
+    n_neighbors_method: str = "ball_tree",
+    n_pca_components: int = 30,
+    num_neighbors: int = 30
+) -> Tuple[NearestNeighbors, AnnData]:
+    """Given an AnnData object, compute pairwise connectivity matrix in transcriptomic space
+
+    Args:
+        adata : an anndata object.
+        nbr_object: An optional sklearn.neighbors.NearestNeighbors object. Can optionally create a nearest neighbor
+            object with custom functionality.
+        basis: str, default 'pca'
+            The space that will be used for nearest neighbor search. Valid names includes, for example, `pca`, `umap`,
+            or `X`
+        n_neighbors_method: str, default 'ball_tree'
+            Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
+            "ball_tree" and "kd_tree".
+        n_pca_components: Only used if 'basis' is 'pca'. Sets number of principal components to compute.
+        num_neighbors: Number of neighbors for each bucket, used in computing distance graph
+
+    Returns:
+        nbrs : Object of class `sklearn.neighbors.NearestNeighbors`
+        adata : Modified AnnData object
+    """
+    logger = lm.get_main_logger()
+
+    if basis == "pca" and "X_pca" not in adata.obsm_keys():
+        logger.info("PCA to be used as basis, X_pca not found, computing PCA...", indent_level=2)
+        pca = PCA(
+            n_components=min(n_pca_components, adata.X.shape[1] - 1),
+            svd_solver="arpack",
+            random_state=0,
+        )
+        fit = pca.fit(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else pca.fit(adata.X)
+        X_pca = fit.transform(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else fit.transform(adata.X)
+        adata.obsm["X_pca"] = X_pca
+
+    if basis == "X":
+        X_data = adata.X
+    elif "X_" + basis in adata.obsm_keys():
+        # Assume basis can be found in .obs under "X_{basis}":
+        X_data = adata.obsm["X_" + basis]
+    else:
+        logger.error("Invalid option given to 'basis'. Options: 'pca', 'umap' or 'X'.")
+
+    if nbr_object is None:
+        # set up neighbour object
+        nbrs = NearestNeighbors(algorithm=n_neighbors_method).fit(X_data)
+    else:  # use provided sklearn NN object
+        nbrs = nbr_object
+
+    # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
+    # NearestNeighbors run:
+    distances, knn = nbrs.kneighbors(X_data)
+    n_obs, n_neighbors = knn.shape
+    distances = scipy.sparse.csr_matrix(
+        (
+            distances.flatten(),
+            (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
+        ),
+        shape=(n_obs, n_obs),
+    )
+    connectivities = distances.copy()
+    connectivities.data[connectivities.data > 0] = 1
+
+    distances.eliminate_zeros()
+    connectivities.eliminate_zeros()
+
+    logger.info_insert_adata("expression_connectivities", adata_attr="obsp")
+    logger.info_insert_adata("expression_distances", adata_attr="obsp")
+
+    adata.obsp["expression_distances"] = distances
+    adata.obsp["expression_connectivies"] = connectivities
+
+    return nbrs, adata
 
 
 # --------------------------------------- Cell-cell/bucket-bucket distance --------------------------------------- #

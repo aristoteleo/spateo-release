@@ -42,8 +42,8 @@ from .paste import (
     pairwise_align,
 )
 from .spatial_degs import moran_i
-from .spatial_impute import *
-from .spatial_impute.run_impute import run_denoise_impute
+from .spatial_smooth import *
+from .spatial_smooth.run_impute import run_denoise_impute
 from .three_dims_align import (
     get_align_labels,
     models_align,
