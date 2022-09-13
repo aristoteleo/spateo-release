@@ -106,7 +106,7 @@ def glm_degs(
             # df_factors_gene["fitted_expression"] = nb2_full.predict() this is equal to nb2_full.mu
             df_factors_gene["resid_deviance"] = nb2_full.resid_deviance
             df_factors_gene["resid_pearson"] = nb2_full.resid_pearson
-            df_factors_gene[["lower_ci", "upper_ci"]] = nb2_full.conf_int(alpha=ci_alpha)
+            df_factors_gene[["ci_lower", "ci_upper"]] = nb2_full.get_prediction().conf_int(alpha=ci_alpha)
             deg_dict[gene] = df_factors_gene
         except:
             deg_df.iloc[i, :] = ("fail", "NB2", "None", 1)
