@@ -177,6 +177,7 @@ def find_cci_two_group(
     ligand_data = adata[cell_pair["cell_sender"], lr_network["from"]]
     receptor_data = adata[cell_pair["cell_receiver"], lr_network["to"]]
     lr_data = ligand_data.X.A * receptor_data.X.A if x_sparse else ligand_data.X * receptor_data.X
+    lr_data = np.array(lr_data)
     if cell_pair.shape[0] == 0:
         lr_prod = np.zeros(lr_network.shape[0])
         lr_co_exp_ratio = np.zeros(lr_network.shape[0])

@@ -58,7 +58,7 @@ class BaseInterpreter:
             Key in .obsm where x- and y-coordinates are stored
         genes : optional list
             Subset to genes of interest: will be used as dependent variables in non-ligand-based regression analyses,
-            will be independent variables/exogenous variables
+            will be independent variables in ligand-based regression analyses
         drop_dummy : optional str
             Name of the category to be dropped (the "dummy variable") in the regression. The dummy category can aid
             in interpretation as all model coefficients can be taken to be in reference to the dummy category. If
@@ -120,6 +120,8 @@ class BaseInterpreter:
         data_id: Union[None, str] = None,
         **kwargs,
     ):
+        self.logger = lm.get_main_logger()
+
         self.adata = adata
         self.cell_names = self.adata.obs_names
         # Sort cell type categories (to keep order consistent for downstream applications):
@@ -128,6 +130,8 @@ class BaseInterpreter:
         self.spatial_key = spatial_key
         self.group_key = group_key
         self.genes = genes
+        self.logger.info("Note: argument provided to 'genes' represents the dependent variables for non-ligand-based "
+                         "analysis, but are used as independent variables for ligand-based analysis.")
         self.drop_dummy = drop_dummy
         self.layer = layer
         self.cci_dir = cci_dir
@@ -152,8 +156,6 @@ class BaseInterpreter:
 
         # Update using user input:
         self.sp_kwargs = update_dict(self.sp_kwargs, kwargs)
-
-        self.logger = lm.get_main_logger()
 
         # Define reconstruction metrics:
         self.metrics = [mae, mse, nll, r_squared]
@@ -331,19 +333,37 @@ class BaseInterpreter:
                 self.logger.error("Invalid input to 'species'. Options: 'human', 'mouse', 'axolotl'.")
             if species == "axolotl":
                 species = "human"
-            sig_set = signet[signet['species'] == species.title()]
+            sig_net = signet[signet['species'] == species.title()]
+            lig_available = set(sig_net['src'])
 
             # Set predictors and target- for consistency with field conventions, set ligands and ligand-downstream
             # gene names to uppercase (the AnnData object is assumed to follow this convention as well):
             # Use the argument provided to 'ligands' to set the predictor block:
             if ligands is None:
-                ligands = [g.upper() for g in self.genes if g in sig_set['src']]
-                ligands = self.adata[:, ligands].X.toarray() if scipy.sparse.issparse(self.adata.X)
-                self.X = pd.DataFrame(self.adata.X)
+                ligands = [g.upper() for g in self.genes if g in lig_available]
+                ligands_expr = self.adata[:, ligands].X.toarray() if scipy.sparse.issparse(self.adata.X) else \
+                            self.adata[:, ligands].X
+                self.X = pd.DataFrame(ligands_expr, columns=ligands)
+            else:
+                # Filter provided ligands to those that can be found in the database:
+                ligands = [l for l in ligands if l in lig_available]
+                self.logger.info("Proceeding with analysis using ligands {}".format(",".join(ligands)))
 
             if receiving_genes is None:
-                "filler"
+                # Append all receptors (direct connections to ligands) and then append all downstream genes (direct
+                # connections to receptors, indirect connections to ligands):
+                # Note that the database contains repeat L:R pairs- each pair is listed more than once if it is part
+                # of more than one pathway. Furthermore, if two ligands bind the same receptor, the receptor will be
+                # listed twice. Since we're looking for just the names, take the set of receptors/downstream genes
+                # to get only unique molecules:
+                receptors = set(list(sig_net.loc[sig_net['src'].isin(ligands)]['dest'].values))
+                ds_genes = list(receptors)
+                receiver_ds = set(list(sig_net.loc[sig_net['src'].isin(receptors)]['dest'].values))
+                ds_genes.extend(list(receiver_ds))
+                ds_genes = list(set(ds_genes))
+                self.genes = ds_genes
 
+            self.param_labels = ligands
 
             # Set
 
@@ -453,6 +473,10 @@ class BaseInterpreter:
 
     def run_GM_lag(self, n_jobs: int = 30):
         """Runs spatially lagged two-stage least squares model"""
+        if not hasattr(self, 'w'):
+            self.logger.info("Called 'run_GM_lag' before computing spatial weights array- computing spatial weights "
+                             "array before proceeding...")
+            self.compute_spatial_weights()
 
         def _single(
             cur_g: str,
@@ -1167,6 +1191,15 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
     predict the regression target.
     """
 
+    def __init__(
+        self,
+        cat_key: Union[None, str] = None,
+        sender: Union[None, str] = None,
+        receiver: Union[None, str] = None,
+        *args,
+        **kwargs
+    ):
+        super().__init__(*args, **kwargs)
     # Copy over the relevant PySal methods (for ref., TwoSLS, sp_att in utils, TwoSLS_sp/GM_Lag), except modify the call
     # to sp_att in TwoSLS_sp to use expression of a custom ligand of choice rather than self.predy
 
@@ -1174,7 +1207,8 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
     def run_GM_lag(self, n_jobs: int = 30):
         "filler"
 
-    # Functionalities to additionally include: gene relationships to genes in their spatial niche
+    # Functionalities to additionally include: when constructing the dataframe, can optionally input a cell type as
+    # the sender and another cell type as the receptor
 
 
 class Ligand_Lagged_Connections_Interpreter(BaseInterpreter):

@@ -34,7 +34,7 @@ def wrap_to_plotter(
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
-    model_size: Union[float, list] = 5.0,
+    model_size: Union[float, list] = 3.0,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     show_outline: bool = False,
@@ -97,7 +97,7 @@ def wrap_to_plotter(
         text_kwargs: A dictionary that will be pass to the ``add_text`` function.
 
                      By default, it is an empty dictionary and the ``add_legend`` function will use the
-                     ``{ "font_family": "arial", "font_size": 18, "font_color": "black", "text_loc": "upper_left"}``
+                     ``{ "font_family": "arial", "font_size": 12, "font_color": "black", "text_loc": "upper_left"}``
                      as its parameters. Otherwise, you can provide a dictionary that properly modify those keys
                      according to your needs.
     """
@@ -185,7 +185,7 @@ def three_d_plot(
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
-    model_size: Union[float, list] = 5.0,
+    model_size: Union[float, list] = 3.0,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     show_outline: bool = False,
@@ -251,7 +251,7 @@ def three_d_plot(
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
                        ``{"legend_size": None, "legend_loc": None,  "legend_size": None, "legend_loc": None,
-                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2f",
+                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2e",
                        "n_labels": 5, "vertical": True}`` as its parameters. Otherwise, you can provide a dictionary
                        that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
@@ -265,7 +265,7 @@ def three_d_plot(
         text_kwargs: A dictionary that will be pass to the ``add_text`` function.
 
                      By default, it is an empty dictionary and the ``add_legend`` function will use the
-                     ``{ "font_family": "arial", "font_size": 18, "font_color": "black", "text_loc": "upper_left"}``
+                     ``{ "font_family": "arial", "font_size": 12, "font_color": "black", "text_loc": "upper_left"}``
                      as its parameters. Otherwise, you can provide a dictionary that properly modify those keys
                      according to your needs.
         view_up: The normal to the orbital plane. Only available when filename ending with ``.mp4`` or ``.gif``.
@@ -346,7 +346,7 @@ def three_d_multi_plot(
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
-    model_size: Union[float, list] = 5.0,
+    model_size: Union[float, list] = 3.0,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     show_outline: bool = False,
@@ -419,7 +419,7 @@ def three_d_multi_plot(
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
                        ``{"legend_size": None, "legend_loc": None,  "legend_size": None, "legend_loc": None,
-                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2f",
+                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2e",
                        "n_labels": 5, "vertical": True}`` as its parameters. Otherwise, you can provide a dictionary
                        that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
@@ -433,7 +433,7 @@ def three_d_multi_plot(
         text_kwargs: A dictionary that will be pass to the ``add_text`` function.
 
                      By default, it is an empty dictionary and the ``add_legend`` function will use the
-                     ``{ "font_family": "arial", "font_size": 18, "font_color": "black", "text_loc": "upper_left"}``
+                     ``{ "font_family": "arial", "font_size": 12, "font_color": "black", "text_loc": "upper_left"}``
                      as its parameters. Otherwise, you can provide a dictionary that properly modify those keys
                      according to your needs.
         view_up: The normal to the orbital plane. Only available when filename ending with ``.mp4`` or ``.gif``.
@@ -446,7 +446,7 @@ def three_d_multi_plot(
                 * Output an obj file, please enter a filename ending with ``.obj``.
                 * Output a vtkjs file, please enter a filename without format.
     """
-    models = model if isinstance(model, MultiBlock) else [model]
+    models = model if isinstance(model, (MultiBlock, list)) else [model]
     keys = key if isinstance(key, list) else [key]
     cpos = cpo if isinstance(cpo, list) else [cpo]
     mts = model_style if isinstance(model_style, list) else [model_style]
@@ -553,7 +553,7 @@ def three_d_animate(
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
-    model_size: Union[float, list] = 5.0,
+    model_size: Union[float, list] = 3.0,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     show_outline: bool = False,
@@ -631,7 +631,7 @@ def three_d_animate(
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
                        ``{"legend_size": None, "legend_loc": None,  "legend_size": None, "legend_loc": None,
-                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2f",
+                       "title_font_size": None, "label_font_size": None, "font_family": "arial", "fmt": "%.2e",
                        "n_labels": 5, "vertical": True}`` as its parameters. Otherwise, you can provide a dictionary
                        that properly modify those keys according to your needs.
         show_outline:  whether to produce an outline of the full extent for the model.
@@ -645,7 +645,7 @@ def three_d_animate(
         text_kwargs: A dictionary that will be pass to the ``add_text`` function.
 
                      By default, it is an empty dictionary and the ``add_legend`` function will use the
-                     ``{ "font_family": "arial", "font_size": 18, "font_color": "black", "text_loc": "upper_left"}``
+                     ``{ "font_family": "arial", "font_size": 12, "font_color": "black", "text_loc": "upper_left"}``
                      as its parameters. Otherwise, you can provide a dictionary that properly modify those keys
                      according to your needs.
         framerate: Frames per second. Only available when filename ending with ``.mp4`` or ``.gif``.
