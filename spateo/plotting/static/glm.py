@@ -31,7 +31,7 @@ def glm_fit(
     line_size: float = 1,
     line_color: str = "black",
     ci_color: str = "gainsboro",
-    ci_alpha: float = 0.5,
+    ci_alpha: float = 0.7,
     ax_size: Union[tuple, list] = (3, 3),
     background_color: str = "white",
     ncols: int = 4,

@@ -1702,6 +1702,9 @@ def save_return_show_fig_utils(
     from ...configuration import reset_rcParams
     from ...tools.utils import update_dict
 
+    if show_legend:
+        plt.subplots_adjust(right=0.85)
+
     if save_show_or_return in ["save", "both", "all"]:
         s_kwargs = {
             "path": None,
@@ -1719,9 +1722,6 @@ def save_return_show_fig_utils(
             reset_rcParams()
 
     if save_show_or_return in ["show", "both", "all"]:
-        if show_legend:
-            plt.subplots_adjust(right=0.85)
-
         # with warnings.catch_warnings():
         #     warnings.simplefilter("ignore")
         #     plt.tight_layout()
