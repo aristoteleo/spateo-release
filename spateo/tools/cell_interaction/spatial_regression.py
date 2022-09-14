@@ -163,8 +163,11 @@ class BaseInterpreter:
     def prepare_data(
             self,
             mod_type: str = "category",
-            ligands: Union[None, List[str]] = None,
-            receiving_genes: Union[None, List[str]] = None,
+            lig: Union[None, List[str]] = None,
+            rec: Union[None, List[str]] = None,
+            niche_lr_r_lag: bool = False,
+            rec_ds: Union[None, List[str]] = None,
+            auto_compute_ds: bool = False,
             species: Literal["human", "mouse", "axolotl"] = "human"
     ):
         """
@@ -179,31 +182,45 @@ class BaseInterpreter:
                     - connections: spatially-aware, uses spatial connections between samples as independent variables
                     - niche: spatially-aware, uses both categories and spatial connections between samples as
                     independent variables
-                    - lag_category: (NOT YET IMPLEMENTED) spatially-lagged *auto*regressive model- considers neighbor
-                    expression of the dependent variable, uses neighborhood category prevalence for the samples as
-                    independent variables
-                    - het_lag: (NOT YET IMPLEMENTED) spatially-lagged, but considers neighbor expression of other
-                    variables that are not the dependent
                     - ligand_lag: spatially-lagged, from database uses select ligand genes to perform regression on
                     select receptor and/or receptor-downstream genes, and additionally considers neighbor expression of
                     the ligands
-                    - ligand_connection_lag: spatially-lagged, uses a combination of spatial connections,
-                    ligand genes and ligand gene expression of the neighbors to perform regression on select receptor
-                    and/or receptor-downstream genes
                     - ligand_niche_lag: spatially-lagged, uses a combination of categories, spatial connections,
                     ligand genes and ligand gene expression of the neighbors to perform regression on select
                     receptor and/or receptor-downstream genes
-            ligands : optional list of str
+                    - niche_lr: spatially-lagged, uses a coupling of spatial category connections,
+                    ligand expression and receptor expression to perform regression on select receptor-downstream genes
+            lig : optional list of str
                 Only used if 'mod_type' contains "ligand". Provides the list of ligands to use as predictors. If not
                 given, will attempt to subset self.genes
-            receiving_genes : optional list of str
+            rec : optional list of str
                 Only used if 'mod_type' contains "ligand". Provides the list of receptor and/or receptor-downstream
-                genes to investigate. If not given, will search through self.genes (that was provided on
-                instantiating the object) for genes that correspond to the provided genes from 'ligands'.
+                genes to investigate. If not given, will search through database for all genes that correspond to the
+                provided genes from 'ligands'.
+            niche_lr_r_lag : bool, default False
+                Only used if 'mod_type' is "niche_lr". Uses the spatial lag of the receptor as the dependent variable
+                rather than
+            rec_ds : optional list of str
+                Only used if 'mod_type' is "niche_lr". Can be used to optionally manually define a list of genes
+                shown to be (or thought to potentially be) downstream of one or more of the provided L:R pairs. If
+                not given, will find receptor-downstream genes from database based on input to 'lig' and 'rec'.
+            auto_compute_ds : bool, default False
+                Set True to append 'rec_ds' to receptor-downstream genes extracted from database.
             species : str, default "human"
                 Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
                 "human", "mouse", "axolotl" (EVENTUALLY, WILL ALSO INCLUDE DROSOPHILA/ZEBRAFISH)
         """
+        # Can provide either a single L:R pair or multiple of ligands and/or receptors:
+        if lig is not None:
+            if not isinstance(lig, list):
+                lig = [lig]
+        if rec is not None:
+            if not isinstance(rec, list):
+                rec = [rec]
+        if rec_ds is not None:
+            if not isinstance(rec_ds, list):
+                rec_ds = [rec_ds]
+
         if "category" in mod_type:
             self.logger.info(f"Using {self.group_key} values to predict feature expression...")
             # First, convert groups/categories into one-hot array:
@@ -326,6 +343,13 @@ class BaseInterpreter:
             self.param_labels = list(np.sort(list(uniq_cats))) + connections_cols
 
         elif mod_type == "ligand_lag":
+            # It is assumed that if 'l' and 'r' are given, multiple ligands and multiple receptors are provided- for
+            # readability:
+            ligands = lig
+            receiving_genes = rec
+            if rec_ds is not None:
+                receiving_genes.extend(rec_ds)
+
             # Load signaling network file and find appropriate subset (if 'species' is axolotl, use the human portion
             # of the network):
             signet = pd.read_csv(os.path.join(self.cci_dir, "human_mouse_signaling_network.csv"), index_col=0)
@@ -365,17 +389,86 @@ class BaseInterpreter:
 
             self.param_labels = ligands
 
-            # Set
+        elif mod_type == "niche_lr":
+            # Load LR database based on input to 'species':
+            if species == "human":
+                lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_human.csv"), index_col=0)
+            elif species == "mouse":
+                lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_mouse.csv"), index_col=0)
+            elif species == "drosophila":
+                lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_drosophila.csv"), index_col=0)
+            #elif species == "zebrafish":
+            #    lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_zebrafish.csv"), index_col=0)
+            #elif species == "axolotl":
+            #    lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_axolotl.csv"), index_col=0)
+            else:
+                self.logger.error("Invalid input given to 'species'. Options: 'human', 'mouse', or 'axolotl'.")
 
-            # Notes to self:
-            # self.genes = array containing all variables to be used as dependent- to put this together,
-            # compute spatial lag
-            # self.param_labels = if niche lag model, to get this list, combine connections column names and ligand
-            # names
-            # self.X = array containing all independent variables
+            # Convert groups/categories into one-hot array:
+            group_name = self.adata.obs[self.group_key]
+            db = pd.DataFrame({"group": group_name})
+            categories = np.array(self.adata.obs[self.group_key].unique().tolist())
+            n_categories = len(categories)
+            db["group"] = pd.Categorical(db["group"], categories=categories)
 
-        elif mod_type == "ligand_connections_lag":
-            "filler"
+            self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
+            X = pd.get_dummies(data=db, drop_first=False)
+
+            # Compute adjacency matrix- use the KNN value in 'sp_kwargs' (which may have been passed as an
+            # argument when initializing the interpreter):
+            construct_pairwise(
+                self.adata, spatial_key=self.spatial_key, n_neighbors=self.sp_kwargs["n_neighbors"], exclude_self=True
+            )
+            adj = self.adata.obsm["adj"]
+
+            # 'l' and 'r' must be matched, and so must be the same length, unless it is a case of one ligand that can
+            # bind multiple receptors or vice versa:
+            if len(lig) != len(rec):
+                self.logger.warning("Length of the provided list of ligands (input to 'l') does not match the length "
+                                    "of the provided list of receptors (input to 'r'). Ensure all ligands and all "
+                                    "receptors have at least one match in the other list.")
+
+            pairs = []
+            # This analysis takes ligand and receptor expression to predict expression of downstream genes- make sure
+            # (1) input to 'r' are listed as receptors in the appropriate database, and (2) for each input to 'r',
+            # there is a matched input in 'l':
+            for ligand in lig:
+                lig_key = "from" if species != "axolotl" else "human_ligand"
+                rec_key = "to" if species != "axolotl" else "human_receptor"
+                possible_receptors = set(lr_network.loc[lr_network[lig_key] == ligand][rec_key])
+                if not any(receptor in possible_receptors for receptor in rec):
+                    self.logger.error("No record of {} interaction with any of {}. Ensure provided lists contain "
+                                      "paired ligand-receptors.".format(ligand, (",".join(rec))))
+                found_receptors = list(possible_receptors.intersection(rec))
+                lig_pairs = list(product(lig, found_receptors))
+                pairs.extend(lig_pairs)
+
+            self.logger.info("Starting from {} ligands and {} receptors, found {} ligand-receptor "
+                             "pairs.".format(len(lig), len(rec), len(pairs)))
+
+            # Since features are combinatorial, it is not recommended to specify more than too many ligand-receptor
+            # pairs:
+            if len(pairs) > 200 / n_categories**2:
+                self.logger.warn("Regression model has many predictors- consider measuring fewer ligands and "
+                                 "receptors.")
+
+            # Each ligand-receptor pair will have an associated niche matrix:
+            self.niche_mats = {}
+
+            for lr_pair in pairs:
+                # Optionally, compute the spatial lag of the receptor:
+
+
+                # Multiply one-hot category array by the expression of select receptor within that cell:
+
+                # Separately multiply by the expression of select ligand such that an expression value only exists
+                # for one cell type per row:
+
+                # Multiply adjacency matrix by the cell type-specific expression of select ligand:
+                nbhd_lig_expr = (adj > 0).astype("int").dot(X.values)
+
+
+
         else:
             self.logger.error("Invalid argument to 'mod_type'.")
 
