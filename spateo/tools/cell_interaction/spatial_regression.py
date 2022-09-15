@@ -33,9 +33,8 @@ from pysal.lib import weights
 from pysal.model import spreg
 
 from ...configuration import SKM, config_spateo_rcParams, set_pub_style
-from ...plotting.static.utils import save_return_show_fig_utils
-
 from ...logging import logger_manager as lm
+from ...plotting.static.utils import save_return_show_fig_utils
 from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import construct_pairwise, transcriptomic_connectivity
@@ -51,37 +50,26 @@ class BaseInterpreter:
     computation of evaluation metrics and more.
 
     Args:
-        adata : class `anndata.AnnData`
-        group_key : str
-            Key in .obs where group (e.g. cell type) information can be found
-        spatial_key : str, default "spatial"
-            Key in .obsm where x- and y-coordinates are stored
-        genes : optional list
-            Subset to genes of interest: will be used as dependent variables in non-ligand-based regression analyses,
+        adata: object of class `anndata.AnnData`
+        group_key: Key in .obs where group (e.g. cell type) information can be found
+        spatial_key: Key in .obsm where x- and y-coordinates are stored
+        genes: Subset to genes of interest: will be used as dependent variables in non-ligand-based regression analyses,
             will be independent variables in ligand-based regression analyses
-        drop_dummy : optional str
-            Name of the category to be dropped (the "dummy variable") in the regression. The dummy category can aid
-            in interpretation as all model coefficients can be taken to be in reference to the dummy category. If
-            None, will randomly select a few samples to constitute the dummy group.
-        layer : optional str
-            Entry in .layers to use instead of .X
-        cci_dir : optional str
-            Full path to the directory containing cell-cell communication databases. Only used in the case of models
+        drop_dummy: Name of the category to be dropped (the "dummy variable") in the regression. The dummy category
+            can aid in interpretation as all model coefficients can be taken to be in reference to the dummy
+            category. If None, will randomly select a few samples to constitute the dummy group.
+        layer: Entry in .layers to use instead of .X
+        cci_dir: Full path to the directory containing cell-cell communication databases. Only used in the case of models
             that use ligands for prediction.
-        smooth : bool, default False
-            To correct for dropout effects, leverage gene expression neighborhoods to smooth expression
-        log_transform : bool, default False
-            Set True if log-transformation should be applied to expression (otherwise, will assume
+        smooth: To correct for dropout effects, leverage gene expression neighborhoods to smooth expression
+        log_transform: Set True if log-transformation should be applied to expression (otherwise, will assume
             preprocessing/log-transform was computed beforehand)
-        weights_mode : str, default "knn"
-            Options "knn", "kernel", "band"; sets whether to use K-nearest neighbors, a kernel-based method, or distance
-            band to compute spatial weights, respectively.
-        data_id : optional str
-            If given, will save pairwise distance arrays & nearest neighbor arrays to folder in the working
+        weights_mode: Options "knn", "kernel", "band"; sets whether to use K-nearest neighbors, a kernel-based
+            method, or distance band to compute spatial weights, respectively.
+        data_id: If given, will save pairwise distance arrays & nearest neighbor arrays to folder in the working
             directory, under './neighbors/{data_id}_distance.csv' and './neighbors/{data_id}_adj.csv'. Will also
             check for existing files under these names to avoid re-computing these arrays. If not given, will not save.
-        kwargs : optional dict
-            Provides additional spatial weight-finding arguments. Note that these must specifically match the name
+        kwargs : Provides additional spatial weight-finding arguments. Note that these must specifically match the name
             that the function will look for (case sensitive). For reference:
                 - n_neighbors : int
                     Number of nearest neighbors for KNN
@@ -130,8 +118,10 @@ class BaseInterpreter:
         self.spatial_key = spatial_key
         self.group_key = group_key
         self.genes = genes
-        self.logger.info("Note: argument provided to 'genes' represents the dependent variables for non-ligand-based "
-                         "analysis, but are used as independent variables for ligand-based analysis.")
+        self.logger.info(
+            "Note: argument provided to 'genes' represents the dependent variables for non-ligand-based "
+            "analysis, but are used as independent variables for ligand-based analysis."
+        )
         self.drop_dummy = drop_dummy
         self.layer = layer
         self.cci_dir = cci_dir
@@ -161,21 +151,21 @@ class BaseInterpreter:
         self.metrics = [mae, mse, nll, r_squared]
 
     def prepare_data(
-            self,
-            mod_type: str = "category",
-            lig: Union[None, List[str]] = None,
-            rec: Union[None, List[str]] = None,
-            niche_lr_r_lag: bool = False,
-            rec_ds: Union[None, List[str]] = None,
-            auto_compute_ds: bool = False,
-            species: Literal["human", "mouse", "axolotl"] = "human"
+        self,
+        mod_type: str = "category",
+        lig: Union[None, List[str]] = None,
+        rec: Union[None, List[str]] = None,
+        niche_lr_r_lag: bool = False,
+        rec_ds: Union[None, List[str]] = None,
+        auto_compute_ds: bool = False,
+        species: Literal["human", "mouse", "axolotl"] = "human",
     ):
         """
         Handles any necessary data preparation, starting from given source AnnData object
 
         Args:
-            mod_type : str, default "category"
-                The type of model that will be employed- this dictates how the data will be processed and prepared.
+            mod_type: The type of model that will be employed- this dictates how the data will be processed and
+                prepared.
                 Options:
                     - category: spatially-aware, for each sample, computes category prevalence within the spatial
                     neighborhood and uses these as independent variables
@@ -190,24 +180,18 @@ class BaseInterpreter:
                     receptor and/or receptor-downstream genes
                     - niche_lr: spatially-lagged, uses a coupling of spatial category connections,
                     ligand expression and receptor expression to perform regression on select receptor-downstream genes
-            lig : optional list of str
-                Only used if 'mod_type' contains "ligand". Provides the list of ligands to use as predictors. If not
+            lig: Only used if 'mod_type' contains "ligand". Provides the list of ligands to use as predictors. If not
                 given, will attempt to subset self.genes
-            rec : optional list of str
-                Only used if 'mod_type' contains "ligand". Provides the list of receptor and/or receptor-downstream
+            rec: Only used if 'mod_type' contains "ligand". Provides the list of receptor and/or receptor-downstream
                 genes to investigate. If not given, will search through database for all genes that correspond to the
                 provided genes from 'ligands'.
-            niche_lr_r_lag : bool, default False
-                Only used if 'mod_type' is "niche_lr". Uses the spatial lag of the receptor as the dependent variable
-                rather than
-            rec_ds : optional list of str
-                Only used if 'mod_type' is "niche_lr". Can be used to optionally manually define a list of genes
+            niche_lr_r_lag: Only used if 'mod_type' is "niche_lr". Uses the spatial lag of the receptor as the
+                dependent variable rather than each spot's unique receptor expression.
+            rec_ds: Only used if 'mod_type' is "niche_lr". Can be used to optionally manually define a list of genes
                 shown to be (or thought to potentially be) downstream of one or more of the provided L:R pairs. If
                 not given, will find receptor-downstream genes from database based on input to 'lig' and 'rec'.
-            auto_compute_ds : bool, default False
-                Set True to append 'rec_ds' to receptor-downstream genes extracted from database.
-            species : str, default "human"
-                Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
+            auto_compute_ds: Set True to append 'rec_ds' to receptor-downstream genes extracted from database.
+            species: Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
                 "human", "mouse", "axolotl" (EVENTUALLY, WILL ALSO INCLUDE DROSOPHILA/ZEBRAFISH)
         """
         # Can provide either a single L:R pair or multiple of ligands and/or receptors:
@@ -357,16 +341,19 @@ class BaseInterpreter:
                 self.logger.error("Invalid input to 'species'. Options: 'human', 'mouse', 'axolotl'.")
             if species == "axolotl":
                 species = "human"
-            sig_net = signet[signet['species'] == species.title()]
-            lig_available = set(sig_net['src'])
+            sig_net = signet[signet["species"] == species.title()]
+            lig_available = set(sig_net["src"])
 
             # Set predictors and target- for consistency with field conventions, set ligands and ligand-downstream
             # gene names to uppercase (the AnnData object is assumed to follow this convention as well):
             # Use the argument provided to 'ligands' to set the predictor block:
             if ligands is None:
                 ligands = [g.upper() for g in self.genes if g in lig_available]
-                ligands_expr = self.adata[:, ligands].X.toarray() if scipy.sparse.issparse(self.adata.X) else \
-                            self.adata[:, ligands].X
+                ligands_expr = (
+                    self.adata[:, ligands].X.toarray()
+                    if scipy.sparse.issparse(self.adata.X)
+                    else self.adata[:, ligands].X
+                )
                 self.X = pd.DataFrame(ligands_expr, columns=ligands)
             else:
                 # Filter provided ligands to those that can be found in the database:
@@ -380,9 +367,9 @@ class BaseInterpreter:
                 # of more than one pathway. Furthermore, if two ligands bind the same receptor, the receptor will be
                 # listed twice. Since we're looking for just the names, take the set of receptors/downstream genes
                 # to get only unique molecules:
-                receptors = set(list(sig_net.loc[sig_net['src'].isin(ligands)]['dest'].values))
+                receptors = set(list(sig_net.loc[sig_net["src"].isin(ligands)]["dest"].values))
                 ds_genes = list(receptors)
-                receiver_ds = set(list(sig_net.loc[sig_net['src'].isin(receptors)]['dest'].values))
+                receiver_ds = set(list(sig_net.loc[sig_net["src"].isin(receptors)]["dest"].values))
                 ds_genes.extend(list(receiver_ds))
                 ds_genes = list(set(ds_genes))
                 self.genes = ds_genes
@@ -397,9 +384,9 @@ class BaseInterpreter:
                 lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_mouse.csv"), index_col=0)
             elif species == "drosophila":
                 lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_drosophila.csv"), index_col=0)
-            #elif species == "zebrafish":
+            # elif species == "zebrafish":
             #    lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_zebrafish.csv"), index_col=0)
-            #elif species == "axolotl":
+            # elif species == "axolotl":
             #    lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_axolotl.csv"), index_col=0)
             else:
                 self.logger.error("Invalid input given to 'species'. Options: 'human', 'mouse', or 'axolotl'.")
@@ -424,9 +411,11 @@ class BaseInterpreter:
             # 'l' and 'r' must be matched, and so must be the same length, unless it is a case of one ligand that can
             # bind multiple receptors or vice versa:
             if len(lig) != len(rec):
-                self.logger.warning("Length of the provided list of ligands (input to 'l') does not match the length "
-                                    "of the provided list of receptors (input to 'r'). Ensure all ligands and all "
-                                    "receptors have at least one match in the other list.")
+                self.logger.warning(
+                    "Length of the provided list of ligands (input to 'l') does not match the length "
+                    "of the provided list of receptors (input to 'r'). Ensure all ligands and all "
+                    "receptors have at least one match in the other list."
+                )
 
             pairs = []
             # This analysis takes ligand and receptor expression to predict expression of downstream genes- make sure
@@ -437,27 +426,31 @@ class BaseInterpreter:
                 rec_key = "to" if species != "axolotl" else "human_receptor"
                 possible_receptors = set(lr_network.loc[lr_network[lig_key] == ligand][rec_key])
                 if not any(receptor in possible_receptors for receptor in rec):
-                    self.logger.error("No record of {} interaction with any of {}. Ensure provided lists contain "
-                                      "paired ligand-receptors.".format(ligand, (",".join(rec))))
+                    self.logger.error(
+                        "No record of {} interaction with any of {}. Ensure provided lists contain "
+                        "paired ligand-receptors.".format(ligand, (",".join(rec)))
+                    )
                 found_receptors = list(possible_receptors.intersection(rec))
                 lig_pairs = list(product(lig, found_receptors))
                 pairs.extend(lig_pairs)
 
-            self.logger.info("Starting from {} ligands and {} receptors, found {} ligand-receptor "
-                             "pairs.".format(len(lig), len(rec), len(pairs)))
+            self.logger.info(
+                "Starting from {} ligands and {} receptors, found {} ligand-receptor "
+                "pairs.".format(len(lig), len(rec), len(pairs))
+            )
 
             # Since features are combinatorial, it is not recommended to specify more than too many ligand-receptor
             # pairs:
             if len(pairs) > 200 / n_categories**2:
-                self.logger.warn("Regression model has many predictors- consider measuring fewer ligands and "
-                                 "receptors.")
+                self.logger.warn(
+                    "Regression model has many predictors- consider measuring fewer ligands and " "receptors."
+                )
 
             # Each ligand-receptor pair will have an associated niche matrix:
             self.niche_mats = {}
 
             for lr_pair in pairs:
                 # Optionally, compute the spatial lag of the receptor:
-
 
                 # Multiply one-hot category array by the expression of select receptor within that cell:
 
@@ -466,8 +459,6 @@ class BaseInterpreter:
 
                 # Multiply adjacency matrix by the cell type-specific expression of select ligand:
                 nbhd_lig_expr = (adj > 0).astype("int").dot(X.values)
-
-
 
         else:
             self.logger.error("Invalid argument to 'mod_type'.")
@@ -483,10 +474,10 @@ class BaseInterpreter:
             self.logger.info("Smoothing gene expression...")
             # Compute connectivity matrix if not already existing:
             try:
-                conn = self.adata.obsp['connectivities']
+                conn = self.adata.obsp["connectivities"]
             except:
                 _, adata = transcriptomic_connectivity(self.adata, n_neighbors_method="ball_tree")
-                conn = adata.obsp['connectivities']
+                conn = adata.obsp["connectivities"]
             adata_smooth_norm, _ = calc_1nd_moment(self.adata.X, conn, normalize_W=True)
             self.adata.layers["M_s"] = adata_smooth_norm
 
@@ -542,14 +533,11 @@ class BaseInterpreter:
         """
         Wrapper for ordinary least squares regression.
 
-        n_jobs : int, default 30
-            For parallel processing, number of tasks to run at once
+        n_jobs: For parallel processing, number of tasks to run at once
 
         Returns:
-            coeffs : pd.DataFrame, shape [n_features, n_params]
-                Contains fitted parameters for each feature
-            reconst: pd.DataFrame, shape [n_samples, n_features]
-                Contains predicted expression for each feature
+            coeffs: Contains fitted parameters for each feature
+            reconst: Contains predicted expression for each feature
         """
         results = Parallel(n_jobs)(
             delayed(ols_fit_predict)(self.X, self.adata, self.variable_names, cur_g) for cur_g in self.genes
@@ -566,9 +554,11 @@ class BaseInterpreter:
 
     def run_GM_lag(self, n_jobs: int = 30):
         """Runs spatially lagged two-stage least squares model"""
-        if not hasattr(self, 'w'):
-            self.logger.info("Called 'run_GM_lag' before computing spatial weights array- computing spatial weights "
-                             "array before proceeding...")
+        if not hasattr(self, "w"):
+            self.logger.info(
+                "Called 'run_GM_lag' before computing spatial weights array- computing spatial weights "
+                "array before proceeding..."
+            )
             self.compute_spatial_weights()
 
         def _single(
@@ -585,28 +575,18 @@ class BaseInterpreter:
             arguments passed on instantiation of Estimator.
 
             Args:
-                cur_g : str
-                    Name of the feature to regress on
-                X : pd.DataFrame
-                    Values used for the regression
-                X_variable_names : list of str
-                    Names of the variables used for the regression
-                uniq_g : list of str
-                    Names of categories- each computed parameter corresponds to a single element in uniq_g
-                adata : class `anndata.AnnData`
-                    AnnData object to store results in
-                w : np.ndarray
-                    Spatial weights array
-                layer : optional str
-                    Specifies layer in AnnData to use- if None, will use .X.
+                cur_g: Name of the feature to regress on
+                X: Values used for the regression
+                X_variable_names: Names of the variables used for the regression
+                uniq_g: Names of categories- each computed parameter corresponds to a single element in uniq_g
+                adata: AnnData object to store results in
+                w: Spatial weights array
+                layer: Specifies layer in AnnData to use- if None, will use .X.
 
             Returns:
-                coeffs : pd.DataFrame
-                    Coefficients for each categorical group for each feature
-                pred : pd.DataFrame
-                    Predicted values from regression for each feature
-                resid : pd.DataFrame
-                    Residual values from regression for each feature
+                coeffs: Coefficients for each categorical group for each feature
+                pred: Predicted values from regression for each feature
+                resid: Residual values from regression for each feature
             """
             if layer is None:
                 X["log_expr"] = adata[:, cur_g].X.A
@@ -654,9 +634,7 @@ class BaseInterpreter:
 
         # Wrap regressions for all single genes:
         results = Parallel(n_jobs)(
-            delayed(_single)(
-                cur_g, self.X, self.variable_names, self.param_labels, self.adata, self.w, self.layer
-            )
+            delayed(_single)(cur_g, self.X, self.variable_names, self.param_labels, self.adata, self.w, self.layer)
             for cur_g in self.genes
         )
 
@@ -680,14 +658,12 @@ class BaseInterpreter:
 
         return coeffs, pred, resid
 
-
     # ------------------------- Downstream interpretation (mostly for interaction models) ------------------------- #
     def visualize_params(self, coeffs: pd.DataFrame):
         """
         Generates heatmap of parameter values for visualization
 
-        coeffs :
-            Contains coefficients from regression for each variable
+        coeffs: Contains coefficients from regression for each variable
         """
 
     def get_sender_receiver_effects(self, coeffs: pd.DataFrame, significance_threshold: float = 0.05):
@@ -702,10 +678,8 @@ class BaseInterpreter:
         Only valid if the model specified uses the connections between categories as variables for the regression.
 
         Args:
-            coeffs : pd.DataFrame
-                Contains coefficients from regression for each variable
-                            significance_threshold : float, default 0.5
-                p-value needed to call a sender-receiver relationship significant
+            coeffs : Contains coefficients from regression for each variable
+            significance_threshold: p-value needed to call a sender-receiver relationship significant
         """
         if not "connections" in self.mod_type or not "niche" in self.mod_type:
             self.logger.error(
@@ -790,22 +764,16 @@ class BaseInterpreter:
         being in proximity with the sender.
 
         Args:
-            cmap : str, default "Reds"
-                Name of Matplotlib color map to use
-            fontsize : optional int
-                Size of figure title and axis labels
-            figsize : optional tuple of form (int, int)
-                Width and height of plotting window
-            save_show_or_return : str
-            Options: "save", "show", "return", "both", "all"
+            cmap: Name of Matplotlib color map to use
+            fontsize: Size of figure title and axis labels
+            figsize: Width and height of plotting window
+            save_show_or_return: Options: "save", "show", "return", "both", "all"
                 - "both" for save and show
-            save_id : optional str
-                Name of the saved figure, without the extension
-            save_kwargs : dict
-                A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
-                save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf',
-                "transparent": True, "close": True, "verbose": True} as its parameters. But to change any of these
-                parameters, this dictionary can be used to do so.
+            save_id: Name of the saved figure, without the extension
+            save_kwargs: A dictionary that will passed to the save_fig function. By default it is an empty
+                dictionary and the save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None,
+                "ext": 'pdf', "transparent": True, "close": True, "verbose": True} as its parameters. But to change
+                any of these parameters, this dictionary can be used to do so.
         """
         if fontsize is None:
             self.fontsize = rcParams.get("font.size")
@@ -827,13 +795,7 @@ class BaseInterpreter:
 
         np.fill_diagonal(sig_df.values, 0)
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-        sns.heatmap(
-            sig_df,
-            square=True,
-            linecolor='grey',
-            linewidths=0.3,
-            cmap=cmap
-        )
+        sns.heatmap(sig_df, square=True, linecolor="grey", linewidths=0.3, cmap=cmap)
         plt.xlabel("Sender")
         plt.ylabel("Receiver")
         plt.tight_layout()
@@ -860,39 +822,31 @@ class BaseInterpreter:
         cut_pvals: float = -5,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
-        cmap: str = 'seismic',
+        cmap: str = "seismic",
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
-        save_kwargs: Optional[dict] = {}
+        save_kwargs: Optional[dict] = {},
     ):
         """
         Evaluates and visualizes the effect that each sender cell type has on specific genes in the receiver
         cell type.
 
         Args:
-            receiver : str
-                Receiver cell type label
-            plot_mode : str, default "fold_change"
+            receiver: Receiver cell type label
+            plot_mode: specifies what gets plotted.
                 Options:
                     - "qvals": elements of the plot represent statistical significance of the interaction
                     - "fold_change": elements of the plot represent fold change induced in the receiver by the sender
-            gene_subset : optional list of str
-                Names of genes to subset for plot. If None, will use all genes that were used in the regression.
-            significance_threshold : float, default 0.05
-                Set non-significant fold changes to zero, where the threshold is given here
-            cut_pvals : float, default -5
-                Minimum allowable log10(pval)- anything below this will be clipped to this value
-            fontsize : optional int
-                Size of figure title and axis labels
-            figsize : optional tuple of form (int, int)
-                Width and height of plotting window
-            cmap : str, default "seismic"
-                Name of matplotlib colormap specifying colormap to use
-            save_show_or_return: Literal["save", "show", "return", "both", "all"], default "show"
-                Whether to save, show or return the figure.
+            gene_subset: Names of genes to subset for plot. If None, will use all genes that were used in the
+                regression.
+            significance_threshold: Set non-significant fold changes to zero, where the threshold is given here
+            cut_pvals: Minimum allowable log10(pval)- anything below this will be clipped to this value
+            fontsize: Size of figure title and axis labels
+            figsize: Width and height of plotting window
+            cmap: Name of matplotlib colormap specifying colormap to use
+            save_show_or_return: Whether to save, show or return the figure.
                 If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
                 displayed and the associated axis and other object will be return.
-            save_kwargs : optional dict
-                A dictionary that will passed to the save_fig function.
+            save_kwargs: A dictionary that will passed to the save_fig function.
                 By default it is an empty dictionary and the save_fig function will use the
                 {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
                 "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
@@ -912,15 +866,11 @@ class BaseInterpreter:
 
         receiver_idx = self.celltype_names.index(receiver)
 
-        if plot_mode == 'qvals':
+        if plot_mode == "qvals":
             # In the analysis process, the receiving cell types become aligned along the column axis:
             arr = np.log(self.qvalues[receiver_idx, :, :].copy())
             arr[arr < cut_pvals] = cut_pvals
-            df = pd.DataFrame(
-                arr,
-                index=self.celltype_names,
-                columns=self.genes
-            )
+            df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
             if gene_subset:
                 df = df.drop(index=receiver)[gene_subset]
 
@@ -928,19 +878,17 @@ class BaseInterpreter:
             sns.heatmap(
                 df.T,
                 square=True,
-                linecolor='grey',
+                linecolor="grey",
                 linewidths=0.3,
-                cbar_kws={'label': "$\log_{10}$ FDR-corrected pvalues"},
-                cmap=cmap, vmin=-5, vmax=0.
+                cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues"},
+                cmap=cmap,
+                vmin=-5,
+                vmax=0.0,
             )
-        elif plot_mode == 'fold_change':
+        elif plot_mode == "fold_change":
             arr = self.fold_change[receiver_idx, :, :].copy()
             arr[np.where(self.qvalues[receiver_idx, :, :] > significance_threshold)] = 0
-            df = pd.DataFrame(
-                arr,
-                index=self.celltype_names,
-                columns=self.genes
-            )
+            df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
             if gene_subset:
                 df = df.drop(index=receiver)[gene_subset]
             vmax = np.max(np.abs(df.values))
@@ -949,11 +897,12 @@ class BaseInterpreter:
             sns.heatmap(
                 df.T,
                 square=True,
-                linecolor='grey',
+                linecolor="grey",
                 linewidths=0.3,
-                cbar_kws={'label': "$\ln$ fold change",
-                          "location": "top"},
-                cmap=cmap, vmin=-vmax, vmax=vmax,
+                cbar_kws={"label": "$\ln$ fold change", "location": "top"},
+                cmap=cmap,
+                vmin=-vmax,
+                vmax=vmax,
             )
         else:
             logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'fold_change'.")
@@ -984,39 +933,31 @@ class BaseInterpreter:
         cut_pvals: float = -5,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
-        cmap: str = 'seismic',
+        cmap: str = "seismic",
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
-        save_kwargs: Optional[dict] = {}
+        save_kwargs: Optional[dict] = {},
     ):
         """
         Evaluates and visualizes the effect that one specific sender cell type has on select genes in all possible
         receiver cell types.
 
         Args:
-            sender : str
-                Sender cell type label
-            plot_mode : str, default "fold_change"
+            sender: Sender cell type label
+            plot_mode: specifies what gets plotted.
                 Options:
                     - "qvals": elements of the plot represent statistical significance of the interaction
                     - "fold_change": elements of the plot represent fold change induced in the receiver by the sender
-            gene_subset : optional list of str
-                Names of genes to subset for plot. If None, will use all genes that were used in the regression.
-            significance_threshold : float, default 0.05
-                Set non-significant fold changes to zero, where the threshold is given here
-            cut_pvals : float, default -5
-                Minimum allowable log10(pval)- anything below this will be clipped to this value
-            fontsize : optional int
-                Size of figure title and axis labels
-            figsize : optional tuple of form (int, int)
-                Width and height of plotting window
-            cmap : str, default "seismic"
-                Name of matplotlib colormap specifying colormap to use
-            save_show_or_return: Literal["save", "show", "return", "both", "all"], default "show"
-                Whether to save, show or return the figure.
+            gene_subset: Names of genes to subset for plot. If None, will use all genes that were used in the
+                regression.
+            significance_threshold: Set non-significant fold changes to zero, where the threshold is given here
+            cut_pvals: Minimum allowable log10(pval)- anything below this will be clipped to this value
+            fontsize: Size of figure title and axis labels
+            figsize: Width and height of plotting window
+            cmap: Name of matplotlib colormap specifying colormap to use
+            save_show_or_return: Whether to save, show or return the figure.
                 If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
                 displayed and the associated axis and other object will be return.
-            save_kwargs : optional dict
-                A dictionary that will passed to the save_fig function.
+            save_kwargs: A dictionary that will passed to the save_fig function.
                 By default it is an empty dictionary and the save_fig function will use the
                 {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
                 "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
@@ -1036,14 +977,10 @@ class BaseInterpreter:
 
         sender_idx = self.celltype_names.index(sender)
 
-        if plot_mode == 'qvals':
+        if plot_mode == "qvals":
             arr = np.log(self.qvalues[:, sender_idx, :].copy())
             arr[arr < cut_pvals] = cut_pvals
-            df = pd.DataFrame(
-                arr,
-                index=self.celltype_names,
-                columns=self.genes
-            )
+            df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
             if gene_subset:
                 df = df.drop(index=sender)[gene_subset]
 
@@ -1051,20 +988,18 @@ class BaseInterpreter:
             sns.heatmap(
                 df.T,
                 square=True,
-                linecolor='grey',
+                linecolor="grey",
                 linewidths=0.3,
-                cbar_kws={'label': "$\log_{10}$ FDR-corrected pvalues"},
-                cmap=cmap, vmin=-5, vmax=0.
+                cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues"},
+                cmap=cmap,
+                vmin=-5,
+                vmax=0.0,
             )
 
-        elif plot_mode == 'fold_change':
+        elif plot_mode == "fold_change":
             arr = self.fold_change[:, sender_idx, :].copy()
             arr[np.where(self.qvalues[:, sender_idx, :] > significance_threshold)] = 0
-            df = pd.DataFrame(
-                arr,
-                index=self.celltype_names,
-                columns=self.genes
-            )
+            df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
             if gene_subset:
                 df = df.drop(index=sender)[gene_subset]
             vmax = np.max(np.abs(df.values))
@@ -1073,11 +1008,12 @@ class BaseInterpreter:
             sns.heatmap(
                 df.T,
                 square=True,
-                linecolor='grey',
+                linecolor="grey",
                 linewidths=0.3,
-                cbar_kws={'label': "$\ln$ fold change",
-                          "location": "top"},
-                cmap=cmap, vmin=-vmax, vmax=vmax,
+                cbar_kws={"label": "$\ln$ fold change", "location": "top"},
+                cmap=cmap,
+                vmin=-vmax,
+                vmax=vmax,
             )
         else:
             logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'fold_change'.")
@@ -1108,32 +1044,25 @@ class BaseInterpreter:
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = (4.5, 7.0),
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
-        save_kwargs: Optional[dict] = {}
+        save_kwargs: Optional[dict] = {},
     ):
         """
         Volcano plot to identify differentially expressed genes of a given receiver cell type in the presence of a
         given sender cell type.
 
         Args:
-            receiver : str
-                Receiver cell type label
-            sender : str
-                Sender cell type label
-            significance_threshold : float, default 0.05
-                Set non-significant fold changes (given by q-values) to zero, where the threshold is given here
-            fold_change_threshold : optional float
-                Set absolute value fold-change threshold beyond which observations are marked as interesting. If not
-                given, will take the 95th percentile fold-change as
-            fontsize : optional int
-                Size of figure title and axis labels
-            figsize : tuple of form (int, int)
-                Width and height of plotting window
-            save_show_or_return: Literal["save", "show", "return", "both", "all"], default "show"
-                Whether to save, show or return the figure.
+            receiver: Receiver cell type label
+            sender: Sender cell type label
+            significance_threshold:  Set non-significant fold changes (given by q-values) to zero, where the
+                threshold is given here
+            fold_change_threshold: Set absolute value fold-change threshold beyond which observations are marked as
+                interesting. If not given, will take the 95th percentile fold-change as
+            fontsize: Size of figure title and axis labels
+            figsize: Width and height of plotting window
+            save_show_or_return: Whether to save, show or return the figure.
                 If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
                 displayed and the associated axis and other object will be return.
-            save_kwargs : optional dict
-                A dictionary that will passed to the save_fig function.
+            save_kwargs: A dictionary that will passed to the save_fig function.
                 By default it is an empty dictionary and the save_fig function will use the
                 {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
                 "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
@@ -1164,45 +1093,40 @@ class BaseInterpreter:
         sns.scatterplot(
             x=self.fold_change[receiver_idx, sender_idx, :][qval_filter],
             y=-np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter],
-            color='white', edgecolor='black', s=100, ax=ax)
+            color="white",
+            edgecolor="black",
+            s=100,
+            ax=ax,
+        )
 
         # Identify subset that may be significant, but which doesn't pass the fold-change threshold:
         qval_filter = np.where(self.qvalues[receiver_idx, sender_idx, :] < significance_threshold)
         x = self.fold_change[receiver_idx, sender_idx, :][qval_filter]
         fc_filter = np.where(x < fold_change_threshold)
         y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter])
-        sns.scatterplot(
-            x=x[fc_filter],
-            y=y[fc_filter],
-            color='darkgrey', edgecolor='black', s=100, ax=ax)
+        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color="darkgrey", edgecolor="black", s=100, ax=ax)
 
         # Identify subset that are significantly downregulated:
         dreg_color = matplotlib.cm.get_cmap("winter")(0)
         x = self.fold_change[receiver_idx, sender_idx, :][qval_filter]
         fc_filter = np.where(x <= -fold_change_threshold)
         y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter], neginf=-14.5)
-        sns.scatterplot(
-            x=x[fc_filter],
-            y=y[fc_filter],
-            color=dreg_color, edgecolor='black', s=100, ax=ax)
+        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=100, ax=ax)
 
         # Identify subset that are significantly upregulated:
         ureg_color = matplotlib.cm.get_map("autumn")(0)
         x = self.fold_change[receiver_idx, sender_idx, :][qval_filter]
         fc_filter = np.where(x >= fold_change_threshold)
         y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter], neginf=-14.5)
-        sns.scatterplot(
-            x=x[fc_filter],
-            y=y[fc_filter],
-            color=ureg_color, edgecolor='black', s=100, ax=ax)
+        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=ureg_color, edgecolor="black", s=100, ax=ax)
 
         # Plot configuration:
         ax.set_xlim((-vmax * 1.1, vmax * 1.1))
-        ax.set_xlabel('$\ln$ fold change')
-        ax.set_ylabel('$-\log_{10}$ FDR-corrected pvalues')
-        plt.axvline(-fold_change_threshold, color='darkgrey', linestyle='--')
-        plt.axvline(fold_change_threshold, color='darkgrey', linestyle='--')
-        plt.axhline(-np.log10(significance_threshold), linestyle='--', color='darkgrey')
+        ax.set_xlabel("$\ln$ fold change")
+        ax.set_ylabel("$-\log_{10}$ FDR-corrected pvalues")
+        plt.axvline(-fold_change_threshold, color="darkgrey", linestyle="--")
+        plt.axvline(fold_change_threshold, color="darkgrey", linestyle="--")
+        plt.axhline(-np.log10(significance_threshold), linestyle="--", color="darkgrey")
 
         plt.tight_layout()
         save_return_show_fig_utils(
@@ -1217,6 +1141,7 @@ class BaseInterpreter:
             return_all=False,
             return_all_list=None,
         )
+
 
 class Category_Interpreter(BaseInterpreter):
     """
@@ -1269,14 +1194,6 @@ class Niche_Interpreter(BaseInterpreter):
         self.prepare_data(mod_type="niche")
 
 
-class Heterologous_Lagged_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-lagged regression using the spatial lag of selected features
-    that are not the regression target feature.
-    """
-
-
 class Ligand_Lagged_Interpreter(BaseInterpreter):
     """
     Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
@@ -1290,9 +1207,10 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
         sender: Union[None, str] = None,
         receiver: Union[None, str] = None,
         *args,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
+
     # Copy over the relevant PySal methods (for ref., TwoSLS, sp_att in utils, TwoSLS_sp/GM_Lag), except modify the call
     # to sp_att in TwoSLS_sp to use expression of a custom ligand of choice rather than self.predy
 
@@ -1304,44 +1222,17 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
     # the sender and another cell type as the receptor
 
 
-class Ligand_Lagged_Connections_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-lagged regression using categorical variables (specifically,
-    the prevalence of categories within spatial neighborhoods) to predict the value of gene expression.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        assert self.group_key is not None, "Categorical labels required for this model."
-
-        # Process the cell type array to use it as the input to the regression model:
-        self.prepare_data(mod_type="ligand_lag_connections")
-
-        # Compute spatial weights matrix given user inputs:
-        self.compute_spatial_weights()
-
-        # Instantiate locations in AnnData object to store results from lag model:
-        for i in ["const"] + self.param_labels + ["W_log_exp"]:
-            self.adata.var[str(i) + "_GM_lag_coeff"] = None
-            self.adata.var[str(i) + "_GM_lag_zstat"] = None
-            self.adata.var[str(i) + "_GM_lag_pval"] = None
-
-
 # -------------------------------------------- Regression Metrics -------------------------------------------- #
 def mae(y_true, y_pred):
     """
     Mean absolute error- in this context, actually log1p mean absolute error
 
     Args:
-        y_true : np.ndarray, shape [n_samples, 1]
-            Regression model output
-        y_pred : np.ndarray, shape [n_samples, 1]
-            Observed values for the dependent variable
+        y_true: Regression model output
+        y_pred: Observed values for the dependent variable
 
     Returns:
-        mae : float
-            Mean absolute error value across all samples
+        mae: Mean absolute error value across all samples
     """
     abs = np.abs(y_true - y_pred)
     mean = np.mean(abs)
@@ -1353,14 +1244,11 @@ def mse(y_true, y_pred):
     Mean squared error- in this context, actually log1p mean squared error
 
     Args:
-        y_true : np.ndarray, shape [n_samples, 1]
-            Regression model output
-        y_pred : np.ndarray, shape [n_samples, 1]
-            Observed values for the dependent variable
+        y_true: Regression model output
+        y_pred: Observed values for the dependent variable
 
     Returns:
-        mse : float
-            Mean squared error value across all samples
+        mse: Mean squared error value across all samples
     """
     se = np.square(y_true - y_pred)
     se = np.mean(se, axis=-1)
@@ -1373,14 +1261,11 @@ def nll(y_true, y_pred):
     Negative log likelihood
 
     Args:
-        y_true : np.ndarray, shape [n_samples, 1]
-            Regression model output
-        y_pred : np.ndarray, shape [n_samples, 1]
-            Observed values for the dependent variable
+        y_true: Regression model output
+        y_pred: Observed values for the dependent variable
 
     Returns:
-        neg_ll : float
-            Negative log likelihood across all samples
+        neg_ll: Negative log likelihood across all samples
     """
     n = len(y_true)
     sigma_hat_2 = (n - 1.0) / (n - 2.0) * np.var(y_true - y_pred.flatten(), ddof=1)
@@ -1393,14 +1278,11 @@ def r_squared(y_true, y_pred):
     Compute custom r squared- in this context, actually log1p R^2
 
     Args:
-        y_true : np.ndarray, shape [n_samples, 1]
-            Regression model output
-        y_pred : np.ndarray, shape [n_samples, 1]
-            Observed values for the dependent variable
+        y_true: Regression model output
+        y_pred: Observed values for the dependent variable
 
     Returns:
-        r2 : float
-            Coefficient of determination
+        r2: Coefficient of determination
     """
     resid = np.sum(np.square(y_true - y_pred))
     total = np.sum(np.square(y_true - np.sum(y_true)))

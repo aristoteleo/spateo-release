@@ -3,7 +3,7 @@ import copy
 import math
 import os
 import warnings
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Collection, Dict, List, Optional, Tuple, Union
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
@@ -16,12 +16,19 @@ import numba
 import numpy as np
 import pandas as pd
 import scipy
+from anndata import AnnData
+from inspect import signature
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from pandas.api.types import is_categorical_dtype
+from scipy.cluster import hierarchy as sch
+from scipy.spatial import distance
 from shapely.wkb import loads
+from sklearn.decomposition import PCA
 from typing_extensions import Literal
 
-from ...configuration import _themes
+from ...configuration import SKM, _themes
+from ...logging import logger_manager as lm
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -1855,3 +1862,311 @@ def deduplicate_kwargs(kwargs_dict, **kwargs):
     kwargs.update(kwargs_dict)
 
     return kwargs
+
+
+# ---------------------------------------------------------------------------------------------------
+# Dendrogram and utilities for dendrogram generation
+# ---------------------------------------------------------------------------------------------------
+def _dendrogram_sig(data: np.ndarray, method: str, **kwargs) -> Tuple[List[int], List[int], List[int], List[int]]:
+    sch_linkage_params = {k for k in signature(sch.linkage).parameters.keys()}
+    sch_dendro_params = {k for k in signature(sch.dendrogram).parameters.keys()}
+    # Extract the kwargs that correspond to each function:
+    link_kwargs = {k: v for k, v in kwargs.items() if k in sch_linkage_params}
+    dendro_kwargs = {k: v for k, v in kwargs.items() if k in sch_dendro_params}
+
+    # Row cluster:
+    row_link = sch.linkage(data, method=method, **link_kwargs)
+    row_dendro = sch.dendrogram(row_link, no_plot=True, **dendro_kwargs)
+    row_order = row_dendro["leaves"]
+
+    # Column cluster:
+    col_link = sch.linkage(np.transpose(data), method=method, **link_kwargs)
+    col_dendro = sch.dendrogram(col_link, no_plot=True, **dendro_kwargs)
+    col_order = col_dendro["leaves"]
+
+    return row_order, col_order, row_link, col_link
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def dendrogram(
+    adata: AnnData,
+    cat_key: str,
+    n_pcs: int = 30,
+    use_rep: Union[None, str] = None,
+    var_names: Union[None, List[str]] = None,
+    cor_method: str = 'pearson',
+    linkage_method: str = 'complete',
+    optimal_ordering: bool = False,
+    key_added: Union[None, str] = None,
+    inplace: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """
+    Computes a hierarchical clustering for the categories given by 'cat_key'.
+
+    By default, the PCA representation is used unless `.X` has less than 50 variables.
+
+    Alternatively, a list of `var_names` (e.g. genes) can be given. If this is the case, will subset to these
+    features and use them for the dendrogram.
+
+    Args:
+        adata: object of class `anndata.AnnData`
+        cat_key: Name of key in .obs specifying group labels for each sample
+        n_pcs: Number of principal components to use in computing hierarchical clustering
+        use_rep: Entry in .obsm to use for computing hierarchical clustering
+        var_names: List of genes to define a subset of 'adata' to compute hierarchical clustering directly on
+            expression values.
+        cor_method: Correlation method to use. Options are 'pearson', 'kendall', and 'spearman'
+        linkage_method: Linkage method to use. See :func:`scipy.cluster.hierarchy.linkage` for more information.
+        optimal_ordering: Same as the optimal_ordering argument of :func:`scipy.cluster.hierarchy.linkage`
+            which reorders the linkage matrix so that the distance between successive leaves is minimal.
+        key_added: Sets key in .uns in which dendrogram information is saved.
+            By default, the dendrogram information is added to `.uns[f'dendrogram_{cat_key}']`.
+        inplace: If `True`, adds dendrogram information to `adata.uns[key_added]`, else this function returns the
+            information.
+
+    Returns:
+        If `inplace=False`, returns dendrogram information, else adata object is updated in place with information
+        stored in `adata.uns[key_added]`.
+    """
+    logger = lm.get_main_logger()
+
+    if not isinstance(cat_key, list):
+        cat_key = [cat_key]
+    # For each category label given in 'cat_key':
+    for cat in cat_key:
+        if cat not in adata.obs_keys():
+            logger.error("'cat_key' has to be a valid observation. "
+                         f"Given value: {cat}, valid observations: {adata.obs_keys()}"
+            )
+        if not is_categorical_dtype(adata.obs[cat_key]):
+            logger.error(
+                "'cat_key' has to be a categorical observation. "
+                f"Given value: {cat}, Column type: {adata.obs[cat].dtype}"
+            )
+
+    if var_names is None:
+        # Choose representation to use for hierarchical clustering:
+        if use_rep is None and n_pcs == 0:
+            use_rep = 'X'
+
+        if use_rep is None:
+            if adata.n_vars > n_pcs:
+                if 'X_pca' in adata.obsm.keys():
+                    if n_pcs is not None and n_pcs > adata.obsm['X_pca'].shape[1]:
+                        logger.error("Existing 'X_pca' does not have enough PCs.")
+                    X = adata.obsm['X_pca'][:, :n_pcs]
+                    logger.info(f'Using \'X_pca\' with n_pcs = {X.shape[1]} to compute dendrogram...')
+                else:
+                    logger.warning("'n_pcs' was provided, but 'X_pca' does not already exist. If you meant to use "
+                                   "gene expression, set 'use_rep' = 'X' or 'n_pcs' = 0. For now, will proceed with "
+                                   "computing PCA representation and using rep 'X_pca'.")
+                    pca = PCA(
+                        n_components=min(n_pcs, adata.X.shape[1] - 1),
+                        svd_solver="arpack",
+                        random_state=0,
+                    )
+                    fit = pca.fit(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else pca.fit(adata.X)
+                    X_pca = fit.transform(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else fit.transform(
+                        adata.X)
+                    adata.obsm["X_pca"] = X_pca
+
+            else:
+                logger.info("Using data matrix X directly")
+                X = adata.X.toarray() if scipy.sparse.issparse(adata.X) else adata.X
+
+        else:
+            if use_rep in adata.obsm.keys() and n_pcs is not None:
+                if n_pcs > adata.obsm[use_rep].shape[1]:
+                    logger.error(
+                        f"{use_rep} does not have enough dimensions. Provide a representation with equal or more "
+                        f"dimensions than 'n_pcs' or lower 'n_pcs'."
+                    )
+                X = adata.obsm[use_rep][:, :n_pcs]
+            elif use_rep in adata.obsm.keys() and n_pcs is None:
+                X = adata.obsm[use_rep]
+            elif use_rep == 'X':
+                X = adata.X.toarray() if scipy.sparse.issparse(adata.X) else adata.X
+            else:
+                logger.error("Did not find {} in `.obsm.keys()`. Needs to be compute first.".format(use_rep))
+
+        rep_df = pd.DataFrame(X)
+
+        categorical = adata.obs[cat_key[0]]
+        # If multiple category keys are given, create new categories by merging their combinations:
+        if len(cat_key) > 1:
+            for cat in cat_key[1:]:
+                categorical = (
+                        categorical.astype(str) + "_" + adata.obs[cat].astype(str)
+                ).astype('category')
+        categorical.name = "_".join(cat_key)
+
+        rep_df.set_index(categorical, inplace=True)
+        categories = rep_df.index.categories
+    else:
+        gene_names = adata.var_names
+        from .dotplot import adata_to_frame
+
+        categories, rep_df = adata_to_frame(adata, gene_names, cat_key)
+
+    # Aggregate values within categories using "mean":
+    mean_df = rep_df.groupby(level=0).mean()
+
+    corr_matrix = mean_df.T.corr(method=cor_method)
+    corr_condensed = distance.squareform(1 - corr_matrix)
+    z_var = sch.linkage(
+        corr_condensed, method=linkage_method, optimal_ordering=optimal_ordering
+    )
+    dendro_info = sch.dendrogram(z_var, labels=list(categories), no_plot=True)
+
+    dat = dict(
+        linkage=z_var,
+        cat_key=cat_key,
+        use_rep=use_rep,
+        cor_method=cor_method,
+        linkage_method=linkage_method,
+        categories_ordered=dendro_info['ivl'],
+        categories_idx_ordered=dendro_info['leaves'],
+        dendrogram_info=dendro_info,
+        correlation_matrix=corr_matrix.values,
+    )
+
+    if inplace:
+        if key_added is None:
+            key_added = f'dendrogram_{"_".join(cat_key)}'
+        logger.info_insert_adata(key_added, adata_attr="uns")
+        adata.uns[key_added] = dat
+    else:
+        return dat
+
+def plot_dendrogram(
+    dendro_ax: matplotlib.axes.Axes,
+    adata: AnnData,
+    cat_key: str,
+    dendrogram_key: Union[None, str] = None,
+    orientation: Literal['top', 'bottom', 'left', 'right'] = 'right',
+    remove_labels: bool = True,
+    ticks: Union[None, Collection[float]] = None
+):
+    """
+    Plots dendrogram on the provided Axes, using the dendrogram information stored in `.uns[dendrogram_key]`
+
+    Args:
+        dendro_ax: object of class `matplotlib.axes.Axes`
+        adata: object of class `anndata.AnnData`
+            Contains dendrogram information as well as the data that will be plotted (and was used to hierarchically
+            cluster)
+        cat_key: Key in .obs containing category labels for all samples
+        dendrogram_key:
+        orientation: Specifies dendrogram placement relative to the plotting window.
+            Options: 'top', 'bottom', 'left', 'right'
+        remove_labels: Removes labels along the side that dendrogram is on, if any
+        ticks: Assumes original ticks come from `scipy.cluster.hierarchy.dendrogram`, but if not can also pass a list
+            of custom tick values.
+    """
+
+    logger = lm.get_main_logger()
+
+    # Get dendrogram key:
+    if not isinstance(dendrogram_key, str):
+        if isinstance(cat_key, str):
+            dendrogram_key = f'dendrogram_{cat_key}'
+        elif isinstance(cat_key, list):
+            dendrogram_key = f'dendrogram_{"_".join(cat_key)}'
+
+    if dendrogram_key not in adata.uns:
+        logger.warning(
+            f"Dendrogram data not found (using key={dendrogram_key}). Running :func `st.pl.dendrogram` with "
+            f"default parameters. For fine tuning it is recommended to run `st.pl.dendrogram` independently."
+        )
+        dendrogram(adata, cat_key, key_added=dendrogram_key)
+
+    if 'dendrogram_info' not in adata.uns[dendrogram_key]:
+        raise ValueError(
+            f"The given dendrogram key ({dendrogram_key!r}) does not contain valid dendrogram information."
+        )
+
+    def translate_pos(pos_list: List[float], new_ticks: List[int], old_ticks: Union[np.ndarray, List[int]]):
+        """
+        Transforms the dendrogram coordinates to a given new position.
+        The xlabel_pos ('pos_list') and orig_ticks ('old_ticks') should be of the same length.
+
+        This is mostly done for the heatmap case, where the position of the dendrogram leaves needs to be adjusted
+        depending on the category size.
+
+        Args:
+            pos_list: List of dendrogram positions that should be translated
+            new_ticks: Sorted list of desired tick positions (e.g. [0, 1, 2, 3])
+            old_ticks: sorted list of original tick positions (e.g. [5, 15, 25, 35])
+            This list is usually the default position used by `scipy.cluster.hierarchy.dendrogram`.
+
+        Returns:
+             new_xs: Translated list of positions
+        """
+        if not isinstance(old_ticks, list):
+            old_ticks = old_ticks.tolist()
+        new_xs = []
+        for x_val in pos_list:
+            if x_val in old_ticks:
+                new_x_val = new_ticks[old_ticks.index(x_val)]
+            else:
+                # find smaller and bigger indices
+                idx_next = np.searchsorted(old_ticks, x_val, side="left")
+                idx_prev = idx_next - 1
+                old_min = old_ticks[idx_prev]
+                old_max = old_ticks[idx_next]
+                new_min = new_ticks[idx_prev]
+                new_max = new_ticks[idx_next]
+                new_x_val = ((x_val - old_min) / (old_max - old_min)) * (
+                        new_max - new_min
+                ) + new_min
+            new_xs.append(new_x_val)
+
+        return new_xs
+
+    dendro_info = adata.uns[dendrogram_key]['dendrogram_info']
+    leaves = dendro_info["ivl"]
+    icoord = np.array(dendro_info['icoord'])
+    dcoord = np.array(dendro_info['dcoord'])
+
+    orig_ticks = np.arange(5, len(leaves) * 10 + 5, 10).astype(float)
+    # check that ticks has the same length as orig_ticks
+    if ticks is not None and len(orig_ticks) != len(ticks):
+        logger.warning("'ticks' argument does not have the same size as orig_ticks. The argument will be ignored.")
+        ticks = None
+
+    for xs, ys in zip(icoord, dcoord):
+        if ticks is not None:
+            xs = translate_pos(xs, ticks, orig_ticks)
+        if orientation in ['right', 'left']:
+            xs, ys = ys, xs
+        dendro_ax.plot(xs, ys, color='#555555')
+
+    dendro_ax.tick_params(bottom=False, top=False, left=False, right=False)
+    ticks = ticks if ticks is not None else orig_ticks
+    if orientation in ['right', 'left']:
+        dendro_ax.set_yticks(ticks)
+        dendro_ax.set_yticklabels(leaves, fontsize='small', rotation=0)
+        dendro_ax.tick_params(labelbottom=False, labeltop=False)
+        if orientation == 'left':
+            xmin, xmax = dendro_ax.get_xlim()
+            dendro_ax.set_xlim(xmax, xmin)
+            dendro_ax.tick_params(labelleft=False, labelright=True)
+    else:
+        dendro_ax.set_xticks(ticks)
+        dendro_ax.set_xticklabels(leaves, fontsize='small', rotation=90)
+        dendro_ax.tick_params(labelleft=False, labelright=False)
+        if orientation == 'bottom':
+            ymin, ymax = dendro_ax.get_ylim()
+            dendro_ax.set_ylim(ymax, ymin)
+            dendro_ax.tick_params(labeltop=True, labelbottom=False)
+
+    if remove_labels:
+        dendro_ax.tick_params(
+            labelbottom=False, labeltop=False, labelleft=False, labelright=False
+        )
+
+    dendro_ax.grid(False)
+
+    dendro_ax.spines['right'].set_visible(False)
+    dendro_ax.spines['top'].set_visible(False)
+    dendro_ax.spines['left'].set_visible(False)
+    dendro_ax.spines['bottom'].set_visible(False)

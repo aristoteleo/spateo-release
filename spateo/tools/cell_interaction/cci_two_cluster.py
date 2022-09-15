@@ -16,9 +16,11 @@ from anndata import AnnData
 from scipy import sparse
 from scipy.sparse import issparse
 from scipy.stats import gmean, pearsonr
+from tqdm import tqdm as tqdm
 from typing_extensions import Literal
 
 from ...configuration import SKM
+from ...logging import logger_manager as lm
 from .cci_utils import fdr_correct
 
 
@@ -192,7 +194,7 @@ def find_cci_two_group(
 
     # permutation test
     per_data = np.zeros((lr_network.shape[0], num))
-    for i in range(num):
+    for i in tqdm(range(num)):
         random.seed(i)
         cell_id = random.sample(adata.obs.index.tolist(), k=cell_pair.shape[0] * 2)
         per_sender_id = cell_id[0 : cell_pair.shape[0]]
@@ -225,3 +227,73 @@ def find_cci_two_group(
 
     res = {"cell_pair": cell_pair, "lr_pair": lr_network}
     return res
+
+
+# Wrapper for plotting:
+def prepare_cci_df(
+        cci_df: pd.DataFrame,
+        means_col: str,
+        pval_col: str,
+        lr_pair_col: str,
+        sr_pair_col: str
+):
+    """
+    Given a dataframe generated from the output of :func `cci_two_cluster`, prepare for visualization by heatmap by
+    splitting into two dataframes, corresponding to the mean cell type-cell type L:R product and probability values
+    from the permutation test.
+
+    Args:
+        cci_df: CCI dataframe with columns for: ligand name, receptor name, L:R product, p value, and sender-receiver
+            cell types
+        means_col: Label for the column corresponding to the mean product of L:R expression between two cell types
+        pval_col: Label for the column corresponding to the p-value of the interaction
+        lr_pair_col: Label for the column corresponding to the ligand-receptor pair in format "{ligand}-{receptor}"
+        sr_pair_col: Label for the column corresponding to the sending-receiving cell type pair in format "{
+        sender}-{receiver}"
+
+    Returns:
+        dict: If 'adata' is None. Keys: 'means', 'pvalues', values: mean cell type-cell type L:R product, probability
+            values, respectively
+
+    Example:
+        res = find_cci_two_group(adata, ...)
+        # The df to save can be found under "lr_pair":
+        res["lr_pair"].to_csv(...)
+
+        adata, dict = prepare_cci_df(res["lr_pair"])
+    """
+
+    logger = lm.get_main_logger()
+
+    # Dictionary to store mean and p-value dataframes:
+    dict = {}
+
+    # Split sender and receiver into separate columns:
+    cci_df[["sender", "receiver"]] = cci_df[sr_pair_col].str.split("-", expand=True)
+    all_lr_products, all_lr_pvals = {}, {}
+    # Split dataframe based on ligand-receptor pair, set "sender" and "receiver" as multiindex, keep only the means
+    # or p-values to get series for each LR interaction:
+    cci_grouped = cci_df.groupby(lr_pair_col)
+    for group in cci_grouped.groups.keys():
+        lig, rec = group.split("-")
+        df_group = cci_grouped.get_group(group)
+        df_group.set_index(["sender", "receiver"])
+        df_group = df_group.transpose()
+        # Series to row dataframe for means and p-values:
+        prod_df_group = df_group.loc[means_col].to_frame().transpose()
+        prod_df_group[["source", "target"]] = [lig, rec]
+        prod_df_group.set_index(["source", "target"])
+        pval_df_group = df_group.loc[pval_col].to_frame().transpose()
+        pval_df_group[["source", "target"]] = [lig, rec]
+        pval_df_group.set_index(["source", "target"])
+
+        all_lr_products[group] = prod_df_group
+        all_lr_pvals[group] = pval_df_group
+
+    means = pd.concat(all_lr_products.values())
+    pvals = pd.concat(all_lr_pvals.values())
+
+    dict["means"] = means
+    dict["pvalues"] = pvals
+
+    return dict

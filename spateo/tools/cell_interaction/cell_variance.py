@@ -19,12 +19,12 @@ from ...plotting.static.utils import save_return_show_fig_utils
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def compute_variance_decomposition(
-        adata: AnnData,
-        spatial_label_id: str,
-        celltype_label_id: str,
-        visualize: bool = False,
-        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
-        save_kwargs: Optional[dict] = {}
+    adata: AnnData,
+    spatial_label_id: str,
+    celltype_label_id: str,
+    visualize: bool = False,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[dict] = {},
 ):
     """
     Computes and then optionally visualizes the variance decomposition for an AnnData object.
@@ -133,7 +133,7 @@ def plot_variance_decomposition(
     cmap: str = "Blues_r",
     multiindex: bool = False,
     save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
-    save_kwargs: Optional[dict] = {}
+    save_kwargs: Optional[dict] = {},
 ):
     """
     Visualization of the parts-wise intra-cell type variation, cell type-independent gene variation to the total
@@ -176,7 +176,7 @@ def plot_variance_decomposition(
         y=["Intra-cell type variance", "Inter-cell type variance", "Gene variance"],
         kind="bar",
         stacked=True,
-        edgecolor='black',
+        edgecolor="black",
         width=0.5,
         figsize=figsize,
         ax=ax,
@@ -184,6 +184,7 @@ def plot_variance_decomposition(
     )
 
     if multiindex:
+
         def process_index(k):
             return tuple(k.split("_"))
 

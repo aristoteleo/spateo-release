@@ -30,6 +30,7 @@ from .utils import (
     _get_array_values,
     check_colornorm,
     deduplicate_kwargs,
+    plot_dendrogram,
     save_return_show_fig_utils,
 )
 
@@ -49,19 +50,14 @@ def adata_to_frame(
     row names are categories defined by groups and column names correspond to variable names.
 
     Args:
-        adata : class `anndata.AnnData`
-        var_names : sequence of str
-            Should be a subset of adata.var_names
-        cat_key : str or sequence of str
-            The key(s) in .obs of the grouping to consider. Should be a categorical observation; if not,
+        adata: class `anndata.AnnData`
+        var_names: Should be a subset of adata.var_names
+        cat_key: The key(s) in .obs of the grouping to consider. Should be a categorical observation; if not,
             will be subdivided into 'num_categories'.
-        num_categories : int, default 7
-            Only used if groupby observation is not categorical. This value determines the number of groups into
+        num_categories: Only used if groupby observation is not categorical. This value determines the number of groups into
             which the groupby observation should be subdivided.
-        layer : optional str
-            Key in .layers specifying layer to use. If not given, will use .X.
-        gene_symbols_key: optional str
-            Key in .var containing gene symbols
+        layer: Key in .layers specifying layer to use. If not given, will use .X.
+        gene_symbols_key: Key in .var containing gene symbols
     """
 
     logger = lm.get_main_logger()
@@ -217,28 +213,19 @@ def make_grid_spec(
     Initialize grid layout to place subplots within a figure environment
 
     Args:
-        ax_or_figsize : tuple of form (int, int) or `matplotlib.axes.Axes` object
-            Either already-existing ax object or the width and height to create a figure window
-        nrows : int
-            Number of rows in the grid
-        ncols : int
-            Number of columns in the grid
-        wspace : optional float
-            The amount of width reserved for space between subplots, expressed as a fraction of the average axis width
-        hspace : optional float
-            The amount of height reserved for space between subplots, expressed as a fraction of the average axis height
-        width_ratios : optional sequence of floats
-            Defines the relative widths of the columns. Each column gets a relative width of width_ratios[i] / sum(
+        ax_or_figsize: Either already-existing ax object or the width and height to create a figure window
+        nrows: Number of rows in the grid
+        ncols: Number of columns in the grid
+        wspace: The amount of width reserved for space between subplots, expressed as a fraction of the average axis width
+        hspace: The amount of height reserved for space between subplots, expressed as a fraction of the average axis height
+        width_ratios: Defines the relative widths of the columns. Each column gets a relative width of width_ratios[i] / sum(
             width_ratios). If not given, all columns will have the same width.
-        height_ratios : optional sequence of floats
-            Defines the relative heights of the rows. Each row gets a relative width of height_ratios[i] / sum(
+        height_ratios: Defines the relative heights of the rows. Each row gets a relative width of height_ratios[i] / sum(
             height_ratios). If not given, all columns will have the same width.
 
     Returns:
-        fig : `matplotlib.figure.Figure` object
-            Instantiated Figure object
-        gs : `matplotlib.gridspec.GridSpec` object
-            Instantiated gridspec object
+        fig: Instantiated Figure object
+        gs: Instantiated gridspec object
     """
     kw = dict(
         wspace=wspace,
@@ -269,62 +256,42 @@ class Dotplot:
     value.
 
     Args:
-        adata : class `anndata.AnnData`
-        var_names : sequence of str
-            Should be a subset of adata.var_names
-        cat_key : str or sequence of str
-            The key(s) in .obs of the grouping to consider. Should be a categorical observation; if not,
+        adata: class `anndata.AnnData`
+        var_names: Should be a subset of adata.var_names
+        cat_key: The key(s) in .obs of the grouping to consider. Should be a categorical observation; if not,
             will be subdivided into 'num_categories'.
-        num_categories : int, default 7
-            Only used if groupby observation is not categorical. This value determines the number of groups into
-            which the groupby observation should be subdivided.
-        categories_order : sequence of str
-            Sets order of categories given by 'cat_key' along the plotting axis
-        title : optional str
-            Sets title for figure window
-        figsize: None or tuple of form (float, float) (default: None)
-            The width and height of a figure
-        gene_symbols_key: optional str
-            Key in .var containing gene symbols
-        var_group_positions : optional sequence of tuples of form (int, int)
-            Each item in the list should contain the start and end position that the bracket should cover.
-            Eg. [(0, 4), (5, 8)] means that there are two brackets, one for the var_names in positions 0-4 and other for
-            positions 5-8
-        var_group_labels : optional sequence of str
-            List of group labels for the variable names (e.g. can group var_names in positions 0-4 as being "group A")
-        var_group_rotation : optional float
-            Rotation in degrees of the variable name labels. If not given, small labels (<4 characters) are not
-            rotated, but otherwise labels are rotated 90 degrees.
-        layer : optional str
-            Key in .layers specifying layer to use. If not given, will use .X.
-        expression_cutoff : float, default 0.0
-            Used for binarizing feature expression- feature is considered to be expressed only if the expression
-            value is greater than this threshold
-        mean_only_expressed : bool, default False
-            If True, gene expression is averaged only over the cells expressing the given features
-        standard_scale : 'None', 'val', or 'group'
-            Whether or not to standardize that dimension between 0 and 1, meaning for each variable or group,
-            subtract the minimum and divide each by its maximum. 'val' or 'group' is used to specify whether this
+        num_categories: Only used if groupby observation is not categorical. This value determines the number of
+            groups into which the groupby observation should be subdivided.
+        categories_order: Sets order of categories given by 'cat_key' along the plotting axis
+        title: Sets title for figure window
+        figsize: The width and height of a figure
+        gene_symbols_key: Key in .var containing gene symbols
+        var_group_positions: Each item in the list should contain the start and end position that the bracket
+            should cover. Eg. [(0, 4), (5, 8)] means that there are two brackets, one for the var_names in positions 0-4
+            and other for positions 5-8.
+        var_group_labels:  List of group labels for the variable names (e.g. can group var_names in positions 0-4
+            as being "group A")
+        var_group_rotation: Rotation in degrees of the variable name labels. If not given, small labels (<4
+            characters) are not rotated, but otherwise labels are rotated 90 degrees.
+        layer: Key in .layers specifying layer to use. If not given, will use .X.
+        expression_cutoff: Used for binarizing feature expression- feature is considered to be expressed only if
+            the expression value is greater than this threshold
+        mean_only_expressed: If True, gene expression is averaged only over the cells expressing the given features
+        standard_scale: Whether or not to standardize that dimension between 0 and 1, meaning for each variable or
+            group, subtract the minimum and divide each by its maximum. 'val' or 'group' is used to specify whether this
             should be done over variables or groups.
-        dot_color_df : optional pd.DataFrame
-            Pre-prepared dataframe with features as indices, categories as columns, and indices corresponding to
-            color intensities
-        dot_size_df : optional pd.DataFrame
-            Pre-prepared dataframe with features as indices, categories as columns, and indices corresponding to
-            dot sizes
-        ax : optional `matplotlib.Axes` object
-            Can be used to provide pre-existing plotting axis
-        vmin : optional float
-            The data value that defines 0.0 in the normalization. Defaults to the min value of the dataset.
-        vmax : optional float
-            The data value that defines 1.0 in the normalization. Defaults to the the max value of the dataset.
-        vcenter : optional float
-            The data value that defines 0.5 in the normalization
-        norm : optional `matplotlib.colors.Normalize` object
-            Optional already-initialized normalizing object that scales data, typically into the interval [0, 1],
+        dot_color_df: Pre-prepared dataframe with features as indices, categories as columns, and indices
+            corresponding to color intensities
+        dot_size_df: Pre-prepared dataframe with features as indices, categories as columns, and indices
+            corresponding to dot sizes
+        ax: Can be used to provide pre-existing plotting axis
+        vmin: The data value that defines 0.0 in the normalization. Defaults to the min value of the dataset.
+        vmax: The data value that defines 1.0 in the normalization. Defaults to the the max value of the dataset.
+        vcenter: The data value that defines 0.5 in the normalization
+        norm: Optional already-initialized normalizing object that scales data, typically into the interval [0, 1],
             for the purposes of mapping to color intensities for plotting. Do not pass both 'norm' and
             'vmin'/'vmax', etc.
-        **kwargs :
+        **kwargs:
             Additional arguments passed to `matplotlib.pyplot.scatter()`
     """
 
@@ -389,6 +356,8 @@ class Dotplot:
         set_pub_style()
 
         self.logger = lm.get_main_logger()
+        self.adata = adata
+        self.cat_key = [cat_key] if isinstance(cat_key, str) else cat_key
         self.kwargs = kwargs
 
         self.var_names = var_names
@@ -522,7 +491,7 @@ class Dotplot:
         self.categories_order = categories_order
         self.var_names_idx_order = None
 
-        # For creating extra plots (NOT YET IMPLEMENTED):
+        # For creating extra plots:
         self.group_extra_size = 0
         self.plot_group_extra = None
         # Instantiate plotting variables- ax_dict will contain a dictionary of axes used in the plot:
@@ -545,6 +514,51 @@ class Dotplot:
         self.are_axes_swapped = True
         return self
 
+    def add_dendrogram(self, show: bool = True, dendrogram_key: Union[None, str] = None, size: float = 0.8):
+        """
+        Show dendrogram based on the hierarchical clustering between the `cat_key` categories. Categories are
+        reordered to match the dendrogram order.
+
+        The dendrogram information is computed using :func:`utils.dendrogram` within Spateo.
+        If `utils.dendrogram` has not been called previously the function is called with default parameters here.
+
+        The dendrogram is by default shown on the right side of the plot or on top if the axes are swapped.
+
+        Args:
+            show: Boolean to turn on (True) or off (False) 'add_dendrogram'
+            dendrogram_key: Needed if :func `utils.dendrogram` saved the dendrogram using a key different than the
+                default name.
+            size: Size of the dendrogram. Corresponds to width when dendrogram shown on the right of the plot,
+            or height when shown on top. The unit is the same as in matplotlib (inches).
+        """
+        if not show:
+            self.plot_group_extra = None
+            return self
+
+        if self.cat_key is None or len(self.categories) <= 2:
+            # dendrogram can only be computed  between groupby categories
+            self.logger.warning(
+                "Too few categories for dendrogram. Dendrogram is added only when the number of categories to plot > 2"
+            )
+            return self
+
+        self.group_extra_size = size
+
+        # To correctly plot dataframe, categories need to be reordered according to the dendrogram ordering:
+        self.reorder_categories_after_dendrogram(dendrogram_key)
+
+        # So that dendrogram "spines" are aligned with dotplot labels:
+        dendro_ticks = np.arange(len(self.categories)) + 0.5
+
+        self.group_extra_size = size
+        self.plot_group_extra = {
+            'kind': 'dendrogram',
+            'width': size,
+            'dendrogram_key': dendrogram_key,
+            'dendrogram_ticks': dendro_ticks,
+        }
+        return self
+
     # To modify the style of the plot:
     def style(
         self,
@@ -565,39 +579,33 @@ class Dotplot:
         Modifies visual aspects of the dot plot
 
         Args:
-        cmap : str
-            Name of Matplotlib color map to use
-        color_on : str, default 'dot'
-            Options are 'dot' or 'square'. By default the colormap is applied to the color of the dot, but 'square'
-            changes this to be applied to a square region behind the dot, in which case the dot becomes transparent
-            with only the edge of the dot shown.
-        dot_max : optional float
+        cmap: Name of Matplotlib color map to use
+        color_on: Options are 'dot' or 'square'. By default the colormap is applied to the color of the dot,
+            but 'square' changes this to be applied to a square region behind the dot, in which case the dot becomes
+            transparent with only the edge of the dot shown.
+        dot_max: optional float
             If none, the maximum dot size is set to the maximum fraction value found (e.g. 0.6). If given,
             the value should be a number between 0 and 1. All fractions larger than dot_max are clipped to this value.
-        dot_min : optional float
+        dot_min: optional float
             If none, the minimum dot size is set to 0. If given, the value should be a number between 0 and 1.
             All fractions smaller than dot_min are clipped to this value.
-        smallest_dot : optional float
+        smallest_dot: optional float
             If none, the smallest dot has size 0. All expression fractions with `dot_min` are plotted with this size.
-        largest_dot : optional float
+        largest_dot: optional float
             If none, the largest dot has size 200. All expression fractions with `dot_max` are plotted with this size.
-        dot_edge_color : str, default 'black'
+        dot_edge_color: str, default 'black'
             Only used if 'color_on' is 'square'. Sets dot edge color
-        dot_edge_lw : float, default 0.2
+        dot_edge_lw: float, default 0.2
             Only used if 'color_on' is 'square'. Sets dot edge line width
-        size_exponent : float, default 1.5
-            Dot size is computed as:
+        size_exponent: Dot size is computed as:
                 fraction  ** size exponent
             and is afterwards scaled to match the 'smallest_dot' and 'largest_dot' size parameters.
             Using a different size exponent changes the relative sizes of the dots to each other.
-        grid : bool, default False
-            Set to true to show grid lines. By default grid lines are not shown. Further configuration of the grid
+        grid: Set to true to show grid lines. By default grid lines are not shown. Further configuration of the grid
             lines can be achieved directly on the returned ax.
-        x_padding : float, default 0.8
-            Space between the plot left/right borders and the dots center. A unit is the distance between the x
+        x_padding: Space between the plot left/right borders and the dots center. A unit is the distance between the x
             ticks. Only applied when 'color_on' = 'dot'
-        y_padding : float, default 1.0
-            Space between the plot top/bottom borders and the dots center. A unit is the distance between the x
+        y_padding: Space between the plot top/bottom borders and the dots center. A unit is the distance between the x
             ticks. Only applied when 'color_on' = 'dot'
 
         Returns:
@@ -1123,6 +1131,105 @@ class Dotplot:
 
         return normalize, dot_min, dot_max
 
+    def reorder_categories_after_dendrogram(self, dendrogram_key):
+        """
+        Reorders categorical observations along plot axis based on dendrogram results.
+
+        The function checks if a dendrogram has already been precomputed. If not, `utils.dendrogram` is run with
+        default parameters.
+
+        The results found in `.uns[dendrogram_key]` are used to reorder `var_group_labels` and `var_group_positions`.
+        """
+
+        def _format_first_three_categories(_categories):
+            """used to clean up warning message"""
+            _categories = list(_categories)
+            if len(_categories) > 3:
+                _categories = _categories[:3] + ['etc.']
+            return ', '.join(_categories)
+
+        # Get dendrogram key:
+        if not isinstance(dendrogram_key, str):
+            if isinstance(self.cat_key, str):
+                dendrogram_key = f'dendrogram_{self.cat_key}'
+            elif isinstance(self.cat_key, list):
+                dendrogram_key = f'dendrogram_{"_".join(self.cat_key)}'
+
+        if dendrogram_key not in self.adata.uns:
+            from .utils import dendrogram
+
+            self.logger.warning(
+                f"Dendrogram data not found (using key={dendrogram_key}). Running :func `st.pl.dendrogram` with "
+                f"default parameters. For fine tuning it is recommended to run `st.pl.dendrogram` independently."
+            )
+            dendrogram(self.adata, self.cat_key, key_added=dendrogram_key)
+
+        if 'dendrogram_info' not in self.adata.uns[dendrogram_key]:
+            raise ValueError(
+                f"The given dendrogram key ({dendrogram_key!r}) does not contain valid dendrogram information."
+            )
+
+        dendro_info = self.adata.uns[dendrogram_key]
+        if self.cat_key != dendro_info['cat_key']:
+            raise ValueError(
+                "Incompatible observations. The precomputed dendrogram contains information for the "
+                f"observation: '{self.cat_key}' while the plot is made for the observation: '{dendro_info['cat_key']}. "
+                "Please run :func `st.pl.dendrogram` using the right observation.'"
+            )
+
+        # Category order:
+        categories_idx_ordered = dendro_info['categories_idx_ordered']
+        categories_ordered = dendro_info['categories_ordered']
+
+        if len(self.categories) != len(categories_idx_ordered):
+            raise ValueError(
+                f"Incompatible observations. Dendrogram data has {len(categories_idx_ordered)} categories but current "
+                f"groupby observation {self.cat_key} contains {len(self.categories)} categories. Most likely the "
+                "underlying groupby observation changed after the initial computation of :func `st.pl.dendrogram`. "
+                "Please run `st.pl.dendrogram` again.'"
+            )
+
+        # Reorder var_groups (if any)
+        if self.var_names is not None:
+            var_names_idx_ordered = list(range(len(self.var_names)))
+
+        if self.has_var_groups:
+            if set(self.var_group_labels) == set(self.categories):
+                positions_ordered = []
+                labels_ordered = []
+                position_start = 0
+                var_names_idx_ordered = []
+                for cat_name in categories_ordered:
+                    idx = self.var_group_labels.index(cat_name)
+                    position = self.var_group_positions[idx]
+                    _var_names = self.var_names[position[0]: position[1] + 1]
+                    var_names_idx_ordered.extend(range(position[0], position[1] + 1))
+                    positions_ordered.append(
+                        (position_start, position_start + len(_var_names) - 1)
+                    )
+                    position_start += len(_var_names)
+                    labels_ordered.append(self.var_group_labels[idx])
+                self.var_group_labels = labels_ordered
+                self.var_group_positions = positions_ordered
+            else:
+                self.logger.warning(
+                    "Groups are not reordered because the `groupby` categories and the `var_group_labels` are "
+                    f"different.\n"
+                    f"categories: {_format_first_three_categories(self.categories)}\n"
+                    "var_group_labels: "
+                    f"{_format_first_three_categories(self.var_group_labels)}"
+                )
+
+        if var_names_idx_ordered is not None:
+            var_names_ordered = [self.var_names[x] for x in var_names_idx_ordered]
+        else:
+            var_names_ordered = None
+
+        self.categories_idx_ordered = categories_idx_ordered
+        self.categories_order = dendro_info['categories_ordered']
+        self.var_names_idx_order = var_names_idx_ordered
+        self.var_names_ordered = var_names_ordered
+
     @staticmethod
     def _plot_var_groups_brackets(
         gene_groups_ax: mpl.axes.Axes,
@@ -1365,7 +1472,18 @@ class Dotplot:
                 gene_groups_ax = self.fig.add_subplot(mainplot_gs[2, 1], sharey=main_ax)
                 var_group_orientation = "right"
 
-        # PLACEHOLDER FOR EXTRA PLOTS...
+        if self.plot_group_extra is not None:
+            if self.plot_group_extra['kind'] == 'dendrogram':
+                plot_dendrogram(
+                    group_extra_ax,
+                    self.adata,
+                    self.cat_key,
+                    dendrogram_key=self.plot_group_extra['dendrogram_key'],
+                    ticks=self.plot_group_extra['dendrogram_ticks'],
+                    orientation=group_extra_orientation
+                )
+
+            return_ax_dict['group_extra_ax'] = group_extra_ax
 
         # Plot category group brackets atop the main ax (if given):
         if self.has_var_groups:
@@ -1551,103 +1669,69 @@ def dotplot(
     the dotplot assumes that all data belongs to a single category.
 
     Args:
-        adata : class `anndata.AnnData`
-        var_names : sequence of str
-            Should be a subset of adata.var_names
-        cat_key : str or sequence of str
-            The key(s) in .obs of the grouping to consider. Should be a categorical observation; if not,
+        adata: object of class `anndata.AnnData`
+        var_names: Should be a subset of adata.var_names
+        cat_key: The key(s) in .obs of the grouping to consider. Should be a categorical observation; if not,
             will be subdivided into 'num_categories'.
-        num_categories : int, default 7
-            Only used if groupby observation is not categorical. This value determines the number of groups into
-            which the groupby observation should be subdivided.
-        cell_cell_dp : bool, default False
-            Set True to initialize specialized cell-cell dotplot instead of gene expression dotplot
-        delta : optional float
-            Only used if 'cell_cell_dp' is True- distance between the largest value to consider and the smallest
+        num_categories: Only used if groupby observation is not categorical. This value determines the number of
+            groups into which the groupby observation should be subdivided.
+        cell_cell_dp: Set True to initialize specialized cell-cell dotplot instead of gene expression dotplot
+        delta: Only used if 'cell_cell_dp' is True- distance between the largest value to consider and the smallest
             value to consider (see 'minn' parameter below)
-        minn : optional float
-            Only used if 'cell_cell_dp' is True- for the dot size legend, sets the value corresponding to the
+        minn: Only used if 'cell_cell_dp' is True- for the dot size legend, sets the value corresponding to the
             smallest dot on the legend
-        alpha : optional float
-            Only used if 'cell_cell_dp' is True- significance threshold. If given, all elements w/ p-values <=
+        alpha: Only used if 'cell_cell_dp' is True- significance threshold. If given, all elements w/ p-values <=
             'alpha' will be marked by rings instead of dots.
-        prescale_adata : bool, default False
-            Set True to indicate that AnnData object should be scaled- if so, will use 'delta' and 'minn' to do so.
-            If False, will proceed as though adata has already been processed as needed.
-        expression_cutoff : float, default 0.0
-            Used for binarizing feature expression- feature is considered to be expressed only if the expression
-            value is greater than this threshold
-        mean_only_expressed : bool, default False
-            If True, gene expression is averaged only over the cells expressing the given features
-        cmap : str
-            Name of Matplotlib color map to use
-        dot_max : optional float
-            If none, the maximum dot size is set to the maximum fraction value found (e.g. 0.6). If given,
+        prescale_adata: Set True to indicate that AnnData object should be scaled- if so, will use 'delta' and
+            'minn' to do so. If False, will proceed as though adata has already been processed as needed.
+        expression_cutoff: Used for binarizing feature expression- feature is considered to be expressed only if
+            the expression value is greater than this threshold
+        mean_only_expressed: If True, gene expression is averaged only over the cells expressing the given features
+        cmap: Name of Matplotlib color map to use
+        dot_max: If none, the maximum dot size is set to the maximum fraction value found (e.g. 0.6). If given,
             the value should be a number between 0 and 1. All fractions larger than dot_max are clipped to this value.
-        dot_min : optional float
-            If none, the minimum dot size is set to 0. If given, the value should be a number between 0 and 1.
+        dot_min: If none, the minimum dot size is set to 0. If given, the value should be a number between 0 and 1.
             All fractions smaller than dot_min are clipped to this value.
-        standard_scale : 'None', 'val', or 'group'
-            Whether or not to standardize that dimension between 0 and 1, meaning for each variable or group,
-            subtract the minimum and divide each by its maximum. 'val' or 'group' is used to specify whether this
+        standard_scale: Whether or not to standardize that dimension between 0 and 1, meaning for each variable or
+            group, subtract the minimum and divide each by its maximum. 'val' or 'group' is used to specify whether this
             should be done over variables or groups.
-        smallest_dot : optional float
-            If none, the smallest dot has size 0. All expression fractions with `dot_min` are plotted with this size.
-        title : optional str
-            Title for the entire plot
-        colorbar_title : optional str
-            Title for the color legend. If None will use generic default title
-        size_title : optional str
-            Title for the dot size legend. If None will use generic default title
-        figsize : optional tuple of form (int, int)
-            Sets width and height of figure window
-        dendrogram :
-        gene_symbols_key: optional str
-            Key in .var containing gene symbols
-        var_group_positions : optional sequence of tuples of form (int, int)
-            Each item in the list should contain the start and end position that the bracket should cover.
-            Eg. [(0, 4), (5, 8)] means that there are two brackets, one for the var_names in positions 0-4 and other for
-            positions 5-8
-        var_group_labels : optional sequence of str
-            List of group labels for the variable names (e.g. can group var_names in positions 0-4 as being "group A")
-        var_group_rotation : optional float
-            Rotation in degrees of the variable name labels. If not given, small labels (<4 characters) are not
-            rotated, but otherwise labels are rotated 90 degrees.
-        layer : optional str
-            Key in .layers specifying layer to use. If not given, will use .X.
-        swap_axes : bool, default False
-            Set True to switch what is plotted on the x- and y-axes
-        dot_color_df : optional pd.DataFrame
-            Pre-prepared dataframe with features as indices, categories as columns, and indices corresponding to
-            color intensities
-        save_show_or_return : str
-            Options: "save", "show", "return", "both", "all"
+        smallest_dot: If none, the smallest dot has size 0. All expression fractions with `dot_min` are plotted with this size.
+        title: Title for the entire plot
+        colorbar_title: Title for the color legend. If None will use generic default title
+        size_title: Title for the dot size legend. If None will use generic default title
+        figsize: Sets width and height of figure window
+        dendrogram: If True, adds dendrogram to plot. Will do the same thing if string is given here,
+            but will recompute dendrogram and save using this argument to set key in .uns.
+        gene_symbols_key: Key in .var containing gene symbols
+        var_group_positions:  Each item in the list should contain the start and end position that the bracket
+            should cover. Eg. [(0, 4), (5, 8)] means that there are two brackets, one for the var_names in positions
+            0-4 and other for positions 5-8
+        var_group_labels: List of group labels for the variable names (e.g. can group var_names in positions 0-4 as
+            being "group A")
+        var_group_rotation: Rotation in degrees of the variable name labels. If not given, small labels (<4
+            characters) are not rotated, but otherwise labels are rotated 90 degrees.
+        layer: Key in .layers specifying layer to use. If not given, will use .X.
+        swap_axes: Set True to switch what is plotted on the x- and y-axes
+        dot_color_df: Pre-prepared dataframe with features as indices, categories as columns, and indices
+            corresponding to color intensities
+        save_show_or_return: Options: "save", "show", "return", "both", "all"
                 - "both" for save and show
-        save_kwargs: dict
-            A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
-            save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf',
+        save_kwargs:  A dictionary that will passed to the save_fig function. By default it is an empty dictionary
+            and the save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf',
             "transparent": True, "close": True, "verbose": True} as its parameters. But to change any of these
             parameters, this dictionary can be used to do so.
-        ax : `matplotlib.axes.Axes' object
-            Pre-initialized axis object to plot on
-        vmin : optional float
-            The data value that defines 0.0 in the normalization. Defaults to the min value of the dataset.
-        vmax : optional float
-            The data value that defines 1.0 in the normalization. Defaults to the the max value of the dataset.
-        vcenter : optional float
-            The data value that defines 0.5 in the normalization
-        norm : optional `matplotlib.colors.Normalize` object
-            Optional already-initialized normalizing object that scales data, typically into the interval [0, 1],
+        ax: Pre-initialized axis object to plot on
+        vmin: The data value that defines 0.0 in the normalization. Defaults to the min value of the dataset.
+        vmax: The data value that defines 1.0 in the normalization. Defaults to the the max value of the dataset.
+        vcenter: The data value that defines 0.5 in the normalization
+        norm: Optional already-initialized normalizing object that scales data, typically into the interval [0, 1],
             for the purposes of mapping to color intensities for plotting. Do not pass both 'norm' and
             'vmin'/'vmax', etc.
-        kwargs :
-            Additional keyword arguments passed to :func:`matplotlib.pyplot.scatter`
+        kwargs: Additional keyword arguments passed to :func:`matplotlib.pyplot.scatter`
 
     Returns:
-        fig : `matplotlib.figure.Figure` object
-            Instantiated Figure object- only if 'return' is True
-        axes : `matplotlib.axes.Axes` object
-            Instantiated Axes object- only if 'return' is True
+        fig: Instantiated Figure object- only if 'return' is True
+        axes: Instantiated Axes object- only if 'return' is True
     """
     if cell_cell_dp:
         dp = CCDotplot(
@@ -1702,6 +1786,11 @@ def dotplot(
             norm=norm,
             **kwargs,
         )
+
+    if dendrogram or isinstance(dendrogram, str):
+        dp.add_dendrogram(dendrogram_key=dendrogram)
+    if swap_axes:
+        dp.swap_axes()
 
     dp = dp.style(
         cmap=cmap,

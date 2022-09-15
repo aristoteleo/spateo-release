@@ -21,11 +21,11 @@ def set_endog(
     y: np.ndarray,
     x: np.ndarray,
     lag_idx: List[int],
-    w: 'libpysal.weights.W',
+    w: "libpysal.weights.W",
     yend: Union[None, np.ndarray] = None,
     q: Union[None, np.ndarray] = None,
     w_lags: int = 1,
-    lag_q: bool = False
+    lag_q: bool = False,
 ):
     """
     Computes spatial lag for the selected independent variables and set them as exogenous variables.
@@ -118,19 +118,20 @@ class LR_BaseGM_Lag(TSLS.BaseTSLS):
         sig2n_k : boolean
             If True, then use n-k to estimate sigma^2. If False, use n.
     """
+
     # All two dimensional
     def __init__(
         self,
         df: pd.DataFrame,
         y_col: str,
         sp_lag_feats: List[str],
-        w: 'libpysal.weights.W',
+        w: "libpysal.weights.W",
         yend: Union[None, List[str]] = None,
         q: Union[None, List[str]] = None,
         w_lags: int = 1,
         lag_q: bool = True,
         robust: Union[None, str] = None,
-        gwk: Union[None, 'libpysal.weights.W'] = None,
+        gwk: Union[None, "libpysal.weights.W"] = None,
         sig2n_k: bool = False,
     ):
         if not isinstance(yend, list):
@@ -151,17 +152,13 @@ class LR_BaseGM_Lag(TSLS.BaseTSLS):
         splag_idx = df.columns.get_indexer(sp_lag_feats)
 
         # Compute spatial lag for selected endogenous and exogenous variables:
-        yend_set, q_set = set_endog(
-            y, x, splag_idx, w, yend, q, w_lags, lag_q
-        )
+        yend_set, q_set = set_endog(y, x, splag_idx, w, yend, q, w_lags, lag_q)
 
         # Attach constant to independent array:
         x_constant, name_x, warn = USER.check_constant(x)
         self.x_constant = x_constant
         # Set y, x, q, yend variables as attributes- will also compute predicted y values and save as attribute:
-        TSLS.BaseTSLS.__init__(
-            self, y=y, x=x_constant, yend=yend_set, q=q_set, robust=robust, gwk=gwk, sig2n_k=sig2n_k
-        )
+        TSLS.BaseTSLS.__init__(self, y=y, x=x_constant, yend=yend_set, q=q_set, robust=robust, gwk=gwk, sig2n_k=sig2n_k)
 
 
 class LR_GM_lag(LR_BaseGM_Lag):
@@ -218,18 +215,18 @@ class LR_GM_lag(LR_BaseGM_Lag):
         df: pd.DataFrame,
         y_col: str,
         sp_lag_feats: List[str],
-        w: 'libpysal.weights.W',
+        w: "libpysal.weights.W",
         yend_cols: Union[None, List[str]] = None,
         q_cols: Union[None, List[str]] = None,
         w_lags: int = 1,
         lag_q: bool = True,
         robust: Union[None, str] = None,
-        gwk: Union[None, 'libpysal.weights.W'] = None,
+        gwk: Union[None, "libpysal.weights.W"] = None,
         sig2n_k: bool = False,
         spat_diag: bool = False,
         vm: bool = False,
         name_ds: Union[None, str] = None,
-        name_x: Union[None, List[str]] = None
+        name_x: Union[None, List[str]] = None,
     ):
         # Check arrays before proceeding:
         y = df[y_col].values.reshape(-1, 1)
@@ -254,13 +251,11 @@ class LR_GM_lag(LR_BaseGM_Lag):
             robust=robust,
             gwk=gwk,
             lag_q=lag_q,
-            sig2n_k=sig2n_k
+            sig2n_k=sig2n_k,
         )
 
         self.rho = self.betas[-1]
-        self.predy_e, self.e_pred, warn = sp_att(
-            w, self.y, self.predy, self.yend[:, -1].reshape(self.n, 1), self.rho
-        )
+        self.predy_e, self.e_pred, warn = sp_att(w, self.y, self.predy, self.yend[:, -1].reshape(self.n, 1), self.rho)
         set_warn(self, warn)
 
         self.title = "SPATIAL TWO STAGE LEAST SQUARES"

@@ -110,8 +110,9 @@ def generate_expr_weights(
     """
     logger = lm.get_main_logger()
 
-    nbrs, adata = transcriptomic_connectivity(adata, nbr_object, basis, n_neighbors_method, n_pca_components,
-                                              num_neighbors)
+    nbrs, adata = transcriptomic_connectivity(
+        adata, nbr_object, basis, n_neighbors_method, n_pca_components, num_neighbors
+    )
 
     assert isinstance(num_neighbors, int), f"Number of neighbors {num_neighbors} is not an integer."
 
@@ -184,7 +185,7 @@ def transcriptomic_connectivity(
     basis: str = "pca",
     n_neighbors_method: str = "ball_tree",
     n_pca_components: int = 30,
-    num_neighbors: int = 30
+    num_neighbors: int = 30,
 ) -> Tuple[NearestNeighbors, AnnData]:
     """Given an AnnData object, compute pairwise connectivity matrix in transcriptomic space
 
