@@ -28,7 +28,7 @@ from ...configuration import SKM, config_spateo_rcParams, set_pub_style
 from ...logging import logger_manager as lm
 from ...plotting.static.dotplot import CCDotplot
 from ...tools.labels import Label, interlabel_connections
-from .utils import _dendrogram_sig
+from .utils import _dendrogram_sig, save_return_show_fig_utils
 
 
 def plot_connections(
@@ -429,7 +429,6 @@ def plot_connections(
         return (fig, ax)
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def ligrec(
     dict: Dict[str, pd.DataFrame],
     source_groups: Union[None, str, List[str]] = None,
@@ -522,7 +521,7 @@ def ligrec(
         # this is what the DotPlot requires
         return {
             "linkage": z_var,
-            "groupby": ["groups"],
+            "cat_key": ["groups"],
             "cor_method": "pearson",
             "use_rep": None,
             "linkage_method": linkage,
@@ -596,10 +595,12 @@ def ligrec(
     minn = np.nanmin(adata.X)
     delta = np.nanmax(adata.X) - minn
     adata.X = (adata.X - minn) / delta
+    # To satisfy conditional check that happens on instantiating dotplot:
+    adata.uns['__type'] = 'UMI'
 
     try:
         if dendrogram == "both":
-            row_order, col_order, _, _ = dendrogram_sig(
+            row_order, col_order, _, _ = _dendrogram_sig(
                 adata.X, method="complete", metric="correlation", optimal_ordering=adata.n_obs <= 1500
             )
             adata = adata[row_order, :][:, col_order]
@@ -629,7 +630,7 @@ def ligrec(
             alpha=alpha,
             adata=adata,
             var_names=adata.var_names,
-            groupby="groups",
+            cat_key="groups",
             dot_color_df=means,
             dot_size_df=pvals,
             title=title,
@@ -649,17 +650,73 @@ def ligrec(
     )
     if dendrogram in ["interacting_molecules", "interacting_clusters"]:
         dp.add_dendrogram(size=1.6, dendrogram_key="dendrogram")
+    if swap_axes:
+        dp.swap_axes()
+
+    dp.make_figure()
+
+    if dendrogram != "both":
+        # Remove the target part in: source | target
+        labs = dp.ax_dict["mainplot_ax"].get_yticklabels() if swap_axes else dp.ax_dict["mainplot_ax"].get_xticklabels()
+        for text in labs:
+            text.set_text(text.get_text().split(" | ")[1])
+        if swap_axes:
+            dp.ax_dict["mainplot_ax"].set_yticklabels(labs)
+        else:
+            dp.ax_dict["mainplot_ax"].set_xticklabels(labs)
+
+    if alpha is not None:
+        yy, xx = np.where((pvals.values + alpha) >= -np.log10(alpha))
+        if len(xx) and len(yy):
+            # for dendrogram='both', they are already re-ordered
+            mapper = (
+                np.argsort(adata.uns["dendrogram"]["categories_idx_ordered"])
+                if "dendrogram" in adata.uns
+                else np.arange(len(pvals))
+            )
+            logger.info(f"Found `{len(yy)}` significant interactions at level `{alpha}`")
+            ss = 0.33 * (adata.X[yy, xx] * (dp.largest_dot - dp.smallest_dot) + dp.smallest_dot)
+
+            yy = np.array([mapper[y] for y in yy])
+            if swap_axes:
+                xx, yy = yy, xx
+            dp.ax_dict["mainplot_ax"].scatter(xx + 0.5, yy + 0.5, color="white", edgecolor=kwargs["dot_edge_color"],
+                                              linewidth=kwargs["dot_edge_lw"], s=ss, lw=0)
+
+    # Save, show or return figures:
+    return save_return_show_fig_utils(
+        save_show_or_return=save_show_or_return,
+        # Doesn't matter what show_legend is for this plotting function
+        show_legend=False,
+        background="white",
+        prefix="dotplot",
+        save_kwargs=save_kwargs,
+        total_panels=1,
+        fig=dp.fig,
+        axes=dp.ax_dict,
+        # Return all parameters are for returning multiple values for 'axes', but this function uses a single dictionary
+        return_all=False,
+        return_all_list=None,
+    )
+
 
 # DEVELOPER NOTE: MATCH THE STYLE OF LULU'S HEATMAP
-def heatmap(data: Union[np.ndarray, pd.DataFrame]):
+def heatmap(
+    data: pd.DataFrame,
+    cmap: str = "winter",
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[dict] = {},
+    **kwargs):
     """
-    Generates and plots heatmap from array or dataframe, where x- and y-axes are two variable categories (e.g. can be
+    Generates and plots heatmap from dataframe, where x- and y-axes are two variable categories (e.g. can be
     cell type-gene or cell types on both axes), and the element magnitude is the relation between them.
 
     Args:
         data:
     """
     config_spateo_rcParams()
+
+
 
     # def
 

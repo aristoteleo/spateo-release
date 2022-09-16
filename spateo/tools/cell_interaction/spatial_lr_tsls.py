@@ -11,7 +11,7 @@ import pandas as pd
 import spreg.summary_output as SUMMARY
 from spreg import user_output as USER
 from spreg.sputils import sphstack
-from spreg.twosls import TSLS
+from spreg.twosls import BaseTSLS
 from spreg.utils import get_lags, lag_spatial, set_warn, sp_att
 
 from ...logging import logger_manager as lm
@@ -77,7 +77,7 @@ def set_endog(
     return yend, q
 
 
-class LR_BaseGM_Lag(TSLS.BaseTSLS):
+class LR_BaseGM_Lag(BaseTSLS):
     """
     Spatial two stage least squares (S2SLS) (note: no consistency checks, diagnostics or constant added);
     Original implementation from Anselin, L. (1988). Spatial econometrics: methods and models (Vol. 4). Springer
@@ -126,23 +126,23 @@ class LR_BaseGM_Lag(TSLS.BaseTSLS):
         y_col: str,
         sp_lag_feats: List[str],
         w: "libpysal.weights.W",
-        yend: Union[None, List[str]] = None,
-        q: Union[None, List[str]] = None,
+        yend_cols: Union[None, List[str]] = None,
+        q_cols: Union[None, List[str]] = None,
         w_lags: int = 1,
         lag_q: bool = True,
         robust: Union[None, str] = None,
         gwk: Union[None, "libpysal.weights.W"] = None,
         sig2n_k: bool = False,
     ):
-        if not isinstance(yend, list):
-            yend = [yend]
-        if not isinstance(q, list):
-            q = [q]
+        if not isinstance(yend_cols, list):
+            yend_cols = [yend_cols]
+        if not isinstance(q_cols, list):
+            q_cols = [q_cols]
 
         # Extract arrays from provided dataframe + column names:
         y = df[y_col].values.reshape(-1, 1)
-        yend = df[yend].values if len(yend) > 1 else df[yend].values.reshape(-1, 1)
-        q = df[q].values if len(q) > 1 else df[q].values.reshape(-1, 1)
+        yend = df[yend_cols].values if len(yend_cols) > 1 else df[yend_cols].values.reshape(-1, 1)
+        q = df[q_cols].values if len(q_cols) > 1 else df[q_cols].values.reshape(-1, 1)
 
         # Extract the independent variables, including all features for which to compute spatial lag alongside all
         # features to leave as is:
@@ -158,7 +158,7 @@ class LR_BaseGM_Lag(TSLS.BaseTSLS):
         x_constant, name_x, warn = USER.check_constant(x)
         self.x_constant = x_constant
         # Set y, x, q, yend variables as attributes- will also compute predicted y values and save as attribute:
-        TSLS.BaseTSLS.__init__(self, y=y, x=x_constant, yend=yend_set, q=q_set, robust=robust, gwk=gwk, sig2n_k=sig2n_k)
+        BaseTSLS.__init__(self, y=y, x=x_constant, yend=yend_set, q=q_set, robust=robust, gwk=gwk, sig2n_k=sig2n_k)
 
 
 class LR_GM_lag(LR_BaseGM_Lag):
@@ -173,41 +173,27 @@ class LR_GM_lag(LR_BaseGM_Lag):
     computation is applied to.
 
     Args:
-        df : pd.DataFrame
-            Dataframe containing dependent variable and all independent variables
-        y_col : str
-            Name of column corresponding to the dependent variable. Will assume all other columns contain independent
+        df: Dataframe containing dependent variable and all independent variables
+        y_col: Name of column corresponding to the dependent variable. Will assume all other columns contain independent
             variables if 'yend' and 'q' are not provided.
-        sp_lag_feats : list of str
-            Names of columns containing features to compute spatial lag for
-        yend_cols : list of str
-            Name of columns corresponding to endogenous variables
-        q : list of str
-            Names of columns corresponding to external exogenous variables (note: this should not contain any variables
-            from x); cannot be used in combination with h
-        w : Pysal weights matrix
-            Spatial weights matrix
-        w_lags : int
-            Orders of W to include as instruments for the spatially lagged dependent variable. For example,
+        sp_lag_feats: Names of columns containing features to compute spatial lag for
+        yend_cols: Name of columns corresponding to endogenous variables
+        q_cols: Names of columns corresponding to external exogenous variables (note: this should not contain any
+            variables from x); cannot be used in combination with h
+        w: Spatial weights matrix (Pysal weights matrix)
+        w_lags: Orders of W to include as instruments for the spatially lagged dependent variable. For example,
             w_lags=1, then instruments are WX; if w_lags=2, then WX, WWX; and so on.
-        lag_q : boolean
-            If True, then include spatial lags of the additional instruments (q) also as exogenous variables
-        robust : string
-            For standard errors of heteroskedasticity: if 'white', then a White consistent estimator of the
+        lag_q: If True, then include spatial lags of the additional instruments (q) also as exogenous variables
+        robust: For standard errors of heteroskedasticity: if 'white', then a White consistent estimator of the
             variance-covariance matrix is given.  If 'hac', then a HAC consistent estimator of the variance-covariance
             matrix is given. Default set to None.
-        gwk : pysal W object
-            Kernel spatial weights needed for HAC estimation. Note: matrix must have ones along the main diagonal.
-        sig2n_k : bool, default False
-            If True, then use n-k to estimate sigma^2. If False, use n.
-        spat_diag : bool, default False
-            If True, then compute Anselin-Kelejian test
-        vm : bool, default False
-            If True, include variance-covariance matrix in summary results
-        name_ds : optional str
-            Name to assign dataset (for summary/printing purposes)
-        name_x : optional list of str
-            Name to assign
+        gwk: Kernel spatial weights needed for HAC estimation (Pysal weights matrix). Note: matrix must have ones along
+            the main diagonal.
+        sig2n_k: If True, then use n-k to estimate sigma^2. If False, use n.
+        spat_diag: If True, then compute Anselin-Kelejian test
+        vm: If True, include variance-covariance matrix in summary results
+        name_ds: Name to assign dataset (for summary/printing purposes)
+        name_x: Name to assign independent variables (for summary/printing purposes)
     """
 
     def __init__(
@@ -239,7 +225,7 @@ class LR_GM_lag(LR_BaseGM_Lag):
         USER.check_weights(w, y, w_required=True)
         USER.check_robust(robust, gwk)
 
-        LR_BaseGM_Lag.__init(
+        LR_BaseGM_Lag.__init__(
             self,
             df=df,
             y_col=y_col,

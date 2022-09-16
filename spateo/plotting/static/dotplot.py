@@ -583,20 +583,14 @@ class Dotplot:
         color_on: Options are 'dot' or 'square'. By default the colormap is applied to the color of the dot,
             but 'square' changes this to be applied to a square region behind the dot, in which case the dot becomes
             transparent with only the edge of the dot shown.
-        dot_max: optional float
-            If none, the maximum dot size is set to the maximum fraction value found (e.g. 0.6). If given,
+        dot_max: If none, the maximum dot size is set to the maximum fraction value found (e.g. 0.6). If given,
             the value should be a number between 0 and 1. All fractions larger than dot_max are clipped to this value.
-        dot_min: optional float
-            If none, the minimum dot size is set to 0. If given, the value should be a number between 0 and 1.
+        dot_min: If none, the minimum dot size is set to 0. If given, the value should be a number between 0 and 1.
             All fractions smaller than dot_min are clipped to this value.
-        smallest_dot: optional float
-            If none, the smallest dot has size 0. All expression fractions with `dot_min` are plotted with this size.
-        largest_dot: optional float
-            If none, the largest dot has size 200. All expression fractions with `dot_max` are plotted with this size.
-        dot_edge_color: str, default 'black'
-            Only used if 'color_on' is 'square'. Sets dot edge color
-        dot_edge_lw: float, default 0.2
-            Only used if 'color_on' is 'square'. Sets dot edge line width
+        smallest_dot: If none, the smallest dot has size 0. All expression fractions with `dot_min` are plotted with this size.
+        largest_dot: If none, the largest dot has size 200. All expression fractions with `dot_max` are plotted with this size.
+        dot_edge_color: Only used if 'color_on' is 'square'. Sets dot edge color
+        dot_edge_lw: Only used if 'color_on' is 'square'. Sets dot edge line width
         size_exponent: Dot size is computed as:
                 fraction  ** size exponent
             and is afterwards scaled to match the 'smallest_dot' and 'largest_dot' size parameters.
@@ -662,27 +656,19 @@ class Dotplot:
         Configures colorbar and other legends for dotplot
 
         Args:
-            show : bool, default True
-                Set to `False` to hide the default plot of the legends. This sets the legend width to zero,
+            show: Set to `False` to hide the default plot of the legends. This sets the legend width to zero,
                 which will result in a wider main plot.
-            show_size_legend : bool, default True
-                Set to `False` to hide the dot size legend
-            show_colorbar : bool, default True
-                Set to `False` to hide the colorbar legend
-            size_title : str
-                Title for the dot size legend. Use '\\n' to add line breaks. Will be shown at the top of the dot size.
-                legend box
-            colorbar_title : str
-                Title for the color bar. Use '\\n' to add line breaks. Will be shown at the top of the color bar.
-            base : int
-                To determine the size of each "benchmark" dot in the size legend, will use a logscale; this parameter
+            show_size_legend: Set to `False` to hide the dot size legend
+            show_colorbar: Set to `False` to hide the colorbar legend
+            size_title:  Title for the dot size legend. Use '\\n' to add line breaks. Will be shown at the top of
+                the dot size legend box
+            colorbar_title: Title for the color bar. Use '\\n' to add line breaks. Will be shown at the top of the
+                color bar.
+            base: To determine the size of each "benchmark" dot in the size legend, will use a logscale; this parameter
                 sets the base of that scale.
-            num_colorbar_ticks : int
-                Number of ticks for the colorbar
-            num_size_legend_dots : int
-                Number of "benchmark" dots to include in the dot size legend
-            width : float, default 1.5
-                Width of the legends area. The unit is the same as in matplotlib (inches)
+            num_colorbar_ticks: Number of ticks for the colorbar
+            num_size_legend_dots: Number of "benchmark" dots to include in the dot size legend
+            width: Width of the legends area. The unit is the same as in matplotlib (inches)
 
         Returns:
              self (instance of class DotPlot)
@@ -753,7 +739,7 @@ class Dotplot:
         )
         size_legend_ax.set_xticks(np.arange(len(size)) + 0.5)
         labels = ["{}".format(np.round((x * 100), decimals=0).astype(int)) for x in size_range]
-        size_legend_ax.set_xticklabels(labels, fontsize="small")
+        size_legend_ax.set_xticklabels(labels, fontsize=6)
 
         # Remove y ticks and labels
         size_legend_ax.tick_params(axis="y", left=False, labelleft=False, labelright=False)
@@ -767,7 +753,7 @@ class Dotplot:
 
         ymax = size_legend_ax.get_ylim()[1]
         size_legend_ax.set_ylim(-1.05 - self.largest_dot * 0.003, 4)
-        size_legend_ax.set_title(self.size_title, y=ymax + 0.45, size="small")
+        size_legend_ax.set_title(self.size_title, y=ymax + 0.45, size=6)
 
         xmin, xmax = size_legend_ax.get_xlim()
         size_legend_ax.set_xlim(xmin - 0.15, xmax + 0.5)
@@ -800,8 +786,8 @@ class Dotplot:
             format="%.2f",
         )
 
-        color_legend_ax.set_title(self.color_legend_title, fontsize="small")
-        color_legend_ax.xaxis.set_tick_params(labelsize="small")
+        color_legend_ax.set_title(self.color_legend_title, fontsize=6)
+        color_legend_ax.xaxis.set_tick_params(labelsize=6)
 
     def _plot_legend(
         self, legend_ax: mpl.axes.Axes, return_ax_dict: dict, normalize: Union[None, mpl.colors.Normalize] = None
@@ -1107,7 +1093,7 @@ class Dotplot:
             ha="center",
             minor=False,
         )
-        dot_ax.tick_params(axis="both", labelsize="small")
+        dot_ax.tick_params(axis="both", labelsize=6)
         dot_ax.grid(False)
         dot_ax.set_ylabel(y_label)
 
@@ -1331,7 +1317,7 @@ class Dotplot:
                     ha="right",
                     va="center",
                     rotation=270,
-                    fontsize="small",
+                    fontsize=6,
                 )
 
         path = Path(verts, codes)
@@ -1438,7 +1424,14 @@ class Dotplot:
             # title will thus be centered over the main plot:
             _ax = self.fig.add_subplot(gs[0, 0])
             _ax.axis("off")
-            _ax.set_title(self.fig_title)
+            ymax = _ax.get_ylim()[1]
+            if self.figsize[1] > 4 and self.figsize[1] < 8:
+                offset = 0.15
+            elif self.figsize[1] <= 4:
+                offset = 0.25
+            elif self.figsize[1] >= 8:
+                offset = 0.1
+            _ax.set_title(self.fig_title, y=ymax+offset)
 
         # The main plot is divided into three rows and two columns:
         # The first row is a spacer that is adjusted in case the legends need more height than the main plot.
@@ -1540,6 +1533,7 @@ class CCDotplot(Dotplot):
         self.delta = delta
         self.minn = minn
         self.alpha = alpha
+        self.largest_dot = self.default_largest_dot
 
     def _plot_size_legend(self, size_legend_ax: mpl.axes.Axes):
         """
@@ -1547,6 +1541,7 @@ class CCDotplot(Dotplot):
 
         Overwrites the default :func `plot_size_legend` for :class `Dotplot`
         """
+
         # Ending point:
         y = self.base ** -((self.dot_max * self.delta) + self.minn)
         # Starting point:
@@ -1562,6 +1557,9 @@ class CCDotplot(Dotplot):
         size = size * mult
 
         # Plot size legend
+        ymin = -0.1 - self.largest_dot * 0.003
+        ymax = -ymin
+
         size_legend_ax.scatter(
             np.arange(len(size)) + 0.5,
             np.repeat(0, len(size)),
@@ -1572,8 +1570,8 @@ class CCDotplot(Dotplot):
             zorder=100,
         )
         size_legend_ax.set_xticks(np.arange(len(size)) + 0.5)
-        labels = ["{}".format(np.round((x * 100), decimals=0).astype(int)) for x in size_range]
-        size_legend_ax.set_xticklabels(labels, fontsize="small")
+        labels = [f"{(x * self.delta) + self.minn:.1f}" for x in size_range]
+        size_legend_ax.set_xticklabels(labels, fontsize=6)
 
         # Remove y ticks and labels
         size_legend_ax.tick_params(axis="y", left=False, labelleft=False, labelright=False)
@@ -1585,9 +1583,8 @@ class CCDotplot(Dotplot):
         size_legend_ax.spines["bottom"].set_visible(False)
         size_legend_ax.grid(False)
 
-        ymax = size_legend_ax.get_ylim()[1]
-        size_legend_ax.set_ylim(-1.05 - self.largest_dot * 0.003, 4)
-        size_legend_ax.set_title(self.size_title, y=ymax + 0.45, size="small")
+        size_legend_ax.set_ylim(ymin, ymax)
+        size_legend_ax.set_title(self.size_title, y=ymax + 0.05, size=6)
 
         xmin, xmax = size_legend_ax.get_xlim()
         size_legend_ax.set_xlim(xmin - 0.15, xmax + 0.5)
@@ -1614,7 +1611,7 @@ class CCDotplot(Dotplot):
             ax.set_xticks([0.35, 0.65])
             ax.set_xticklabels(["false", "true"])
             ax.set_yticks([])
-            ax.set_title(f"significant\n$p={self.alpha}$", y=ymax + 0.25, size="small")
+            ax.set_title(f"significant\n$p={self.alpha}$", y=ymax + 0.05, size=6)
             ax.set(frame_on=False)
 
             l, b, w, h = size_legend_ax.get_position().bounds
