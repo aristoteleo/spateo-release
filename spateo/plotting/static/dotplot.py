@@ -552,10 +552,10 @@ class Dotplot:
 
         self.group_extra_size = size
         self.plot_group_extra = {
-            'kind': 'dendrogram',
-            'width': size,
-            'dendrogram_key': dendrogram_key,
-            'dendrogram_ticks': dendro_ticks,
+            "kind": "dendrogram",
+            "width": size,
+            "dendrogram_key": dendrogram_key,
+            "dendrogram_ticks": dendro_ticks,
         }
         return self
 
@@ -1131,13 +1131,13 @@ class Dotplot:
             """used to clean up warning message"""
             _categories = list(_categories)
             if len(_categories) > 3:
-                _categories = _categories[:3] + ['etc.']
-            return ', '.join(_categories)
+                _categories = _categories[:3] + ["etc."]
+            return ", ".join(_categories)
 
         # Get dendrogram key:
         if not isinstance(dendrogram_key, str):
             if isinstance(self.cat_key, str):
-                dendrogram_key = f'dendrogram_{self.cat_key}'
+                dendrogram_key = f"dendrogram_{self.cat_key}"
             elif isinstance(self.cat_key, list):
                 dendrogram_key = f'dendrogram_{"_".join(self.cat_key)}'
 
@@ -1150,13 +1150,13 @@ class Dotplot:
             )
             dendrogram(self.adata, self.cat_key, key_added=dendrogram_key)
 
-        if 'dendrogram_info' not in self.adata.uns[dendrogram_key]:
+        if "dendrogram_info" not in self.adata.uns[dendrogram_key]:
             raise ValueError(
                 f"The given dendrogram key ({dendrogram_key!r}) does not contain valid dendrogram information."
             )
 
         dendro_info = self.adata.uns[dendrogram_key]
-        if self.cat_key != dendro_info['cat_key']:
+        if self.cat_key != dendro_info["cat_key"]:
             raise ValueError(
                 "Incompatible observations. The precomputed dendrogram contains information for the "
                 f"observation: '{self.cat_key}' while the plot is made for the observation: '{dendro_info['cat_key']}. "
@@ -1164,8 +1164,8 @@ class Dotplot:
             )
 
         # Category order:
-        categories_idx_ordered = dendro_info['categories_idx_ordered']
-        categories_ordered = dendro_info['categories_ordered']
+        categories_idx_ordered = dendro_info["categories_idx_ordered"]
+        categories_ordered = dendro_info["categories_ordered"]
 
         if len(self.categories) != len(categories_idx_ordered):
             raise ValueError(
@@ -1188,11 +1188,9 @@ class Dotplot:
                 for cat_name in categories_ordered:
                     idx = self.var_group_labels.index(cat_name)
                     position = self.var_group_positions[idx]
-                    _var_names = self.var_names[position[0]: position[1] + 1]
+                    _var_names = self.var_names[position[0] : position[1] + 1]
                     var_names_idx_ordered.extend(range(position[0], position[1] + 1))
-                    positions_ordered.append(
-                        (position_start, position_start + len(_var_names) - 1)
-                    )
+                    positions_ordered.append((position_start, position_start + len(_var_names) - 1))
                     position_start += len(_var_names)
                     labels_ordered.append(self.var_group_labels[idx])
                 self.var_group_labels = labels_ordered
@@ -1212,7 +1210,7 @@ class Dotplot:
             var_names_ordered = None
 
         self.categories_idx_ordered = categories_idx_ordered
-        self.categories_order = dendro_info['categories_ordered']
+        self.categories_order = dendro_info["categories_ordered"]
         self.var_names_idx_order = var_names_idx_ordered
         self.var_names_ordered = var_names_ordered
 
@@ -1431,7 +1429,7 @@ class Dotplot:
                 offset = 0.25
             elif self.figsize[1] >= 8:
                 offset = 0.1
-            _ax.set_title(self.fig_title, y=ymax+offset)
+            _ax.set_title(self.fig_title, y=ymax + offset)
 
         # The main plot is divided into three rows and two columns:
         # The first row is a spacer that is adjusted in case the legends need more height than the main plot.
@@ -1466,17 +1464,17 @@ class Dotplot:
                 var_group_orientation = "right"
 
         if self.plot_group_extra is not None:
-            if self.plot_group_extra['kind'] == 'dendrogram':
+            if self.plot_group_extra["kind"] == "dendrogram":
                 plot_dendrogram(
                     group_extra_ax,
                     self.adata,
                     self.cat_key,
-                    dendrogram_key=self.plot_group_extra['dendrogram_key'],
-                    ticks=self.plot_group_extra['dendrogram_ticks'],
-                    orientation=group_extra_orientation
+                    dendrogram_key=self.plot_group_extra["dendrogram_key"],
+                    ticks=self.plot_group_extra["dendrogram_ticks"],
+                    orientation=group_extra_orientation,
                 )
 
-            return_ax_dict['group_extra_ax'] = group_extra_ax
+            return_ax_dict["group_extra_ax"] = group_extra_ax
 
         # Plot category group brackets atop the main ax (if given):
         if self.has_var_groups:

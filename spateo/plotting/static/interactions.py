@@ -9,6 +9,8 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+from inspect import signature
+
 import matplotlib as mpl
 import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
@@ -17,7 +19,6 @@ import pandas as pd
 import scipy
 import seaborn as sns
 from anndata import AnnData
-from inspect import signature
 from matplotlib import rcParams
 from matplotlib.collections import PolyCollection
 from matplotlib.ticker import StrMethodFormatter
@@ -515,7 +516,7 @@ def ligrec(
             metric="correlation",
             method=linkage,
             # Unlikely to ever be profiling this many LR pairings, but cap at 1500
-            optimal_ordering=adata.n_obs <= 1500
+            optimal_ordering=adata.n_obs <= 1500,
         )
         dendro_info = sch.dendrogram(z_var, labels=adata.obs_names.values, no_plot=True)
         # this is what the DotPlot requires
@@ -596,7 +597,7 @@ def ligrec(
     delta = np.nanmax(adata.X) - minn
     adata.X = (adata.X - minn) / delta
     # To satisfy conditional check that happens on instantiating dotplot:
-    adata.uns['__type'] = 'UMI'
+    adata.uns["__type"] = "UMI"
 
     try:
         if dendrogram == "both":
@@ -639,13 +640,11 @@ def ligrec(
             standard_scale=None,
             figsize=figsize,
         )
-        .style(
-            **dotplot_style_kwargs
-        )
+        .style(**dotplot_style_kwargs)
         .legend(
             size_title=r"$-\log_{10} ~ P$",
             colorbar_title=r"$log_2(molecule_1 * molecule_2 + 1)$",
-            **dotplot_legend_kwargs
+            **dotplot_legend_kwargs,
         )
     )
     if dendrogram in ["interacting_molecules", "interacting_clusters"]:
@@ -680,8 +679,15 @@ def ligrec(
             yy = np.array([mapper[y] for y in yy])
             if swap_axes:
                 xx, yy = yy, xx
-            dp.ax_dict["mainplot_ax"].scatter(xx + 0.5, yy + 0.5, color="white", edgecolor=kwargs["dot_edge_color"],
-                                              linewidth=kwargs["dot_edge_lw"], s=ss, lw=0)
+            dp.ax_dict["mainplot_ax"].scatter(
+                xx + 0.5,
+                yy + 0.5,
+                color="white",
+                edgecolor=kwargs["dot_edge_color"],
+                linewidth=kwargs["dot_edge_lw"],
+                s=ss,
+                lw=0,
+            )
 
     # Save, show or return figures:
     return save_return_show_fig_utils(
@@ -706,7 +712,8 @@ def heatmap(
     cmap: str = "winter",
     save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
     save_kwargs: Optional[dict] = {},
-    **kwargs):
+    **kwargs,
+):
     """
     Generates and plots heatmap from dataframe, where x- and y-axes are two variable categories (e.g. can be
     cell type-gene or cell types on both axes), and the element magnitude is the relation between them.
@@ -715,8 +722,6 @@ def heatmap(
         data:
     """
     config_spateo_rcParams()
-
-
 
     # def
 

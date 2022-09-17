@@ -11,6 +11,12 @@ are restricted to human, mouse and axolotl. Might also be making a lot of assump
 but the axolotl LR network has columns for human equivalents for all LR so I assumed there's enough homology there
 Developer note: for the sender/receiver effect functions, each row in pvalues, fold_change, etc. is a receiver,
 each column is a sender
+
+Developer note: currently, processing of 'connections' is set to encode the presence of cell type proximities as
+either a 0 or 1. Another option is to minmax scale across rows.
+
+Developer note: still to add: incorporation of Lasso OLS, maybe cross-validation wrapper in addition to the metrics at
+the bottom to return all metrics for each fold.
 """
 import os
 import time
@@ -31,6 +37,7 @@ from matplotlib import rcParams
 from patsy import dmatrix
 from pysal.lib import weights
 from pysal.model import spreg
+from tqdm import tqdm
 
 from ...configuration import SKM, config_spateo_rcParams, set_pub_style
 from ...logging import logger_manager as lm
@@ -43,7 +50,9 @@ from .regression_utils import compute_wald_test, get_fisher_inverse, ols_fit_pre
 from .spatial_lr_tsls import LR_GM_lag
 
 
-# --------------------------------------- Wrapper classes for model running --------------------------------------- #
+# ---------------------------------------------------------------------------------------------------
+# Wrapper classes for model running
+# ---------------------------------------------------------------------------------------------------
 class BaseInterpreter:
     """
     Basis class for all spatially-aware and spatially-lagged regression models that can be implemented through this
@@ -157,6 +166,7 @@ class BaseInterpreter:
         lig: Union[None, List[str]] = None,
         rec: Union[None, List[str]] = None,
         niche_lr_r_lag: bool = True,
+        use_ds: bool = True,
         rec_ds: Union[None, List[str]] = None,
         species: Literal["human", "mouse", "axolotl"] = "human",
     ):
@@ -169,9 +179,7 @@ class BaseInterpreter:
                 Options:
                     - category: spatially-aware, for each sample, computes category prevalence within the spatial
                     neighborhood and uses these as independent variables
-                    - connections: spatially-aware, uses spatial connections between samples as independent variables
-                    - niche: spatially-aware, uses both categories and spatial connections between samples as
-                        independent variables
+                    - niche: spatially-aware, uses spatial connections between samples as independent variables
                     - ligand_lag: spatially-lagged, from database uses select ligand genes to perform regression on
                         select receptor and/or receptor-downstream genes, and additionally considers neighbor
                         expression of the ligands
@@ -186,6 +194,7 @@ class BaseInterpreter:
                 given, will search through database for all genes that correspond to the provided genes from 'ligands'.
             niche_lr_r_lag: Only used if 'mod_type' is "niche_lr". Uses the spatial lag of the receptor as the
                 dependent variable rather than each spot's unique receptor expression. Defaults to True.
+            use_ds: If True, uses receptor-downstream genes in addition to ligands and receptors.
             rec_ds: Only used if 'mod_type' is "niche_lr" or "ligand_lag". Can be used to optionally manually define a
                 list of genes shown to be (or thought to potentially be) downstream of one or more of the provided
                 L:R pairs. If not given, will find receptor-downstream genes from database based on input to 'lig'
@@ -235,32 +244,36 @@ class BaseInterpreter:
             )
 
         # General preprocessing required by multiple model types (for the models that use cellular niches):
-        if "niche" in mod_type:
-            # Convert groups/categories into one-hot array:
-            group_name = self.adata.obs[self.group_key]
-            db = pd.DataFrame({"group": group_name})
-            categories = np.array(self.adata.obs[self.group_key].unique().tolist())
-            db["group"] = pd.Categorical(db["group"], categories=categories)
+        # Convert groups/categories into one-hot array:
+        group_name = self.adata.obs[self.group_key]
+        db = pd.DataFrame({"group": group_name})
+        categories = np.array(self.adata.obs[self.group_key].unique().tolist())
+        db["group"] = pd.Categorical(db["group"], categories=categories)
 
-            self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
-            X = pd.get_dummies(data=db, drop_first=False)
+        self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
+        X = pd.get_dummies(data=db, drop_first=False)
+        # Ensure columns are in order:
+        X = X.reindex(sorted(X.columns), axis=1)
 
-            # Compute adjacency matrix- use the KNN value in 'sp_kwargs' (which may have been passed as an
-            # argument when initializing the interpreter):
-            construct_pairwise(
-                self.adata, spatial_key=self.spatial_key, n_neighbors=self.sp_kwargs["n_neighbors"], exclude_self=True
-            )
-            adj = self.adata.obsm["adj"]
+        # Compute adjacency matrix- use the KNN value in 'sp_kwargs' (which may have been passed as an
+        # argument when initializing the interpreter):
+        construct_pairwise(
+            self.adata, spatial_key=self.spatial_key, n_neighbors=self.sp_kwargs["n_neighbors"], exclude_self=True
+        )
+        adj = self.adata.obsm["adj"]
 
-            # Construct category adjacency matrix (n_samples x n_categories array that records how many neighbors of
-            # each category are present within the neighborhood of each sample):
-            dmat_neighbors = (adj > 0).astype("int").dot(X.values)
+        # Construct category adjacency matrix (n_samples x n_categories array that records how many neighbors of
+        # each category are present within the neighborhood of each sample):
+        dmat_neighbors = (adj > 0).astype("int").dot(X.values)
 
-            # Construct the category interaction matrix (1D array w/ n_categories ** 2 elements, encodes the niche of
-            # each sample by documenting the category-category spatial connections within the niche- specifically,
-            # for each sample, records the category identity of its neighbors in space):
-            data = {"categories": X, "dmat_neighbours": dmat_neighbors}
-            connections = np.asarray(dmatrix("categories:dmat_neighbours-1", data))
+        # Construct the category interaction matrix (1D array w/ n_categories ** 2 elements, encodes the niche of
+        # each sample by documenting the category-category spatial connections within the niche- specifically,
+        # for each sample, records the category identity of its neighbors in space):
+        data = {"categories": X, "dmat_neighbours": dmat_neighbors}
+        connections = np.asarray(dmatrix("categories:dmat_neighbours-1", data))
+
+        # Set all elements of 'connections' to be binary to represent the presence/absence of a connection:
+        connections[connections > 1] = 1
 
         # Specific preprocessing for each model type:
         if "category" in mod_type:
@@ -295,6 +308,8 @@ class BaseInterpreter:
 
             self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
             X = pd.get_dummies(data=db, drop_first=False)
+            # Ensure columns are in order:
+            X = X.reindex(sorted(X.columns), axis=1)
             # Compute adjacency matrix- use the KNN value in 'sp_kwargs' (which may have been passed as an
             # argument when initializing the interpreter):
             if self.data_id is not None:
@@ -334,25 +349,22 @@ class BaseInterpreter:
 
             self.param_labels = list(np.sort(list(self.param_labels)))
 
-        elif mod_type == "connections" or mod_type == "niche":
-            # If mod_type is 'connections', use only the connections matrix as independent variables in the regression:
-            if mod_type == "connections":
-                connections_cols = list(product(X.columns, X.columns))
-                connections_cols.sort(key=lambda x: x[1])
-                connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
-                self.X = pd.DataFrame(connections, columns=connections_cols)
+        elif mod_type == "niche":
+            # If mod_type is 'niche', use the connections matrix as independent variables in the regression:
+            connections_cols = list(product(X.columns, X.columns))
+            connections_cols.sort(key=lambda x: x[1])
+            connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
+            self.X = pd.DataFrame(connections, columns=connections_cols)
+            """
             # Otherwise if 'niche', combine two arrays:
-            # connections, encoding pairwise *spatial adjacencies/spatial prevalence* between categories for each
-            # sample, and
-            # categories, encoding *identity* of the niche components
+            # 'connections', encoding pairwise *spatial adjacencies* between categories for each sample, and
+            # 'dmat_neighbors', encoding *identity* and *prevalence* of the niche components
             elif mod_type == "niche":
-                category_df = pd.DataFrame(categories, columns=X.columns)
-
                 connections_cols = list(product(X.columns, X.columns))
                 connections_cols.sort(key=lambda x: x[1])
                 connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
-                connections_df = pd.DataFrame(connections, columns=connections_cols)
-                self.X = pd.concat([category_df, connections_df], axis=1)
+                connections_df = pd.DataFrame(connections, index=X.index, columns=connections_cols)
+                self.X = pd.concat([X, connections_df], axis=1)"""
 
             # Set self.param_labels to reflect inclusion of the interactions:
             self.param_labels = self.variable_names = self.X.columns
@@ -368,34 +380,51 @@ class BaseInterpreter:
                 self.logger.error("Invalid input to 'species'. Options: 'human', 'mouse', 'axolotl'.")
             if species == "axolotl":
                 species = "human"
+                axolotl_lr = pd.read_csv(os.path.join(self.cci_dir, "lr_network_axolotl.csv"), index_col=0)
+                axolotl_l = set(axolotl_lr["human_ligand"])
             sig_net = signet[signet["species"] == species.title()]
             lig_available = set(sig_net["src"])
+            if "axolotl_l" in locals():
+                lig_available = lig_available.union(axolotl_l)
 
             # Set predictors and target- for consistency with field conventions, set ligands and ligand-downstream
             # gene names to uppercase (the AnnData object is assumed to follow this convention as well):
             # Use the argument provided to 'ligands' to set the predictor block:
             if ligands is None:
                 ligands = [g.upper() for g in self.genes if g in lig_available]
-                ligands_expr = (
-                    self.adata[:, ligands].X.toarray()
-                    if scipy.sparse.issparse(self.adata.X)
-                    else self.adata[:, ligands].X
-                )
-                self.X = pd.DataFrame(ligands_expr, columns=ligands)
             else:
                 # Filter provided ligands to those that can be found in the database:
                 ligands = [l for l in ligands if l in lig_available]
                 self.logger.info("Proceeding with analysis using ligands {}".format(",".join(ligands)))
 
+            # Filter ligands to those that can be found in the database:
+            ligands = [l for l in ligands if l in self.adata.var_names]
+            if len(ligands) == 0:
+                self.logger.error(
+                    "None of the ligands could be found in AnnData variable names. "
+                    "Check that AnnData index names match database entries."
+                    "Also possible to have selected only ligands that can't be found in AnnData- "
+                    "select different ligands."
+                )
+            self.n_ligands = len(ligands)
+
+            ligands_expr = pd.DataFrame(
+                self.adata[:, ligands].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, ligands].X,
+                index=X.index,
+                columns=ligands,
+            )
+
             if mod_type == "niche_ligand_lag":
                 # Combine ligand expression with niche information:
-                category_df = pd.DataFrame(categories, columns=X.columns)
+                # category_df = pd.DataFrame(categories, columns=X.columns)
 
                 connections_cols = list(product(X.columns, X.columns))
                 connections_cols.sort(key=lambda x: x[1])
                 connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
-                connections_df = pd.DataFrame(connections, columns=connections_cols)
-                self.X = pd.concat([category_df, connections_df, ligands_expr], axis=1)
+                connections_df = pd.DataFrame(connections, index=X.index, columns=connections_cols)
+                self.X = pd.concat([connections_df, ligands_expr], axis=1)
+            else:
+                self.X = pd.DataFrame(ligands_expr, columns=ligands)
 
             if receiving_genes is None:
                 # Append all receptors (direct connections to ligands):
@@ -405,18 +434,32 @@ class BaseInterpreter:
                 # to get only unique molecules:
                 receptors = set(list(sig_net.loc[sig_net["src"].isin(ligands)]["dest"].values))
                 receiving_genes = list(receptors)
+                self.logger.info(
+                    "List of receptors was not provided- found these receptors from the provided "
+                    f"ligands: {(', ').join(receiving_genes)}"
+                )
 
             if rec_ds is not None:
                 # If specific list of downstream genes (indirect connections to ligands) is provided, append:
                 receiving_genes.extend(rec_ds)
-            else:
+            elif use_ds:
                 #  Optionally append all downstream genes from the database (direct connections to receptors,
                 #  indirect connections to ligands):
-                self.logger.info("Downstream genes were not manually provided with 'rec_ds'...automatically "
-                                 "searching for downstream genes associated with the discovered 'receptors'.")
-                receiver_ds = set(list(sig_net.loc[sig_net["src"].isin(receiving_genes)]["dest"].values))
-                receiving_genes.extend(list(receiver_ds))
+                self.logger.info(
+                    "Downstream genes were not manually provided with 'rec_ds'...automatically "
+                    "searching for downstream genes associated with the discovered 'receptors'."
+                )
+                receiver_ds = list(set(list(sig_net.loc[sig_net["src"].isin(receiving_genes)]["dest"].values)))
+                self.logger.info(
+                    "List of receptor-downstream genes was not provided- found these genes from the "
+                    f"current list of receivers: {(', ').join(receiver_ds)}"
+                )
+                receiving_genes.extend(receiver_ds)
                 receiving_genes = list(set(receiving_genes))
+
+            # Filter receiving genes for those that can be found in the dataset:
+            receiving_genes = [r for r in receiving_genes if r in self.adata.var_names]
+
             self.genes = receiving_genes
 
             if mod_type == "ligand_lag":
@@ -433,21 +476,37 @@ class BaseInterpreter:
                 lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_human.csv"), index_col=0)
             elif species == "mouse":
                 lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_mouse.csv"), index_col=0)
-            elif species == "drosophila":
-                lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_drosophila.csv"), index_col=0)
+            # elif species == "drosophila":
+            #    lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_drosophila.csv"), index_col=0)
             # elif species == "zebrafish":
             #    lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_zebrafish.csv"), index_col=0)
-            # elif species == "axolotl":
-            #    lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_axolotl.csv"), index_col=0)
+            elif species == "axolotl":
+                lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_axolotl.csv"), index_col=0)
             else:
                 self.logger.error("Invalid input given to 'species'. Options: 'human', 'mouse', or 'axolotl'.")
 
             if lig is None:
                 self.logger.error("For 'mod_type' = 'niche_lr', ligands must be provided.")
+            lig = [l.upper() for l in lig]
             # If no receptors are given, search database for matches w/ the ligand:
             if rec is None:
                 rec = set(list(lr_network.loc[lr_network["from"].isin(lig)]["to"].values))
                 rec = [r.upper() for r in rec]
+                self.logger.info(
+                    "List of receptors was not provided- found these receptors from the provided "
+                    f"ligands: {(', ').join(rec)}"
+                )
+
+            # Filter ligand and receptor lists to those that can be found in the data:
+            lig = [l for l in lig if l in self.adata.var_names]
+            if len(lig) == 0:
+                self.logger.error(
+                    "None of the ligands could be found in AnnData variable names. "
+                    "Check that AnnData index names match database entries."
+                    "Also possible to have selected only ligands that can't be found in AnnData- "
+                    "select different ligands."
+                )
+            rec = [r for r in rec if r in self.adata.var_names]
 
             # Convert groups/categories into one-hot array:
             group_name = self.adata.obs[self.group_key]
@@ -458,6 +517,8 @@ class BaseInterpreter:
 
             self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
             X = pd.get_dummies(data=db, drop_first=False)
+            # Ensure columns are in order:
+            X = X.reindex(sorted(X.columns), axis=1)
 
             # Compute adjacency matrix- use the KNN value in 'sp_kwargs' (which may have been passed as an
             # argument when initializing the interpreter):
@@ -489,11 +550,11 @@ class BaseInterpreter:
                         "No record of {} interaction with any of {}. Ensure provided lists contain "
                         "paired ligand-receptors.".format(ligand, (",".join(rec)))
                     )
-                found_receptors = list(possible_receptors.intersection(rec))
+                found_receptors = list(set(possible_receptors).intersection(set(rec)))
                 lig_pairs = list(product(lig, found_receptors))
                 pairs.extend(lig_pairs)
             self.n_pairs = len(pairs)
-            print(f"Setting up Niche-L:R model using the following ligand-receptor pairs: {','.join(pairs)}")
+            print(f"Setting up Niche-L:R model using the following ligand-receptor pairs: {pairs}")
 
             self.logger.info(
                 "Starting from {} ligands and {} receptors, found {} ligand-receptor "
@@ -503,7 +564,7 @@ class BaseInterpreter:
             # Since features are combinatorial, it is not recommended to specify more than too many ligand-receptor
             # pairs:
             if len(pairs) > 200 / n_categories**2:
-                self.logger.warn(
+                self.logger.warning(
                     "Regression model has many predictors- consider measuring fewer ligands and " "receptors."
                 )
 
@@ -512,18 +573,25 @@ class BaseInterpreter:
 
             for lr_pair in pairs:
                 lig, rec = lr_pair[0], lr_pair[1]
+                lig_expr_values = (
+                    self.adata[:, lig].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, lig].X
+                )
+                rec_expr_values = (
+                    self.adata[:, rec].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, rec].X
+                )
                 # Optionally, compute the spatial lag of the receptor:
                 if niche_lr_r_lag:
-                    if not hasattr(self, 'w'):
+                    if not hasattr(self, "w"):
                         self.compute_spatial_weights()
-                    rec = spreg.utils.lag_spatial(self.w, self.adata[:, rec].X)
+                    rec_lag = spreg.utils.lag_spatial(self.w, rec_expr_values)
+                    self.adata.obs[f"{rec}_lag"] = rec_lag
                 # Multiply one-hot category array by the expression of select receptor within that cell:
-                rec_vals = self.adata[:, rec].X
-                rec_expr = np.multiply(X.values, np.tile(rec_vals, X.shape[1]))
+                rec_vals = self.adata[:, rec].X if not niche_lr_r_lag else self.adata.obs[f"{rec}_lag"].values
+                rec_expr = np.multiply(X.values, np.tile(rec_vals.reshape(-1, 1), X.shape[1]))
 
                 # Separately multiply by the expression of select ligand such that an expression value only exists
                 # for one cell type per row:
-                lig_vals = self.adata
+                lig_vals = lig_expr_values
                 lig_expr = np.multiply(X.values, np.tile(lig_vals, X.shape[1]))
                 # Multiply adjacency matrix by the cell-specific expression of select ligand:
                 nbhd_lig_expr = (adj > 0).astype("int").dot(lig_expr)
@@ -549,8 +617,6 @@ class BaseInterpreter:
                 #  Optionally append all downstream genes from the database (direct connections to receptors,
                 #  indirect connections to ligands):
                 receptors = set([pair[1] for pair in pairs])
-                self.logger.info("Downstream genes were not manually provided with 'rec_ds'...automatically "
-                                 "searching for downstream genes associated with the discovered 'receptors'.")
                 signet = pd.read_csv(os.path.join(self.cci_dir, "human_mouse_signaling_network.csv"), index_col=0)
                 if species == "axolotl":
                     species = "human"
@@ -558,8 +624,17 @@ class BaseInterpreter:
 
                 receiver_ds = set(list(sig_net.loc[sig_net["src"].isin(receptors)]["dest"].values))
                 ds = list(receiver_ds)
+                self.logger.info(
+                    "List of receptor-downstream genes was not provided- found these genes from the "
+                    f"provided receptors: {(', ').join(ds)}"
+                )
             self.genes = ds
             self.X = pd.concat(self.niche_mats, axis=1)
+            self.X.columns = self.X.columns.droplevel()
+
+            # Minmax-scale columns to minimize the external impact of intercellular differences in ligand/receptor
+            # expression:
+            self.X = (self.X - self.X.min()) / (self.X.max() - self.X.min())
 
             self.param_labels = self.variable_names = self.X.columns
 
@@ -571,9 +646,9 @@ class BaseInterpreter:
 
         # Filter gene names if specific gene names are provided. If not, use all genes referenced in .X:
         if self.genes is not None:
-            self.genes = self.adata.var.index.intersection(self.genes)
+            self.genes = list(self.adata.var.index.intersection(self.genes))
         else:
-            self.genes = self.adata.var.index
+            self.genes = list(self.adata.var.index)
         self.adata = self.adata[:, self.genes]
 
     def compute_spatial_weights(self):
@@ -601,12 +676,15 @@ class BaseInterpreter:
         # Row standardize spatial weights matrix:
         self.w.transform = "R"
 
-    # ------------------------------ Parameters for spatially-aware and lagged models ------------------------------ #
+    # ---------------------------------------------------------------------------------------------------
+    # Computing parameters for spatially-aware and lagged models
+    # ---------------------------------------------------------------------------------------------------
     def run_OLS(self, n_jobs: int = 30) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Wrapper for ordinary least squares regression.
 
-        n_jobs: For parallel processing, number of tasks to run at once
+        Args:
+            n_jobs: For parallel processing, number of tasks to run at once
 
         Returns:
             coeffs: Contains fitted parameters for each feature
@@ -625,114 +703,22 @@ class BaseInterpreter:
         reconst = pd.DataFrame(reconst, index=self.genes, columns=self.cell_names).T
         return coeffs, reconst
 
-    def run_GM_lag(self, n_jobs: int = 30):
-        """Runs spatially lagged two-stage least squares model"""
-        if not hasattr(self, "w"):
-            self.logger.info(
-                "Called 'run_GM_lag' before computing spatial weights array- computing spatial weights "
-                "array before proceeding..."
-            )
-            self.compute_spatial_weights()
+    def run_lasso_LS(self, n_jobs: int = 30) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Wrapper for Lasso-regularized ordinary least squares regression.
 
-        def _single(
-            cur_g: str,
-            X: pd.DataFrame,
-            X_variable_names: List[str],
-            param_labels: List[str],
-            adata: AnnData,
-            w: np.ndarray,
-            layer: Union[None, str] = None,
-        ):
-            """
-            Defines model run process for a single feature- not callable by the user, all arguments populated by
-            arguments passed on instantiation of :class `BaseInterpreter`.
+        Args:
+            n_jobs: For parallel processing, number of tasks to run at once
+            *TO INSERT: LASSO ARGUMENTS*
 
-            Args:
-                cur_g: Name of the feature to regress on
-                X: Values used for the regression
-                X_variable_names: Names of the variables used for the regression
-                param_labels: Names of categories- each computed parameter corresponds to a single element in
-                    param_labels
-                adata: AnnData object to store results in
-                w: Spatial weights array
-                layer: Specifies layer in AnnData to use- if None, will use .X.
+        Returns:
+            coeffs: Contains fitted parameters for each feature
+            reconst: Contains predicted expression for each feature
+        """
 
-            Returns:
-                coeffs: Coefficients for each categorical group for each feature
-                pred: Predicted values from regression for each feature
-                resid: Residual values from regression for each feature
-            """
-            if layer is None:
-                X["log_expr"] = adata[:, cur_g].X.A
-            else:
-                X["log_expr"] = adata[:, cur_g].layers[layer].A
-
-            try:
-                model = spreg.GM_Lag(
-                    X[["log_expr"]].values,
-                    X[X_variable_names].values,
-                    w=w,
-                    name_y="log_expr",
-                    name_x=X_variable_names,
-                )
-                self.logger.info("Printing model summary: \n", model.summary)
-                y_pred = model.predy
-                resid = model.u
-
-                # Coefficients for each cell type:
-                a = pd.DataFrame(model.betas, model.name_x + ["W_log_exp"], columns=["coef"])
-                b = pd.DataFrame(
-                    model.z_stat,
-                    model.name_x + ["W_log_exp"],
-                    columns=["z_stat", "p_val"],
-                )
-
-                df = a.merge(b, left_index=True, right_index=True)
-
-                for ind, g in enumerate(["const"] + param_labels + ["W_log_exp"]):
-                    adata.var.loc[cur_g, str(g) + "_GM_lag_coeff"] = df.iloc[ind, 0]
-                    adata.var.loc[cur_g, str(g) + "_GM_lag_zstat"] = df.iloc[ind, 1]
-                    adata.var.loc[cur_g, str(g) + "_GM_lag_pval"] = df.iloc[ind, 2]
-
-            except:
-                y_pred = np.full((X.shape[0],), np.nan)
-                resid = np.full((X.shape[0],), np.nan)
-
-                for ind, g in enumerate(["const"] + param_labels + ["W_log_exp"]):
-                    adata.var.loc[cur_g, str(g) + "_GM_lag_coeff"] = np.nan
-                    adata.var.loc[cur_g, str(g) + "_GM_lag_zstat"] = np.nan
-                    adata.var.loc[cur_g, str(g) + "_GM_lag_pval"] = np.nan
-
-            # Outputs for a single gene:
-            return adata.var.loc[cur_g, :].values, y_pred, resid
-
-        # Wrap regressions for all single genes:
-        results = Parallel(n_jobs)(
-            delayed(_single)(cur_g, self.X, self.variable_names, self.param_labels, self.adata, self.w, self.layer)
-            for cur_g in self.genes
-        )
-
-        coeffs = [item[0] for item in results]
-        pred = [item[1] for item in results]
-        resid = [item[2] for item in results]
-
-        # Coefficients and their significance:
-        coeffs = pd.DataFrame(coeffs, index=self.genes)
-        coeffs.columns = self.adata.var.loc[self.genes, :].columns
-
-        pred = pd.DataFrame(np.hstack(pred), index=self.adata.obs_names, columns=self.genes)
-        resid = pd.DataFrame(np.hstack(resid), index=self.adata.obs_names, columns=self.genes)
-
-        # Update AnnData object:
-        self.adata.obsm["ypred"] = pred
-        self.adata.obsm["resid"] = resid
-
-        for cn in coeffs.columns:
-            self.adata.var.loc[:, cn] = coeffs[cn]
-
-        return coeffs, pred, resid
-
-    # ------------------------- Downstream interpretation (mostly for interaction models) ------------------------- #
+    # ---------------------------------------------------------------------------------------------------
+    # Downstream interpretation (mostly for interaction models)
+    # ---------------------------------------------------------------------------------------------------
     def visualize_params(self, coeffs: pd.DataFrame):
         """
         Generates heatmap of parameter values for visualization
@@ -741,10 +727,11 @@ class BaseInterpreter:
         """
 
     def get_sender_receiver_effects(
-            self,
-            coeffs: pd.DataFrame,
-            significance_threshold: float = 0.05,
-            lr_pair: Union[None, str] = None
+        self,
+        coeffs: pd.DataFrame,
+        significance_threshold: float = 0.05,
+        lr_pair: Union[None, str] = None,
+        save_prefix: Union[None, str] = None,
     ):
         """
         For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
@@ -764,6 +751,8 @@ class BaseInterpreter:
                 subset the coefficients array to the specific ligand-receptor pair of interest. Takes the form
                 "{ligand}-{receptor}" and should match one of the keys in :dict `self.niche_mats`. If not given,
                 will default to the first key in this dictionary.
+            save_prefix: If provided, saves all relevant dataframes to :path `./regression_outputs` under the name
+                `{prefix}_{coeffs/pvalues, etc.}.csv`. If not provided, will not save.
         """
         if not "connections" in self.mod_type or not "niche" in self.mod_type:
             self.logger.error(
@@ -771,11 +760,16 @@ class BaseInterpreter:
                 "predictor variable."
             )
 
+        # Save labels of indices and columns (correspond to features & parameters, respectively, for the coeffs
+        # DataFrame, will be columns & indices respectively for the other arrays generated by this function):
+        feature_labels = coeffs.index
+        param_labels = coeffs.columns
+
         # Return only the numerical coefficients:
-        coeffs = coeffs[[col for col in coeffs.columns if "coeff" in col]].values
+        coeffs_np = coeffs[[col for col in coeffs.columns if "coeff" in col]].values
         if "lag" in self.mod_type:
             # Remove the first column (the intercept):
-            coeffs = coeffs[:, 1:]
+            coeffs_np = coeffs_np[:, 1:]
 
         # Get inverse Fisher information matrix, with the y block containing all features that were used in regression):
         y = self.adata[:, self.genes].X
@@ -783,38 +777,31 @@ class BaseInterpreter:
 
         # Compute significance for each parameter:
         is_significant, pvalues, qvalues = compute_wald_test(
-            params=coeffs, fisher_inv=inverse_fisher, significance_threshold=significance_threshold
+            params=coeffs_np, fisher_inv=inverse_fisher, significance_threshold=significance_threshold
         )
-        # Keep track of which element corresponds to which LR pair if using niche-LR model:
-        if self.mod_type == "niche_LR":
-            if lr_pair is None:
-                self.logger.warning("'lr_pair' not specified- defaulting to the first L:R pair that was used for the "
-                                    "model. For reference, all L:R pairs used for the "
-                                    f"model: {list(self.niche_mats.keys())}")
-                lr_pair = list(self.niche_mats.keys())[0]
-            if lr_pair not in self.niche_mats.keys():
-                self.logger.warning("Input to 'lr_pair' not recognized- proceeding with the first L:R pair that was "
-                                    "used for the model. For reference, all L:R pairs used for the "
-                                    f"model: {list(self.niche_mats.keys())}")
-                lr_pair = list(self.niche_mats.keys())[0]
 
-            is_significant = pd.DataFrame(is_significant, index=self.X.columns)
-            pvalues = pd.DataFrame(pvalues, index=self.X.columns)
-            qvalues = pd.DataFrame(qvalues, index=self.X.columns)
+        # If 'save_prefix' is given, save the complete coefficients, significance, p-value and q-value matrices:
+        if save_prefix is not None:
+            is_significant = pd.DataFrame(is_significant, index=param_labels, columns=feature_labels)
+            pvalues = pd.DataFrame(pvalues, index=param_labels, columns=feature_labels)
+            qvalues = pd.DataFrame(qvalues, index=param_labels, columns=feature_labels)
 
-            is_significant = is_significant.filter(lr_pair, axis='index')
-            pvalues = pvalues.filter(lr_pair, axis='index')
-            qvalues = qvalues.filter(lr_pair, axis='index')
+            if not os.path.exists("./regression_outputs"):
+                os.makedirs("./regression_outputs")
+            is_significant.to_csv(f"./regression_outputs/{save_prefix}_is_sign.csv")
+            pvalues.to_csv(f"./regression_outputs/{save_prefix}_pvalues.csv")
+            qvalues.to_csv(f"./regression_outputs/{save_prefix}_qvalues.csv")
+            coeffs.to_csv(f"./regression_outputs/{save_prefix}_coeffs.csv")
 
-        # If niche model, extract the portion that corresponds to the interaction terms:
-        if self.mod_type == "niche":
+        # If niche ligand lag model, extract the portion that corresponds to the interaction terms:
+        if self.mod_type == "niche_ligand_lag":
             interaction_shape = np.int(self.n_features**2)
-            is_significant = is_significant[self.n_features : interaction_shape + self.n_features, :]
-            pvalues = pvalues[self.n_features : interaction_shape + self.n_features, :]
-            qvalues = qvalues[self.n_features : interaction_shape + self.n_features, :]
+            is_significant = is_significant[:interaction_shape, :]
+            pvalues = pvalues[:interaction_shape, :]
+            qvalues = qvalues[:interaction_shape, :]
 
-            # Compute the fold-change induced in the receiver by the sender for the case model type is "niche":
-            interaction_params = coeffs[:, self.n_features : interaction_shape + self.n_features]
+            # Compute the fold-change induced in the receiver by the sender, from the interaction terms:
+            interaction_params = coeffs_np[:, :interaction_shape]
             # Split array such that an nxn matrix is created, where n is 'n_features' (the number of cell type
             # categories)
             self.fold_change = np.concatenate(
@@ -824,16 +811,44 @@ class BaseInterpreter:
                 ),
                 axis=0,
             )
-        # If niche-LR model, can extract the portion corresponding to the interaction terms for all of the chosen L-R
-        # pairs:
+        # If niche-LR model, extract the portion corresponding to the interaction terms for a specific L-R pair:
         elif self.mod_type == "niche_lr":
-            # pvalues will be a subset of the complete p-value array:
-            coeffs = coeffs.filter(lr_pair, axis='columns')
+            if lr_pair is None:
+                self.logger.warning(
+                    "'lr_pair' not specified- defaulting to the first L:R pair that was used for the "
+                    "model. For reference, all L:R pairs used for the "
+                    f"model: {list(self.niche_mats.keys())}"
+                )
+                lr_pair = list(self.niche_mats.keys())[0]
+            if lr_pair not in self.niche_mats.keys():
+                self.logger.warning(
+                    "Input to 'lr_pair' not recognized- proceeding with the first L:R pair that was "
+                    "used for the model. For reference, all L:R pairs used for the "
+                    f"model: {list(self.niche_mats.keys())}"
+                )
+                lr_pair = list(self.niche_mats.keys())[0]
+
+            is_significant = is_significant.filter(lr_pair, axis="index").values
+            pvalues = pvalues.filter(lr_pair, axis="index").values
+            qvalues = qvalues.filter(lr_pair, axis="index").values
+
+            # Coefficients, etc. will also be a subset of the complete array:
+            coeffs_np = coeffs.filter(lr_pair, axis="columns").values
+            # Significance, pvalues, qvalues filtered above
+
+            self.fold_change = np.concatenate(
+                np.expand_dims(
+                    np.split(coeffs_np.T, indices_or_sections=np.sqrt(coeffs_np.T.shape[0]), axis=0), axis=0
+                ),
+                axis=0,
+            )
 
         # Else if connection-based model, all regression coefficients already correspond to the interaction terms:
         else:
             self.fold_change = np.concatenate(
-                np.expand_dims(np.split(coeffs.T, indices_or_sections=np.sqrt(coeffs.T.shape[0]), axis=0), axis=0),
+                np.expand_dims(
+                    np.split(coeffs_np.T, indices_or_sections=np.sqrt(coeffs_np.T.shape[0]), axis=0), axis=0
+                ),
                 axis=0,
             )
 
@@ -1260,7 +1275,8 @@ class Category_Interpreter(BaseInterpreter):
     variables (specifically, the prevalence of categories within spatial neighborhoods) to predict the value of gene
     expression.
 
-    The only keyword argument that is used for this class is 'n_neighbors'.
+    Arguments passed to :class `BaseInterpreter`. The only keyword argument that is used for this class is
+    'n_neighbors'.
     """
 
     def __init__(self, *args, **kwargs):
@@ -1271,30 +1287,13 @@ class Category_Interpreter(BaseInterpreter):
         self.prepare_data(mod_type="category")
 
 
-class Connections_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-aware (but not spatially lagged) regression using the
-    connections between categories to predict the value of gene expression.
-
-    The only keyword argument that is used for this class is 'n_neighbors'.
-
-    To fit model, run :func `self.run_GM_lag`
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        assert self.group_key is not None, "Categorical labels required for this model."
-
-        # Prepare data:
-        self.prepare_data(mod_type="connections")
-
-
 class Niche_Interpreter(BaseInterpreter):
     """
     Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
     prediction when instantiating a model for spatially-aware regression using both the prevalence of and connections
     between categories within spatial neighborhoods to predict the value of gene expression.
+
+    Arguments passed to :class `BaseInterpreter`.
     """
 
     def __init__(self, *args, **kwargs):
@@ -1310,12 +1309,14 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
     prediction when instantiating a model for spatially-lagged regression using the spatial lag of ligand genes to
     predict the regression target.
 
+    Arguments passed to :class `BaseInterpreter`.
+
     Args:
         lig: Name(s) of ligands to use as predictors
         rec: Name(s) of receptors to use as regression targets. If not given, will search through database for all
-            genes that correspond to the provided genes from 'ligands'
+            genes that correspond to the provided genes from 'ligands'.
         rec_ds: Name(s) of receptor-downstream genes to use as regression targets. If not given, will search through
-            database for all genes that correspond to receptors
+            database for all genes that correspond to receptor-downstream genes.
         species: Specifies L:R database to use
         args: Additional positional arguments to :class `BaseInterpreter`
         kwargs: Additional keyword arguments to :class `BaseInterpreter`
@@ -1328,120 +1329,38 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
         rec_ds: Union[None, str, List[str]] = None,
         species: Literal["human", "mouse", "axolotl"] = "human",
         *args,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
 
         self.prepare_data(mod_type="ligand_lag", lig=lig, rec=rec, rec_ds=rec_ds, species=species)
 
-    # Custom version of the GM lag model defined in the base class:
-    def run_GM_lag(self, n_jobs: int = 30):
-        """Runs spatially lagged two-stage least squares model for the ligand-lag case"""
+    def run_GM_lag(self):
+        """Runs spatially lagged two-stage least squares model"""
         if not hasattr(self, "w"):
             self.logger.info(
-                "Called 'run_GM_lag' before computing spatial weights array- computing spatial weights array before "
-                "proceeding..."
+                "Called 'run_GM_lag' before computing spatial weights array- computing spatial weights "
+                "array before proceeding..."
             )
             self.compute_spatial_weights()
 
-        def _single(
-            cur_g: str,
-            X: pd.DataFrame,
-            X_lag_vars: List[str],
-            param_labels: List[str],
-            adata: AnnData,
-            w: np.ndarray,
-            layer: Union[None, str] = None,
-        ):
-            """
-            Defines model run process for a single feature- not callable by the user, all arguments populated by
-            arguments passed on instantiation of :class `BaseInterpreter`.
-
-            Args:
-                cur_g: Name of the feature to regress on
-                X: Values used for the regression, in the form of a dataframe
-                X_lag_vars: Names of the variables for which to compute spatial lag
-                param_labels: Names of categories- each computed parameter corresponds to a single element in
-                    param_labels
-                adata: AnnData object to store results in
-                w: Spatial weights array
-                layer: Specifies layer in AnnData to use- if None, will use .X.
-
-            Returns:
-                coeffs: Coefficients for each categorical group for each feature
-                pred: Predicted values from regression for each feature
-                resid: Residual values from regression for each feature
-            """
-            if layer is None:
-                X["log_expr"] = adata[:, cur_g].X.A
-            else:
-                X["log_expr"] = adata[:, cur_g].layers[layer].A
-
-            try:
-                model = LR_GM_lag(
-                    df=X,
-                    y_col="log_expr",
-                    sp_lag_feats=X_lag_vars,
-                    w=w,
-                    name_x=list(X.columns),
-                )
-                self.logger.info("Printing model summary: \n", model.summary)
-                y_pred = model.predy
-                resid = model.u
-
-                # Coefficients for each cell type:
-                a = pd.DataFrame(model.betas, model.name_x + ["W_log_exp"], columns=["coef"])
-                b = pd.DataFrame(
-                    model.z_stat,
-                    model.name_x + ["W_log_exp"],
-                    columns=["z_stat", "p_val"],
-                )
-
-                df = a.merge(b, left_index=True, right_index=True)
-
-                for ind, g in enumerate(["const"] + param_labels + ["W_log_exp"]):
-                    # Parameter may or may not be lagged:
-                    if g in X_lag_vars:
-                        suffix = "_GM_lag"
-                    else:
-                        suffix = "_GM"
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_coeff"] = df.iloc[ind, 0]
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_zstat"] = df.iloc[ind, 1]
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_pval"] = df.iloc[ind, 2]
-
-            except:
-                y_pred = np.full((X.shape[0],), np.nan)
-                resid = np.full((X.shape[0],), np.nan)
-
-                for ind, g in enumerate(["const"] + param_labels + ["W_log_exp"]):
-                    # Parameter may or may not be lagged:
-                    if g in X_lag_vars:
-                        suffix = "_GM_lag"
-                    else:
-                        suffix = "_GM"
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_coeff"] = np.nan
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_zstat"] = np.nan
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_pval"] = np.nan
-
-            # Outputs for a single gene:
-            return adata.var.loc[cur_g, :].values, y_pred, resid
-
-        # Wrap regressions for all single genes:
-        results = Parallel(n_jobs)(
-            delayed(_single)(cur_g, self.X, self.variable_names, self.param_labels, self.adata, self.w, self.layer)
-            for cur_g in self.genes
-        )
-
-        coeffs = [item[0] for item in results]
-        pred = [item[1] for item in results]
-        resid = [item[2] for item in results]
+        # Regress on one gene at a time:
+        all_values, all_pred, all_resid = [], [], []
+        for i in tqdm(range(len(self.genes))):
+            cur_g = self.genes[i]
+            values, pred, resid = self.single(
+                cur_g, self.X, self.variable_names, self.param_labels, self.adata, self.w, self.layer
+            )
+            all_values.append(values)
+            all_pred.append(pred)
+            all_resid.append(resid)
 
         # Coefficients and their significance:
-        coeffs = pd.DataFrame(coeffs, index=self.genes)
+        coeffs = pd.DataFrame(np.vstack(all_values))
         coeffs.columns = self.adata.var.loc[self.genes, :].columns
 
-        pred = pd.DataFrame(np.hstack(pred), index=self.adata.obs_names, columns=self.genes)
-        resid = pd.DataFrame(np.hstack(resid), index=self.adata.obs_names, columns=self.genes)
+        pred = pd.DataFrame(np.hstack(all_pred), index=self.adata.obs_names, columns=self.genes)
+        resid = pd.DataFrame(np.hstack(all_resid), index=self.adata.obs_names, columns=self.genes)
 
         # Update AnnData object:
         self.adata.obsm["ypred"] = pred
@@ -1451,6 +1370,81 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
             self.adata.var.loc[:, cn] = coeffs[cn]
 
         return coeffs, pred, resid
+
+    def single(
+        self,
+        cur_g: str,
+        X: pd.DataFrame,
+        X_variable_names: List[str],
+        param_labels: List[str],
+        adata: AnnData,
+        w: np.ndarray,
+        layer: Union[None, str] = None,
+    ):
+        """
+        Defines model run process for a single feature- not callable by the user, all arguments populated by
+        arguments passed on instantiation of :class `BaseInterpreter`.
+
+        Args:
+            cur_g: Name of the feature to regress on
+            X: Values used for the regression
+            X_variable_names: Names of the variables used for the regression
+            param_labels: Names of categories- each computed parameter corresponds to a single element in
+                param_labels
+            adata: AnnData object to store results in
+            w: Spatial weights array
+            layer: Specifies layer in AnnData to use- if None, will use .X.
+
+        Returns:
+            coeffs: Coefficients for each categorical group for each feature
+            pred: Predicted values from regression for each feature
+            resid: Residual values from regression for each feature
+        """
+        if layer is None:
+            X["log_expr"] = adata[:, cur_g].X.A
+        else:
+            X["log_expr"] = adata[:, cur_g].layers[layer].A
+
+        try:
+            model = spreg.GM_Lag(
+                X[["log_expr"]].values,
+                X[X_variable_names].values,
+                w=w,
+                name_y="log_expr",
+                name_x=X_variable_names,
+            )
+            self.logger.info(f"Printing model summary for regression on {cur_g}: \n")
+            print(model.summary)
+            y_pred = model.predy
+            resid = model.u
+
+            # Coefficients for each cell type:
+            a = pd.DataFrame(model.betas, model.name_x + ["W_log_exp"], columns=["coef"])
+            b = pd.DataFrame(
+                model.z_stat,
+                model.name_x + ["W_log_exp"],
+                columns=["z_stat", "p_val"],
+            )
+
+            df = a.merge(b, left_index=True, right_index=True)
+
+            for ind, g in enumerate(["const"] + param_labels + ["W_log_exp"]):
+                adata.var.loc[cur_g, str(g) + "_GM_lag_coeff"] = df.iloc[ind, 0]
+                adata.var.loc[cur_g, str(g) + "_GM_lag_zstat"] = df.iloc[ind, 1]
+                adata.var.loc[cur_g, str(g) + "_GM_lag_pval"] = df.iloc[ind, 2]
+
+        except:
+            y_pred = np.full((X.shape[0],), np.nan)
+            resid = np.full((X.shape[0],), np.nan)
+
+            for ind, g in enumerate(["const"] + param_labels + ["W_log_exp"]):
+                adata.var.loc[cur_g, str(g) + "_GM_lag_coeff"] = np.nan
+                adata.var.loc[cur_g, str(g) + "_GM_lag_zstat"] = np.nan
+                adata.var.loc[cur_g, str(g) + "_GM_lag_pval"] = np.nan
+
+        # Outputs for a single gene:
+        return adata.var.loc[cur_g, :].values, y_pred.reshape(-1, 1), resid.reshape(-1, 1)
+
 
 class Niche_Ligand_Lagged_Interpreter(BaseInterpreter):
     """
@@ -1459,12 +1453,14 @@ class Niche_Ligand_Lagged_Interpreter(BaseInterpreter):
     well as the (non-lagged) prevalence of and connections between categories within spatial neighborhoods to
     predict the regression target.
 
+    Arguments passed to :class `BaseInterpreter`.
+
     Args:
         lig: Name(s) of ligands to use as predictors
         rec: Name(s) of receptors to use as regression targets. If not given, will search through database for all
-            genes that correspond to the provided genes from 'ligands'
+            genes that correspond to the provided genes from 'ligands'.
         rec_ds: Name(s) of receptor-downstream genes to use as regression targets. If not given, will search through
-            database for all genes that correspond to receptors
+            database for all genes that correspond to receptor-downstream genes.
         species: Specifies L:R database to use
         niche_lr_r_lag: Only used if 'mod_type' is "niche_lr". Uses the spatial lag of the receptor as the
             dependent variable rather than each spot's unique receptor expression. Defaults to True.
@@ -1484,12 +1480,15 @@ class Niche_Ligand_Lagged_Interpreter(BaseInterpreter):
     ):
         super().__init__(*args, **kwargs)
 
-        self.prepare_data(mod_type="niche_ligand_lag", lig=lig, rec=rec, rec_ds=rec_ds, species=species,
-                          niche_lr_r_lag=niche_lr_r_lag)
+        self.prepare_data(
+            mod_type="niche_ligand_lag", lig=lig, rec=rec, rec_ds=rec_ds, species=species, niche_lr_r_lag=niche_lr_r_lag
+        )
 
     # Custom version of the GM lag model defined in the base class:
-    def run_GM_lag(self, n_jobs: int = 30):
+    def run_GM_lag(self):
         """Runs spatially lagged two-stage least squares model for the ligand-lag case"""
+        self.logger.info("Running niche ligand lag model...")
+
         if not hasattr(self, "w"):
             self.logger.info(
                 "Called 'run_GM_lag' before computing spatial weights array- computing spatial weights array before "
@@ -1497,104 +1496,23 @@ class Niche_Ligand_Lagged_Interpreter(BaseInterpreter):
             )
             self.compute_spatial_weights()
 
-        def _single(
-                cur_g: str,
-                X: pd.DataFrame,
-                X_lag_vars: List[str],
-                param_labels: List[str],
-                adata: AnnData,
-                w: np.ndarray,
-                layer: Union[None, str] = None,
-        ):
-            """
-            Defines model run process for a single feature- not callable by the user, all arguments populated by
-            arguments passed on instantiation of :class `BaseInterpreter`.
-
-            Args:
-                cur_g: Name of the feature to regress on
-                X: Values used for the regression, in the form of a dataframe
-                X_lag_vars: Names of the variables for which to compute spatial lag
-                param_labels: Names of categories- each computed parameter corresponds to a single element in
-                    param_labels
-                adata: AnnData object to store results in
-                w: Spatial weights array
-                layer: Specifies layer in AnnData to use- if None, will use .X.
-
-            Returns:
-                coeffs: Coefficients for each categorical group for each feature
-                pred: Predicted values from regression for each feature
-                resid: Residual values from regression for each feature
-            """
-            if layer is None:
-                X["log_expr"] = adata[:, cur_g].X.A
-            else:
-                X["log_expr"] = adata[:, cur_g].layers[layer].A
-
-            try:
-                model = LR_GM_lag(
-                    df=X,
-                    y_col="log_expr",
-                    sp_lag_feats=X_lag_vars,
-                    w=w,
-                    name_x=list(X.columns),
-                )
-                self.logger.info("Printing model summary: \n", model.summary)
-                y_pred = model.predy
-                resid = model.u
-
-                # Coefficients for each cell type:
-                a = pd.DataFrame(model.betas, model.name_x + ["W_log_exp"], columns=["coef"])
-                b = pd.DataFrame(
-                    model.z_stat,
-                    model.name_x + ["W_log_exp"],
-                    columns=["z_stat", "p_val"],
-                )
-
-                df = a.merge(b, left_index=True, right_index=True)
-
-                for ind, g in enumerate(["const"] + param_labels + ["W_log_exp"]):
-                    # Parameter may or may not be lagged:
-                    if g in X_lag_vars:
-                        suffix = "_GM_lag"
-                    else:
-                        suffix = "_GM"
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_coeff"] = df.iloc[ind, 0]
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_zstat"] = df.iloc[ind, 1]
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_pval"] = df.iloc[ind, 2]
-
-            except:
-                y_pred = np.full((X.shape[0],), np.nan)
-                resid = np.full((X.shape[0],), np.nan)
-
-                for ind, g in enumerate(["const"] + param_labels + ["W_log_exp"]):
-                    # Parameter may or may not be lagged:
-                    if g in X_lag_vars:
-                        suffix = "_GM_lag"
-                    else:
-                        suffix = "_GM"
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_coeff"] = np.nan
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_zstat"] = np.nan
-                    adata.var.loc[cur_g, str(g) + f"{suffix}_pval"] = np.nan
-
-            # Outputs for a single gene:
-            return adata.var.loc[cur_g, :].values, y_pred, resid
-
-        # Wrap regressions for all single genes:
-        results = Parallel(n_jobs)(
-            delayed(_single)(cur_g, self.X, self.variable_names, self.param_labels, self.adata, self.w, self.layer)
-            for cur_g in self.genes
-        )
-
-        coeffs = [item[0] for item in results]
-        pred = [item[1] for item in results]
-        resid = [item[2] for item in results]
+        # Regress on one gene at a time:
+        all_values, all_pred, all_resid = [], [], []
+        for i in tqdm(range(len(self.genes))):
+            cur_g = self.genes[i]
+            values, pred, resid = self.single(
+                cur_g, self.X, self.variable_names, self.param_labels, self.adata, self.w, self.layer
+            )
+            all_values.append(values)
+            all_pred.append(pred)
+            all_resid.append(resid)
 
         # Coefficients and their significance:
-        coeffs = pd.DataFrame(coeffs, index=self.genes)
+        coeffs = pd.DataFrame(np.vstack(all_values))
         coeffs.columns = self.adata.var.loc[self.genes, :].columns
 
-        pred = pd.DataFrame(np.hstack(pred), index=self.adata.obs_names, columns=self.genes)
-        resid = pd.DataFrame(np.hstack(resid), index=self.adata.obs_names, columns=self.genes)
+        pred = pd.DataFrame(np.hstack(all_pred), index=self.adata.obs_names, columns=self.genes)
+        resid = pd.DataFrame(np.hstack(all_resid), index=self.adata.obs_names, columns=self.genes)
 
         # Update AnnData object:
         self.adata.obsm["ypred"] = pred
@@ -1605,12 +1523,99 @@ class Niche_Ligand_Lagged_Interpreter(BaseInterpreter):
 
         return coeffs, pred, resid
 
+    def single(
+        self,
+        cur_g: str,
+        X: pd.DataFrame,
+        X_lag_vars: List[str],
+        param_labels: List[str],
+        adata: AnnData,
+        w: np.ndarray,
+        layer: Union[None, str] = None,
+    ):
+        """
+        Defines model run process for a single feature- not callable by the user, all arguments populated by
+        arguments passed on instantiation of :class `BaseInterpreter`.
+
+        Args:
+            cur_g: Name of the feature to regress on
+            X: Values used for the regression, in the form of a dataframe
+            X_lag_vars: Names of the variables for which to compute spatial lag
+            param_labels: Names of categories- each computed parameter corresponds to a single element in
+                param_labels
+            adata: AnnData object to store results in
+            w: Spatial weights array
+            layer: Specifies layer in AnnData to use- if None, will use .X.
+
+        Returns:
+            coeffs: Coefficients for each categorical group for each feature
+            pred: Predicted values from regression for each feature
+            resid: Residual values from regression for each feature
+        """
+        if layer is None:
+            X["log_expr"] = adata[:, cur_g].X.A
+        else:
+            X["log_expr"] = adata[:, cur_g].layers[layer].A
+
+        try:
+            model = LR_GM_lag(
+                df=X,
+                y_col="log_expr",
+                sp_lag_feats=X_lag_vars,
+                w=w,
+                name_x=list(X.columns),
+            )
+            self.logger.info(f"Printing model summary for regression on {cur_g}: \n")
+            print(model.summary)
+            y_pred = model.predy
+            resid = model.u
+
+            # Coefficients for each cell type:
+            a = pd.DataFrame(model.betas, model.name_x + ["W_log_exp"], columns=["coef"])
+            b = pd.DataFrame(
+                model.z_stat,
+                model.name_x + ["W_log_exp"],
+                columns=["z_stat", "p_val"],
+            )
+
+            df = a.merge(b, left_index=True, right_index=True)
+
+            for ind, g in enumerate(["const"] + param_labels + ["W_log_exp"]):
+                # Parameter may or may not be lagged:
+                if g in X_lag_vars:
+                    suffix = "_GM_lag"
+                else:
+                    suffix = "_GM"
+                adata.var.loc[cur_g, str(g) + f"{suffix}_coeff"] = df.iloc[ind, 0]
+                adata.var.loc[cur_g, str(g) + f"{suffix}_zstat"] = df.iloc[ind, 1]
+                adata.var.loc[cur_g, str(g) + f"{suffix}_pval"] = df.iloc[ind, 2]
+
+        except:
+            y_pred = np.full((X.shape[0],), np.nan)
+            resid = np.full((X.shape[0],), np.nan)
+
+            for ind, g in enumerate(["const"] + param_labels + ["W_log_exp"]):
+                # Parameter may or may not be lagged:
+                if g in X_lag_vars:
+                    suffix = "_GM_lag"
+                else:
+                    suffix = "_GM"
+                adata.var.loc[cur_g, str(g) + f"{suffix}_coeff"] = np.nan
+                adata.var.loc[cur_g, str(g) + f"{suffix}_zstat"] = np.nan
+                adata.var.loc[cur_g, str(g) + f"{suffix}_pval"] = np.nan
+
+        # Outputs for a single gene:
+        return adata.var.loc[cur_g, :].values, y_pred, resid
+
+
 class Niche_LR_Interpreter(BaseInterpreter):
     """
     Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
     prediction when instantiating a model for spatially-aware regression using the prevalence of and connections
     between categories within spatial neighborhoods and the cell type-specific expression of ligands and receptors to
     predict the regression target.
+
+    Arguments passed to :class `BaseInterpreter`.
 
     Args:
         lig: Name(s) of ligands to use as predictors
@@ -1637,10 +1642,14 @@ class Niche_LR_Interpreter(BaseInterpreter):
     ):
         super().__init__(*args, **kwargs)
 
-        self.prepare_data(mod_type="niche_lr", lig=lig, rec=rec, rec_ds=rec_ds, species=species,
-                          niche_lr_r_lag=niche_lr_r_lag)
-    
-# -------------------------------------------- Regression Metrics -------------------------------------------- #
+        self.prepare_data(
+            mod_type="niche_lr", lig=lig, rec=rec, rec_ds=rec_ds, species=species, niche_lr_r_lag=niche_lr_r_lag
+        )
+
+
+# ---------------------------------------------------------------------------------------------------
+# Regression Metrics
+# ---------------------------------------------------------------------------------------------------
 def mae(y_true, y_pred):
     """
     Mean absolute error- in this context, actually log1p mean absolute error
@@ -1706,3 +1715,8 @@ def r_squared(y_true, y_pred):
     total = np.sum(np.square(y_true - np.sum(y_true)))
     r2 = 1.0 - resid / total
     return r2
+
+
+# ---------------------------------------------------------------------------------------------------
+# Cross-validation
+# ---------------------------------------------------------------------------------------------------

@@ -9,6 +9,8 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import geopandas as gpd
 
+from inspect import signature
+
 import matplotlib
 import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
@@ -17,7 +19,6 @@ import numpy as np
 import pandas as pd
 import scipy
 from anndata import AnnData
-from inspect import signature
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from pandas.api.types import is_categorical_dtype
@@ -1886,6 +1887,7 @@ def _dendrogram_sig(data: np.ndarray, method: str, **kwargs) -> Tuple[List[int],
 
     return row_order, col_order, row_link, col_link
 
+
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def dendrogram(
     adata: AnnData,
@@ -1893,8 +1895,8 @@ def dendrogram(
     n_pcs: int = 30,
     use_rep: Union[None, str] = None,
     var_names: Union[None, List[str]] = None,
-    cor_method: str = 'pearson',
-    linkage_method: str = 'complete',
+    cor_method: str = "pearson",
+    linkage_method: str = "complete",
     optimal_ordering: bool = False,
     key_added: Union[None, str] = None,
     inplace: bool = True,
@@ -1934,8 +1936,9 @@ def dendrogram(
     # For each category label given in 'cat_key':
     for cat in cat_key:
         if cat not in adata.obs_keys():
-            logger.error("'cat_key' has to be a valid observation. "
-                         f"Given value: {cat}, valid observations: {adata.obs_keys()}"
+            logger.error(
+                "'cat_key' has to be a valid observation. "
+                f"Given value: {cat}, valid observations: {adata.obs_keys()}"
             )
         if not is_categorical_dtype(adata.obs[cat_key]):
             logger.error(
@@ -1946,27 +1949,30 @@ def dendrogram(
     if var_names is None:
         # Choose representation to use for hierarchical clustering:
         if use_rep is None and n_pcs == 0:
-            use_rep = 'X'
+            use_rep = "X"
 
         if use_rep is None:
             if adata.n_vars > n_pcs:
-                if 'X_pca' in adata.obsm.keys():
-                    if n_pcs is not None and n_pcs > adata.obsm['X_pca'].shape[1]:
+                if "X_pca" in adata.obsm.keys():
+                    if n_pcs is not None and n_pcs > adata.obsm["X_pca"].shape[1]:
                         logger.error("Existing 'X_pca' does not have enough PCs.")
-                    X = adata.obsm['X_pca'][:, :n_pcs]
-                    logger.info(f'Using \'X_pca\' with n_pcs = {X.shape[1]} to compute dendrogram...')
+                    X = adata.obsm["X_pca"][:, :n_pcs]
+                    logger.info(f"Using 'X_pca' with n_pcs = {X.shape[1]} to compute dendrogram...")
                 else:
-                    logger.warning("'n_pcs' was provided, but 'X_pca' does not already exist. If you meant to use "
-                                   "gene expression, set 'use_rep' = 'X' or 'n_pcs' = 0. For now, will proceed with "
-                                   "computing PCA representation and using rep 'X_pca'.")
+                    logger.warning(
+                        "'n_pcs' was provided, but 'X_pca' does not already exist. If you meant to use "
+                        "gene expression, set 'use_rep' = 'X' or 'n_pcs' = 0. For now, will proceed with "
+                        "computing PCA representation and using rep 'X_pca'."
+                    )
                     pca = PCA(
                         n_components=min(n_pcs, adata.X.shape[1] - 1),
                         svd_solver="arpack",
                         random_state=0,
                     )
                     fit = pca.fit(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else pca.fit(adata.X)
-                    X_pca = fit.transform(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else fit.transform(
-                        adata.X)
+                    X_pca = (
+                        fit.transform(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else fit.transform(adata.X)
+                    )
                     adata.obsm["X_pca"] = X_pca
 
             else:
@@ -1983,7 +1989,7 @@ def dendrogram(
                 X = adata.obsm[use_rep][:, :n_pcs]
             elif use_rep in adata.obsm.keys() and n_pcs is None:
                 X = adata.obsm[use_rep]
-            elif use_rep == 'X':
+            elif use_rep == "X":
                 X = adata.X.toarray() if scipy.sparse.issparse(adata.X) else adata.X
             else:
                 logger.error("Did not find {} in `.obsm.keys()`. Needs to be compute first.".format(use_rep))
@@ -1994,9 +2000,7 @@ def dendrogram(
         # If multiple category keys are given, create new categories by merging their combinations:
         if len(cat_key) > 1:
             for cat in cat_key[1:]:
-                categorical = (
-                        categorical.astype(str) + "_" + adata.obs[cat].astype(str)
-                ).astype('category')
+                categorical = (categorical.astype(str) + "_" + adata.obs[cat].astype(str)).astype("category")
         categorical.name = "_".join(cat_key)
 
         rep_df.set_index(categorical, inplace=True)
@@ -2012,9 +2016,7 @@ def dendrogram(
 
     corr_matrix = mean_df.T.corr(method=cor_method)
     corr_condensed = distance.squareform(1 - corr_matrix)
-    z_var = sch.linkage(
-        corr_condensed, method=linkage_method, optimal_ordering=optimal_ordering
-    )
+    z_var = sch.linkage(corr_condensed, method=linkage_method, optimal_ordering=optimal_ordering)
     dendro_info = sch.dendrogram(z_var, labels=list(categories), no_plot=True)
 
     dat = dict(
@@ -2023,8 +2025,8 @@ def dendrogram(
         use_rep=use_rep,
         cor_method=cor_method,
         linkage_method=linkage_method,
-        categories_ordered=dendro_info['ivl'],
-        categories_idx_ordered=dendro_info['leaves'],
+        categories_ordered=dendro_info["ivl"],
+        categories_idx_ordered=dendro_info["leaves"],
         dendrogram_info=dendro_info,
         correlation_matrix=corr_matrix.values,
     )
@@ -2037,14 +2039,15 @@ def dendrogram(
     else:
         return dat
 
+
 def plot_dendrogram(
     dendro_ax: matplotlib.axes.Axes,
     adata: AnnData,
     cat_key: str,
     dendrogram_key: Union[None, str] = None,
-    orientation: Literal['top', 'bottom', 'left', 'right'] = 'right',
+    orientation: Literal["top", "bottom", "left", "right"] = "right",
     remove_labels: bool = True,
-    ticks: Union[None, Collection[float]] = None
+    ticks: Union[None, Collection[float]] = None,
 ):
     """
     Plots dendrogram on the provided Axes, using the dendrogram information stored in `.uns[dendrogram_key]`
@@ -2068,7 +2071,7 @@ def plot_dendrogram(
     # Get dendrogram key:
     if not isinstance(dendrogram_key, str):
         if isinstance(cat_key, str):
-            dendrogram_key = f'dendrogram_{cat_key}'
+            dendrogram_key = f"dendrogram_{cat_key}"
         elif isinstance(cat_key, list):
             dendrogram_key = f'dendrogram_{"_".join(cat_key)}'
 
@@ -2079,7 +2082,7 @@ def plot_dendrogram(
         )
         dendrogram(adata, cat_key, key_added=dendrogram_key)
 
-    if 'dendrogram_info' not in adata.uns[dendrogram_key]:
+    if "dendrogram_info" not in adata.uns[dendrogram_key]:
         raise ValueError(
             f"The given dendrogram key ({dendrogram_key!r}) does not contain valid dendrogram information."
         )
@@ -2115,17 +2118,15 @@ def plot_dendrogram(
                 old_max = old_ticks[idx_next]
                 new_min = new_ticks[idx_prev]
                 new_max = new_ticks[idx_next]
-                new_x_val = ((x_val - old_min) / (old_max - old_min)) * (
-                        new_max - new_min
-                ) + new_min
+                new_x_val = ((x_val - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min
             new_xs.append(new_x_val)
 
         return new_xs
 
-    dendro_info = adata.uns[dendrogram_key]['dendrogram_info']
+    dendro_info = adata.uns[dendrogram_key]["dendrogram_info"]
     leaves = dendro_info["ivl"]
-    icoord = np.array(dendro_info['icoord'])
-    dcoord = np.array(dendro_info['dcoord'])
+    icoord = np.array(dendro_info["icoord"])
+    dcoord = np.array(dendro_info["dcoord"])
 
     orig_ticks = np.arange(5, len(leaves) * 10 + 5, 10).astype(float)
     # check that ticks has the same length as orig_ticks
@@ -2136,37 +2137,35 @@ def plot_dendrogram(
     for xs, ys in zip(icoord, dcoord):
         if ticks is not None:
             xs = translate_pos(xs, ticks, orig_ticks)
-        if orientation in ['right', 'left']:
+        if orientation in ["right", "left"]:
             xs, ys = ys, xs
-        dendro_ax.plot(xs, ys, color='#555555')
+        dendro_ax.plot(xs, ys, color="#555555")
 
     dendro_ax.tick_params(bottom=False, top=False, left=False, right=False)
     ticks = ticks if ticks is not None else orig_ticks
-    if orientation in ['right', 'left']:
+    if orientation in ["right", "left"]:
         dendro_ax.set_yticks(ticks)
-        dendro_ax.set_yticklabels(leaves, fontsize='small', rotation=0)
+        dendro_ax.set_yticklabels(leaves, fontsize="small", rotation=0)
         dendro_ax.tick_params(labelbottom=False, labeltop=False)
-        if orientation == 'left':
+        if orientation == "left":
             xmin, xmax = dendro_ax.get_xlim()
             dendro_ax.set_xlim(xmax, xmin)
             dendro_ax.tick_params(labelleft=False, labelright=True)
     else:
         dendro_ax.set_xticks(ticks)
-        dendro_ax.set_xticklabels(leaves, fontsize='small', rotation=90)
+        dendro_ax.set_xticklabels(leaves, fontsize="small", rotation=90)
         dendro_ax.tick_params(labelleft=False, labelright=False)
-        if orientation == 'bottom':
+        if orientation == "bottom":
             ymin, ymax = dendro_ax.get_ylim()
             dendro_ax.set_ylim(ymax, ymin)
             dendro_ax.tick_params(labeltop=True, labelbottom=False)
 
     if remove_labels:
-        dendro_ax.tick_params(
-            labelbottom=False, labeltop=False, labelleft=False, labelright=False
-        )
+        dendro_ax.tick_params(labelbottom=False, labeltop=False, labelleft=False, labelright=False)
 
     dendro_ax.grid(False)
 
-    dendro_ax.spines['right'].set_visible(False)
-    dendro_ax.spines['top'].set_visible(False)
-    dendro_ax.spines['left'].set_visible(False)
-    dendro_ax.spines['bottom'].set_visible(False)
+    dendro_ax.spines["right"].set_visible(False)
+    dendro_ax.spines["top"].set_visible(False)
+    dendro_ax.spines["left"].set_visible(False)
+    dendro_ax.spines["bottom"].set_visible(False)

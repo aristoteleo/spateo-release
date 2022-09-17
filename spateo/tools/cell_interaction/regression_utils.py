@@ -8,6 +8,7 @@ import pandas as pd
 import scipy
 import statsmodels.stats.multitest
 from anndata import AnnData
+from sklearn.model_selection import train_test_split
 
 
 # ------------------------------------------- Ordinary Least-Squares ------------------------------------------- #
@@ -19,22 +20,14 @@ def ols_fit(
     Ordinary least squares regression for a single variable
 
     Args:
-        X : pd.DataFrame
-            Contains data to be used as independent variables in the regression
-        adata : class `anndata.AnnData`
-            AnnData object to store results in
-        x_feats : list of str
-            Names of the features to use in the regression. Must be present as columns of 'X'.
-        y_feat : str
-            Name of the feature to regress on. Must be present in adata 'var_names'.
-        var_names : list of str
-            Names of variables corresponding to regression parameters (e.g. cell types or combinations of cell types)
-        layer : optional str
-            Can specify layer of adata to use. If not given, will use .X.
+        X: Contains data to be used as independent variables in the regression
+        adata: Object of class `anndata.AnnData` to store results in
+        x_feats: Names of the features to use in the regression. Must be present as columns of 'X'.
+        y_feat: Name of the feature to regress on. Must be present in adata 'var_names'.
+        layer: Can specify layer of adata to use. If not given, will use .X.
 
     Returns:
-        Beta : np.ndarray, shape [n_features, n_parameters]
-            Contains parameter for each column in y_feat
+        Beta : Array of shape [n_parameters, 1]. Contains weight for each parameter.
     """
     # Beta = (X^T * X)^-1 * X^T * y
     if layer is None:
@@ -68,10 +61,8 @@ def ols_fit_predict(
     Args: see :func `ols_fit` docstring.
 
     Returns:
-        Beta : np.ndarray, shape [n_features, n_parameters]
-            Contains parameter for each column in y_feat
-        rex : np.ndarray, shape [n_samples, n_y_feats]
-            Reconstructed independent variable values
+        Beta: Array of shape [n_parameters, 1], contains weight for each parameter
+        rex: Array of shape [n_samples, 1]. Reconstructed independent variable values.
     """
     # Beta = (X^T * X)^-1 * X^T * y
     if layer is None:
@@ -89,6 +80,86 @@ def ols_fit_predict(
 
     rex = ols_predict(x, Beta)
     return Beta, rex
+
+
+# ---------------------------------------- LASSO Ordinary Least-Squares ---------------------------------------- #
+def lasso_fit(
+    X: pd.DataFrame,
+    adata: AnnData,
+    x_feats: List[str],
+    y_feat: str,
+    learn_rate: float,
+    iterations: int,
+    l1_penalty: float,
+    test_size: float = 0.2,
+    layer: Union[None, str] = None,
+) -> np.ndarray:
+    """
+    For single variable, trains a Lasso least squares regression model. Has the capability of dealing with
+    multicollinear data.
+
+    Args:
+        X: Contains data to be used as independent variables in the regression
+        adata: Object of class `anndata.AnnData` to store results in
+        x_feats: Names of the features to use in the regression. Must be present as columns of 'X'.
+        y_feat: Name of the feature to regress on. Must be present in adata 'var_names'.
+        learn_rate: Controls the size of the weight updates- a smaller learn rate constrains the magnitude of the
+            weight change.
+        iterations: Number of weight updates to perform
+        l1_penalty: Corresponds to lambda, the strength of the regularization- higher values lead to increasingly
+            strict weight shrinkage.
+        test_size: Size of the evaluation set, given as a proportion of the total dataset size. Should be between 0
+            and 1, exclusive.
+        layer: Can specify layer of adata to use. If not given, will use .X.
+
+    Returns:
+        W: Array, shape [n_parameters, 1]. Contains weight for each parameter.
+    """
+    if layer is None:
+        X["log_expr"] = adata[:, y_feat].X.A
+    else:
+        X["log_expr"] = adata[:, y_feat].layers[layer].A
+    y = X["log_expr"].values
+
+    # Get values corresponding to the features to be used as regressors:
+    X = X[x_feats].values
+
+    # Split data into training and test set:
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=1 / 3, random_state=0)
+
+    # Weight and bias initialization:
+    W = np.zeros(X.shape[1])
+    b = 0
+
+    # Gradient descent learning:
+    for i in range(iterations):
+        y_pred = X_train.dot(W) + b
+
+        # Initialize and compute gradients:
+        dW = np.zeros(X.shape[1])
+
+        for j in range(X.shape[1]):
+            if W[j] > 0:
+                dW[j] = (-(2 * X_train[:, j]).dot(y_train - y_pred) - l1_penalty) / X.shape[0]
+
+        db = -2 * np.sum(y_train - y_pred) / X.shape[0]
+
+
+def lasso_predict():
+    """Given predictor values and parameter values, reconstruct dependent expression"""
+
+
+def lasso_fit_predict():
+    """
+    For single variable, fits Lasso least squares model and then uses the fitted parameters to predict dependent
+    feature expression.
+
+    Args: see :func `lasso_fit` docstring.
+
+    Returns:
+        W: Array of shape [n_parameters, 1], contains weight for each parameter
+        rex: Array of shape [n_samples, 1]. Reconstructed independent variable values.
+    """
 
 
 # ------------------------------------------- Significance Testing ------------------------------------------- #

@@ -87,7 +87,10 @@ def log1p_anndata(
     logger = lm.get_main_logger()
 
     if "log1p" in adata.uns_keys():
-        logger.warning("adata.X seems to be already log-transformed.")
+        logger.warning(
+            "adata.X seems to be already have been log-transformed (log1p exists as key in `adata.uns`). "
+            "Re-computing."
+        )
 
     adata = adata.copy() if copy else adata
     if adata.is_view:

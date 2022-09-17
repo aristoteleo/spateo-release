@@ -230,13 +230,7 @@ def find_cci_two_group(
 
 
 # Wrapper for plotting:
-def prepare_cci_df(
-        cci_df: pd.DataFrame,
-        means_col: str,
-        pval_col: str,
-        lr_pair_col: str,
-        sr_pair_col: str
-):
+def prepare_cci_df(cci_df: pd.DataFrame, means_col: str, pval_col: str, lr_pair_col: str, sr_pair_col: str):
     """
     Given a dataframe generated from the output of :func `cci_two_cluster`, prepare for visualization by heatmap by
     splitting into two dataframes, corresponding to the mean cell type-cell type L:R product and probability values
