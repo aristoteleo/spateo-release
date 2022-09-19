@@ -575,7 +575,7 @@ def ligrec(
         start += size
     label_ranges = {k: label_ranges[k] for k in sorted(label_ranges.keys())}
 
-    pvals = pvals[label_ranges.keys()]
+    pvals = pvals[label_ranges.keys()].astype("float")
     # Add minimum value to p-values to avoid value error- 3.0 will be the largest possible value:
     pvals = -np.log10(pvals + min(1e-3, alpha if alpha is not None else 1e-3)).fillna(0)
 
@@ -722,11 +722,3 @@ def heatmap(
         data:
     """
     config_spateo_rcParams()
-
-    # def
-
-    # def volcano_plot():
-    """
-    Generates and plots volcano plot for visualization of the relative log-fold change and FDR-corrected p-values for
-    features between two groups
-    """

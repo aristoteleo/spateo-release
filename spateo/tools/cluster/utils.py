@@ -259,9 +259,19 @@ def integrate(
     """
 
     # Merge the obsm data and varm data of all anndata objcets separately.
-    obsm_dict, varm_dict = {}, {}
-    obsm_keys, varm_keys = adatas[0].obsm.keys(), adatas[0].varm.keys()
-    n_obsm_keys, n_varm_keys = len(obsm_keys), len(varm_keys)
+    batch_ca = [adata.obs[batch_key][0] for adata in adatas]
+
+    # Merge the obsm, varm and uns data of all anndata objcets separately.
+    obsm_dict, varm_dict, uns_dict = {}, {}, {}
+    obsm_keys, varm_keys, uns_keys = [], [], []
+    for adata in adatas:
+        obsm_keys.extend(list(adata.obsm.keys()))
+        varm_keys.extend(list(adata.varm.keys()))
+        uns_keys.extend(list(adata.uns_keys()))
+
+    obsm_keys, varm_keys, uns_keys = list(set(obsm_keys)), list(set(varm_keys)), list(set(uns_keys))
+    n_obsm_keys, n_varm_keys, n_uns_keys = len(obsm_keys), len(varm_keys), len(uns_keys)
+
     if n_obsm_keys > 0:
         for key in obsm_keys:
             obsm_dict[key] = np.concatenate([to_dense_matrix(adata.obsm[key]) for adata in adatas], axis=0)
@@ -269,9 +279,18 @@ def integrate(
         for key in varm_keys:
             varm_dict[key] = np.concatenate([to_dense_matrix(adata.varm[key]) for adata in adatas], axis=0)
 
-    # Delete obsm and varm data.
+    if n_uns_keys > 0:
+        for key in uns_keys:
+            if "__type" in uns_keys and key == "__type":
+                uns_dict["__type"] = adatas[0].uns["__type"]
+            else:
+                uns_dict[key] = {
+                    ca: adata.uns[key] if key in adata.uns_keys() else None for ca, adata in zip(batch_ca, adatas)
+                }
+
+    # Delete obsm, varm and uns data.
     for adata in adatas:
-        del adata.obsm, adata.varm
+        del adata.obsm, adata.varm, adata.uns
 
     # Concatenating obs and var data.
     batch_ca = [adata.obs[batch_key][0] for adata in adatas]
@@ -281,7 +300,7 @@ def integrate(
         batch_categories=batch_ca,
         join="outer",
         fill_value=fill_value,
-        uns_merge="unique",
+        uns_merge=None,
     )
 
     # Add Concatenated obsm data and varm data to integrated anndata object.
@@ -291,6 +310,9 @@ def integrate(
     if n_varm_keys > 0:
         for key, value in varm_dict.items():
             integrated_adata.varm[key] = value
+    if n_uns_keys > 0:
+        for key, value in uns_dict.items():
+            integrated_adata.uns[key] = value
 
     return integrated_adata
 

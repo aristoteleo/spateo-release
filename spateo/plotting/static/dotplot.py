@@ -787,7 +787,7 @@ class Dotplot:
         )
 
         color_legend_ax.set_title(self.color_legend_title, fontsize=6)
-        color_legend_ax.xaxis.set_tick_params(labelsize=6)
+        color_legend_ax.xaxis.set_tick_params(labelsize=9)
 
     def _plot_legend(
         self, legend_ax: mpl.axes.Axes, return_ax_dict: dict, normalize: Union[None, mpl.colors.Normalize] = None
@@ -980,6 +980,7 @@ class Dotplot:
             dot_max : float
                 The maximum dot size represented on the plot, given as a fraction of the maximum value in the data
         """
+
         logger = lm.get_main_logger()
 
         if dot_size.shape != dot_color.shape:
@@ -1112,7 +1113,7 @@ class Dotplot:
             dot_ax.set_xlim(-x_padding, dot_color.shape[1] + x_padding)
 
         if grid:
-            dot_ax.grid(True, color="gray", linewidth=0.1)
+            dot_ax.grid(True, color="lightgray", linewidth=0.1)
             dot_ax.set_axisbelow(True)
 
         return normalize, dot_min, dot_max
@@ -1253,6 +1254,7 @@ class Dotplot:
             orientation : str
                 Options: 'top' or 'right' to set the location of the brackets
         """
+
         # Get the 'brackets' coordinates as lists of start and end positions
         left = [x[0] + left_adjustment for x in group_positions]
         right = [x[1] + right_adjustment for x in group_positions]
@@ -1555,8 +1557,8 @@ class CCDotplot(Dotplot):
         size = size * mult
 
         # Plot size legend
-        ymin = -0.1 - self.largest_dot * 0.003
-        ymax = -ymin
+        ymin = -self.largest_dot * 0.003
+        ymax = 0.65
 
         size_legend_ax.scatter(
             np.arange(len(size)) + 0.5,
@@ -1569,7 +1571,7 @@ class CCDotplot(Dotplot):
         )
         size_legend_ax.set_xticks(np.arange(len(size)) + 0.5)
         labels = [f"{(x * self.delta) + self.minn:.1f}" for x in size_range]
-        size_legend_ax.set_xticklabels(labels, fontsize=6)
+        size_legend_ax.set_xticklabels(labels, fontsize=9)
 
         # Remove y ticks and labels
         size_legend_ax.tick_params(axis="y", left=False, labelleft=False, labelright=False)
@@ -1582,7 +1584,7 @@ class CCDotplot(Dotplot):
         size_legend_ax.grid(False)
 
         size_legend_ax.set_ylim(ymin, ymax)
-        size_legend_ax.set_title(self.size_title, y=ymax + 0.05, size=6)
+        size_legend_ax.set_title(self.size_title, y=ymax + 0.05, size=9)
 
         xmin, xmax = size_legend_ax.get_xlim()
         size_legend_ax.set_xlim(xmin - 0.15, xmax + 0.5)
@@ -1609,11 +1611,11 @@ class CCDotplot(Dotplot):
             ax.set_xticks([0.35, 0.65])
             ax.set_xticklabels(["false", "true"])
             ax.set_yticks([])
-            ax.set_title(f"significant\n$p={self.alpha}$", y=ymax + 0.05, size=6)
+            ax.set_title(f"significant\n$p={self.alpha}$", y=ymax + 0.05, size=9)
             ax.set(frame_on=False)
 
             l, b, w, h = size_legend_ax.get_position().bounds
-            ax.set_position([l + w, b, w, h])
+            ax.set_position([l, b + h + 0.2, w, h])
 
 
 # --------------------------------------- Dotplot wrapper --------------------------------------- #
@@ -1728,6 +1730,7 @@ def dotplot(
         fig: Instantiated Figure object- only if 'return' is True
         axes: Instantiated Axes object- only if 'return' is True
     """
+
     if cell_cell_dp:
         dp = CCDotplot(
             adata,

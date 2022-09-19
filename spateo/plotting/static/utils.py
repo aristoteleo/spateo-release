@@ -638,7 +638,7 @@ def _matplotlib_points(
                 handles=legend_elements,
                 bbox_to_anchor=(1.04, 1),
                 loc=matplotlib.rcParams["legend.loc"],
-                ncol=len(unique_labels) // 15 + 1,
+                ncol=len(unique_labels) // 20 + 1,
             )
         elif len(unique_labels) > 1 and show_legend == "on data":
             font_color = "white" if background in ["black", "#ffffff"] else "black"
@@ -672,7 +672,7 @@ def _matplotlib_points(
                 handles=legend_elements,
                 bbox_to_anchor=(1.04, 1),
                 loc=show_legend,
-                ncol=len(unique_labels) // 15 + 1,
+                ncol=len(unique_labels) // 20 + 1,
             )
     else:
         # main_debug("hiding legend")

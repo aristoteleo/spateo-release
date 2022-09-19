@@ -748,14 +748,97 @@ class BaseInterpreter:
         return coeffs, reconst
 
     # ---------------------------------------------------------------------------------------------------
-    # Downstream interpretation (mostly for interaction models)
+    # Downstream interpretation (mostly for lag model)
     # ---------------------------------------------------------------------------------------------------
-    def visualize_params(self, coeffs: pd.DataFrame):
+    def visualize_params(
+        self,
+        coeffs: pd.DataFrame,
+        subset_cols: Union[None, str, List[str]] = None,
+        cmap: str = "autumn",
+        mask_threshold: Union[None, float] = None,
+        title: Union[None, str] = None,
+        xlabel: Union[None, str] = None,
+        ylabel: Union[None, str] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        annot_kws: dict = {},
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
+        save_kwargs: dict = {},
+    ):
         """
         Generates heatmap of parameter values for visualization
 
-        coeffs: Contains coefficients from regression for each variable
+        Args:
+            coeffs: Contains coefficients (and any other relevant statistics that were computed) from regression for
+                each variable
+            subset_cols: String or list of strings that can be used to subset coeffs DataFrame such that only columns
+                with names containing the provided key strings are displayed on heatmap. For example, can use "coeff" to
+                plot only the linear regression coefficients, "zstat" for the z-statistic, etc. Or can use the full
+                name of the column to select specific columns.
+            cmap: Name of the colormap to use
+            mask_threshold: Optional, sets lower threshold for parameters to be assigned color in heatmap
+            title: Optional, provides title for plot. If not given, will use default "Spatial Parameters".
+            xlabel: Optional, provides label for x-axis. If not given, will use default "Predictor Features".
+            ylabel: Optional, provides label for y-axis. If not given, will use default "Target Features".
+            figsize: Can be used to set width and height of figure window, in inches. If not given, will use Spateo
+                default.
+            annot_kws: Optional dictionary that can be used to set qualities of the axis/tick labels. For example,
+                can set 'size': 9, 'weight': 'bold', etc.
+            save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+            save_kwargs: Optional[dict] = {}
         """
+        config_spateo_rcParams()
+        if figsize is None:
+            self.figsize = rcParams.get("figure.figsize")
+        else:
+            self.figsize = figsize
+        if len(annot_kws) == 0:
+            annot_kws = {"size": 9, "weight": "bold"}
+
+        if subset_cols is not None:
+            if isinstance(subset_cols, str):
+                subset_cols = [subset_cols]
+            col_subset = [col for col in coeffs.columns if any(key in col for key in subset_cols)]
+            coeffs = coeffs[col_subset]
+
+        if mask_threshold is not None:
+            mask = coeffs < mask_threshold
+        else:
+            mask = None
+
+        fig, ax = plt.subplots(1, 1, figsize=self.figsize)
+        sns.heatmap(
+            coeffs,
+            cmap=cmap,
+            square=True,
+            yticklabels=list(coeffs.columns),
+            linecolor="grey",
+            linewidths=0.3,
+            annot_kws=annot_kws,
+            xticklabels=list(coeffs.index),
+            mask=mask,
+            ax=ax,
+        )
+        plt.gcf().subplots_adjust(bottom=0.3)
+        plt.title(title if title is not None else "Spatial Parameters")
+        plt.xlabel(xlabel if xlabel is not None else "Predictor Features")
+        plt.ylabel(ylabel if ylabel is not None else "Target Features")
+        ax.set_xticklabels(list(coeffs.index), rotation=45, ha="right")
+        ax.xaxis.set_ticks_position("none")
+        ax.yaxis.set_ticks_position("none")
+        plt.tight_layout()
+
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=True,
+            background="white",
+            prefix="type_coupling",
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None,
+        )
 
     def get_sender_receiver_effects(
         self,
@@ -768,9 +851,8 @@ class BaseInterpreter:
         For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
         significant.
 
-        Additionally, if the connections b/w categories are used as variables for regression,
-        for each feature and each sender-receiver category pair, determines the log fold-change that the sender
-        induces in the feature for the receiver.
+        Additionally, for each feature and each sender-receiver category pair, determines the log fold-change that
+        the sender induces in the feature for the receiver.
 
         Only valid if the model specified uses the connections between categories as variables for the regression-
         thus can be applied to 'mod_type' "niche", or "niche_lr".
@@ -798,7 +880,11 @@ class BaseInterpreter:
         feature_labels = coeffs.index
         param_labels = coeffs.columns
         # Get inverse Fisher information matrix, with the y block containing all features that were used in regression):
-        y = self.adata[:, self.genes].X
+        y = (
+            self.adata[:, self.genes].X.toarray()
+            if scipy.sparse.issparse(self.adata.X)
+            else self.adata[:, self.genes].X
+        )
         inverse_fisher = get_fisher_inverse(self.X.values, y)
 
         # Compute significance for each parameter:
@@ -882,8 +968,8 @@ class BaseInterpreter:
         cmap: str = "Reds",
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[int, int]] = None,
+        ignore_self: bool = True,
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
-        save_id: Union[None, str] = None,
         save_kwargs: dict = {},
     ):
         """
@@ -902,7 +988,8 @@ class BaseInterpreter:
             figsize: Width and height of plotting window
             save_show_or_return: Options: "save", "show", "return", "both", "all"
                 - "both" for save and show
-            save_id: Name of the saved figure, without the extension
+            ignore_self: If True, will ignore the effect of cell type in proximity to other cells of the same type-
+                will record the number of DEGs only if the two cell types are different.
             save_kwargs: A dictionary that will passed to the save_fig function. By default it is an empty
                 dictionary and the save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None,
                 "ext": 'pdf', "transparent": True, "close": True, "verbose": True} as its parameters. But to change
@@ -917,20 +1004,27 @@ class BaseInterpreter:
         else:
             self.figsize = figsize
 
-        path = os.path.join(os.getcwd(), "/figures", save_id)
-        # Update save_kwargs with save path:
-        save_kwargs["path"] = path
+        if not hasattr(self, "is_significant"):
+            self.logger.warning(
+                "Significance dataframe does not exist- please run `get_sender_receiver_effects` " "first."
+            )
 
-        if not hasattr(self, "is_sign"):
-            self.logger.warn("Significance dataframe does not exist- please run `get_sender_receiver_effects` first.")
-
-        sig_df = pd.DataFrame(np.sum(self.is_sign, axis=-1), columns=self.cell_names, index=self.cell_names)
-
-        np.fill_diagonal(sig_df.values, 0)
+        sig_df = pd.DataFrame(
+            np.sum(self.is_significant, axis=-1), columns=self.celltype_names, index=self.celltype_names
+        )
+        if ignore_self:
+            np.fill_diagonal(sig_df.values, 0)
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-        sns.heatmap(sig_df, square=True, linecolor="grey", linewidths=0.3, cmap=cmap)
+        sns.heatmap(sig_df, square=True, linecolor="grey", linewidths=0.3, cmap=cmap, mask=(sig_df == 0))
         plt.xlabel("Sender")
         plt.ylabel("Receiver")
+
+        title = (
+            "Niche-Associated Differential Expression"
+            if self.mod_type == "niche"
+            else "Cell Type-Specific Ligand:Receptor-Associated Differential Expression"
+        )
+        plt.title(title)
         plt.tight_layout()
 
         save_return_show_fig_utils(
@@ -1013,7 +1107,7 @@ class BaseInterpreter:
                 square=True,
                 linecolor="grey",
                 linewidths=0.3,
-                cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues"},
+                cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
                 cmap=cmap,
                 vmin=-5,
                 vmax=0.0,
@@ -1123,7 +1217,7 @@ class BaseInterpreter:
                 square=True,
                 linecolor="grey",
                 linewidths=0.3,
-                cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues"},
+                cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
                 cmap=cmap,
                 vmin=-5,
                 vmax=0.0,
@@ -1189,7 +1283,7 @@ class BaseInterpreter:
             significance_threshold:  Set non-significant fold changes (given by q-values) to zero, where the
                 threshold is given here
             fold_change_threshold: Set absolute value fold-change threshold beyond which observations are marked as
-                interesting. If not given, will take the 95th percentile fold-change as
+                interesting. If not given, will take the 95th percentile fold-change as the cutoff.
             fontsize: Size of figure title and axis labels
             figsize: Width and height of plotting window
             save_show_or_return: Whether to save, show or return the figure.
@@ -1218,6 +1312,10 @@ class BaseInterpreter:
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
         ax.grid(False)
+
+        # Set fold-change threshold if not already provided:
+        if fold_change_threshold is None:
+            fold_change_threshold = np.percentile(self.fold_change)
 
         # All non-significant features:
         qval_filter = np.where(self.qvalues[receiver_idx, sender_idx, :] >= significance_threshold)
@@ -1452,6 +1550,7 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
 
         # Outputs for a single gene:
         return adata.var.loc[cur_g, :].values, y_pred.reshape(-1, 1), resid.reshape(-1, 1)
+
 
 class Niche_LR_Interpreter(BaseInterpreter):
     """
