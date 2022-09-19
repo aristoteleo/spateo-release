@@ -16,7 +16,11 @@ from anndata import AnnData
 from scipy import sparse
 from scipy.sparse import issparse
 from scipy.stats import gmean, pearsonr
-from typing_extensions import Literal
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 from ..configuration import SKM
 
