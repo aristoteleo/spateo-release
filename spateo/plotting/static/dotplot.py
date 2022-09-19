@@ -1428,7 +1428,7 @@ class Dotplot:
             if self.figsize[1] > 4 and self.figsize[1] < 8:
                 offset = 0.15
             elif self.figsize[1] <= 4:
-                offset = 0.25
+                offset = 0.35
             elif self.figsize[1] >= 8:
                 offset = 0.1
             _ax.set_title(self.fig_title, y=ymax + offset)

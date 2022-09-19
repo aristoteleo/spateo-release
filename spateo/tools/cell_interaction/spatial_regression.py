@@ -552,7 +552,7 @@ class BaseInterpreter:
                         "paired ligand-receptors.".format(ligand, (",".join(rec)))
                     )
                 found_receptors = list(set(possible_receptors).intersection(set(rec)))
-                lig_pairs = list(product(lig, found_receptors))
+                lig_pairs = list(product([ligand], found_receptors))
                 pairs.extend(lig_pairs)
             self.n_pairs = len(pairs)
             print(f"Setting up Niche-L:R model using the following ligand-receptor pairs: {pairs}")
@@ -756,6 +756,8 @@ class BaseInterpreter:
         subset_cols: Union[None, str, List[str]] = None,
         cmap: str = "autumn",
         mask_threshold: Union[None, float] = None,
+        mask_zero: bool = True,
+        transpose: bool = False,
         title: Union[None, str] = None,
         xlabel: Union[None, str] = None,
         ylabel: Union[None, str] = None,
@@ -776,6 +778,8 @@ class BaseInterpreter:
                 name of the column to select specific columns.
             cmap: Name of the colormap to use
             mask_threshold: Optional, sets lower threshold for parameters to be assigned color in heatmap
+            mask_zero: Set True to not assign color to zeros (representing neither a positive or negative interaction)
+            transpose: Set True to reverse the dataframe's orientation before plotting
             title: Optional, provides title for plot. If not given, will use default "Spatial Parameters".
             xlabel: Optional, provides label for x-axis. If not given, will use default "Predictor Features".
             ylabel: Optional, provides label for y-axis. If not given, will use default "Target Features".
@@ -792,46 +796,66 @@ class BaseInterpreter:
         else:
             self.figsize = figsize
         if len(annot_kws) == 0:
-            annot_kws = {"size": 9, "weight": "bold"}
+            annot_kws = {"size": 6, "weight": "bold"}
+
+        # Reformat column names for better visual:
+        coeffs.columns = coeffs.columns.str.replace("group_", "")
+        coeffs.columns = coeffs.columns.str.replace("_", ":")
 
         if subset_cols is not None:
             if isinstance(subset_cols, str):
                 subset_cols = [subset_cols]
             col_subset = [col for col in coeffs.columns if any(key in col for key in subset_cols)]
             coeffs = coeffs[col_subset]
+        # Remove rows with no nonzero values:
+        coeffs = coeffs.loc[(coeffs != 0).any(axis=1)]
+
+        if transpose:
+            coeffs = coeffs.T
+        xtick_labels = list(coeffs.columns)
+        ytick_labels = list(coeffs.index)
 
         if mask_threshold is not None:
-            mask = coeffs < mask_threshold
+            mask = (coeffs < mask_threshold)
+        elif mask_zero:
+            mask = (coeffs == 0)
         else:
             mask = None
 
         fig, ax = plt.subplots(1, 1, figsize=self.figsize)
-        sns.heatmap(
+        res = sns.heatmap(
             coeffs,
             cmap=cmap,
             square=True,
-            yticklabels=list(coeffs.columns),
+            yticklabels=ytick_labels,
             linecolor="grey",
             linewidths=0.3,
             annot_kws=annot_kws,
-            xticklabels=list(coeffs.index),
+            xticklabels=xtick_labels,
             mask=mask,
             ax=ax,
         )
-        plt.gcf().subplots_adjust(bottom=0.3)
+        # Outer frame:
+        for _, spine in res.spines.items():
+            spine.set_visible(True)
+            spine.set_linewidth(0.75)
+
+        #plt.gcf().subplots_adjust(bottom=0.3)
         plt.title(title if title is not None else "Spatial Parameters")
-        plt.xlabel(xlabel if xlabel is not None else "Predictor Features")
-        plt.ylabel(ylabel if ylabel is not None else "Target Features")
-        ax.set_xticklabels(list(coeffs.index), rotation=45, ha="right")
-        ax.xaxis.set_ticks_position("none")
-        ax.yaxis.set_ticks_position("none")
+        if xlabel is not None:
+            plt.xlabel(xlabel, size=9)
+        if ylabel is not None:
+            plt.ylabel(ylabel, size=9)
+        ax.set_xticklabels(xtick_labels, rotation=90, ha="center")
+        #ax.xaxis.set_ticks_position("none")
+        #ax.yaxis.set_ticks_position("none")
         plt.tight_layout()
 
         save_return_show_fig_utils(
             save_show_or_return=save_show_or_return,
             show_legend=True,
             background="white",
-            prefix="type_coupling",
+            prefix="parameters",
             save_kwargs=save_kwargs,
             total_panels=1,
             fig=fig,
@@ -967,7 +991,7 @@ class BaseInterpreter:
         self,
         cmap: str = "Reds",
         fontsize: Union[None, int] = None,
-        figsize: Union[None, Tuple[int, int]] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
         ignore_self: bool = True,
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
         save_kwargs: dict = {},
@@ -1015,7 +1039,11 @@ class BaseInterpreter:
         if ignore_self:
             np.fill_diagonal(sig_df.values, 0)
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-        sns.heatmap(sig_df, square=True, linecolor="grey", linewidths=0.3, cmap=cmap, mask=(sig_df == 0))
+        res = sns.heatmap(sig_df, square=True, linecolor="grey", linewidths=0.3, cmap=cmap, mask=(sig_df == 0), ax=ax)
+        # Outer frame:
+        for _, spine in res.spines.items():
+            spine.set_visible(True)
+            spine.set_linewidth(1.5)
         plt.xlabel("Sender")
         plt.ylabel("Receiver")
 
@@ -1101,7 +1129,7 @@ class BaseInterpreter:
             if gene_subset:
                 df = df.drop(index=receiver)[gene_subset]
 
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
             sns.heatmap(
                 df.T,
                 square=True,
@@ -1111,6 +1139,7 @@ class BaseInterpreter:
                 cmap=cmap,
                 vmin=-5,
                 vmax=0.0,
+                ax=ax
             )
         elif plot_mode == "fold_change":
             arr = self.fold_change[receiver_idx, :, :].copy()
@@ -1120,7 +1149,7 @@ class BaseInterpreter:
                 df = df.drop(index=receiver)[gene_subset]
             vmax = np.max(np.abs(df.values))
 
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
             sns.heatmap(
                 df.T,
                 square=True,
@@ -1130,6 +1159,7 @@ class BaseInterpreter:
                 cmap=cmap,
                 vmin=-vmax,
                 vmax=vmax,
+                ax=ax
             )
         else:
             logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'fold_change'.")
@@ -1211,7 +1241,7 @@ class BaseInterpreter:
             if gene_subset:
                 df = df.drop(index=sender)[gene_subset]
 
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
             sns.heatmap(
                 df.T,
                 square=True,
@@ -1221,6 +1251,7 @@ class BaseInterpreter:
                 cmap=cmap,
                 vmin=-5,
                 vmax=0.0,
+                ax=ax
             )
 
         elif plot_mode == "fold_change":
@@ -1231,7 +1262,7 @@ class BaseInterpreter:
                 df = df.drop(index=sender)[gene_subset]
             vmax = np.max(np.abs(df.values))
 
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
             sns.heatmap(
                 df.T,
                 square=True,
@@ -1241,6 +1272,7 @@ class BaseInterpreter:
                 cmap=cmap,
                 vmin=-vmax,
                 vmax=vmax,
+                ax=ax
             )
         else:
             logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'fold_change'.")
@@ -1310,7 +1342,7 @@ class BaseInterpreter:
         receiver_idx = self.celltype_names.index(receiver)
         sender_idx = self.celltype_names.index(sender)
 
-        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        fig, ax = plt.subplots(1, 1, figsize=self.figsize)
         ax.grid(False)
 
         # Set fold-change threshold if not already provided:

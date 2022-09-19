@@ -12,7 +12,11 @@ from scipy.stats import mannwhitneyu
 from sklearn.neighbors import NearestNeighbors
 from statsmodels.sandbox.stats.multicomp import multipletests
 from tqdm import tqdm
-from typing_extensions import Literal
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
