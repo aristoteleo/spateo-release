@@ -1,6 +1,6 @@
 """Spatial DEGs
 """
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -16,15 +16,17 @@ from ..configuration import SKM
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def moran_i(
     adata: AnnData,
-    X_data: Optional[np.ndarray] = None,
     genes: Optional[List[str]] = None,
     layer: Optional[str] = None,
+    spatial_key: str = "spatial",
+    model: Literal["2d", "3d"] = "2d",
     x: Optional[List[int]] = None,
     y: Optional[List[int]] = None,
+    z: Optional[List[int]] = None,
     k: int = 5,
     weighted: Optional[List[str]] = None,
     permutations: int = 199,
-    n_jobs: int = 40,
+    n_jobs: int = 30,
 ) -> pd.DataFrame:
     """Identify genes with strong spatial autocorrelation with Moran's I test.
     This can be used to identify genes that are
@@ -34,19 +36,19 @@ def moran_i(
     ----------
         adata: :class:`~anndata.AnnData`
             an Annodata object
-        X_data: `np.ndarray` (default: `None`)
-            The user supplied data that will be used for Moran's I calculation
-            directly.
         genes: `list` or None (default: `None`)
             The list of genes that will be used to subset the data for dimension
             reduction and clustering. If `None`, all genes will be used.
         layer: `str` or None (default: `None`)
             The layer that will be used to retrieve data for dimension reduction
             and clustering. If `None`, .X is used.
+        spatial_key: The key in ``.obsm`` that corresponds to the spatial coordinate of each cell.
         x: 'list' or None(default: `None`)
             x-coordinates of all buckets.
         y: 'list' or None(default: `None`)
             y-coordinates of all buckets.
+        z: 'list' or None(default: `None`)
+            z-coordinates of all buckets.
         k: 'int' (defult=20)
             Number of neighbors to use by default for kneighbors queries.
         weighted : 'str'(defult='kernel')
@@ -60,23 +62,30 @@ def moran_i(
     -------
         A pandas DataFrame of the Moran' I test results.
     """
-    if X_data is None:
+    if layer is None:
         X_data = adata.X
     else:
-        X_data = X_data
+        X_data = adata.layers[layer]
     if genes is None:
         genes = adata.var_names
     else:
         genes = genes
     if x is None:
-        x = adata.obsm["spatial"][:, 0].tolist()
+        x = adata.obsm[spatial_key][:, 0].tolist()
     else:
         x = x
     if y is None:
-        y = adata.obsm["spatial"][:, 1].tolist()
+        y = adata.obsm[spatial_key][:, 1].tolist()
     else:
         y = y
-    xymap = pd.DataFrame({"x": x, "y": y})
+    if model == "3d":
+        if z is None:
+            z = adata.obsm[spatial_key][:, 2].tolist()
+        else:
+            z = z
+        xymap = pd.DataFrame({"x": x, "y": y, "z": z})
+    else:
+        xymap = pd.DataFrame({"x": x, "y": y})
     if weighted is not None:
         # weighted matrix (kernel distance)
         kw = lib.weights.Kernel(xymap, k, function="gaussian")
