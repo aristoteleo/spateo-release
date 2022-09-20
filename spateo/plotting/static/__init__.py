@@ -8,7 +8,7 @@ from .contour import spatial_domains
 from .dotplot import dotplot
 from .geo import geo
 from .glm import glm_fit
-from .interactions import plot_connections
+from .interactions import plot_connections, ligrec
 from .lisa import lisa, lisa_quantiles
 from .polarity import *
 from .scatters import scatters

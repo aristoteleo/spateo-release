@@ -11,6 +11,7 @@ from anndata import AnnData
 from sklearn.linear_model import Lasso, LassoCV
 from sklearn.model_selection import train_test_split
 
+from ...configuration import SKM
 from ...logging import logger_manager as lm
 
 
@@ -55,6 +56,7 @@ def ols_predict(X: np.ndarray, params: np.ndarray) -> np.ndarray:
     return ypred
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def ols_fit_predict(
     X: pd.DataFrame, adata: AnnData, x_feats: List[str], y_feat: str, layer: Union[None, str] = None
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -166,6 +168,7 @@ def lasso_predict(X: np.ndarray, params: np.ndarray, b: np.ndarray) -> np.ndarra
     return X.dot(params) + b
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def lasso_fit_predict(
     X: pd.DataFrame,
     adata: AnnData,

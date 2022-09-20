@@ -430,8 +430,10 @@ def plot_connections(
         return (fig, ax)
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def ligrec(
-    dict: Dict[str, pd.DataFrame],
+    adata: AnnData,
+    dict_key: str,
     source_groups: Union[None, str, List[str]] = None,
     target_groups: Union[None, str, List[str]] = None,
     means_range: Tuple[float, float] = (-np.inf, np.inf),
@@ -454,8 +456,10 @@ def ligrec(
     right, if 'swap_axes' is True), whereas molecule 2 is the receptor on the cluster(s) labeled on the bottom.
 
     Args:
-        dict: Should contain keys labeled "means" and "pvalues", with values being dataframes for the mean cell
-            type-cell type L:R product and significance values.
+        adata: Object of :class `anndata.AnnData`
+        dict_key: Key in .uns to dictionary containing cell-cell communication information. Should contain keys labeled
+            "means" and "pvalues", with values being dataframes for the mean cell type-cell type L:R product and
+            significance values.
         source_groups: Source interaction clusters. If `None`, select all clusters.
         target_groups: Target interaction clusters. If `None`, select all clusters.
         means_range: Only show interactions whose means are within this **closed** interval
@@ -490,6 +494,8 @@ def ligrec(
 
     if title is None:
         title = "Ligand-Receptor Inference"
+
+    dict = adata.uns[dict_key]
 
     def filter_values(
         pvals: pd.DataFrame, means: pd.DataFrame, *, mask: pd.DataFrame, kind: str

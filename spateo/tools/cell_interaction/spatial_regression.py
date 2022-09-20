@@ -1043,7 +1043,7 @@ class BaseInterpreter:
         # Outer frame:
         for _, spine in res.spines.items():
             spine.set_visible(True)
-            spine.set_linewidth(1.5)
+            spine.set_linewidth(0.75)
         plt.xlabel("Sender")
         plt.ylabel("Receiver")
 
