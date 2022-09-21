@@ -22,7 +22,12 @@ import os
 import time
 from itertools import product
 from random import sample
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -39,20 +44,15 @@ from pysal.lib import weights
 from pysal.model import spreg
 from tqdm import tqdm
 
-from ...configuration import SKM, config_spateo_rcParams, set_pub_style
+from ...configuration import SKM, config_spateo_rcParams
 from ...logging import logger_manager as lm
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import construct_pairwise, transcriptomic_connectivity
 from ...tools.utils import update_dict
-from .regression_utils import (
-    compute_wald_test,
-    get_fisher_inverse,
-    lasso_fit_predict,
-    multitesting_correction,
-    ols_fit_predict,
-)
+from .general_lm import lasso_fit_predict, ols_fit_predict
+from .regression_utils import compute_wald_test, get_fisher_inverse
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -126,6 +126,8 @@ class BaseInterpreter:
         self.logger = lm.get_main_logger()
 
         self.adata = adata
+        # Convention is to capitalize gene names:
+        self.adata.var_names = [g.upper() for g in self.adata.var_names]
         self.cell_names = self.adata.obs_names
         # Sort cell type categories (to keep order consistent for downstream applications):
         self.celltype_names = sorted(list(set(adata.obs[group_key])))
@@ -240,7 +242,7 @@ class BaseInterpreter:
             else:
                 log1p(self.adata.layers[self.layer])
         else:
-            self.logger.warn(
+            self.logger.warning(
                 "Linear regression models are not well suited to the distributional characteristics of "
                 "raw transcriptomic data- it is recommended to perform a log-transformation first."
             )
@@ -414,7 +416,7 @@ class BaseInterpreter:
             # gene names to uppercase (the AnnData object is assumed to follow this convention as well):
             # Use the argument provided to 'ligands' to set the predictor block:
             if ligands is None:
-                ligands = [g.upper() for g in self.genes if g in lig_available]
+                ligands = [g for g in self.genes if g in lig_available]
             else:
                 # Filter provided ligands to those that can be found in the database:
                 ligands = [l for l in ligands if l in lig_available]
@@ -495,11 +497,11 @@ class BaseInterpreter:
 
             if lig is None:
                 self.logger.error("For 'mod_type' = 'niche_lr', ligands must be provided.")
-            lig = [l.upper() for l in lig]
+
             # If no receptors are given, search database for matches w/ the ligand:
             if rec is None:
                 rec = set(list(lr_network.loc[lr_network["from"].isin(lig)]["to"].values))
-                rec = [r.upper() for r in rec]
+
                 self.logger.info(
                     "List of receptors was not provided- found these receptors from the provided "
                     f"ligands: {(', ').join(rec)}"
@@ -545,7 +547,7 @@ class BaseInterpreter:
                 lig_key = "from" if species != "axolotl" else "human_ligand"
                 rec_key = "to" if species != "axolotl" else "human_receptor"
                 possible_receptors = set(lr_network.loc[lr_network[lig_key] == ligand][rec_key])
-                possible_receptors = [r.upper() for r in possible_receptors]
+
                 if not any(receptor in possible_receptors for receptor in rec):
                     self.logger.error(
                         "No record of {} interaction with any of {}. Ensure provided lists contain "
@@ -680,7 +682,7 @@ class BaseInterpreter:
         self.w.transform = "R"
 
     # ---------------------------------------------------------------------------------------------------
-    # Computing parameters for spatially-aware and lagged models
+    # Computing parameters for spatially-aware and lagged models- general linear models
     # ---------------------------------------------------------------------------------------------------
     def run_OLS(self, n_jobs: int = 30) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -787,8 +789,14 @@ class BaseInterpreter:
                 default.
             annot_kws: Optional dictionary that can be used to set qualities of the axis/tick labels. For example,
                 can set 'size': 9, 'weight': 'bold', etc.
-            save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
-            save_kwargs: Optional[dict] = {}
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
         """
         config_spateo_rcParams()
         if figsize is None:
@@ -1014,10 +1022,14 @@ class BaseInterpreter:
                 - "both" for save and show
             ignore_self: If True, will ignore the effect of cell type in proximity to other cells of the same type-
                 will record the number of DEGs only if the two cell types are different.
-            save_kwargs: A dictionary that will passed to the save_fig function. By default it is an empty
-                dictionary and the save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None,
-                "ext": 'pdf', "transparent": True, "close": True, "verbose": True} as its parameters. But to change
-                any of these parameters, this dictionary can be used to do so.
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
         """
         if fontsize is None:
             self.fontsize = rcParams.get("font.size")
