@@ -200,9 +200,19 @@ def find_cci_two_group(
     per_data = np.zeros((lr_network.shape[0], num))
     for i in tqdm(range(num)):
         random.seed(i)
-        cell_id = random.sample(adata.obs.index.tolist(), k=cell_pair.shape[0] * 2)
-        per_sender_id = cell_id[0 : cell_pair.shape[0]]
-        per_receiver_id = cell_id[cell_pair.shape[0] : cell_pair.shape[0] * 2]
+        try:
+            cell_id = random.sample(adata.obs.index.tolist(), k=cell_pair.shape[0] * 2)
+            per_sender_id = cell_id[0 : cell_pair.shape[0]]
+            per_receiver_id = cell_id[cell_pair.shape[0] : cell_pair.shape[0] * 2]
+        except:
+            # If cell_pair * 2 is too large a number:
+            import itertools
+
+            combinations = itertools.permutations(adata.obs.index.tolist(), r=2)
+            pairs = random.sample(list(combinations), k=cell_pair.shape[0])
+            per_sender_id = [pair[0] for pair in pairs]
+            per_receiver_id = [pair[1] for pair in pairs]
+
         per_ligand_data = adata[per_sender_id, lr_network["from"]]
         per_receptor_data = adata[per_receiver_id, lr_network["to"]]
         per_lr_data = (

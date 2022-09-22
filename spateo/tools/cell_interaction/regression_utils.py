@@ -11,10 +11,12 @@ except ImportError:
 import numpy as np
 import pandas as pd
 import scipy
+import sklearn
 import statsmodels.stats.multitest
 from anndata import AnnData
 
 from ...configuration import SKM
+from ...logging import logger_manager as lm
 
 
 # ------------------------------------------- Significance Testing ------------------------------------------- #
@@ -24,10 +26,8 @@ def get_fisher_inverse(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     whether the log-likelihood is sensitive to change in the parameter x.
 
     Args:
-        x : np.ndarray
-            Independent variable array
-        y : np.ndarray
-            Dependent variable array
+        x: Independent variable array
+        y: Dependent variable array
 
     Returns:
         inverse_fisher : np.ndarray
@@ -48,13 +48,10 @@ def wald_test(theta_mle: np.ndarray, theta_sd: np.ndarray, theta0: Union[float, 
     supplied reference value (theta0), based on the standard deviation of the posterior of the parameter estimate.
 
     Args:
-        theta_mle : np.ndarray
-            Maximum likelihood estimation of given parameter by feature
-        theta_sd : np.ndarray
-            Standard deviation of the maximum likelihood estimation
-        theta0 : float or np.ndarray
-            Value(s) to test theta_mle against. Must be either a single number or an array w/ equal number of entries
-            to theta_mle.
+        theta_mle: Maximum likelihood estimation of given parameter by feature
+        theta_sd: Standard deviation of the maximum likelihood estimation
+        theta0: Value(s) to test theta_mle against. Must be either a single number or an array w/ equal number of
+            entries to theta_mle.
 
     Returns:
         pvals : np.ndarray
@@ -81,10 +78,8 @@ def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: fl
     q-values.
 
     Args:
-    pvals : np.ndarray
-        Uncorrected p-values; must be given as a one-dimensional array
-    method : str, default 'fdr_bh'
-        Method to use for correction. Available methods can be found in the documentation for
+    pvals: Uncorrected p-values; must be given as a one-dimensional array
+    method: Method to use for correction. Available methods can be found in the documentation for
         statsmodels.stats.multitest.multipletests(), and are also listed below (in correct case) for convenience:
             - Named methods:
                 - bonferroni
@@ -98,12 +93,10 @@ def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: fl
                 - fdr_by: Benjamini-Yekutieli correction
                 - fdr_tsbh: Two-stage Benjamini-Hochberg
                 - fdr_tsbky: Two-stage Benjamini-Krieger-Yekutieli method
-    alpha : float, default 0.05
-        Family-wise error rate (FWER)
+    alpha: Family-wise error rate (FWER)
 
     Returns
-        qval : np.ndarray
-            p-values post-correction
+        qval: p-values post-correction
     """
 
     qval = np.zeros([pvals.shape[0]]) + np.nan
@@ -119,16 +112,13 @@ def _get_p_value(variables: np.array, fisher_inv: np.array, coef_loc_totest: int
     Computes p-values for differential expression for each feature
 
     Args:
-        variables : np.ndarray
-            Array where each column corresponds to a feature
-        fisher_inv : np.ndarray
-            Inverse Fisher information matrix
-        coef_loc_totest : int
-            Numerical column of the array corresponding to the coefficient to test
+        variables: Array where each column corresponds to a feature
+        fisher_inv: Inverse Fisher information matrix
+        coef_loc_totest: Numerical column of the array corresponding to the coefficient to test
 
     Returns:
-        pvalues : np.ndarray
-            Array of identical shape to variables, where each element is a p-value for that instance of that feature
+        pvalues: Array of identical shape to variables, where each element is a p-value for that instance of that
+            feature
     """
 
     theta_mle = variables[coef_loc_totest]
@@ -145,21 +135,17 @@ def compute_wald_test(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Args:
-        params : np.ndarray
-            Array of shape [n_features, n_params]
-        fisher_inv : np.ndarray
-            Inverse Fisher information matrix
-        significance_threshold : float, default 0.01
-            Upper threshold to be considered significant
+        params: Array of shape [n_features, n_params]
+        fisher_inv: Inverse Fisher information matrix
+        significance_threshold: Upper threshold to be considered significant
 
     Returns
-        significance : np.ndarray
-            Array of identical shape to variables, where each element is True or False if it meets the threshold for
-            significance
-        pvalues : np.ndarray
-            Array of identical shape to variables, where each element is a p-value for that instance of that feature
-        qvalues : np.ndarray
-            Array of identical shape to variables, where each element is a q-value for that instance of that feature
+        significance: Array of identical shape to variables, where each element is True or False if it meets the
+            threshold for significance
+        pvalues: Array of identical shape to variables, where each element is a p-value for that instance of that
+            feature
+        qvalues: Array of identical shape to variables, where each element is a q-value for that instance of that
+            feature
     """
 
     pvalues = []
@@ -177,6 +163,7 @@ def compute_wald_test(
     significance = qvalues < significance_threshold
 
     return significance, pvalues, qvalues
+
 
 # ------------------------------------------- Comparison ------------------------------------------- #
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
@@ -224,8 +211,9 @@ def plot_prior_vs_data(
         predicted = reconst[target_name].values.reshape(-1, 1)
     else:
         predicted = reconst.mean(axis=1).values.reshape(-1, 1)
-        observed = adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else \
-            adata[:, reconst.columns].X
+        observed = (
+            adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, reconst.columns].X
+        )
         observed = np.mean(observed, axis=1).reshape(-1, 1)
 
     obs_pred = np.hstack((observed, predicted))
@@ -235,12 +223,18 @@ def plot_prior_vs_data(
     xrange, step = np.linspace(0, xmax, num=10, retstep=True)
 
     fig, ax = plt.subplots(1, 1, figsize=figsize)
-    ax.hist(obs_pred, xrange, alpha=0.7,
-            label=[f"Observed {target_name}", f"Predicted {target_name}"], density=True, color=["#FFA07A", "#20B2AA"])
+    ax.hist(
+        obs_pred,
+        xrange,
+        alpha=0.7,
+        label=[f"Observed {target_name}", f"Predicted {target_name}"],
+        density=True,
+        color=["#FFA07A", "#20B2AA"],
+    )
 
-    plt.legend(loc='upper right', fontsize=9)
+    plt.legend(loc="upper right", fontsize=9)
 
-    ax.set_xticks(ticks=[i + 0.5*step for i in xrange[:-1]], labels=[np.round(l, 3) for l in xrange[:-1]])
+    ax.set_xticks(ticks=[i + 0.5 * step for i in xrange[:-1]], labels=[np.round(l, 3) for l in xrange[:-1]])
     plt.xlabel("Counts", size=9)
     plt.ylabel("Normalized Proportion of Cells", size=9)
     if title is not None:

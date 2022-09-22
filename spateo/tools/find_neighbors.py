@@ -254,7 +254,7 @@ def transcriptomic_connectivity(
     logger.info_insert_adata("expression_distances", adata_attr="obsp")
 
     adata.obsp["expression_distances"] = distances
-    adata.obsp["expression_connectivies"] = connectivities
+    adata.obsp["expression_connectivities"] = connectivities
 
     return nbrs, adata
 

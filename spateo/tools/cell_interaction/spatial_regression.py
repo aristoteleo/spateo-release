@@ -225,10 +225,10 @@ class BaseInterpreter:
             self.logger.info("Smoothing gene expression...")
             # Compute connectivity matrix if not already existing:
             try:
-                conn = self.adata.obsp["connectivities"]
+                conn = self.adata.obsp["expression_connectivities"]
             except:
                 _, adata = transcriptomic_connectivity(self.adata, n_neighbors_method="ball_tree")
-                conn = adata.obsp["connectivities"]
+                conn = adata.obsp["expression_connectivities"]
             adata_smooth_norm, _ = calc_1nd_moment(self.adata.X, conn, normalize_W=True)
             self.adata.layers["M_s"] = adata_smooth_norm
 
@@ -824,9 +824,9 @@ class BaseInterpreter:
         ytick_labels = list(coeffs.index)
 
         if mask_threshold is not None:
-            mask = (coeffs < mask_threshold)
+            mask = coeffs < mask_threshold
         elif mask_zero:
-            mask = (coeffs == 0)
+            mask = coeffs == 0
         else:
             mask = None
 
@@ -848,15 +848,15 @@ class BaseInterpreter:
             spine.set_visible(True)
             spine.set_linewidth(0.75)
 
-        #plt.gcf().subplots_adjust(bottom=0.3)
+        # plt.gcf().subplots_adjust(bottom=0.3)
         plt.title(title if title is not None else "Spatial Parameters")
         if xlabel is not None:
             plt.xlabel(xlabel, size=9)
         if ylabel is not None:
             plt.ylabel(ylabel, size=9)
         ax.set_xticklabels(xtick_labels, rotation=90, ha="center")
-        #ax.xaxis.set_ticks_position("none")
-        #ax.yaxis.set_ticks_position("none")
+        # ax.xaxis.set_ticks_position("none")
+        # ax.yaxis.set_ticks_position("none")
         plt.tight_layout()
 
         save_return_show_fig_utils(
@@ -1151,7 +1151,7 @@ class BaseInterpreter:
                 cmap=cmap,
                 vmin=-5,
                 vmax=0.0,
-                ax=ax
+                ax=ax,
             )
         elif plot_mode == "fold_change":
             arr = self.fold_change[receiver_idx, :, :].copy()
@@ -1171,7 +1171,7 @@ class BaseInterpreter:
                 cmap=cmap,
                 vmin=-vmax,
                 vmax=vmax,
-                ax=ax
+                ax=ax,
             )
         else:
             logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'fold_change'.")
@@ -1263,7 +1263,7 @@ class BaseInterpreter:
                 cmap=cmap,
                 vmin=-5,
                 vmax=0.0,
-                ax=ax
+                ax=ax,
             )
 
         elif plot_mode == "fold_change":
@@ -1284,7 +1284,7 @@ class BaseInterpreter:
                 cmap=cmap,
                 vmin=-vmax,
                 vmax=vmax,
-                ax=ax
+                ax=ax,
             )
         else:
             logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'fold_change'.")
