@@ -95,6 +95,7 @@ def multi_slices(
         slices_data.copy(),
         col=slices_key,
         hue=label,
+        palette=palette,
         sharex=True,
         sharey=True,
         height=axsize[1] * nrows,
@@ -115,9 +116,7 @@ def multi_slices(
         point_size = point_size**2 * ncols * nrows
 
     # Draw scatter plots.
-    g.map_dataframe(
-        sns.scatterplot, x="x", y="y", alpha=alpha, palette=palette, color=color, s=point_size, legend="brief", **kwargs
-    )
+    g.map_dataframe(sns.scatterplot, x="x", y="y", alpha=alpha, color=color, s=point_size, legend="brief", **kwargs)
 
     # Set legend.
     label_values = slices_data[label].values
