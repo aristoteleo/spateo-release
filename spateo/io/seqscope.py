@@ -9,7 +9,11 @@ import pandas as pd
 import scipy.io
 from anndata import AnnData
 from scipy.sparse import coo_matrix
-from typing_extensions import Literal
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
@@ -46,7 +50,15 @@ def read_seqscope_positions_as_dataframe(path: str) -> pd.DataFrame:
     Returns:
         DataFrame containing barcode positions.
     """
-    df = pd.read_table(path, names=["barcode", "lane", "tile", "x", "y"], sep="\s+")
+    dtype = {
+        "barcode": "category",
+        "lane": np.uint16,
+        "tile": np.uint16,
+        "x": np.uint32,
+        "y": np.uint32,
+    }
+
+    df = pd.read_table(path, names=["barcode", "lane", "tile", "x", "y"], sep="\s+", dtype=dtype)
     return df
 
 

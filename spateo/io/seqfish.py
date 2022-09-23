@@ -5,22 +5,26 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix
-from typing_extensions import Literal
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
 
-VERSIONS = {"slide2": ngs.chemistry.get_chemistry("Slide-seqV2")}
+VERSIONS = {"seqFISH": ngs.chemistry.get_chemistry("seqFISH")}
 
 
 def read_seqfish_meta_as_dataframe(
-    path: str, fov_offset: pd.DataFrame, accumulate_x: bool = False, accumulate_y: bool = False
+    path: str, fov_offset: pd.DataFrame = None, accumulate_x: bool = False, accumulate_y: bool = False
 ) -> pd.DataFrame:
     """Read a seqFISH cell centroid locations file.
 
     Args:
         path: Path to file
-        fov_offset: a dataframe contain offset of each fov, for example,
+        fov_offset: a dataframe contains the x/y offset of each fov (field of view), for example,
             {'fov':[fov_1, ..], 'x_offset':[x_offset_1, ..], 'y_offset':[y_offset_1, ..]}
         accumulate_x: whether to accumulate x_offset
         accumulate_y: whether to accumulate y_offset
@@ -29,14 +33,14 @@ def read_seqfish_meta_as_dataframe(
         Pandas DataFrame with the following columns.
             * `fov`: ID of field of view
             * `cell_id`: ID of cell in each fov
-            * `x`, `y`: X, Y coordinates
+            * `x`, `y`: X, Y coordinates of the cell centroids
             * `region`: sample region(tissue)
     """
     dtype = {
         "Field of View": np.uint8,
         "Cell ID": np.uint16,
-        "X": np.float16,
-        "Y": np.float16,
+        "X": np.float32,
+        "Y": np.float32,
         "Region": "category",
     }
     df_loc = pd.read_csv(
@@ -53,20 +57,21 @@ def read_seqfish_meta_as_dataframe(
     }
     df_loc = df_loc.rename(columns=rename)
 
-    if accumulate_x:
-        for i in range(1, fov_offset.shape[0]):
-            fov_offset["x_offset"][i] = fov_offset["x_offset"][i] + fov_offset["x_offset"][i - 1]
-    if accumulate_y:
-        for i in range(1, fov_offset.shape[0]):
-            fov_offset["y_offset"][i] = fov_offset["y_offset"][i] + fov_offset["y_offset"][i - 1]
+    if fov_offset is not None:
+        if accumulate_x:
+            for i in range(1, fov_offset.shape[0]):
+                fov_offset["x_offset"][i] = fov_offset["x_offset"][i] + fov_offset["x_offset"][i - 1]
+        if accumulate_y:
+            for i in range(1, fov_offset.shape[0]):
+                fov_offset["y_offset"][i] = fov_offset["y_offset"][i] + fov_offset["y_offset"][i - 1]
 
-    for i in range(fov_offset.shape[0]):
-        df_loc["x"][df_loc["fov"] == fov_offset["fov"][i]] = (
-            df_loc["x"][df_loc["fov"] == fov_offset["fov"][i]] + fov_offset["x_offset"][i]
-        )
-        df_loc["y"][df_loc["fov"] == fov_offset["fov"][i]] = (
-            df_loc["y"][df_loc["fov"] == fov_offset["fov"][i]] + fov_offset["y_offset"][i]
-        )
+        for i in range(fov_offset.shape[0]):
+            df_loc["x"][df_loc["fov"] == fov_offset["fov"][i]] = (
+                df_loc["x"][df_loc["fov"] == fov_offset["fov"][i]] + fov_offset["x_offset"][i]
+            )
+            df_loc["y"][df_loc["fov"] == fov_offset["fov"][i]] = (
+                df_loc["y"][df_loc["fov"] == fov_offset["fov"][i]] + fov_offset["y_offset"][i]
+            )
 
     df_loc["spatial"] = [[int(df_loc["x"][i]), int(df_loc["y"][i])] for i in range(df_loc.shape[0])]
     return df_loc
@@ -75,7 +80,7 @@ def read_seqfish_meta_as_dataframe(
 def read_seqfish(
     path: str,
     meta_path: str,
-    fov_offset: pd.DataFrame,
+    fov_offset: pd.DataFrame = None,
     accumulate_x: bool = False,
     accumulate_y: bool = False,
     version: Literal["seqfish"] = "seqfish",
@@ -92,7 +97,7 @@ def read_seqfish(
         version: seqFISH technology version. Currently only used to set the scale and
             scale units of each unit coordinate. This may change in the future.
     """
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, dtype=np.uint16)
 
     X = csr_matrix(df)
     obs = pd.DataFrame(index=df.index.to_list())
