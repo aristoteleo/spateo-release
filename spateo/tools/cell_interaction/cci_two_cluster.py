@@ -8,7 +8,7 @@
 """
 
 import random
-from typing import List, Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
@@ -42,6 +42,7 @@ def find_cci_two_group(
     top: int = 20,
     spatial_neighbors: str = "spatial_neighbors",
     spatial_distances: str = "spatial_distances",
+    min_cells_by_counts: int = 5,
     min_pairs: int = 5,
     min_pairs_ratio: float = 0.01,
     num: int = 1000,
@@ -63,8 +64,10 @@ def find_cci_two_group(
         receiver_group: the cell group name of receive receptors.
         spatial_neighbors:  spatial neighbor key {spatial_neighbors} in adata.uns.keys(),
         spatial_distances: spatial neighbor distance key {spatial_distances} in adata.obsp.keys().
-        min_pairs: minimal number of cell pairs between cells from two groups.
-        min_pairs_ratio: minimal ratio of cell pairs to theoretical cell pairs (n x M / 2) between cells
+        min_cells_by_counts: threshold for minimum number of cells expressing ligand/receptor to avoid being filtered
+            out. Only used if 'lr_pair' is None.
+        min_pairs: minimum number of cell pairs between cells from two groups.
+        min_pairs_ratio: minimum ratio of cell pairs to theoretical cell pairs (n x M / 2) between cells
             from two groups.
         num: number of permutations. It is recommended that this number be at least 1000.
         pvalue: the p-value threshold that will be used to filter for significant ligand-receptor pairs.
@@ -77,6 +80,9 @@ def find_cci_two_group(
     Returns:
         result_dict: a dictionary where the key is 'cell_pair' and 'lr_pair'.
     """
+
+    logger = lm.get_main_logger()
+
     # prior lr_network
     if species == "human":
         lr_network = pd.read_csv(path + "lr_network_human.csv", index_col=0)
@@ -117,21 +123,33 @@ def find_cci_two_group(
         lr_network = lr_network[lr_network["to"].isin(expressed_receptor)]
 
         # ligand_sender_spec
-        adata_l = adata[:, lr_network["from"]]
+        adata_l = adata[:, list(set(lr_network["from"]))]
         for g in adata.obs[group].unique():
+            # Of all cells expressing particular ligand, what proportion are group g:
             frac = (adata_l[adata_l.obs[group] == g].X > 0).sum(axis=0) / (adata_l.X > 0).sum(axis=0)
             adata_l.var[g + "_frac"] = frac.A1 if x_sparse else frac
+
         dfl = adata_l.var[adata_l.var[sender_group + "_frac"] > 0]
+        dfl = dfl[dfl['n_cells_by_counts'] > min_cells_by_counts]
+
         ligand_sender_spec = dfl.sort_values(by=sender_group + "_frac", ascending=False)[:top].index
+        logger.info(f"{top} ligands for cell type {sender_group} with highest fraction of prevalence: "
+                    f"{list(ligand_sender_spec)}. Testing interactions involving these genes.")
         lr_network_l = lr_network.loc[lr_network["from"].isin(ligand_sender_spec.tolist())]
 
         # receptor_receiver_spec
-        adata_r = adata[:, lr_network["to"]]
+        adata_r = adata[:, list(set(lr_network["to"]))]
         for g in adata.obs[group].unique():
+            # Of all cells expressing particular receptor, what proportion are group g:
             frac = (adata_r[adata_r.obs[group] == g].X > 0).sum(axis=0) / adata_r.X.sum(axis=0)
             adata_r.var[g + "_frac"] = frac.A1 if x_sparse else frac
+
         dfr = adata_r.var[adata_r.var[receiver_group + "_frac"] > 0]
+        dfr = dfr[dfr['n_cells_by_counts'] > min_cells_by_counts]
+
         receptor_receiver_spec = dfr.sort_values(by=receiver_group + "_frac", ascending=False)[:top].index
+        logger.info(f"{top} receptors for cell type {receiver_group} with highest fraction of prevalence: "
+                    f"{list(set(receptor_receiver_spec))}. Testing interactions involving these genes.")
         lr_network_r = lr_network.loc[lr_network["to"].isin(receptor_receiver_spec.tolist())]
 
         if filter_lr == "inner":
