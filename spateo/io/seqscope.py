@@ -33,6 +33,7 @@ def read_seqscope_as_anndata(matrix_dir: str) -> AnnData:
     Returns:
         AnnData of barcode x genes.
     """
+    lm.main_info("Constructing count matrix.")
     obs = pd.read_csv(os.path.join(matrix_dir, "barcodes.tsv"), names=["barcode"]).set_index("barcode")
     var = pd.read_csv(os.path.join(matrix_dir, "features.tsv"), names=["gene_name", "gene_id", "library"]).set_index(
         "gene_id"

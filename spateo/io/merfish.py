@@ -12,6 +12,7 @@ except ImportError:
     from typing_extensions import Literal
 
 from ..configuration import SKM
+from ..logging import logger_manager as lm
 
 VERSIONS = {"MERFISH": ngs.chemistry.get_chemistry("MERFISH")}
 
@@ -25,6 +26,7 @@ def read_merfish_as_anndata(path: str) -> AnnData:
     Returns:
         AnnData of cell x genes.
     """
+    lm.main_info("Constructing count matrix.")
     X = pd.read_csv(path, index_col=0).transpose()
     obs = pd.DataFrame(index=X.index)
     var = pd.DataFrame(index=X.columns)
