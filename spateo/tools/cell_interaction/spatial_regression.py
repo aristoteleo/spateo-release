@@ -4,8 +4,6 @@ Suite of tools for spatially-aware as well as spatially-lagged linear regression
 Also performs downstream characterization following spatially-informed regression to characterize niche impact on gene
 expression
 
-Developer note: may change from the manual version of OLS here to a version of things that runs through
-Statsmodels- I think the summary functionality is useful!
 Developer note: haven't been able to find a good network for Drosophila and Zebrafish yet, so spatially lagged models
 are restricted to human, mouse and axolotl. Might also be making a lot of assumptions about the axolotl,
 but the axolotl LR network has columns for human equivalents for all LR so I assumed there's enough homology there
@@ -14,15 +12,12 @@ each column is a sender
 
 Developer note: currently, processing of 'connections' is set to encode the presence of cell type proximities as
 either a 0 or 1. Another option is to minmax scale across rows.
-
-Developer note: still to add: incorporation of Lasso OLS, maybe cross-validation wrapper in addition to the metrics at
-the bottom to return all metrics for each fold.
 """
 import os
 import time
 from itertools import product
 from random import sample
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 try:
     from typing import Literal
@@ -44,14 +39,15 @@ from pysal.lib import weights
 from pysal.model import spreg
 from tqdm import tqdm
 
-from ...configuration import SKM, config_spateo_rcParams
+from ...configuration import config_spateo_rcParams
 from ...logging import logger_manager as lm
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import construct_pairwise, transcriptomic_connectivity
 from ...tools.utils import update_dict
-from .general_lm import lasso_fit_predict, ols_fit_predict
+
+# from .general_lm import lasso_fit_predict, ols_fit_predict
 from .regression_utils import compute_wald_test, get_fisher_inverse
 
 
@@ -59,8 +55,7 @@ from .regression_utils import compute_wald_test, get_fisher_inverse
 # Wrapper classes for model running
 # ---------------------------------------------------------------------------------------------------
 class BaseInterpreter:
-    """
-    Basis class for all spatially-aware and spatially-lagged regression models that can be implemented through this
+    """Basis class for all spatially-aware and spatially-lagged regression models that can be implemented through this
     toolkit. Includes necessary methods for data loading and preparation, computation of spatial weights matrices,
     computation of evaluation metrics and more.
 
@@ -164,9 +159,6 @@ class BaseInterpreter:
         # Update using user input:
         self.sp_kwargs = update_dict(self.sp_kwargs, kwargs)
 
-        # Define reconstruction metrics:
-        self.metrics = [mae, mse, nll, r_squared]
-
     def prepare_data(
         self,
         mod_type: str = "category",
@@ -177,8 +169,7 @@ class BaseInterpreter:
         rec_ds: Union[None, List[str]] = None,
         species: Literal["human", "mouse", "axolotl"] = "human",
     ):
-        """
-        Handles any necessary data preparation, starting from given source AnnData object
+        """Handles any necessary data preparation, starting from given source AnnData object
 
         Args:
             mod_type: The type of model that will be employed- this dictates how the data will be processed and
@@ -204,7 +195,7 @@ class BaseInterpreter:
                 L:R pairs. If not given, will find receptor-downstream genes from database based on input to 'lig'
                 and 'rec'.
             species: Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
-                "human", "mouse", "axolotl" (EVENTUALLY, WILL ALSO INCLUDE DROSOPHILA/ZEBRAFISH)
+                "human", "mouse", "axolotl".
         """
         # Can provide either a single L:R pair or multiple of ligands and/or receptors:
         if lig is not None:
@@ -657,9 +648,7 @@ class BaseInterpreter:
         # self.adata = self.adata[:, self.genes]
 
     def compute_spatial_weights(self):
-        """
-        Generates matrix of pairwise spatial distances, used in spatially-lagged models
-        """
+        """Generates matrix of pairwise spatial distances, used in spatially-lagged models"""
         # Choose how weights are computed:
         if self.weights_mode == "knn":
             self.w = weights.distance.KNN.from_array(self.adata.obsm[self.spatial_key], k=self.sp_kwargs["n_neighbors"])
@@ -682,72 +671,8 @@ class BaseInterpreter:
         self.w.transform = "R"
 
     # ---------------------------------------------------------------------------------------------------
-    # Computing parameters for spatially-aware and lagged models- general linear models
+    # Computing parameters for spatially-aware and lagged models- generalized linear models
     # ---------------------------------------------------------------------------------------------------
-    def run_OLS(self, n_jobs: int = 30) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """
-        Wrapper for ordinary least squares regression.
-
-        Args:
-            n_jobs: For parallel processing, number of tasks to run at once
-
-        Returns:
-            coeffs: Contains fitted parameters for each feature
-            reconst: Contains predicted expression for each feature
-        """
-        results = Parallel(n_jobs)(
-            delayed(ols_fit_predict)(self.X, self.adata, self.variable_names, cur_g) for cur_g in self.genes
-        )
-        coeffs = [item[0] for item in results]
-        reconst = [item[1] for item in results]
-
-        coeffs = pd.DataFrame(coeffs, index=self.genes, columns=self.X.columns)
-        for cn in coeffs.columns:
-            self.adata.var.loc[:, cn] = coeffs[cn]
-        # Nested list transforms into dataframe rows- instantiate and transpose to get to correct shape:
-        reconst = pd.DataFrame(reconst, index=self.genes, columns=self.cell_names).T
-        return coeffs, reconst
-
-    def run_lasso_LS(
-        self,
-        iterations: int,
-        l1_penalty: float = 0.2,
-        test_size: float = 0.2,
-        num_folds: Union[None, int] = None,
-        n_jobs: int = 30,
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """
-        Wrapper for Lasso-regularized ordinary least squares regression.
-
-        Args:
-            iterations: Number of weight updates to perform
-            l1_penalty: Corresponds to lambda, the strength of the regularization- higher values lead to increasingly
-                strict weight shrinkage. This set value will only be used if 'num_folds' is given. Defaults to 0.2.
-            test_size: Size of the evaluation set, given as a proportion of the total dataset size. Should be between 0
-                and 1, exclusive.
-            num_folds: Can be used to specify number of folds for cross-validation. If not given, will not perform
-                cross-validation.
-            n_jobs: For parallel processing, number of tasks to run at once
-
-        Returns:
-            coeffs: Contains fitted parameters for each feature
-            reconst: Contains predicted expression for each feature
-        """
-        results = Parallel(n_jobs)(
-            delayed(lasso_fit_predict)(
-                self.X, self.adata, self.variable_names, cur_g, iterations, l1_penalty, test_size, num_folds
-            )
-            for cur_g in self.genes
-        )
-        coeffs = [item[0] for item in results]
-        reconst = [item[1] for item in results]
-
-        coeffs = pd.DataFrame(coeffs, index=self.genes, columns=self.X.columns)
-        for cn in coeffs.columns:
-            self.adata.var.loc[:, cn] = coeffs[cn]
-        # Nested list transforms into dataframe rows- instantiate and transpose to get to correct shape:
-        reconst = pd.DataFrame(reconst, index=self.genes, columns=self.cell_names).T
-        return coeffs, reconst
 
     # ---------------------------------------------------------------------------------------------------
     # Downstream interpretation (mostly for lag model)
@@ -768,8 +693,7 @@ class BaseInterpreter:
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
         save_kwargs: dict = {},
     ):
-        """
-        Generates heatmap of parameter values for visualization
+        """Generates heatmap of parameter values for visualization
 
         Args:
             coeffs: Contains coefficients (and any other relevant statistics that were computed) from regression for
@@ -879,8 +803,7 @@ class BaseInterpreter:
         lr_pair: Union[None, str] = None,
         save_prefix: Union[None, str] = None,
     ):
-        """
-        For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
+        """For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
         significant.
 
         Additionally, for each feature and each sender-receiver category pair, determines the log fold-change that
@@ -1004,8 +927,7 @@ class BaseInterpreter:
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
         save_kwargs: dict = {},
     ):
-        """
-        Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
+        """Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
         categories. Only valid if the model specified uses the connections between categories as variables for the
         regression.
 
@@ -1093,8 +1015,7 @@ class BaseInterpreter:
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
     ):
-        """
-        Evaluates and visualizes the effect that each sender cell type has on specific genes in the receiver
+        """Evaluates and visualizes the effect that each sender cell type has on specific genes in the receiver
         cell type.
 
         Args:
@@ -1206,8 +1127,7 @@ class BaseInterpreter:
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
     ):
-        """
-        Evaluates and visualizes the effect that one specific sender cell type has on select genes in all possible
+        """Evaluates and visualizes the effect that one specific sender cell type has on select genes in all possible
         receiver cell types.
 
         Args:
@@ -1317,8 +1237,7 @@ class BaseInterpreter:
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
     ):
-        """
-        Volcano plot to identify differentially expressed genes of a given receiver cell type in the presence of a
+        """Volcano plot to identify differentially expressed genes of a given receiver cell type in the presence of a
         given sender cell type.
 
         Args:
@@ -1419,11 +1338,10 @@ class BaseInterpreter:
 
 
 class Category_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-aware (but not spatially lagged) regression using categorical
-    variables (specifically, the prevalence of categories within spatial neighborhoods) to predict the value of gene
-    expression.
+    """Wraps all necessary methods for data loading and preparation, model initialization, parameterization,
+    evaluation and prediction when instantiating a model for spatially-aware (but not spatially lagged) regression
+    using categorical variables (specifically, the prevalence of categories within spatial neighborhoods) to predict
+    the value of gene expression.
 
     Arguments passed to :class `BaseInterpreter`. The only keyword argument that is used for this class is
     'n_neighbors'.
@@ -1438,10 +1356,9 @@ class Category_Interpreter(BaseInterpreter):
 
 
 class Niche_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-aware regression using both the prevalence of and connections
-    between categories within spatial neighborhoods to predict the value of gene expression.
+    """Wraps all necessary methods for data loading and preparation, model initialization, parameterization,
+    evaluation and prediction when instantiating a model for spatially-aware regression using both the prevalence of
+    and connections between categories within spatial neighborhoods to predict the value of gene expression.
 
     Arguments passed to :class `BaseInterpreter`.
     """
@@ -1454,10 +1371,9 @@ class Niche_Interpreter(BaseInterpreter):
 
 
 class Ligand_Lagged_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-lagged regression using the spatial lag of ligand genes to
-    predict the regression target.
+    """Wraps all necessary methods for data loading and preparation, model initialization, parameterization,
+    evaluation and prediction when instantiating a model for spatially-lagged regression using the spatial lag of
+    ligand genes to predict the regression target.
 
     Arguments passed to :class `BaseInterpreter`.
 
@@ -1530,9 +1446,8 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
         adata: AnnData,
         w: np.ndarray,
         layer: Union[None, str] = None,
-    ):
-        """
-        Defines model run process for a single feature- not callable by the user, all arguments populated by
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Defines model run process for a single feature- not callable by the user, all arguments populated by
         arguments passed on instantiation of :class `BaseInterpreter`.
 
         Args:
@@ -1597,11 +1512,10 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
 
 
 class Niche_LR_Interpreter(BaseInterpreter):
-    """
-    Wraps all necessary methods for data loading and preparation, model initialization, parameterization, evaluation and
-    prediction when instantiating a model for spatially-aware regression using the prevalence of and connections
-    between categories within spatial neighborhoods and the cell type-specific expression of ligands and receptors to
-    predict the regression target.
+    """Wraps all necessary methods for data loading and preparation, model initialization, parameterization,
+    evaluation and prediction when instantiating a model for spatially-aware regression using the prevalence of and
+    connections between categories within spatial neighborhoods and the cell type-specific expression of ligands and
+    receptors to predict the regression target.
 
     Arguments passed to :class `BaseInterpreter`.
 
@@ -1633,78 +1547,3 @@ class Niche_LR_Interpreter(BaseInterpreter):
         self.prepare_data(
             mod_type="niche_lr", lig=lig, rec=rec, rec_ds=rec_ds, species=species, niche_lr_r_lag=niche_lr_r_lag
         )
-
-
-# ---------------------------------------------------------------------------------------------------
-# Regression Metrics
-# ---------------------------------------------------------------------------------------------------
-def mae(y_true, y_pred):
-    """
-    Mean absolute error- in this context, actually log1p mean absolute error
-
-    Args:
-        y_true: Regression model output
-        y_pred: Observed values for the dependent variable
-
-    Returns:
-        mae: Mean absolute error value across all samples
-    """
-    abs = np.abs(y_true - y_pred)
-    mean = np.mean(abs)
-    return mean
-
-
-def mse(y_true, y_pred):
-    """
-    Mean squared error- in this context, actually log1p mean squared error
-
-    Args:
-        y_true: Regression model output
-        y_pred: Observed values for the dependent variable
-
-    Returns:
-        mse: Mean squared error value across all samples
-    """
-    se = np.square(y_true - y_pred)
-    se = np.mean(se, axis=-1)
-    return se
-
-
-# NOTE: NLL from here: https://github.com/tensorchiefs/dl_book/blob/master/chapter_06/nb_ch06_02.ipynb
-def nll(y_true, y_pred):
-    """
-    Negative log likelihood
-
-    Args:
-        y_true: Regression model output
-        y_pred: Observed values for the dependent variable
-
-    Returns:
-        neg_ll: Negative log likelihood across all samples
-    """
-    n = len(y_true)
-    sigma_hat_2 = (n - 1.0) / (n - 2.0) * np.var(y_true - y_pred.flatten(), ddof=1)
-    nll = 0.5 * np.log(2 * np.pi * sigma_hat_2) + 0.5 * np.mean((y_true - y_pred.flatten()) ** 2) / sigma_hat_2
-    return nll
-
-
-def r_squared(y_true, y_pred):
-    """
-    Compute custom r squared- in this context, actually log1p R^2
-
-    Args:
-        y_true: Regression model output
-        y_pred: Observed values for the dependent variable
-
-    Returns:
-        r2: Coefficient of determination
-    """
-    resid = np.sum(np.square(y_true - y_pred))
-    total = np.sum(np.square(y_true - np.sum(y_true)))
-    r2 = 1.0 - resid / total
-    return r2
-
-
-# ---------------------------------------------------------------------------------------------------
-# Cross-validation
-# ---------------------------------------------------------------------------------------------------

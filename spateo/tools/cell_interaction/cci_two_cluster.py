@@ -130,11 +130,13 @@ def find_cci_two_group(
             adata_l.var[g + "_frac"] = frac.A1 if x_sparse else frac
 
         dfl = adata_l.var[adata_l.var[sender_group + "_frac"] > 0]
-        dfl = dfl[dfl['n_cells_by_counts'] > min_cells_by_counts]
+        dfl = dfl[dfl["n_cells_by_counts"] > min_cells_by_counts]
 
         ligand_sender_spec = dfl.sort_values(by=sender_group + "_frac", ascending=False)[:top].index
-        logger.info(f"{top} ligands for cell type {sender_group} with highest fraction of prevalence: "
-                    f"{list(ligand_sender_spec)}. Testing interactions involving these genes.")
+        logger.info(
+            f"{top} ligands for cell type {sender_group} with highest fraction of prevalence: "
+            f"{list(ligand_sender_spec)}. Testing interactions involving these genes."
+        )
         lr_network_l = lr_network.loc[lr_network["from"].isin(ligand_sender_spec.tolist())]
 
         # receptor_receiver_spec
@@ -145,11 +147,13 @@ def find_cci_two_group(
             adata_r.var[g + "_frac"] = frac.A1 if x_sparse else frac
 
         dfr = adata_r.var[adata_r.var[receiver_group + "_frac"] > 0]
-        dfr = dfr[dfr['n_cells_by_counts'] > min_cells_by_counts]
+        dfr = dfr[dfr["n_cells_by_counts"] > min_cells_by_counts]
 
         receptor_receiver_spec = dfr.sort_values(by=receiver_group + "_frac", ascending=False)[:top].index
-        logger.info(f"{top} receptors for cell type {receiver_group} with highest fraction of prevalence: "
-                    f"{list(set(receptor_receiver_spec))}. Testing interactions involving these genes.")
+        logger.info(
+            f"{top} receptors for cell type {receiver_group} with highest fraction of prevalence: "
+            f"{list(set(receptor_receiver_spec))}. Testing interactions involving these genes."
+        )
         lr_network_r = lr_network.loc[lr_network["to"].isin(receptor_receiver_spec.tolist())]
 
         if filter_lr == "inner":

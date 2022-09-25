@@ -1,7 +1,7 @@
 """
 Auxiliary functions to aid in the interpretation functions for the spatial and spatially-lagged regression models.
 """
-from typing import Tuple, Union
+from typing import List, Tuple, Union
 
 try:
     from typing import Literal
@@ -17,12 +17,50 @@ from anndata import AnnData
 
 from ...configuration import SKM
 from ...logging import logger_manager as lm
+from ...preprocessing.transform import log1p
 
 
-# ------------------------------------------- Significance Testing ------------------------------------------- #
-def get_fisher_inverse(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+# ---------------------------------------------------------------------------------------------------
+# Nonlinearity
+# ---------------------------------------------------------------------------------------------------
+def softplus(z):
+    """Numerically stable version of log(1 + exp(z))."""
+    nl = z.copy()
+    nl[z > 35] = z[z > 35]
+    nl[z < -10] = np.exp(z[z < -10])
+    nl[(z >= -10) & (z <= 35)] = log1p(np.exp(z[(z >= -10) & (z <= 35)]))
+    return nl
+
+
+# ---------------------------------------------------------------------------------------------------
+# Regularization
+# ---------------------------------------------------------------------------------------------------
+def L2_penalty(beta: np.ndarray, Tau: Union[None, np.ndarray] = None) -> float:
+    """Implementation of the L2 penalty that penalizes based on the square of coefficient magnitudes.
+
+    Args:
+        beta: Array of shape [n_features,]; learned model coefficients
+        Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
+        provided, Tau will default to the identity matrix.
     """
-    Computes the Fisher matrix that measures the amount of information each feature in x provides about y- that is,
+    if Tau is None:
+        # Ridge=like penalty
+        L2penalty = np.linalg.norm(beta, 2) ** 2
+    else:
+        # Tikhonov penalty
+        if Tau.shape[0] != beta.shape[0] or Tau.shape[1] != beta.shape[0]:
+            raise ValueError("Tau should be (n_features x n_features)")
+        else:
+            L2penalty = np.linalg.norm(np.dot(Tau, beta), 2) ** 2
+
+    return L2penalty
+
+
+# ---------------------------------------------------------------------------------------------------
+# Significance Testing
+# ---------------------------------------------------------------------------------------------------
+def get_fisher_inverse(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Computes the Fisher matrix that measures the amount of information each feature in x provides about y- that is,
     whether the log-likelihood is sensitive to change in the parameter x.
 
     Args:
@@ -43,8 +81,7 @@ def get_fisher_inverse(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 
 def wald_test(theta_mle: np.ndarray, theta_sd: np.ndarray, theta0: Union[float, np.ndarray] = 0) -> np.ndarray:
-    """
-    Perform single-coefficient Wald test, informing whether a given coefficient deviates significantly from the
+    """Perform single-coefficient Wald test, informing whether a given coefficient deviates significantly from the
     supplied reference value (theta0), based on the standard deviation of the posterior of the parameter estimate.
 
     Args:
@@ -73,8 +110,7 @@ def wald_test(theta_mle: np.ndarray, theta_sd: np.ndarray, theta0: Union[float, 
 
 
 def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: float = 0.05) -> np.ndarray:
-    """
-    In the case of testing multiple hypotheses from the same experiment, perform multiple test correction to adjust
+    """In the case of testing multiple hypotheses from the same experiment, perform multiple test correction to adjust
     q-values.
 
     Args:
@@ -108,8 +144,7 @@ def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: fl
 
 
 def _get_p_value(variables: np.array, fisher_inv: np.array, coef_loc_totest: int) -> np.ndarray:
-    """
-    Computes p-values for differential expression for each feature
+    """Computes p-values for differential expression for each feature
 
     Args:
         variables: Array where each column corresponds to a feature
@@ -139,7 +174,7 @@ def compute_wald_test(
         fisher_inv: Inverse Fisher information matrix
         significance_threshold: Upper threshold to be considered significant
 
-    Returns
+    Returns:
         significance: Array of identical shape to variables, where each element is True or False if it meets the
             threshold for significance
         pvalues: Array of identical shape to variables, where each element is a p-value for that instance of that
@@ -165,26 +200,84 @@ def compute_wald_test(
     return significance, pvalues, qvalues
 
 
-# ------------------------------------------- Comparison ------------------------------------------- #
+# ---------------------------------------------------------------------------------------------------
+# Regression Metrics
+# ---------------------------------------------------------------------------------------------------
+def mae(y_true, y_pred) -> float:
+    """Mean absolute error- in this context, actually log1p mean absolute error
+
+    Args:
+        y_true: Regression model output
+        y_pred: Observed values for the dependent variable
+
+    Returns:
+        mae: Mean absolute error value across all samples
+    """
+    abs = np.abs(y_true - y_pred)
+    mean = np.mean(abs)
+    return mean
+
+
+def mse(y_true, y_pred) -> float:
+    """Mean squared error- in this context, actually log1p mean squared error
+
+    Args:
+        y_true: Regression model output
+        y_pred: Observed values for the dependent variable
+
+    Returns:
+        mse: Mean squared error value across all samples
+    """
+    se = np.square(y_true - y_pred)
+    se = np.mean(se, axis=-1)
+    return se
+
+
+def r_squared(y_true, y_pred) -> float:
+    """Compute custom r squared- in this context, actually log1p R^2
+
+    Args:
+        y_true: Regression model output
+        y_pred: Observed values for the dependent variable
+
+    Returns:
+        r2: Coefficient of determination
+    """
+    resid = np.sum(np.square(y_true - y_pred))
+    total = np.sum(np.square(y_true - np.sum(y_true)))
+    r2 = 1.0 - resid / total
+    return r2
+
+
+# ---------------------------------------------------------------------------------------------------
+# Testing Model Accuracy
+# ---------------------------------------------------------------------------------------------------
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def plot_prior_vs_data(
     reconst: pd.DataFrame,
     adata: AnnData,
+    kind: str = "barplot",
     target_name: Union[None, str] = None,
     title: Union[None, str] = None,
     figsize: Union[None, Tuple[float, float]] = None,
     save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
     save_kwargs: dict = {},
 ):
-    """
-    For diagnostics, plots distribution of observed vs. predicted counts. Note that this is most effective for counts
-    after a log transformation. Assumed
+    """Plots distribution of observed vs. predicted counts in the form of a comparative density barplot.
 
     Args:
         reconst: DataFrame containing values for reconstruction/prediction of targets of a regression model
         adata: AnnData object containing observed counts
-        target_name: Optional, name of the column in the DataFrame/variable name in the AnnData object corresponding
-            to the target gene. Assumed to be the same in both if given. If not given, will compute the mean over all
+        kind: Kind of plot to generate. Options: "barplot", "scatterplot". Case sensitive, defaults to "barplot".
+        target_name: Optional, can be:
+                - Column name in DataFrame/AnnData object: name of gene to subset to
+                - "sum": computes sum over all features present in 'reconst' to compare to the corresponding subset of
+                'adata'.
+                - "mean": computes mean over all features present in 'reconst' to compare to the corresponding subset of
+                'adata'.
+            If not given, will subset AnnData to features in 'reconst' and flatten both arrays to compare all values.
+
+            If not given, will compute the sum over all
             features present in 'reconst' and compare to the corresponding subset of 'adata'.
         save_show_or_return: Whether to save, show or return the figure.
             If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
@@ -201,45 +294,145 @@ def plot_prior_vs_data(
     from ...configuration import config_spateo_rcParams
     from ...plotting.static.utils import save_return_show_fig_utils
 
+    logger = lm.get_main_logger()
+
     config_spateo_rcParams()
     if figsize is None:
         figsize = rcParams.get("figure.figsize")
 
-    if target_name is not None:
-        observed = adata[:, target_name].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, target_name].X
-        observed = observed.reshape(-1, 1)
-        predicted = reconst[target_name].values.reshape(-1, 1)
-    else:
+    if target_name == "sum":
+        predicted = reconst.sum(axis=1).values.reshape(-1, 1)
+        observed = (
+            adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, reconst.columns].X
+        )
+        observed = np.sum(observed, axis=1).reshape(-1, 1)
+    elif target_name == "mean":
         predicted = reconst.mean(axis=1).values.reshape(-1, 1)
         observed = (
             adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, reconst.columns].X
         )
         observed = np.mean(observed, axis=1).reshape(-1, 1)
+    elif target_name is not None:
+        observed = adata[:, target_name].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, target_name].X
+        observed = observed.reshape(-1, 1)
+        predicted = reconst[target_name].values.reshape(-1, 1)
+    else:
+        # Flatten arrays:
+        observed = (
+            adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, reconst.columns].X
+        )
+        observed = observed.flatten().reshape(-1, 1)
+        predicted = reconst.values.flatten().reshape(-1, 1)
 
     obs_pred = np.hstack((observed, predicted))
     # Upper limit along the x-axis (99th percentile to prevent outliers from affecting scale too badly):
     xmax = np.percentile(obs_pred, 99)
+    # Lower limit along the x-axis:
+    xmin = np.min(observed)
     # Divide x-axis into pieces for purposes of setting x labels:
-    xrange, step = np.linspace(0, xmax, num=10, retstep=True)
+    xrange, step = np.linspace(xmin, xmax, num=10, retstep=True)
 
     fig, ax = plt.subplots(1, 1, figsize=figsize)
-    ax.hist(
-        obs_pred,
-        xrange,
-        alpha=0.7,
-        label=[f"Observed {target_name}", f"Predicted {target_name}"],
-        density=True,
-        color=["#FFA07A", "#20B2AA"],
-    )
+    if target_name is None:
+        target_name = "Total Counts"
 
-    plt.legend(loc="upper right", fontsize=9)
+    if kind == "barplot":
+        ax.hist(
+            obs_pred,
+            xrange,
+            alpha=0.7,
+            label=[f"Observed {target_name}", f"Predicted {target_name}"],
+            density=True,
+            color=["#FFA07A", "#20B2AA"],
+        )
 
-    ax.set_xticks(ticks=[i + 0.5 * step for i in xrange[:-1]], labels=[np.round(l, 3) for l in xrange[:-1]])
-    plt.xlabel("Counts", size=9)
-    plt.ylabel("Normalized Proportion of Cells", size=9)
-    if title is not None:
-        plt.title(title, size=9)
-    plt.tight_layout()
+        plt.legend(loc="upper right", fontsize=9)
+
+        ax.set_xticks(ticks=[i + 0.5 * step for i in xrange[:-1]], labels=[np.round(l, 3) for l in xrange[:-1]])
+        plt.xlabel("Counts", size=9)
+        plt.ylabel("Normalized Proportion of Cells", size=9)
+        if title is not None:
+            plt.title(title, size=9)
+        plt.tight_layout()
+
+    elif kind == "scatterplot":
+        from scipy.stats import spearmanr
+
+        observed = observed.flatten()
+        predicted = predicted.flatten()
+        slope, intercept = np.polyfit(observed, predicted, 1)
+
+        # Extract residuals:
+        predicted_model = np.polyval([slope, intercept], observed)
+        observed_mean = np.mean(observed)
+        predicted_mean = np.mean(predicted)
+        n = observed.size  # number of samples
+        m = 2  # number of parameters
+        dof = n - m  # degrees of freedom
+        # Students statistic of interval confidence:
+        t = scipy.stats.t.ppf(0.975, dof)
+        residual = observed - predicted_model
+        # Standard deviation of the error:
+        std_error = (np.sum(residual**2) / dof) ** 0.5
+
+        # Calculate spearman correlation and coefficient of determination:
+        s = spearmanr(observed, predicted)[0]
+        numerator = np.sum((observed - observed_mean) * (predicted - predicted_mean))
+        denominator = (np.sum((observed - observed_mean) ** 2) * np.sum((predicted - predicted_mean) ** 2)) ** 0.5
+        correlation_coef = numerator / denominator
+        r2 = correlation_coef**2
+
+        # Plot best fit line:
+        observed_line = np.linspace(np.min(observed), np.max(observed), 100)
+        predicted_line = np.polyval([slope, intercept], observed_line)
+
+        # Confidence interval and prediction interval:
+        ci = (
+            t
+            * std_error
+            * (1 / n + (observed_line - observed_mean) ** 2 / np.sum((observed - observed_mean) ** 2)) ** 0.5
+        )
+        pi = (
+            t
+            * std_error
+            * (1 + 1 / n + (observed_line - observed_mean) ** 2 / np.sum((observed - observed_mean) ** 2)) ** 0.5
+        )
+
+        ax.plot(observed, predicted, "o", ms=3, color="royalblue", alpha=0.7)
+        ax.plot(observed_line, predicted_line, color="royalblue", alpha=0.7)
+        ax.fill_between(
+            observed_line, predicted_line + pi, predicted_line - pi, color="lightcyan", label="95% prediction interval"
+        )
+        ax.fill_between(
+            observed_line, predicted_line + ci, predicted_line - ci, color="skyblue", label="95% confidence interval"
+        )
+        ax.spines["right"].set_visible(False)
+        ax.spines["top"].set_visible(False)
+
+        ax.set_xlabel(f"Observed {target_name}")
+        ax.set_ylabel(f"Predicted {target_name}")
+        title = title if title is not None else "Observed and Predicted {}".format(target_name)
+        ax.set_title(title)
+
+        # Display r^2, Spearman correlation, mean absolute error on plot as well:
+        r2s = str(np.round(r2, 2))
+        spearman = str(np.round(s, 2))
+        ma_err = mae(observed, predicted)
+        mae_s = str(np.round(ma_err, 2))
+
+        # Place text at slightly above the minimum x_line value and maximum y_line value to avoid obscuring the plot:
+        ax.text(
+            1.01 * np.min(observed),
+            1.01 * np.max(predicted),
+            "$r^2$ = " + r2s + ", Spearman $r$ = " + spearman + ", MAE = " + mae_s,
+            fontsize=8,
+        )
+        plt.legend(loc="lower center", bbox_to_anchor=(0.5, -0.4), fontsize=8)
+
+    else:
+        logger.info(
+            ":func `plot_prior_vs_data` error: Invalid input given to 'kind'. Options: 'barplot', " "'scatterplot'."
+        )
 
     save_return_show_fig_utils(
         save_show_or_return=save_show_or_return,
