@@ -698,7 +698,8 @@ class BaseInterpreter:
                 None, will default to a 5-fold cross-validation.
             n_jobs: For parallel processing, number of tasks to run at once
             zero_inflated: If True, indicates that data to regress on is zero-inflated and that :class
-                `ZeroInflatedGLMCV` should be used in fitting. Defaults to True.
+                `ZeroInflatedGLMCV` should be used in fitting. If False, :class `GLMCV` will be used in training.
+                Defaults to True.
             kwargs: Additional named arguments that will be provided to :class `GLMCV`.
 
         Returns:
@@ -720,6 +721,8 @@ class BaseInterpreter:
                 gs_params=gs_params,
                 n_gs_cv=n_gs_cv,
                 return_model=False,
+                verbose=False,
+                **kwargs
             )
             for cur_g in self.genes
         )

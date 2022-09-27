@@ -613,6 +613,8 @@ class GLMCV:
         random_seed: Seed of the random number generator used to initialize the solution. Default: 888
         theta: Shape parameter of the negative binomial distribution (number of successes before the first
             failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
+        verbose: If True, returns logging information as program runs. Recommended to set to False for any
+            parallelized processes.
 
     Attributes:
         beta0_: The intercept
@@ -638,6 +640,7 @@ class GLMCV:
         fit_intercept: bool = True,
         random_seed: int = 888,
         theta: float = 1.0,
+        verbose: bool = True,
     ):
         if reg_lambda is None:
             reg_lambda = np.logspace(np.log(0.1), np.log(1e-6), n_lambdas, base=np.exp(1))
@@ -672,6 +675,7 @@ class GLMCV:
         self.score_metric = score_metric
         self.fit_intercept = fit_intercept
         self.random_seed = random_seed
+        self.verbose = verbose
 
     def __repr__(self):
         reg_lambda = self.reg_lambda
@@ -735,7 +739,8 @@ class GLMCV:
                 scores_fold.append(glm.score(X[val], y[val]))
             avg_score = np.mean(scores_fold)
             scores.append(avg_score)
-            self.logger.info(f"Average score for lambda = {np.round(rl, 6)}: {avg_score}")
+            if self.verbose:
+                self.logger.info(f"Average score for lambda = {np.round(rl, 6)}: {avg_score}")
 
             # Extract final parameters for this value of lambda:
             if idx == 0:
@@ -834,6 +839,8 @@ class ZeroInflatedGLMCV(BaseEstimator):
         random_seed: Seed of the random number generator used to initialize the solution. Default: 888
         theta: Shape parameter of the negative binomial distribution (number of successes before the first
             failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
+        verbose: If True, returns logging information as program runs. Recommended to set to False for any
+            parallelized processes.
 
     Attributes:
         beta0_: The intercept
@@ -861,6 +868,7 @@ class ZeroInflatedGLMCV(BaseEstimator):
         fit_intercept: bool = True,
         random_seed: int = 888,
         theta: float = 1.0,
+        verbose: bool = True
     ):
         self.classifier = classifier
         self.classifier_kwargs = classifier_kwargs
@@ -878,6 +886,7 @@ class ZeroInflatedGLMCV(BaseEstimator):
         self.score_metric = score_metric
         self.fit_intercept = fit_intercept
         self.random_seed = random_seed
+        self.verbose = verbose
 
     def fit(self, X: np.ndarray, y: np.ndarray):
         """Train the model.
@@ -901,36 +910,41 @@ class ZeroInflatedGLMCV(BaseEstimator):
 
         non_zero_indices = np.where(self.classifier_.predict(X) == 1)[0]
 
-        if non_zero_indices.size > 0:
-            self.regressor = GLMCV(
-                self.distr,
-                self.alpha,
-                self.Tau,
-                self.reg_lambda,
-                self.n_lambdas,
-                self.cv,
-                self.learning_rate,
-                self.max_iter,
-                self.tol,
-                self.eta,
-                self.score_metric,
-                self.fit_intercept,
-                self.random_seed,
-                self.theta,
-            )
+        self.regressor = GLMCV(
+            self.distr,
+            self.alpha,
+            self.Tau,
+            self.reg_lambda,
+            self.n_lambdas,
+            self.cv,
+            self.learning_rate,
+            self.max_iter,
+            self.tol,
+            self.eta,
+            self.score_metric,
+            self.fit_intercept,
+            self.random_seed,
+            self.theta,
+        )
 
+        if non_zero_indices.size > 0:
             self.regressor.fit(X[non_zero_indices], y[non_zero_indices])
-            # Coefficients for the pipeline come from the regressor:
-            self.beta0_ = self.regressor.beta0_  # intercept
-            self.beta_ = self.regressor.beta_  # parameter coefficients
-            self.glm_ = self.regressor.glm_  # regressor model resulting in the optimal fit
-            self.reg_lambda_opt_ = self.regressor.reg_lambda_opt_  # best value for the regularization parameter value
-            self.scores_ = self.regressor.scores_  # deviance or pseudo-R^2 for the best model
         else:
-            self.logger.error(
-                "The predicted training labels are all zero, making the regressor obsolete. Change the "
-                "classifier or create an object of :class `GLMCV` instead."
-            )
+            if self.verbose:
+                self.logger.warning(
+                    "The predicted training labels are all zero, making the regressor obsolete. Fitting on all "
+                    "values instead. It is recommended to change the classifier or create an object of :class `GLMCV` "
+                    "instead."
+                )
+            self.regressor.fit(X, y)
+
+        # Coefficients for the pipeline come from the regressor:
+        self.beta0_ = self.regressor.beta0_  # intercept
+        self.beta_ = self.regressor.beta_  # parameter coefficients
+        self.glm_ = self.regressor.glm_  # regressor model resulting in the optimal fit
+        self.reg_lambda_opt_ = self.regressor.reg_lambda_opt_  # best value for the regularization parameter value
+        self.scores_ = self.regressor.scores_  # deviance or pseudo-R^2 for the best model
+
 
         return self
 
@@ -1002,6 +1016,7 @@ def fit_glm(
     gs_params: Union[None, dict] = None,
     n_gs_cv: Union[None, int] = None,
     return_model: bool = True,
+    verbose: bool = True,
     **kwargs,
 ) -> Tuple[np.ndarray, np.ndarray, Union[None, GLMCV, ZeroInflatedGLMCV]]:
     """Wrapper for fitting a generalized elastic net linear model to large biological data, with automated finding of
@@ -1028,6 +1043,8 @@ def fit_glm(
         n_gs_cv: Number of folds for cross-validation, will only be used if gs_params is not None. If None,
             will default to a 5-fold cross-validation.
         return_model: If True, returns fitted model. Defaults to True.
+        verbose: If True, returns logging information as program runs. Recommended to set to False for any
+            parallelized processes.
         kwargs: Additional named arguments that will be provided to :class `GLMCV`. Valid options are:
             - distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
             - alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function
@@ -1059,6 +1076,8 @@ def fit_glm(
         kwargs["distr"] = "poisson"
     if not "score_metric" in kwargs:
         kwargs["score_metric"] = "pseudo_r2"
+    if not "verbose" in kwargs:
+        kwargs["verbose"] = verbose
 
     if classifier is None:
         from sklearn.svm import SVC
@@ -1083,22 +1102,25 @@ def fit_glm(
 
     y = adata[:, y_feat].X.toarray()
 
-    desc = "<Grid search CV model fitting for : "
-    for param in gs_params.keys():
-        desc += f"\n{param} to test | {gs_params[param]}"
-    logger.info(desc)
+    if verbose:
+        desc = "<Grid search CV model fitting for parameters : "
+        for param in gs_params.keys():
+            desc += f"\n{param} to test | {gs_params[param]}"
+        logger.info(desc)
 
     if zero_inflated:
         if gs_params is not None:
             reg_lambda_given = kwargs.get("reg_lambda", None)
             if reg_lambda_given is None or len(reg_lambda_given) > 3:
-                logger.info(
-                    "Beginning grid search procedure. Temporarily running on reduced range of lambda values for "
-                    "conciseness."
-                )
+                if verbose:
+                    logger.info(
+                        "Beginning grid search procedure. Temporarily running on reduced range of lambda values for "
+                        "conciseness."
+                    )
                 kwargs["reg_lambda"] = [0.1, 1e-4]
             else:
-                logger.info("Beginning grid search procedure.")
+                if verbose:
+                    logger.info("Beginning grid search procedure.")
 
             zir = ZeroInflatedGLMCV(classifier=classifier, **kwargs)
             grid = GridSearchCV(estimator=zir, param_grid=gs_params, cv=n_gs_cv)
@@ -1124,6 +1146,30 @@ def fit_glm(
         reg = ZeroInflatedGLMCV(classifier=classifier, **kwargs)
 
     else:
+        if gs_params is not None:
+            reg_lambda_given = kwargs.get("reg_lambda", None)
+            if reg_lambda_given is None or len(reg_lambda_given) > 3:
+                if verbose:
+                    logger.info(
+                        "Beginning grid search procedure. Temporarily running on reduced range of lambda values for "
+                        "conciseness."
+                    )
+                kwargs["reg_lambda"] = [0.1, 1e-4]
+            else:
+                if verbose:
+                    logger.info("Beginning grid search procedure.")
+
+            reg = GLMCV(**kwargs)
+            grid = GridSearchCV(estimator=reg, param_grid=gs_params, cv=n_gs_cv)
+            grid.fit(X, y)
+            best_params = grid.best_params_
+
+            # Select parameters in the classifier signature to update classifier keyword arguments:
+            for param, value in best_params.items():
+                kwargs[param] = value
+            # Restore lambda to its original configuration:
+            kwargs["reg_lambda"] = reg_lambda_given
+
         reg = GLMCV(**kwargs)
 
     rex = reg.fit_predict(X, y)
