@@ -35,6 +35,21 @@ def softplus(z):
 # ---------------------------------------------------------------------------------------------------
 # Regularization
 # ---------------------------------------------------------------------------------------------------
+def L1_penalty(beta: np.ndarray) -> float:
+    """
+    Implementation of the L1 penalty that penalizes based on absolute value of coefficient magnitude.
+
+    Args:
+        beta: Array of shape [n_features,]; learned model coefficients
+
+    Returns:
+        L1penalty: float, value for the regularization parameter (typically stylized by lambda)
+    """
+    # Lasso-like penalty- max(sum(abs(beta), axis=0))
+    L1penalty = np.linalg.norm(beta, 1)
+    return L1penalty
+
+
 def L2_penalty(beta: np.ndarray, Tau: Union[None, np.ndarray] = None) -> float:
     """Implementation of the L2 penalty that penalizes based on the square of coefficient magnitudes.
 
@@ -54,6 +69,27 @@ def L2_penalty(beta: np.ndarray, Tau: Union[None, np.ndarray] = None) -> float:
             L2penalty = np.linalg.norm(np.dot(Tau, beta), 2) ** 2
 
     return L2penalty
+
+
+def L1_L2_penalty(
+    alpha: float,
+    beta: np.ndarray,
+    Tau: Union[None, np.ndarray] = None,
+) -> float:
+    """
+    Combination of the L1 and L2 penalties.
+
+    Args:
+        alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function.
+        beta: Array of shape [n_features,]; learned model coefficients
+        Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
+        provided, Tau will default to the identity matrix.
+
+    Returns:
+        P: Value for the regularization parameter
+    """
+    P = 0.5 * (1 - alpha) * L2_penalty(beta, Tau) + alpha * L1_penalty(beta)
+    return P
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -231,22 +267,6 @@ def mse(y_true, y_pred) -> float:
     se = np.square(y_true - y_pred)
     se = np.mean(se, axis=-1)
     return se
-
-
-def r_squared(y_true, y_pred) -> float:
-    """Compute custom r squared- in this context, actually log1p R^2
-
-    Args:
-        y_true: Regression model output
-        y_pred: Observed values for the dependent variable
-
-    Returns:
-        r2: Coefficient of determination
-    """
-    resid = np.sum(np.square(y_true - y_pred))
-    total = np.sum(np.square(y_true - np.sum(y_true)))
-    r2 = 1.0 - resid / total
-    return r2
 
 
 # ---------------------------------------------------------------------------------------------------

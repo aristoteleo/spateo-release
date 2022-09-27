@@ -7,7 +7,7 @@ Additionally features capability to perform elastic net regularized regression.
 
 :class `GLM` and :class `GLMCV` adapted from https://github.com/glm-tools/pyglmnet.
 """
-from typing import Union
+from typing import List, Tuple, Union
 
 try:
     from typing import Literal
@@ -17,15 +17,19 @@ except ImportError:
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from dynamo.tools.moments import calc_1nd_moment
 from scipy.special import expit, loggamma
-from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.linear_model import Lasso, LassoCV
+from sklearn.base import BaseEstimator, clone
+from sklearn.exceptions import NotFittedError
 from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.utils.validation import check_array, check_is_fitted, check_X_y
 
 from ...configuration import SKM
 from ...logging import logger_manager as lm
-from .regression_utils import L2_penalty, softplus
+from ...preprocessing.normalize import normalize_total
+from ...preprocessing.transform import log1p
+from ...tools.find_neighbors import transcriptomic_connectivity
+from .regression_utils import L1_L2_penalty, L2_penalty, softplus
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -185,12 +189,12 @@ def batch_grad(
     grad_beta0 *= 1.0 / n_samples
     grad_beta *= 1.0 / n_samples
     if fit_intercept:
-        grad_beta += reg_lambda * (1 - alpha) * np.dot(InvCov, beta[1:])
+        grad_beta += reg_lambda * (1 - alpha) * np.dot(InvCov, beta[1:])  # + reg_lambda * alpha * np.sign(beta[1:])
         g = np.zeros((n_features + 1,))
         g[0] = grad_beta0
         g[1:] = grad_beta
     else:
-        grad_beta += reg_lambda * (1 - alpha) * np.dot(InvCov, beta)
+        grad_beta += reg_lambda * (1 - alpha) * np.dot(InvCov, beta)  # + reg_lambda * alpha * np.sign(beta)
         g = grad_beta
 
     return g
@@ -277,9 +281,11 @@ def _loss(
     ll = 1.0 / n_samples * log_likelihood(distr, y, y_hat, z, theta)
 
     if fit_intercept:
-        P = 0.5 * (1 - alpha) * L2_penalty(beta[1:], Tau)
+        P = L1_L2_penalty(alpha, beta[1:], Tau)
+        # P = 0.5 * (1 - alpha) * L2_penalty(beta[1:], Tau)
     else:
-        P = 0.5 * (1 - alpha) * L2_penalty(beta, Tau)
+        P = L1_L2_penalty(alpha, beta, Tau)
+        # P = 0.5 * (1 - alpha) * L2_penalty(beta, Tau)
 
     loss = -ll + reg_lambda * P
     return loss
@@ -369,11 +375,12 @@ class GLM(BaseEstimator):
         eta: A threshold parameter that linearizes the exp() function above eta.
         score_metric: Scoring metric. Options:
             - "deviance": Uses the difference between the saturated (perfectly predictive) model and the true model.
-            - "pseudo_R2": Uses the coefficient of determination b/w the true and predicted values.
+            - "pseudo_r2": Uses the coefficient of determination b/w the true and predicted values.
         fit_intercept: Specifies if a constant (a.k.a. bias or intercept) should be added to the decision function
-        random_state: Seed of the random number generator used to initialize the solution. Default: 888
+        random_seed: Seed of the random number generator used to initialize the solution. Default: 888
         theta: Shape parameter of the negative binomial distribution (number of successes before the first
             failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
+        verbose: If True, will display information about number of iterations until convergence. Defaults to False.
 
     Attributes:
         beta0_: The intercept
@@ -387,14 +394,15 @@ class GLM(BaseEstimator):
         alpha: float = 0.5,
         Tau: Union[None, np.ndarray] = None,
         reg_lambda: float = 0.1,
-        learning_rate: float = 2e-1,
+        learning_rate: float = 0.2,
         max_iter: int = 1000,
         tol: float = 1e-6,
         eta: float = 2.0,
-        score_metric: Literal["deviance", "pseudo_R2"] = "deviance",
+        score_metric: Literal["deviance", "pseudo_r2"] = "deviance",
         fit_intercept: bool = True,
-        random_state: int = 888,
+        random_seed: int = 888,
         theta: float = 1.0,
+        verbose: bool = False,
     ):
 
         self.logger = lm.get_main_logger()
@@ -417,11 +425,11 @@ class GLM(BaseEstimator):
         self.score_metric = score_metric
         self.fit_intercept = fit_intercept
         # Seed into instance of np.random.RandomState
-        self.random_state = np.random.RandomState(random_state)
+        self.random_state = np.random.RandomState(random_seed)
         self.theta = theta
+        self.verbose = verbose
 
     def __repr__(self):
-        """Description of the object."""
         reg_lambda = self.reg_lambda
         s = "<GLM object attributes: "
         s += "\nDistribution | %s" % self.distr
@@ -434,7 +442,7 @@ class GLM(BaseEstimator):
         """Proximal operator to slowly guide convergence during gradient descent."""
         return np.sign(beta) * (np.abs(beta) - thresh) * (np.abs(beta) > thresh)
 
-    def fit(self, X, y):
+    def fit(self, X: np.ndarray, y: np.ndarray):
         """The fit function.
 
         Args:
@@ -480,12 +488,7 @@ class GLM(BaseEstimator):
         reg_lambda = self.reg_lambda
 
         self._convergence = list()
-        try:
-            from tqdm import tqdm
-
-            train_iterations = tqdm(range(self.max_iter))
-        except:
-            train_iterations = range(self.max_iter)
+        train_iterations = range(self.max_iter)
 
         # Iterative updates
         for t in train_iterations:
@@ -506,11 +509,11 @@ class GLM(BaseEstimator):
             norm_update = np.linalg.norm(beta - beta_old)
             norm_update /= np.linalg.norm(beta)
             self._convergence.append(norm_update)
-            if t > 1 and self._convergence[-1] < tol:
+            if t > 1 and self._convergence[-1] < tol and self.verbose:
                 self.logger.info("\tParameter update tolerance. " + "Converged in {0:d} iterations".format(t))
                 break
 
-        if self.n_iter_ == self.max_iter:
+        if self.n_iter_ == self.max_iter and self.verbose:
             self.logger.warning("Reached max number of iterations without convergence.")
 
         # Update the estimated variables
@@ -546,7 +549,7 @@ class GLM(BaseEstimator):
         yhat = np.asarray(yhat)
         return yhat
 
-    def fit_predict(self, X, y):
+    def fit_predict(self, X: np.ndarray, y: np.ndarray):
         """Fit the model and predict on the same data.
 
         Args:
@@ -559,7 +562,7 @@ class GLM(BaseEstimator):
         yhat = self.fit(X, y).predict(X)
         return yhat
 
-    def score(self, X, y):
+    def score(self, X: np.ndarray, y: np.ndarray):
         """Score model by computing either the deviance or R^2 for predicted values.
 
         Args:
@@ -570,7 +573,7 @@ class GLM(BaseEstimator):
             score: Value of chosen metric (any pos number for deviance, 0-1 for R^2)
         """
         check_is_fitted(self, "is_fitted_")
-        valid_metrics = ["deviance", "pseudo_R2"]
+        valid_metrics = ["deviance", "pseudo_r2"]
         if self.score_metric not in valid_metrics:
             self.logger.error(f"score_metric has to be one of: {','.join(valid_metrics)}")
         # Model must be fit before scoring:
@@ -582,40 +585,550 @@ class GLM(BaseEstimator):
 
         if self.score_metric == "deviance":
             score = deviance(y, yhat, self.distr, self.theta)
-        elif self.score_metric == "pseudo_R2":
+        elif self.score_metric == "pseudo_r2":
             score = pseudo_r2(y, yhat, self.ynull_, self.distr, self.theta)
         return score
 
 
 class GLMCV:
-    """For estimating regularized generalized linear models (GLM) along a regularization path with warm restarts."""
+    """For estimating regularized generalized linear models (GLM) along a regularization path with warm restarts.
+
+    Args:
+        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
+        alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function
+        Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
+            provided, Tau will default to the identity matrix.
+        reg_lambda: Regularization parameter :math:`\\lambda` of penalty term
+        n_lambdas: Number of lambdas along the regularization path. Defaults to 25.
+        cv: Number of cross-validation repeats
+        learning_rate: Governs the magnitude of parameter updates for the gradient descent algorithm
+        max_iter: Maximum number of iterations for the solver
+        tol: Convergence threshold or stopping criteria. Optimization loop will stop when relative change in
+            parameter norm is below the threshold.
+        eta: A threshold parameter that linearizes the exp() function above eta.
+        score_metric: Scoring metric. Options:
+            - "deviance": Uses the difference between the saturated (perfectly predictive) model and the true model.
+            - "pseudo_r2": Uses the coefficient of determination b/w the true and predicted values.
+        fit_intercept: Specifies if a constant (a.k.a. bias or intercept) should be added to the decision function
+        random_seed: Seed of the random number generator used to initialize the solution. Default: 888
+        theta: Shape parameter of the negative binomial distribution (number of successes before the first
+            failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
+
+    Attributes:
+        beta0_: The intercept
+        beta_: Learned parameters
+        glm_: The GLM object with the best score
+        reg_lambda_opt: The value of reg_lambda for the best GLM model
+        n_iter: Number of iterations
+    """
+
+    def __init__(
+        self,
+        distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"] = "poisson",
+        alpha: float = 0.5,
+        Tau: Union[None, np.ndarray] = None,
+        reg_lambda: Union[None, List[float]] = None,
+        n_lambdas: int = 25,
+        cv: int = 5,
+        learning_rate: float = 0.2,
+        max_iter: int = 1000,
+        tol: float = 1e-6,
+        eta: float = 2.0,
+        score_metric: Literal["deviance", "pseudo_r2"] = "deviance",
+        fit_intercept: bool = True,
+        random_seed: int = 888,
+        theta: float = 1.0,
+    ):
+        if reg_lambda is None:
+            reg_lambda = np.logspace(np.log(0.1), np.log(1e-6), n_lambdas, base=np.exp(1))
+        if not isinstance(reg_lambda, (list, np.ndarray)):
+            reg_lambda = [reg_lambda]
+
+        self.logger = lm.get_main_logger()
+        allowable_dists = ["gaussian", "poisson", "neg-binomial", "gamma"]
+        if distr not in allowable_dists:
+            self.logger.error(f"'distr' must be one of {', '.join(allowable_dists)}, got {distr}.")
+        if not isinstance(max_iter, int):
+            self.logger.error("'max_iter' must be an integer.")
+        if not isinstance(fit_intercept, bool):
+            self.logger.error(f"'fit_intercept' must be Boolean, got {type(fit_intercept)}")
+
+        self.distr = distr
+        self.alpha = alpha
+        self.reg_lambda = reg_lambda
+        self.cv = cv
+        self.Tau = Tau
+        self.learning_rate = learning_rate
+        self.max_iter = max_iter
+        self.beta0_ = None
+        self.beta_ = None
+        self.reg_lambda_opt_ = None
+        self.glm_ = None
+        self.scores_ = None
+        self.ynull_ = None
+        self.tol = tol
+        self.eta = eta
+        self.theta = theta
+        self.score_metric = score_metric
+        self.fit_intercept = fit_intercept
+        self.random_seed = random_seed
+
+    def __repr__(self):
+        reg_lambda = self.reg_lambda
+        s = "<GLMCV object attributes: "
+        s += f"\nDistribution | {self.distr}"
+        s += "\nalpha | %0.2f" % self.alpha
+        s += "\nmax_iter | %0.2f" % self.max_iter
+        if len(reg_lambda) > 1:
+            s += "\nlambda: %0.2f to %0.2f\n>" % (reg_lambda[0], reg_lambda[-1])
+        else:
+            s += "\nlambda: %0.2f\n>" % reg_lambda[0]
+        return s
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """The fit function.
+
+        Args:
+            X: 2D array of shape [n_samples, n_features]; input data
+            y: 1D array of shape [n_samples,]; target data
+
+        Returns:
+            self: Fitted instance of class GLM
+        """
+        glms, scores = list(), list()
+        self.ynull_ = np.mean(y)
+
+        idxs = np.arange(y.shape[0])
+        np.random.shuffle(idxs)
+        cv_splits = np.array_split(idxs, self.cv)
+
+        cv_training_iterations = self.reg_lambda
+
+        for idx, rl in enumerate(cv_training_iterations):
+            glm = GLM(
+                distr=self.distr,
+                alpha=self.alpha,
+                Tau=self.Tau,
+                reg_lambda=rl,
+                learning_rate=self.learning_rate,
+                max_iter=self.max_iter,
+                tol=self.tol,
+                eta=self.eta,
+                theta=self.theta,
+                score_metric=self.score_metric,
+                fit_intercept=self.fit_intercept,
+                random_seed=self.random_seed,
+            )
+
+            scores_fold = list()
+            for fold in range(self.cv):
+                val = cv_splits[fold]
+                train = np.setdiff1d(idxs, val)
+                # Initialize parameters:
+                if idx == 0:
+                    glm.beta0_, glm.beta_ = self.beta0_, self.beta_
+                else:
+                    glm.beta0_, glm.beta_ = glms[-1].beta0_, glms[-1].beta_
+
+                glm.n_iter_ = 0
+                glm.fit(X[train], y[train])
+                scores_fold.append(glm.score(X[val], y[val]))
+            avg_score = np.mean(scores_fold)
+            scores.append(avg_score)
+            self.logger.info(f"Average score for lambda = {np.round(rl, 6)}: {avg_score}")
+
+            # Extract final parameters for this value of lambda:
+            if idx == 0:
+                glm.beta0_, glm.beta_ = self.beta0_, self.beta_
+            else:
+                glm.beta0_, glm.beta_ = glms[-1].beta0_, glms[-1].beta_
+
+            glm.n_iter_ = 0
+            glm.fit(X, y)
+            glms.append(glm)
+
+        # Find the lambda that maximizes (for r-squared) or minimizes (for deviance) the scoring metric:
+        if self.score_metric == "deviance":
+            opt = np.array(scores).argmin()
+        elif self.score_metric == "pseudo_r2":
+            opt = np.array(scores).argmax()
+        else:
+            self.logger.error(f"Unknown score_metric: {self.score_metric}")
+
+        self.beta0_, self.beta_ = glms[opt].beta0_, glms[opt].beta_
+        self.reg_lambda_opt_ = self.reg_lambda[opt]
+        self.glm_ = glms[opt]
+        self.scores_ = scores
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Using the best scoring model, predict target values.
+
+        Args:
+            X: Array of shape [n_samples, n_features]; input data for prediction
+
+        Returns:
+            yhat: Predicted targets based on the model with optimal reg_lambda, of shape [n_samples,]
+        """
+        yhat = self.glm_.predict(X)
+        return yhat
+
+    def fit_predict(self, X: np.ndarray, y: np.ndarray):
+        """Fit the model and, after finding the best model, predict on the same data using that model.
+
+        Args:
+            X: array of shape [n_samples, n_features]; input data to fit and predict
+            y: array of shape [n_samples,]; target values for regression
+
+        Returns:
+            yhat: Predicted targets based on the model with optimal reg_lambda, of shape [n_samples,]
+        """
+        self.fit(X, y)
+        yhat = self.glm_.predict(X)
+        return yhat
+
+    def score(self, X: np.ndarray, y: np.ndarray):
+        """Score model by computing either the deviance or R^2 for predicted values.
+
+        Args:
+            X: array of shape [n_samples, n_features]; input data to fit and predict
+            y: array of shape [n_samples,]; target values for regression
+
+        Returns:
+            score: Value of chosen metric (any pos number for deviance, 0-1 for R^2) for the optimal reg_lambda
+        """
+        score = self.glm_.score(X, y)
+        return score
 
 
 # ---------------------------------------------------------------------------------------------------
 # LASSO zero-inflated linear regressor- custom class based on LassoCV
 # ---------------------------------------------------------------------------------------------------
-class ZeroInflatedLassoGLMCV:
+class ZeroInflatedGLMCV(BaseEstimator):
     """A meta-regressor for generalized linear regression on zero-inflated datasets in which the targets contain many
-    zeros, featuring a cross-validation procedure to determine optimal value for the regularization parameter.
+    zeros, featuring a cross-validation procedure to determine optimal value for the regularization parameter. Also
+    estimates regularized generalized linear models (GLM) along a regularization path with warm restarts.
 
     Args:
-        X: Contains data to be used as independent variables in the regression
-        adata: Object of class `anndata.AnnData` to store results in
-        x_feats: Names of the features to use in the regression. Must be present as columns of 'X'.
-        y_feat: Name of the feature to regress on. Must be present in adata 'var_names'.
-        iterations: Number of weight updates to perform
-        l1_penalty: Corresponds to lambda, the strength of the regularization- higher values lead to increasingly
-            strict weight shrinkage. This set value will only be used if 'num_folds' is given. Defaults to 0.2.
-        test_size: Size of the evaluation set, given as a proportion of the total dataset size. Should be between 0
-            and 1, exclusive.
-        num_folds: Can be used to specify number of folds for cross-validation. If not given, will not perform
-            cross-validation.
-        layer: Can specify layer of adata to use. If not given, will use .X.
+        classifier: Any object that accepts a data array, array of target values and has a `fit` function (inputs
+            will be identical to those that would be used for regression).
+        classifier_kwargs: Optional dictionary that can be used to provide classifier parameters. Keys are parameter
+            names, values are parameter values. Any parameters not given this way will take the classifier default
+            values.
+        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
+        alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function
+        Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
+            provided, Tau will default to the identity matrix.
+        reg_lambda: Regularization parameter :math:`\\lambda` of penalty term
+        n_lambdas: Number of lambdas along the regularization path. Only used if 'reg_lambda' is not given.
+        cv: Number of cross-validation repeats
+        learning_rate: Governs the magnitude of parameter updates for the gradient descent algorithm
+        max_iter: Maximum number of iterations for the solver
+        tol: Convergence threshold or stopping criteria. Optimization loop will stop when relative change in
+            parameter norm is below the threshold.
+        eta: A threshold parameter that linearizes the exp() function above eta.
+        score_metric: Scoring metric. Options:
+            - "deviance": Uses the difference between the saturated (perfectly predictive) model and the true model.
+            - "pseudo_r2": Uses the coefficient of determination b/w the true and predicted values.
+        fit_intercept: Specifies if a constant (a.k.a. bias or intercept) should be added to the decision function
+        random_seed: Seed of the random number generator used to initialize the solution. Default: 888
+        theta: Shape parameter of the negative binomial distribution (number of successes before the first
+            failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
+
+    Attributes:
+        beta0_: The intercept
+        beta_: Learned parameters
+        glm_: The GLM object with the best score
+        reg_lambda_opt: The value of reg_lambda for the best GLM model
+        n_iter: Number of iterations
+    """
+
+    def __init__(
+        self,
+        classifier,
+        classifier_kwargs: Union[None, dict] = None,
+        distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"] = "poisson",
+        alpha: float = 0.5,
+        Tau: Union[None, np.ndarray] = None,
+        reg_lambda: Union[None, List[float]] = None,
+        n_lambdas: int = 25,
+        cv: int = 5,
+        learning_rate: float = 0.2,
+        max_iter: int = 1000,
+        tol: float = 1e-6,
+        eta: float = 2.0,
+        score_metric: Literal["deviance", "pseudo_r2"] = "deviance",
+        fit_intercept: bool = True,
+        random_seed: int = 888,
+        theta: float = 1.0,
+    ):
+        self.classifier = classifier
+        self.classifier_kwargs = classifier_kwargs
+        self.distr = distr
+        self.alpha = alpha
+        self.reg_lambda = reg_lambda
+        self.n_lambdas = n_lambdas
+        self.cv = cv
+        self.Tau = Tau
+        self.learning_rate = learning_rate
+        self.max_iter = max_iter
+        self.tol = tol
+        self.eta = eta
+        self.theta = theta
+        self.score_metric = score_metric
+        self.fit_intercept = fit_intercept
+        self.random_seed = random_seed
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """Train the model.
+
+        Args:
+            X: Array of shape [n_samples, n_features]; input data to fit
+            y: Array of shape [n_samples,]; target values
+
+        Returns:
+            self: Fitted regressor
+        """
+        self.logger = lm.get_main_logger()
+
+        X, y = check_X_y(X, y)
+        try:
+            check_is_fitted(self.classifier)
+            self.classifier_ = self.classifier
+        except NotFittedError:
+            self.classifier_ = clone(self.classifier)
+            self.classifier_.fit(X, y != 0)
+
+        non_zero_indices = np.where(self.classifier_.predict(X) == 1)[0]
+
+        if non_zero_indices.size > 0:
+            self.regressor = GLMCV(
+                self.distr,
+                self.alpha,
+                self.Tau,
+                self.reg_lambda,
+                self.n_lambdas,
+                self.cv,
+                self.learning_rate,
+                self.max_iter,
+                self.tol,
+                self.eta,
+                self.score_metric,
+                self.fit_intercept,
+                self.random_seed,
+                self.theta,
+            )
+
+            self.regressor.fit(X[non_zero_indices], y[non_zero_indices])
+            # Coefficients for the pipeline come from the regressor:
+            self.beta0_ = self.regressor.beta0_  # intercept
+            self.beta_ = self.regressor.beta_  # parameter coefficients
+            self.glm_ = self.regressor.glm_  # regressor model resulting in the optimal fit
+            self.reg_lambda_opt_ = self.regressor.reg_lambda_opt_  # best value for the regularization parameter value
+            self.scores_ = self.regressor.scores_  # deviance or pseudo-R^2 for the best model
+        else:
+            self.logger.error(
+                "The predicted training labels are all zero, making the regressor obsolete. Change the "
+                "classifier or create an object of :class `GLMCV` instead."
+            )
+
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Evaluate ZeroInflatedGLMCV structure on data.
+
+        Args:
+            X: Array of shape [n_samples, n_features]; input data corresponding to samples to get predictions for
+
+        Returns:
+            yhat: Array of shape [n_samples,]; predicted values for each sample
+        """
+        self.logger = lm.get_main_logger()
+
+        if not hasattr(self, "beta_"):
+            self.logger.error("Error: model of :class `ZeroInflatedGLMCV` not yet fitted. Call :func `fit()` method.")
+        X = check_array(X)
+
+        yhat = np.zeros(X.shape[0])
+        non_zero_indices = np.where(self.classifier_.predict(X) == 1)[0]
+
+        if non_zero_indices.size > 0:
+            yhat[non_zero_indices] = self.regressor.predict(X[non_zero_indices])
+            # (else there are no predicted non-zeros, so directly return the initialized array of zeros)
+
+        return yhat
+
+    def fit_predict(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """Fit the model and, after finding the best model, predict on the same data using that model.
+
+        Args:
+            X: array of shape [n_samples, n_features]; input data to fit and predict
+            y: array of shape [n_samples,]; target values for regression
+
+        Returns:
+            yhat: Predicted targets based on the model with optimal reg_lambda, of shape [n_samples,]
+        """
+        self.fit(X, y)
+        yhat = self.predict(X)
+        return yhat
+
+    def score(self, X: np.ndarray, y: np.ndarray) -> float:
+        """Score model by computing either the deviance or R^2 for predicted values.
+
+        Args:
+            X: array of shape [n_samples, n_features]; input data to fit and predict
+            y: array of shape [n_samples,]; target values for regression
+
+        Returns:
+            score: Value of chosen metric (any pos number for deviance, 0-1 for R^2) for the optimal reg_lambda
+        """
+        score = self.regressor.score(X, y)
+        return score
+
+
+# ---------------------------------------------------------------------------------------------------
+# Wrapper for GLM CV or zero-inflated GLM CV, with parameter optimization
+# ---------------------------------------------------------------------------------------------------
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def fit_glm(
+    X: np.ndarray,
+    adata: AnnData,
+    y_feat,
+    calc_first_moment: bool = True,
+    log_transform: bool = True,
+    zero_inflated: bool = True,
+    classifier=None,
+    classifier_kwargs: Union[None, dict] = None,
+    gs_params: Union[None, dict] = None,
+    n_gs_cv: Union[None, int] = None,
+    return_model: bool = True,
+    **kwargs,
+) -> Tuple[np.ndarray, np.ndarray, Union[None, GLMCV, ZeroInflatedGLMCV]]:
+    """Wrapper for fitting a generalized elastic net linear model to large biological data, with automated finding of
+    optimum lambda regularization parameter and optional further grid search for parameter optimization.
+
+    Args:
+        X: Array containing data for fitting- all columns in this array will be used as independent variables
+        adata: AnnData object from which dependent variable gene expression values will be taken from
+        y_feat: Name of the feature in 'adata' corresponding to the dependent variable
+        log_transform: If True, will log transform expression. Defaults to True.
+        zero_inflated: If True, indicates that data to regress on is zero-inflated and that :class
+            `ZeroInflatedGLMCV` should be used in fitting. Defaults to True.
+        calc_first_moment: If True, will alleviate dropout effects by computing the first moment of each gene across
+            cells, consistent with the method used by the original RNA velocity method (La Manno et al.,
+            2018). Defaults to True.
+        classifier: Classifier object that has a `fit` function (inputs will be data array X and target array y). If
+            not given, will default to :class `sklearn.SVM.SVC`.
+        classifier_kwargs: Optional dictionary that can be used to provide classifier parameters. Keys are parameter
+            names, values are parameter values. Any parameters not given this way will take the classifier default
+            values.
+        gs_params: Optional dictionary where keys are variable names for either the classifier or the regressor and
+            values are lists of potential values for which to find the best combination using grid search.
+            Classifier parameters should be given in the following form: 'classifier__{parameter name}'.
+        n_gs_cv: Number of folds for cross-validation, will only be used if gs_params is not None. If None,
+            will default to a 5-fold cross-validation.
+        return_model: If True, returns fitted model. Defaults to True.
+        kwargs: Additional named arguments that will be provided to :class `GLMCV`. Valid options are:
+            - distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
+            - alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function
+            - Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
+                    provided, Tau will default to the identity matrix.
+            - reg_lambda: Regularization parameter :math:`\\lambda` of penalty term
+            - n_lambdas: Number of lambdas along the regularization path. Only used if 'reg_lambda' is not given.
+            - cv: Number of cross-validation repeats
+            - learning_rate: Governs the magnitude of parameter updates for the gradient descent algorithm
+            - max_iter: Maximum number of iterations for the solver
+            - tol: Convergence threshold or stopping criteria. Optimization loop will stop when relative change in
+                    parameter norm is below the threshold.
+            - eta: A threshold parameter that linearizes the exp() function above eta.
+            - score_metric: Scoring metric. Options:
+                - "deviance": Uses the difference between the saturated (perfectly predictive) model and the true model.
+                - "pseudo_r2": Uses the coefficient of determination b/w the true and predicted values.
+            - fit_intercept: Specifies if a constant (a.k.a. bias or intercept) should be added to the decision function
+            - random_seed: Seed of the random number generator used to initialize the solution. Default: 888
+            - theta: Shape parameter of the negative binomial distribution (number of successes before the first
+                    failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
 
     Returns:
-        W: Array, shape [n_parameters, 1]. Contains weight for each parameter.
-        b: Array, shape [n_parameters, 1]. Intercept term.
-        alpha: float, only returns if 'num_folds' is given. This is the best penalization value as chosen by
-        cross-validation
+        Beta: Array of shape [n_parameters, 1], contains weight for each parameter
+        rex: Array of shape [n_samples, 1]. Reconstructed independent variable values.
+        reg: Instance of regression model. Returned only if 'return_model' is True.
     """
-    "filler"
+    logger = lm.get_main_logger()
+    if not "distr" in kwargs:
+        kwargs["distr"] = "poisson"
+    if not "score_metric" in kwargs:
+        kwargs["score_metric"] = "pseudo_r2"
+
+    if classifier is None:
+        from sklearn.svm import SVC
+
+        if classifier_kwargs is not None:
+            classifier = SVC(**classifier_kwargs)
+        else:
+            classifier = SVC()
+
+    if calc_first_moment:
+        normalize_total(adata)
+        _, adata = transcriptomic_connectivity(adata, n_neighbors_method="ball_tree")
+        conn = adata.obsp["expression_connectivities"]
+        adata_smooth_norm, _ = calc_1nd_moment(adata.X, conn, normalize_W=True)
+        adata.layers["M_s"] = adata_smooth_norm
+
+        adata.layers["raw"] = adata.X
+        adata.X = adata.layers["M_s"]
+
+    if log_transform:
+        log1p(adata)
+
+    y = adata[:, y_feat].X.toarray()
+
+    desc = "<Grid search CV model fitting for : "
+    for param in gs_params.keys():
+        desc += f"\n{param} to test | {gs_params[param]}"
+    logger.info(desc)
+
+    if zero_inflated:
+        if gs_params is not None:
+            reg_lambda_given = kwargs.get("reg_lambda", None)
+            if reg_lambda_given is None or len(reg_lambda_given) > 3:
+                logger.info(
+                    "Beginning grid search procedure. Temporarily running on reduced range of lambda values for "
+                    "conciseness."
+                )
+                kwargs["reg_lambda"] = [0.1, 1e-4]
+            else:
+                logger.info("Beginning grid search procedure.")
+
+            zir = ZeroInflatedGLMCV(classifier=classifier, **kwargs)
+            grid = GridSearchCV(estimator=zir, param_grid=gs_params, cv=n_gs_cv)
+            grid.fit(X, y)
+            best_params = grid.best_params_
+
+            # Select parameters in the classifier signature to update classifier keyword arguments:
+            for param, value in best_params.items():
+                if "classifier" in param:
+                    if classifier_kwargs is None:
+                        classifier_kwargs = {}
+                    param = param.split("__")[1]
+                    classifier_kwargs[param] = value
+                else:
+                    kwargs[param] = value
+            # Restore lambda to its original configuration:
+            kwargs["reg_lambda"] = reg_lambda_given
+
+        # Initialize model using the found optimal parameters:
+        if classifier_kwargs is not None:
+            for k, v in classifier_kwargs.items():
+                setattr(classifier, k, v)
+        reg = ZeroInflatedGLMCV(classifier=classifier, **kwargs)
+
+    else:
+        reg = GLMCV(**kwargs)
+
+    rex = reg.fit_predict(X, y)
+    Beta = reg.beta_
+    if return_model:
+        return Beta, rex, reg
+    else:
+        return Beta, rex

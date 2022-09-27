@@ -46,8 +46,7 @@ from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import construct_pairwise, transcriptomic_connectivity
 from ...tools.utils import update_dict
-
-# from .general_lm import lasso_fit_predict, ols_fit_predict
+from .generalized_lm import fit_glm
 from .regression_utils import compute_wald_test, get_fisher_inverse
 
 
@@ -308,8 +307,8 @@ class BaseInterpreter:
         data = {"categories": X, "dmat_neighbours": dmat_neighbors}
         connections = np.asarray(dmatrix("categories:dmat_neighbours-1", data))
 
-        # Set all elements of 'connections' to be binary to represent the presence/absence of a connection:
-        connections[connections > 1] = 1
+        # Minmax scale each column
+        connections = (connections - connections.min()) / (connections.max() - connections.min())
 
         # Specific preprocessing for each model type:
         if "category" in mod_type:
@@ -350,7 +349,7 @@ class BaseInterpreter:
             # Construct category adjacency matrix (n_samples x n_categories array that records how many neighbors of
             # each category are present within the neighborhood of each sample):
             dmat_neighbors = (adj > 0).astype("int").dot(X.values)
-            self.X = pd.DataFrame(dmat_neighbors, columns=X.columns)
+            self.X = pd.DataFrame(dmat_neighbors, columns=X.columns, index=self.adata.obs_names)
             self.X = self.X.reindex(sorted(self.X.columns), axis=1)
             self.n_features = self.X.shape[1]
 
@@ -370,7 +369,7 @@ class BaseInterpreter:
             connections_cols = list(product(X.columns, X.columns))
             connections_cols.sort(key=lambda x: x[1])
             connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
-            self.X = pd.DataFrame(connections, columns=connections_cols)
+            self.X = pd.DataFrame(connections, columns=connections_cols, index=self.adata.obs_names)
             """
             # Otherwise if 'niche', combine two arrays:
             # 'connections', encoding pairwise *spatial adjacencies* between categories for each sample, and
@@ -426,7 +425,7 @@ class BaseInterpreter:
 
             ligands_expr = pd.DataFrame(
                 self.adata[:, ligands].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, ligands].X,
-                index=X.index,
+                index=self.adata.obs_names,
                 columns=ligands,
             )
 
@@ -625,6 +624,7 @@ class BaseInterpreter:
             self.genes = ds
             self.X = pd.concat(self.niche_mats, axis=1)
             self.X.columns = self.X.columns.droplevel()
+            self.X.index = self.adata.obs_names
             # Drop all-zero columns (represent cell type pairs with no spatial coupled L/R expression):
             self.X = self.X.loc[:, (self.X != 0).any(axis=0)]
 
@@ -673,6 +673,65 @@ class BaseInterpreter:
     # ---------------------------------------------------------------------------------------------------
     # Computing parameters for spatially-aware and lagged models- generalized linear models
     # ---------------------------------------------------------------------------------------------------
+    def GLMCV_fit_predict(
+        self,
+        classifier,
+        classifier_kwargs: Union[None, dict] = None,
+        gs_params: Union[None, dict] = None,
+        n_gs_cv: Union[None, int] = None,
+        n_jobs: int = 30,
+        zero_inflated: bool = True,
+        **kwargs,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Wrapper for
+
+        Args:
+            classifier: Classifier object that has a `fit` function (inputs will be data array X and target array y). If
+                not given, will default to :class `sklearn.SVM.SVC`.
+            classifier_kwargs: Optional dictionary that can be used to provide classifier parameters. Keys are parameter
+                names, values are parameter values. Any parameters not given this way will take the classifier default
+                values.
+            gs_params: Optional dictionary where keys are variable names for either the classifier or the regressor and
+                values are lists of potential values for which to find the best combination using grid search.
+                Classifier parameters should be given in the following form: 'classifier__{parameter name}'.
+            n_gs_cv: Number of folds for grid search cross-validation, will only be used if gs_params is not None. If
+                None, will default to a 5-fold cross-validation.
+            n_jobs: For parallel processing, number of tasks to run at once
+            zero_inflated: If True, indicates that data to regress on is zero-inflated and that :class
+                `ZeroInflatedGLMCV` should be used in fitting. Defaults to True.
+            kwargs: Additional named arguments that will be provided to :class `GLMCV`.
+
+        Returns:
+            coeffs: Contains fitted parameters for each feature
+            reconst: Contains predicted expression for each feature
+        """
+        X = self.X[self.variable_names].values
+        # Set preprocessing parameters to False- :func `prepare_data` handles these steps.
+        results = Parallel(n_jobs)(
+            delayed(fit_glm)(
+                X,
+                self.adata,
+                cur_g,
+                calc_first_moment=False,
+                log_transform=False,
+                zero_inflated=zero_inflated,
+                classifier=classifier,
+                classifier_kwargs=classifier_kwargs,
+                gs_params=gs_params,
+                n_gs_cv=n_gs_cv,
+                return_model=False,
+            )
+            for cur_g in self.genes
+        )
+        coeffs = [item[0] for item in results]
+        reconst = [item[1] for item in results]
+
+        coeffs = pd.DataFrame(coeffs, index=self.genes, columns=self.X.columns)
+        for cn in coeffs.columns:
+            self.adata.var.loc[:, cn] = coeffs[cn]
+        # Nested list transforms into dataframe rows- instantiate and transpose to get to correct shape:
+        reconst = pd.DataFrame(reconst, index=self.genes, columns=self.cell_names).T
+        return coeffs, reconst
 
     # ---------------------------------------------------------------------------------------------------
     # Downstream interpretation (mostly for lag model)

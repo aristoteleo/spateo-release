@@ -1,4 +1,3 @@
-from .cell_variance import compute_variance_decomposition
 from .regression_utils import plot_prior_vs_data
 from .spatial_regression import (
     Category_Interpreter,
