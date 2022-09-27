@@ -906,7 +906,12 @@ class ZeroInflatedGLMCV(BaseEstimator):
             self.classifier_ = self.classifier
         except NotFittedError:
             self.classifier_ = clone(self.classifier)
-            self.classifier_.fit(X, y != 0)
+            try:
+                self.classifier_.fit(X, y != 0)
+            except:
+                self.logger.warning("The true values are all zero, unable to fit only to nonzero values. Fitting on "
+                                    "all values instead.")
+                self.classifier_.fit(X, y)
 
         non_zero_indices = np.where(self.classifier_.predict(X) == 1)[0]
 
