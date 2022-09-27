@@ -904,16 +904,16 @@ class ZeroInflatedGLMCV(BaseEstimator):
         try:
             check_is_fitted(self.classifier)
             self.classifier_ = self.classifier
+            non_zero_indices = np.where(self.classifier_.predict(X) == 1)[0]
         except NotFittedError:
             self.classifier_ = clone(self.classifier)
             try:
                 self.classifier_.fit(X, y != 0)
+                non_zero_indices = np.where(self.classifier_.predict(X) == 1)[0]
             except:
-                self.logger.warning("The true values are all zero, unable to fit only to nonzero values. Fitting on "
-                                    "all values instead.")
-                self.classifier_.fit(X, y)
-
-        non_zero_indices = np.where(self.classifier_.predict(X) == 1)[0]
+                self.logger.warning("For selected feature, all samples are zero or nonzero (only one class present). "
+                                    "Skipping classification and fitting downstream regressor to all samples.")
+                non_zero_indices = range(X.shape[0])
 
         self.regressor = GLMCV(
             self.distr,
