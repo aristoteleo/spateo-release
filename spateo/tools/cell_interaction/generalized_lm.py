@@ -16,13 +16,11 @@ except ImportError:
     from typing_extensions import Literal
 
 import numpy as np
-import pandas as pd
 from anndata import AnnData
 from dynamo.tools.moments import calc_1nd_moment
 from scipy.special import expit, loggamma
-from sklearn.base import BaseEstimator, clone
-from sklearn.exceptions import NotFittedError
-from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.base import BaseEstimator
+from sklearn.model_selection import GridSearchCV
 from sklearn.utils.validation import check_array, check_is_fitted, check_X_y
 
 from ...configuration import SKM
@@ -30,7 +28,7 @@ from ...logging import logger_manager as lm
 from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import transcriptomic_connectivity
-from .regression_utils import L1_L2_penalty, L2_penalty, softplus
+from .regression_utils import L1_L2_penalty, softplus
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -906,6 +904,15 @@ def fit_glm(
         kwargs["score_metric"] = "pseudo_r2"
     if not "fit_zero_inflated" in kwargs:
         kwargs["fit_zero_inflated"] = fit_zero_inflated
+
+    if kwargs["distr"] in ["poisson", "binomial", "neg-binomial"]:
+        if calc_first_moment or log_transform:
+            logger.info(
+                f"With a {kwargs['distr']} assumption, it is recommended to fit to raw counts. Setting all "
+                f"preprocessing settings to False."
+            )
+            calc_first_moment = False
+            log_transform = False
 
     if calc_first_moment:
         normalize_total(adata)

@@ -65,6 +65,8 @@ class BaseInterpreter:
         layer: Entry in .layers to use instead of .X
         cci_dir: Full path to the directory containing cell-cell communication databases. Only used in the case of
             models that use ligands for prediction.
+        normalize: Perform library size normalization, to set total counts in each cell to the same number (adjust
+            for cell size)
         smooth: To correct for dropout effects, leverage gene expression neighborhoods to smooth expression
         log_transform: Set True if log-transformation should be applied to expression (otherwise, will assume
             preprocessing/log-transform was computed beforehand)
@@ -106,6 +108,7 @@ class BaseInterpreter:
         drop_dummy: Union[None, str] = None,
         layer: Union[None, str] = None,
         cci_dir: Union[None, str] = None,
+        normalize: bool = True,
         smooth: bool = False,
         log_transform: bool = False,
         weights_mode: str = "knn",
@@ -131,6 +134,7 @@ class BaseInterpreter:
         self.drop_dummy = drop_dummy
         self.layer = layer
         self.cci_dir = cci_dir
+        self.normalize = normalize
         self.smooth = smooth
         self.log_transform = log_transform
         self.weights_mode = weights_mode
@@ -203,7 +207,9 @@ class BaseInterpreter:
                 rec_ds = [rec_ds]
 
         # Normalize to size factor:
-        normalize_total(self.adata)
+        if self.normalize:
+            self.logger.info("Setting total counts in each cell to 1e4.")
+            normalize_total(self.adata)
 
         # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
         if self.smooth:
