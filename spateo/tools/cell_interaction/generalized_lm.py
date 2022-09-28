@@ -403,7 +403,7 @@ class GLM(BaseEstimator):
         fit_intercept: bool = True,
         random_seed: int = 888,
         theta: float = 1.0,
-        verbose: bool = True
+        verbose: bool = True,
     ):
 
         self.logger = lm.get_main_logger()
@@ -719,8 +719,10 @@ class GLMCV(BaseEstimator):
         # Ensure dataset is large enough for cross-validation; if not, adjust number of folds to number of data
         # points - 1 for leave-one-out cross validation:
         if idxs.shape[0] < self.cv:
-            self.logger.info(f"Too few samples for {self.cv}-fold cross-validation- performing leave-one-out cross "
-                             f"validation instead.")
+            self.logger.info(
+                f"Too few samples for {self.cv}-fold cross-validation- performing leave-one-out cross "
+                f"validation instead."
+            )
             n_folds = idxs.shape[0] - 1
         else:
             n_folds = self.cv
@@ -920,8 +922,8 @@ def fit_glm(
 
     y = adata[:, y_feat].X.toarray()
 
-    #logger.info("<Grid search CV model fitting for parameters : ")
-    #for param in gs_params.keys():
+    # logger.info("<Grid search CV model fitting for parameters : ")
+    # for param in gs_params.keys():
     #    logger.info(f"{param} to test | {gs_params[param]}")
 
     start_gs_time = time.time()

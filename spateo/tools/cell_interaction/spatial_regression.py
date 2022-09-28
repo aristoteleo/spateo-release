@@ -6,7 +6,7 @@ expression
 
 Note to self: current set up --> each of the spatial regression classes can be called either through cell_interaction (
 e.g. st.cell_interaction.NicheInterpreter) or standalone (e.g. st.NicheInterpreter)- the same is true for all
-functions besides the general regression ones (e.g. fit_glm, which must be called w/ st.fit_glm). 
+functions besides the general regression ones (e.g. fit_glm, which must be called w/ st.fit_glm).
 """
 import os
 import time
@@ -706,7 +706,7 @@ class BaseInterpreter:
                 gs_params=gs_params,
                 n_gs_cv=n_gs_cv,
                 return_model=False,
-                **kwargs
+                **kwargs,
             )
             for cur_g in self.genes
         )

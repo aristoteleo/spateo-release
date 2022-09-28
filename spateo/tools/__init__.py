@@ -9,7 +9,6 @@ from .architype import (
     find_spatially_related_genes,
     get_genes_from_spatial_archetype,
 )
-
 from .cell_interaction import *
 from .cell_interaction.cci_two_cluster import find_cci_two_group
 from .cell_interaction.cell_communication import (
@@ -25,7 +24,6 @@ from .cell_interaction.spatial_regression import (
     Niche_Interpreter,
     Niche_LR_Interpreter,
 )
-
 from .cluster import *
 from .cluster.find_clusters import scc, spagcn_pyg
 from .cluster_degs import (
