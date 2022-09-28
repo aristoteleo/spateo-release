@@ -4,14 +4,9 @@ Suite of tools for spatially-aware as well as spatially-lagged linear regression
 Also performs downstream characterization following spatially-informed regression to characterize niche impact on gene
 expression
 
-Developer note: haven't been able to find a good network for Drosophila and Zebrafish yet, so spatially lagged models
-are restricted to human, mouse and axolotl. Might also be making a lot of assumptions about the axolotl,
-but the axolotl LR network has columns for human equivalents for all LR so I assumed there's enough homology there
-Developer note: for the sender/receiver effect functions, each row in pvalues, fold_change, etc. is a receiver,
-each column is a sender
-
-Developer note: currently, processing of 'connections' is set to encode the presence of cell type proximities as
-either a 0 or 1. Another option is to minmax scale across rows.
+Note to self: current set up --> each of the spatial regression classes can be called either through cell_interaction (
+e.g. st.cell_interaction.NicheInterpreter) or standalone (e.g. st.NicheInterpreter)- the same is true for all
+functions besides the general regression ones (e.g. fit_glm, which must be called w/ st.fit_glm). 
 """
 import os
 import time
