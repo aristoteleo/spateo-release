@@ -710,21 +710,3 @@ def ligrec(
         return_all=False,
         return_all_list=None,
     )
-
-
-# DEVELOPER NOTE: MATCH THE STYLE OF LULU'S HEATMAP
-def heatmap(
-    data: pd.DataFrame,
-    cmap: str = "winter",
-    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
-    save_kwargs: Optional[dict] = {},
-    **kwargs,
-):
-    """
-    Generates and plots heatmap from dataframe, where x- and y-axes are two variable categories (e.g. can be
-    cell type-gene or cell types on both axes), and the element magnitude is the relation between them.
-
-    Args:
-        data:
-    """
-    config_spateo_rcParams()
