@@ -7,6 +7,7 @@ Additionally features capability to perform elastic net regularized regression.
 
 :class `GLM` and :class `GLMCV` adapted from https://github.com/glm-tools/pyglmnet.
 """
+import time
 from typing import List, Tuple, Union
 
 try:
@@ -402,7 +403,7 @@ class GLM(BaseEstimator):
         fit_intercept: bool = True,
         random_seed: int = 888,
         theta: float = 1.0,
-        verbose: bool = False,
+        verbose: bool = True
     ):
 
         self.logger = lm.get_main_logger()
@@ -590,10 +591,12 @@ class GLM(BaseEstimator):
         return score
 
 
-class GLMCV:
+class GLMCV(BaseEstimator):
     """For estimating regularized generalized linear models (GLM) along a regularization path with warm restarts.
 
     Args:
+        fit_zero_inflated: If True, indicates that data is highly sparse and should be fitted on only the nonzero
+            values. Otherwise, will use all values.
         distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
         alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function
         Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
@@ -626,6 +629,7 @@ class GLMCV:
 
     def __init__(
         self,
+        fit_zero_inflated: bool = False,
         distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"] = "poisson",
         alpha: float = 0.5,
         Tau: Union[None, np.ndarray] = None,
@@ -640,7 +644,6 @@ class GLMCV:
         fit_intercept: bool = True,
         random_seed: int = 888,
         theta: float = 1.0,
-        verbose: bool = True,
     ):
         if reg_lambda is None:
             reg_lambda = np.logspace(np.log(0.1), np.log(1e-6), n_lambdas, base=np.exp(1))
@@ -655,10 +658,14 @@ class GLMCV:
             self.logger.error("'max_iter' must be an integer.")
         if not isinstance(fit_intercept, bool):
             self.logger.error(f"'fit_intercept' must be Boolean, got {type(fit_intercept)}")
+        if not isinstance(fit_zero_inflated, bool):
+            self.logger.error(f"'fit_zero_inflated' must be Boolean, got {type(fit_zero_inflated)}")
 
+        self.fit_zero_inflated = fit_zero_inflated
         self.distr = distr
         self.alpha = alpha
         self.reg_lambda = reg_lambda
+        self.n_lambdas = n_lambdas
         self.cv = cv
         self.Tau = Tau
         self.learning_rate = learning_rate
@@ -675,7 +682,6 @@ class GLMCV:
         self.score_metric = score_metric
         self.fit_intercept = fit_intercept
         self.random_seed = random_seed
-        self.verbose = verbose
 
     def __repr__(self):
         reg_lambda = self.reg_lambda
@@ -699,12 +705,26 @@ class GLMCV:
         Returns:
             self: Fitted instance of class GLM
         """
+        # If 'fit_zero_inflated' is True, subset arrays accordingly:
+        if self.fit_zero_inflated:
+            self.non_zero_indices = np.where(y >= 0)[0]
+            X = X[self.non_zero_indices]
+            y = y[self.non_zero_indices]
+
         glms, scores = list(), list()
         self.ynull_ = np.mean(y)
 
         idxs = np.arange(y.shape[0])
         np.random.shuffle(idxs)
-        cv_splits = np.array_split(idxs, self.cv)
+        # Ensure dataset is large enough for cross-validation; if not, adjust number of folds to number of data
+        # points - 1 for leave-one-out cross validation:
+        if idxs.shape[0] < self.cv:
+            self.logger.info(f"Too few samples for {self.cv}-fold cross-validation- performing leave-one-out cross "
+                             f"validation instead.")
+            n_folds = idxs.shape[0] - 1
+        else:
+            n_folds = self.cv
+        cv_splits = np.array_split(idxs, n_folds)
 
         cv_training_iterations = self.reg_lambda
 
@@ -722,10 +742,11 @@ class GLMCV:
                 score_metric=self.score_metric,
                 fit_intercept=self.fit_intercept,
                 random_seed=self.random_seed,
+                verbose=False,
             )
 
             scores_fold = list()
-            for fold in range(self.cv):
+            for fold in range(n_folds):
                 val = cv_splits[fold]
                 train = np.setdiff1d(idxs, val)
                 # Initialize parameters:
@@ -739,8 +760,7 @@ class GLMCV:
                 scores_fold.append(glm.score(X[val], y[val]))
             avg_score = np.mean(scores_fold)
             scores.append(avg_score)
-            if self.verbose:
-                self.logger.info(f"Average score for lambda = {np.round(rl, 6)}: {avg_score}")
+            self.logger.info(f"Average score for lambda = {np.round(rl, 6)}: {avg_score}")
 
             # Extract final parameters for this value of lambda:
             if idx == 0:
@@ -775,7 +795,17 @@ class GLMCV:
         Returns:
             yhat: Predicted targets based on the model with optimal reg_lambda, of shape [n_samples,]
         """
-        yhat = self.glm_.predict(X)
+        self.logger = lm.get_main_logger()
+
+        if not hasattr(self, "beta_"):
+            self.logger.error("Error: model of :class `GLMCV` not yet fitted. Call :func `fit()` method.")
+        X = check_array(X)
+
+        if self.fit_zero_inflated:
+            yhat = np.zeros(X.shape[0])
+            yhat[self.non_zero_indices] = self.glm_.predict(X)
+        else:
+            yhat = self.glm_.predict(X)
         return yhat
 
     def fit_predict(self, X: np.ndarray, y: np.ndarray):
@@ -789,7 +819,7 @@ class GLMCV:
             yhat: Predicted targets based on the model with optimal reg_lambda, of shape [n_samples,]
         """
         self.fit(X, y)
-        yhat = self.glm_.predict(X)
+        yhat = self.predict(X)
         return yhat
 
     def score(self, X: np.ndarray, y: np.ndarray):
@@ -807,206 +837,7 @@ class GLMCV:
 
 
 # ---------------------------------------------------------------------------------------------------
-# LASSO zero-inflated linear regressor- custom class based on LassoCV
-# ---------------------------------------------------------------------------------------------------
-class ZeroInflatedGLMCV(BaseEstimator):
-    """A meta-regressor for generalized linear regression on zero-inflated datasets in which the targets contain many
-    zeros, featuring a cross-validation procedure to determine optimal value for the regularization parameter. Also
-    estimates regularized generalized linear models (GLM) along a regularization path with warm restarts.
-
-    Args:
-        classifier: Any object that accepts a data array, array of target values and has a `fit` function (inputs
-            will be identical to those that would be used for regression).
-        classifier_kwargs: Optional dictionary that can be used to provide classifier parameters. Keys are parameter
-            names, values are parameter values. Any parameters not given this way will take the classifier default
-            values.
-        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
-        alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function
-        Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
-            provided, Tau will default to the identity matrix.
-        reg_lambda: Regularization parameter :math:`\\lambda` of penalty term
-        n_lambdas: Number of lambdas along the regularization path. Only used if 'reg_lambda' is not given.
-        cv: Number of cross-validation repeats
-        learning_rate: Governs the magnitude of parameter updates for the gradient descent algorithm
-        max_iter: Maximum number of iterations for the solver
-        tol: Convergence threshold or stopping criteria. Optimization loop will stop when relative change in
-            parameter norm is below the threshold.
-        eta: A threshold parameter that linearizes the exp() function above eta.
-        score_metric: Scoring metric. Options:
-            - "deviance": Uses the difference between the saturated (perfectly predictive) model and the true model.
-            - "pseudo_r2": Uses the coefficient of determination b/w the true and predicted values.
-        fit_intercept: Specifies if a constant (a.k.a. bias or intercept) should be added to the decision function
-        random_seed: Seed of the random number generator used to initialize the solution. Default: 888
-        theta: Shape parameter of the negative binomial distribution (number of successes before the first
-            failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
-        verbose: If True, returns logging information as program runs. Recommended to set to False for any
-            parallelized processes.
-
-    Attributes:
-        beta0_: The intercept
-        beta_: Learned parameters
-        glm_: The GLM object with the best score
-        reg_lambda_opt: The value of reg_lambda for the best GLM model
-        n_iter: Number of iterations
-    """
-
-    def __init__(
-        self,
-        classifier,
-        classifier_kwargs: Union[None, dict] = None,
-        distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"] = "poisson",
-        alpha: float = 0.5,
-        Tau: Union[None, np.ndarray] = None,
-        reg_lambda: Union[None, List[float]] = None,
-        n_lambdas: int = 25,
-        cv: int = 5,
-        learning_rate: float = 0.2,
-        max_iter: int = 1000,
-        tol: float = 1e-6,
-        eta: float = 2.0,
-        score_metric: Literal["deviance", "pseudo_r2"] = "deviance",
-        fit_intercept: bool = True,
-        random_seed: int = 888,
-        theta: float = 1.0,
-        verbose: bool = True
-    ):
-        self.classifier = classifier
-        self.classifier_kwargs = classifier_kwargs
-        self.distr = distr
-        self.alpha = alpha
-        self.reg_lambda = reg_lambda
-        self.n_lambdas = n_lambdas
-        self.cv = cv
-        self.Tau = Tau
-        self.learning_rate = learning_rate
-        self.max_iter = max_iter
-        self.tol = tol
-        self.eta = eta
-        self.theta = theta
-        self.score_metric = score_metric
-        self.fit_intercept = fit_intercept
-        self.random_seed = random_seed
-        self.verbose = verbose
-
-    def fit(self, X: np.ndarray, y: np.ndarray):
-        """Train the model.
-
-        Args:
-            X: Array of shape [n_samples, n_features]; input data to fit
-            y: Array of shape [n_samples,]; target values
-
-        Returns:
-            self: Fitted regressor
-        """
-        self.logger = lm.get_main_logger()
-
-        X, y = check_X_y(X, y)
-        try:
-            check_is_fitted(self.classifier)
-            self.classifier_ = self.classifier
-            non_zero_indices = np.where(self.classifier_.predict(X) == 1)[0]
-        except NotFittedError:
-            self.classifier_ = clone(self.classifier)
-            try:
-                self.classifier_.fit(X, y != 0)
-                non_zero_indices = np.where(self.classifier_.predict(X) == 1)[0]
-            except:
-                self.logger.warning("For selected feature, all samples are zero or nonzero (only one class present). "
-                                    "Skipping classification and fitting downstream regressor to all samples.")
-                non_zero_indices = range(X.shape[0])
-
-        self.regressor = GLMCV(
-            self.distr,
-            self.alpha,
-            self.Tau,
-            self.reg_lambda,
-            self.n_lambdas,
-            self.cv,
-            self.learning_rate,
-            self.max_iter,
-            self.tol,
-            self.eta,
-            self.score_metric,
-            self.fit_intercept,
-            self.random_seed,
-            self.theta,
-        )
-
-        if non_zero_indices.size > 0:
-            self.regressor.fit(X[non_zero_indices], y[non_zero_indices])
-        else:
-            if self.verbose:
-                self.logger.warning(
-                    "The predicted training labels are all zero, making the regressor obsolete. Fitting on all "
-                    "values instead. It is recommended to change the classifier or create an object of :class `GLMCV` "
-                    "instead."
-                )
-            self.regressor.fit(X, y)
-
-        # Coefficients for the pipeline come from the regressor:
-        self.beta0_ = self.regressor.beta0_  # intercept
-        self.beta_ = self.regressor.beta_  # parameter coefficients
-        self.glm_ = self.regressor.glm_  # regressor model resulting in the optimal fit
-        self.reg_lambda_opt_ = self.regressor.reg_lambda_opt_  # best value for the regularization parameter value
-        self.scores_ = self.regressor.scores_  # deviance or pseudo-R^2 for the best model
-
-
-        return self
-
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        """Evaluate ZeroInflatedGLMCV structure on data.
-
-        Args:
-            X: Array of shape [n_samples, n_features]; input data corresponding to samples to get predictions for
-
-        Returns:
-            yhat: Array of shape [n_samples,]; predicted values for each sample
-        """
-        self.logger = lm.get_main_logger()
-
-        if not hasattr(self, "beta_"):
-            self.logger.error("Error: model of :class `ZeroInflatedGLMCV` not yet fitted. Call :func `fit()` method.")
-        X = check_array(X)
-
-        yhat = np.zeros(X.shape[0])
-        non_zero_indices = np.where(self.classifier_.predict(X) == 1)[0]
-
-        if non_zero_indices.size > 0:
-            yhat[non_zero_indices] = self.regressor.predict(X[non_zero_indices])
-            # (else there are no predicted non-zeros, so directly return the initialized array of zeros)
-
-        return yhat
-
-    def fit_predict(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Fit the model and, after finding the best model, predict on the same data using that model.
-
-        Args:
-            X: array of shape [n_samples, n_features]; input data to fit and predict
-            y: array of shape [n_samples,]; target values for regression
-
-        Returns:
-            yhat: Predicted targets based on the model with optimal reg_lambda, of shape [n_samples,]
-        """
-        self.fit(X, y)
-        yhat = self.predict(X)
-        return yhat
-
-    def score(self, X: np.ndarray, y: np.ndarray) -> float:
-        """Score model by computing either the deviance or R^2 for predicted values.
-
-        Args:
-            X: array of shape [n_samples, n_features]; input data to fit and predict
-            y: array of shape [n_samples,]; target values for regression
-
-        Returns:
-            score: Value of chosen metric (any pos number for deviance, 0-1 for R^2) for the optimal reg_lambda
-        """
-        score = self.regressor.score(X, y)
-        return score
-
-
-# ---------------------------------------------------------------------------------------------------
-# Wrapper for GLM CV or zero-inflated GLM CV, with parameter optimization
+# Wrapper for GLM CV, with parameter optimization
 # ---------------------------------------------------------------------------------------------------
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def fit_glm(
@@ -1015,15 +846,12 @@ def fit_glm(
     y_feat,
     calc_first_moment: bool = True,
     log_transform: bool = True,
-    zero_inflated: bool = True,
-    classifier=None,
-    classifier_kwargs: Union[None, dict] = None,
+    fit_zero_inflated: bool = False,
     gs_params: Union[None, dict] = None,
     n_gs_cv: Union[None, int] = None,
     return_model: bool = True,
-    verbose: bool = True,
     **kwargs,
-) -> Tuple[np.ndarray, np.ndarray, Union[None, GLMCV, ZeroInflatedGLMCV]]:
+) -> Tuple[np.ndarray, np.ndarray, Union[None, GLMCV]]:
     """Wrapper for fitting a generalized elastic net linear model to large biological data, with automated finding of
     optimum lambda regularization parameter and optional further grid search for parameter optimization.
 
@@ -1032,24 +860,17 @@ def fit_glm(
         adata: AnnData object from which dependent variable gene expression values will be taken from
         y_feat: Name of the feature in 'adata' corresponding to the dependent variable
         log_transform: If True, will log transform expression. Defaults to True.
-        zero_inflated: If True, indicates that data to regress on is zero-inflated and that :class
-            `ZeroInflatedGLMCV` should be used in fitting. Defaults to True.
+        fit_zero_inflated: If True, indicates that data to regress on is zero-inflated and that fitting should be
+            performed on the non-zero subset. Defaults to False.
         calc_first_moment: If True, will alleviate dropout effects by computing the first moment of each gene across
             cells, consistent with the method used by the original RNA velocity method (La Manno et al.,
             2018). Defaults to True.
-        classifier: Classifier object that has a `fit` function (inputs will be data array X and target array y). If
-            not given, will default to :class `sklearn.SVM.SVC`.
-        classifier_kwargs: Optional dictionary that can be used to provide classifier parameters. Keys are parameter
-            names, values are parameter values. Any parameters not given this way will take the classifier default
-            values.
         gs_params: Optional dictionary where keys are variable names for either the classifier or the regressor and
             values are lists of potential values for which to find the best combination using grid search.
             Classifier parameters should be given in the following form: 'classifier__{parameter name}'.
         n_gs_cv: Number of folds for cross-validation, will only be used if gs_params is not None. If None,
             will default to a 5-fold cross-validation.
         return_model: If True, returns fitted model. Defaults to True.
-        verbose: If True, returns logging information as program runs. Recommended to set to False for any
-            parallelized processes.
         kwargs: Additional named arguments that will be provided to :class `GLMCV`. Valid options are:
             - distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
             - alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function
@@ -1081,16 +902,8 @@ def fit_glm(
         kwargs["distr"] = "poisson"
     if not "score_metric" in kwargs:
         kwargs["score_metric"] = "pseudo_r2"
-    if not "verbose" in kwargs:
-        kwargs["verbose"] = verbose
-
-    if classifier is None:
-        from sklearn.svm import SVC
-
-        if classifier_kwargs is not None:
-            classifier = SVC(**classifier_kwargs)
-        else:
-            classifier = SVC()
+    if not "fit_zero_inflated" in kwargs:
+        kwargs["fit_zero_inflated"] = fit_zero_inflated
 
     if calc_first_moment:
         normalize_total(adata)
@@ -1107,77 +920,42 @@ def fit_glm(
 
     y = adata[:, y_feat].X.toarray()
 
-    if verbose:
-        desc = "<Grid search CV model fitting for parameters : "
-        for param in gs_params.keys():
-            desc += f"\n{param} to test | {gs_params[param]}"
-        logger.info(desc)
+    #logger.info("<Grid search CV model fitting for parameters : ")
+    #for param in gs_params.keys():
+    #    logger.info(f"{param} to test | {gs_params[param]}")
 
-    if zero_inflated:
-        if gs_params is not None:
-            reg_lambda_given = kwargs.get("reg_lambda", None)
-            if reg_lambda_given is None or len(reg_lambda_given) > 3:
-                if verbose:
-                    logger.info(
-                        "Beginning grid search procedure. Temporarily running on reduced range of lambda values for "
-                        "conciseness."
-                    )
-                kwargs["reg_lambda"] = [0.1, 1e-4]
-            else:
-                if verbose:
-                    logger.info("Beginning grid search procedure.")
-
-            zir = ZeroInflatedGLMCV(classifier=classifier, **kwargs)
-            grid = GridSearchCV(estimator=zir, param_grid=gs_params, cv=n_gs_cv)
-            grid.fit(X, y)
-            best_params = grid.best_params_
-
-            # Select parameters in the classifier signature to update classifier keyword arguments:
-            for param, value in best_params.items():
-                if "classifier" in param:
-                    if classifier_kwargs is None:
-                        classifier_kwargs = {}
-                    param = param.split("__")[1]
-                    classifier_kwargs[param] = value
-                else:
-                    kwargs[param] = value
-            # Restore lambda to its original configuration:
-            kwargs["reg_lambda"] = reg_lambda_given
-
-        # Initialize model using the found optimal parameters:
-        if classifier_kwargs is not None:
-            for k, v in classifier_kwargs.items():
-                setattr(classifier, k, v)
-        reg = ZeroInflatedGLMCV(classifier=classifier, **kwargs)
-
-    else:
-        if gs_params is not None:
-            reg_lambda_given = kwargs.get("reg_lambda", None)
-            if reg_lambda_given is None or len(reg_lambda_given) > 3:
-                if verbose:
-                    logger.info(
-                        "Beginning grid search procedure. Temporarily running on reduced range of lambda values for "
-                        "conciseness."
-                    )
-                kwargs["reg_lambda"] = [0.1, 1e-4]
-            else:
-                if verbose:
-                    logger.info("Beginning grid search procedure.")
-
-            reg = GLMCV(**kwargs)
-            grid = GridSearchCV(estimator=reg, param_grid=gs_params, cv=n_gs_cv)
-            grid.fit(X, y)
-            best_params = grid.best_params_
-
-            # Select parameters in the classifier signature to update classifier keyword arguments:
-            for param, value in best_params.items():
-                kwargs[param] = value
-            # Restore lambda to its original configuration:
-            kwargs["reg_lambda"] = reg_lambda_given
+    start_gs_time = time.time()
+    if gs_params is not None:
+        reg_lambda_given = kwargs.get("reg_lambda", None)
+        if reg_lambda_given is None or len(reg_lambda_given) > 3:
+            logger.info(
+                "Beginning grid search procedure. Temporarily running on reduced range of lambda values for "
+                "conciseness."
+            )
+            kwargs["reg_lambda"] = [0.1, 1e-4]
+        else:
+            logger.info("Beginning grid search procedure.")
 
         reg = GLMCV(**kwargs)
+        grid = GridSearchCV(estimator=reg, param_grid=gs_params, cv=n_gs_cv)
+        grid.fit(X, y)
+        logger.info(f"Grid search finished for {y_feat}. Elapsed time: {time.time()-start_gs_time}s.")
+        best_params = grid.best_params_
+        msg = f"Grid search best parameters for {y_feat}: "
+        for k, v in best_params.items():
+            msg += f"\n{k}: {v}"
+        logger.info(msg)
+
+        # Select parameters in the classifier signature to update classifier keyword arguments:
+        for param, value in best_params.items():
+            kwargs[param] = value
+        # Restore lambda to its original configuration:
+        kwargs["reg_lambda"] = reg_lambda_given
+
+    reg = GLMCV(**kwargs)
 
     rex = reg.fit_predict(X, y)
+    logger.info(f"Optimal lambda regularization value for {y_feat}: {reg.reg_lambda_opt_}.")
     Beta = reg.beta_
     if return_model:
         return Beta, rex, reg

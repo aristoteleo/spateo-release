@@ -307,8 +307,8 @@ class BaseInterpreter:
         data = {"categories": X, "dmat_neighbours": dmat_neighbors}
         connections = np.asarray(dmatrix("categories:dmat_neighbours-1", data))
 
-        # Minmax scale each column
-        connections = (connections - connections.min()) / (connections.max() - connections.min())
+        # Set connections array to indicator array:
+        connections[connections > 1] = 1
 
         # Specific preprocessing for each model type:
         if "category" in mod_type:
@@ -675,31 +675,23 @@ class BaseInterpreter:
     # ---------------------------------------------------------------------------------------------------
     def GLMCV_fit_predict(
         self,
-        classifier,
-        classifier_kwargs: Union[None, dict] = None,
         gs_params: Union[None, dict] = None,
         n_gs_cv: Union[None, int] = None,
         n_jobs: int = 30,
-        zero_inflated: bool = True,
+        fit_zero_inflated: bool = True,
         **kwargs,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Wrapper for
 
         Args:
-            classifier: Classifier object that has a `fit` function (inputs will be data array X and target array y). If
-                not given, will default to :class `sklearn.SVM.SVC`.
-            classifier_kwargs: Optional dictionary that can be used to provide classifier parameters. Keys are parameter
-                names, values are parameter values. Any parameters not given this way will take the classifier default
-                values.
             gs_params: Optional dictionary where keys are variable names for either the classifier or the regressor and
                 values are lists of potential values for which to find the best combination using grid search.
                 Classifier parameters should be given in the following form: 'classifier__{parameter name}'.
             n_gs_cv: Number of folds for grid search cross-validation, will only be used if gs_params is not None. If
                 None, will default to a 5-fold cross-validation.
             n_jobs: For parallel processing, number of tasks to run at once
-            zero_inflated: If True, indicates that data to regress on is zero-inflated and that :class
-                `ZeroInflatedGLMCV` should be used in fitting. If False, :class `GLMCV` will be used in training.
-                Defaults to True.
+            fit_zero_inflated: If True, indicates that data is highly sparse and should be fitted on only the nonzero
+                values. Otherwise, will use all values.
             kwargs: Additional named arguments that will be provided to :class `GLMCV`.
 
         Returns:
@@ -715,13 +707,10 @@ class BaseInterpreter:
                 cur_g,
                 calc_first_moment=False,
                 log_transform=False,
-                zero_inflated=zero_inflated,
-                classifier=classifier,
-                classifier_kwargs=classifier_kwargs,
+                fit_zero_inflated=fit_zero_inflated,
                 gs_params=gs_params,
                 n_gs_cv=n_gs_cv,
                 return_model=False,
-                verbose=False,
                 **kwargs
             )
             for cur_g in self.genes
