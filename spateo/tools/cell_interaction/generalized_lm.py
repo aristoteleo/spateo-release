@@ -54,11 +54,16 @@ def _z(beta0: float, beta: np.ndarray, X: np.ndarray, fit_intercept: bool) -> np
     return z
 
 
-def _nl(distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"], z: np.ndarray, eta: float, fit_intercept: bool):
+def _nl(
+    distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"],
+    z: np.ndarray,
+    eta: float,
+    fit_intercept: bool,
+) -> np.ndarray:
     """Applies nonlinear operation to linear estimation.
 
     Args:
-        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma"
+        distr: Distribution family- can be "gaussian", "poisson", "softplus", "neg-binomial", or "gamma"
         z: Array of shape [n_samples, n_features]; prediction of the target values
         eta: A threshold parameter that linearizes the exp() function above threshold eta
         fit_intercept: Specifies if a constant (a.k.a. bias or intercept) should be added to the decision function.
@@ -69,7 +74,7 @@ def _nl(distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"], z: np.nd
     """
     logger = lm.get_main_logger()
 
-    if distr in ["gamma", "neg-binomial"]:
+    if distr in ["softplus", "gamma", "neg-binomial"]:
         nl = softplus(z)
     elif distr == "poisson":
         nl = z.copy()
@@ -82,11 +87,11 @@ def _nl(distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"], z: np.nd
     return nl
 
 
-def _grad_nl(distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"], z: np.ndarray, eta: float):
+def _grad_nl(distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"], z: np.ndarray, eta: float):
     """Derivative of the non-linearity.
 
     Args:
-        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma"
+        distr: Distribution family- can be "gaussian", "poisson", "softplus", "neg-binomial", or "gamma"
         z: Array of shape [n_samples, n_features]; prediction of the target values
         eta: A threshold parameter that linearizes the exp() function above threshold eta
 
@@ -95,7 +100,7 @@ def _grad_nl(distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"], z: 
     """
     logger = lm.get_main_logger()
 
-    if distr in ["gamma", "neg-binomial"]:
+    if distr in ["softplus", "gamma", "neg-binomial"]:
         grad_nl = expit(z)
     elif distr == "poisson":
         grad_nl = z.copy()
@@ -111,7 +116,7 @@ def _grad_nl(distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"], z: 
 # Gradient
 # ---------------------------------------------------------------------------------------------------
 def batch_grad(
-    distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"],
+    distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"],
     alpha: float,
     reg_lambda: float,
     X: np.ndarray,
@@ -125,7 +130,8 @@ def batch_grad(
     """Computes the gradient (for parameter updating) via batch gradient descent
 
     Args:
-        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
+        distr: Distribution family- can be "gaussian", "softplus", "poisson", "neg-binomial", or "gamma". Case
+            sensitive.
         alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.)
             term of the loss function
         reg_lambda: Regularization parameter :math:`\\lambda` of penalty term
@@ -161,7 +167,7 @@ def batch_grad(
     # Initialize gradient:
     grad_beta0 = 0.0
 
-    if distr == "poisson":
+    if distr in ["poisson", "softplus"]:
         if fit_intercept:
             grad_beta0 = np.sum(grad_nl) - np.sum(y * grad_nl / nl)
         grad_beta = (np.dot(grad_nl.T, X) - np.dot((y * grad_nl / nl).T, X)).T
@@ -203,7 +209,7 @@ def batch_grad(
 # Objective function
 # ---------------------------------------------------------------------------------------------------
 def log_likelihood(
-    distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"],
+    distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"],
     y: np.ndarray,
     y_hat: Union[np.ndarray, float],
     theta: float = 1.0,
@@ -211,14 +217,15 @@ def log_likelihood(
     """Computes negative log-likelihood of an observation, based on true values and predictions from the regression.
 
     Args:
-        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
+        distr: Distribution family- can be "gaussian", "poisson", "softplus", "neg-binomial", or "gamma". Case
+            sensitive.
         y: Target values
         y_hat: Predicted values, either array of predictions or scalar value
 
     Returns:
         logL: Numerical value for the log-likelihood
     """
-    if distr == "poisson":
+    if distr in ["poisson", "softplus"]:
         eps = np.spacing(1)
         logL = np.sum(y * np.log(y_hat + eps) - y_hat)
 
@@ -243,7 +250,7 @@ def log_likelihood(
 
 
 def _loss(
-    distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"],
+    distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"],
     alpha: float,
     reg_lambda: float,
     X: np.ndarray,
@@ -257,7 +264,8 @@ def _loss(
     """Objective function, comprised of a combination of the log-likelihood and regularization losses.
 
     Args:
-        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
+        distr: Distribution family- can be "gaussian", "poisson", "softplus", "neg-binomial", or "gamma". Case
+            sensitive.
         alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function
         reg_lambda: Regularization parameter :math:`\\lambda` of penalty term
         X: Array of shape [n_samples, n_features]; input data
@@ -297,7 +305,7 @@ def pseudo_r2(
     y: np.ndarray,
     yhat: np.ndarray,
     ynull_: float,
-    distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"],
+    distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"],
     theta: float,
 ):
     """Compute r^2 using log-likelihood, taking into account the observed and predicted distributions as well as the
@@ -307,11 +315,12 @@ def pseudo_r2(
         y: Array of shape [n_samples,]; target values for regression
         yhat: Predicted targets of shape [n_samples,]
         ynull_: Mean of the target labels (null model prediction)
-        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
+        distr: Distribution family- can be "gaussian", "poisson", "softplus", "neg-binomial", or "gamma". Case
+            sensitive.
         theta: Shape parameter of the negative binomial distribution (number of successes before the first
             failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
     """
-    if distr in ["poisson", "neg-binomial"]:
+    if distr in ["poisson", "neg-binomial", "softplus"]:
         LS = log_likelihood(distr, y, y, theta=theta)
     else:
         LS = 0
@@ -327,21 +336,25 @@ def pseudo_r2(
 
 
 def deviance(
-    y: np.ndarray, yhat: np.ndarray, distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"], theta: float
+    y: np.ndarray,
+    yhat: np.ndarray,
+    distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"],
+    theta: float,
 ):
     """Deviance goodness-of-fit
 
     Args:
         y: Array of shape [n_samples,]; target values for regression
         yhat: Predicted targets of shape [n_samples,]
-        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
+        distr: Distribution family- can be "gaussian", "poisson", "softplus", "neg-binomial", or "gamma". Case
+            sensitive.
         theta: Shape parameter of the negative binomial distribution (number of successes before the first
             failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
 
     Returns:
         score: Deviance of the predicted labels
     """
-    if distr in ["poisson", "neg-binomial"]:
+    if distr in ["poisson", "neg-binomial", "softplus"]:
         LS = log_likelihood(distr, y, y, theta=theta)
     else:
         LS = 0
@@ -389,7 +402,7 @@ class GLM(BaseEstimator):
 
     def __init__(
         self,
-        distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"] = "poisson",
+        distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"] = "poisson",
         alpha: float = 0.5,
         Tau: Union[None, np.ndarray] = None,
         reg_lambda: float = 0.1,
@@ -405,7 +418,7 @@ class GLM(BaseEstimator):
     ):
 
         self.logger = lm.get_main_logger()
-        allowable_dists = ["gaussian", "poisson", "neg-binomial", "gamma"]
+        allowable_dists = ["gaussian", "poisson", "softplus", "neg-binomial", "gamma"]
         if distr not in allowable_dists:
             self.logger.error(f"'distr' must be one of {', '.join(allowable_dists)}, got {distr}.")
         if not isinstance(max_iter, int):
@@ -628,7 +641,7 @@ class GLMCV(BaseEstimator):
     def __init__(
         self,
         fit_zero_inflated: bool = False,
-        distr: Literal["gaussian", "poisson", "neg-binomial", "gamma"] = "poisson",
+        distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"] = "poisson",
         alpha: float = 0.5,
         Tau: Union[None, np.ndarray] = None,
         reg_lambda: Union[None, List[float]] = None,
@@ -649,7 +662,7 @@ class GLMCV(BaseEstimator):
             reg_lambda = [reg_lambda]
 
         self.logger = lm.get_main_logger()
-        allowable_dists = ["gaussian", "poisson", "neg-binomial", "gamma"]
+        allowable_dists = ["gaussian", "poisson", "softplus", "neg-binomial", "gamma"]
         if distr not in allowable_dists:
             self.logger.error(f"'distr' must be one of {', '.join(allowable_dists)}, got {distr}.")
         if not isinstance(max_iter, int):
