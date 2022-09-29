@@ -606,8 +606,6 @@ class GLMCV(BaseEstimator):
     """For estimating regularized generalized linear models (GLM) along a regularization path with warm restarts.
 
     Args:
-        fit_zero_inflated: If True, indicates that data is highly sparse and should be fitted on only the nonzero
-            values. Otherwise, will use all values.
         distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
         alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function
         Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
@@ -640,7 +638,6 @@ class GLMCV(BaseEstimator):
 
     def __init__(
         self,
-        fit_zero_inflated: bool = False,
         distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"] = "poisson",
         alpha: float = 0.5,
         Tau: Union[None, np.ndarray] = None,
@@ -669,10 +666,7 @@ class GLMCV(BaseEstimator):
             self.logger.error("'max_iter' must be an integer.")
         if not isinstance(fit_intercept, bool):
             self.logger.error(f"'fit_intercept' must be Boolean, got {type(fit_intercept)}")
-        if not isinstance(fit_zero_inflated, bool):
-            self.logger.error(f"'fit_zero_inflated' must be Boolean, got {type(fit_zero_inflated)}")
 
-        self.fit_zero_inflated = fit_zero_inflated
         self.distr = distr
         self.alpha = alpha
         self.reg_lambda = reg_lambda
@@ -716,12 +710,6 @@ class GLMCV(BaseEstimator):
         Returns:
             self: Fitted instance of class GLM
         """
-        # If 'fit_zero_inflated' is True, subset arrays accordingly:
-        if self.fit_zero_inflated:
-            self.non_zero_indices = np.where(y >= 0)[0]
-            X = X[self.non_zero_indices]
-            y = y[self.non_zero_indices]
-
         glms, scores = list(), list()
         self.ynull_ = np.mean(y)
 
@@ -814,11 +802,7 @@ class GLMCV(BaseEstimator):
             self.logger.error("Error: model of :class `GLMCV` not yet fitted. Call :func `fit()` method.")
         X = check_array(X)
 
-        if self.fit_zero_inflated:
-            yhat = np.zeros(X.shape[0])
-            yhat[self.non_zero_indices] = self.glm_.predict(X)
-        else:
-            yhat = self.glm_.predict(X)
+        yhat = self.glm_.predict(X)
         return yhat
 
     def fit_predict(self, X: np.ndarray, y: np.ndarray):
@@ -859,7 +843,6 @@ def fit_glm(
     y_feat,
     calc_first_moment: bool = True,
     log_transform: bool = True,
-    fit_zero_inflated: bool = False,
     gs_params: Union[None, dict] = None,
     n_gs_cv: Union[None, int] = None,
     return_model: bool = True,
@@ -873,8 +856,6 @@ def fit_glm(
         adata: AnnData object from which dependent variable gene expression values will be taken from
         y_feat: Name of the feature in 'adata' corresponding to the dependent variable
         log_transform: If True, will log transform expression. Defaults to True.
-        fit_zero_inflated: If True, indicates that data to regress on is zero-inflated and that fitting should be
-            performed on the non-zero subset. Defaults to False.
         calc_first_moment: If True, will alleviate dropout effects by computing the first moment of each gene across
             cells, consistent with the method used by the original RNA velocity method (La Manno et al.,
             2018). Defaults to True.
@@ -915,8 +896,6 @@ def fit_glm(
         kwargs["distr"] = "poisson"
     if not "score_metric" in kwargs:
         kwargs["score_metric"] = "pseudo_r2"
-    if not "fit_zero_inflated" in kwargs:
-        kwargs["fit_zero_inflated"] = fit_zero_inflated
 
     if kwargs["distr"] in ["poisson", "binomial", "neg-binomial"]:
         if calc_first_moment or log_transform:

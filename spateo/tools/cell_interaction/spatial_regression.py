@@ -679,7 +679,6 @@ class BaseInterpreter:
         gs_params: Union[None, dict] = None,
         n_gs_cv: Union[None, int] = None,
         n_jobs: int = 30,
-        fit_zero_inflated: bool = True,
         **kwargs,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Wrapper for
@@ -691,8 +690,6 @@ class BaseInterpreter:
             n_gs_cv: Number of folds for grid search cross-validation, will only be used if gs_params is not None. If
                 None, will default to a 5-fold cross-validation.
             n_jobs: For parallel processing, number of tasks to run at once
-            fit_zero_inflated: If True, indicates that data is highly sparse and should be fitted on only the nonzero
-                values. Otherwise, will use all values.
             kwargs: Additional named arguments that will be provided to :class `GLMCV`.
 
         Returns:
@@ -708,7 +705,6 @@ class BaseInterpreter:
                 cur_g,
                 calc_first_moment=False,
                 log_transform=False,
-                fit_zero_inflated=fit_zero_inflated,
                 gs_params=gs_params,
                 n_gs_cv=n_gs_cv,
                 return_model=False,
