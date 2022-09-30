@@ -57,12 +57,15 @@ class BaseInterpreter:
         adata: object of class `anndata.AnnData`
         group_key: Key in .obs where group (e.g. cell type) information can be found
         spatial_key: Key in .obsm where x- and y-coordinates are stored
+        distr: Can optionally provide distribution family to specify the type of model that should be fit at the time
+            of initializing this class rather than after calling :func `GLMCV_fit_predict`- can be "gaussian",
+            "poisson", "softplus", "neg-binomial", or "gamma". Case sensitive.
         genes: Subset to genes of interest: will be used as dependent variables in non-ligand-based regression analyses,
             will be independent variables in ligand-based regression analyses
         drop_dummy: Name of the category to be dropped (the "dummy variable") in the regression. The dummy category
             can aid in interpretation as all model coefficients can be taken to be in reference to the dummy
             category. If None, will randomly select a few samples to constitute the dummy group.
-        layer: Entry in .layers to use instead of .X
+        layer: Entry in .layers to use instead of .X when fitting model- all other operations will use .X.
         cci_dir: Full path to the directory containing cell-cell communication databases. Only used in the case of
             models that use ligands for prediction.
         normalize: Perform library size normalization, to set total counts in each cell to the same number (adjust
@@ -103,6 +106,7 @@ class BaseInterpreter:
         self,
         adata: AnnData,
         spatial_key: str = "spatial",
+        distr: Union[None, Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"]] = None,
         group_key: Union[None, str] = None,
         genes: Union[None, List] = None,
         drop_dummy: Union[None, str] = None,
@@ -125,6 +129,7 @@ class BaseInterpreter:
         self.celltype_names = sorted(list(set(adata.obs[group_key])))
 
         self.spatial_key = spatial_key
+        self.distr = distr
         self.group_key = group_key
         self.genes = genes
         self.logger.info(
@@ -206,37 +211,113 @@ class BaseInterpreter:
             if not isinstance(rec_ds, list):
                 rec_ds = [rec_ds]
 
+        if self.distr in ["poisson", "softplus", "neg-binomial"]:
+            if self.normalize or self.smooth or self.log_transform:
+                self.logger.info(
+                    f"With a {self.distr} assumption, it is recommended to fit to raw counts. Computing normalizations "
+                    f"and transforms if applicable, but storing the results for later and fitting to the raw counts."
+                )
+                self.adata.layers["raw"] = self.adata.X
+
         # Normalize to size factor:
         if self.normalize:
-            self.logger.info("Setting total counts in each cell to 1e4.")
-            normalize_total(self.adata)
+            if self.distr not in ["poisson", "softplus", "binomial", "neg-binomial"]:
+                self.logger.info("Setting total counts in each cell to 1e4 inplace.")
+                normalize_total(self.adata)
+            else:
+                self.logger.info("Setting total counts in each cell to 1e4, storing in adata.layers['X_norm'].")
+                dat = normalize_total(self.adata, inplace=False)
+                self.adata.layers["X_norm"] = dat["X"]
+                self.adata.obs["norm_factor"] = dat["norm_factor"]
 
         # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
         if self.smooth:
-            self.logger.info("Smoothing gene expression...")
-            # Compute connectivity matrix if not already existing:
-            try:
-                conn = self.adata.obsp["expression_connectivities"]
-            except:
-                _, adata = transcriptomic_connectivity(self.adata, n_neighbors_method="ball_tree")
-                conn = adata.obsp["expression_connectivities"]
-            adata_smooth_norm, _ = calc_1nd_moment(self.adata.X, conn, normalize_W=True)
-            self.adata.layers["M_s"] = adata_smooth_norm
+            if self.distr not in ["poisson", "softplus", "binomial", "neg-binomial"]:
+                self.logger.info("Smoothing gene expression inplace...")
+                # Compute connectivity matrix if not already existing:
+                try:
+                    conn = self.adata.obsp["expression_connectivities"]
+                except:
+                    _, adata = transcriptomic_connectivity(self.adata, n_neighbors_method="ball_tree")
+                    conn = adata.obsp["expression_connectivities"]
+                adata_smooth_norm, _ = calc_1nd_moment(self.adata.X, conn, normalize_W=True)
+                self.adata.layers["M_s"] = adata_smooth_norm
 
-            # Use smoothed layer for downstream processing:
-            self.adata.layers["raw"] = self.adata.X
-            self.adata.X = self.adata.layers["M_s"]
+                # Use smoothed layer for downstream processing:
+                self.adata.layers["raw"] = self.adata.X
+                self.adata.X = self.adata.layers["M_s"]
+
+            else:
+                self.logger.info(
+                    "Smoothing gene expression inplace and storing in in adata.layers['M_s'] or "
+                    "adata.layers['normed_M_s'] if normalization was first performed."
+                )
+                adata_temp = self.adata.copy()
+                # Check if normalized expression is present- if 'distr' is one of the indicated distributions AND
+                # 'normalize' is True, AnnData will not have been updated in place, with the normalized array
+                # instead being stored in the object.
+                try:
+                    adata_temp.X = adata_temp.layers["X_norm"]
+                    norm = True
+                except:
+                    norm = False
+                    pass
+
+                try:
+                    conn = self.adata.obsp["expression_connectivities"]
+                except:
+                    _, adata = transcriptomic_connectivity(adata_temp, n_neighbors_method="ball_tree")
+                    conn = adata.obsp["expression_connectivities"]
+                adata_smooth_norm, _ = calc_1nd_moment(adata_temp.X, conn, normalize_W=True)
+                if norm:
+                    self.adata.layers["norm_M_s"] = adata_smooth_norm
+                else:
+                    self.adata.layers["M_s"] = adata_smooth_norm
 
         if self.log_transform:
-            if self.layer is None:
+            if self.distr not in ["poisson", "softplus", "binomial", "neg-binomial"]:
+                self.logger.info("Log-transforming expression inplace...")
                 log1p(self.adata)
             else:
-                log1p(self.adata.layers[self.layer])
-        else:
-            self.logger.warning(
-                "Linear regression models are not well suited to the distributional characteristics of "
-                "raw transcriptomic data- it is recommended to perform a log-transformation first."
-            )
+                self.logger.info(
+                    "Log-transforming expression and storing in adata.layers['X_log1p'], "
+                    "adata.layers['X_norm_log1p'], adata.layers['X_M_s_log1p'], or adata.layers["
+                    "'X_norm_M_s_log1p'], depending on the normalizations and transforms that were "
+                    "specified."
+                )
+                adata_temp = self.adata.copy()
+                # Check if normalized expression is present- if 'distr' is one of the indicated distributions AND
+                # 'normalize' and/or 'smooth' is True, AnnData will not have been updated in place,
+                # with the normalized array instead being stored in the object.
+                if "norm_M_s" in adata_temp.layers.keys():
+                    layer = "norm_M_s"
+                    adata_temp.X = adata_temp.layers["norm_M_s"]
+                    norm, smoothed = True, True
+                elif "M_s" in adata_temp.layers.keys():
+                    layer = "M_s"
+                    adata_temp.X = adata_temp.layers["M_s"]
+                    norm, smoothed = False, True
+                elif "X_norm" in adata_temp.layers.keys():
+                    layer = "X_norm"
+                    adata_temp.X = adata_temp.layers["X_norm"]
+                    norm, smoothed = True, False
+                else:
+                    layer = None
+                    norm, smoothed = False, False
+
+                if layer is not None:
+                    log1p(adata_temp.layers[layer])
+                else:
+                    log1p(adata_temp)
+
+                if norm and smoothed:
+                    self.adata.layers["X_norm_M_s_log1p"] = adata_temp.X
+                elif norm:
+                    self.adata.layers["X_norm_log1p"] = adata_temp.X
+                elif smoothed:
+                    self.adata.layers["X_M_s_log1p"] = adata_temp.X
+                else:
+                    self.adata.layers["X_log1p"] = adata_temp.X
 
         # General preprocessing required by multiple model types (for the models that use cellular niches):
         # Convert groups/categories into one-hot array:
@@ -696,7 +777,22 @@ class BaseInterpreter:
             coeffs: Contains fitted parameters for each feature
             reconst: Contains predicted expression for each feature
         """
+        # If Poisson or softplus, use log-transformed values for downstream applications (model regresses on
+        # log-transformed values):
+        if self.distr in ["poisson", "softplus"]:
+            self.logger.info(
+                "With Poisson distribution assumed for dependent variable, using log-transformed data "
+                "to compute sender-receiver effects."
+            )
+            try:
+                log_key = [key for key in self.adata.layers.keys() if "log1p" in key][0]
+                self.adata.X = self.adata.layers[log_key]
+            except:
+                log1p(self.adata)
+
         X = self.X[self.variable_names].values
+        kwargs["distr"] = self.distr
+
         # Set preprocessing parameters to False- :func `prepare_data` handles these steps.
         results = Parallel(n_jobs)(
             delayed(fit_glm)(
@@ -851,8 +947,8 @@ class BaseInterpreter:
         lr_pair: Union[None, str] = None,
         save_prefix: Union[None, str] = None,
     ):
-        """For each predictor and each feature, determine if the influence of said predictor in predicting said feature is
-        significant.
+        """For each predictor and each feature, determine if the influence of said predictor in predicting said
+        feature is significant.
 
         Additionally, for each feature and each sender-receiver category pair, determines the log fold-change that
         the sender induces in the feature for the receiver.

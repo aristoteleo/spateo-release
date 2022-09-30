@@ -897,7 +897,7 @@ def fit_glm(
     if not "score_metric" in kwargs:
         kwargs["score_metric"] = "pseudo_r2"
 
-    if kwargs["distr"] in ["poisson", "binomial", "neg-binomial"]:
+    if kwargs["distr"] in ["poisson", "softplus", "neg-binomial"]:
         if calc_first_moment or log_transform:
             logger.info(
                 f"With a {kwargs['distr']} assumption, it is recommended to fit to raw counts. Setting all "
