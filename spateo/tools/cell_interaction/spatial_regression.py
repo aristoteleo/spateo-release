@@ -73,10 +73,13 @@ class BaseInterpreter:
         smooth: To correct for dropout effects, leverage gene expression neighborhoods to smooth expression
         log_transform: Set True if log-transformation should be applied to expression (otherwise, will assume
             preprocessing/log-transform was computed beforehand)
-        niche_compute_indicator: Only used if 'mod_type' is "niche". If True, for the connections array
-            encoding the cell type-cell type interactions that occur within each niche, threshold all nonzero values
-            to 1, to reflect the presence of a pairwise cell type interaction. Otherwise, will fit on the normalized
-            number of pairwise interactions within each niche.
+        niche_compute_indicator: Only used if 'mod_type' is "niche" or "niche_lr". If True, for the "niche" model, for
+            the connections array encoding the cell type-cell type interactions that occur within each niche,
+            threshold all nonzero values to 1, to reflect the presence of a pairwise cell type interaction.
+            Otherwise, will fit on the normalized number of pairwise interactions within each niche. For the
+            "niche_lr" model, for the cell type pair interactions array, threshold all nonzero values to 1 to reflect
+            the presence of an interaction between the two cell types within each niche. Otherwise, will fit on
+            normalized data.
         weights_mode: Options "knn", "kernel", "band"; sets whether to use K-nearest neighbors, a kernel-based
             method, or distance band to compute spatial weights, respectively.
         data_id: If given, will save pairwise distance arrays & nearest neighbor arrays to folder in the working
@@ -227,7 +230,7 @@ class BaseInterpreter:
 
         # Normalize to size factor:
         if self.normalize:
-            if self.distr not in ["poisson", "softplus", "binomial", "neg-binomial"]:
+            if self.distr not in ["poisson", "softplus", "neg-binomial"]:
                 self.logger.info("Setting total counts in each cell to 1e4 inplace.")
                 normalize_total(self.adata)
             else:
@@ -235,10 +238,11 @@ class BaseInterpreter:
                 dat = normalize_total(self.adata, inplace=False)
                 self.adata.layers["X_norm"] = dat["X"]
                 self.adata.obs["norm_factor"] = dat["norm_factor"]
+                self.adata.layers["stored_processed"] = dat["X"]
 
         # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
         if self.smooth:
-            if self.distr not in ["poisson", "softplus", "binomial", "neg-binomial"]:
+            if self.distr not in ["poisson", "softplus", "neg-binomial"]:
                 self.logger.info("Smoothing gene expression inplace...")
                 # Compute connectivity matrix if not already existing:
                 try:
@@ -279,9 +283,11 @@ class BaseInterpreter:
                     self.adata.layers["norm_M_s"] = adata_smooth_norm
                 else:
                     self.adata.layers["M_s"] = adata_smooth_norm
+                self.adata.layers["stored_processed"] = adata_smooth_norm
+
 
         if self.log_transform:
-            if self.distr not in ["poisson", "softplus", "binomial", "neg-binomial"]:
+            if self.distr not in ["poisson", "softplus", "neg-binomial"]:
                 self.logger.info("Log-transforming expression inplace...")
                 log1p(self.adata)
             else:
@@ -324,6 +330,8 @@ class BaseInterpreter:
                     self.adata.layers["X_M_s_log1p"] = adata_temp.X
                 else:
                     self.adata.layers["X_log1p"] = adata_temp.X
+                self.adata.layers["stored_processed"] = adata_temp.X
+
 
         # General preprocessing required by multiple model types (for the models that use cellular niches):
         # Convert groups/categories into one-hot array:
@@ -649,28 +657,37 @@ class BaseInterpreter:
             # pairs:
             if len(pairs) > 200 / n_categories**2:
                 self.logger.warning(
-                    "Regression model has many predictors- consider measuring fewer ligands and " "receptors."
+                    "Regression model has many predictors- consider measuring fewer ligands and receptors."
                 )
 
             # Each ligand-receptor pair will have an associated niche matrix:
             self.niche_mats = {}
 
+            # Copy of AnnData to avoid modifying in-place:
+            expr = self.adata.copy()
+            # Look for normalized and/or transformed values if "poisson", "softplus" or "neg-binomial" were given as the
+            # distribution to fit to- Niche LR dependent variables draw from the gene expression:
+            try:
+                expr.X = expr.layers["stored_processed"]
+            except:
+                pass
+
             for lr_pair in pairs:
                 lig, rec = lr_pair[0], lr_pair[1]
                 lig_expr_values = (
-                    self.adata[:, lig].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, lig].X
+                    expr[:, lig].X.toarray() if scipy.sparse.issparse(expr.X) else expr[:, lig].X
                 )
                 rec_expr_values = (
-                    self.adata[:, rec].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, rec].X
+                    expr[:, rec].X.toarray() if scipy.sparse.issparse(expr.X) else expr[:, rec].X
                 )
                 # Optionally, compute the spatial lag of the receptor:
                 if niche_lr_r_lag:
                     if not hasattr(self, "w"):
                         self.compute_spatial_weights()
                     rec_lag = spreg.utils.lag_spatial(self.w, rec_expr_values)
-                    self.adata.obs[f"{rec}_lag"] = rec_lag
+                    expr.obs[f"{rec}_lag"] = rec_lag
                 # Multiply one-hot category array by the expression of select receptor within that cell:
-                rec_vals = self.adata[:, rec].X if not niche_lr_r_lag else self.adata.obs[f"{rec}_lag"].values
+                rec_vals = expr[:, rec].X if not niche_lr_r_lag else expr.obs[f"{rec}_lag"].values
                 rec_expr = np.multiply(X.values, np.tile(rec_vals.reshape(-1, 1), X.shape[1]))
 
                 # Separately multiply by the expression of select ligand such that an expression value only exists
@@ -688,7 +705,9 @@ class BaseInterpreter:
 
                 lr_connections_cols = list(product(X.columns, X.columns))
                 lr_connections_cols.sort(key=lambda x: x[1])
-                lr_connections_cols = [f"{i[0]}-{i[1]}_{lig}-{rec}" for i in lr_connections_cols]
+                # Swap ligand and receptor because we're looking at receptor expression in the "source" cell and
+                # ligand expression in the surrounding cells.
+                lr_connections_cols = [f"{i[0]}-{i[1]}_{rec}-{lig}" for i in lr_connections_cols]
                 self.niche_mats[f"{lig}-{rec}"] = pd.DataFrame(lr_connections, columns=lr_connections_cols)
                 self.niche_mats = {key: value for key, value in sorted(self.niche_mats.items())}
 
@@ -719,9 +738,12 @@ class BaseInterpreter:
             # Drop all-zero columns (represent cell type pairs with no spatial coupled L/R expression):
             self.X = self.X.loc[:, (self.X != 0).any(axis=0)]
 
-            # Minmax-scale columns to minimize the external impact of intercellular differences in ligand/receptor
-            # expression:
-            self.X = (self.X - self.X.min()) / (self.X.max() - self.X.min())
+            if self.niche_compute_indicator:
+                self.X[self.X > 0] = 1
+            else:
+                # Minmax-scale columns to minimize the external impact of intercellular differences in ligand/receptor
+                # expression:
+                self.X = (self.X - self.X.min()) / (self.X.max() - self.X.min())
 
             self.param_labels = self.variable_names = self.X.columns
 
@@ -843,7 +865,8 @@ class BaseInterpreter:
                 plot only the linear regression coefficients, "zstat" for the z-statistic, etc. Or can use the full
                 name of the column to select specific columns.
             cmap: Name of the colormap to use
-            mask_threshold: Optional, sets lower threshold for parameters to be assigned color in heatmap
+            mask_threshold: Optional, sets lower absolute value thresholds for parameters to be assigned color in
+                heatmap (will compare absolute value of each element against this threshold)
             mask_zero: Set True to not assign color to zeros (representing neither a positive or negative interaction)
             transpose: Set True to reverse the dataframe's orientation before plotting
             title: Optional, provides title for plot. If not given, will use default "Spatial Parameters".
@@ -888,11 +911,13 @@ class BaseInterpreter:
         ytick_labels = list(coeffs.index)
 
         if mask_threshold is not None:
-            mask = coeffs < mask_threshold
+            mask = np.abs(coeffs) < mask_threshold
         elif mask_zero:
             mask = coeffs == 0
         else:
             mask = None
+        # Drop columns in which all elements fail to meet mask threshold criteria:
+        coeffs = coeffs[~np.all(mask == 1, axis=1)]
 
         fig, ax = plt.subplots(1, 1, figsize=self.figsize)
         res = sns.heatmap(
