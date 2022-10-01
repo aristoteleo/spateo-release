@@ -285,7 +285,6 @@ class BaseInterpreter:
                     self.adata.layers["M_s"] = adata_smooth_norm
                 self.adata.layers["stored_processed"] = adata_smooth_norm
 
-
         if self.log_transform:
             if self.distr not in ["poisson", "softplus", "neg-binomial"]:
                 self.logger.info("Log-transforming expression inplace...")
@@ -331,7 +330,6 @@ class BaseInterpreter:
                 else:
                     self.adata.layers["X_log1p"] = adata_temp.X
                 self.adata.layers["stored_processed"] = adata_temp.X
-
 
         # General preprocessing required by multiple model types (for the models that use cellular niches):
         # Convert groups/categories into one-hot array:
@@ -674,12 +672,8 @@ class BaseInterpreter:
 
             for lr_pair in pairs:
                 lig, rec = lr_pair[0], lr_pair[1]
-                lig_expr_values = (
-                    expr[:, lig].X.toarray() if scipy.sparse.issparse(expr.X) else expr[:, lig].X
-                )
-                rec_expr_values = (
-                    expr[:, rec].X.toarray() if scipy.sparse.issparse(expr.X) else expr[:, rec].X
-                )
+                lig_expr_values = expr[:, lig].X.toarray() if scipy.sparse.issparse(expr.X) else expr[:, lig].X
+                rec_expr_values = expr[:, rec].X.toarray() if scipy.sparse.issparse(expr.X) else expr[:, rec].X
                 # Optionally, compute the spatial lag of the receptor:
                 if niche_lr_r_lag:
                     if not hasattr(self, "w"):
