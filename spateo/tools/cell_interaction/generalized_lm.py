@@ -328,7 +328,7 @@ def pseudo_r2(
     L0 = log_likelihood(distr, y, ynull_, theta=theta)
     L1 = log_likelihood(distr, y, yhat, theta=theta)
 
-    if distr in ["poisson", "neg-binomial"]:
+    if distr in ["poisson", "neg-binomial", "softplus"]:
         score = 1 - (LS - L1) / (LS - L0)
     else:
         score = 1 - L1 / L0

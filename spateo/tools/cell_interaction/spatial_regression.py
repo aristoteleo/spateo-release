@@ -73,6 +73,10 @@ class BaseInterpreter:
         smooth: To correct for dropout effects, leverage gene expression neighborhoods to smooth expression
         log_transform: Set True if log-transformation should be applied to expression (otherwise, will assume
             preprocessing/log-transform was computed beforehand)
+        niche_compute_indicator: Only used if 'mod_type' is "niche". If True, for the connections array
+            encoding the cell type-cell type interactions that occur within each niche, threshold all nonzero values
+            to 1, to reflect the presence of a pairwise cell type interaction. Otherwise, will fit on the normalized
+            number of pairwise interactions within each niche.
         weights_mode: Options "knn", "kernel", "band"; sets whether to use K-nearest neighbors, a kernel-based
             method, or distance band to compute spatial weights, respectively.
         data_id: If given, will save pairwise distance arrays & nearest neighbor arrays to folder in the working
@@ -115,6 +119,7 @@ class BaseInterpreter:
         normalize: bool = True,
         smooth: bool = False,
         log_transform: bool = False,
+        niche_compute_indicator: bool = True,
         weights_mode: str = "knn",
         data_id: Union[None, str] = None,
         **kwargs,
@@ -142,6 +147,7 @@ class BaseInterpreter:
         self.normalize = normalize
         self.smooth = smooth
         self.log_transform = log_transform
+        self.niche_compute_indicator = niche_compute_indicator
         self.weights_mode = weights_mode
         self.data_id = data_id
 
@@ -390,7 +396,10 @@ class BaseInterpreter:
         connections = np.asarray(dmatrix("categories:dmat_neighbours-1", data))
 
         # Set connections array to indicator array:
-        connections[connections > 1] = 1
+        if self.niche_compute_indicator:
+            connections[connections > 1] = 1
+        else:
+            connections = (connections - connections.min()) / (connections - connections.max())
 
         # Specific preprocessing for each model type:
         if "category" in mod_type:
@@ -777,19 +786,6 @@ class BaseInterpreter:
             coeffs: Contains fitted parameters for each feature
             reconst: Contains predicted expression for each feature
         """
-        # If Poisson or softplus, use log-transformed values for downstream applications (model regresses on
-        # log-transformed values):
-        if self.distr in ["poisson", "softplus"]:
-            self.logger.info(
-                "With Poisson distribution assumed for dependent variable, using log-transformed data "
-                "to compute sender-receiver effects."
-            )
-            try:
-                log_key = [key for key in self.adata.layers.keys() if "log1p" in key][0]
-                self.adata.X = self.adata.layers[log_key]
-            except:
-                log1p(self.adata)
-
         X = self.X[self.variable_names].values
         kwargs["distr"] = self.distr
 
@@ -971,6 +967,24 @@ class BaseInterpreter:
                 "Type coupling analysis only valid if connections between categories are used as the "
                 "predictor variable."
             )
+
+        # If Poisson or softplus, use log-transformed values for downstream applications (model ultimately uses a
+        # linear combination of independent variables to predict log-transformed dependent):
+        if self.distr in ["poisson", "softplus"]:
+            try:
+                log_key = [key for key in self.adata.layers.keys() if "log1p" in key][0]
+                self.adata.X = self.adata.layers[log_key]
+                self.logger.info(
+                    "With Poisson distribution assumed for dependent variable, using log-transformed data "
+                    f"to compute sender-receiver effects...log key found in adata under key {log_key}."
+                )
+            except:
+                self.logger.info(
+                    "With Poisson distribution assumed for dependent variable, using log-transformed data "
+                    "to compute sender-receiver effects...log key not found in adata, manually computing."
+                )
+                log1p(self.adata)
+                self.logger.info("Data log-transformed.")
 
         coeffs_np = coeffs.values
 
