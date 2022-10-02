@@ -699,9 +699,9 @@ class BaseInterpreter:
 
                 lr_connections_cols = list(product(X.columns, X.columns))
                 lr_connections_cols.sort(key=lambda x: x[1])
-                # Swap ligand and receptor because we're looking at receptor expression in the "source" cell and
-                # ligand expression in the surrounding cells.
-                lr_connections_cols = [f"{i[0]}-{i[1]}_{rec}-{lig}" for i in lr_connections_cols]
+                # Swap sending & receiving cell types because we're looking at receptor expression in the "source" cell
+                # and ligand expression in the surrounding cells.
+                lr_connections_cols = [f"{i[1]}-{i[0]}_{lig}-{rec}" for i in lr_connections_cols]
                 self.niche_mats[f"{lig}-{rec}"] = pd.DataFrame(lr_connections, columns=lr_connections_cols)
                 self.niche_mats = {key: value for key, value in sorted(self.niche_mats.items())}
 
@@ -901,17 +901,24 @@ class BaseInterpreter:
 
         if transpose:
             coeffs = coeffs.T
-        xtick_labels = list(coeffs.columns)
-        ytick_labels = list(coeffs.index)
 
         if mask_threshold is not None:
             mask = np.abs(coeffs) < mask_threshold
+            # Drop columns in which all elements fail to meet mask threshold criteria (then recompute mask w/
+            # potentially smaller dataframe):
+            coeffs = coeffs.loc[:, (mask == 0).any(axis=0)]
+            mask = np.abs(coeffs) < mask_threshold
         elif mask_zero:
+            mask = coeffs == 0
+            # Drop columns in which all elements fail to meet mask threshold criteria (then recompute mask w/
+            # potentially smaller dataframe):
+            coeffs = coeffs.loc[:, (mask == 0).any(axis=0)]
             mask = coeffs == 0
         else:
             mask = None
-        # Drop columns in which all elements fail to meet mask threshold criteria:
-        coeffs = coeffs[~np.all(mask == 1, axis=1)]
+
+        xtick_labels = list(coeffs.columns)
+        ytick_labels = list(coeffs.index)
 
         fig, ax = plt.subplots(1, 1, figsize=self.figsize)
         res = sns.heatmap(
@@ -934,9 +941,9 @@ class BaseInterpreter:
         # plt.gcf().subplots_adjust(bottom=0.3)
         plt.title(title if title is not None else "Spatial Parameters")
         if xlabel is not None:
-            plt.xlabel(xlabel, size=9)
+            plt.xlabel(xlabel, size=6)
         if ylabel is not None:
-            plt.ylabel(ylabel, size=9)
+            plt.ylabel(ylabel, size=6)
         ax.set_xticklabels(xtick_labels, rotation=90, ha="center")
         # ax.xaxis.set_ticks_position("none")
         # ax.yaxis.set_ticks_position("none")
@@ -955,38 +962,22 @@ class BaseInterpreter:
             return_all_list=None,
         )
 
-    def get_sender_receiver_effects(
-        self,
-        coeffs: pd.DataFrame,
-        significance_threshold: float = 0.05,
-        lr_pair: Union[None, str] = None,
-        save_prefix: Union[None, str] = None,
-    ):
-        """For each predictor and each feature, determine if the influence of said predictor in predicting said
-        feature is significant.
-
-        Additionally, for each feature and each sender-receiver category pair, determines the log fold-change that
-        the sender induces in the feature for the receiver.
-
-        Only valid if the model specified uses the connections between categories as variables for the regression-
-        thus can be applied to 'mod_type' "niche", or "niche_lr".
+    def compute_coeff_significance(self, coeffs: pd.DataFrame, significance_threshold: float = 0.05):
+        """
+        Computes statistical significance for fitted coefficients.
 
         Args:
-            coeffs : Contains coefficients from regression for each variable
+            coeffs: Contains coefficients from regression for each variable
             significance_threshold: p-value needed to call a sender-receiver relationship significant
-            lr_pair: Required if (and used only in the case that) coefficients came from a Niche-LR model; used to
-                subset the coefficients array to the specific ligand-receptor pair of interest. Takes the form
-                "{ligand}-{receptor}" and should match one of the keys in :dict `self.niche_mats`. If not given,
-                will default to the first key in this dictionary.
-            save_prefix: If provided, saves all relevant dataframes to :path `./regression_outputs` under the name
-                `{prefix}_{coeffs/pvalues, etc.}.csv`. If not provided, will not save.
-        """
-        if not "niche" in self.mod_type:
-            self.logger.error(
-                "Type coupling analysis only valid if connections between categories are used as the "
-                "predictor variable."
-            )
 
+        Returns:
+            is_significant: Dataframe of identical shape to coeffs, where each element is True or False if it meets the
+            threshold for significance
+            pvalues: Dataframe of identical shape to coeffs, where each element is a p-value for that instance of that
+                feature
+            qvalues: Dataframe of identical shape to coeffs, where each element is a q-value for that instance of that
+                feature
+        """
         # If Poisson or softplus, use log-transformed values for downstream applications (model ultimately uses a
         # linear combination of independent variables to predict log-transformed dependent):
         if self.distr in ["poisson", "softplus"]:
@@ -1006,11 +997,11 @@ class BaseInterpreter:
                 self.logger.info("Data log-transformed.")
 
         coeffs_np = coeffs.values
-
         # Save labels of indices and columns (correspond to features & parameters, respectively, for the coeffs
         # DataFrame, will be columns & indices respectively for the other arrays generated by this function):
         feature_labels = coeffs.index
         param_labels = coeffs.columns
+
         # Get inverse Fisher information matrix, with the y block containing all features that were used in regression):
         y = (
             self.adata[:, self.genes].X.toarray()
@@ -1024,12 +1015,50 @@ class BaseInterpreter:
             params=coeffs_np, fisher_inv=inverse_fisher, significance_threshold=significance_threshold
         )
 
+        is_significant = pd.DataFrame(is_significant, index=param_labels, columns=feature_labels)
+        pvalues = pd.DataFrame(pvalues, index=param_labels, columns=feature_labels)
+        qvalues = pd.DataFrame(qvalues, index=param_labels, columns=feature_labels)
+
+        return is_significant, pvalues, qvalues
+
+    def get_sender_receiver_effects(
+        self,
+        coeffs: pd.DataFrame,
+        significance_threshold: float = 0.05,
+        lr_pair: Union[None, str] = None,
+        save_prefix: Union[None, str] = None,
+    ):
+        """For each predictor and each feature, determine if the influence of said predictor in predicting said
+        feature is significant.
+
+        Additionally, for each feature and each sender-receiver category pair, determines the log fold-change that
+        the sender induces in the feature for the receiver.
+
+        Only valid if the model specified uses the connections between categories as variables for the regression-
+        thus can be applied to 'mod_type' "niche", or "niche_lr".
+
+        Args:
+            coeffs: Contains coefficients from regression for each variable
+            significance_threshold: p-value needed to call a sender-receiver relationship significant
+            lr_pair: Required if (and used only in the case that) coefficients came from a Niche-LR model; used to
+                subset the coefficients array to the specific ligand-receptor pair of interest. Takes the form
+                "{ligand}-{receptor}" and should match one of the keys in :dict `self.niche_mats`. If not given,
+                will default to the first key in this dictionary.
+            save_prefix: If provided, saves all relevant dataframes to :path `./regression_outputs` under the name
+                `{prefix}_{coeffs/pvalues, etc.}.csv`. If not provided, will not save.
+        """
+        if not "niche" in self.mod_type:
+            self.logger.error(
+                "Type coupling analysis only valid if connections between categories are used as the "
+                "predictor variable."
+            )
+
+        coeffs_np = coeffs.values
+
+        is_significant, pvalues, qvalues = self.compute_coeff_significance(coeffs, significance_threshold)
+
         # If 'save_prefix' is given, save the complete coefficients, significance, p-value and q-value matrices:
         if save_prefix is not None:
-            is_significant = pd.DataFrame(is_significant, index=param_labels, columns=feature_labels)
-            pvalues = pd.DataFrame(pvalues, index=param_labels, columns=feature_labels)
-            qvalues = pd.DataFrame(qvalues, index=param_labels, columns=feature_labels)
-
             if not os.path.exists("./regression_outputs"):
                 os.makedirs("./regression_outputs")
             is_significant.to_csv(f"./regression_outputs/{save_prefix}_is_sign.csv")
@@ -1062,7 +1091,7 @@ class BaseInterpreter:
             coeffs_np = coeffs.filter(lr_pair, axis="columns").values
             # Significance, pvalues, qvalues filtered above
 
-            self.fold_change = np.concatenate(
+            self.effect_size = np.concatenate(
                 np.expand_dims(
                     np.split(coeffs_np.T, indices_or_sections=np.sqrt(coeffs_np.T.shape[0]), axis=0), axis=0
                 ),
@@ -1071,7 +1100,7 @@ class BaseInterpreter:
 
         # Else if connection-based model, all regression coefficients already correspond to the interaction terms:
         else:
-            self.fold_change = np.concatenate(
+            self.effect_size = np.concatenate(
                 np.expand_dims(
                     np.split(coeffs_np.T, indices_or_sections=np.sqrt(coeffs_np.T.shape[0]), axis=0), axis=0
                 ),
@@ -1182,7 +1211,7 @@ class BaseInterpreter:
     def sender_effect(
         self,
         receiver: str,
-        plot_mode: str = "fold_change",
+        plot_mode: str = "effect_size",
         gene_subset: Union[None, List[str]] = None,
         significance_threshold: float = 0.05,
         cut_pvals: float = -5,
@@ -1200,10 +1229,11 @@ class BaseInterpreter:
             plot_mode: specifies what gets plotted.
                 Options:
                     - "qvals": elements of the plot represent statistical significance of the interaction
-                    - "fold_change": elements of the plot represent fold change induced in the receiver by the sender
+                    - "effect_size": elements of the plot represent numerical expression change induced in the
+                        receiver by the sender
             gene_subset: Names of genes to subset for plot. If None, will use all genes that were used in the
                 regression.
-            significance_threshold: Set non-significant fold changes to zero, where the threshold is given here
+            significance_threshold: Set non-significant effect sizes to zero, where the threshold is given here
             cut_pvals: Minimum allowable log10(pval)- anything below this will be clipped to this value
             fontsize: Size of figure title and axis labels
             figsize: Width and height of plotting window
@@ -1240,7 +1270,7 @@ class BaseInterpreter:
                 df = df.drop(index=receiver)[gene_subset]
 
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-            sns.heatmap(
+            qv = sns.heatmap(
                 df.T,
                 square=True,
                 linecolor="grey",
@@ -1251,8 +1281,14 @@ class BaseInterpreter:
                 vmax=0.0,
                 ax=ax,
             )
-        elif plot_mode == "fold_change":
-            arr = self.fold_change[receiver_idx, :, :].copy()
+
+            # Outer frame:
+            for _, spine in qv.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
+
+        elif plot_mode == "effect_size":
+            arr = self.effect_size[receiver_idx, :, :].copy()
             arr[np.where(self.qvalues[receiver_idx, :, :] > significance_threshold)] = 0
             df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
             if gene_subset:
@@ -1260,22 +1296,28 @@ class BaseInterpreter:
             vmax = np.max(np.abs(df.values))
 
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-            sns.heatmap(
+            es = sns.heatmap(
                 df.T,
                 square=True,
                 linecolor="grey",
                 linewidths=0.3,
-                cbar_kws={"label": "$\ln$ fold change", "location": "top"},
+                cbar_kws={"label": "$\ln$ effect size", "location": "top"},
                 cmap=cmap,
                 vmin=-vmax,
                 vmax=vmax,
                 ax=ax,
             )
-        else:
-            logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'fold_change'.")
 
-        plt.xlabel("Sender cell type")
-        plt.title("Sender Effects on " + receiver)
+            # Outer frame:
+            for _, spine in es.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
+
+        else:
+            logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
+
+        plt.xlabel("Sender cell type", fontsize=9)
+        plt.title("Sender Effects on " + receiver, fontsize=9)
         plt.tight_layout()
 
         save_return_show_fig_utils(
@@ -1294,7 +1336,7 @@ class BaseInterpreter:
     def receiver_effect(
         self,
         sender: str,
-        plot_mode: str = "fold_change",
+        plot_mode: str = "effect_size",
         gene_subset: Union[None, List[str]] = None,
         significance_threshold: float = 0.05,
         cut_pvals: float = -5,
@@ -1312,10 +1354,10 @@ class BaseInterpreter:
             plot_mode: specifies what gets plotted.
                 Options:
                     - "qvals": elements of the plot represent statistical significance of the interaction
-                    - "fold_change": elements of the plot represent fold change induced in the receiver by the sender
+                    - "effect_size": elements of the plot represent effect size induced in the receiver by the sender
             gene_subset: Names of genes to subset for plot. If None, will use all genes that were used in the
                 regression.
-            significance_threshold: Set non-significant fold changes to zero, where the threshold is given here
+            significance_threshold: Set non-significant effect sizes to zero, where the threshold is given here
             cut_pvals: Minimum allowable log10(pval)- anything below this will be clipped to this value
             fontsize: Size of figure title and axis labels
             figsize: Width and height of plotting window
@@ -1351,7 +1393,7 @@ class BaseInterpreter:
                 df = df.drop(index=sender)[gene_subset]
 
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-            sns.heatmap(
+            qv = sns.heatmap(
                 df.T,
                 square=True,
                 linecolor="grey",
@@ -1363,8 +1405,13 @@ class BaseInterpreter:
                 ax=ax,
             )
 
-        elif plot_mode == "fold_change":
-            arr = self.fold_change[:, sender_idx, :].copy()
+            # Outer frame:
+            for _, spine in qv.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
+
+        elif plot_mode == "effect_size":
+            arr = self.effect_size[:, sender_idx, :].copy()
             arr[np.where(self.qvalues[:, sender_idx, :] > significance_threshold)] = 0
             df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
             if gene_subset:
@@ -1372,22 +1419,28 @@ class BaseInterpreter:
             vmax = np.max(np.abs(df.values))
 
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-            sns.heatmap(
+            es = sns.heatmap(
                 df.T,
                 square=True,
                 linecolor="grey",
                 linewidths=0.3,
-                cbar_kws={"label": "$\ln$ fold change", "location": "top"},
+                cbar_kws={"label": "$\ln$ effect size", "location": "top"},
                 cmap=cmap,
                 vmin=-vmax,
                 vmax=vmax,
                 ax=ax,
             )
-        else:
-            logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'fold_change'.")
 
-        plt.xlabel("Receiving cell type")
-        plt.title("{} effects on receivers".format(sender))
+            # Outer frame:
+            for _, spine in es.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
+
+        else:
+            logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
+
+        plt.xlabel("Receiving cell type", fontsize=9)
+        plt.title("{} effects on receivers".format(sender), fontsize=9)
         plt.tight_layout()
 
         save_return_show_fig_utils(
@@ -1408,7 +1461,7 @@ class BaseInterpreter:
         receiver: str,
         sender: str,
         significance_threshold: float = 0.05,
-        fold_change_threshold: Union[None, float] = None,
+        effect_size_threshold: Union[None, float] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = (4.5, 7.0),
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
@@ -1420,9 +1473,9 @@ class BaseInterpreter:
         Args:
             receiver: Receiver cell type label
             sender: Sender cell type label
-            significance_threshold:  Set non-significant fold changes (given by q-values) to zero, where the
+            significance_threshold:  Set non-significant effect sizes (given by q-values) to zero, where the
                 threshold is given here
-            fold_change_threshold: Set absolute value fold-change threshold beyond which observations are marked as
+            effect_size_threshold: Set absolute value effect-size threshold beyond which observations are marked as
                 interesting. If not given, will take the 95th percentile fold-change as the cutoff.
             fontsize: Size of figure title and axis labels
             figsize: Width and height of plotting window
@@ -1454,15 +1507,15 @@ class BaseInterpreter:
         ax.grid(False)
 
         # Set fold-change threshold if not already provided:
-        if fold_change_threshold is None:
-            fold_change_threshold = np.percentile(self.fold_change)
+        if effect_size_threshold is None:
+            effect_size_threshold = np.percentile(self.effect_size)
 
         # All non-significant features:
         qval_filter = np.where(self.qvalues[receiver_idx, sender_idx, :] >= significance_threshold)
-        vmax = np.max(np.abs(self.fold_change[receiver_idx, sender_idx, :]))
+        vmax = np.max(np.abs(self.effect_size[receiver_idx, sender_idx, :]))
 
         sns.scatterplot(
-            x=self.fold_change[receiver_idx, sender_idx, :][qval_filter],
+            x=self.effect_size[receiver_idx, sender_idx, :][qval_filter],
             y=-np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter],
             color="white",
             edgecolor="black",
@@ -1472,31 +1525,31 @@ class BaseInterpreter:
 
         # Identify subset that may be significant, but which doesn't pass the fold-change threshold:
         qval_filter = np.where(self.qvalues[receiver_idx, sender_idx, :] < significance_threshold)
-        x = self.fold_change[receiver_idx, sender_idx, :][qval_filter]
-        fc_filter = np.where(x < fold_change_threshold)
+        x = self.effect_size[receiver_idx, sender_idx, :][qval_filter]
+        fc_filter = np.where(x < effect_size_threshold)
         y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter])
         sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color="darkgrey", edgecolor="black", s=100, ax=ax)
 
         # Identify subset that are significantly downregulated:
         dreg_color = matplotlib.cm.get_cmap("winter")(0)
-        x = self.fold_change[receiver_idx, sender_idx, :][qval_filter]
-        fc_filter = np.where(x <= -fold_change_threshold)
+        x = self.effect_size[receiver_idx, sender_idx, :][qval_filter]
+        fc_filter = np.where(x <= -effect_size_threshold)
         y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter], neginf=-14.5)
         sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=100, ax=ax)
 
         # Identify subset that are significantly upregulated:
         ureg_color = matplotlib.cm.get_map("autumn")(0)
-        x = self.fold_change[receiver_idx, sender_idx, :][qval_filter]
-        fc_filter = np.where(x >= fold_change_threshold)
+        x = self.effect_size[receiver_idx, sender_idx, :][qval_filter]
+        fc_filter = np.where(x >= effect_size_threshold)
         y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter], neginf=-14.5)
         sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=ureg_color, edgecolor="black", s=100, ax=ax)
 
         # Plot configuration:
         ax.set_xlim((-vmax * 1.1, vmax * 1.1))
-        ax.set_xlabel("$\ln$ fold change")
+        ax.set_xlabel("$\ln$ effect size")
         ax.set_ylabel("$-\log_{10}$ FDR-corrected pvalues")
-        plt.axvline(-fold_change_threshold, color="darkgrey", linestyle="--")
-        plt.axvline(fold_change_threshold, color="darkgrey", linestyle="--")
+        plt.axvline(-effect_size_threshold, color="darkgrey", linestyle="--")
+        plt.axvline(effect_size_threshold, color="darkgrey", linestyle="--")
         plt.axhline(-np.log10(significance_threshold), linestyle="--", color="darkgrey")
 
         plt.tight_layout()

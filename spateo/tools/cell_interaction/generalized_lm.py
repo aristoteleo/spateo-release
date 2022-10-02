@@ -957,6 +957,7 @@ def fit_glm(
 
     rex = reg.fit_predict(X, y)
     logger.info(f"Optimal lambda regularization value for {y_feat}: {reg.reg_lambda_opt_}.")
+    adata.uns["reg_intercept"] = reg.beta0_
     Beta = reg.beta_
     if return_model:
         return Beta, rex, reg
