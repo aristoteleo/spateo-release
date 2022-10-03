@@ -14,14 +14,19 @@ from .polarity import *
 from .scatters import scatters
 from .space import space
 from .three_d_plot import (
+    acceleration,
     add_legend,
     add_model,
     add_outline,
     add_text,
     create_plotter,
+    curl,
+    curvature,
+    jacobian,
     output_plotter,
     save_plotter,
     three_d_animate,
     three_d_multi_plot,
     three_d_plot,
+    torsion,
 )
