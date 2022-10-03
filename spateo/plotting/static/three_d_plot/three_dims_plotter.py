@@ -553,7 +553,7 @@ def output_plotter(
     """
 
     def _to_graph(_screenshot, _jupyter_backend):
-        if jupyter is False:
+        if jupyter is False or jupyter is "none":
             cpo, img = plotter.show(
                 screenshot=_screenshot,
                 return_img=True,
@@ -583,7 +583,7 @@ def output_plotter(
     # The format of the output file.
     if filename is None:
         # p.show(jupyter_backend=jupyter_backend)
-        if jupyter is False:
+        if jupyter is False or jupyter is "none":
             cpo, img = plotter.show(return_img=True, return_cpos=True, jupyter_backend=jupyter_backend)
             return cpo, img
         else:
