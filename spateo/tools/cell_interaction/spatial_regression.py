@@ -1519,7 +1519,7 @@ class BaseInterpreter:
             y=-np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter],
             color="white",
             edgecolor="black",
-            s=100,
+            s=50,
             ax=ax,
         )
 
@@ -1528,29 +1528,30 @@ class BaseInterpreter:
         x = self.effect_size[receiver_idx, sender_idx, :][qval_filter]
         fc_filter = np.where(x < effect_size_threshold)
         y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter])
-        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color="darkgrey", edgecolor="black", s=100, ax=ax)
+        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color="darkgrey", edgecolor="black", s=50, ax=ax)
 
         # Identify subset that are significantly downregulated:
         dreg_color = matplotlib.cm.get_cmap("winter")(0)
         x = self.effect_size[receiver_idx, sender_idx, :][qval_filter]
         fc_filter = np.where(x <= -effect_size_threshold)
         y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter], neginf=-14.5)
-        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=100, ax=ax)
+        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=50, ax=ax)
 
         # Identify subset that are significantly upregulated:
-        ureg_color = matplotlib.cm.get_map("autumn")(0)
+        ureg_color = matplotlib.cm.get_cmap("autumn")(0)
         x = self.effect_size[receiver_idx, sender_idx, :][qval_filter]
         fc_filter = np.where(x >= effect_size_threshold)
         y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter], neginf=-14.5)
-        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=ureg_color, edgecolor="black", s=100, ax=ax)
+        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=ureg_color, edgecolor="black", s=50, ax=ax)
 
         # Plot configuration:
         ax.set_xlim((-vmax * 1.1, vmax * 1.1))
-        ax.set_xlabel("$\ln$ effect size")
-        ax.set_ylabel("$-\log_{10}$ FDR-corrected pvalues")
-        plt.axvline(-effect_size_threshold, color="darkgrey", linestyle="--")
-        plt.axvline(effect_size_threshold, color="darkgrey", linestyle="--")
-        plt.axhline(-np.log10(significance_threshold), linestyle="--", color="darkgrey")
+        ax.set_xlabel("Effect size", fontsize=9)
+        ax.set_ylabel("$-\log_{10}$ FDR-corrected pvalues", fontsize=9)
+        ax.tick_params(axis="both", labelsize=8)
+        plt.axvline(-effect_size_threshold, color="darkgrey", linestyle="--", linewidth=0.9)
+        plt.axvline(effect_size_threshold, color="darkgrey", linestyle="--", linewidth=0.9)
+        plt.axhline(-np.log10(significance_threshold), linestyle="--", color="darkgrey", linewidth=0.9)
 
         plt.tight_layout()
         save_return_show_fig_utils(

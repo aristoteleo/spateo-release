@@ -739,7 +739,7 @@ class Dotplot:
         )
         size_legend_ax.set_xticks(np.arange(len(size)) + 0.5)
         labels = ["{}".format(np.round((x * 100), decimals=0).astype(int)) for x in size_range]
-        size_legend_ax.set_xticklabels(labels, fontsize=6)
+        size_legend_ax.set_xticklabels(labels, fontsize=8)
 
         # Remove y ticks and labels
         size_legend_ax.tick_params(axis="y", left=False, labelleft=False, labelright=False)
@@ -786,8 +786,8 @@ class Dotplot:
             format="%.2f",
         )
 
-        color_legend_ax.set_title(self.color_legend_title, fontsize=6)
-        color_legend_ax.xaxis.set_tick_params(labelsize=9)
+        color_legend_ax.set_title(self.color_legend_title, fontsize=7)
+        color_legend_ax.xaxis.set_tick_params(labelsize=7)
 
     def _plot_legend(
         self, legend_ax: mpl.axes.Axes, return_ax_dict: dict, normalize: Union[None, mpl.colors.Normalize] = None
@@ -1317,7 +1317,7 @@ class Dotplot:
                     ha="right",
                     va="center",
                     rotation=270,
-                    fontsize=6,
+                    fontsize=8,
                 )
 
         path = Path(verts, codes)
@@ -1637,6 +1637,7 @@ def dotplot(
     dot_min: float = Dotplot.default_dot_min,
     standard_scale: Literal["var", "group"] = None,
     smallest_dot: float = Dotplot.default_smallest_dot,
+    largest_dot: float = Dotplot.default_largest_dot,
     title: str = None,
     colorbar_title: str = Dotplot.default_color_legend_title,
     size_title: str = Dotplot.default_size_legend_title,
@@ -1692,7 +1693,10 @@ def dotplot(
         standard_scale: Whether or not to standardize that dimension between 0 and 1, meaning for each variable or
             group, subtract the minimum and divide each by its maximum. 'val' or 'group' is used to specify whether this
             should be done over variables or groups.
-        smallest_dot: If none, the smallest dot has size 0. All expression fractions with `dot_min` are plotted with this size.
+        smallest_dot: If None, the smallest dot has size 0. All expression fractions with `dot_min` are plotted with
+            this size.
+        largest_dot: If None, the largest dot has size 200. All expression fractions with `dot_max` are plotted with
+            this size.
         title: Title for the entire plot
         colorbar_title: Title for the color legend. If None will use generic default title
         size_title: Title for the dot size legend. If None will use generic default title
@@ -1795,6 +1799,7 @@ def dotplot(
         dot_max=dot_max,
         dot_min=dot_min,
         smallest_dot=smallest_dot,
+        largest_dot=largest_dot,
         dot_edge_lw=kwargs.pop("linewidth", Dotplot.default_dot_edgelw),
     ).legend(colorbar_title=colorbar_title, size_title=size_title)
 
