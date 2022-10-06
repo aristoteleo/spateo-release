@@ -153,6 +153,13 @@ def find_cci_two_group(
             frac = (adata_r[adata_r.obs[group] == g].X > 0).sum(axis=0) / adata_r.X.sum(axis=0)
             adata_r.var[g + "_frac"] = frac.A1 if x_sparse else frac
 
+        # Check if preprocessing has already been done:
+        if "n_cells_by_counts" not in adata_r.var_keys():
+            if issparse(adata_r.X):
+                adata_r.var["n_cells_by_counts"] = adata_r.X.getnnz(axis=0)
+            else:
+                adata_r.var["n_cells_by_counts"] = np.count_nonzero(adata_r.X, axis=0)
+
         dfr = adata_r.var[adata_r.var[receiver_group + "_frac"] > 0]
         dfr = dfr[dfr["n_cells_by_counts"] > min_cells_by_counts]
 
