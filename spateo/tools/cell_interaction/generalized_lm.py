@@ -16,6 +16,7 @@ except ImportError:
     from typing_extensions import Literal
 
 import numpy as np
+import pandas as pd
 from anndata import AnnData
 from dynamo.tools.moments import calc_1nd_moment
 from scipy.special import expit, loggamma
@@ -838,7 +839,7 @@ class GLMCV(BaseEstimator):
 # ---------------------------------------------------------------------------------------------------
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def fit_glm(
-    X: np.ndarray,
+    X: Union[np.ndarray, pd.DataFrame],
     adata: AnnData,
     y_feat,
     calc_first_moment: bool = True,
@@ -852,7 +853,8 @@ def fit_glm(
     optimum lambda regularization parameter and optional further grid search for parameter optimization.
 
     Args:
-        X: Array containing data for fitting- all columns in this array will be used as independent variables
+        X: Array or DataFrame containing data for fitting- all columns in this array will be used as independent
+            variables
         adata: AnnData object from which dependent variable gene expression values will be taken from
         y_feat: Name of the feature in 'adata' corresponding to the dependent variable
         log_transform: If True, will log transform expression. Defaults to True.
@@ -920,6 +922,8 @@ def fit_glm(
         log1p(adata)
 
     y = adata[:, y_feat].X.toarray()
+    if isinstance(X, pd.DataFrame):
+        X = X.values
 
     # logger.info("<Grid search CV model fitting for parameters : ")
     # for param in gs_params.keys():

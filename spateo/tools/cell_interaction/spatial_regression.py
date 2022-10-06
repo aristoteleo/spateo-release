@@ -681,7 +681,10 @@ class BaseInterpreter:
                     rec_lag = spreg.utils.lag_spatial(self.w, rec_expr_values)
                     expr.obs[f"{rec}_lag"] = rec_lag
                 # Multiply one-hot category array by the expression of select receptor within that cell:
-                rec_vals = expr[:, rec].X if not niche_lr_r_lag else expr.obs[f"{rec}_lag"].values
+                if not niche_lr_r_lag:
+                    rec_vals = expr[:, rec].X.toarray() if scipy.sparse.issparse(expr.X) else expr[:, rec].X
+                else:
+                    rec_vals = expr.obs[f"{rec}_lag"].values
                 rec_expr = np.multiply(X.values, np.tile(rec_vals.reshape(-1, 1), X.shape[1]))
 
                 # Separately multiply by the expression of select ligand such that an expression value only exists
@@ -785,9 +788,11 @@ class BaseInterpreter:
         gs_params: Union[None, dict] = None,
         n_gs_cv: Union[None, int] = None,
         n_jobs: int = 30,
+        cat_key: Union[None, str] = None,
+        categories: Union[None, str, List[str]] = None,
         **kwargs,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """Wrapper for
+        """Wrapper for fitting predictive generalized linear regression model.
 
         Args:
             gs_params: Optional dictionary where keys are variable names for either the classifier or the regressor and
@@ -796,14 +801,33 @@ class BaseInterpreter:
             n_gs_cv: Number of folds for grid search cross-validation, will only be used if gs_params is not None. If
                 None, will default to a 5-fold cross-validation.
             n_jobs: For parallel processing, number of tasks to run at once
+            cat_key: Optional, name of key in .obs containing categorical (e.g. cell type) information
+            categories: Optional, names of categories to subset to for the regression. In cases where the exogenous
+                block is exceptionally heterogenous, can be used to narrow down the search space.
             kwargs: Additional named arguments that will be provided to :class `GLMCV`.
 
         Returns:
             coeffs: Contains fitted parameters for each feature
             reconst: Contains predicted expression for each feature
         """
-        X = self.X[self.variable_names].values
+        X = self.X[self.variable_names]
         kwargs["distr"] = self.distr
+
+        if categories is not None:
+            if not isinstance(categories, list):
+                categories = [categories]
+
+            if cat_key is None:
+                self.logger.error(
+                    ":func `GLMCV_fit_predict` error: 'Categories' were given, but not 'cat_key' "
+                    "specifying where in .obs to look."
+                )
+            # Filter adata for rows annotated as being any category in 'categories', and X block for columns annotated with
+            # any of the categories in 'categories'.
+            self.adata = self.adata[self.adata.obs[cat_key].isin(categories)]
+            self.cell_names = self.adata.obs_names
+            X = X.filter(regex="|".join(categories))
+            X = X.loc[self.adata.obs_names]
 
         # Set preprocessing parameters to False- :func `prepare_data` handles these steps.
         results = Parallel(n_jobs)(
@@ -823,7 +847,7 @@ class BaseInterpreter:
         coeffs = [item[0] for item in results]
         reconst = [item[1] for item in results]
 
-        coeffs = pd.DataFrame(coeffs, index=self.genes, columns=self.X.columns)
+        coeffs = pd.DataFrame(coeffs, index=self.genes, columns=X.columns)
         for cn in coeffs.columns:
             self.adata.var.loc[:, cn] = coeffs[cn]
         # Nested list transforms into dataframe rows- instantiate and transpose to get to correct shape:
@@ -1774,6 +1798,10 @@ class Niche_LR_Interpreter(BaseInterpreter):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
+        self.logger.info(
+            "Predictor arrays for :class `Niche_LR_Interpreter` are extremely sparse. It is recommended "
+            "to provide categories to subset for :func `GLMCV_fit_predict`."
+        )
 
         self.prepare_data(
             mod_type="niche_lr", lig=lig, rec=rec, rec_ds=rec_ds, species=species, niche_lr_r_lag=niche_lr_r_lag
