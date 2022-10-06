@@ -795,7 +795,7 @@ class BaseInterpreter:
         """Wrapper for fitting predictive generalized linear regression model.
 
         Args:
-            gs_params: Optional dictionary where keys are variable names for either the classifier or the regressor and
+            gs_params: Optional dictionary where keys are variable names for the regressor and
                 values are lists of potential values for which to find the best combination using grid search.
                 Classifier parameters should be given in the following form: 'classifier__{parameter name}'.
             n_gs_cv: Number of folds for grid search cross-validation, will only be used if gs_params is not None. If
