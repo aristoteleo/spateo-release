@@ -11,6 +11,7 @@ except ImportError:
 
 from ...logging import logger_manager as lm
 from ...tools import pairwise_align
+from ...tools.paste import _get_optimal_mapping_relationship
 from .interpolations import get_X_Y_grid
 
 
@@ -24,6 +25,7 @@ def cell_directions(
     numItermaxEmd: int = 100000,
     dtype: str = "float32",
     device: str = "cpu",
+    keep_all: bool = False,
     inplace: bool = True,
     **kwargs,
 ) -> Optional[List[AnnData]]:
@@ -47,6 +49,8 @@ def cell_directions(
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
         device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``
+        keep_all: Whether to retain all the optimal relationships obtained only based on the pi matrix, If ``keep_all``
+                  is False, the optimal relationships obtained based on the pi matrix and the nearest coordinates.
         inplace: Whether to copy adata or modify it inplace.
         **kwargs: Additional parameters that will be passed to ``pairwise_align`` function.
 
@@ -73,8 +77,9 @@ def cell_directions(
             **kwargs,
         )
 
-        max_index = np.argwhere((pi.T == pi.T.max(axis=0)).T)
-        pi_value = pi[max_index[:, 0], max_index[:, 1]].reshape(-1, 1)
+        max_index, pi_value, _, _ = _get_optimal_mapping_relationship(
+            X=adataA.obsm[spatial_key].copy(), Y=adataB.obsm[spatial_key].copy(), pi=pi, keep_all=keep_all
+        )
 
         mapping_data = pd.DataFrame(
             np.concatenate([max_index, pi_value], axis=1),

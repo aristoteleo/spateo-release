@@ -96,6 +96,7 @@ def models_align(
     numItermaxEmd: int = 100000,
     dtype: str = "float32",
     device: str = "cpu",
+    keep_all: bool = False,
     **kwargs,
 ) -> List[AnnData]:
     """
@@ -114,7 +115,9 @@ def models_align(
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
-        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``
+        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
+        keep_all: Whether to retain all the optimal relationships obtained only based on the pi matrix, If ``keep_all``
+                  is False, the optimal relationships obtained based on the pi matrix and the nearest coordinates.
         **kwargs: Additional parameters that will be passed to ``pairwise_align`` function.
 
     Returns:
@@ -151,7 +154,9 @@ def models_align(
         modelA.obsm[key_added] = modelA_coords
         modelB.obsm[key_added] = modelB_coords
 
-        mapping_A_dict, mapping_B_dict = mapping_aligned_coords(X=modelA_coords, Y=modelB_coords, pi=pi)
+        mapping_A_dict, mapping_B_dict = mapping_aligned_coords(
+            X=modelA_coords, Y=modelB_coords, pi=pi, keep_all=keep_all
+        )
 
         modelA.uns[f"latter_{mapping_key_added}"] = mapping_A_dict.copy()
         modelA.uns[f"latter_{mapping_key_added}"]["raw_X"] = modelA.obsm[spatial_key][mapping_A_dict["pi_index"][:, 0]]
@@ -284,6 +289,7 @@ def models_center_align(
     distributions: Optional[List[np.ndarray]] = None,
     dtype: str = "float32",
     device: str = "cpu",
+    keep_all: bool = False,
 ) -> Tuple[AnnData, List[AnnData]]:
     """
     Align spatial coordinates of a list of models to a center model.
@@ -315,7 +321,9 @@ def models_center_align(
                   Otherwise, default will automatically calculate mappings.
         distributions: Distributions of spots for each slice. Otherwise, default is uniform.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
-        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``
+        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
+        keep_all: Whether to retain all the optimal relationships obtained only based on the pi matrix, If ``keep_all``
+                  is False, the optimal relationships obtained based on the pi matrix and the nearest coordinates.
 
     Returns:
         new_center_model: The center model.
@@ -355,7 +363,9 @@ def models_center_align(
         model.obsm[key_added] = model_coords
 
         center_model.uns[mapping_key_added] = {"mapping_relations": {"t": mapping_dict["tX"], "R": None}}
-        model.uns[f"center_{mapping_key_added}"] = mapping_aligned_coords(X=center_coords, Y=model_coords, pi=pi)[1]
+        model.uns[f"center_{mapping_key_added}"] = mapping_aligned_coords(
+            X=center_coords, Y=model_coords, pi=pi, keep_all=keep_all
+        )[1]
         model.uns[f"center_{mapping_key_added}"]["raw_X"] = center_model.obsm[spatial_key][
             model.uns[f"center_{mapping_key_added}"]["pi_index"][:, 0]
         ]

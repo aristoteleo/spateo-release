@@ -451,7 +451,52 @@ def generalized_procrustes_analysis(X, Y, pi):
 #######################################
 
 
-def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> Tuple[dict, dict]:
+def _get_optimal_mapping_relationship(
+    X: np.ndarray,
+    Y: np.ndarray,
+    pi: np.ndarray,
+    keep_all: bool = False,
+):
+    from scipy.spatial import cKDTree
+
+    X_max_index = np.argwhere((pi.T == pi.T.max(axis=0)).T)
+    Y_max_index = np.argwhere(pi == pi.max(axis=0))
+    if not keep_all:
+
+        values, counts = np.unique(X_max_index[:, 0], return_counts=True)
+        x_index_unique, x_index_repeat = values[counts == 1], values[counts != 1]
+        X_max_index_unique = X_max_index[np.isin(X_max_index[:, 0], x_index_unique)]
+
+        for i in x_index_repeat:
+            i_max_index = X_max_index[X_max_index[:, 0] == i]
+            i_kdtree = cKDTree(Y[i_max_index[:, 1]])
+            _, ii = i_kdtree.query(X[i], k=1)
+            X_max_index_unique = np.concatenate([X_max_index_unique, i_max_index[ii].reshape(1, 2)], axis=0)
+
+        values, counts = np.unique(Y_max_index[:, 1], return_counts=True)
+        y_index_unique, y_index_repeat = values[counts == 1], values[counts != 1]
+        Y_max_index_unique = Y_max_index[np.isin(Y_max_index[:, 1], y_index_unique)]
+
+        for i in y_index_repeat:
+            i_max_index = Y_max_index[Y_max_index[:, 1] == i]
+            i_kdtree = cKDTree(X[i_max_index[:, 0]])
+            _, ii = i_kdtree.query(Y[i], k=1)
+            Y_max_index_unique = np.concatenate([Y_max_index_unique, i_max_index[ii].reshape(1, 2)], axis=0)
+
+        X_max_index = X_max_index_unique.copy()
+        Y_max_index = Y_max_index_unique.copy()
+
+    X_pi_value = pi[X_max_index[:, 0], X_max_index[:, 1]].reshape(-1, 1)
+    Y_pi_value = pi[Y_max_index[:, 0], Y_max_index[:, 1]].reshape(-1, 1)
+    return X_max_index, X_pi_value, Y_max_index, Y_pi_value
+
+
+def mapping_aligned_coords(
+    X: np.ndarray,
+    Y: np.ndarray,
+    pi: np.ndarray,
+    keep_all: bool = False,
+) -> Tuple[dict, dict]:
     """
     Optimal mapping coordinates between X and Y.
 
@@ -459,6 +504,8 @@ def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> Tupl
         X: Aligned spatial coordinates.
         Y: Aligned spatial coordinates.
         pi: Mapping between the two layers output by PASTE.
+        keep_all: Whether to retain all the optimal relationships obtained only based on the pi matrix, If ``keep_all``
+                  is False, the optimal relationships obtained based on the pi matrix and the nearest coordinates.
 
     Returns:
         Two dicts of mapping_X, mapping_Y, pi_index, pi_value.
@@ -473,11 +520,9 @@ def mapping_aligned_coords(X: np.ndarray, Y: np.ndarray, pi: np.ndarray) -> Tupl
     pi = pi.copy()
 
     # Obtain the optimal mapping between points
-    X_max_index = np.argwhere((pi.T == pi.T.max(axis=0)).T)
-    X_pi_value = pi[X_max_index[:, 0], X_max_index[:, 1]].reshape(-1, 1)
-
-    Y_max_index = np.argwhere(pi == pi.max(axis=0))
-    Y_pi_value = pi[Y_max_index[:, 0], Y_max_index[:, 1]].reshape(-1, 1)
+    X_max_index, X_pi_value, Y_max_index, Y_pi_value = _get_optimal_mapping_relationship(
+        X=X, Y=Y, pi=pi, keep_all=keep_all
+    )
 
     mappings = []
     for max_index, pi_value, subset in zip(
