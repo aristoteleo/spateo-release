@@ -1235,8 +1235,8 @@ class BaseInterpreter:
         for _, spine in res.spines.items():
             spine.set_visible(True)
             spine.set_linewidth(0.75)
-        plt.xlabel("Source Cell")
-        plt.ylabel("Neighbor Cell")
+        plt.xlabel("Neighbor Cell")
+        plt.ylabel("Source Cell")
 
         title = (
             "Niche-Associated Differential Expression"
