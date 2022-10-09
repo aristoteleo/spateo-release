@@ -150,7 +150,7 @@ def find_cci_two_group(
         adata_r = adata[:, list(set(lr_network["to"]))]
         for g in adata.obs[group].unique():
             # Of all cells expressing particular receptor, what proportion are group g:
-            frac = (adata_r[adata_r.obs[group] == g].X > 0).sum(axis=0) / adata_r.X.sum(axis=0)
+            frac = (adata_r[adata_r.obs[group] == g].X > 0).sum(axis=0) / (adata_r.X > 0).sum(axis=0)
             adata_r.var[g + "_frac"] = frac.A1 if x_sparse else frac
 
         # Check if preprocessing has already been done:

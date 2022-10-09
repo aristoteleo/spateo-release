@@ -762,7 +762,6 @@ class GLMCV(BaseEstimator):
                 scores_fold.append(glm.score(X[val], y[val]))
             avg_score = np.mean(scores_fold)
             scores.append(avg_score)
-            self.logger.info(f"Average score for lambda = {np.round(rl, 6)}: {avg_score}")
 
             # Extract final parameters for this value of lambda:
             if idx == 0:

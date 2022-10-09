@@ -814,8 +814,12 @@ class BaseInterpreter:
         kwargs["distr"] = self.distr
 
         if categories is not None:
-            if not isinstance(categories, list):
-                categories = [categories]
+            self.categories = categories
+            # Flag indicating that resultant parameters matrix is not pairwise (i.e. that there's not one parameter
+            # for each cell type combination):
+            self.square = False
+            if not isinstance(self.categories, list):
+                self.categories = [self.categories]
 
             if cat_key is None:
                 self.logger.error(
@@ -824,10 +828,12 @@ class BaseInterpreter:
                 )
             # Filter adata for rows annotated as being any category in 'categories', and X block for columns annotated with
             # any of the categories in 'categories'.
-            self.adata = self.adata[self.adata.obs[cat_key].isin(categories)]
+            self.adata = self.adata[self.adata.obs[cat_key].isin(self.categories)]
             self.cell_names = self.adata.obs_names
-            X = X.filter(regex="|".join(categories))
+            X = X.filter(regex="|".join(self.categories))
             X = X.loc[self.adata.obs_names]
+        else:
+            self.square = True
 
         # Set preprocessing parameters to False- :func `prepare_data` handles these steps.
         results = Parallel(n_jobs)(
@@ -855,7 +861,7 @@ class BaseInterpreter:
         return coeffs, reconst
 
     # ---------------------------------------------------------------------------------------------------
-    # Downstream interpretation (mostly for lag model)
+    # Downstream interpretation
     # ---------------------------------------------------------------------------------------------------
     def visualize_params(
         self,
@@ -1107,46 +1113,61 @@ class BaseInterpreter:
                 )
                 lr_pair = list(self.niche_mats.keys())[0]
 
-            is_significant = is_significant.filter(lr_pair, axis="index").values
-            pvalues = pvalues.filter(lr_pair, axis="index").values
-            qvalues = qvalues.filter(lr_pair, axis="index").values
+            is_significant = is_significant.filter(lr_pair, axis="index")
+            pvalues = pvalues.filter(lr_pair, axis="index")
+            qvalues = qvalues.filter(lr_pair, axis="index")
 
             # Coefficients, etc. will also be a subset of the complete array:
-            coeffs_np = coeffs.filter(lr_pair, axis="columns").values
+            coeffs = coeffs.filter(lr_pair, axis="columns")
+            coeffs_np = coeffs.values
             # Significance, pvalues, qvalues filtered above
 
-            self.effect_size = np.concatenate(
-                np.expand_dims(
-                    np.split(coeffs_np.T, indices_or_sections=np.sqrt(coeffs_np.T.shape[0]), axis=0), axis=0
-                ),
-                axis=0,
-            )
+            # If the 'square' flag is set- that is, if the original parameters constitute at least one pairwise
+            # combination of cell types (which is not true if 'categories' are given to the fit function):
+            if self.square:
+                self.effect_size = np.concatenate(
+                    np.expand_dims(
+                        np.split(coeffs_np.T, indices_or_sections=np.sqrt(coeffs_np.T.shape[0]), axis=0), axis=0
+                    ),
+                    axis=0,
+                )
+            else:
+                self.effect_size = coeffs
 
         # Else if connection-based model, all regression coefficients already correspond to the interaction terms:
         else:
-            self.effect_size = np.concatenate(
+            if self.square:
+                self.effect_size = np.concatenate(
+                    np.expand_dims(
+                        np.split(coeffs_np.T, indices_or_sections=np.sqrt(coeffs_np.T.shape[0]), axis=0), axis=0
+                    ),
+                    axis=0,
+                )
+            else:
+                self.effect_size = coeffs
+
+        if self.square:
+            # Split array such that an nxn matrix is created, where n is 'n_features' (the number of cell type
+            # categories)
+            self.pvalues = np.concatenate(
+                np.expand_dims(np.split(pvalues, indices_or_sections=np.sqrt(pvalues.shape[0]), axis=0), axis=0),
+                axis=0,
+            )
+            self.qvalues = np.concatenate(
+                np.expand_dims(np.split(qvalues, indices_or_sections=np.sqrt(qvalues.shape[0]), axis=0), axis=0),
+                axis=0,
+            )
+            self.is_significant = np.concatenate(
                 np.expand_dims(
-                    np.split(coeffs_np.T, indices_or_sections=np.sqrt(coeffs_np.T.shape[0]), axis=0), axis=0
+                    np.split(is_significant, indices_or_sections=np.sqrt(is_significant.shape[0]), axis=0), axis=0
                 ),
                 axis=0,
             )
+        else:
+            self.pvalues = pvalues.T
+            self.qvalues = qvalues.T
+            self.is_significant = is_significant.T
 
-        # Split array such that an nxn matrix is created, where n is 'n_features' (the number of cell type
-        # categories)
-        self.pvalues = np.concatenate(
-            np.expand_dims(np.split(pvalues, indices_or_sections=np.sqrt(pvalues.shape[0]), axis=0), axis=0),
-            axis=0,
-        )
-        self.qvalues = np.concatenate(
-            np.expand_dims(np.split(qvalues, indices_or_sections=np.sqrt(qvalues.shape[0]), axis=0), axis=0),
-            axis=0,
-        )
-        self.is_significant = np.concatenate(
-            np.expand_dims(
-                np.split(is_significant, indices_or_sections=np.sqrt(is_significant.shape[0]), axis=0), axis=0
-            ),
-            axis=0,
-        )
 
     def type_coupling_analysis(
         self,
@@ -1194,7 +1215,13 @@ class BaseInterpreter:
 
         if not hasattr(self, "is_significant"):
             self.logger.warning(
-                "Significance dataframe does not exist- please run `get_sender_receiver_effects` " "first."
+                "Significance dataframe does not exist- please run :func `get_sender_receiver_effects` " "first."
+            )
+
+        if not hasattr(self, "square"):
+            self.logger.error(
+                ":func `type_coupling_analysis` can only be run if the design matrix can be made square- that is, "
+                "if all pairwise combinations of cell types are represented."
             )
 
         sig_df = pd.DataFrame(
@@ -1234,7 +1261,7 @@ class BaseInterpreter:
 
     def sender_effect(
         self,
-        receiver: str,
+        sender: str,
         plot_mode: str = "effect_size",
         gene_subset: Union[None, List[str]] = None,
         significance_threshold: float = 0.05,
@@ -1245,16 +1272,16 @@ class BaseInterpreter:
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
     ):
-        """Evaluates and visualizes the effect that each sender cell type has on specific genes in the receiver
-        cell type.
+        """Evaluates and visualizes the effect that the given sender cell type has on expression/abundance in each
+        possible receiver cell type.
 
         Args:
-            receiver: Receiver cell type label
+            sender: sender cell type label
             plot_mode: specifies what gets plotted.
                 Options:
                     - "qvals": elements of the plot represent statistical significance of the interaction
                     - "effect_size": elements of the plot represent numerical expression change induced in the
-                        receiver by the sender
+                        sender by the sender
             gene_subset: Names of genes to subset for plot. If None, will use all genes that were used in the
                 regression.
             significance_threshold: Set non-significant effect sizes to zero, where the threshold is given here
@@ -1283,72 +1310,139 @@ class BaseInterpreter:
         else:
             self.figsize = figsize
 
-        receiver_idx = self.celltype_names.index(receiver)
+        if self.square:
+            sender_idx = self.celltype_names.index(sender)
 
-        if plot_mode == "qvals":
-            # In the analysis process, the receiving cell types become aligned along the column axis:
-            arr = np.log(self.qvalues[receiver_idx, :, :].copy())
-            arr[arr < cut_pvals] = cut_pvals
-            df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
-            if gene_subset:
-                df = df.drop(index=receiver)[gene_subset]
+            if plot_mode == "qvals":
+                # In the analysis process, the receiving cell types become aligned along the column axis:
+                arr = np.log(self.qvalues[sender_idx, :, :].copy())
+                arr[arr < cut_pvals] = cut_pvals
+                df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
+                if gene_subset:
+                    df = df.drop(index=sender)[gene_subset]
 
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-            qv = sns.heatmap(
-                df.T,
-                square=True,
-                linecolor="grey",
-                linewidths=0.3,
-                cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
-                cmap=cmap,
-                vmin=-5,
-                vmax=0.0,
-                ax=ax,
-            )
+                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+                qv = sns.heatmap(
+                    df.T,
+                    square=True,
+                    linecolor="grey",
+                    linewidths=0.3,
+                    cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
+                    cmap=cmap,
+                    vmin=-5,
+                    vmax=0.0,
+                    ax=ax,
+                )
 
-            # Outer frame:
-            for _, spine in qv.spines.items():
-                spine.set_visible(True)
-                spine.set_linewidth(0.75)
+                # Outer frame:
+                for _, spine in qv.spines.items():
+                    spine.set_visible(True)
+                    spine.set_linewidth(0.75)
 
-        elif plot_mode == "effect_size":
-            arr = self.effect_size[receiver_idx, :, :].copy()
-            arr[np.where(self.qvalues[receiver_idx, :, :] > significance_threshold)] = 0
-            df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
-            if gene_subset:
-                df = df.drop(index=receiver)[gene_subset]
-            vmax = np.max(np.abs(df.values))
+            elif plot_mode == "effect_size":
+                arr = self.effect_size[sender_idx, :, :].copy()
+                arr[np.where(self.qvalues[sender_idx, :, :] > significance_threshold)] = 0
+                df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
+                if gene_subset:
+                    df = df.drop(index=sender)[gene_subset]
+                vmax = np.max(np.abs(df.values))
 
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-            es = sns.heatmap(
-                df.T,
-                square=True,
-                linecolor="grey",
-                linewidths=0.3,
-                cbar_kws={"label": "$\ln$ effect size", "location": "top"},
-                cmap=cmap,
-                vmin=-vmax,
-                vmax=vmax,
-                ax=ax,
-            )
+                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+                es = sns.heatmap(
+                    df.T,
+                    square=True,
+                    linecolor="grey",
+                    linewidths=0.3,
+                    cbar_kws={"label": "Effect size", "location": "top"},
+                    cmap=cmap,
+                    vmin=-vmax,
+                    vmax=vmax,
+                    ax=ax,
+                )
 
-            # Outer frame:
-            for _, spine in es.spines.items():
-                spine.set_visible(True)
-                spine.set_linewidth(0.75)
+                # Outer frame:
+                for _, spine in es.spines.items():
+                    spine.set_visible(True)
+                    spine.set_linewidth(0.75)
+
+            else:
+                logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
 
         else:
-            logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
+            if sender not in self.categories:
+                self.logger.error("Adata was subset to categories of interest and fit on those categories, "
+                                  "but the group provided to 'sender' is not one of those categories.")
 
-        plt.xlabel("Sender cell type", fontsize=9)
-        plt.title("Sender Effects on " + receiver, fontsize=9)
+            sender_cols = [col for col in self.effect_size.columns if sender in col.split("-")[1]]
+            # (note that what should be considered the "receiver" is the first cell type listed)
+
+            if plot_mode == "qvals":
+                df = np.log(self.qvalues[sender_cols].copy())
+                # Reformat columns for visual purposes:
+                receivers = [ct[0] for ct in df.columns.str.split("-")]
+                df.columns = [col.split("_")[1] for col in receivers]
+                df[df < cut_pvals] = cut_pvals
+                if gene_subset:
+                    df = df.loc[gene_subset]
+
+                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+                qv = sns.heatmap(
+                    df,
+                    square=True,
+                    linecolor="grey",
+                    linewidths=0.3,
+                    cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
+                    cmap=cmap,
+                    vmin=-5,
+                    vmax=0.0,
+                    ax=ax,
+                )
+
+                # Outer frame:
+                for _, spine in qv.spines.items():
+                    spine.set_visible(True)
+                    spine.set_linewidth(0.75)
+
+            elif plot_mode == "effect_size":
+                df = self.effect_size[sender_cols].copy()
+                # Reformat columns for visual purposes:
+                receivers = [ct[0] for ct in df.columns.str.split("-")]
+                df.columns = [col.split("_")[1] for col in receivers]
+                df.values[np.where(self.qvalues[sender_cols] > significance_threshold)] = 0
+                if gene_subset:
+                    df = df.loc[gene_subset]
+                vmax = np.max(np.abs(df.values))
+
+                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+                es = sns.heatmap(
+                    df,
+                    square=True,
+                    linecolor="grey",
+                    linewidths=0.3,
+                    cbar_kws={"label": "Effect size", "location": "top"},
+                    cmap=cmap,
+                    vmin=-vmax,
+                    vmax=vmax,
+                    ax=ax,
+                )
+
+                # Outer frame:
+                for _, spine in es.spines.items():
+                    spine.set_visible(True)
+                    spine.set_linewidth(0.75)
+
+            else:
+                logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
+
+        plt.xlabel("Receiver cell type", fontsize=9)
+        plt.title("{} effects on receivers".format(sender), fontsize=9)
         plt.tight_layout()
 
         save_return_show_fig_utils(
             save_show_or_return=save_show_or_return,
             show_legend=True,
             background="white",
-            prefix="sender_effects_on_{}".format(receiver),
+            prefix="{}_effects_on_receivers".format(sender),
             save_kwargs=save_kwargs,
             total_panels=1,
             fig=fig,
@@ -1359,7 +1453,7 @@ class BaseInterpreter:
 
     def receiver_effect(
         self,
-        sender: str,
+        receiver: str,
         plot_mode: str = "effect_size",
         gene_subset: Union[None, List[str]] = None,
         significance_threshold: float = 0.05,
@@ -1370,11 +1464,11 @@ class BaseInterpreter:
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
     ):
-        """Evaluates and visualizes the effect that one specific sender cell type has on select genes in all possible
-        receiver cell types.
+        """Evaluates and visualizes the effect that each possible sender cell type has on expression/abundance in a
+        selected receiver cell type.
 
         Args:
-            sender: Sender cell type label
+            receiver: Receiver cell type label
             plot_mode: specifies what gets plotted.
                 Options:
                     - "qvals": elements of the plot represent statistical significance of the interaction
@@ -1407,71 +1501,138 @@ class BaseInterpreter:
         else:
             self.figsize = figsize
 
-        sender_idx = self.celltype_names.index(sender)
+        if self.square:
+            receiver_idx = self.celltype_names.index(receiver)
 
-        if plot_mode == "qvals":
-            arr = np.log(self.qvalues[:, sender_idx, :].copy())
-            arr[arr < cut_pvals] = cut_pvals
-            df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
-            if gene_subset:
-                df = df.drop(index=sender)[gene_subset]
+            if plot_mode == "qvals":
+                arr = np.log(self.qvalues[:, receiver_idx, :].copy())
+                arr[arr < cut_pvals] = cut_pvals
+                df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
+                if gene_subset:
+                    df = df.drop(index=receiver)[gene_subset]
 
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-            qv = sns.heatmap(
-                df.T,
-                square=True,
-                linecolor="grey",
-                linewidths=0.3,
-                cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
-                cmap=cmap,
-                vmin=-5,
-                vmax=0.0,
-                ax=ax,
-            )
+                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+                qv = sns.heatmap(
+                    df.T,
+                    square=True,
+                    linecolor="grey",
+                    linewidths=0.3,
+                    cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
+                    cmap=cmap,
+                    vmin=-5,
+                    vmax=0.0,
+                    ax=ax,
+                )
 
-            # Outer frame:
-            for _, spine in qv.spines.items():
-                spine.set_visible(True)
-                spine.set_linewidth(0.75)
+                # Outer frame:
+                for _, spine in qv.spines.items():
+                    spine.set_visible(True)
+                    spine.set_linewidth(0.75)
 
-        elif plot_mode == "effect_size":
-            arr = self.effect_size[:, sender_idx, :].copy()
-            arr[np.where(self.qvalues[:, sender_idx, :] > significance_threshold)] = 0
-            df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
-            if gene_subset:
-                df = df.drop(index=sender)[gene_subset]
-            vmax = np.max(np.abs(df.values))
+            elif plot_mode == "effect_size":
+                arr = self.effect_size[:, receiver_idx, :].copy()
+                arr[np.where(self.qvalues[:, receiver_idx, :] > significance_threshold)] = 0
+                df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
+                if gene_subset:
+                    df = df.drop(index=receiver)[gene_subset]
+                vmax = np.max(np.abs(df.values))
 
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-            es = sns.heatmap(
-                df.T,
-                square=True,
-                linecolor="grey",
-                linewidths=0.3,
-                cbar_kws={"label": "$\ln$ effect size", "location": "top"},
-                cmap=cmap,
-                vmin=-vmax,
-                vmax=vmax,
-                ax=ax,
-            )
+                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+                es = sns.heatmap(
+                    df.T,
+                    square=True,
+                    linecolor="grey",
+                    linewidths=0.3,
+                    cbar_kws={"label": "Effect size", "location": "top"},
+                    cmap=cmap,
+                    vmin=-vmax,
+                    vmax=vmax,
+                    ax=ax,
+                )
 
-            # Outer frame:
-            for _, spine in es.spines.items():
-                spine.set_visible(True)
-                spine.set_linewidth(0.75)
+                # Outer frame:
+                for _, spine in es.spines.items():
+                    spine.set_visible(True)
+                    spine.set_linewidth(0.75)
+
+            else:
+                logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
 
         else:
-            logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
+            if receiver not in self.categories:
+                self.logger.error("Adata was subset to categories of interest and fit on those categories, "
+                                  "but the provided group to 'receiver' is not one of those categories.")
 
-        plt.xlabel("Receiving cell type", fontsize=9)
-        plt.title("{} effects on receivers".format(sender), fontsize=9)
+            receiver_cols = [col for col in self.effect_size.columns if receiver in col.split("-")[0]]
+            # (note that what should be considered the "receiver" is the first cell type listed)
+
+            if plot_mode == "qvals":
+                df = np.log(self.qvalues[receiver_cols].copy())
+                # Reformat columns for visual purposes:
+                senders = [ct[1] for ct in df.columns.str.split("-")]
+                df.columns = [col.split("_")[1] for col in senders]
+                df[df < cut_pvals] = cut_pvals
+                if gene_subset:
+                    df = df.loc[gene_subset]
+
+                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+                qv = sns.heatmap(
+                    df,
+                    square=True,
+                    linecolor="grey",
+                    linewidths=0.3,
+                    cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
+                    cmap=cmap,
+                    vmin=-5,
+                    vmax=0.0,
+                    ax=ax,
+                )
+
+                # Outer frame:
+                for _, spine in qv.spines.items():
+                    spine.set_visible(True)
+                    spine.set_linewidth(0.75)
+
+            elif plot_mode == "effect_size":
+                df = self.effect_size[receiver_cols].copy()
+                # Reformat columns for visual purposes:
+                senders = [ct[1] for ct in df.columns.str.split("-")]
+                df.columns = [col.split("_")[1] for col in senders]
+                df.values[np.where(self.qvalues[receiver_cols] > significance_threshold)] = 0
+                if gene_subset:
+                    df = df.loc[gene_subset]
+                vmax = np.max(np.abs(df.values))
+
+                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+                es = sns.heatmap(
+                    df,
+                    square=True,
+                    linecolor="grey",
+                    linewidths=0.3,
+                    cbar_kws={"label": "Effect size", "location": "top"},
+                    cmap=cmap,
+                    vmin=-vmax,
+                    vmax=vmax,
+                    ax=ax,
+                )
+
+                # Outer frame:
+                for _, spine in es.spines.items():
+                    spine.set_visible(True)
+                    spine.set_linewidth(0.75)
+
+            else:
+                logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
+
+        plt.xlabel("Sender cell type", fontsize=9)
+        plt.title("Sender Effects on " + receiver, fontsize=9)
         plt.tight_layout()
 
         save_return_show_fig_utils(
             save_show_or_return=save_show_or_return,
             show_legend=True,
             background="white",
-            prefix="{}_effects_on_receiver".format(sender),
+            prefix="sender_effects_on_{}".format(receiver),
             save_kwargs=save_kwargs,
             total_panels=1,
             fig=fig,
@@ -1524,49 +1685,98 @@ class BaseInterpreter:
         else:
             self.figsize = figsize
 
-        receiver_idx = self.celltype_names.index(receiver)
-        sender_idx = self.celltype_names.index(sender)
+        # Set fold-change threshold if not already provided:
+        if effect_size_threshold is None:
+            effect_size_threshold = np.percentile(self.effect_size, 95)
 
         fig, ax = plt.subplots(1, 1, figsize=self.figsize)
         ax.grid(False)
 
-        # Set fold-change threshold if not already provided:
-        if effect_size_threshold is None:
-            effect_size_threshold = np.percentile(self.effect_size)
+        if self.square:
+            receiver_idx = self.celltype_names.index(receiver)
+            sender_idx = self.celltype_names.index(sender)
 
-        # All non-significant features:
-        qval_filter = np.where(self.qvalues[receiver_idx, sender_idx, :] >= significance_threshold)
-        vmax = np.max(np.abs(self.effect_size[receiver_idx, sender_idx, :]))
+            # All non-significant features:
+            qval_filter = np.where(self.qvalues[sender_idx, receiver_idx, :] >= significance_threshold)
+            vmax = np.max(np.abs(self.effect_size[sender_idx, receiver_idx, :]))
 
-        sns.scatterplot(
-            x=self.effect_size[receiver_idx, sender_idx, :][qval_filter],
-            y=-np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter],
-            color="white",
-            edgecolor="black",
-            s=50,
-            ax=ax,
-        )
+            if qval_filter[0].size > 0:
+                sns.scatterplot(
+                    x=self.effect_size[sender_idx, receiver_idx, :][qval_filter],
+                    y=-np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter],
+                    color="white",
+                    edgecolor="black",
+                    s=50,
+                    ax=ax,
+                )
 
-        # Identify subset that may be significant, but which doesn't pass the fold-change threshold:
-        qval_filter = np.where(self.qvalues[receiver_idx, sender_idx, :] < significance_threshold)
-        x = self.effect_size[receiver_idx, sender_idx, :][qval_filter]
-        fc_filter = np.where(x < effect_size_threshold)
-        y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter])
-        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color="darkgrey", edgecolor="black", s=50, ax=ax)
+            # Identify subset that may be significant, but which doesn't pass the fold-change threshold:
+            qval_filter = np.where(self.qvalues[sender_idx, receiver_idx, :] < significance_threshold)
+            x = self.effect_size[sender_idx, receiver_idx, :][qval_filter]
+            y = -np.nan_to_num(np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter], posinf=14.5,
+                neginf=-14.5)
+            fc_filter = np.where(x < effect_size_threshold)
+            if qval_filter[0].size > 0:
+                sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color="darkgrey", edgecolor="black", s=50, ax=ax)
 
-        # Identify subset that are significantly downregulated:
-        dreg_color = matplotlib.cm.get_cmap("winter")(0)
-        x = self.effect_size[receiver_idx, sender_idx, :][qval_filter]
-        fc_filter = np.where(x <= -effect_size_threshold)
-        y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter], neginf=-14.5)
-        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=50, ax=ax)
+            # Identify subset that are significantly downregulated:
+            dreg_color = matplotlib.cm.get_cmap("winter")(0)
+            y = -np.nan_to_num(np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter], posinf=14.5,
+                neginf=-14.5)
+            fc_filter = np.where(x <= -effect_size_threshold)
+            if qval_filter[0].size > 0:
+                sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=50, ax=ax)
 
-        # Identify subset that are significantly upregulated:
-        ureg_color = matplotlib.cm.get_cmap("autumn")(0)
-        x = self.effect_size[receiver_idx, sender_idx, :][qval_filter]
-        fc_filter = np.where(x >= effect_size_threshold)
-        y = -np.nan_to_num(np.log10(self.qvalues[receiver_idx, sender_idx, :])[qval_filter], neginf=-14.5)
-        sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=ureg_color, edgecolor="black", s=50, ax=ax)
+            # Identify subset that are significantly upregulated:
+            ureg_color = matplotlib.cm.get_cmap("autumn")(0)
+            fc_filter = np.where(x >= effect_size_threshold)
+            if qval_filter[0].size > 0:
+                sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=ureg_color, edgecolor="black", s=50, ax=ax)
+
+        else:
+            if sender not in self.categories and receiver not in self.categories:
+                self.logger.error("Adata was subset to categories of interest and fit on those categories, "
+                                  "but neither the sender nor the receiver group are of those categories.")
+
+            # All non-significant features:
+            sender_receiver_cols = [col for col in self.effect_size.columns if sender in col.split("-")[1] and receiver
+                                    in col.split("-")[0]]
+            qval_filter = np.where(self.qvalues[sender_receiver_cols] >= significance_threshold)
+            vmax = np.max(np.abs(self.effect_size[sender_receiver_cols].values))
+
+            if qval_filter[0].size > 0:
+                sns.scatterplot(
+                    x=self.effect_size[sender_receiver_cols].values[qval_filter],
+                    y=-np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter],
+                    color="white",
+                    edgecolor="black",
+                    s=50,
+                    ax=ax,
+                )
+
+            qval_filter = np.where(self.qvalues[sender_receiver_cols] < significance_threshold)
+            x = self.effect_size[sender_receiver_cols].values[qval_filter]
+            y = -np.nan_to_num(np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter], posinf=14.5,
+                neginf=-14.5)
+
+            # Identify subset that may be significant, but which doesn't pass the effect size threshold:
+            fc_filter = np.where(x < effect_size_threshold)
+            if qval_filter[0].size > 0:
+                sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color="darkgrey", edgecolor="black", s=50, ax=ax)
+
+            # Identify subset that are significantly downregulated:
+            dreg_color = matplotlib.cm.get_cmap("winter")(0)
+            fc_filter = np.where(x <= -effect_size_threshold)
+            y = -np.nan_to_num(np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter], posinf=14.5,
+                neginf=-14.5)
+            if qval_filter[0].size > 0:
+                sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=50, ax=ax)
+
+            # Identify subset that are significantly upregulated:
+            ureg_color = matplotlib.cm.get_cmap("autumn")(0)
+            fc_filter = np.where(x >= effect_size_threshold)
+            if qval_filter[0].size > 0:
+                sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=ureg_color, edgecolor="black", s=50, ax=ax)
 
         # Plot configuration:
         ax.set_xlim((-vmax * 1.1, vmax * 1.1))
