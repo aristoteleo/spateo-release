@@ -1051,7 +1051,7 @@ class BaseInterpreter:
 
         return is_significant, pvalues, qvalues
 
-    def get_sender_receiver_effects(
+    def get_effect_sizes(
         self,
         coeffs: pd.DataFrame,
         significance_threshold: float = 0.05,
@@ -1061,7 +1061,7 @@ class BaseInterpreter:
         """For each predictor and each feature, determine if the influence of said predictor in predicting said
         feature is significant.
 
-        Additionally, for each feature and each sender-receiver category pair, determines the log fold-change that
+        Additionally, for each feature and each sender-receiver category pair, determines the effect size that
         the sender induces in the feature for the receiver.
 
         Only valid if the model specified uses the connections between categories as variables for the regression-
@@ -1168,8 +1168,7 @@ class BaseInterpreter:
             self.qvalues = qvalues.T
             self.is_significant = is_significant.T
 
-
-    def type_coupling_analysis(
+    def type_coupling(
         self,
         cmap: str = "Reds",
         fontsize: Union[None, int] = None,
@@ -1259,7 +1258,7 @@ class BaseInterpreter:
             return_all_list=None,
         )
 
-    def sender_effect(
+    def sender_effect_on_all_receivers(
         self,
         sender: str,
         plot_mode: str = "effect_size",
@@ -1370,8 +1369,10 @@ class BaseInterpreter:
 
         else:
             if sender not in self.categories:
-                self.logger.error("Adata was subset to categories of interest and fit on those categories, "
-                                  "but the group provided to 'sender' is not one of those categories.")
+                self.logger.error(
+                    "Adata was subset to categories of interest and fit on those categories, "
+                    "but the group provided to 'sender' is not one of those categories."
+                )
 
             sender_cols = [col for col in self.effect_size.columns if sender in col.split("-")[1]]
             # (note that what should be considered the "receiver" is the first cell type listed)
@@ -1451,7 +1452,7 @@ class BaseInterpreter:
             return_all_list=None,
         )
 
-    def receiver_effect(
+    def all_senders_effect_on_receiver(
         self,
         receiver: str,
         plot_mode: str = "effect_size",
@@ -1560,8 +1561,10 @@ class BaseInterpreter:
 
         else:
             if receiver not in self.categories:
-                self.logger.error("Adata was subset to categories of interest and fit on those categories, "
-                                  "but the provided group to 'receiver' is not one of those categories.")
+                self.logger.error(
+                    "Adata was subset to categories of interest and fit on those categories, "
+                    "but the provided group to 'receiver' is not one of those categories."
+                )
 
             receiver_cols = [col for col in self.effect_size.columns if receiver in col.split("-")[0]]
             # (note that what should be considered the "receiver" is the first cell type listed)
@@ -1713,16 +1716,18 @@ class BaseInterpreter:
             # Identify subset that may be significant, but which doesn't pass the fold-change threshold:
             qval_filter = np.where(self.qvalues[sender_idx, receiver_idx, :] < significance_threshold)
             x = self.effect_size[sender_idx, receiver_idx, :][qval_filter]
-            y = -np.nan_to_num(np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter], posinf=14.5,
-                neginf=-14.5)
+            y = -np.nan_to_num(
+                np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter], posinf=14.5, neginf=-14.5
+            )
             fc_filter = np.where(x < effect_size_threshold)
             if qval_filter[0].size > 0:
                 sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color="darkgrey", edgecolor="black", s=50, ax=ax)
 
             # Identify subset that are significantly downregulated:
             dreg_color = matplotlib.cm.get_cmap("winter")(0)
-            y = -np.nan_to_num(np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter], posinf=14.5,
-                neginf=-14.5)
+            y = -np.nan_to_num(
+                np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter], posinf=14.5, neginf=-14.5
+            )
             fc_filter = np.where(x <= -effect_size_threshold)
             if qval_filter[0].size > 0:
                 sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=50, ax=ax)
@@ -1735,12 +1740,15 @@ class BaseInterpreter:
 
         else:
             if sender not in self.categories and receiver not in self.categories:
-                self.logger.error("Adata was subset to categories of interest and fit on those categories, "
-                                  "but neither the sender nor the receiver group are of those categories.")
+                self.logger.error(
+                    "Adata was subset to categories of interest and fit on those categories, "
+                    "but neither the sender nor the receiver group are of those categories."
+                )
 
             # All non-significant features:
-            sender_receiver_cols = [col for col in self.effect_size.columns if sender in col.split("-")[1] and receiver
-                                    in col.split("-")[0]]
+            sender_receiver_cols = [
+                col for col in self.effect_size.columns if sender in col.split("-")[1] and receiver in col.split("-")[0]
+            ]
             qval_filter = np.where(self.qvalues[sender_receiver_cols] >= significance_threshold)
             vmax = np.max(np.abs(self.effect_size[sender_receiver_cols].values))
 
@@ -1756,8 +1764,9 @@ class BaseInterpreter:
 
             qval_filter = np.where(self.qvalues[sender_receiver_cols] < significance_threshold)
             x = self.effect_size[sender_receiver_cols].values[qval_filter]
-            y = -np.nan_to_num(np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter], posinf=14.5,
-                neginf=-14.5)
+            y = -np.nan_to_num(
+                np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter], posinf=14.5, neginf=-14.5
+            )
 
             # Identify subset that may be significant, but which doesn't pass the effect size threshold:
             fc_filter = np.where(x < effect_size_threshold)
@@ -1767,8 +1776,9 @@ class BaseInterpreter:
             # Identify subset that are significantly downregulated:
             dreg_color = matplotlib.cm.get_cmap("winter")(0)
             fc_filter = np.where(x <= -effect_size_threshold)
-            y = -np.nan_to_num(np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter], posinf=14.5,
-                neginf=-14.5)
+            y = -np.nan_to_num(
+                np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter], posinf=14.5, neginf=-14.5
+            )
             if qval_filter[0].size > 0:
                 sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=50, ax=ax)
 
