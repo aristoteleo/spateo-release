@@ -2,24 +2,14 @@
 """
 import os
 
-import ngs_tools as ngs
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 
-try:
-    from typing import Literal
-except ImportError:
-    from typing_extensions import Literal
-
 from ..configuration import SKM
 from ..logging import logger_manager as lm
 from .utils import get_points_props
-
-VERSIONS = {
-    "STARmap": ngs.chemistry.get_chemistry("STARmap"),
-}
 
 
 def read_starmap_as_anndata(data_dir: str) -> AnnData:
@@ -65,14 +55,11 @@ def read_starmap_positions_as_dataframe(path: str) -> pd.DataFrame:
 
 def read_starmap(
     data_dir: str,
-    version: Literal["starmap"] = "starmap",
 ) -> AnnData:
     """Read STARmap data as AnnData.
 
     Args:
         data_dir: Path to directory containing STARmap files.
-        version: STARmap technology version. Currently only used to set the scale and
-            scale units of each unit coordinate. This may change in the future.
     """
     adata = read_starmap_as_anndata(data_dir)
     df_labels = read_starmap_positions_as_dataframe(os.path.join(data_dir, "labels.npz"))
@@ -86,9 +73,6 @@ def read_starmap(
     adata.obsm["bbox"] = ordered_props.filter(regex="bbox-").values
 
     scale, scale_unit = 1.0, None
-    if version in VERSIONS:
-        resolution = VERSIONS[version].resolution
-        scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)

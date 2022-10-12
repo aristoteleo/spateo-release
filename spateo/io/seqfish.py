@@ -1,20 +1,12 @@
 """IO functions for seqFISH-PLUS technology.
 """
-import ngs_tools as ngs
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 
-try:
-    from typing import Literal
-except ImportError:
-    from typing_extensions import Literal
-
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-
-VERSIONS = {"seqFISH": ngs.chemistry.get_chemistry("seqFISH")}
 
 
 def read_seqfish_meta_as_dataframe(
@@ -83,7 +75,6 @@ def read_seqfish(
     fov_offset: pd.DataFrame = None,
     accumulate_x: bool = False,
     accumulate_y: bool = False,
-    version: Literal["seqfish"] = "seqfish",
 ) -> AnnData:
     """Read seqFISH data as AnnData.
 
@@ -94,8 +85,6 @@ def read_seqfish(
             {'fov':[fov_1, ..], 'x_offset':[x_offset_1, ..], 'y_offset':[y_offset_1, ..]}
         accumulate_x: whether to accumulate x_offset
         accumulate_y: whether to accumulate y_offset
-        version: seqFISH technology version. Currently only used to set the scale and
-            scale units of each unit coordinate. This may change in the future.
     """
     df = pd.read_csv(path, dtype=np.uint16)
 
@@ -115,9 +104,6 @@ def read_seqfish(
     adata.obsm["spatial"] = np.array(df_loc["spatial"].to_list())
 
     scale, scale_unit = 1.0, None
-    if version in VERSIONS:
-        resolution = VERSIONS[version].resolution
-        scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)

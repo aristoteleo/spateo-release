@@ -1,20 +1,12 @@
 """IO functions for MERFISH technology.
 """
-import ngs_tools as ngs
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 
-try:
-    from typing import Literal
-except ImportError:
-    from typing_extensions import Literal
-
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-
-VERSIONS = {"MERFISH": ngs.chemistry.get_chemistry("MERFISH")}
 
 
 def read_merfish_as_anndata(path: str) -> AnnData:
@@ -52,15 +44,12 @@ def read_merfish_positions_as_dataframe(path: str) -> pd.DataFrame:
 def read_merfish(
     path: str,
     positions_path: str,
-    version: Literal["merfish"] = "merfish",
 ) -> AnnData:
     """Read MERFISH data as AnnData.
 
     Args:
         path: Path to matrix files
         positions_path: Path to xlsx containing spatial coordinates
-        version: MERFISH technology version. Currently only used to set the scale and
-            scale units of each unit coordinate. This may change in the future.
     """
 
     adata = read_merfish_as_anndata(path)
@@ -70,9 +59,6 @@ def read_merfish(
     adata.obsm["spatial"] = np.array(df_loc)
 
     scale, scale_unit = 1.0, None
-    if version in VERSIONS:
-        resolution = VERSIONS[version].resolution
-        scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)

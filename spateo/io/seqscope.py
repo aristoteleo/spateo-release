@@ -1,7 +1,7 @@
 """IO functions for SeqScope technology.
 """
 import os
-from typing import List, Optional, Union
+from typing import Optional
 
 import ngs_tools as ngs
 import numpy as np
@@ -20,7 +20,7 @@ from ..logging import logger_manager as lm
 from .utils import bin_indices, get_bin_props
 
 VERSIONS = {
-    "SeqScope": ngs.chemistry.get_chemistry("SeqScope"),
+    "seqscope": ngs.chemistry.get_chemistry("SeqScope"),
 }
 
 
