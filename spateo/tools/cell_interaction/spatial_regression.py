@@ -1213,9 +1213,7 @@ class BaseInterpreter:
             self.figsize = figsize
 
         if not hasattr(self, "is_significant"):
-            self.logger.warning(
-                "Significance dataframe does not exist- please run :func `get_sender_receiver_effects` " "first."
-            )
+            self.logger.warning("Significance dataframe does not exist- please run :func `get_effect_sizes` " "first.")
 
         if not hasattr(self, "square"):
             self.logger.error(
