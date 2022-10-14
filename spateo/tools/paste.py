@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import ot
@@ -140,6 +140,7 @@ def pairwise_align(
     sampleA: AnnData,
     sampleB: AnnData,
     layer: str = "X",
+    genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     alpha: float = 0.1,
     dissimilarity: str = "kl",
@@ -158,8 +159,9 @@ def pairwise_align(
     Args:
         sampleA: Sample A to align.
         sampleB: Sample B to align.
-        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinates.
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
+        genes: Genes used for calculation. If None, use all common genes for calculation.
+        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinates.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
                 When α = 0 only the gene expression data is taken into account,
                 while when α =1 only the spatial coordinates are taken into account.
@@ -183,6 +185,7 @@ def pairwise_align(
 
     # subset for common genes
     common_genes = filter_common_genes(sampleA.var.index, sampleB.var.index)
+    common_genes = common_genes if genes is None else intersect_lsts(common_genes, genes)
     sampleA, sampleB = sampleA[:, common_genes], sampleB[:, common_genes]
 
     # Calculate spatial distances
@@ -272,6 +275,7 @@ def center_align(
     init_center_sample: AnnData,
     samples: List[AnnData],
     layer: str = "X",
+    genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     lmbda: Optional[np.ndarray] = None,
     alpha: float = 0.1,
@@ -294,8 +298,9 @@ def center_align(
     Args:
         init_center_sample: Sample to use as the initialization for center alignment; Make sure to include gene expression and spatial information.
         samples: List of samples to use in the center alignment.
-        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinates.
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
+        genes: Genes used for calculation. If None, use all common genes for calculation.
+        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinates.
         lmbda: List of probability weights assigned to each slice; If ``None``, use uniform weights.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
                 When α = 0 only the gene expression data is taken into account,
@@ -336,6 +341,7 @@ def center_align(
     all_samples_genes = [s[0].var.index for s in samples]
     all_samples_genes.append(init_center_sample.var.index)
     common_genes = filter_common_genes(*all_samples_genes)
+    common_genes = common_genes if genes is None else intersect_lsts(common_genes, genes)
 
     # subset common genes
     init_center_sample = init_center_sample[:, common_genes]

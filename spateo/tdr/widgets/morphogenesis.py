@@ -18,6 +18,7 @@ from .interpolations import get_X_Y_grid
 def cell_directions(
     adatas: List[AnnData],
     layer: str = "X",
+    genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "align_spatial",
     key_added: str = "mapping",
     alpha: float = 0.001,
@@ -35,6 +36,7 @@ def cell_directions(
     Args:
         adatas: AnnData object of samples from continuous developmental stages.
         layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        genes: Genes used for calculation. If None, use all common genes for calculation.
         spatial_key: The key in ``.obsm`` that corresponds to the spatial coordinate of each cell.
         The key that will be used for the vector field key in ``.uns``.
         key_added: The key that will be used in ``.obsm``.
@@ -69,6 +71,7 @@ def cell_directions(
             sampleB=adataB.copy(),
             spatial_key=spatial_key,
             layer=layer,
+            genes=genes,
             alpha=alpha,
             numItermax=numItermax,
             numItermaxEmd=numItermaxEmd,

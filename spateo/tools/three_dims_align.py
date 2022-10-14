@@ -88,6 +88,7 @@ def rigid_transform_3D(
 def models_align(
     models: List[AnnData],
     layer: str = "X",
+    genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
     mapping_key_added: str = "models_align",
@@ -105,6 +106,7 @@ def models_align(
     Args:
         models: List of models (AnnData Object).
         layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        genes: Genes used for calculation. If None, use all common genes for calculation.
         spatial_key: The key in ``.obsm`` that corresponds to the raw spatial coordinate.
         key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         mapping_key_added: `.uns` key under which to add the alignment info.
@@ -136,8 +138,9 @@ def models_align(
         pi, _ = pairwise_align(
             sampleA=modelA.copy(),
             sampleB=modelB.copy(),
-            spatial_key=key_added,
             layer=layer,
+            genes=genes,
+            spatial_key=key_added,
             alpha=alpha,
             numItermax=numItermax,
             numItermaxEmd=numItermaxEmd,
@@ -187,6 +190,7 @@ def models_align_ref(
     n_sampling: Optional[int] = 2000,
     sampling_method: str = "trn",
     layer: str = "X",
+    genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
     mapping_key_added: str = "models_align",
@@ -206,6 +210,7 @@ def models_align_ref(
         n_sampling: When ``models_ref`` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
         sampling_method: The method to sample data points, can be one of ``["trn", "kmeans", "random"]``.
         layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        genes: Genes used for calculation. If None, use all common genes for calculation.
         spatial_key: The key in ``.obsm`` that corresponds to the raw spatial coordinate.
         key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         mapping_key_added: `.uns` key under which to add the alignment info.
@@ -239,6 +244,7 @@ def models_align_ref(
     align_models_ref = models_align(
         models=models_ref,
         layer=layer,
+        genes=genes,
         spatial_key=spatial_key,
         key_added=key_added,
         mapping_key_added=mapping_key_added,
@@ -272,6 +278,7 @@ def models_center_align(
     init_center_model: AnnData,
     models: List[AnnData],
     layer: str = "X",
+    genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
     mapping_key_added: str = "models_align",
@@ -298,6 +305,7 @@ def models_center_align(
         init_center_model: AnnData object to use as the initialization for center alignment; Make sure to include gene expression and spatial information.
         models: List of AnnData objects to use in the center alignment.
         layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        genes: Genes used for calculation. If None, use all common genes for calculation.
         spatial_key: The key in ``.obsm`` that corresponds to the raw spatial coordinate.
         key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         mapping_key_added: `.uns` key under which to add the alignment info.
@@ -337,6 +345,7 @@ def models_center_align(
         init_center_sample=init_center_model,
         samples=models,
         layer=layer,
+        genes=genes,
         spatial_key=spatial_key,
         lmbda=lmbda,
         alpha=alpha,
@@ -402,6 +411,7 @@ def models_center_align_ref(
     n_sampling: Optional[int] = 1000,
     sampling_method: str = "trn",
     layer: str = "X",
+    genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
     mapping_key_added: str = "models_align",
@@ -430,6 +440,7 @@ def models_center_align_ref(
         n_sampling: When `models_ref` is None, new data containing n_sampling coordinate points will be automatically generated for alignment.
         sampling_method: The method to sample data points, can be one of ["trn", "kmeans", "random"].
         layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        genes: Genes used for calculation. If None, use all common genes for calculation.
         spatial_key: The key in ``.obsm`` that corresponds to the raw spatial coordinate.
         key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         mapping_key_added: `.uns` key under which to add the alignment info.
@@ -484,6 +495,7 @@ def models_center_align_ref(
         init_center_model=init_center_model,
         models=models_ref,
         layer=layer,
+        genes=genes,
         spatial_key=spatial_key,
         key_added=key_added,
         mapping_key_added=mapping_key_added,
