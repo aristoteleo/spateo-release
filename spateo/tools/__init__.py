@@ -42,3 +42,11 @@ from .three_dims_align import (
     rigid_transform_2D,
     rigid_transform_3D,
 )
+from .ST_regression.generalized_lm import fit_glm
+from .ST_regression.regression_utils import plot_prior_vs_data
+from .ST_regression.spatial_regression import (
+    Category_Interpreter,
+    Ligand_Lagged_Interpreter,
+    Niche_Interpreter,
+    Niche_LR_Interpreter,
+)

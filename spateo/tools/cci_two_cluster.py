@@ -279,7 +279,7 @@ def find_cci_two_group(
     return res
 
 
-# Wrapper for plotting:
+# Wrapper for preprocessing for plotting:
 def prepare_cci_df(cci_df: pd.DataFrame, means_col: str, pval_col: str, lr_pair_col: str, sr_pair_col: str):
     """
     Given a dataframe generated from the output of :func `cci_two_cluster`, prepare for visualization by heatmap by
