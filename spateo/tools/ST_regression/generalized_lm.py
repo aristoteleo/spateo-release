@@ -4,8 +4,6 @@ Rather than assuming the response variable necessarily follows the normal distri
 specification of models whose response variable follows different distributions (e.g. Poisson or Gamma),
 although allows also for normal (Gaussian) modeling.
 Additionally features capability to perform elastic net regularized regression.
-
-:class `GLM` and :class `GLMCV` adapted from https://github.com/glm-tools/pyglmnet.
 """
 import time
 from typing import List, Tuple, Union
@@ -785,6 +783,8 @@ class GLMCV(BaseEstimator):
         self.reg_lambda_opt_ = self.reg_lambda[opt]
         self.glm_ = glms[opt]
         self.scores_ = scores
+        # Optimal score:
+        self.opt = opt
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -957,10 +957,12 @@ def fit_glm(
         kwargs["reg_lambda"] = reg_lambda_given
 
     reg = GLMCV(**kwargs)
+    # Store score for the chosen feature (pseudo-R^2 or deviance):
+    adata.uns[f"{y_feat}_{kwargs['score_metric']}"] = reg.opt
 
     rex = reg.fit_predict(X, y)
     logger.info(f"Optimal lambda regularization value for {y_feat}: {reg.reg_lambda_opt_}.")
-    adata.uns["reg_intercept"] = reg.beta0_
+    adata.uns[f"{y_feat}_reg_intercept"] = reg.beta0_
     Beta = reg.beta_
     if return_model:
         return Beta, rex, reg

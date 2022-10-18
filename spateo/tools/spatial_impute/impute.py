@@ -20,7 +20,7 @@ from torch.backends import cudnn
 from tqdm import tqdm
 
 from ...configuration import SKM
-from ...preprocessing.find_neighbors import construct_pairwise, normalize_adj
+from ..find_neighbors import construct_pairwise, normalize_adj
 
 
 # -------------------------------------------- Tensor operations -------------------------------------------- #
@@ -100,7 +100,7 @@ class STGNN:
     random_seed : int, default 50
         Sets seed for all random number generators
     add_regularization : bool, default True
-        Set True to include weight-based penalty term in representation learning. This should be set True in
+        Set True to include weight-based penalty term in representation learning.
     device : str, default 'cpu'
         Options: 'cpu', 'cuda:_'. Perform computations on CPU or GPU. If GPU, provide the name of the device to run
         computations
