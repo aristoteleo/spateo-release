@@ -774,8 +774,10 @@ class GLMCV(BaseEstimator):
         # Find the lambda that maximizes (for r-squared) or minimizes (for deviance) the scoring metric:
         if self.score_metric == "deviance":
             opt = np.array(scores).argmin()
+            opt_score = np.array(scores).min()
         elif self.score_metric == "pseudo_r2":
             opt = np.array(scores).argmax()
+            opt_score = np.array(scores).max()
         else:
             self.logger.error(f"Unknown score_metric: {self.score_metric}")
 
@@ -784,7 +786,7 @@ class GLMCV(BaseEstimator):
         self.glm_ = glms[opt]
         self.scores_ = scores
         # Optimal score:
-        self.opt = opt
+        self.opt_score = opt_score
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -847,7 +849,7 @@ def fit_glm(
     n_gs_cv: Union[None, int] = None,
     return_model: bool = True,
     **kwargs,
-) -> Tuple[np.ndarray, np.ndarray, Union[None, GLMCV]]:
+) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray, Union[None, GLMCV]]:
     """Wrapper for fitting a generalized elastic net linear model to large biological data, with automated finding of
     optimum lambda regularization parameter and optional further grid search for parameter optimization.
 
@@ -957,14 +959,14 @@ def fit_glm(
         kwargs["reg_lambda"] = reg_lambda_given
 
     reg = GLMCV(**kwargs)
-    # Store score for the chosen feature (pseudo-R^2 or deviance):
-    adata.uns[f"{y_feat}_{kwargs['score_metric']}"] = reg.opt
 
     rex = reg.fit_predict(X, y)
     logger.info(f"Optimal lambda regularization value for {y_feat}: {reg.reg_lambda_opt_}.")
-    adata.uns[f"{y_feat}_reg_intercept"] = reg.beta0_
+    intercept = reg.beta0_
     Beta = reg.beta_
+    opt_score = reg.opt_score
+    # Returns: intercept, coefficients, metric for the optimum lambda, reconstruction, optionally model object
     if return_model:
-        return Beta, rex, reg
+        return intercept, Beta, opt_score, rex, reg
     else:
-        return Beta, rex
+        return intercept, Beta, opt_score, rex

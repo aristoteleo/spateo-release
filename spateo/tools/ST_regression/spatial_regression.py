@@ -850,12 +850,16 @@ class BaseInterpreter:
             )
             for cur_g in self.genes
         )
-        coeffs = [item[0] for item in results]
-        reconst = [item[1] for item in results]
+        intercepts = [item[0] for item in results]
+        coeffs = [item[1] for item in results]
+        opt_scores = [item[2] for item in results]
+        reconst = [item[3] for item in results]
 
         coeffs = pd.DataFrame(coeffs, index=self.genes, columns=X.columns)
         for cn in coeffs.columns:
             self.adata.var.loc[:, cn] = coeffs[cn]
+        self.adata.uns["pseudo_r2"] = dict(zip(self.genes, opt_scores))
+        self.adata.uns["intercepts"] = dict(zip(self.genes, intercepts))
         # Nested list transforms into dataframe rows- instantiate and transpose to get to correct shape:
         reconst = pd.DataFrame(reconst, index=self.genes, columns=self.cell_names).T
         return coeffs, reconst
