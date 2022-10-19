@@ -16,6 +16,7 @@ except ImportError:
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from scipy.sparse import diags, issparse
 from scipy.special import expit, loggamma
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import GridSearchCV
@@ -27,7 +28,6 @@ from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import transcriptomic_connectivity
 from .regression_utils import L1_L2_penalty, softplus
-from .spatial_regression import calc_1nd_moment
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -970,3 +970,15 @@ def fit_glm(
         return intercept, Beta, opt_score, rex, reg
     else:
         return intercept, Beta, opt_score, rex
+
+
+def calc_1nd_moment(X, W, normalize_W=True):
+    if normalize_W:
+        if type(W) == np.ndarray:
+            d = np.sum(W, 1).flatten()
+        else:
+            d = np.sum(W, 1).A.flatten()
+        W = diags(1 / d) @ W if issparse(W) else np.diag(1 / d) @ W
+        return W @ X, W
+    else:
+        return W @ X
