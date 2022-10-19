@@ -26,12 +26,12 @@ import pandas as pd
 import scipy
 import seaborn as sns
 from anndata import AnnData
-from dynamo.tools.moments import calc_1nd_moment
 from joblib import Parallel, delayed
 from matplotlib import rcParams
 from patsy import dmatrix
 from pysal.lib import weights
 from pysal.model import spreg
+from scipy.sparse import diags, issparse
 from tqdm import tqdm
 
 from ...configuration import config_spateo_rcParams
@@ -2028,3 +2028,15 @@ class Niche_LR_Interpreter(BaseInterpreter):
         self.prepare_data(
             mod_type="niche_lr", lig=lig, rec=rec, rec_ds=rec_ds, species=species, niche_lr_r_lag=niche_lr_r_lag
         )
+
+
+def calc_1nd_moment(X, W, normalize_W=True):
+    if normalize_W:
+        if type(W) == np.ndarray:
+            d = np.sum(W, 1).flatten()
+        else:
+            d = np.sum(W, 1).A.flatten()
+        W = diags(1 / d) @ W if issparse(W) else np.diag(1 / d) @ W
+        return W @ X, W
+    else:
+        return W @ X
