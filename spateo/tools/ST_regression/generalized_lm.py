@@ -16,7 +16,6 @@ except ImportError:
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from dynamo.tools.moments import calc_1nd_moment
 from scipy.special import expit, loggamma
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import GridSearchCV
@@ -28,6 +27,7 @@ from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
 from ...tools.find_neighbors import transcriptomic_connectivity
 from .regression_utils import L1_L2_penalty, softplus
+from .spatial_regression import calc_1nd_moment
 
 
 # ---------------------------------------------------------------------------------------------------

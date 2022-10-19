@@ -11,7 +11,6 @@ except ImportError:
 import numpy as np
 import pandas as pd
 import scipy
-import sklearn
 import statsmodels.stats.multitest
 from anndata import AnnData
 
