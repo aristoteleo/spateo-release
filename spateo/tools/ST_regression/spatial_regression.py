@@ -34,7 +34,7 @@ from pysal.model import spreg
 from scipy.sparse import diags, issparse
 from tqdm import tqdm
 
-from ...configuration import config_spateo_rcParams
+from ...configuration import config_spateo_rcParams, shiftedColorMap
 from ...logging import logger_manager as lm
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...preprocessing.normalize import normalize_total
@@ -872,6 +872,7 @@ class BaseInterpreter:
         coeffs: pd.DataFrame,
         subset_cols: Union[None, str, List[str]] = None,
         cmap: str = "autumn",
+        zero_center_cmap: bool = False,
         mask_threshold: Union[None, float] = None,
         mask_zero: bool = True,
         transpose: bool = False,
@@ -893,6 +894,7 @@ class BaseInterpreter:
                 plot only the linear regression coefficients, "zstat" for the z-statistic, etc. Or can use the full
                 name of the column to select specific columns.
             cmap: Name of the colormap to use
+            zero_center_cmap: Set True to set colormap intensity midpoint to zero.
             mask_threshold: Optional, sets lower absolute value thresholds for parameters to be assigned color in
                 heatmap (will compare absolute value of each element against this threshold)
             mask_zero: Set True to not assign color to zeros (representing neither a positive or negative interaction)
@@ -951,6 +953,14 @@ class BaseInterpreter:
         else:
             mask = None
 
+        # If "zero_center_cmap", find percentile corresponding to zero and set colormap midpoint to this value:
+        if zero_center_cmap:
+            cmap = plt.get_cmap(cmap)
+            coeffs_max = np.max(coeffs.values)
+            zero_point = 1 - coeffs_max / (coeffs_max + abs(np.min(coeffs.values)))
+            print(zero_point)
+            cmap = shiftedColorMap(cmap, midpoint=zero_point)
+
         xtick_labels = list(coeffs.columns)
         ytick_labels = list(coeffs.index)
 
@@ -996,13 +1006,23 @@ class BaseInterpreter:
             return_all_list=None,
         )
 
-    def compute_coeff_significance(self, coeffs: pd.DataFrame, significance_threshold: float = 0.05):
+    def compute_coeff_significance(
+        self,
+        coeffs: pd.DataFrame,
+        significance_threshold: float = 0.05,
+        only_positive: bool = False,
+        only_negative: bool = False
+    ):
         """
         Computes statistical significance for fitted coefficients.
 
         Args:
             coeffs: Contains coefficients from regression for each variable
             significance_threshold: p-value needed to call a sender-receiver relationship significant
+            only_positive: Set True to find significance/pvalues/qvalues only for the subset of coefficients that is
+                positive (representing possible mechanisms of positive regulation).
+            only_negative: Set True to find significance/pvalues/qvalues only for the subset of coefficients that is
+                negative (representing possible mechanisms of positive regulation).
 
         Returns:
             is_significant: Dataframe of identical shape to coeffs, where each element is True or False if it meets the
@@ -1050,14 +1070,29 @@ class BaseInterpreter:
         )
 
         is_significant = pd.DataFrame(is_significant, index=param_labels, columns=feature_labels)
+        print(is_significant)
         pvalues = pd.DataFrame(pvalues, index=param_labels, columns=feature_labels)
         qvalues = pd.DataFrame(qvalues, index=param_labels, columns=feature_labels)
+
+        # If 'only_positive' or 'only_negative' are set, set all elements corresponding to negative or positive
+        # coefficients (respectively) to False and all pvalues/qvalues to 1:
+        if only_positive:
+            is_significant[coeffs.T <= 0] = False
+            print(is_significant)
+            pvalues[coeffs.T <= 0] = 1
+            qvalues[coeffs.T <= 0] = 1
+        elif only_negative:
+            is_significant[coeffs.T >= 0] = False
+            pvalues[coeffs.T >= 0] = 1
+            qvalues[coeffs.T >= 0] = 1
 
         return is_significant, pvalues, qvalues
 
     def get_effect_sizes(
         self,
         coeffs: pd.DataFrame,
+        only_positive: bool = False,
+        only_negative: bool = False,
         significance_threshold: float = 0.05,
         lr_pair: Union[None, str] = None,
         save_prefix: Union[None, str] = None,
@@ -1073,6 +1108,10 @@ class BaseInterpreter:
 
         Args:
             coeffs: Contains coefficients from regression for each variable
+            only_positive: Set True to find significance/pvalues/qvalues only for the subset of coefficients that is
+                positive (representing possible mechanisms of positive regulation).
+            only_negative: Set True to find significance/pvalues/qvalues only for the subset of coefficients that is
+                negative (representing possible mechanisms of positive regulation).
             significance_threshold: p-value needed to call a sender-receiver relationship significant
             lr_pair: Required if (and used only in the case that) coefficients came from a Niche-LR model; used to
                 subset the coefficients array to the specific ligand-receptor pair of interest. Takes the form
@@ -1089,7 +1128,12 @@ class BaseInterpreter:
 
         coeffs_np = coeffs.values
 
-        is_significant, pvalues, qvalues = self.compute_coeff_significance(coeffs, significance_threshold)
+        is_significant, pvalues, qvalues = self.compute_coeff_significance(
+            coeffs,
+            only_positive=only_positive,
+            only_negative=only_negative,
+            significance_threshold=significance_threshold
+        )
 
         # If 'save_prefix' is given, save the complete coefficients, significance, p-value and q-value matrices:
         if save_prefix is not None:
@@ -1236,8 +1280,8 @@ class BaseInterpreter:
         for _, spine in res.spines.items():
             spine.set_visible(True)
             spine.set_linewidth(0.75)
-        plt.xlabel("Neighbor Cell")
-        plt.ylabel("Source Cell")
+        plt.xlabel("Receiving Cell")
+        plt.ylabel("Sending Cell")
 
         title = (
             "Niche-Associated Differential Expression"
