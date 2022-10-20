@@ -1011,7 +1011,7 @@ class BaseInterpreter:
         coeffs: pd.DataFrame,
         significance_threshold: float = 0.05,
         only_positive: bool = False,
-        only_negative: bool = False
+        only_negative: bool = False,
     ):
         """
         Computes statistical significance for fitted coefficients.
@@ -1132,7 +1132,7 @@ class BaseInterpreter:
             coeffs,
             only_positive=only_positive,
             only_negative=only_negative,
-            significance_threshold=significance_threshold
+            significance_threshold=significance_threshold,
         )
 
         # If 'save_prefix' is given, save the complete coefficients, significance, p-value and q-value matrices:
