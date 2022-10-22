@@ -24,6 +24,7 @@ def multi_slices(
     spatial_key: str = "align_spatial",
     layer: str = "X",
     point_size: Optional[float] = None,
+    font_size: Optional[float] = 20,
     color: Optional[str] = "skyblue",
     palette: Optional[str] = None,
     alpha: float = 1.0,
@@ -74,9 +75,8 @@ def multi_slices(
     spatial_coords = slices_data[["x", "y"]].values.copy()
     ptp_vec = spatial_coords.ptp(0)
     aspect_ratio = ptp_vec[0] / ptp_vec[1]
-
     ax_height = 2 if nrows == 1 and ax_height == 1 else ax_height
-    axsize = (ax_height * aspect_ratio, ax_height * 1.2)
+    axsize = (ax_height * aspect_ratio, ax_height * 2)
 
     # Set multi-plot grid for plotting.
     sns.set_theme(
@@ -85,7 +85,7 @@ def multi_slices(
         font="Arial",
         font_scale=1,
         rc={
-            "font.size": 20.0,
+            "font.size": font_size,
             "font.family": ["sans-serif"],
             "font.sans-serif": ["Arial", "sans-serif", "Helvetica", "DejaVu Sans", "Bitstream Vera Sans"],
         },
@@ -146,6 +146,7 @@ def multi_slices(
     else:
         g.add_legend()
 
+    plt.tight_layout()
     return save_return_show_fig_utils(
         save_show_or_return=save_show_or_return,
         show_legend=show_legend,
