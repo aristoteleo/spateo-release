@@ -7,5 +7,5 @@ This page provides links to handy step-by-step tutorials for key features of *sp
 
    notebooks/cell_segmentation
    notebooks/tdr
-
+   notebooks/morphogenesis
 ```
