@@ -28,17 +28,22 @@ from scipy.cluster import hierarchy as sch
 from ...configuration import SKM, config_spateo_rcParams, set_pub_style
 from ...logging import logger_manager as lm
 from ...plotting.static.dotplot import CCDotplot
+from ...tools.find_neighbors import generate_spatial_weights_fixed_nbrs
 from ...tools.labels import Label, interlabel_connections
 from .utils import _dendrogram_sig, save_return_show_fig_utils
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def plot_connections(
-    label: Label,
-    spatial_weights_matrix: Union[scipy.sparse.csr_matrix, np.ndarray],
+    adata: AnnData,
+    cat_key: str,
+    spatial_key: str = "spatial",
+    n_spatial_neighbors: Union[None, int] = 6,
+    spatial_weights_matrix: Union[None, scipy.sparse.csr_matrix, np.ndarray] = None,
     expr_weights_matrix: Union[None, scipy.sparse.csr_matrix, np.ndarray] = None,
     reverse_expr_plot_orientation: bool = False,
     ax: Union[None, mpl.axes.Axes] = None,
-    figsize: tuple = (8, 8),
+    figsize: tuple = (3, 3),
     zero_self_connections: bool = True,
     normalize_by_self_connections: bool = False,
     shapes_style: bool = True,
@@ -51,63 +56,53 @@ def plot_connections(
     save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
     save_kwargs: Optional[dict] = {},
 ):
-    """
-    Plot spatial_connections between labels- visualization of how closely labels are colocalized
+    """Plot spatial_connections between labels- visualization of how closely labels are colocalized
 
     Args:
-        label : class `Label`
-            This class contains attributes related to the labeling of each sample
-        weights_matrix : sparse matrix or numpy array
-            Spatial distance matrix, weighted by distance between spots
-        expr_weights_matrix : optional sparse matrix or numpy array
-            Gene expression distance matrix, weighted by distance in transcriptomic or PCA space. If not given,
-            only the spatial distance matrix will be plotted. If given, will plot the spatial distance matrix in the
-            left plot and the gene expression distance matrix in the right plot.
-        reverse_expr_plot_orientation : bool, default False
-            If True, plot the gene expression connections in the form of a lower right triangle. If False,
-            gene expression connections will be an upper left triangle just like the spatial connections.
-        ax : optional `matplotlib.Axes`
-            Existing axes object, if applicable
-        figsize : (int, int) tuple
-            Width x height of desired figure window in inches
-        zero_self_connections : bool, default True
-            Ignores intra-label interactions
-        normalize_by_self_connections : bool, default False
-            Only used if 'zero_self_connections' is False. If True, normalize intra-label connections by
-            the number of spots of that label
-        shapes_style : bool, default True
-            If True plots squares, if False plots heatmap
-        label_outline : bool, default False
-            If True, gives dark outline to axis tick label text
-        max_scale : float, default 0.46
-            Only used for the case that 'shape_style' is True, gives maximum size of square
-        colormap : str, dict, or matplotlib.colormap
-            Specifies colors to use for plotting. If dictionary, keys should be numerical labels corresponding to those
-            of the Label object.
-        title_str : str
-            Give plot a title
-        title_fontsize : float
-            Size of plot title
-        label_fontsize : float
-            Size of labels along the axes of the graph
-        save_show_or_return : str, default "show"
-            Whether to save, show or return the figure.
+        adata: AnnData object
+        cat_key: Key in .obs containing categorical grouping labels. Colocalization will be assessed
+            for pairwise combinations of these labels.
+        spatial_key: Key in .obsm containing coordinates in the physical space. Not used unless
+            'spatial_weights_matrix' is None, in which case this is required. Defaults to "spatial".
+        n_spatial_neighbors: Optional, number of neighbors in the physical space for each cell. Not used unless
+            'spatial_weights_matrix' is None.
+        spatial_weights_matrix: Spatial distance matrix, weighted by distance between spots. If not given,
+            will compute at runtime.
+        expr_weights_matrix: Gene expression distance matrix, weighted by distance in transcriptomic or PCA space.
+            If not given, only the spatial distance matrix will be plotted. If given, will plot the spatial distance
+            matrix in the left plot and the gene expression distance matrix in the right plot.
+        reverse_expr_plot_orientation: If True, plot the gene expression connections in the form of a lower right
+            triangle. If False, gene expression connections will be an upper left triangle just like the spatial
+            connections.
+        ax: Existing axes object, if applicable
+        figsize: Width x height of desired figure window in inches
+        zero_self_connections: If True, ignores intra-label interactions
+        normalize_by_self_connections: Only used if 'zero_self_connections' is False. If True, normalize intra-label
+            connections by the number of spots of that label
+        shapes_style: If True plots squares, if False plots heatmap
+        label_outline: If True, gives dark outline to axis tick label text
+        max_scale: Only used for the case that 'shape_style' is True, gives maximum size of square
+        colormap: Specifies colors to use for plotting. If dictionary, keys should be numerical labels corresponding
+            to those of the Label object.
+        title_str: Optionally used to give plot a title
+        title_fontsize: Size of plot title- only used if 'title_str' is given.
+        label_fontsize: Size of labels along the axes of the graph
+        save_show_or_return: Whether to save, show or return the figure.
             If "both", it will save and plot the figure at the same time. If "all", the figure will be saved, displayed
             and the associated axis and other object will be return.
-        save_kwargs : optional dict
-            A dictionary that will passed to the save_fig function.
+        save_kwargs: A dictionary that will passed to the save_fig function.
             By default it is an empty dictionary and the save_fig function will use the
             {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
             "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
             keys according to your needs.
 
     Returns:
-        (fig, ax) :
-            Returns plot and axis object if 'save_show_or_return' is "all"
+        (fig, ax): Returns plot and axis object if 'save_show_or_return' is "all"
     """
     from ...plotting.static.utils import save_fig
     from ...tools.utils import update_dict
 
+    logger = lm.get_main_logger()
     config_spateo_rcParams()
     title_fontsize = rcParams.get("axes.titlesize") if title_fontsize is None else title_fontsize
     label_fontsize = rcParams.get("axes.labelsize") if label_fontsize is None else label_fontsize
@@ -133,6 +128,27 @@ def plot_connections(
         else:
             ax_sp = ax
         fig = ax.get_figure()
+
+    # Convert cell type labels to numerical using Label object:
+    categories_str_cat = np.unique(adata.obs[cat_key].values)
+    categories_num_cat = range(len(categories_str_cat))
+    map_dict = dict(zip(categories_num_cat, categories_str_cat))
+    categories_str = adata.obs[cat_key]
+    categories_num = adata.obs[cat_key].replace(categories_str_cat, categories_num_cat)
+
+    label = Label(categories_num.to_numpy(), str_map=map_dict)
+
+    # If spatial weights matrix is not given, compute it. 'spatial_key' needs to be present in the AnnData object:
+    if spatial_weights_matrix is None:
+        if spatial_key not in adata.obsm_keys():
+            logger.error(f"Given 'spatial_key' {spatial_key} does not exist as key in adata.obsm. Options: "
+                         f"{adata.obsm_keys()}.")
+        spatial_weights_matrix, _, _ = generate_spatial_weights_fixed_nbrs(
+            adata,
+            spatial_key=spatial_key,
+            num_neighbors=n_spatial_neighbors,
+            decay_type="reciprocal"
+        )
 
     # Compute spatial connections array:
     spatial_connections = interlabel_connections(label, spatial_weights_matrix)
