@@ -3,9 +3,6 @@ Wrapper function to run generative modeling for count denoising and imputation.
 """
 from typing import List, Union
 
-import matplotlib.pyplot as plt
-import numpy as np
-import scipy.sparse as sp
 from anndata import AnnData
 from impute import STGNN
 
@@ -54,63 +51,8 @@ def run_denoise_impute(
             # Generate two plots: one for observed data and one for imputed:
             print(f"{feat} Observed")
             size = 3000 / adata_orig.n_obs
-            space(adata_orig, color=feat, cmap="magma", figsize=(5, 5), dpi=300, pointsize=size, alpha=0.9)
+            space(adata_orig, color=feat, cmap=cmap, figsize=(5, 5), dpi=300, pointsize=size, alpha=0.9)
 
             print(f"{feat} Imputed")
             size = 3000 / adata_orig.n_obs
-            space(adata_rex, color=feat, cmap="magma", figsize=(5, 5), dpi=300, pointsize=size, alpha=0.9)
-
-            """
-            # Generate two plots: one for observed data and one for imputed:
-            to_plot_orig = adata_orig[:, feat].X
-            if sp.issparse(to_plot_orig):
-                to_plot_orig = to_plot_orig.toarray()
-            to_plot_rex = adata_rex[:, feat].X
-            # For visualization, set max colormap value to the 99th percentile values:
-            orig_vmax = np.percentile(to_plot_orig, 99)
-            rex_vmax = np.percentile(to_plot_rex, 99)
-
-            fig, ax = plt.subplots(1, 1, figsize=(7.5, 7.5), constrained_layout=True)
-            size = 100000 / adata.n_obs
-            scatterplot = ax.scatter(
-                adata.obsm[spatial_key][:, 0],
-                adata.obsm[spatial_key][:, 1],
-                c=to_plot_orig,
-                cmap=cmap,
-                vmin=0,
-                vmax=orig_vmax,
-                s=size,
-                alpha=1.0,
-            )
-            ax.set_aspect("equal", "datalim")
-            ax.set_title(
-                f"{feat.title()} Observed",
-                fontsize=14,
-                fontweight="bold",
-            )
-            ax.set_ylim(ax.get_ylim()[::-1])
-            cbar = fig.colorbar(scatterplot)
-            # https://stackoverflow.com/questions/62812792/adding-colorbar-to-scatterplot-after-loop
-            plt.show()
-
-            fig, ax = plt.subplots(1, 1, figsize=(7.5, 7.5), constrained_layout=True)
-            size = 100000 / adata.n_obs
-            scatterplot = ax.scatter(
-                adata.obsm[spatial_key][:, 0],
-                adata.obsm[spatial_key][:, 1],
-                c=to_plot_rex,
-                cmap=cmap,
-                vmin=0,
-                vmax=rex_vmax,
-                s=size,
-                alpha=1.0,
-            )
-            ax.set_aspect("equal", "datalim")
-            ax.set_title(
-                f"{feat.title()} Enhanced",
-                fontsize=14,
-                fontweight="bold",
-            )
-            ax.set_ylim(ax.get_ylim()[::-1])
-            cbar = fig.colorbar(scatterplot)
-            plt.show()"""
+            space(adata_rex, color=feat, cmap=cmap, figsize=(5, 5), dpi=300, pointsize=size, alpha=0.9)

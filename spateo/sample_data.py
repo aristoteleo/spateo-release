@@ -64,9 +64,60 @@ def drosophila_E8_10(
 ):
     """The E8-10 whole-body data of drosophila of aligned serial slices with tissue type annotations.
 
-    Returns
-    -------
+    Returns:
         Returns `adata` object
+    """
+    adata = get_adata(url, filename)
+
+    return adata
+
+
+def slideseq(
+    url="https://www.dropbox.com/s/d3tpusisbyzn6jk/slideseq.h5ad?dl=1",
+    filename="slideseq_mouse_hippocampus.h5ad",
+):
+    """Saptial transcriptomic sample from the mouse hippocampus; data generated using Slide-seqV2. See:
+    Stickels, R. R., Murray, E., Kumar, P., Li, J., Marshall, J. L., Di Bella, D. J., ... & Chen, F. (2021).
+    Highly sensitive spatial transcriptomics at near-cellular resolution with Slide-seqV2. Nature biotechnology, 39(3),
+    313-319.
+
+    Returns:
+        adata: AnnData object containing Slide-seq data
+    """
+    adata = get_adata(url, filename)
+
+    return adata
+
+
+def seqfish(
+    url="https://www.dropbox.com/s/cm3uw8czhz5hu30/seqFISH.h5ad?dl=1",
+    filename="seqfish_mouse_embryo.h5ad",
+):
+    """Spatial transcriptomic sample taken at one timepoint in the process of mouse organogenesis; data generated using
+    seqFISH. See:
+    Lohoff, T., Ghazanfar, S., Missarova, A., Koulena, N., Pierson, N., Griffiths, J. A., ... & Marioni, J. C. (2022).
+    Integration of spatial and single-cell transcriptomic data elucidates mouse organogenesis.
+    Nature biotechnology, 40(1), 74-85.
+
+    Returns:
+        adata: AnnData object containing Slide-seq data
+    """
+    adata = get_adata(url, filename)
+
+    return adata
+
+
+def merfish(
+    url="https://www.dropbox.com/s/e8hwgqnrx2ob9h4/MERFISH.h5ad?dl=1",
+    filename="merfish_mouse_hypothalamus.h5ad",
+):
+    """Spatial transcriptomic sample taken from the mouse hypothalamus; data generated using MERFISH. See:
+    Moffitt, J. R., Bambah-Mukku, D., Eichhorn, S. W., Vaughn, E., Shekhar, K., Perez, J. D., ... & Zhuang, X. (2018).
+    Molecular, spatial, and functional single-cell profiling of the hypothalamic preoptic region.
+    Science, 362(6416), eaau5324.
+
+    Returns:
+        adata: AnnData object containing Slide-seq data
     """
     adata = get_adata(url, filename)
 
