@@ -127,7 +127,7 @@ def find_cci_two_group(
         for g in adata.obs[group].unique():
             # Of all cells expressing particular ligand, what proportion are group g:
             frac = (adata_l[adata_l.obs[group] == g].X > 0).sum(axis=0) / (adata_l.X > 0).sum(axis=0)
-            adata_l.var[g + "_frac"] = frac.A1 if x_sparse else frac
+            adata_l.var[g + "_frac"] = np.asarray(frac.A1) if x_sparse else np.asarray(frac)
 
         # Check if preprocessing has already been done:
         if "n_cells_by_counts" not in adata_l.var_keys():
@@ -151,7 +151,7 @@ def find_cci_two_group(
         for g in adata.obs[group].unique():
             # Of all cells expressing particular receptor, what proportion are group g:
             frac = (adata_r[adata_r.obs[group] == g].X > 0).sum(axis=0) / (adata_r.X > 0).sum(axis=0)
-            adata_r.var[g + "_frac"] = frac.A1 if x_sparse else frac
+            adata_r.var[g + "_frac"] = np.asarray(frac.A1) if x_sparse else np.asarray(frac)
 
         # Check if preprocessing has already been done:
         if "n_cells_by_counts" not in adata_r.var_keys():
