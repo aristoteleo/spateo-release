@@ -141,13 +141,12 @@ def plot_connections(
     # If spatial weights matrix is not given, compute it. 'spatial_key' needs to be present in the AnnData object:
     if spatial_weights_matrix is None:
         if spatial_key not in adata.obsm_keys():
-            logger.error(f"Given 'spatial_key' {spatial_key} does not exist as key in adata.obsm. Options: "
-                         f"{adata.obsm_keys()}.")
+            logger.error(
+                f"Given 'spatial_key' {spatial_key} does not exist as key in adata.obsm. Options: "
+                f"{adata.obsm_keys()}."
+            )
         spatial_weights_matrix, _, _ = generate_spatial_weights_fixed_nbrs(
-            adata,
-            spatial_key=spatial_key,
-            num_neighbors=n_spatial_neighbors,
-            decay_type="reciprocal"
+            adata, spatial_key=spatial_key, num_neighbors=n_spatial_neighbors, decay_type="reciprocal"
         )
 
     # Compute spatial connections array:
