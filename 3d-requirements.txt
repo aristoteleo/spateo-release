@@ -1,7 +1,13 @@
+colorcet
+ipygany
+ipyvtklink
 open3d>=0.14.1
+meshio
+panel
 PVGeo>=2.1.0
 pyacvd>=0.2.7
 PyMCubes
 pymeshfix>=0.15.0
+pythreejs
 pyvista>=0.33.3
 vtk>=9.1.0
