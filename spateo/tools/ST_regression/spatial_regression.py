@@ -5,7 +5,7 @@ Also performs downstream characterization following spatially-informed regressio
 expression
 
 Note to self: current set up --> each of the spatial regression classes can be called either through cell_interaction (
-e.g. st.cell_interaction.NicheInterpreter) or standalone (e.g. st.NicheInterpreter)- the same is true for all
+e.g. st.cell_interaction.NicheModel) or standalone (e.g. st.NicheModel)- the same is true for all
 functions besides the general regression ones (e.g. fit_glm, which must be called w/ st.fit_glm).
 """
 import os
@@ -48,7 +48,7 @@ from .regression_utils import compute_wald_test, get_fisher_inverse
 # ---------------------------------------------------------------------------------------------------
 # Wrapper classes for model running
 # ---------------------------------------------------------------------------------------------------
-class BaseInterpreter:
+class Base_Model:
     """Basis class for all spatially-aware and spatially-lagged regression models that can be implemented through this
     toolkit. Includes necessary methods for data loading and preparation, computation of spatial weights matrices,
     computation of evaluation metrics and more.
@@ -171,6 +171,137 @@ class BaseInterpreter:
         # Update using user input:
         self.sp_kwargs = update_dict(self.sp_kwargs, kwargs)
 
+    def preprocess_data(
+        self,
+        normalize: Union[None, bool] = None,
+        smooth: Union[None, bool] = None,
+        log_transform: Union[None, bool] = None,
+    ):
+        """Normalization and transformation of input data. Can manually specify whether to normalize, scale,
+        etc. data- any arguments not given this way will default to values passed on instantiation of the Interpreter
+        object.
+
+        Returns:
+            None, all preprocessing operates inplace on the object's input AnnData.
+        """
+        if normalize is None:
+            normalize = self.normalize
+        if smooth is None:
+            smooth = self.smooth
+        if log_transform is None:
+            log_transform = self.log_transform
+
+        if self.distr in ["poisson", "softplus", "neg-binomial"]:
+            if normalize or smooth or log_transform:
+                self.logger.info(
+                    f"With a {self.distr} assumption, it is recommended to fit to raw counts. Computing normalizations "
+                    f"and transforms if applicable, but storing the results for later and fitting to the raw counts."
+                )
+                self.adata.layers["raw"] = self.adata.X
+
+        # Normalize to size factor:
+        if normalize:
+            if self.distr not in ["poisson", "softplus", "neg-binomial"]:
+                self.logger.info("Setting total counts in each cell to 1e4 inplace.")
+                normalize_total(self.adata)
+            else:
+                self.logger.info("Setting total counts in each cell to 1e4, storing in adata.layers['X_norm'].")
+                dat = normalize_total(self.adata, inplace=False)
+                self.adata.layers["X_norm"] = dat["X"]
+                self.adata.obs["norm_factor"] = dat["norm_factor"]
+                self.adata.layers["stored_processed"] = dat["X"]
+
+        # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
+        if smooth:
+            if self.distr not in ["poisson", "softplus", "neg-binomial"]:
+                self.logger.info("Smoothing gene expression inplace...")
+                # Compute connectivity matrix if not already existing:
+                try:
+                    conn = self.adata.obsp["expression_connectivities"]
+                except:
+                    _, adata = transcriptomic_connectivity(self.adata, n_neighbors_method="ball_tree")
+                    conn = adata.obsp["expression_connectivities"]
+                adata_smooth_norm, _ = calc_1nd_moment(self.adata.X, conn, normalize_W=True)
+                self.adata.layers["M_s"] = adata_smooth_norm
+
+                # Use smoothed layer for downstream processing:
+                self.adata.layers["raw"] = self.adata.X
+                self.adata.X = self.adata.layers["M_s"]
+
+            else:
+                self.logger.info(
+                    "Smoothing gene expression inplace and storing in in adata.layers['M_s'] or "
+                    "adata.layers['normed_M_s'] if normalization was first performed."
+                )
+                adata_temp = self.adata.copy()
+                # Check if normalized expression is present- if 'distr' is one of the indicated distributions AND
+                # 'normalize' is True, AnnData will not have been updated in place, with the normalized array
+                # instead being stored in the object.
+                try:
+                    adata_temp.X = adata_temp.layers["X_norm"]
+                    norm = True
+                except:
+                    norm = False
+                    pass
+
+                try:
+                    conn = self.adata.obsp["expression_connectivities"]
+                except:
+                    _, adata = transcriptomic_connectivity(adata_temp, n_neighbors_method="ball_tree")
+                    conn = adata.obsp["expression_connectivities"]
+                adata_smooth_norm, _ = calc_1nd_moment(adata_temp.X, conn, normalize_W=True)
+                if norm:
+                    self.adata.layers["norm_M_s"] = adata_smooth_norm
+                else:
+                    self.adata.layers["M_s"] = adata_smooth_norm
+                self.adata.layers["stored_processed"] = adata_smooth_norm
+
+        if log_transform:
+            if self.distr not in ["poisson", "softplus", "neg-binomial"]:
+                self.logger.info("Log-transforming expression inplace...")
+                log1p(self.adata)
+            else:
+                self.logger.info(
+                    "Log-transforming expression and storing in adata.layers['X_log1p'], "
+                    "adata.layers['X_norm_log1p'], adata.layers['X_M_s_log1p'], or adata.layers["
+                    "'X_norm_M_s_log1p'], depending on the normalizations and transforms that were "
+                    "specified."
+                )
+                adata_temp = self.adata.copy()
+                # Check if normalized expression is present- if 'distr' is one of the indicated distributions AND
+                # 'normalize' and/or 'smooth' is True, AnnData will not have been updated in place,
+                # with the normalized array instead being stored in the object.
+                if "norm_M_s" in adata_temp.layers.keys():
+                    layer = "norm_M_s"
+                    adata_temp.X = adata_temp.layers["norm_M_s"]
+                    norm, smoothed = True, True
+                elif "M_s" in adata_temp.layers.keys():
+                    layer = "M_s"
+                    adata_temp.X = adata_temp.layers["M_s"]
+                    norm, smoothed = False, True
+                elif "X_norm" in adata_temp.layers.keys():
+                    layer = "X_norm"
+                    adata_temp.X = adata_temp.layers["X_norm"]
+                    norm, smoothed = True, False
+                else:
+                    layer = None
+                    norm, smoothed = False, False
+
+                if layer is not None:
+                    log1p(adata_temp.layers[layer])
+                else:
+                    log1p(adata_temp)
+
+                if norm and smoothed:
+                    self.adata.layers["X_norm_M_s_log1p"] = adata_temp.X
+                elif norm:
+                    self.adata.layers["X_norm_log1p"] = adata_temp.X
+                elif smoothed:
+                    self.adata.layers["X_M_s_log1p"] = adata_temp.X
+                else:
+                    self.adata.layers["X_log1p"] = adata_temp.X
+                self.adata.layers["stored_processed"] = adata_temp.X
+
     def prepare_data(
         self,
         mod_type: str = "category",
@@ -220,116 +351,7 @@ class BaseInterpreter:
             if not isinstance(rec_ds, list):
                 rec_ds = [rec_ds]
 
-        if self.distr in ["poisson", "softplus", "neg-binomial"]:
-            if self.normalize or self.smooth or self.log_transform:
-                self.logger.info(
-                    f"With a {self.distr} assumption, it is recommended to fit to raw counts. Computing normalizations "
-                    f"and transforms if applicable, but storing the results for later and fitting to the raw counts."
-                )
-                self.adata.layers["raw"] = self.adata.X
-
-        # Normalize to size factor:
-        if self.normalize:
-            if self.distr not in ["poisson", "softplus", "neg-binomial"]:
-                self.logger.info("Setting total counts in each cell to 1e4 inplace.")
-                normalize_total(self.adata)
-            else:
-                self.logger.info("Setting total counts in each cell to 1e4, storing in adata.layers['X_norm'].")
-                dat = normalize_total(self.adata, inplace=False)
-                self.adata.layers["X_norm"] = dat["X"]
-                self.adata.obs["norm_factor"] = dat["norm_factor"]
-                self.adata.layers["stored_processed"] = dat["X"]
-
-        # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
-        if self.smooth:
-            if self.distr not in ["poisson", "softplus", "neg-binomial"]:
-                self.logger.info("Smoothing gene expression inplace...")
-                # Compute connectivity matrix if not already existing:
-                try:
-                    conn = self.adata.obsp["expression_connectivities"]
-                except:
-                    _, adata = transcriptomic_connectivity(self.adata, n_neighbors_method="ball_tree")
-                    conn = adata.obsp["expression_connectivities"]
-                adata_smooth_norm, _ = calc_1nd_moment(self.adata.X, conn, normalize_W=True)
-                self.adata.layers["M_s"] = adata_smooth_norm
-
-                # Use smoothed layer for downstream processing:
-                self.adata.layers["raw"] = self.adata.X
-                self.adata.X = self.adata.layers["M_s"]
-
-            else:
-                self.logger.info(
-                    "Smoothing gene expression inplace and storing in in adata.layers['M_s'] or "
-                    "adata.layers['normed_M_s'] if normalization was first performed."
-                )
-                adata_temp = self.adata.copy()
-                # Check if normalized expression is present- if 'distr' is one of the indicated distributions AND
-                # 'normalize' is True, AnnData will not have been updated in place, with the normalized array
-                # instead being stored in the object.
-                try:
-                    adata_temp.X = adata_temp.layers["X_norm"]
-                    norm = True
-                except:
-                    norm = False
-                    pass
-
-                try:
-                    conn = self.adata.obsp["expression_connectivities"]
-                except:
-                    _, adata = transcriptomic_connectivity(adata_temp, n_neighbors_method="ball_tree")
-                    conn = adata.obsp["expression_connectivities"]
-                adata_smooth_norm, _ = calc_1nd_moment(adata_temp.X, conn, normalize_W=True)
-                if norm:
-                    self.adata.layers["norm_M_s"] = adata_smooth_norm
-                else:
-                    self.adata.layers["M_s"] = adata_smooth_norm
-                self.adata.layers["stored_processed"] = adata_smooth_norm
-
-        if self.log_transform:
-            if self.distr not in ["poisson", "softplus", "neg-binomial"]:
-                self.logger.info("Log-transforming expression inplace...")
-                log1p(self.adata)
-            else:
-                self.logger.info(
-                    "Log-transforming expression and storing in adata.layers['X_log1p'], "
-                    "adata.layers['X_norm_log1p'], adata.layers['X_M_s_log1p'], or adata.layers["
-                    "'X_norm_M_s_log1p'], depending on the normalizations and transforms that were "
-                    "specified."
-                )
-                adata_temp = self.adata.copy()
-                # Check if normalized expression is present- if 'distr' is one of the indicated distributions AND
-                # 'normalize' and/or 'smooth' is True, AnnData will not have been updated in place,
-                # with the normalized array instead being stored in the object.
-                if "norm_M_s" in adata_temp.layers.keys():
-                    layer = "norm_M_s"
-                    adata_temp.X = adata_temp.layers["norm_M_s"]
-                    norm, smoothed = True, True
-                elif "M_s" in adata_temp.layers.keys():
-                    layer = "M_s"
-                    adata_temp.X = adata_temp.layers["M_s"]
-                    norm, smoothed = False, True
-                elif "X_norm" in adata_temp.layers.keys():
-                    layer = "X_norm"
-                    adata_temp.X = adata_temp.layers["X_norm"]
-                    norm, smoothed = True, False
-                else:
-                    layer = None
-                    norm, smoothed = False, False
-
-                if layer is not None:
-                    log1p(adata_temp.layers[layer])
-                else:
-                    log1p(adata_temp)
-
-                if norm and smoothed:
-                    self.adata.layers["X_norm_M_s_log1p"] = adata_temp.X
-                elif norm:
-                    self.adata.layers["X_norm_log1p"] = adata_temp.X
-                elif smoothed:
-                    self.adata.layers["X_M_s_log1p"] = adata_temp.X
-                else:
-                    self.adata.layers["X_log1p"] = adata_temp.X
-                self.adata.layers["stored_processed"] = adata_temp.X
+        self.preprocess_data()
 
         # General preprocessing required by multiple model types (for the models that use cellular niches):
         # Convert groups/categories into one-hot array:
@@ -467,16 +489,6 @@ class BaseInterpreter:
             connections_cols.sort(key=lambda x: x[1])
             connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
             self.X = pd.DataFrame(connections, columns=connections_cols, index=self.adata.obs_names)
-            """
-            # Otherwise if 'niche', combine two arrays:
-            # 'connections', encoding pairwise *spatial adjacencies* between categories for each sample, and
-            # 'dmat_neighbors', encoding *identity* and *prevalence* of the niche components
-            elif mod_type == "niche":
-                connections_cols = list(product(X.columns, X.columns))
-                connections_cols.sort(key=lambda x: x[1])
-                connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
-                connections_df = pd.DataFrame(connections, index=X.index, columns=connections_cols)
-                self.X = pd.concat([X, connections_df], axis=1)"""
 
             # Set self.param_labels to reflect inclusion of the interactions:
             self.param_labels = self.variable_names = self.X.columns
@@ -573,10 +585,6 @@ class BaseInterpreter:
                 lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_human.csv"), index_col=0)
             elif species == "mouse":
                 lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_mouse.csv"), index_col=0)
-            # elif species == "drosophila":
-            #    lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_drosophila.csv"), index_col=0)
-            # elif species == "zebrafish":
-            #    lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_zebrafish.csv"), index_col=0)
             elif species == "axolotl":
                 lr_network = pd.read_csv(os.path.join(self.cci_dir, "lr_network_axolotl.csv"), index_col=0)
             else:
@@ -1120,6 +1128,15 @@ class BaseInterpreter:
             save_prefix: If provided, saves all relevant dataframes to :path `./regression_outputs` under the name
                 `{prefix}_{coeffs/pvalues, etc.}.csv`. If not provided, will not save.
         """
+        # If "Poisson" given as the distributional assumption, check for log-transformed data:
+        if self.distr == "poisson":
+            if not any("log1p" in key for key in self.adata.layers.keys()):
+                self.logger.info(
+                    "With Poisson distribution assumed for dependent variable, using log-transformed data "
+                    "to compute sender-receiver effects...log key not found in adata, manually computing."
+                )
+                self.preprocess_data(log_transform=True)
+
         if not "niche" in self.mod_type:
             self.logger.error(
                 "Type coupling analysis only valid if connections between categories are used as the "
@@ -1858,13 +1875,13 @@ class BaseInterpreter:
         )
 
 
-class Category_Interpreter(BaseInterpreter):
+class Category_Model(Base_Model):
     """Wraps all necessary methods for data loading and preparation, model initialization, parameterization,
     evaluation and prediction when instantiating a model for spatially-aware (but not spatially lagged) regression
     using categorical variables (specifically, the prevalence of categories within spatial neighborhoods) to predict
     the value of gene expression.
 
-    Arguments passed to :class `BaseInterpreter`. The only keyword argument that is used for this class is
+    Arguments passed to :class `Base_Model`. The only keyword argument that is used for this class is
     'n_neighbors'.
     """
 
@@ -1876,12 +1893,12 @@ class Category_Interpreter(BaseInterpreter):
         self.prepare_data(mod_type="category")
 
 
-class Niche_Interpreter(BaseInterpreter):
+class Niche_Model(Base_Model):
     """Wraps all necessary methods for data loading and preparation, model initialization, parameterization,
     evaluation and prediction when instantiating a model for spatially-aware regression using both the prevalence of
     and connections between categories within spatial neighborhoods to predict the value of gene expression.
 
-    Arguments passed to :class `BaseInterpreter`.
+    Arguments passed to :class `Base_Model`.
     """
 
     def __init__(self, *args, **kwargs):
@@ -1891,12 +1908,12 @@ class Niche_Interpreter(BaseInterpreter):
         self.prepare_data(mod_type="niche")
 
 
-class Ligand_Lagged_Interpreter(BaseInterpreter):
+class Ligand_Lagged_Model(Base_Model):
     """Wraps all necessary methods for data loading and preparation, model initialization, parameterization,
     evaluation and prediction when instantiating a model for spatially-lagged regression using the spatial lag of
     ligand genes to predict the regression target.
 
-    Arguments passed to :class `BaseInterpreter`.
+    Arguments passed to :class `Base_Model`.
 
     Args:
         lig: Name(s) of ligands to use as predictors
@@ -1905,8 +1922,8 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
         rec_ds: Name(s) of receptor-downstream genes to use as regression targets. If not given, will search through
             database for all genes that correspond to receptor-downstream genes.
         species: Specifies L:R database to use
-        args: Additional positional arguments to :class `BaseInterpreter`
-        kwargs: Additional keyword arguments to :class `BaseInterpreter`
+        args: Additional positional arguments to :class `Base_Model`
+        kwargs: Additional keyword arguments to :class `Base_Model`
     """
 
     def __init__(
@@ -1969,7 +1986,7 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
         layer: Union[None, str] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Defines model run process for a single feature- not callable by the user, all arguments populated by
-        arguments passed on instantiation of :class `BaseInterpreter`.
+        arguments passed on instantiation of :class `Base_Model`.
 
         Args:
             cur_g: Name of the feature to regress on
@@ -2032,13 +2049,13 @@ class Ligand_Lagged_Interpreter(BaseInterpreter):
         return adata.var.loc[cur_g, :].values, y_pred.reshape(-1, 1), resid.reshape(-1, 1)
 
 
-class Niche_LR_Interpreter(BaseInterpreter):
+class Niche_LR_Model(Base_Model):
     """Wraps all necessary methods for data loading and preparation, model initialization, parameterization,
     evaluation and prediction when instantiating a model for spatially-aware regression using the prevalence of and
     connections between categories within spatial neighborhoods and the cell type-specific expression of ligands and
     receptors to predict the regression target.
 
-    Arguments passed to :class `BaseInterpreter`.
+    Arguments passed to :class `Base_Model`.
 
     Args:
         lig: Name(s) of ligands to use as predictors
@@ -2049,8 +2066,8 @@ class Niche_LR_Interpreter(BaseInterpreter):
         species: Specifies L:R database to use
         niche_lr_r_lag: Only used if 'mod_type' is "niche_lr". Uses the spatial lag of the receptor as the
             dependent variable rather than each spot's unique receptor expression. Defaults to True.
-        args: Additional positional arguments to :class `BaseInterpreter`
-        kwargs: Additional keyword arguments to :class `BaseInterpreter`
+        args: Additional positional arguments to :class `Base_Model`
+        kwargs: Additional keyword arguments to :class `Base_Model`
     """
 
     def __init__(
@@ -2065,7 +2082,7 @@ class Niche_LR_Interpreter(BaseInterpreter):
     ):
         super().__init__(*args, **kwargs)
         self.logger.info(
-            "Predictor arrays for :class `Niche_LR_Interpreter` are extremely sparse. It is recommended "
+            "Predictor arrays for :class `Niche_LR_Model` are extremely sparse. It is recommended "
             "to provide categories to subset for :func `GLMCV_fit_predict`."
         )
 

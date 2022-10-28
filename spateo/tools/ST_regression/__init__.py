@@ -1,12 +1,12 @@
 """
 General and generalized linear modeling of spatial transcriptomics
 
-Option to call functions from ST_regression (e.g. st.tl.ST_regression.Niche_Interpreter) or directly from Spateo (e.g.
-st.tl.Niche_Interpreter).
+Option to call functions from ST_regression (e.g. st.tl.ST_regression.Niche_Model) or directly from Spateo (e.g.
+st.tl.Niche_Model).
 """
 from .spatial_regression import (
-    Category_Interpreter,
-    Ligand_Lagged_Interpreter,
-    Niche_Interpreter,
-    Niche_LR_Interpreter,
+    Category_Model,
+    Ligand_Lagged_Model,
+    Niche_LR_Model,
+    Niche_Model,
 )
