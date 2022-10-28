@@ -122,3 +122,37 @@ def merfish(
     adata = get_adata(url, filename)
 
     return adata
+
+
+def seqscope(
+    url="https://www.dropbox.com/s/hci9up23dkuyexb/SeqScope.h5ad?dl=1",
+    filename="seqscope_mouse_liver.h5ad",
+):
+    """Spatial transcriptomic sample taken from the mouse liver; data generated using Seq-Scope. See:
+    Cho, C. S., Xi, J., Si, Y., Park, S. R., Hsu, J. E., Kim, M., ... & Lee, J. H. (2021). Microscopic examination of
+    spatial transcriptome using Seq-Scope. Cell, 184(13), 3559-3572, and:
+    Xi, J., Lee, J. H., Kang, H. M., & Jun, G. (2022). STtools: a comprehensive software pipeline for
+    ultra-high-resolution spatial transcriptomics data. Bioinformatics Advances, 2(1), vbac061.
+
+    Returns:
+        adata: AnnData object containing Slide-seq data
+    """
+    adata = get_adata(url, filename)
+
+    return adata
+
+
+def starmap(
+    url="https://www.dropbox.com/s/zpvu387tajrwth7/STARmap.h5ad?dl=1",
+    filename="starmap_mouse_brain.h5ad",
+):
+    """Spatial transcriptomic sample taken from the mouse brain; data generated using STARmap. See:
+    Wang, X., Allen, W. E., Wright, M. A., Sylwestrak, E. L., Samusik, N., Vesuna, S., ... & Deisseroth, K. (2018).
+    Three-dimensional intact-tissue sequencing of single-cell transcriptional states. Science, 361(6400), eaat5691.
+
+    Returns:
+        adata: AnnData object containing Slide-seq data
+    """
+    adata = get_adata(url, filename)
+
+    return adata
