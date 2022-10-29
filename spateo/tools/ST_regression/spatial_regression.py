@@ -139,7 +139,8 @@ class Base_Model:
         self.spatial_key = spatial_key
         self.distr = distr
         self.group_key = group_key
-        self.genes = genes
+        # Convention is to capitalize gene names:
+        self.genes = [g.upper() for g in genes]
         self.logger.info(
             "Note: argument provided to 'genes' represents the dependent variables for non-ligand-based "
             "analysis, but are used as independent variables for ligand-based analysis."
