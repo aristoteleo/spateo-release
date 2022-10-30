@@ -50,7 +50,7 @@ def weighted_spatial_graph(
     Returns:
         out_graph: Weighted nearest neighbors graph with shape [n_samples, n_samples]
         distance_graph: Unweighted graph with shape [n_samples, n_samples]
-        adata: Updated AnnData object containing 'spatial_distance' in .obsp and 'spatial_neighbors' in .uns.
+        adata: Updated AnnData object containing 'spatial_distances','spatial_weights','spatial_connectivities' in .obsp and 'spatial_neighbors' in .uns.
     """
     logger = lm.get_main_logger()
     if fixed == "n_neighbors":
@@ -342,7 +342,7 @@ def generate_spatial_distance_graph(
 
     if num_neighbors is None:
         # no limit to number of neighbours
-        return nbrs.radius_neighbors_graph(radius=radius, mode="distance")
+        return nbrs, nbrs.radius_neighbors_graph(radius=radius, mode="distance")
 
     else:
         assert isinstance(num_neighbors, int), f"Number of neighbors {num_neighbors} is not an integer."
@@ -378,7 +378,7 @@ def generate_spatial_weights_fixed_nbrs(
     Returns:
         out_graph: Weighted k-nearest neighbors graph with shape [n_samples, n_samples].
         distance_graph: Unweighted graph with shape [n_samples, n_samples].
-        adata: Updated AnnData object containing 'spatial_distance' in .obsp and 'spatial_neighbors' in .uns.
+        adata: Updated AnnData object containing 'spatial_distances','spatial_weights','spatial_connectivities' in .obsp and 'spatial_neighbors' in .uns.
     """
     logger = lm.get_main_logger()
 
@@ -418,7 +418,7 @@ def generate_spatial_weights_fixed_nbrs(
     logger.info_insert_adata("spatial_distances", adata_attr="obsp")
 
     adata.obsp["spatial_distances"] = distances
-    adata.obsp["spatial_connectivies"] = connectivities
+    adata.obsp["spatial_connectivities"] = connectivities
 
     logger.info_insert_adata("spatial_neighbors", adata_attr="uns")
     logger.info_insert_adata("spatial_neighbors.indices", adata_attr="uns")
@@ -463,6 +463,10 @@ def generate_spatial_weights_fixed_nbrs(
         )
 
     out_graph = row_normalize(graph_out, verbose=False)
+
+    logger.info_insert_adata("spatial_weights", adata_attr="obsp")
+    adata.obsp["spatial_weights"] = out_graph
+
     return out_graph, distance_graph, adata
 
 
@@ -509,7 +513,7 @@ def generate_spatial_weights_fixed_radius(
     Returns:
         out_graph: Weighted nearest neighbors graph with shape [n_samples, n_samples].
         distance_graph: Unweighted graph with shape [n_samples, n_samples].
-        adata: Updated AnnData object containing 'spatial_distance' in .obsp and 'spatial_neighbors' in .uns.
+        adata: Updated AnnData object containing 'spatial_distances','spatial_weights','spatial_connectivities' in .obsp and 'spatial_neighbors' in .uns.
     """
     logger = lm.get_main_logger()
 
@@ -547,7 +551,7 @@ def generate_spatial_weights_fixed_radius(
     logger.info_insert_adata("spatial_distances", adata_attr="obsp")
 
     adata.obsp["spatial_distances"] = distances
-    adata.obsp["spatial_connectivies"] = connectivities
+    adata.obsp["spatial_connectivities"] = connectivities
 
     logger.info_insert_adata("spatial_neighbors", adata_attr="uns")
     logger.info_insert_adata("spatial_neighbors.indices", adata_attr="uns")
@@ -563,6 +567,10 @@ def generate_spatial_weights_fixed_radius(
     graph_out.data = gaussian_weight_2d(graph_out.data, sigma)
 
     out_graph = row_normalize(graph_out, verbose=verbose)
+
+    logger.info_insert_adata("spatial_weights", adata_attr="obsp")
+    adata.obsp["spatial_weights"] = out_graph
+
     return out_graph, distance_graph, adata
 
 
