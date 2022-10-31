@@ -33,13 +33,14 @@ from .paste import (
     pairwise_align,
 )
 from .spatial_degs import moran_i
+from .ST_regression import *
 from .ST_regression.generalized_lm import fit_glm
 from .ST_regression.regression_utils import plot_prior_vs_data
 from .ST_regression.spatial_regression import (
-    Category_Interpreter,
-    Ligand_Lagged_Interpreter,
-    Niche_Interpreter,
-    Niche_LR_Interpreter,
+    Category_Model,
+    Ligand_Lagged_Model,
+    Niche_LR_Model,
+    Niche_Model,
 )
 from .three_dims_align import (
     get_align_labels,
