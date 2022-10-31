@@ -58,12 +58,23 @@ def get_adata(url: str, filename: Optional[str] = None) -> AnnData:
     return adata
 
 
-def drosophila_E8_10(
-    url="https://www.dropbox.com/s/z330s7a4p2w15oe/E8-10_b_all_anno_scsq.h5ad?dl=1",
-    filename="drosophila_E8_10.h5ad",
+def drosophila(
+    url="https://www.dropbox.com/s/bvstb3en5kc6wui/E7-9h_cellbin_tdr_v2.h5ad?dl=0",
+    filename="drosophila_E7-9h_v2.h5ad",
 ):
     """The E8-10 whole-body data of drosophila of aligned serial slices with tissue type annotations.
 
+    Args:
+        url: url that deposits the data. Available ``url`` are:
+
+                * ``E7-9h_cellbin_tdr_v1.h5ad``: ``https://www.dropbox.com/s/ow8xkge0538309a/E7-9h_cellbin_tdr_v1.h5ad?dl=0``
+                * ``E7-9h_cellbin_tdr_v2.h5ad``: ``https://www.dropbox.com/s/bvstb3en5kc6wui/E7-9h_cellbin_tdr_v2.h5ad?dl=0``
+                * ``E7-9h_cellbin_tdr_v2_midgut.h5ad``: ``https://www.dropbox.com/s/q020zgxxemxl7j4/E7-9h_cellbin_tdr_v2_midgut.h5ad?dl=0``
+                * ``E7-9h_cellbin_tdr_v3_midgut.h5ad``: ``https://www.dropbox.com/s/cz2nqpmoc3oo5f3/E7-9h_cellbin_tdr_v3_midgut.h5ad?dl=0``
+                * ``E9-10h_cellbin_tdr_v1.h5ad``: ``https://www.dropbox.com/s/q2l8mqpn7qvz2xr/E9-10h_cellbin_tdr_v1.h5ad?dl=0``
+                * ``E9-10h_cellbin_tdr_v2.h5ad``: ``https://www.dropbox.com/s/q02sx6acvcqaf35/E9-10h_cellbin_tdr_v2.h5ad?dl=0``
+                * ``E9-10h_cellbin_tdr_v2_midgut.h5ad``: ``https://www.dropbox.com/s/we2fkpd1p3ww33f/E9-10h_cellbin_tdr_v2_midgut.h5ad?dl=0``
+        filename: file name that will store the data locally.
     Returns:
         Returns `adata` object
     """
