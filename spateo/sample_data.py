@@ -74,6 +74,7 @@ def drosophila(
                 * ``E9-10h_cellbin_tdr_v1.h5ad``: ``https://www.dropbox.com/s/q2l8mqpn7qvz2xr/E9-10h_cellbin_tdr_v1.h5ad?dl=0``
                 * ``E9-10h_cellbin_tdr_v2.h5ad``: ``https://www.dropbox.com/s/q02sx6acvcqaf35/E9-10h_cellbin_tdr_v2.h5ad?dl=0``
                 * ``E9-10h_cellbin_tdr_v2_midgut.h5ad``: ``https://www.dropbox.com/s/we2fkpd1p3ww33f/E9-10h_cellbin_tdr_v2_midgut.h5ad?dl=0``
+                * ``E9-10h_cellbin_tdr_v2_CNS.h5ad``: ``https://www.dropbox.com/s/a7bllwm760dmda6/E9-10h_cellbin_tdr_v2_CNS.h5ad?dl=0``
         filename: file name that will store the data locally.
     Returns:
         Returns `adata` object
