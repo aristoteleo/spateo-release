@@ -45,7 +45,7 @@ def kernel_interpolation(
 
     from dynamo.vectorfield.scVectorField import SparseVFC
 
-    X, Y, Grid, grid_in_hull = get_X_Y_grid(adata=adata, X=X, Y=Y, grid_num=grid_num)
+    X, Y, Grid, grid_in_hull = get_X_Y_grid(adata=adata, X=X, Y=Y, genes=genes, grid_num=grid_num)
 
     predict_X = Grid if NX is None else NX
     res = SparseVFC(X, Y, predict_X, lambda_=lambda_, lstsq_method=lstsq_method, **kwargs)
@@ -89,7 +89,7 @@ def deep_intepretation(
         within the convex hull formed by the input data points while each column corresponds a gene whose expression
         values are interpolated.
     """
-    X, Y, Grid, grid_in_hull = get_X_Y_grid(adata=adata, X=X, Y=Y, grid_num=grid_num)
+    X, Y, Grid, grid_in_hull = get_X_Y_grid(adata=adata, X=X, Y=Y, genes=genes, grid_num=grid_num)
 
     data_dict = {"X": X, "Y": Y}
 
