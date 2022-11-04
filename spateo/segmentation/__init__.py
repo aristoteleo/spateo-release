@@ -13,6 +13,7 @@ from . import (
     simulation,
     utils,
     vi,
+    simulation_evaluation,
 )
 from .align import refine_alignment
 from .benchmark import compare
@@ -31,3 +32,4 @@ from .label import (
     watershed,
 )
 from .qc import generate_random_labels, generate_random_labels_like, select_qc_regions
+

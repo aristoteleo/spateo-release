@@ -13,6 +13,7 @@ from .clip import interactive_box_clip, interactive_rectangle_clip
 from .deep_interpolation import DataSampler, DeepInterpolation
 from .interpolation_nn import *
 from .interpolations import deep_intepretation, kernel_interpolation
+from .interpolations_2d import deep_intepretation_2d
 from .morphology import model_morphology, pc_KDE
 from .nn_losses import *
 from .pick import (

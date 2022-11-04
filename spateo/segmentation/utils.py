@@ -35,7 +35,7 @@ def circle(k: int) -> np.ndarray:
     return cv2.circle(np.zeros((k, k), dtype=np.uint8), (r, r), r, 1, -1)
 
 
-def knee_threshold(X: np.ndarray, n_bins: int = 256) -> float:
+def knee_threshold(X: np.ndarray, n_bins: int = 256, clip: int = 5) -> float:
     """Find the knee thresholding point of an arbitrary array.
 
     Note:
@@ -57,6 +57,9 @@ def knee_threshold(X: np.ndarray, n_bins: int = 256) -> float:
     else:
         x = np.linspace(X.min(), X.max(), n_bins)
     y = np.array([(X <= val).sum() for val in x]) / X.size
+
+    x = x[clip:]
+    y = y[clip:]
 
     kl = KneeLocator(x, y, curve="concave")
     return kl.knee
@@ -204,6 +207,7 @@ def apply_threshold(X: np.ndarray, k: int, threshold: Optional[Union[float, np.n
     """
     # Apply threshold and mclose,mopen
     threshold = threshold if threshold is not None else knee_threshold(X)
+    print(f'threshold: {threshold}')
     mask = mclose_mopen(X >= threshold, k)
     return mask
 

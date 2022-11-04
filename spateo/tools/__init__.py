@@ -31,8 +31,11 @@ from .three_dims_align import (
     slices_align_ref,
 )
 
-from .live_wire import (
-    compute_shortest_path,
-    live_wire,
-)
+#from .live_wire import (
+#    compute_shortest_path,
+#    live_wire,
+#    draw_adata,
+#    lasso_adata,
+#)
 
+from .spatially_variable_gene_ot import cal_wass_dis_bs  

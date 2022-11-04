@@ -113,6 +113,7 @@ class SpateoAdataKeyManager:
     EXPANDED_SUFFIX = "expanded"
     AUGMENTED_SUFFIX = "augmented"
     SELECTION_SUFFIX = "selection"
+    BOUNDARY_SUFFIX = "boundary"
 
     X_LAYER = "X"
 
