@@ -1,7 +1,10 @@
 """
 Companion functions for cell-cell communication inference analyses
 """
-from typing import Literal
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 import numpy as np
 import pandas as pd

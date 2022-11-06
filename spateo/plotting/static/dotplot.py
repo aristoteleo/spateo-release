@@ -9,7 +9,13 @@ plot_totals, additional if condition in make_figure()...
 import collections.abc as cabc
 from collections import namedtuple
 from itertools import product
-from typing import Iterable, Literal, Optional, Sequence, Tuple, Union
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
+
+from typing import Iterable, Optional, Sequence, Tuple, Union
 
 import matplotlib as mpl
 import matplotlib.patches as patches

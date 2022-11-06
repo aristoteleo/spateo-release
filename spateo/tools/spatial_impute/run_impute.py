@@ -4,10 +4,10 @@ Wrapper function to run generative modeling for count denoising and imputation.
 from typing import List, Union
 
 from anndata import AnnData
-from impute import STGNN
 
 from ...configuration import SKM
 from ...plotting.static.space import space
+from .impute import STGNN
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
