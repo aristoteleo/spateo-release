@@ -19,6 +19,7 @@ from torch.backends import cudnn
 from tqdm import tqdm
 
 from ...configuration import SKM
+from ...logging import logger_manager as lm
 from ..find_neighbors import construct_pairwise, normalize_adj
 from .impute_model import Encoder
 
@@ -35,14 +36,11 @@ def permutation(feature: FloatTensor) -> Tensor:
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def get_aug_feature(adata: AnnData, highly_variable: bool = False):
-    """
-    From AnnData object, get counts matrix, augment it and store both as .obsm entries
+    """From AnnData object, get counts matrix, augment it and store both as .obsm entries
 
     Args:
-        adata : class `anndata.AnnData`
-            Source AnnData object
-        highly_variable : bool, default False
-            Set True to subset to highly-variable genes
+        adata: Source AnnData object
+        highly_variable: Set True to subset to highly-variable genes
     """
     if highly_variable:
         adata_Vars = adata[:, adata.var["highly_variable"]]
@@ -94,15 +92,11 @@ class STGNN:
     Graph neural network for representation learning of spatial transcriptomics data from only the gene expression
     matrix. Wraps preprocessing and training.
 
-    adata : class `anndata.AnnData`
-    spatial_key : str, default 'spatial'
-        Key in .obsm where x- and y-coordinates are stored
-    random_seed : int, default 50
-        Sets seed for all random number generators
-    add_regularization : bool, default True
-        Set True to include weight-based penalty term in representation learning.
-    device : str, default 'cpu'
-        Options: 'cpu', 'cuda:_'. Perform computations on CPU or GPU. If GPU, provide the name of the device to run
+    adata: class `anndata.AnnData`
+    spatial_key: Key in .obsm where x- and y-coordinates are stored
+    random_seed: Sets seed for all random number generators
+    add_regularization: Set True to include weight-based penalty term in representation learning.
+    device: Options: 'cpu', 'cuda:_'. Perform computations on CPU or GPU. If GPU, provide the name of the device to run
         computations
     """
 
@@ -125,33 +119,33 @@ class STGNN:
 
         self.adata_output = self.adata.copy()
 
-    def train_STGNN(self, clip: Union[None, float] = None):
+    def train_STGNN(self, **kwargs):
         """
+        Args:
+            kwargs: Arguments that can be passed to :class `Trainer`.
 
-        Parameter
-        ---------
-        clip : optional float
-            Threshold below which imputed feature values will be set to 0, as a percentile
-
-        Returns
-        -------
-        adata_output : class `anndata.AnnData`
+        Returns:
+            adata_output: AnnData object with the smoothed values stored in a layer, either "X_smooth_gcn" or
+                "X_smooth_gcn_reg".
 
         """
+        # Activation function for GNN:
+        act = kwargs.get("act", "relu")
+        # Dictionary to convert string input to 'act' to PyTorch activation function:
+        act_dict = {"linear": F.linear, "sigmoid": F.sigmoid, "tanh": F.tanh, "relu": F.relu, "elu": F.elu}
+        kwargs["act"] = act_dict[act]
+
         if self.add_regularization:
             # Compute two versions of embedding and store as separate entries in .obsm:
             adata = self.adata_output.copy()
             get_aug_feature(adata)
             model = Trainer(adata, device=self.device)
+            # Adjust arguments based on .vars():
+            for var in kwargs.keys():
+                if var in vars(model).keys():
+                    model.var = kwargs[var]
+
             emb = model.train()
-            # Clipping constraint:
-            if clip is not None:
-                thresh = np.percentile(emb, clip, axis=0)
-                mask = emb < thresh
-                emb[mask] = 0
-            # Non-negativity constraint:
-            nz_mask = emb < 0
-            emb[nz_mask] = 0
 
             # Save reconstruction to layers:
             self.adata_output.layers["X_smooth_gcn"] = emb
@@ -162,28 +156,19 @@ class STGNN:
             get_aug_feature(adata)
             model = Trainer(adata, add_regularization=True, device=self.device)
             emb_regularization = model.train()
-            # Clipping constraint:
-            if clip is not None:
-                thresh = np.percentile(emb_regularization, clip, axis=0)
-                mask = emb_regularization < thresh
-                emb_regularization[mask] = 0
-            # Non-negativity constraint:
-            nz_mask = emb < 0
-            emb[nz_mask] = 0
+
             self.adata_output.layers["X_smooth_gcn_reg"] = emb_regularization
 
         else:
             get_aug_feature(self.adata_output)
             model = Trainer(self.adata_output, device=self.device)
+            # Adjust arguments based on .vars():
+            for var in kwargs.keys():
+                if var in vars(model).keys():
+                    setattr(model, var, kwargs[var])
+
             emb = model.train()
-            # Clipping constraint:
-            if clip is not None:
-                thresh = np.percentile(emb, clip, axis=0)
-                mask = emb < thresh
-                emb[mask] = 0
-            # Non-negativity constraint:
-            nz_mask = emb < 0
-            emb[nz_mask] = 0
+
             self.adata_output.layers["X_smooth_gcn"] = emb
 
         return self.adata_output
@@ -194,24 +179,20 @@ class Trainer:
     Graph neural network training module.
 
     Args:
-        adata : class `anndata.AnnData`
-        device : torch.device object
-        learn_rate : float, default 0.001
-            Controls magnitude of gradient for network learning
-        weight_decay : float, default 0.0
-            Controls degradation rate of parameters
-        epochs : int, default 1000
-            Number of iterations of training loop to perform
-        dim_output : int, default 64
-            Dimensionality of the output representation
-        alpha : float, default 10
-            Controls influence of reconstruction loss in representation learning
-        beta : float, default 1
-            Weight factor to control the influence of contrastive loss in representation learning
-        theta: float, default 0.1
-            Weight factor to control the influence of the regularization term in representation learning
-        add_regularization : bool, default False
-            Adds penalty term to representation learning
+        adata: class `anndata.AnnData`
+        device: torch.device object
+        learn_rate: Controls magnitude of gradient for network learning
+        dropout: Proportion of weights in each layer to set to 0
+        act: String specifying activation function for each encoder layer. Options: "linear", "sigmoid", "tanh",
+            "relu", "elu"
+        clip: Threshold below which imputed feature values will be set to 0, as a percentile
+        weight_decay: Controls degradation rate of parameters
+        epochs: Number of iterations of training loop to perform
+        dim_output: Dimensionality of the output representation
+        alpha: Controls influence of reconstruction loss in representation learning
+        beta: Weight factor to control the influence of contrastive loss in representation learning
+        theta: Weight factor to control the influence of the regularization term in representation learning
+        add_regularization: Adds penalty term to representation learning
     """
 
     def __init__(
@@ -219,6 +200,9 @@ class Trainer:
         adata: AnnData,
         device: "torch.device",
         learn_rate: float = 0.001,
+        dropout: float = 0.0,
+        act=F.relu,
+        clip: Union[None, float] = 0.25,
         weight_decay: float = 0.00,
         epochs: int = 1000,
         dim_output: int = 64,
@@ -230,6 +214,9 @@ class Trainer:
         self.adata = adata.copy()
         self.device = device
         self.learn_rate = learn_rate
+        self.dropout = dropout
+        self.act = act
+        self.clip = clip
         self.weight_decay = weight_decay
         self.epochs = epochs
         self.alpha = alpha
@@ -259,7 +246,15 @@ class Trainer:
         emb_rec : np.ndarray
             Reconstruction of the counts matrix
         """
-        self.model = Encoder(self.dim_input, self.dim_output, self.graph_neigh).to(self.device)
+        logger = lm.get_main_logger()
+        logger.info(
+            f"Training graph neural network model with learn rate: {self.learn_rate} for {self.epochs} epochs, "
+            f"dropout rate: {self.dropout} and clipping threshold percentile: {self.clip}."
+        )
+
+        self.model = Encoder(self.dim_input, self.dim_output, self.graph_neigh, self.dropout, self.act, self.clip).to(
+            self.device
+        )
         self.loss_CSL = nn.BCEWithLogitsLoss()
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), self.learn_rate, weight_decay=self.weight_decay)

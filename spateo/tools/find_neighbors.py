@@ -578,17 +578,6 @@ def generate_spatial_weights_fixed_radius(
 def calculate_distance(position: np.ndarray) -> np.ndarray:
     """Given array of x- and y-coordinates, compute pairwise distances between all samples"""
     distance_matrix = squareform(pdist(position, metric="euclidean"))
-    """
-    n_bucket = position.shape[0]
-    distance_matrix = np.zeros([n_bucket, n_bucket])
-
-    for i in range(n_bucket):
-        x = position[i, :]
-        for j in range(i + 1, n_bucket):
-            y = position[j, :]
-            d = np.sqrt(np.sum(np.square(x - y)))
-            distance_matrix[i, j] = d
-            distance_matrix[j, i] = d"""
 
     return distance_matrix
 

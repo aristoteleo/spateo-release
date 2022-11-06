@@ -1,3 +1,6 @@
+from typing import Union
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,12 +10,10 @@ from torch.nn.parameter import Parameter
 
 
 class Discriminator(nn.Module):
-    """
-    Module that learns associations between graph embeddings and their positively-labeled augmentations
+    """Module that learns associations between graph embeddings and their positively-labeled augmentations
 
     Args:
-        nf : int
-            Dimensionality (along the feature axis) of the input array
+        nf: Dimensionality (along the feature axis) of the input array
     """
 
     def __init__(self, nf: int):
@@ -29,22 +30,17 @@ class Discriminator(nn.Module):
                 m.bias.data.fill_(0.0)
 
     def forward(self, g_repr: FloatTensor, g_pos: FloatTensor, g_neg: FloatTensor):
-        """
-        Feeds data forward through network and computes graph representations
+        """Feeds data forward through network and computes graph representations
 
         Args:
-            g_repr : float tensor
-                Representation of source graph, with aggregated neighborhood representations
-            g_pos : float tensor
-                Representation of augmentation of the source graph that can be considered a positive pairing,
+            g_repr: Representation of source graph, with aggregated neighborhood representations
+            g_pos : Representation of augmentation of the source graph that can be considered a positive pairing,
                 with aggregated neighborhood representations
-            g_neg : float tensor
-                Representation of augmentation of the source graph that can be considered a negative pairing,
+            g_neg: Representation of augmentation of the source graph that can be considered a negative pairing,
                 with aggregated neighborhood representations
 
         Returns:
-             logits : float tensor, shape [1, 2]
-                Similarity score for the positive and negative paired graphs
+             logits: Similarity score for the positive and negative paired graphs
         """
         c_x = g_repr.expand_as(g_pos)
 
@@ -81,23 +77,26 @@ class AvgReadout(nn.Module):
 
 
 class Encoder(Module):
-    """
-    Representation learning for spatial transcriptomics data
+    """Representation learning for spatial transcriptomics data
 
     Args:
-        in_features : int
-            Number of features in the dataset
-        out_features : int
-            Size of the desired encoding
-        graph_neigh : float tensor, shape [n_samples, n_samples]
-            Pairwise adjacency matrix indicating which spots are neighbors of which other spots
-        dropout : float, default 0.0
-            Proportion of weights in each layer to set to 0
-        act : object of class `torch.nn.functional`, default `F.relu`
-            Activation function for each encoder layer
+        in_features: Number of features in the dataset
+        out_features: Size of the desired encoding
+        graph_neigh: Pairwise adjacency matrix indicating which spots are neighbors of which other spots
+        dropout: Proportion of weights in each layer to set to 0
+        act: object of class `torch.nn.functional`, default `F.relu`. Activation function for each encoder layer
+        clip: Threshold below which imputed feature values will be set to 0, as a percentile of the max value
     """
 
-    def __init__(self, in_features: int, out_features: int, graph_neigh: FloatTensor, dropout: float = 0.0, act=F.relu):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        graph_neigh: FloatTensor,
+        dropout: float = 0.0,
+        act=F.relu,
+        clip: Union[None, float] = None,
+    ):
         super(Encoder, self).__init__()
 
         self.in_features = in_features
@@ -105,6 +104,7 @@ class Encoder(Module):
         self.graph_neigh = graph_neigh
         self.dropout = dropout
         self.act = act
+        self.clip = clip
 
         self.weight1 = Parameter(torch.FloatTensor(self.in_features, self.out_features))
         self.weight2 = Parameter(torch.FloatTensor(self.out_features, self.in_features))
@@ -122,12 +122,9 @@ class Encoder(Module):
     def forward(self, feat: FloatTensor, feat_a: FloatTensor, adj: FloatTensor):
         """
         Args:
-        feat : float tensor, shape [n_samples, n_features]
-            Counts matrix
-        feat_a : float tensor, shape [n_samples, n_features]
-            Counts matrix following permutation and augmentation
-        adj : float tensor, shape [n_samples, n_samples]
-            Pairwise distance matrix
+            feat: Counts matrix
+            feat_a: Counts matrix following permutation and augmentation
+            adj: Pairwise distance matrix
         """
         z = F.dropout(feat, self.dropout, self.training)
         z = torch.mm(z, self.weight1)
@@ -137,6 +134,15 @@ class Encoder(Module):
 
         h = torch.mm(z, self.weight2)
         h = torch.mm(adj, h)
+
+        # Clipping constraint:
+        if self.clip is not None:
+            thresh = torch.quantile(h, self.clip, dim=0)
+            mask = h < thresh
+            h[mask] = 0
+        # Non-negativity constraint:
+        nz_mask = h < 0
+        h[nz_mask] = 0
 
         emb = self.act(z)
 
