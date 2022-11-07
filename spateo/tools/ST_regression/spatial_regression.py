@@ -991,15 +991,12 @@ class Base_Model:
             spine.set_visible(True)
             spine.set_linewidth(0.75)
 
-        # plt.gcf().subplots_adjust(bottom=0.3)
         plt.title(title if title is not None else "Spatial Parameters")
         if xlabel is not None:
             plt.xlabel(xlabel, size=6)
         if ylabel is not None:
             plt.ylabel(ylabel, size=6)
         ax.set_xticklabels(xtick_labels, rotation=90, ha="center")
-        # ax.xaxis.set_ticks_position("none")
-        # ax.yaxis.set_ticks_position("none")
         plt.tight_layout()
 
         save_return_show_fig_utils(
@@ -1079,7 +1076,6 @@ class Base_Model:
         )
 
         is_significant = pd.DataFrame(is_significant, index=param_labels, columns=feature_labels)
-        print(is_significant)
         pvalues = pd.DataFrame(pvalues, index=param_labels, columns=feature_labels)
         qvalues = pd.DataFrame(qvalues, index=param_labels, columns=feature_labels)
 

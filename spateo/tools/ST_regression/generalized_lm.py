@@ -384,6 +384,7 @@ class GLM(BaseEstimator):
         tol: Convergence threshold or stopping criteria. Optimization loop will stop when relative change in
             parameter norm is below the threshold.
         eta: A threshold parameter that linearizes the exp() function above eta.
+        clip_coeffs: Coefficients of lower absolute value than this threshold are set to zero.
         score_metric: Scoring metric. Options:
             - "deviance": Uses the difference between the saturated (perfectly predictive) model and the true model.
             - "pseudo_r2": Uses the coefficient of determination b/w the true and predicted values.
@@ -409,6 +410,7 @@ class GLM(BaseEstimator):
         max_iter: int = 1000,
         tol: float = 1e-6,
         eta: float = 2.0,
+        clip_coeffs: float = 0.01,
         score_metric: Literal["deviance", "pseudo_r2"] = "deviance",
         fit_intercept: bool = True,
         random_seed: int = 888,
@@ -433,6 +435,7 @@ class GLM(BaseEstimator):
         self.max_iter = max_iter
         self.tol = tol
         self.eta = eta
+        self.clip_coeffs = clip_coeffs
         self.score_metric = score_metric
         self.fit_intercept = fit_intercept
         # Seed into instance of np.random.RandomState
@@ -537,6 +540,9 @@ class GLM(BaseEstimator):
         self.ynull_ = np.mean(y)
         self.is_fitted_ = True
 
+        # Clip small nonzero values w/ absolute value below the provided threshold:
+        self.beta_[np.abs(self.beta_) < self.clip_coeffs] = 0
+
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -617,6 +623,7 @@ class GLMCV(BaseEstimator):
         tol: Convergence threshold or stopping criteria. Optimization loop will stop when relative change in
             parameter norm is below the threshold.
         eta: A threshold parameter that linearizes the exp() function above eta.
+        clip_coeffs: Absolute value below which to set coefficients to zero.
         score_metric: Scoring metric. Options:
             - "deviance": Uses the difference between the saturated (perfectly predictive) model and the true model.
             - "pseudo_r2": Uses the coefficient of determination b/w the true and predicted values.
@@ -647,6 +654,7 @@ class GLMCV(BaseEstimator):
         max_iter: int = 1000,
         tol: float = 1e-6,
         eta: float = 2.0,
+        clip_coeffs: float = 0.01,
         score_metric: Literal["deviance", "pseudo_r2"] = "deviance",
         fit_intercept: bool = True,
         random_seed: int = 888,
@@ -682,6 +690,7 @@ class GLMCV(BaseEstimator):
         self.ynull_ = None
         self.tol = tol
         self.eta = eta
+        self.clip_coeffs = clip_coeffs
         self.theta = theta
         self.score_metric = score_metric
         self.fit_intercept = fit_intercept
@@ -738,6 +747,7 @@ class GLMCV(BaseEstimator):
                 max_iter=self.max_iter,
                 tol=self.tol,
                 eta=self.eta,
+                clip_coeffs=self.clip_coeffs,
                 theta=self.theta,
                 score_metric=self.score_metric,
                 fit_intercept=self.fit_intercept,
