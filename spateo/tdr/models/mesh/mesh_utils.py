@@ -50,16 +50,16 @@ def uniform_larger_pc(
     slices = []
     for z in coords_z:
         slice_coords = coords[coords[:, 2] == z]
+        slice_cloud = pv.PolyData(slice_coords)
         if len(slice_coords) >= 3:
-            slice_cloud = pv.PolyData(slice_coords)
             slice_plane = slice_cloud.delaunay_2d(alpha=alpha).triangulate().clean()
-            slices.append(slice_plane)
+            uniform_plane = uniform_mesh(mesh=slice_plane, nsub=nsub, nclus=nclus)
+            slices.append(uniform_plane)
         else:
-            raise ValueError(f"When the z-axis is {z}, the number of coordinates is less than 3 and cannot be uniform.")
-    slices_mesh = merge_models(models=slices)
-    uniform_slices_mesh = uniform_mesh(mesh=slices_mesh, nsub=nsub, nclus=nclus)
+            slices.append(slice_cloud)
 
-    new_pc = pv.PolyData(uniform_slices_mesh.points).clean()
+    slices_mesh = merge_models(models=slices)
+    new_pc = pv.PolyData(slices_mesh.points).clean()
     return new_pc
 
 
@@ -144,3 +144,36 @@ def fix_mesh(mesh: PolyData) -> PolyData:
         )
 
     return fixed_mesh
+
+
+##############
+# clean mesh #
+##############
+
+
+def clean_mesh(mesh: PolyData) -> PolyData:
+    """Removes unused points and degenerate cells."""
+
+    sub_meshes = mesh.split_bodies()
+    n_mesh = len(sub_meshes)
+
+    if n_mesh == 1:
+        return mesh
+    else:
+        inside_number = []
+        for i, main_mesh in enumerate(sub_meshes[:-1]):
+            main_mesh = pv.PolyData(main_mesh.points, main_mesh.cells)
+            for j, check_mesh in enumerate(sub_meshes[i + 1 :]):
+                check_mesh = pv.PolyData(check_mesh.points, check_mesh.cells)
+                inside = check_mesh.select_enclosed_points(main_mesh, check_surface=False).threshold(0.5)
+                inside = pv.PolyData(inside.points, inside.cells)
+                if check_mesh == inside:
+                    inside_number.append(i + 1 + j)
+
+        cm_number = list(set([i for i in range(n_mesh)]).difference(set(inside_number)))
+        if len(cm_number) == 1:
+            cmesh = sub_meshes[cm_number[0]]
+        else:
+            cmesh = merge_models([sub_meshes[i] for i in cm_number])
+
+        return pv.PolyData(cmesh.points, cmesh.cells)

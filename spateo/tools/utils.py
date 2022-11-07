@@ -89,7 +89,9 @@ def gen_rotation_2d(degree: float):
     return np.array(R)
 
 
-def compute_smallest_distance(coords: list, leaf_size: int = 40, sample_num=None, use_unique_coords=True) -> float:
+def compute_smallest_distance(
+    coords: np.ndarray, leaf_size: int = 40, sample_num=None, use_unique_coords=True
+) -> float:
     """Compute and return smallest distance. A wrapper for sklearn API
     Parameters
     ----------

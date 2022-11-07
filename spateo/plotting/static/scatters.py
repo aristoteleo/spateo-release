@@ -3,7 +3,7 @@
 
 import warnings
 from numbers import Number
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import anndata
 import cv2
@@ -14,9 +14,10 @@ from anndata import AnnData
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
 from pandas.api.types import is_categorical_dtype
+from typing_extensions import Literal
 
-from spateo.configuration import _themes, reset_rcParams
-from spateo.tools.utils import (
+from ...configuration import SKM, _themes, reset_rcParams
+from ...tools.utils import (
     affine_transform,
     calc_1nd_moment,
     flatten,
@@ -24,8 +25,6 @@ from spateo.tools.utils import (
     get_mapper,
     update_dict,
 )
-
-from ...configuration import SKM
 from .utils import (
     _datashade_points,
     _get_adata_color_vec,
@@ -75,8 +74,8 @@ def scatters(
     show_arrowed_spines: bool = False,
     ax: Optional[matplotlib.axes.Axes] = None,
     sort: str = "raw",
-    save_show_or_return: str = "show",
-    save_kwargs: dict = {},
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[Dict] = None,
     return_all: bool = False,
     add_gamma_fit: bool = False,
     frontier: bool = False,
@@ -111,7 +110,7 @@ def scatters(
     img_layers: Optional[int] = None,
     **kwargs,
 ) -> Union[None, Axes]:
-    """Plot an embedding as points. Currently this only works
+    """Plot an embedding as points. Currently, this only works
     for 2D embeddings. While there are many optional parameters
     to further control and tailor the plotting, you need only
     pass in the trained/fit umap model to get results. This plot
@@ -123,7 +122,7 @@ def scatters(
 
     Args:
         adata: :class:`~anndata.AnnData`
-            an Annodata object
+            an Anndata object
         basis: `str`
             The reduced dimension.
         x: `int` (default: `0`)
@@ -135,7 +134,7 @@ def scatters(
         layer: `str` (default: `X`)
             The layer of data to use for the scatter plot.
         highlights: `list` (default: None)
-            Which color group will be highlighted. if highligts is a list of lists - each list is relate to each color
+            Which color group will be highlighted. if highlights is a list of lists - each list is relate to each color
             element.
         labels: array, shape (n_samples,) (optional, default None)
             An array of labels (assumed integer or categorical),
@@ -219,13 +218,13 @@ def scatters(
         sort: `str` (optional, default `raw`)
             The method to reorder data so that high values points will be on top of background points. Can be one of
             {'raw', 'abs', 'neg'}, i.e. sorted by raw data, sort by absolute values or sort by negative values.
-        save_show_or_return: `str` {'save', 'show', 'return', 'both', 'all'} (default: `show`)
-            Whether to save, show or return the figure. If "both", it will save and plot the figure at the same time. If
+        save_show_or_return: Whether to save, show or return the figure.
+            If "both", it will save and plot the figure at the same time. If
             "all", the figure will be saved, displayed and the associated axis and other object will be return.
-        save_kwargs: `dict` (default: `{}`)
-            A dictionary that will passed to the save_fig function. By default it is an empty dictionary and the
-            save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent":
-            True, "close": True, "verbose": True} as its parameters. Otherwise you can provide a dictionary that
+        save_kwargs: A dictionary that will be passed to the save_fig function.
+            By default, it is an empty dictionary and the save_fig function will use the
+            {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True, "verbose": True}
+            as its parameters. Otherwise, you can provide a dictionary that
             properly modify those keys according to your needs.
         return_all: `bool` (default: `False`)
             Whether to return all the scatter related variables. Default is False.
@@ -1008,7 +1007,7 @@ def scatters(
         show_legend=show_legend,
         background=background,
         prefix="scatters",
-        save_kwargs=save_kwargs,
+        save_kwargs=save_kwargs or {},
         total_panels=total_panels,
         fig=figure,
         axes=axes_list if total_panels else ax,

@@ -16,7 +16,7 @@ to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else np.asarr
 
 
 def compute_pca_components(
-    matrix: Union[np.ndarray, spmatrix], save_curve_img: Optional[str] = None
+    matrix: Union[np.ndarray, spmatrix], random_state: Optional[int] = 1, save_curve_img: Optional[str] = None
 ) -> Tuple[Any, int, float]:
     """
     Calculate the inflection point of the PCA curve to
@@ -34,7 +34,7 @@ def compute_pca_components(
     matrix[np.isnan(matrix)] = 0
 
     # Principal component analysis (PCA).
-    pca = PCA(n_components=None)
+    pca = PCA(n_components=None, random_state=random_state)
     pcs = pca.fit_transform(matrix)
 
     # Percentage of variance explained by each of the selected components.
@@ -65,6 +65,7 @@ def pca_spateo(
     pca_key: Optional[str] = "X_pca",
     genes: Union[list, None] = None,
     layer: Union[str, None] = None,
+    random_state: Optional[int] = 1,
 ):
     """
     Do PCA for dimensional reduction.
@@ -107,10 +108,10 @@ def pca_spateo(
         lm.main_info("Runing PCA on user provided data...")
 
     if n_pca_components is None:
-        pcs, n_pca_components, _ = compute_pca_components(adata.X, save_curve_img=None)
+        pcs, n_pca_components, _ = compute_pca_components(adata.X, random_state=random_state, save_curve_img=None)
     else:
         matrix = to_dense_matrix(matrix)
-        pca = PCA(n_components=n_pca_components)
+        pca = PCA(n_components=n_pca_components, random_state=random_state)
         pcs = pca.fit_transform(matrix)
 
     adata.obsm[pca_key] = pcs[:, :n_pca_components]
@@ -194,6 +195,7 @@ def sctransform(
 def pearson_residuals(
     adata: AnnData,
     n_top_genes: Optional[int] = 3000,
+    subset: bool = False,
     theta: float = 100,
     clip: Optional[float] = None,
     check_values: bool = True,
@@ -211,6 +213,7 @@ def pearson_residuals(
     Args:
         adata: An anndata object.
         n_top_genes: Number of highly-variable genes to keep.
+        subset: Inplace subset to highly-variable genes if `True` otherwise merely indicate highly variable genes.
         theta: The negative binomial overdispersion parameter theta for Pearson residuals.
                Higher values correspond to less overdispersion (var = mean + mean^2/theta), and `theta=np.Inf`
                corresponds to a Poisson model.
@@ -229,8 +232,9 @@ def pearson_residuals(
     )
 
     if not (n_top_genes is None):
-        compute_highly_variable_genes(adata, n_top_genes=n_top_genes, recipe="pearson_residuals", inplace=True)
-        adata = adata[:, adata.var.highly_variable]
+        compute_highly_variable_genes(
+            adata, n_top_genes=n_top_genes, recipe="pearson_residuals", inplace=True, subset=subset
+        )
 
     X = adata.X.copy()
     residuals = compute_pearson_residuals(X, theta=theta, clip=clip, check_values=check_values)
@@ -241,6 +245,7 @@ def pearson_residuals(
 def integrate(
     adatas: List[AnnData],
     batch_key: str = "slices",
+    fill_value: Union[int, float] = 0,
 ) -> AnnData:
     """
     Concatenating all anndata objects.
@@ -248,29 +253,51 @@ def integrate(
     Args:
         adatas: AnnData matrices to concatenate with.
         batch_key: Add the batch annotation to :attr:`obs` using this key.
+        fill_value: Scalar value to fill newly missing values in arrays with.
     Returns:
         integrated_adata: The concatenated AnnData, where adata.obs[batch_key] stores a categorical variable labeling the batch.
     """
 
-    # Merge the obsm data and varm data of all anndata objcets separately.
-    obsm_dict, varm_dict = {}, {}
-    obsm_keys, varm_keys = adatas[0].obsm.keys(), adatas[0].varm.keys()
-    n_obsm_keys, n_varm_keys = len(obsm_keys), len(varm_keys)
+    batch_ca = [adata.obs[batch_key][0] for adata in adatas]
+
+    # Merge the obsm, varm and uns data of all anndata objcets separately.
+    obsm_dict, varm_dict, uns_dict = {}, {}, {}
+    obsm_keys, varm_keys, uns_keys = [], [], []
+    for adata in adatas:
+        obsm_keys.extend(list(adata.obsm.keys()))
+        varm_keys.extend(list(adata.varm.keys()))
+        uns_keys.extend(list(adata.uns_keys()))
+
+    obsm_keys, varm_keys, uns_keys = list(set(obsm_keys)), list(set(varm_keys)), list(set(uns_keys))
+    n_obsm_keys, n_varm_keys, n_uns_keys = len(obsm_keys), len(varm_keys), len(uns_keys)
+
     if n_obsm_keys > 0:
         for key in obsm_keys:
             obsm_dict[key] = np.concatenate([to_dense_matrix(adata.obsm[key]) for adata in adatas], axis=0)
     if n_varm_keys > 0:
         for key in varm_keys:
             varm_dict[key] = np.concatenate([to_dense_matrix(adata.varm[key]) for adata in adatas], axis=0)
+    if n_uns_keys > 0:
+        for key in uns_keys:
+            if "__type" in uns_keys and key == "__type":
+                uns_dict["__type"] = adatas[0].uns["__type"]
+            else:
+                uns_dict[key] = {
+                    ca: adata.uns[key] if key in adata.uns_keys() else None for ca, adata in zip(batch_ca, adatas)
+                }
 
-    # Delete obsm and varm data.
+    # Delete obsm, varm and uns data.
     for adata in adatas:
-        del adata.obsm, adata.varm
+        del adata.obsm, adata.varm, adata.uns
 
-    # Concatenating obs and var data.
-    batch_ca = [adata.obs[batch_key][0] for adata in adatas]
+    # Concatenating obs and var data which will ignore the uns, obsm, varm attributes.
     integrated_adata = adatas[0].concatenate(
-        *adatas[1:], batch_key=batch_key, batch_categories=batch_ca, join="outer", fill_value=0, uns_merge="unique"
+        *adatas[1:],
+        batch_key=batch_key,
+        batch_categories=batch_ca,
+        join="outer",
+        fill_value=fill_value,
+        uns_merge=None,
     )
 
     # Add Concatenated obsm data and varm data to integrated anndata object.
@@ -280,6 +307,9 @@ def integrate(
     if n_varm_keys > 0:
         for key, value in varm_dict.items():
             integrated_adata.varm[key] = value
+    if n_uns_keys > 0:
+        for key, value in uns_dict.items():
+            integrated_adata.uns[key] = value
 
     return integrated_adata
 

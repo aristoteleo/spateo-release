@@ -3,9 +3,8 @@ from typing import Union
 import anndata
 import numpy as np
 
-from spateo.tools.utils import compute_smallest_distance
-
 from ...configuration import SKM
+from ...tools.utils import compute_smallest_distance
 from .scatters import scatters
 
 # from .scatters import (

@@ -106,11 +106,13 @@ class SpateoAdataKeyManager:
     LABELS_LAYER_KEY = "labels"
     MASK_SUFFIX = "mask"
     MARKERS_SUFFIX = "markers"
+    DISTANCES_SUFFIX = "distances"
     BINS_SUFFIX = "bins"
     LABELS_SUFFIX = "labels"
     SCORES_SUFFIX = "scores"
     EXPANDED_SUFFIX = "expanded"
     AUGMENTED_SUFFIX = "augmented"
+    SELECTION_SUFFIX = "selection"
 
     X_LAYER = "X"
 
@@ -179,12 +181,21 @@ class SpateoAdataKeyManager:
                     all(SpateoAdataKeyManager.adata_is_type(_adata, t) for _adata in adata)
                     if isinstance(adata, (list, tuple))
                     else SpateoAdataKeyManager.adata_is_type(adata, t)
+                    if type(adata) == AnnData
+                    else False
                 )
                 if (not optional or adata is not None) and not passing:
-                    raise ConfigurationError(
-                        f"AnnData(s) provided to `{argname}` argument must be of `{t}` type, but received "
-                        f"`{SpateoAdataKeyManager.get_adata_type(adata)}` type."
-                    )
+                    if isinstance(adata, (list, tuple)):
+                        raise ConfigurationError(
+                            f"AnnDatas provided to `{argname}` argument must be of `{t}` type, but some are not."
+                        )
+                    elif type(adata) == AnnData:
+                        raise ConfigurationError(
+                            f"AnnData provided to `{argname}` argument must be of `{t}` type, but received "
+                            f"`{SpateoAdataKeyManager.get_adata_type(adata)}` type."
+                        )
+                    else:
+                        raise ConfigurationError(f"AnnData is not AnnData object, but {type(adata)}.")
                 return func(*args, **kwargs)
 
             return wrapper
@@ -228,6 +239,54 @@ class SpateoAdataKeyManager:
 
 SKM = SpateoAdataKeyManager
 
+
+# Means to shift the scale of colormaps:
+def shiftedColorMap(cmap, start=0, midpoint=0.5, stop=1.0, name="shiftedcmap"):
+    """
+    Function to offset the "center" of a colormap. Useful for
+    data with a negative min and positive max and you want the
+    middle of the colormap's dynamic range to be at zero.
+
+    Input
+    -----
+      cmap : The matplotlib colormap to be altered
+      start : Offset from lowest point in the colormap's range.
+          Defaults to 0.0 (no lower offset). Should be between
+          0.0 and `midpoint`.
+      midpoint : The new center of the colormap. Defaults to
+          0.5 (no shift). Should be between 0.0 and 1.0. In
+          general, this should be  1 - vmax / (vmax + abs(vmin))
+          For example if your data range from -15.0 to +5.0 and
+          you want the center of the colormap at 0.0, `midpoint`
+          should be set to  1 - 5/(5 + 15)) or 0.75
+      stop : Offset from highest point in the colormap's range.
+          Defaults to 1.0 (no upper offset). Should be between
+          `midpoint` and 1.0.
+    """
+    cdict = {"red": [], "green": [], "blue": [], "alpha": []}
+
+    # regular index to compute the colors
+    reg_index = np.linspace(start, stop, 257)
+
+    # shifted index to match the data
+    shift_index = np.hstack(
+        [np.linspace(0.0, midpoint, 128, endpoint=False), np.linspace(midpoint, 1.0, 129, endpoint=True)]
+    )
+
+    for ri, si in zip(reg_index, shift_index):
+        r, g, b, a = cmap(ri)
+
+        cdict["red"].append((si, r, r))
+        cdict["green"].append((si, g, g))
+        cdict["blue"].append((si, b, b))
+        cdict["alpha"].append((si, a, a))
+
+    newcmap = matplotlib.colors.LinearSegmentedColormap(name, cdict)
+    plt.register_cmap(cmap=newcmap)
+
+    return newcmap
+
+
 fire_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("fire", colorcet.fire)
 darkblue_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("darkblue", colorcet.kbc)
 darkgreen_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("darkgreen", colorcet.kgy)
@@ -252,15 +311,24 @@ glasbey_dark_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    plt.register_cmap("fire", fire_cmap)
-    plt.register_cmap("darkblue", darkblue_cmap)
-    plt.register_cmap("darkgreen", darkgreen_cmap)
-    plt.register_cmap("darkred", darkred_cmap)
-    plt.register_cmap("darkpurple", darkpurple_cmap)
-    plt.register_cmap("div_blue_black_red", div_blue_black_red_cmap)
-    plt.register_cmap("div_blue_red", div_blue_red_cmap)
-    plt.register_cmap("glasbey_white", glasbey_white_cmap)
-    plt.register_cmap("glasbey_dark", glasbey_dark_cmap)
+    if "fire" not in matplotlib.colormaps():
+        plt.register_cmap("fire", fire_cmap)
+    if "darkblue" not in matplotlib.colormaps():
+        plt.register_cmap("darkblue", darkblue_cmap)
+    if "darkgreen" not in matplotlib.colormaps():
+        plt.register_cmap("darkgreen", darkgreen_cmap)
+    if "darkred" not in matplotlib.colormaps():
+        plt.register_cmap("darkred", darkred_cmap)
+    if "darkpurple" not in matplotlib.colormaps():
+        plt.register_cmap("darkpurple", darkpurple_cmap)
+    if "div_blue_black_red" not in matplotlib.colormaps():
+        plt.register_cmap("div_blue_black_red", div_blue_black_red_cmap)
+    if "div_blue_red" not in matplotlib.colormaps():
+        plt.register_cmap("div_blue_red", div_blue_red_cmap)
+    if "glasbey_white" not in matplotlib.colormaps():
+        plt.register_cmap("glasbey_white", glasbey_white_cmap)
+    if "glasbey_dark" not in matplotlib.colormaps():
+        plt.register_cmap("glasbey_dark", glasbey_dark_cmap)
 
 _themes = {
     "fire": {

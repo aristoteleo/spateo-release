@@ -58,15 +58,112 @@ def get_adata(url: str, filename: Optional[str] = None) -> AnnData:
     return adata
 
 
-def drosophila_E8_10(
-    url="https://www.dropbox.com/s/z330s7a4p2w15oe/E8-10_b_all_anno_scsq.h5ad?dl=1",
-    filename="drosophila_E8_10.h5ad",
+def drosophila(
+    url="https://www.dropbox.com/s/bvstb3en5kc6wui/E7-9h_cellbin_tdr_v2.h5ad?dl=0",
+    filename="drosophila_E7-9h_v2.h5ad",
 ):
     """The E8-10 whole-body data of drosophila of aligned serial slices with tissue type annotations.
 
-    Returns
-    -------
+    Args:
+        url: url that deposits the data. Available ``url`` are:
+
+                * ``E7-9h_cellbin_tdr_v1.h5ad``: ``https://www.dropbox.com/s/ow8xkge0538309a/E7-9h_cellbin_tdr_v1.h5ad?dl=0``
+                * ``E7-9h_cellbin_tdr_v2.h5ad``: ``https://www.dropbox.com/s/bvstb3en5kc6wui/E7-9h_cellbin_tdr_v2.h5ad?dl=0``
+                * ``E7-9h_cellbin_tdr_v2_midgut.h5ad``: ``https://www.dropbox.com/s/q020zgxxemxl7j4/E7-9h_cellbin_tdr_v2_midgut.h5ad?dl=0``
+                * ``E7-9h_cellbin_tdr_v3_midgut.h5ad``: ``https://www.dropbox.com/s/cz2nqpmoc3oo5f3/E7-9h_cellbin_tdr_v3_midgut.h5ad?dl=0``
+                * ``E9-10h_cellbin_tdr_v1.h5ad``: ``https://www.dropbox.com/s/q2l8mqpn7qvz2xr/E9-10h_cellbin_tdr_v1.h5ad?dl=0``
+                * ``E9-10h_cellbin_tdr_v2.h5ad``: ``https://www.dropbox.com/s/q02sx6acvcqaf35/E9-10h_cellbin_tdr_v2.h5ad?dl=0``
+                * ``E9-10h_cellbin_tdr_v2_midgut.h5ad``: ``https://www.dropbox.com/s/we2fkpd1p3ww33f/E9-10h_cellbin_tdr_v2_midgut.h5ad?dl=0``
+                * ``E9-10h_cellbin_tdr_v2_CNS.h5ad``: ``https://www.dropbox.com/s/a7bllwm760dmda6/E9-10h_cellbin_tdr_v2_CNS.h5ad?dl=0``
+        filename: file name that will store the data locally.
+    Returns:
         Returns `adata` object
+    """
+    adata = get_adata(url, filename)
+
+    return adata
+
+
+def slideseq(
+    url="https://www.dropbox.com/s/d3tpusisbyzn6jk/slideseq.h5ad?dl=1",
+    filename="slideseq_mouse_hippocampus.h5ad",
+):
+    """Saptial transcriptomic sample from the mouse hippocampus; data generated using Slide-seqV2. See:
+    Stickels, R. R., Murray, E., Kumar, P., Li, J., Marshall, J. L., Di Bella, D. J., ... & Chen, F. (2021).
+    Highly sensitive spatial transcriptomics at near-cellular resolution with Slide-seqV2. Nature biotechnology, 39(3),
+    313-319.
+
+    Returns:
+        adata: AnnData object containing Slide-seq data
+    """
+    adata = get_adata(url, filename)
+
+    return adata
+
+
+def seqfish(
+    url="https://www.dropbox.com/s/cm3uw8czhz5hu30/seqFISH.h5ad?dl=1",
+    filename="seqfish_mouse_embryo.h5ad",
+):
+    """Spatial transcriptomic sample taken at one timepoint in the process of mouse organogenesis; data generated using
+    seqFISH. See:
+    Lohoff, T., Ghazanfar, S., Missarova, A., Koulena, N., Pierson, N., Griffiths, J. A., ... & Marioni, J. C. (2022).
+    Integration of spatial and single-cell transcriptomic data elucidates mouse organogenesis.
+    Nature biotechnology, 40(1), 74-85.
+
+    Returns:
+        adata: AnnData object containing Slide-seq data
+    """
+    adata = get_adata(url, filename)
+
+    return adata
+
+
+def merfish(
+    url="https://www.dropbox.com/s/e8hwgqnrx2ob9h4/MERFISH.h5ad?dl=1",
+    filename="merfish_mouse_hypothalamus.h5ad",
+):
+    """Spatial transcriptomic sample taken from the mouse hypothalamus; data generated using MERFISH. See:
+    Moffitt, J. R., Bambah-Mukku, D., Eichhorn, S. W., Vaughn, E., Shekhar, K., Perez, J. D., ... & Zhuang, X. (2018).
+    Molecular, spatial, and functional single-cell profiling of the hypothalamic preoptic region.
+    Science, 362(6416), eaau5324.
+
+    Returns:
+        adata: AnnData object containing Slide-seq data
+    """
+    adata = get_adata(url, filename)
+
+    return adata
+
+
+def seqscope(
+    url="https://www.dropbox.com/s/hci9up23dkuyexb/SeqScope.h5ad?dl=1",
+    filename="seqscope_mouse_liver.h5ad",
+):
+    """Spatial transcriptomic sample taken from the mouse liver; data generated using Seq-Scope. See:
+    Cho, C. S., Xi, J., Si, Y., Park, S. R., Hsu, J. E., Kim, M., ... & Lee, J. H. (2021). Microscopic examination of
+    spatial transcriptome using Seq-Scope. Cell, 184(13), 3559-3572, and:
+    Xi, J., Lee, J. H., Kang, H. M., & Jun, G. (2022). STtools: a comprehensive software pipeline for
+    ultra-high-resolution spatial transcriptomics data. Bioinformatics Advances, 2(1), vbac061.
+
+    Returns:
+        adata: AnnData object containing Slide-seq data
+    """
+    adata = get_adata(url, filename)
+
+    return adata
+
+
+def starmap(
+    url="https://www.dropbox.com/s/zpvu387tajrwth7/STARmap.h5ad?dl=1",
+    filename="starmap_mouse_brain.h5ad",
+):
+    """Spatial transcriptomic sample taken from the mouse brain; data generated using STARmap. See:
+    Wang, X., Allen, W. E., Wright, M. A., Sylwestrak, E. L., Samusik, N., Vesuna, S., ... & Deisseroth, K. (2018).
+    Three-dimensional intact-tissue sequencing of single-cell transcriptional states. Science, 361(6400), eaat5691.
+
+    Returns:
+        adata: AnnData object containing Slide-seq data
     """
     adata = get_adata(url, filename)
 

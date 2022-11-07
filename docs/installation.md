@@ -34,6 +34,4 @@ where `{branch}` is the branch name.
 
 ## Development
 
-If you are interested in contributing to Spateo, please read [](contributing/index).
-
-[python]: https://www.python.org/downloads/
+If you are interested in contributing to Spateo, please read [](contributing).

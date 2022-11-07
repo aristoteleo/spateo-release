@@ -9,6 +9,9 @@ install:
 install-dev:
 	pip install -r dev-requirements.txt
 
+install-tdr:
+	pip install -r 3d-requirements.txt
+
 install-docs:
 	pip install -r docs/requirements.txt
 

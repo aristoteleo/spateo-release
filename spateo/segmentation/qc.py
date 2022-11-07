@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
@@ -15,7 +15,9 @@ def select_qc_regions(
     n: int = 4,
     size: int = 2000,
     seed: Optional[int] = None,
+    use_scale: bool = True,
     absolute: bool = False,
+    weight_func: Optional[Callable[[AnnData], float]] = lambda adata: np.log1p(adata.X.sum()),
 ):
     """Select regions to use for segmentation quality control purposes.
 
@@ -29,12 +31,22 @@ def select_qc_regions(
         regions: List of tuples in the form `(xmin, ymin)` or `(xmin, xmax, ymin, ymax)`.
             If the later, the `size` argument is used to compute the bounding box.
         n: Number of regions to select if `regions` is not provided.
-        size: Width and height of each randomly selected region.
+        size: Width and height, in pixels, of each randomly selected region.
         seed: Random seed.
+        use_scale: Whether or not the provided `regions` are in scale units.
+            This option only has effect when `regions` are
+            provided. `False` means the provided coordinates are in terms of
+            pixels.
         absolute: Whether or not the provided `regions` are in terms of absolute
             X and Y coordinates. This option only has effect when `regions` are
             provided. `False` means the provided coordinates are relative with
             respect to the coordinates in the provided `adata`.
+        weight_func: Weighting function when `regions` is not provided. The probability of
+            selecting each `size x size` region will be weighted by this function, which
+            accepts a single AnnData (the region) as its argument, and returns a single
+            float weight, such that higher weights mean higher probability. By default,
+            the log1p of the sum of the counts in the `X` layer is used. Set to `None`
+            to weight each region equally.
     """
     if not regions:
         lm.main_info(f"Randomly selecting {n} regions of shape {(size, size)}.")
@@ -48,7 +60,14 @@ def select_qc_regions(
             raise SegmentationError("No possible regions found. This may indicate the `size` argument is to big.")
 
         rng = np.random.default_rng(seed)
-        choices = indices[rng.choice(np.arange(indices.shape[0]), n, replace=False)]
+        if weight_func is None:
+            idx = rng.choice(np.arange(indices.shape[0]), n, replace=False)
+        else:
+            p = np.zeros(indices.shape[0])
+            for i, (x, y) in enumerate(indices):
+                p[i] = weight_func(adata[x : x + size, y : y + size])
+            idx = rng.choice(np.arange(indices.shape[0]), n, replace=False, p=p / p.sum())
+        choices = indices[idx]
 
         for i, (x, y) in enumerate(choices):
             xmin = int(adata.obs_names[x])
@@ -58,6 +77,9 @@ def select_qc_regions(
         lm.main_info(f"Using regions provided with `regions` argument.")
         _regions = np.zeros((len(regions), 4), dtype=int)
         adata_bounds = SKM.get_agg_bounds(adata)
+        binsize = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_BINSIZE_KEY)
+        scale = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_KEY) * binsize
+        unit = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY)
         for i, region in enumerate(regions):
             if len(region) == 4:
                 xmin, xmax, ymin, ymax = region
@@ -67,6 +89,12 @@ def select_qc_regions(
                 ymax = ymin + size
             else:
                 raise SegmentationError("`regions` must be a list of 4-element or 2-element tuples.")
+
+            if use_scale and unit is not None:
+                xmin /= scale
+                xmax /= scale
+                ymin /= scale
+                ymax /= scale
 
             # If absolute = False, adjust for anndata bounds
             if not absolute:

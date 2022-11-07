@@ -90,7 +90,7 @@ myst_enable_extensions = [
     "dollarmath",
     "amsmath",
 ]
-myst_heading_anchors = 3
+myst_heading_anchors = 4
 autoapi_type = "python"
 autoapi_dirs = [str(SPATEO_DIR)]
 autoapi_add_toctree_entry = False
@@ -236,5 +236,7 @@ nbsphinx_prolog = r"""
 )
 nbsphinx_thumbnails = {
     "tutorials/notebooks/cell_segmentation": "_static/tutorials/cell_segmentation.png",
+    "tutorials/notebooks/cci": "_static/tutorials/cci.png",
     "tutorials/notebooks/tdr": "_static/tutorials/tdr.png",
+    "tutorials/notebooks/morphogenesis": "_static/tutorials/morphogenesis.png",
 }
