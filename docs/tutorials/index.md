@@ -6,6 +6,7 @@ This page provides links to handy step-by-step tutorials for key features of *sp
 .. nbgallery::
 
    notebooks/cell_segmentation
+   notebooks/cluster_digitization
    notebooks/cci
    notebooks/tdr
    notebooks/morphogenesis

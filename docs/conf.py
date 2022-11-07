@@ -236,6 +236,7 @@ nbsphinx_prolog = r"""
 )
 nbsphinx_thumbnails = {
     "tutorials/notebooks/cell_segmentation": "_static/tutorials/cell_segmentation.png",
+    "tutorials/notebooks/cluster_digitization": "_static/tutorials/cluster_digitization.png",
     "tutorials/notebooks/cci": "_static/tutorials/cci.png",
     "tutorials/notebooks/tdr": "_static/tutorials/tdr.png",
     "tutorials/notebooks/morphogenesis": "_static/tutorials/morphogenesis.png",
