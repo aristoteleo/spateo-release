@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 from ...configuration import SKM
 from ...logging import logger_manager as lm
-from ..find_neighbors import construct_pairwise, normalize_adj
+from ..find_neighbors import construct_nn_graph, normalize_adj
 from .impute_model import Encoder
 
 
@@ -114,7 +114,7 @@ class STGNN:
         self.device = torch.device(device)
 
         fix_seed(self.random_seed)
-        construct_pairwise(self.adata, spatial_key=spatial_key)
+        construct_nn_graph(self.adata, spatial_key=spatial_key)
         add_contrastive_label(self.adata)
 
         self.adata_output = self.adata.copy()

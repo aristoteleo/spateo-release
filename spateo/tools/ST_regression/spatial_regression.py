@@ -39,7 +39,7 @@ from ...logging import logger_manager as lm
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
-from ...tools.find_neighbors import construct_pairwise, transcriptomic_connectivity
+from ...tools.find_neighbors import construct_nn_graph, transcriptomic_connectivity
 from ...tools.utils import update_dict
 from .generalized_lm import fit_glm
 from .regression_utils import compute_wald_test, get_fisher_inverse
@@ -378,7 +378,7 @@ class Base_Model:
             except:
                 self.logger.info(f"Pre-computed adjacency matrix not found. Computing adjacency matrix.")
                 start = time.time()
-                construct_pairwise(
+                construct_nn_graph(
                     self.adata,
                     spatial_key=self.spatial_key,
                     n_neighbors=self.sp_kwargs["n_neighbors"],
@@ -396,7 +396,7 @@ class Base_Model:
         else:
             self.logger.info(f"Path to pre-computed adjacency matrix not given. Computing adjacency matrix.")
             start = time.time()
-            construct_pairwise(
+            construct_nn_graph(
                 self.adata,
                 spatial_key=self.spatial_key,
                 n_neighbors=self.sp_kwargs["n_neighbors"],
