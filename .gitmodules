@@ -5,6 +5,4 @@
 [submodule "docs/docs/tutorials/notebooks"]
 	path = docs/docs/tutorials/notebooks
 	url = https://github.com/aristoteleo/spateo-tutorials
-[submodule "docs/spateo-tutorials"]
-	path = docs/spateo-tutorials
-	url = https://github.com/aristoteleo/spateo-tutorials.git
+	branch = main
