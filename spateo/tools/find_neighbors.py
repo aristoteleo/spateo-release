@@ -78,7 +78,7 @@ def weighted_spatial_graph(
 
 # -------------------------------- Wrapper for weighted transcriptomic space graph -------------------------------- #
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def generate_expr_weights(
+def weighted_expr_neighbors_graph(
     adata: AnnData,
     nbr_object: NearestNeighbors = None,
     basis: str = "pca",
@@ -583,7 +583,7 @@ def calculate_distance(position: np.ndarray) -> np.ndarray:
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def construct_pairwise(
+def construct_nn_graph(
     adata: AnnData,
     spatial_key: str = "spatial",
     n_neighbors: int = 8,

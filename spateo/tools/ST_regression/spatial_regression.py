@@ -1083,7 +1083,6 @@ class Base_Model:
         # coefficients (respectively) to False and all pvalues/qvalues to 1:
         if only_positive:
             is_significant[coeffs.T <= 0] = False
-            print(is_significant)
             pvalues[coeffs.T <= 0] = 1
             qvalues[coeffs.T <= 0] = 1
         elif only_negative:
