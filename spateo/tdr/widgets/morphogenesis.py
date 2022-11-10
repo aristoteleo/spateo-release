@@ -529,6 +529,47 @@ def morphofield_torsion(
     return None if inplace else adata
 
 
+def morphofield_divergence(
+    adata: AnnData,
+    vf_key: str = "VecFld_morpho",
+    key_added: str = "divergence",
+    method: str = "analytical",
+    vectorize_size: Optional[int] = 1000,
+    inplace: bool = True,
+) -> Optional[AnnData]:
+    """
+    Calculate divergence for each cell with the reconstructed vector field function.
+
+    Args:
+        adata: AnnData object that contains the reconstructed vector field.
+        vf_key: The key in ``.uns`` that corresponds to the reconstructed vector field.
+        key_added: The key that will be used for the acceleration key in ``.obs`` and ``.obsm``.
+        method: The method that will be used for calculating acceleration field, either ``'analytical'`` or ``'numerical'``.
+
+                ``'analytical'`` method uses the analytical expressions for calculating acceleration while ``'numerical'``
+                method uses numdifftools, a numerical differentiation tool, for computing acceleration. ``'analytical'``
+                method is much more efficient.
+        vectorize_size: vectorize_size is used to control the number of samples computed in each vectorized batch.
+
+                * If vectorize_size = 1, there's no vectorization whatsoever.
+                * If vectorize_size = None, all samples are vectorized.
+        inplace: Whether to copy adata or modify it inplace.
+
+    Returns:
+        An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obs`` attribute.
+
+        The  ``key_added`` in the ``.obs`` which contains divergence.
+    """
+
+    adata = adata if inplace else adata.copy()
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+
+    X, V = vector_field_class.get_data()
+    adata.obs[key_added] = vector_field_class.compute_divergence(X=X, method=method, vectorize_size=vectorize_size)
+
+    return None if inplace else adata
+
+
 def morphofield_jacobian(
     adata: AnnData,
     vf_key: str = "VecFld_morpho",
