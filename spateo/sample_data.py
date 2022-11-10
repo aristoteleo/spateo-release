@@ -110,6 +110,33 @@ def drosophila(
         return adata_list
 
 
+def mousebrain(
+    filename,
+    dir_name: str = "./data",
+):
+    """Mouse brain spatial transcriptome data.
+
+    Args:
+        filename: file name of the data.  Available ``filename`` are:
+                * ``mousebrain_bin30.h5ad``
+                * ``mousebrain_bin60.h5ad``
+                * ``mousebrain_bin60_clustered.h5ad``
+                * ``mousebrain_cellbin_clustered.h5ad``
+        dir_name: dir path that will store the data locally.
+    Returns:
+        Returns `adata` object
+    """
+    url_dict = {
+        "mousebrain_bin30.h5ad": "https://www.dropbox.com/s/tyvhndoyj8se5xt/mousebrain_bin30.h5ad?dl=0",
+        "mousebrain_bin60.h5ad": "https://www.dropbox.com/s/c5tu4drxda01m0u/mousebrain_bin60.h5ad?dl=0",
+        "mousebrain_bin60_clustered.h5ad": "https://www.dropbox.com/s/wxgkim87uhpaz1c/mousebrain_bin60_clustered.h5ad?dl=0",
+        "mousebrain_cellbin_clustered.h5ad": "https://www.dropbox.com/s/seusnva0dgg5de5/mousebrain_cellbin_clustered.h5ad?dl=0",
+    }
+    adata = get_adata(url_dict[filename], filename=filename, dir_name=dir_name)
+
+    return adata
+
+
 def axolotl_2DPI(
     url="https://www.dropbox.com/s/j1zhftwxkg4jym3/axolotl_2DPI.h5ad?dl=1",
     filename="axolotl_2DPI.h5ad",
