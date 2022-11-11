@@ -137,32 +137,25 @@ def mousebrain(
     return adata
 
 
-def axolotl_2DPI(
-    url="https://www.dropbox.com/s/j1zhftwxkg4jym3/axolotl_2DPI.h5ad?dl=1",
-    filename="axolotl_2DPI.h5ad",
+def axolotl(
+    filename,
+    dir_name: str = "./data",
 ):
-    """Single-cell Stereo-seq reveals induced 1 progenitor cells involved in axolotl brain regeneration.
-    Wei et al., (2022)(https://doi.org/10.1126/science.abp9444).
+    """axolotl spatial transcriptome data.
 
+    Args:
+        filename: file name of the data.  Available ``filename`` are:
+                * ``axolotl_2DPI.h5ad``
+                * ``axolotl_2DPI_right.h5ad``
+        dir_name: dir path that will store the data locally.
     Returns:
         Returns `adata` object
     """
-    adata = get_adata(url, filename)
-
-    return adata
-
-
-def axolotl_2DPI_right(
-    url="https://www.dropbox.com/s/8j9mr6lobj3gmlw/axolotl_2DPI_right.h5ad?dl=1",
-    filename="axolotl_2DPI_right.h5ad",
-):
-    """Single-cell Stereo-seq reveals induced 1 progenitor cells involved in axolotl brain regeneration.
-    Wei et al., (2022)(https://doi.org/10.1126/science.abp9444).
-
-    Returns:
-        Returns `adata` object
-    """
-    adata = get_adata(url, filename)
+    url_dict = {
+        "axolotl_2DPI.h5ad": "https://www.dropbox.com/s/j1zhftwxkg4jym3/axolotl_2DPI.h5ad?dl=1",
+        "axolotl_2DPI_right.h5ad": "https://www.dropbox.com/s/8j9mr6lobj3gmlw/axolotl_2DPI_right.h5ad?dl=1",
+    }
+    adata = get_adata(url_dict[filename], filename=filename, dir_name=dir_name)
 
     return adata
 
