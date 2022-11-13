@@ -203,13 +203,13 @@ def archetypes_genes(
     archetypes_dict = {}
 
     for i in np.arange(num_clusters):
-        lm.main_info("current archetype is, ", str(i))
+        # lm.main_info("current archetype is, ", str(i))
 
         typical_genes = get_genes_from_spatial_archetype(
             exp.T, moran_i_genes, archetypes, archetype=i, pval_threshold=0
         )
 
-        lm.main_info("typical gene for the current archetype include, ", typical_genes)
+        # lm.main_info("typical gene for the current archetype include, ", typical_genes)
         archetypes_dict[i] = typical_genes
 
     return archetypes_dict
