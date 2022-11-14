@@ -16,7 +16,21 @@ from sklearn.utils import sparsefuncs
 from ..logging import logger_manager as lm
 
 
-def _normalize_data(X, counts, after=None, copy=False):
+def _normalize_data(X, counts, after=None, copy=False, rows=True, round=False):
+    """Row-wise or column-wise normalization of sparse data array.
+
+    Args:
+        X: Sparse data array to modify.
+        counts: Array of shape [1, n], where n is the number of buckets or number of genes, containing the total
+            counts in each cell or for each gene, respectively.
+        after: Target sum total counts for each gene or each cell. Defaults to `None`, in which case each observation
+            (cell) will have a total count equal to the median of total counts for observations (cells) before
+            normalization.
+        copy: Whether to operate on a copy of X.
+        rows: Whether to perform normalization over rows (normalize each cell to have the same total count number) or
+            over columns (normalize each gene to have the same total count number).
+        round: Whether to round to three decimal places to more exactly match the desired number of total counts.
+    """
     X = X.copy() if copy else X
     if issubclass(X.dtype.type, (int, np.integer)):
         X = X.astype(np.float32)
@@ -28,9 +42,19 @@ def _normalize_data(X, counts, after=None, copy=False):
     if scipy.sparse.issparse(X):
         sparsefuncs.inplace_row_scale(X, 1 / counts)
     elif isinstance(counts, np.ndarray):
-        np.divide(X, counts[:, None], out=X)
+        if rows:
+            np.divide(X, counts[:, None], out=X)
+        else:
+            np.divide(X, counts[None, :], out=X)
     else:
-        X = np.divide(X, counts[:, None])
+        if rows:
+            X = np.divide(X, counts[:, None])
+        else:
+            X = np.divide(X, counts[None, :])
+
+    if round:
+        X = np.around(X, decimals=3)
+
     return X
 
 
@@ -44,7 +68,7 @@ def normalize_total(
     layer: Optional[str] = None,
     inplace: bool = True,
     copy: bool = False,
-) -> Optional[Dict[str, np.ndarray]]:
+) -> Union[AnnData, Dict[str, np.ndarray]]:
     """\
     Normalize counts per cell.
     Normalize each cell by total counts over all genes, so that every cell has the same total count after normalization.
@@ -55,8 +79,9 @@ def normalize_total(
 
     Args:
         adata: The annotated data matrix of shape `n_obs` × `n_vars`. Rows correspond to cells and columns to genes.
-        target_sum: If `None`, after normalization, each observation (cell) has a total count equal to the median of
-            total counts for observations (cells) before normalization.
+        target_sum: Desired sum of counts for each gene post-normalization. If `None`, after normalization,
+            each observation (cell) will have a total count equal to the median of total counts for observations (
+            cells) before normalization.
         exclude_highly_expressed: Exclude (very) highly expressed genes for the computation of the normalization factor
             for each cell. A gene is considered highly expressed if it has more than `max_fraction` of the total counts
             in at least one cell.
@@ -90,12 +115,10 @@ def normalize_total(
         X = adata.X
 
     gene_subset = None
-    msg = "normalizing counts per cell"
+    msg = "Normalizing counts per cell..."
     if exclude_highly_expressed:
         counts_per_cell = X.sum(1)  # original counts per cell
         counts_per_cell = np.ravel(counts_per_cell)
-
-        # at least one cell as more than max_fraction of counts per cell
 
         gene_subset = (X > counts_per_cell[:, None] * max_fraction).sum(0)
         gene_subset = np.ravel(gene_subset) == 0
@@ -109,7 +132,7 @@ def normalize_total(
     else:
         counts_per_cell = X.sum(1)
 
-    start = logger.info(msg)
+    logger.info(msg)
     counts_per_cell = np.ravel(counts_per_cell)
 
     cell_subset = counts_per_cell > 0
