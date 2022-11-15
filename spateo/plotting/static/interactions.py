@@ -415,7 +415,7 @@ def plot_connections(
             if label_fontsize <= 8:
                 y = -0.35
             elif label_fontsize > 8:
-                y = -0.25
+                y = -0.45
         else:
             y = None
         ax_expr.set_title(title_str_expr, fontsize=title_fontsize, fontweight="bold", y=y)

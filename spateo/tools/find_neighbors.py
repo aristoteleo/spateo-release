@@ -2,7 +2,7 @@
 Functions for finding nearest neighbors and the distances between them in spatial transcriptomics data.
 """
 import os
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -185,7 +185,6 @@ def transcriptomic_connectivity(
     basis: str = "pca",
     n_neighbors_method: str = "ball_tree",
     n_pca_components: int = 30,
-    num_neighbors: int = 30,
 ) -> Tuple[NearestNeighbors, AnnData]:
     """Given an AnnData object, compute pairwise connectivity matrix in transcriptomic space
 
@@ -209,7 +208,10 @@ def transcriptomic_connectivity(
     logger = lm.get_main_logger()
 
     if basis == "pca" and "X_pca" not in adata.obsm_keys():
-        logger.info("PCA to be used as basis, X_pca not found, computing PCA...", indent_level=2)
+        logger.info(
+            "PCA to be used as basis for :func `transcriptomic_connectivity`, X_pca not found, " "computing PCA...",
+            indent_level=2,
+        )
         pca = PCA(
             n_components=min(n_pca_components, adata.X.shape[1] - 1),
             svd_solver="arpack",
@@ -470,7 +472,7 @@ def generate_spatial_weights_fixed_nbrs(
     return out_graph, distance_graph, adata
 
 
-def gaussian_weight_2d(distance: float, sigma: float):
+def gaussian_weight_2d(distance: float, sigma: float) -> float:
     """Calculate normalized gaussian value for a given distance from central point
     Normalized by 2*pi*sigma-squared
     """
@@ -478,7 +480,7 @@ def gaussian_weight_2d(distance: float, sigma: float):
     return np.exp(-0.5 * distance**2 / sigma_squared) / np.sqrt(sigma_squared * 2 * np.pi)
 
 
-def p_equiv_radius(p: float, sigma: float):
+def p_equiv_radius(p: float, sigma: float) -> float:
     """Find radius at which you eliminate fraction p of a radial Gaussian probability distribution with standard
     deviation sigma.
     """
@@ -574,18 +576,72 @@ def generate_spatial_weights_fixed_radius(
     return out_graph, distance_graph, adata
 
 
-# ----------- (Identical to generate_spatial_weights_fixed_nbrs, but specific to STGNN) ---------- #
-def calculate_distance(position: np.ndarray) -> np.ndarray:
-    """Given array of x- and y-coordinates, compute pairwise distances between all samples"""
-    distance_matrix = squareform(pdist(position, metric="euclidean"))
+def calculate_distance(position: np.ndarray, dist_metric: str = "euclidean") -> np.ndarray:
+    """Given array of x- and y-coordinates, compute pairwise distances between all samples using Euclidean distance."""
+    distance_matrix = squareform(pdist(position, metric=dist_metric))
 
     return distance_matrix
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def construct_pairwise_distance_matrix(
+    adata: AnnData,
+    spatial_key: str = "spatial",
+    dist_metric: str = "euclidean",
+    min_dist_threshold: Optional[float] = None,
+    max_dist_threshold: Optional[float] = None,
+) -> AnnData:
+    """Given AnnData object and array of x- and y-coordinates, compute pairwise distance between all samples.
+
+    Args:
+        adata: An AnnData object.
+        spatial_key: Key in .obsm in which x- and y-coordinates are stored.
+        dist_metric: Distance metric to use. Options: ‘braycurtis’, ‘canberra’, ‘chebyshev’, ‘cityblock’, ‘correlation’,
+            ‘cosine’, ‘dice’, ‘euclidean’, ‘hamming’, ‘jaccard’, ‘jensenshannon’, ‘kulczynski1’, ‘mahalanobis’,
+            ‘matching’, ‘minkowski’, ‘rogerstanimoto’, ‘russellrao’, ‘seuclidean’, ‘sokalmichener’, ‘sokalsneath’,
+            ‘sqeuclidean’, ‘yule’.
+        min_dist_threshold: Optional, sets the max allowable distance that a cell can be from its nearest neighbor to
+            avoid being filtered out. Used to remove singular isolated cells.
+        max_dist_threshold: Optional, used to remove clusters of isolated cells close to one another but far from all
+            other cells.
+
+    Returns:
+        adata: Input AnnData object with spatial distance matrix in .obsp.
+    """
+    logger = lm.get_main_logger()
+
+    if not isinstance(adata.obsm[spatial_key], np.ndarray):
+        pos = adata.obsm[spatial_key].values
+    else:
+        pos = adata.obsm[spatial_key]
+
+    distance_matrix = squareform(pdist(pos, metric=dist_metric))
+
+    logger.info_insert_adata(f"{spatial_key}_pairwise_distances", adata_attr="obsp")
+    adata.obsp[f"{spatial_key}_pairwise_distances"] = distance_matrix
+
+    # Optionally, filter the pairwise distance matrix:
+    if min_dist_threshold is not None:
+        adata = adata[
+            np.min(
+                adata.obsp[f"{spatial_key}_pairwise_distances"].A,
+                axis=1,
+                initial=1e10,
+                where=np.array(adata.obsp[f"{spatial_key}_pairwise_distances"].A > 0),
+            )
+            <= min_dist_threshold
+        ]
+    if max_dist_threshold is not None:
+        adata = adata[np.max(adata.obsp["spatial_distances"].A, axis=1) <= max_dist_threshold]
+
+    return adata
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def construct_nn_graph(
     adata: AnnData,
     spatial_key: str = "spatial",
+    dist_metric: str = "euclidean",
     n_neighbors: int = 8,
     exclude_self: bool = True,
     save_id: Union[None, str] = None,
@@ -595,6 +651,10 @@ def construct_nn_graph(
     Args:
         adata: An anndata object.
         spatial_key: Key in .obsm in which x- and y-coordinates are stored.
+        dist_metric: Distance metric to use. Options: ‘braycurtis’, ‘canberra’, ‘chebyshev’, ‘cityblock’, ‘correlation’,
+            ‘cosine’, ‘dice’, ‘euclidean’, ‘hamming’, ‘jaccard’, ‘jensenshannon’, ‘kulczynski1’, ‘mahalanobis’,
+            ‘matching’, ‘minkowski’, ‘rogerstanimoto’, ‘russellrao’, ‘seuclidean’, ‘sokalmichener’, ‘sokalsneath’,
+            ‘sqeuclidean’, ‘yule’.
         n_neighbors: Number of nearest neighbors to compute for each bucket.
         exclude_self: Set True to set elements along the diagonal to zero.
         save_id: Optional string; if not None, will save distance matrix and neighbors matrix to path:
@@ -602,7 +662,7 @@ def construct_nn_graph(
     """
     position = adata.obsm[spatial_key]
     # calculate distance matrix
-    distance_matrix = calculate_distance(position)
+    distance_matrix = calculate_distance(position, dist_metric)
     n_bucket = distance_matrix.shape[0]
 
     adata.obsm["distance_matrix"] = distance_matrix

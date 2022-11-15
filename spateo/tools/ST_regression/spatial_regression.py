@@ -1018,7 +1018,7 @@ class Base_Model:
         significance_threshold: float = 0.05,
         only_positive: bool = False,
         only_negative: bool = False,
-    ):
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
         Computes statistical significance for fitted coefficients.
 
@@ -1935,7 +1935,7 @@ class Ligand_Lagged_Model(Base_Model):
 
         self.prepare_data(mod_type="ligand_lag", lig=lig, rec=rec, rec_ds=rec_ds, species=species)
 
-    def run_GM_lag(self):
+    def run_GM_lag(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Runs spatially lagged two-stage least squares model"""
         if not hasattr(self, "w"):
             self.logger.info(
@@ -2087,7 +2087,7 @@ class Niche_LR_Model(Base_Model):
         )
 
 
-def calc_1nd_moment(X, W, normalize_W=True):
+def calc_1nd_moment(X, W, normalize_W=True) -> Tuple[np.ndarray, Optional[np.ndarray]]:
     if normalize_W:
         if type(W) == np.ndarray:
             d = np.sum(W, 1).flatten()

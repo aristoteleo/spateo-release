@@ -13,9 +13,7 @@ from typing import Tuple
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from scipy import sparse
 from scipy.sparse import issparse
-from scipy.stats import gmean, pearsonr
 from tqdm import tqdm as tqdm
 
 try:
@@ -25,7 +23,7 @@ except ImportError:
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-from .cci_utils import fdr_correct
+from .cci_fdr import fdr_correct
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")

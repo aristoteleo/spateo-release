@@ -188,7 +188,7 @@ def seqfish(
     Nature biotechnology, 40(1), 74-85.
 
     Returns:
-        adata: AnnData object containing Slide-seq data
+        adata: AnnData object containing seqFISH data
     """
     adata = get_adata(url, filename)
 
@@ -205,7 +205,7 @@ def merfish(
     Science, 362(6416), eaau5324.
 
     Returns:
-        adata: AnnData object containing Slide-seq data
+        adata: AnnData object containing MERFISH data
     """
     adata = get_adata(url, filename)
 
@@ -223,7 +223,7 @@ def seqscope(
     ultra-high-resolution spatial transcriptomics data. Bioinformatics Advances, 2(1), vbac061.
 
     Returns:
-        adata: AnnData object containing Slide-seq data
+        adata: AnnData object containing Seq-Scope data
     """
     adata = get_adata(url, filename)
 
@@ -239,7 +239,7 @@ def starmap(
     Three-dimensional intact-tissue sequencing of single-cell transcriptional states. Science, 361(6400), eaat5691.
 
     Returns:
-        adata: AnnData object containing Slide-seq data
+        adata: AnnData object containing STARmap data
     """
     adata = get_adata(url, filename)
 
