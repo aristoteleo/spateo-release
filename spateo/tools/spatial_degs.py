@@ -10,6 +10,8 @@ from pysal import explore, lib
 from scipy.sparse import issparse
 from statsmodels.sandbox.stats.multicomp import multipletests
 
+from ..logging import logger_manager as lm
+
 try:
     from typing import Literal
 except ImportError:
@@ -120,12 +122,32 @@ def moran_i(
 
 
 def cellbin_morani(
-    adata_cellbin,
-    binsize,
-):
+    adata_cellbin: AnnData,
+    binsize: int,
+    cluster_key: str = "Celltype",
+) -> pd.DataFrame:
+    """Calculate Moran's I score for each celltype (in segmented cell adata).
+    Since the presentation of cells are boolean values, this function first
+    summarizes the number of each celltype using a given binsize, creating a
+    spatial 2D matrix with cell counts. Then calculates Moran's I score on the
+    matrix for spatial score for each celltype.
+
+    Parameters
+    ----------
+        adata_cellbin: :class:`~anndata.AnnData`
+            An Annodata object for segmented cells.
+        binsize: int
+            The binsize used to summarize cell counts for each celltype.
+        cluster_key: `str` (default="Celltype")
+            The key in adata.obs including celltype labels.
+    Returns
+    -------
+        A pandas DataFrame containing the Moran' I score for celltypes.
+    """
     from esda.moran import Moran
     from libpysal.weights import lat2W
 
+    lm.main_info("Calculating cell counts in each bin, using binsize " + str(binsize))
     spatial_cellbin = np.zeros(
         (
             int(max(adata_cellbin.obsm["X_spatial"][:, 0] // binsize)) + 1,
@@ -135,16 +157,17 @@ def cellbin_morani(
     w = lat2W(spatial_cellbin.shape[0], spatial_cellbin.shape[1])
     mi = []
     mi_norm = []
-    for i in np.unique(adata_cellbin.obs["Celltype"]):
+    lm.main_info("Calculating Moran's I score for each celltype")
+    for i in np.unique(adata_cellbin.obs[cluster_key]):
         spatial_cellbin[:, :] = 0
-        subset_adata_cellbin = adata_cellbin[adata_cellbin.obs["Celltype"] == i, :].copy()
+        subset_adata_cellbin = adata_cellbin[adata_cellbin.obs[cluster_key] == i, :].copy()
         for j in subset_adata_cellbin.obsm["spatial"] // binsize:
             spatial_cellbin[int(j[0]), int(j[1])] = spatial_cellbin[int(j[0]), int(j[1])] + 1
         mi_tmp = Moran(spatial_cellbin, w)
         mi.append(mi_tmp.I)
         mi_norm.append(mi_tmp.p_norm)
     mi_df = pd.DataFrame(
-        {"cluster": np.unique(adata_cellbin.obs["Celltype"]), "moran_i": mi, "moran_i_p_norm": mi_norm}
+        {"cluster": np.unique(adata_cellbin.obs[cluster_key]), "moran_i": mi, "moran_i_p_norm": mi_norm}
     )
     mi_df = mi_df.sort_values(by="moran_i", ascending=False)
     return mi_df

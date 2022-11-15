@@ -38,7 +38,7 @@ from .paste import (
     mapping_center_coords,
     pairwise_align,
 )
-from .spatial_degs import moran_i
+from .spatial_degs import cellbin_morani, moran_i
 from .spatial_impute import *
 from .spatial_impute.impute import STGNN
 from .spatial_impute.run_impute import run_denoise_impute
