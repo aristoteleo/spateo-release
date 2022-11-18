@@ -484,8 +484,9 @@ class Base_Model:
 
             self.param_labels = list(np.sort(list(self.param_labels)))
 
-        elif mod_type == "niche":
-            # If mod_type is 'niche', use the connections matrix as independent variables in the regression:
+        elif mod_type == "niche" or mod_type == "niche_lag":
+            # If mod_type is 'niche' or 'niche_lag', use the connections matrix as independent variables in the
+            # regression:
             connections_cols = list(product(X.columns, X.columns))
             connections_cols.sort(key=lambda x: x[1])
             connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
@@ -1879,6 +1880,10 @@ class Category_Model(Base_Model):
 
     Arguments passed to :class `Base_Model`. The only keyword argument that is used for this class is
     'n_neighbors'.
+
+    Args:
+        args: Positional arguments to :class `Base_Model`
+        kwargs: Keyword arguments to :class `Base_Model`
     """
 
     def __init__(self, *args, **kwargs):
@@ -1895,6 +1900,10 @@ class Niche_Model(Base_Model):
     and connections between categories within spatial neighborhoods to predict the value of gene expression.
 
     Arguments passed to :class `Base_Model`.
+
+    Args:
+        args: Positional arguments to :class `Base_Model`
+        kwargs: Keyword arguments to :class `Base_Model`
     """
 
     def __init__(self, *args, **kwargs):
@@ -1904,36 +1913,71 @@ class Niche_Model(Base_Model):
         self.prepare_data(mod_type="niche")
 
 
-class Ligand_Lagged_Model(Base_Model):
+class Lagged_Model(Base_Model):
     """Wraps all necessary methods for data loading and preparation, model initialization, parameterization,
-    evaluation and prediction when instantiating a model for spatially-lagged regression using the spatial lag of
-    ligand genes to predict the regression target.
+    evaluation and prediction when instantiating a model for spatially-lagged regression.
+
+    Can specify one of two models: "ligand", which uses the spatial lag of ligand genes and the spatial lag of the
+    regression target to predict the regression target, or "niche", which uses the spatial lag of cell type
+    colocalization and the spatial lag of the regression target to predict the regression target.
+
+    If "ligand" is specified, arguments to `lig` must be given, and it is recommended to provide `species` as well-
+    default for this is human.
 
     Arguments passed to :class `Base_Model`.
 
     Args:
+        model_type: Either "ligand" or "niche", specifies whether to fit a model that incorporates the spatial lag of
+            ligand expression or the spatial lag of cell type colocalization.
         lig: Name(s) of ligands to use as predictors
         rec: Name(s) of receptors to use as regression targets. If not given, will search through database for all
             genes that correspond to the provided genes from 'ligands'.
         rec_ds: Name(s) of receptor-downstream genes to use as regression targets. If not given, will search through
             database for all genes that correspond to receptor-downstream genes.
         species: Specifies L:R database to use
+        normalize: Perform library size normalization, to set total counts in each cell to the same number (adjust
+            for cell size)
+        smooth: To correct for dropout effects, leverage gene expression neighborhoods to smooth expression
+        log_transform: Set True if log-transformation should be applied to expression (otherwise, will assume
+            preprocessing/log-transform was computed beforehand)
         args: Additional positional arguments to :class `Base_Model`
         kwargs: Additional keyword arguments to :class `Base_Model`
     """
 
     def __init__(
         self,
-        lig: Union[None, str, List[str]],
+        model_type: str = "ligand",
+        lig: Union[None, str, List[str]] = None,
         rec: Union[None, str, List[str]] = None,
         rec_ds: Union[None, str, List[str]] = None,
         species: Literal["human", "mouse", "axolotl"] = "human",
+        normalize: bool = True,
+        smooth: bool = False,
+        log_transform: bool = True,
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
 
-        self.prepare_data(mod_type="ligand_lag", lig=lig, rec=rec, rec_ds=rec_ds, species=species)
+        if self.distr != "gaussian":
+            self.logger.info(
+                "We recommend applying spatially-lagged models to processed data, for which normality "
+                "can be assumed- in this case `distr` can be set to 'gaussian'."
+            )
+
+        if model_type == "ligand":
+            if lig is None:
+                self.logger.error(
+                    "From instantiation of :class `Lagged_Model`: `model_type` was given as 'ligand', "
+                    "but ligands were not provided using parameter 'lig'."
+                )
+            # Optional data preprocessing:
+            self.preprocess_data(normalize, smooth, log_transform)
+            self.prepare_data(mod_type="ligand_lag", lig=lig, rec=rec, rec_ds=rec_ds, species=species)
+        elif model_type == "niche":
+            # Optional data preprocessing:
+            self.preprocess_data(normalize, smooth, log_transform)
+            self.prepare_data(mod_type="niche_lag")
 
     def run_GM_lag(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Runs spatially lagged two-stage least squares model"""

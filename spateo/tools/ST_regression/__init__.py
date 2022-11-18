@@ -6,7 +6,7 @@ st.tl.Niche_Model).
 """
 from .spatial_regression import (
     Category_Model,
-    Ligand_Lagged_Model,
+    Lagged_Model,
     Niche_LR_Model,
     Niche_Model,
 )

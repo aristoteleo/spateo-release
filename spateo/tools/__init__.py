@@ -47,7 +47,7 @@ from .ST_regression.generalized_lm import fit_glm
 from .ST_regression.regression_utils import plot_prior_vs_data
 from .ST_regression.spatial_regression import (
     Category_Model,
-    Ligand_Lagged_Model,
+    Lagged_Model,
     Niche_LR_Model,
     Niche_Model,
 )
