@@ -9,6 +9,7 @@ import pandas as pd
 import scipy
 import sklearn
 from anndata import AnnData
+from scipy.sparse.csgraph import floyd_warshall
 from scipy.spatial.distance import pdist, squareform
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
@@ -401,7 +402,7 @@ def generate_spatial_weights_fixed_nbrs(
 
     # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
     # NearestNeighbors run:
-    distances, knn = nbrs.kneighbors(locations)
+    distances, knn = nbrs.kneighbors(locations, n_neighbors=num_neighbors)
     n_obs, n_neighbors = knn.shape
     distances = scipy.sparse.csr_matrix(
         (
@@ -413,6 +414,7 @@ def generate_spatial_weights_fixed_nbrs(
     connectivities = distances.copy()
     connectivities.data[connectivities.data > 0] = 1
 
+    # Store as sparse matrices:
     distances.eliminate_zeros()
     connectivities.eliminate_zeros()
 
@@ -584,14 +586,14 @@ def calculate_distance(position: np.ndarray, dist_metric: str = "euclidean") -> 
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def construct_pairwise_distance_matrix(
+def construct_spatial_distance_matrix(
     adata: AnnData,
     spatial_key: str = "spatial",
     dist_metric: str = "euclidean",
     min_dist_threshold: Optional[float] = None,
     max_dist_threshold: Optional[float] = None,
 ) -> AnnData:
-    """Given AnnData object and array of x- and y-coordinates, compute pairwise distance between all samples.
+    """Given AnnData object and array of x- and y-coordinates, compute pairwise spatial distances between all samples.
 
     Args:
         adata: An AnnData object.
@@ -631,8 +633,143 @@ def construct_pairwise_distance_matrix(
             )
             <= min_dist_threshold
         ]
+    logger.info(f"Number of buckets remaining after filtering by `min_dist_threshold`: {adata.n_obs}")
+
     if max_dist_threshold is not None:
         adata = adata[np.max(adata.obsp["spatial_distances"].A, axis=1) <= max_dist_threshold]
+    logger.info(f"Number of buckets remaining after filtering by `max_dist_threshold`: {adata.n_obs}")
+
+    return adata
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def construct_geodesic_distance_matrix(
+    adata: AnnData,
+    spatial_key: str = "spatial",
+    nbr_object: NearestNeighbors = None,
+    method: str = "ball_tree",
+    n_neighbors: int = 30,
+    min_dist_threshold: Optional[float] = None,
+    max_dist_threshold: Optional[float] = None,
+) -> AnnData:
+    """Given AnnData object and array of x- and y-coordinates, compute geodesic distance each sample and its nearest
+    neighbors (geodesic distance is the shortest path between vertices, where paths are lines in space that connect
+    points).
+
+    Args:
+        adata: An AnnData object.
+        spatial_key: Key in .obsm in which x- and y-coordinates are stored.
+        nbr_object : An optional sklearn.neighbors.NearestNeighbors object. Can optionally create a nearest neighbor
+            object with custom functionality.
+        method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
+            "ball_tree" and "kd_tree".
+        n_neighbors: For each bucket, number of neighbors to include in the distance matrix. Used for practicality
+            purposes, to reduce the size of the computed arrays to only those that will realistically be considered.
+        min_dist_threshold: Optional, sets the max allowable distance that a cell can be from its nearest neighbor to
+            avoid being filtered out. Used to remove singular isolated cells.
+        max_dist_threshold: Optional, used to remove clusters of isolated cells close to one another but far from all
+            other cells.
+
+    Returns:
+        adata: Input AnnData object with spatial distance matrix and geodesic distance matrix in .obsp.
+    """
+    logger = lm.get_main_logger()
+    unfiltered_n_buckets = adata.n_obs
+
+    if not isinstance(adata.obsm[spatial_key], np.ndarray):
+        pos = adata.obsm[spatial_key].values
+    else:
+        pos = adata.obsm[spatial_key]
+
+    # Define the nearest-neighbors graph
+    nbrs, distance_graph = generate_spatial_distance_graph(
+        pos,
+        nbr_object=nbr_object,
+        method=method,
+        num_neighbors=n_neighbors,
+        radius=None,
+    )
+
+    # Update AnnData to add spatial distances from the sklearn NearestNeighbors run:
+    distances, knn = nbrs.kneighbors(pos, n_neighbors=n_neighbors)
+    n_obs, n_neighbors = knn.shape
+
+    # In case filtering is not performed, at this point save a copy of the dense distance matrix for Geodesic distance
+    # computation:
+    if min_dist_threshold is None and max_dist_threshold is None:
+        dists_copy = distances.copy()
+
+    distances = scipy.sparse.csr_matrix(
+        (
+            distances.flatten(),
+            (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
+        ),
+        shape=(n_obs, n_obs),
+    )
+    distances.eliminate_zeros()
+
+    logger.info_insert_adata("spatial_distances", adata_attr="obsp")
+    adata.obsp["spatial_distances"] = distances
+
+    # Optionally, filter the pairwise distance matrix:
+    if min_dist_threshold is not None:
+        adata = adata[
+            np.min(
+                adata.obsp[f"{spatial_key}_pairwise_distances"].A,
+                axis=1,
+                initial=1e10,
+                where=np.array(adata.obsp[f"{spatial_key}_pairwise_distances"].A > 0),
+            )
+            <= min_dist_threshold
+        ]
+        logger.info(f"Number of buckets remaining after filtering by `min_dist_threshold`: {adata.n_obs}")
+
+    if max_dist_threshold is not None:
+        adata = adata[np.max(adata.obsp["spatial_distances"].A, axis=1) <= max_dist_threshold]
+        logger.info(f"Number of buckets remaining after filtering by `max_dist_threshold`: {adata.n_obs}")
+
+    # If filtering was performed, recompute the distance matrix (repeat process above, but with the updated AnnData
+    # object) to reflect the change:
+    if adata.n_obs != unfiltered_n_buckets:
+        if not isinstance(adata.obsm[spatial_key], np.ndarray):
+            pos = adata.obsm[spatial_key].values
+        else:
+            pos = adata.obsm[spatial_key]
+
+        # Define the nearest-neighbors graph
+        nbrs, distance_graph = generate_spatial_distance_graph(
+            pos,
+            nbr_object=nbr_object,
+            method=method,
+            num_neighbors=n_neighbors,
+            radius=None,
+        )
+
+        # Update AnnData to add spatial distances from the sklearn NearestNeighbors run:
+        distances, knn = nbrs.kneighbors(pos)
+        n_obs, n_neighbors = knn.shape
+
+        # Store Euclidean distances as sparse matrix:
+        distances = scipy.sparse.csr_matrix(
+            (
+                distances.flatten(),
+                (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
+            ),
+            shape=(n_obs, n_obs),
+        )
+        distances.eliminate_zeros()
+
+        logger.info("Updating `spatial_distances` in .obsp since some buckets were filtered out of the AnnData object.")
+        adata.obsp["spatial_distances"] = distances
+
+    distances[distances == np.inf] = 0
+    distances.eliminate_zeros()
+
+    # Compute Geodesic distance matrix and store as sparse matrix:
+    geodesic_dist_mat = scipy.sparse.csr_matrix(floyd_warshall(csgraph=distances, directed=False))
+    print(geodesic_dist_mat.shape)
+    logger.info_insert_adata("geodesic_distances", adata_attr="obsp")
+    adata.obsp["geodesic_distances"] = geodesic_dist_mat
 
     return adata
 
