@@ -784,3 +784,109 @@ def curl(
         model_size=model_size,
         **kwargs,
     )
+
+
+def divergence(
+    adata: AnnData,
+    model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
+    divergence_key: str = "divergence",
+    filename: Optional[str] = None,
+    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    colormap: Optional[Union[str, list]] = "default_cmap",
+    ambient: Union[float, list] = 0.2,
+    opacity: Union[float, np.ndarray, list] = 1.0,
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "points",
+    model_size: Union[float, list] = 3.0,
+    **kwargs,
+):
+    """
+    Visualize the divergence result.
+
+    Args:
+        adata: An anndata object contain curl values in ``.obs[divergence_key]``.
+        model: A reconstructed model contains ``obs_index`` values.
+        divergence_key: The key in ``.obs`` that corresponds to the divergence values in the anndata object.
+        filename: Filename of output file. Writer type is inferred from the extension of the filename.
+
+                * Output an image file,please enter a filename ending with
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                * Output a gif file, please enter a filename ending with ``.gif``.
+                * Output a mp4 file, please enter a filename ending with ``.mp4``.
+        jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
+
+                * ``'none'`` - Do not display in the notebook.
+                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'static'`` - Display a static figure.
+                * ``'ipygany'`` - Show an ipygany widget
+                * ``'panel'`` - Show a panel widget.
+        colormap: Name of the Matplotlib colormap to use when mapping the scalars.
+
+                  When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
+        ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
+                 the actor when not directed at the light source emitted from the viewer.
+        opacity: Opacity of the model.
+
+                 If a single float value is given, it will be the global opacity of the model and uniformly applied
+                 everywhere, elif a numpy.ndarray with single float values is given, it
+                 will be the opacity of each point. - should be between 0 and 1.
+
+                 A string can also be specified to map the scalars range to a predefined opacity transfer function
+                 (options include: 'linear', 'linear_r', 'geom', 'geom_r').
+        model_style: Visualization style of the model. One of the following:
+
+                * ``model_style = 'surface'``,
+                * ``model_style = 'wireframe'``,
+                * ``model_style = 'points'``.
+        model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
+
+                    If ``model_style = 'wireframe'``, thickness of lines.
+        **kwargs: Additional parameters that will be passed into the ``st.pl.feature`` function.
+
+    Returns:
+
+        cpo: List of camera position, focal point, and view up.
+             Returned only if filename is None or filename ending with
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
+        img: Numpy array of the last image.
+             Returned only if filename is None or filename ending with
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+
+    Examples:
+
+        Visualize only in one model:
+
+        st.pl.divergence(
+            adata=stage_adata,
+            model=stage_pc,
+            divergence_key="divergence",
+            jupyter="static",
+            model_style="points",
+            model_size=3
+        )
+
+        Visualize in multiple model:
+
+        st.pl.divergence(
+            adata=stage_adata,
+            model=[stage_pc, trajectory_model],
+            divergence_key="divergence",
+            jupyter="static",
+            model_style=["points", "wireframe"],
+            model_size=[3, 1]
+        )
+    """
+
+    return feature(
+        adata=adata,
+        model=model,
+        feature_key=divergence_key,
+        filename=filename,
+        jupyter=jupyter,
+        colormap=colormap,
+        ambient=ambient,
+        opacity=opacity,
+        model_style=model_style,
+        model_size=model_size,
+        **kwargs,
+    )

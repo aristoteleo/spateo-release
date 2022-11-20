@@ -22,6 +22,7 @@ from .three_d_plot import (
     create_plotter,
     curl,
     curvature,
+    divergence,
     jacobian,
     output_plotter,
     save_plotter,
