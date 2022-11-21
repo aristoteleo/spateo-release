@@ -85,16 +85,16 @@ def drosophila(
         Returns `adata` object
     """
     url_dict = {
-        "E7-9h_cellbin_tdr_v1.h5ad": "https://www.dropbox.com/s/ow8xkge0538309a/E7-9h_cellbin_tdr_v1.h5ad?dl=0",
-        "E7-9h_cellbin_tdr_v2.h5ad": "https://www.dropbox.com/s/bvstb3en5kc6wui/E7-9h_cellbin_tdr_v2.h5ad?dl=0",
-        "E7-9h_cellbin_tdr_v2_midgut.h5ad": "https://www.dropbox.com/s/q020zgxxemxl7j4/E7-9h_cellbin_tdr_v2_midgut.h5ad?dl=0",
-        "E7-9h_cellbin_tdr_v3_midgut.h5ad": "https://www.dropbox.com/s/cz2nqpmoc3oo5f3/E7-9h_cellbin_tdr_v3_midgut.h5ad?dl=0",
-        "E7-9h_cellbin_h5ad.zip": "https://www.dropbox.com/s/dsgyc10q5s58ill/cellbin_h5ad.zip?dl=0",
-        "E7-9h_bin20_h5ad.zip": "https://www.dropbox.com/s/f3c635r4ro4zsmj/bin20_h5ad.zip?dl=0",
-        "E9-10h_cellbin_tdr_v1.h5ad": "https://www.dropbox.com/s/q2l8mqpn7qvz2xr/E9-10h_cellbin_tdr_v1.h5ad?dl=0",
-        "E9-10h_cellbin_tdr_v2.h5ad": "https://www.dropbox.com/s/q02sx6acvcqaf35/E9-10h_cellbin_tdr_v2.h5ad?dl=0",
-        "E9-10h_cellbin_tdr_v2_midgut.h5ad": "https://www.dropbox.com/s/we2fkpd1p3ww33f/E9-10h_cellbin_tdr_v2_midgut.h5ad?dl=0",
-        "E9-10h_cellbin_tdr_v2_CNS.h5ad": "https://www.dropbox.com/s/a7bllwm760dmda6/E9-10h_cellbin_tdr_v2_CNS.h5ad?dl=0",
+        "E7-9h_cellbin_tdr_v1.h5ad": "https://www.dropbox.com/s/ow8xkge0538309a/E7-9h_cellbin_tdr_v1.h5ad?dl=1",
+        "E7-9h_cellbin_tdr_v2.h5ad": "https://www.dropbox.com/s/bvstb3en5kc6wui/E7-9h_cellbin_tdr_v2.h5ad?dl=1",
+        "E7-9h_cellbin_tdr_v2_midgut.h5ad": "https://www.dropbox.com/s/q020zgxxemxl7j4/E7-9h_cellbin_tdr_v2_midgut.h5ad?dl=1",
+        "E7-9h_cellbin_tdr_v3_midgut.h5ad": "https://www.dropbox.com/s/cz2nqpmoc3oo5f3/E7-9h_cellbin_tdr_v3_midgut.h5ad?dl=1",
+        "E7-9h_cellbin_h5ad.zip": "https://www.dropbox.com/s/dsgyc10q5s58ill/cellbin_h5ad.zip?dl=1",
+        "E7-9h_bin20_h5ad.zip": "https://www.dropbox.com/s/f3c635r4ro4zsmj/bin20_h5ad.zip?dl=1",
+        "E9-10h_cellbin_tdr_v1.h5ad": "https://www.dropbox.com/s/q2l8mqpn7qvz2xr/E9-10h_cellbin_tdr_v1.h5ad?dl=1",
+        "E9-10h_cellbin_tdr_v2.h5ad": "https://www.dropbox.com/s/q02sx6acvcqaf35/E9-10h_cellbin_tdr_v2.h5ad?dl=1",
+        "E9-10h_cellbin_tdr_v2_midgut.h5ad": "https://www.dropbox.com/s/we2fkpd1p3ww33f/E9-10h_cellbin_tdr_v2_midgut.h5ad?dl=1",
+        "E9-10h_cellbin_tdr_v2_CNS.h5ad": "https://www.dropbox.com/s/a7bllwm760dmda6/E9-10h_cellbin_tdr_v2_CNS.h5ad?dl=1",
     }
     if filename.endswith(".h5ad") or filename.endswith(".loom"):
         adata = get_adata(url=url_dict[filename], filename=filename, dir_name=dir_name)
@@ -127,10 +127,10 @@ def mousebrain(
         Returns `adata` object
     """
     url_dict = {
-        "mousebrain_bin30.h5ad": "https://www.dropbox.com/s/tyvhndoyj8se5xt/mousebrain_bin30.h5ad?dl=0",
-        "mousebrain_bin60.h5ad": "https://www.dropbox.com/s/c5tu4drxda01m0u/mousebrain_bin60.h5ad?dl=0",
-        "mousebrain_bin60_clustered.h5ad": "https://www.dropbox.com/s/wxgkim87uhpaz1c/mousebrain_bin60_clustered.h5ad?dl=0",
-        "mousebrain_cellbin_clustered.h5ad": "https://www.dropbox.com/s/seusnva0dgg5de5/mousebrain_cellbin_clustered.h5ad?dl=0",
+        "mousebrain_bin30.h5ad": "https://www.dropbox.com/s/tyvhndoyj8se5xt/mousebrain_bin30.h5ad?dl=1",
+        "mousebrain_bin60.h5ad": "https://www.dropbox.com/s/c5tu4drxda01m0u/mousebrain_bin60.h5ad?dl=1",
+        "mousebrain_bin60_clustered.h5ad": "https://www.dropbox.com/s/wxgkim87uhpaz1c/mousebrain_bin60_clustered.h5ad?dl=1",
+        "mousebrain_cellbin_clustered.h5ad": "https://www.dropbox.com/s/seusnva0dgg5de5/mousebrain_cellbin_clustered.h5ad?dl=1",
     }
     adata = get_adata(url_dict[filename], filename=filename, dir_name=dir_name)
 

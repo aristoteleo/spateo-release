@@ -19,8 +19,6 @@ def log1p(
     X: Union[AnnData, np.ndarray, scipy.sparse.spmatrix],
     base: Optional[int] = None,
     copy: bool = False,
-    layer: Optional[str] = None,
-    obsm: Optional[str] = None,
 ):
     """Computes the natural logarithm of the data matrix (unless different base is chosen using the `base` argument)
 

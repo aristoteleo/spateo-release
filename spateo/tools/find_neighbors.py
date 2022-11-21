@@ -16,6 +16,7 @@ from sklearn.neighbors import NearestNeighbors
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
+from ..preprocessing.aggregate import bin_adata
 from ..tools.labels import row_normalize
 
 
@@ -593,7 +594,8 @@ def construct_spatial_distance_matrix(
     min_dist_threshold: Optional[float] = None,
     max_dist_threshold: Optional[float] = None,
 ) -> AnnData:
-    """Given AnnData object and array of x- and y-coordinates, compute pairwise spatial distances between all samples.
+    """Given AnnData object and key to array of x- and y-coordinates, compute pairwise spatial distances between all
+    samples.
 
     Args:
         adata: An AnnData object.
@@ -636,7 +638,7 @@ def construct_spatial_distance_matrix(
     logger.info(f"Number of buckets remaining after filtering by `min_dist_threshold`: {adata.n_obs}")
 
     if max_dist_threshold is not None:
-        adata = adata[np.max(adata.obsp["spatial_distances"].A, axis=1) <= max_dist_threshold]
+        adata = adata[np.max(adata.obsp[f"{spatial_key}_pairwise_distances"].A, axis=1) <= max_dist_threshold]
     logger.info(f"Number of buckets remaining after filtering by `max_dist_threshold`: {adata.n_obs}")
 
     return adata
@@ -652,19 +654,18 @@ def construct_geodesic_distance_matrix(
     min_dist_threshold: Optional[float] = None,
     max_dist_threshold: Optional[float] = None,
 ) -> AnnData:
-    """Given AnnData object and array of x- and y-coordinates, compute geodesic distance each sample and its nearest
-    neighbors (geodesic distance is the shortest path between vertices, where paths are lines in space that connect
-    points).
+    """Given AnnData object and key to array of x- and y-coordinates, compute geodesic distance each sample and its
+    nearest neighbors (geodesic distance is the shortest path between vertices, where paths are lines in space that
+    connect points).
 
     Args:
-        adata: An AnnData object.
+        adata: AnnData object.
         spatial_key: Key in .obsm in which x- and y-coordinates are stored.
         nbr_object : An optional sklearn.neighbors.NearestNeighbors object. Can optionally create a nearest neighbor
             object with custom functionality.
         method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
             "ball_tree" and "kd_tree".
-        n_neighbors: For each bucket, number of neighbors to include in the distance matrix. Used for practicality
-            purposes, to reduce the size of the computed arrays to only those that will realistically be considered.
+        n_neighbors: For each bucket, number of neighbors to include in the distance matrix.
         min_dist_threshold: Optional, sets the max allowable distance that a cell can be from its nearest neighbor to
             avoid being filtered out. Used to remove singular isolated cells.
         max_dist_threshold: Optional, used to remove clusters of isolated cells close to one another but far from all
@@ -681,7 +682,8 @@ def construct_geodesic_distance_matrix(
     else:
         pos = adata.obsm[spatial_key]
 
-    # Define the nearest-neighbors graph
+    # Define the nearest-neighbors graph- find only the top n_neighbors to ease computational burden when it comes
+    # time to find all pairwise Geodesic distances.
     nbrs, distance_graph = generate_spatial_distance_graph(
         pos,
         nbr_object=nbr_object,
@@ -768,10 +770,78 @@ def construct_geodesic_distance_matrix(
     # Compute Geodesic distance matrix and store as sparse matrix:
     geodesic_dist_mat = scipy.sparse.csr_matrix(floyd_warshall(csgraph=distances, directed=False))
     print(geodesic_dist_mat.shape)
-    logger.info_insert_adata("geodesic_distances", adata_attr="obsp")
-    adata.obsp["geodesic_distances"] = geodesic_dist_mat
+    logger.info_insert_adata("geodesic_pairwise_distances", adata_attr="obsp")
+    adata.obsp["geodesic_pairwise_distances"] = geodesic_dist_mat
 
     return adata
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def construct_binned_spatial_distance(
+    adata: AnnData,
+    bin_size: int = 1,
+    coords_key: str = "spatial",
+    distance_method: str = "spatial",
+    min_dist_threshold: Optional[float] = None,
+    max_dist_threshold: Optional[float] = None,
+    distance_metric: Optional[str] = "euclidean",
+    n_neighbors: Optional[int] = 30,
+):
+    """Given AnnData object and key to array of x- and y-coordinates, first "collapse" the dataset by aggregating
+    nearby cells together into bins, and then compute pairwise spatial distances between all samples.
+
+    Args:
+        adata: AnnData object.
+        bin_size: Shrinking factor to be applied to spatial coordinates; the size of this factor dictates the size of
+            the regions that will be combined into one pseudo-cell (larger -> generally higher number of cells in
+            each bin).
+        coords_key: Key in .obsm in which spatial coordinates are stored.
+        distance_method: Options: "spatial" and "geodesic", indicating that pairwise spatial distance or pairwise
+            geodesic distance should be computed, respectively.
+        distance_metric: Optional, can be used to change the distance metric used when "distance_method" is "spatial".
+            Options: ‘braycurtis’, ‘canberra’, ‘chebyshev’, ‘cityblock’, ‘correlation’, ‘cosine’, ‘dice’,
+            ‘euclidean’, ‘hamming’, ‘jaccard’, ‘jensenshannon’, ‘kulczynski1’, ‘mahalanobis’, ‘matching’,
+            ‘minkowski’, ‘rogerstanimoto’, ‘russellrao’, ‘seuclidean’, ‘sokalmichener’, ‘sokalsneath’,
+            ‘sqeuclidean’, ‘yule’.
+        min_dist_threshold: Optional, sets the max allowable distance that a cell can be from its nearest neighbor to
+            avoid being filtered out. Used to remove singular isolated cells.
+        max_dist_threshold: Optional, used to remove clusters of isolated cells close to one another but far from all
+            other cells.
+        n_neighbors: For each bucket, number of neighbors to include in the distance matrix. Must be given if
+            "distance_method" is "geodesic".
+
+    Returns:
+        adata_binned: New AnnData object generated by the binning process.
+        M: Pairwise distance array.
+    """
+    logger = lm.get_main_logger()
+    adata_binned = bin_adata(adata, bin_size, coords_key=coords_key)
+
+    if distance_method == "spatial":
+        adata_binned = construct_spatial_distance_matrix(
+            adata_binned,
+            spatial_key=coords_key,
+            dist_metric=distance_metric,
+            min_dist_threshold=min_dist_threshold,
+            max_dist_threshold=max_dist_threshold,
+        )
+        M = adata_binned.obsp[f"{coords_key}_pairwise_distances"]
+    elif distance_method == "geodesic":
+        adata_binned = construct_geodesic_distance_matrix(
+            adata_binned,
+            spatial_key=coords_key,
+            n_neighbors=n_neighbors,
+            min_dist_threshold=min_dist_threshold,
+            max_dist_threshold=max_dist_threshold,
+        )
+        M = adata_binned.obsp["geodesic_pairwise_distances"]
+    else:
+        logger.error("Invalid input given to `distance_method`. Options: 'spatial' or 'geodesic'.")
+
+    if np.sum(~np.isfinite(M)) > 0:
+        logger.error("Distance matrix has inf value")
+
+    return adata_binned, M
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
