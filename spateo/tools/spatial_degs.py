@@ -32,7 +32,7 @@ def moran_i(
     z: Optional[List[int]] = None,
     k: int = 5,
     weighted: Optional[List[str]] = None,
-    permutations: int = 99,
+    permutations: int = 199,
     n_jobs: int = 1,
 ) -> pd.DataFrame:
     """Identify genes with strong spatial autocorrelation with Moran's I test.
