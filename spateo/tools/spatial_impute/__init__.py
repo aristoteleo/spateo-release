@@ -1,2 +1,2 @@
 from .impute import STGNN
-from .run_impute import run_denoise_impute
+from .run_impute import impute_and_downsample

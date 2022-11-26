@@ -130,8 +130,6 @@ class Base_Model:
         self.logger = lm.get_main_logger()
 
         self.adata = adata
-        # Convention is to capitalize gene names:
-        self.adata.var_names = [g.upper() for g in self.adata.var_names]
         self.cell_names = self.adata.obs_names
         # Sort cell type categories (to keep order consistent for downstream applications):
         self.celltype_names = sorted(list(set(adata.obs[group_key])))
@@ -139,8 +137,7 @@ class Base_Model:
         self.spatial_key = spatial_key
         self.distr = distr
         self.group_key = group_key
-        # Convention is to capitalize gene names:
-        self.genes = [g.upper() for g in genes]
+        self.genes = genes
         self.logger.info(
             "Note: argument provided to 'genes' represents the dependent variables for non-ligand-based "
             "analysis, but are used as independent variables for ligand-based analysis."

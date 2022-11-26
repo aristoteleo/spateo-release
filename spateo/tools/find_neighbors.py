@@ -33,7 +33,14 @@ def weighted_spatial_graph(
     sigma: float = 100,
 ) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]:
     """Given an AnnData object, compute distance array with either a fixed number of neighbors for each bucket or a
-    fixed search radius for each bucket.
+    fixed search radius for each bucket. Additional note: parameters 'p' and 'sigma' (used only if 'fixed' is
+    'radius') are used to modulate the radius when defining neighbors using a fixed radius. 'Sigma' parameterizes
+    the standard deviation (e.g. in pixels, micrometers, etc.) of a Gaussian distribution that is centered at a
+    particular bucket with height 'a'- to search for that bucket's neighbors, 'p' is the cutoff height of the
+    Gaussian, as a proportion of the peak height 'a'. Essentially, to define the radius that should be used for all
+    buckets, this function measures how far out from each bucket you would need to go before the Gaussian decays to
+    e.g. 0.05 of its peak height. With knowledge of e.g. diffusion kinetics for particular soluble factors,
+    the neighborhood can be defined taking this into account.
 
     Args:
         adata: an anndata object.
@@ -499,7 +506,6 @@ def generate_spatial_weights_fixed_radius(
     sigma: float = 100,
     nbr_object: NearestNeighbors = None,
     method: str = "ball_tree",
-    max_num_neighbors: int = None,
     verbose: bool = False,
 ) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]:
     """Starting from a radius-based neighbor graph, generate a sparse graph (csr format) with weighted edges, where edge
@@ -513,7 +519,6 @@ def generate_spatial_weights_fixed_radius(
         sigma: Standard deviation of the Gaussian.
         method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
             "ball_tree" and "kd_tree".
-        max_num_neighbors: Sets upper threshold on number of neighbors a bucket can have.
 
     Returns:
         out_graph: Weighted nearest neighbors graph with shape [n_samples, n_samples].
@@ -531,9 +536,7 @@ def generate_spatial_weights_fixed_radius(
         logger.info(f"Equivalent radius for removing {p} of " f"gaussian distribution with sigma {sigma} is: {r}\n")
 
     # Define the nearest neighbor graph:
-    nbrs, distance_graph = generate_spatial_distance_graph(
-        locations, nbr_object=nbr_object, num_neighbors=max_num_neighbors, radius=r
-    )
+    nbrs, distance_graph = generate_spatial_distance_graph(locations, nbr_object=nbr_object, radius=r)
 
     # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
     # NearestNeighbors run:
