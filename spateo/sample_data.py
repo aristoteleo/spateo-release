@@ -152,8 +152,8 @@ def axolotl(
         Returns `adata` object
     """
     url_dict = {
-        "axolotl_2DPI.h5ad": "https://www.dropbox.com/s/j1zhftwxkg4jym3/axolotl_2DPI.h5ad?dl=1",
-        "axolotl_2DPI_right.h5ad": "https://www.dropbox.com/s/8j9mr6lobj3gmlw/axolotl_2DPI_right.h5ad?dl=1",
+        "axolotl_2DPI.h5ad": "https://www.dropbox.com/s/6ihasky6mey286l/axolotl_2DPI.h5ad?dl=1",
+        "axolotl_2DPI_right.h5ad": "https://www.dropbox.com/s/pm5vvqcd4leahsb/axolotl_2DPI_right.h5ad?dl=1",
     }
     adata = get_adata(url_dict[filename], filename=filename, dir_name=dir_name)
 
