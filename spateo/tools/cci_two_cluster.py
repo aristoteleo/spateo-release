@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-@File    :   cci_new.py
+@File    :   cci_two_cluster.py
 @Time    :   2022/07/03 11:50:40
 @Author  :   LuluZuo
 @Version :   1.0
@@ -339,3 +339,37 @@ def prepare_cci_df(cci_df: pd.DataFrame, means_col: str, pval_col: str, lr_pair_
     dict["pvalues"] = pvals
 
     return dict
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def prepare_cci_cellpair_adata(
+    adata: AnnData,
+    sender_group: str = None,
+    receiver_group: str = None,
+    group: str = None,
+    cci_dict: dict = None,
+    all_cell_pair: bool = False,
+) -> AnnData:
+    """prepare for visualization cellpairs by func `st.tl.space`, plot all_cell_pair,
+    or cell pairs which constrain by spatial distance(output of :func `cci_two_cluster`).
+        Args:
+            adata:An Annodata object.
+            sender_group: the cell group name of send ligands.
+            receiver_group: the cell group name of receive receptors.
+            group:The group name in adata.obs, Unused unless 'all_cell_pair' is True.
+            cci_dict: a dictionary result from :func `cci_two_cluster`, where the key is 'cell_pair' and 'lr_pair'.
+                     Unused unless 'all_cell_pair' is False.
+            all_cell_pair: show all cells of the sender and receiver cell group, spatial_key: Key in .obsm containing coordinates for each bucket. Defult `False`.
+        Returns:
+            adata: Updated AnnData object containing 'spec' in .obs.
+    """
+    logger = lm.get_main_logger()
+
+    adata.obs["spec"] = "other"
+    if all_cell_pair:
+        adata.obs.loc[adata.obs[group] == sender_group, "spec"] = sender_group
+        adata.obs.loc[adata.obs[group] == receiver_group, "spec"] = receiver_group
+    else:
+        adata.obs.loc[adata.obs.index.isin(cci_dict["cell_pair"]["cell_sender"].tolist()), "spec"] = sender_group
+        adata.obs.loc[adata.obs.index.isin(cci_dict["cell_pair"]["cell_receiver"].tolist()), "spec"] = receiver_group
+    return adata
