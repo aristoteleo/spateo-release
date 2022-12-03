@@ -89,8 +89,8 @@ def drosophila(
         "E7-9h_cellbin_tdr_v2.h5ad": "https://www.dropbox.com/s/bvstb3en5kc6wui/E7-9h_cellbin_tdr_v2.h5ad?dl=1",
         "E7-9h_cellbin_tdr_v2_midgut.h5ad": "https://www.dropbox.com/s/q020zgxxemxl7j4/E7-9h_cellbin_tdr_v2_midgut.h5ad?dl=1",
         "E7-9h_cellbin_tdr_v3_midgut.h5ad": "https://www.dropbox.com/s/cz2nqpmoc3oo5f3/E7-9h_cellbin_tdr_v3_midgut.h5ad?dl=1",
-        "E7-9h_cellbin_h5ad.zip": "https://www.dropbox.com/s/dsgyc10q5s58ill/cellbin_h5ad.zip?dl=1",
-        "E7-9h_bin20_h5ad.zip": "https://www.dropbox.com/s/f3c635r4ro4zsmj/bin20_h5ad.zip?dl=1",
+        "E7-9h_cellbin_h5ad.zip": "https://yq01-ct01.baidupcs.com/file/33a841239s21a64188a4dfa5ba6fc000?bkt=en-e031c0692dcd5a21cb9b7dc32086fda95e0ccccb0c3349d8cf10c6a227b624b16fa4148db441052c&fid=3627617064-250528-547706644850916&time=1670092976&sign=FDTAXUbGERLQlBHSKfWqi-DCb740ccc5511e5e8fedcff06b081203-ucK5LvvmMdebDCkUK6bIt7zl%2B84%3D&to=427&size=16158219&sta_dx=16158219&sta_cs=0&sta_ft=zip&sta_ct=0&sta_mt=0&fm2=MH%2CYangquan%2CAnywhere%2C%2C%E9%99%95%E8%A5%BF%2Cct&ctime=1670091825&mtime=1670091825&resv0=-1&resv1=0&resv2=rlim&resv3=5&resv4=16158219&vuk=3627617064&iv=0&htype=&randtype=&tkbind_id=0&newver=1&newfm=1&secfm=1&flow_ver=3&pkey=en-9054aa2cad924f0d599095a94ed4b854e5970e39aa0c9444cf57152bf7053f32510488b37501bfef&sl=76480590&expires=8h&rt=pr&r=574265491&vbdid=508923211&fin=cellbin_h5ad.zip&fn=cellbin_h5ad.zip&rtype=1&dp-logid=8971527268563088775&dp-callid=0.1&hps=1&tsl=80&csl=80&fsl=-1&csign=SO8aWwhnhOnGKGYv9cWXdJamoKk%3D&so=0&ut=6&uter=4&serv=0&uc=1058262541&ti=c77e04c9862927e5cc28032e1c6abcd6f293302b741abd8e54086130d5ff933c&hflag=30&from_type=1&adg=c_e1c2310f52475804a26726f9181d2ae8&reqlabel=250528_f_68129c39a137f978b08a95b72fcc7f8f_-1_4717521fbacb8ab13b0b72daacf708b3&by=themis",
+        "E7-9h_bin20_h5ad.zip": "https://ucd1e2dec0e8649689333bc8f748.dl.dropboxusercontent.com/cd/0/get/Bx9-BFgcvjpaDYK2g4JzMhDf_EFQtaKEKa-eLjVOYSGaBRYsIL7KQby9Sw75TfXkXwcRBudmW81EBV12iAeh4IX1-MbJm8zwkLJHOoWlNWV-lmqV5i8v4fwxABqMLT1Ad86AuP9nuLwlpwghAusj2Wf61bl1Gq5n-gokf5IzrO1L0xmouroXbT3Sz4dTlX6nPhg/file#",
         "E9-10h_cellbin_tdr_v1.h5ad": "https://www.dropbox.com/s/q2l8mqpn7qvz2xr/E9-10h_cellbin_tdr_v1.h5ad?dl=1",
         "E9-10h_cellbin_tdr_v2.h5ad": "https://www.dropbox.com/s/q02sx6acvcqaf35/E9-10h_cellbin_tdr_v2.h5ad?dl=1",
         "E9-10h_cellbin_tdr_v2_midgut.h5ad": "https://www.dropbox.com/s/we2fkpd1p3ww33f/E9-10h_cellbin_tdr_v2_midgut.h5ad?dl=1",
@@ -100,13 +100,11 @@ def drosophila(
         adata = get_adata(url=url_dict[filename], filename=filename, dir_name=dir_name)
         return adata
     elif filename.endswith(".zip"):
-        extract_dir = os.path.join(dir_name, filename[:-4])
-        Path(extract_dir).mkdir(parents=True, exist_ok=True)
-
         file_path = download_data(url=url_dict[filename], file_path=filename)
-        shutil.unpack_archive(file_path, extract_dir)
+        shutil.unpack_archive(file_path, dir_name)
 
-        adata_list = [read_h5ad(filename=filename) for root, dirs, files in os.walk(extract_dir) for filename in files]
+        zip_folder = os.path.join(dir_name, filename[:-4])
+        adata_list = [read_h5ad(filename=os.path.join(zip_folder, filename)) for root, dirs, files in os.walk(zip_folder) for filename in files]
         return adata_list
 
 
