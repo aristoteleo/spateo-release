@@ -724,3 +724,51 @@ def three_d_animate(
 
     # Close the plotting object.
     p.close()
+
+
+def merge_animations(
+    mp4_files: Optional[list] = None,
+    mp4_folder: Optional[list] = None,
+    filename: str = "merged_animation.mp4",
+):
+    """
+    Use MoviePy to compose a new animation and play multiple animations together in the new animation.
+
+    Args:
+        mp4_files: A list containing absolute paths to mp4 files that need to be played together.
+        mp4_folder: Absolute path to the folder containing all mp4 files that need to be played together. If ``mp4_files`` is provided, ``mp4_folder`` cannot also be provided.
+        filename: Absolute path to save the newly composed animation.
+
+    Examples:
+        st.pl.merge_animations(mp4_files=["animation1.mp4", "animation2.mp4"], filename=f"merged_animation.mp4")
+    """
+    try:
+        from moviepy.editor import VideoFileClip, concatenate_videoclips
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `moviepy`." "\nInstall moviepy via `pip install --upgrade moviepy`"
+        )
+
+    try:
+        from natsort import natsorted
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `natsort`." "\nInstall natsort via `pip install --upgrade natsort`"
+        )
+
+    clips = []
+    if mp4_files is None and mp4_folder is not None:
+        for root, dirs, files in os.walk(mp4_folder):
+            for file in files:
+                mp4_file = os.path.join(root, file)
+                assert str(mp4_file).endswith(".mp4"), f"``{mp4_file}`` is not the mp4 file."
+                clips.append(VideoFileClip(mp4_file))
+    elif mp4_files is not None and mp4_folder is None:
+        for mp4_file in mp4_files:
+            assert str(mp4_file).endswith(".mp4"), f"``{mp4_file}`` is not the mp4 file."
+            clips.append(VideoFileClip(mp4_file))
+    else:
+        raise ValueError("One of ``mp4_files`` and ``mp4_folder`` must be None.")
+
+    final_clip = concatenate_videoclips(clips)
+    final_clip.write_videofile(filename)
