@@ -104,7 +104,11 @@ def drosophila(
         shutil.unpack_archive(file_path, dir_name)
 
         zip_folder = os.path.join(dir_name, filename[:-4])
-        adata_list = [read_h5ad(filename=os.path.join(zip_folder, filename)) for root, dirs, files in os.walk(zip_folder) for filename in files]
+        adata_list = [
+            read_h5ad(filename=os.path.join(zip_folder, filename))
+            for root, dirs, files in os.walk(zip_folder)
+            for filename in files
+        ]
         return adata_list
 
 
