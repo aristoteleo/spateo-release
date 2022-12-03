@@ -24,6 +24,7 @@ from .three_d_plot import (
     curvature,
     divergence,
     jacobian,
+    merge_animations,
     output_plotter,
     save_plotter,
     three_d_animate,
