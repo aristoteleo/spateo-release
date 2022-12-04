@@ -240,4 +240,5 @@ nbsphinx_thumbnails = {
     "tutorials/notebooks/cci": "_static/tutorials/cci.png",
     "tutorials/notebooks/tdr": "_static/tutorials/tdr.png",
     "tutorials/notebooks/morphogenesis": "_static/tutorials/morphogenesis.png",
+    "tutorials/notebooks/interactive": "_static/tutorials/interactive.png",
 }
