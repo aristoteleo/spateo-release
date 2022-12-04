@@ -10,4 +10,5 @@ This page provides links to handy step-by-step tutorials for key features of *sp
    notebooks/cci
    notebooks/tdr
    notebooks/morphogenesis
+   notebooks/interactive
 ```
