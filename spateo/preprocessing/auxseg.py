@@ -196,7 +196,7 @@ class LiveWireSegmentation(object):
     def mouse_moved(self, event):
         if self.current_point is not None:
             mouse_point = (int(event.ydata), int(event.xdata))
-            if event.key == "z":
+            if event.key == "s":
                 self.path = self.LineDDA(self.current_point, mouse_point)
             else:
                 self.path = self.compute_shortest_path(self.current_point, mouse_point)
@@ -206,7 +206,7 @@ class LiveWireSegmentation(object):
             plt.draw()
 
     def key_pressed(self, event):
-        if event.key == "ctrl+c":
+        if event.key == "ctrl+z":
             self.point_plot_list.pop(-1).remove()
             self.path_plot_list.pop(-1).remove()
             self.point_list.pop(-1)
