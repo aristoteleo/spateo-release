@@ -121,6 +121,7 @@ def mousebrain(
     Args:
         filename: file name of the data.  Available ``filename`` are:
                 * ``mousebrain_bin30.h5ad``
+                * ``mousebrain_bin50_raw.h5ad``
                 * ``mousebrain_bin60.h5ad``
                 * ``mousebrain_bin60_clustered.h5ad``
                 * ``mousebrain_cellbin_clustered.h5ad``
@@ -130,6 +131,7 @@ def mousebrain(
     """
     url_dict = {
         "mousebrain_bin30.h5ad": "https://www.dropbox.com/s/tyvhndoyj8se5xt/mousebrain_bin30.h5ad?dl=1",
+        "mousebrain_bin50_raw.h5ad": "https://www.dropbox.com/s/vtapwsccpi885l2/mousebrain_bin50_raw.h5ad?dl=0",
         "mousebrain_bin60.h5ad": "https://www.dropbox.com/s/c5tu4drxda01m0u/mousebrain_bin60.h5ad?dl=1",
         "mousebrain_bin60_clustered.h5ad": "https://www.dropbox.com/s/wxgkim87uhpaz1c/mousebrain_bin60_clustered.h5ad?dl=1",
         "mousebrain_cellbin_clustered.h5ad": "https://www.dropbox.com/s/seusnva0dgg5de5/mousebrain_cellbin_clustered.h5ad?dl=1",
