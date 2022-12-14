@@ -7,7 +7,6 @@ Written by @HailinPan, optimized by @Lioscro.
 
 from typing import Dict, Optional, Tuple, Union
 
-import ngs_tools as ngs
 import numpy as np
 from joblib import delayed
 from scipy import special, stats
@@ -248,6 +247,13 @@ def run_em(
         Tuple of parameters estimated by the EM algorithm if `bins` is not provided.
         Otherwise, a dictionary of tuple of parameters, with bin labels as keys.
     """
+    try:
+        import ngs_tools as ngs
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `ngs_tools`." "\nInstall fbgbp via `pip install --upgrade ngs_tools`"
+        )
+
     samples = {}  # key 0 when bins = None
     if bins is not None:
         for label in np.unique(bins):
