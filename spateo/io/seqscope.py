@@ -3,7 +3,6 @@
 import os
 from typing import Optional
 
-import ngs_tools as ngs
 import numpy as np
 import pandas as pd
 import scipy.io
@@ -18,10 +17,6 @@ except ImportError:
 from ..configuration import SKM
 from ..logging import logger_manager as lm
 from .utils import bin_indices, get_bin_props
-
-VERSIONS = {
-    "seqscope": ngs.chemistry.get_chemistry("SeqScope"),
-}
 
 
 def read_seqscope_as_anndata(matrix_dir: str) -> AnnData:
@@ -126,9 +121,9 @@ def read_seqscope(
         adata.obsm["spatial"] = adata.obs[["x", "y"]].values
 
     scale, scale_unit = 1.0, None
-    if version in VERSIONS:
-        resolution = VERSIONS[version].resolution
-        scale, scale_unit = resolution.scale, resolution.unit
+    # if version in VERSIONS:
+    #    resolution = VERSIONS[version].resolution
+    #    scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
     SKM.init_adata_type(adata, SKM.ADATA_UMI_TYPE)

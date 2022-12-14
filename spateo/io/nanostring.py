@@ -4,15 +4,15 @@ import glob
 import os
 import re
 import warnings
-from typing import List, Optional, Union
+from typing import List, NamedTuple, Optional, Union
 
-import ngs_tools as ngs
 import numpy as np
 import pandas as pd
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import skimage.io
+
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 from typing_extensions import Literal
@@ -21,9 +21,20 @@ from ..configuration import SKM
 from ..logging import logger_manager as lm
 from .utils import get_points_props
 
-VERSIONS = {
-    "cosmx": ngs.chemistry.get_chemistry("CosMx"),
-}
+try:
+    import ngs_tools as ngs
+
+    VERSIONS = {
+        "cosmx": ngs.chemistry.get_chemistry("CosMx").resolution,
+    }
+except ModuleNotFoundError:
+
+    class SpatialResolution(NamedTuple):
+        scale: float = 1.0
+        unit: Optional[Literal["nm", "um", "mm"]] = None
+
+    VERSIONS = {"cosmx": SpatialResolution(0.18, "um")}
+
 FOV_PARSER = re.compile("^.+_F(?P<fov>[0-9]+)\..+$")
 
 
@@ -283,7 +294,7 @@ def read_nanostring(
 
     scale, scale_unit = 1.0, None
     if version in VERSIONS:
-        resolution = VERSIONS[version].resolution
+        resolution = VERSIONS[version]
         scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
