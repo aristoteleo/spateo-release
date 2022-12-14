@@ -8,7 +8,7 @@ def read_requirements(path):
         return [line.strip() for line in f if not line.isspace()]
 
 
-with open("README.md", "r") as fh:
+with open("README.md", "r", encoding="UTF-8") as fh:
     long_description = fh.read()
 
 setup(
