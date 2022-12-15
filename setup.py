@@ -13,7 +13,7 @@ with open("README.md", "r", encoding="UTF-8") as fh:
 
 setup(
     name="spateo-release",
-    version="1.0.1",
+    version="1.0.2",
     python_requires=">=3.7",
     install_requires=read_requirements("requirements.txt"),
     extras_require={
