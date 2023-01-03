@@ -3,7 +3,7 @@ from typing import Optional, Union
 import numpy as np
 from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
-from ..models import collect_model, multiblock2model
+from ..models import collect_models, multiblock2model
 from .utils import _interactive_plotter
 
 ##################################
@@ -38,7 +38,7 @@ def three_d_pick(
 
         picked_models.append(picked_model)
 
-    return collect_model(picked_models)
+    return collect_models(picked_models)
 
 
 #################################
@@ -149,7 +149,7 @@ def interactive_pick(
         checkbox_start_pos = checkbox_start_pos + checkbox_size + (checkbox_size // 10)
     p.show(cpos="iso")
 
-    return collect_model(picked_models)
+    return collect_models(picked_models)
 
 
 #############################
@@ -223,7 +223,7 @@ def overlap_pick(
     if not (main_pc is None and other_pc is None):
         inside_pc1, _ = overlap_pc_pick(pc=main_pc, mesh=select_mesh)
         inside_pc2, _ = overlap_pc_pick(pc=other_pc, mesh=select_mesh)
-        select_pc = collect_model(models=[inside_pc1, inside_pc2])
+        select_pc = collect_models(models=[inside_pc1, inside_pc2])
     else:
         select_pc = None
     return select_mesh, select_pc

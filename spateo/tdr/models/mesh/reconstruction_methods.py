@@ -173,6 +173,7 @@ def alpha_shape_mesh(pc: PolyData, alpha: float = 2.0) -> PolyData:
     Computes a triangle mesh from a point cloud based on the alpha shape algorithm.
     Algorithm Overview:
         For each real number α, define the concept of a generalized disk of radius 1/α as follows:
+
             If α = 0, it is a closed half-plane;
             If α > 0, it is a closed disk of radius 1/α;
             If α < 0, it is the closure of the complement of a disk of radius −1/α.
@@ -221,6 +222,7 @@ def ball_pivoting_mesh(pc: PolyData, radii: List[float] = None):
         the three vertices form a triangle if the ball is getting "caught" and settle between the points, without
         containing any other point.
         The algorithm stimulates a virtual ball of radius r. Each iteration consists of two steps:
+
             * Seed triangle - The ball rolls over the point cloud until it gets "caught" between three vertices and
                               settles between in them. Choosing the right r promises no other point is contained in the
                               formed triangle. This triangle is called "Seed triangle".
@@ -281,8 +283,10 @@ def poisson_mesh(
         pc: A point cloud model.
         depth: Maximum depth of the tree that will be used for surface reconstruction.
                Running at depth d corresponds to solving on a grid whose resolution is no larger than 2^d x 2^d x 2^d.
+
                Note that since the reconstructor adapts the octree to the sampling density, the specified reconstruction
                depth is only an upper bound.
+
                The depth that defines the depth of the octree used for the surface reconstruction and hence implies the
                resolution of the resulting triangle mesh. A higher depth value means a mesh with more details.
         width: Specifies the target width of the finest level octree cells.

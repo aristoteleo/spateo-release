@@ -2,7 +2,6 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import pyvista as pv
 from pyvista import DataSet, MultiBlock, PolyData, UnstructuredGrid
 
 try:
@@ -10,6 +9,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+from ..models.morpho_models import construct_lines
 from .slice import euclidean_distance, three_d_slice
 from .tree import NLPCA, DDRTree, cal_ncenter
 
@@ -257,7 +257,7 @@ def map_points_to_branch(
     Find the closest principal tree node to any point in the model through KDTree.
 
     Args:
-        model: A reconstruct model.
+        model: A reconstructed model.
         nodes: The nodes in the principal tree.
         spatial_key: The key that corresponds to the coordinates of the point in the model. If spatial_key is None,
                      the coordinates are model.points.
@@ -292,7 +292,7 @@ def map_gene_to_branch(
     Find the closest principal tree node to any point in the model through KDTree.
 
     Args:
-        model: A reconstruct model contains the gene expression label.
+        model: A reconstructed model contains the gene expression label.
         tree: A three-dims principal tree model contains the nodes label.
         key: The key that corresponds to the gene expression.
         nodes_key: The key that corresponds to the coordinates of the nodes in the tree.
@@ -323,43 +323,65 @@ def map_gene_to_branch(
     return tree if not inplace else None
 
 
-def construct_tree_model(
-    nodes: np.ndarray,
-    edges: np.ndarray,
-    key_added: Optional[str] = "nodes",
-) -> PolyData:
+def calc_tree_length(
+    tree_model: Union[UnstructuredGrid, PolyData],
+) -> float:
     """
-    Construct a principal tree model.
+    Calculate the length of a tree model.
 
     Args:
-        nodes: The nodes in the principal tree.
-        edges: The edges between nodes in the principal tree.
-        key_added: The key under which to add the nodes labels.
+        tree_model: A three-dims principal tree model.
 
     Returns:
-         A three-dims principal tree model, which contains the following properties:
-            `tree_model.point_data[key_added]`, the nodes labels array.
+        The length of the tree model.
     """
+    from scipy.spatial.distance import cdist
 
-    padding = np.array([2] * edges.shape[0], int)
-    edges_w_padding = np.vstack((padding, edges.T)).T
-    tree_model = pv.PolyData(nodes, edges_w_padding)
-    tree_model.point_data[key_added] = np.arange(0, len(nodes), 1)
-
-    return tree_model
+    tree_length = (
+        cdist(
+            XA=np.asarray(tree_model.points[:-1, :]),
+            XB=np.asarray(tree_model.points[1:, :]),
+            metric="euclidean",
+        )
+        .diagonal()
+        .sum()
+    )
+    return tree_length
 
 
 def changes_along_branch(
     model: Union[PolyData, UnstructuredGrid],
     spatial_key: Optional[str] = None,
     map_key: Union[str, list] = None,
-    key_added: Optional[str] = "nodes",
+    nodes_key: str = "nodes",
+    key_added: str = "tree",
+    label: str = "tree",
     rd_method: Literal["ElPiGraph", "SimplePPT", "PrinCurve"] = "ElPiGraph",
     NumNodes: int = 50,
+    color: str = "gainsboro",
     inplace: bool = False,
     **kwargs,
-) -> Tuple[Union[DataSet, PolyData, UnstructuredGrid], PolyData]:
+) -> Tuple[Union[DataSet, PolyData, UnstructuredGrid], PolyData, float]:
+    """
+    Find the closest tree node to any point in the model.
 
+    Args:
+        model:  A reconstructed model.
+        spatial_key: If spatial_key is None, the spatial coordinates are in model.points, otherwise in model[spatial_key].
+        map_key:  The key in model that corresponds to the gene expression.
+        nodes_key: The key that corresponds to the coordinates of the nodes in the tree.
+        key_added: The key that corresponds to tree label.
+        label: The label of tree model.
+        rd_method: The method of constructing a tree.
+        NumNodes: Number of nodes for the tree model.
+        color: Color to use for plotting tree model.
+        inplace: Updates model in-place.
+
+    Returns:
+        model: Updated model if inplace is True.
+        tree_model: A three-dims principal tree model.
+        tree_length: The length of the tree model.
+    """
     model = model.copy() if not inplace else model
     X = model.points if spatial_key is None else model[spatial_key]
 
@@ -374,10 +396,12 @@ def changes_along_branch(
             "`rd_method` value is wrong." "\nAvailable `rd_method` are: `'ElPiGraph'`, `'SimplePPT'`, `'PrinCurve'`."
         )
 
-    map_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=key_added, inplace=True)
-    tree_model = construct_tree_model(nodes=nodes, edges=edges)
+    map_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=nodes_key, inplace=True)
+    tree_model = construct_lines(points=nodes, edges=edges, key_added=key_added, label=label, color=color)
+    tree_model.point_data[nodes_key] = np.arange(0, len(nodes), 1)
+    tree_length = calc_tree_length(tree_model=tree_model)
 
     if not (map_key is None):
-        map_gene_to_branch(model=model, tree=tree_model, key=map_key, nodes_key=key_added, inplace=True)
+        map_gene_to_branch(model=model, tree=tree_model, key=map_key, nodes_key=nodes_key, inplace=True)
 
-    return model if not inplace else None, tree_model
+    return model if not inplace else None, tree_model, tree_length

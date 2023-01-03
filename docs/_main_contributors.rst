@@ -16,3 +16,4 @@
    * `Shiping Liu <https://github.com/Shiping>`_: supervision, guidance and support
    * `Jonathan Weissman <https://weissman.wi.mit.edu/>`_ & lab: supervision, guidance and support
    * `Yinqi Bai <https://github.com/HailinPan>`_: developer, supervision, guidance and support ☀
+   * `Daniel Zhu <https://github.com/dzhu8>`_: main developer, diverse contributions ☀

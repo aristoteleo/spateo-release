@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import ot
@@ -65,16 +65,17 @@ def kl_divergence_backend(X, Y):
     return D
 
 
-def check_backend(device: str = "cpu"):
+def check_backend(device: str = "cpu", dtype: str = "float32"):
     """
     Check the proper backend for the device.
 
     Args:
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
+        dtype: The floating-point number type. Only float32 and float64.
 
     Returns:
-        device: The device used to run the program.
         backend: The proper backend.
+        type_as: The type_as.device is the device used to run the program and the type_as.dtype is the floating-point number type.
     """
     if device == "cpu":
         backend = ot.backend.NumpyBackend()
@@ -85,9 +86,10 @@ def check_backend(device: str = "cpu"):
             backend = ot.backend.TorchBackend()
         else:
             backend = ot.backend.NumpyBackend()
-            device = "cpu"
             lm.main_info(message="GPU is not available, resorting to torch cpu.", indent_level=2)
-    return device, backend
+
+    type_as = backend.__type_list__[0] if dtype == "float32" else backend.__type_list__[1]
+    return backend, type_as
 
 
 # @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sample")
@@ -102,12 +104,11 @@ def check_spatial_coords(sample: AnnData, spatial_key: str = "spatial") -> np.nd
     Returns:
         The spatial coordinates.
     """
-    coordinates = sample.obsm[spatial_key]
+    coordinates = sample.obsm[spatial_key].copy()
     if isinstance(coordinates, pd.DataFrame):
         coordinates = coordinates.values
 
-    coordinates = np.asarray(coordinates, dtype=np.float64)
-    return coordinates
+    return np.asarray(coordinates)
 
 
 # @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "sample")
@@ -123,9 +124,8 @@ def check_exp(sample: AnnData, layer: str = "X") -> np.ndarray:
         The expression matrix.
     """
 
-    exp_martix = sample.X if layer == "X" else sample.layers[layer]
+    exp_martix = sample.X.copy() if layer == "X" else sample.layers[layer].copy()
     exp_martix = to_dense_matrix(exp_martix)
-    exp_martix = exp_martix.astype(np.float64)
     return exp_martix
 
 
@@ -140,6 +140,7 @@ def pairwise_align(
     sampleA: AnnData,
     sampleB: AnnData,
     layer: str = "X",
+    genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     alpha: float = 0.1,
     dissimilarity: str = "kl",
@@ -149,6 +150,7 @@ def pairwise_align(
     norm: bool = False,
     numItermax: int = 200,
     numItermaxEmd: int = 100000,
+    dtype: str = "float32",
     device: str = "cpu",
 ) -> Tuple[np.ndarray, Optional[int]]:
     """
@@ -157,16 +159,20 @@ def pairwise_align(
     Args:
         sampleA: Sample A to align.
         sampleB: Sample B to align.
-        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinates.
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
+        genes: Genes used for calculation. If None, use all common genes for calculation.
+        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinates.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
+                When α = 0 only the gene expression data is taken into account,
+                while when α =1 only the spatial coordinates are taken into account.
         dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
         G_init (array-like, optional): Initial mapping to be used in FGW-OT, otherwise default is uniform mapping.
         a_distribution (array-like, optional): Distribution of sampleA spots, otherwise default is uniform.
         b_distribution (array-like, optional): Distribution of sampleB spots, otherwise default is uniform.
+        norm: If ``True``, scales spatial distances such that neighboring spots are at distance 1. Otherwise, spatial distances remain unchanged.
         numItermax: Max number of iterations for cg during FGW-OT.
         numItermaxEmd: Max number of iterations for emd during FGW-OT.
-        norm: If ``True``, scales spatial distances such that neighboring spots are at distance 1. Otherwise, spatial distances remain unchanged.
+        dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
 
     Returns:
@@ -175,22 +181,23 @@ def pairwise_align(
     """
 
     # Determine if gpu or cpu is being used
-    device, nx = check_backend(device=device)
+    nx, type_as = check_backend(device=device, dtype=dtype)
 
     # subset for common genes
     common_genes = filter_common_genes(sampleA.var.index, sampleB.var.index)
+    common_genes = common_genes if genes is None else intersect_lsts(common_genes, genes)
     sampleA, sampleB = sampleA[:, common_genes], sampleB[:, common_genes]
 
     # Calculate spatial distances
-    coordinatesA = nx.from_numpy(check_spatial_coords(sample=sampleA, spatial_key=spatial_key))
-    coordinatesB = nx.from_numpy(check_spatial_coords(sample=sampleB, spatial_key=spatial_key))
+    coordinatesA = nx.from_numpy(check_spatial_coords(sample=sampleA, spatial_key=spatial_key), type_as=type_as)
+    coordinatesB = nx.from_numpy(check_spatial_coords(sample=sampleB, spatial_key=spatial_key), type_as=type_as)
 
     D_A = ot.dist(coordinatesA, coordinatesA, metric="euclidean")
     D_B = ot.dist(coordinatesB, coordinatesB, metric="euclidean")
 
     # Calculate expression dissimilarity
-    A_X = nx.from_numpy(check_exp(sample=sampleA, layer=layer))
-    B_X = nx.from_numpy(check_exp(sample=sampleB, layer=layer))
+    A_X = nx.from_numpy(check_exp(sample=sampleA, layer=layer), type_as=type_as)
+    B_X = nx.from_numpy(check_exp(sample=sampleB, layer=layer), type_as=type_as)
 
     if dissimilarity.lower() == "euclidean" or dissimilarity.lower() == "euc":
         M = ot.dist(A_X, B_X)
@@ -200,8 +207,8 @@ def pairwise_align(
     # init distributions
     a = np.ones((sampleA.shape[0],)) / sampleA.shape[0] if a_distribution is None else np.asarray(a_distribution)
     b = np.ones((sampleB.shape[0],)) / sampleB.shape[0] if b_distribution is None else np.asarray(b_distribution)
-    a = nx.from_numpy(a.astype(np.float64))
-    b = nx.from_numpy(b.astype(np.float64))
+    a = nx.from_numpy(a, type_as=type_as)
+    b = nx.from_numpy(b, type_as=type_as)
 
     if norm:
         D_A /= nx.min(D_A[D_A > 0])
@@ -213,7 +220,7 @@ def pairwise_align(
     if G_init is None:
         G0 = a[:, None] * b[None, :]
     else:
-        G_init = nx.from_numpy(G_init.astype(np.float64))
+        G_init = nx.from_numpy(G_init, type_as=type_as)
         G0 = (1 / nx.sum(G_init)) * G_init
 
     pi, log = ot.gromov.cg(
@@ -268,6 +275,7 @@ def center_align(
     init_center_sample: AnnData,
     samples: List[AnnData],
     layer: str = "X",
+    genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     lmbda: Optional[np.ndarray] = None,
     alpha: float = 0.1,
@@ -281,6 +289,7 @@ def center_align(
     random_seed: Optional[int] = None,
     pis_init: Optional[List[np.ndarray]] = None,
     distributions: Optional[List[np.ndarray]] = None,
+    dtype: str = "float32",
     device: str = "cpu",
 ) -> Tuple[AnnData, List[np.ndarray]]:
     """
@@ -289,10 +298,13 @@ def center_align(
     Args:
         init_center_sample: Sample to use as the initialization for center alignment; Make sure to include gene expression and spatial information.
         samples: List of samples to use in the center alignment.
-        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinates.
         layer: If `'X'`, uses ``sample.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``sample.layers[layer]``.
+        genes: Genes used for calculation. If None, use all common genes for calculation.
+        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinates.
         lmbda: List of probability weights assigned to each slice; If ``None``, use uniform weights.
         alpha:  Alignment tuning parameter. Note: 0 <= alpha <= 1.
+                When α = 0 only the gene expression data is taken into account,
+                while when α =1 only the spatial coordinates are taken into account.
         n_components: Number of components in NMF decomposition.
         threshold: Threshold for convergence of W and H during NMF decomposition.
         max_iter: Maximum number of iterations for our center alignment algorithm.
@@ -303,6 +315,7 @@ def center_align(
         random_seed: Set random seed for reproducibility.
         pis_init: Initial list of mappings between 'A' and 'slices' to solver. Otherwise, default will automatically calculate mappings.
         distributions: Distributions of spots for each slice. Otherwise, default is uniform.
+        dtype: The floating-point number type. Only float32 and float64.
         device: Equipment used to run the program. You can also set the specified GPU for running. E.g.: '0'.
 
     Returns:
@@ -328,6 +341,7 @@ def center_align(
     all_samples_genes = [s[0].var.index for s in samples]
     all_samples_genes.append(init_center_sample.var.index)
     common_genes = filter_common_genes(*all_samples_genes)
+    common_genes = common_genes if genes is None else intersect_lsts(common_genes, genes)
 
     # subset common genes
     init_center_sample = init_center_sample[:, common_genes]
@@ -372,6 +386,7 @@ def center_align(
                 b_distribution=distributions[i],
                 numItermax=numItermax,
                 numItermaxEmd=numItermaxEmd,
+                dtype=dtype,
                 device=device,
             )
             new_pis.append(p)
@@ -420,8 +435,9 @@ def generalized_procrustes_analysis(X, Y, pi):
         X: np array of spatial coordinates.
         Y: np array of spatial coordinates.
         pi: mapping between the two layers output by PASTE.
+
     Returns:
-        Aligned spatial coordinates of X, Y.
+        Aligned spatial coordinates of X, Y and the mapping relations.
     """
     tX = pi.sum(axis=1).dot(X)
     tY = pi.sum(axis=0).dot(Y)
@@ -431,5 +447,164 @@ def generalized_procrustes_analysis(X, Y, pi):
     U, S, Vt = np.linalg.svd(H)
     R = Vt.T.dot(U.T)
     Y = R.dot(Y.T).T
+    mapping_dict = {"tX": tX, "tY": tY, "R": R}
 
-    return X, Y
+    return X, Y, mapping_dict
+
+
+#######################################
+# Mapping aligned spatial coordinates #
+#######################################
+
+
+def _get_optimal_mapping_relationship(
+    X: np.ndarray,
+    Y: np.ndarray,
+    pi: np.ndarray,
+    keep_all: bool = False,
+):
+    from scipy.spatial import cKDTree
+
+    X_max_index = np.argwhere((pi.T == pi.T.max(axis=0)).T)
+    Y_max_index = np.argwhere(pi == pi.max(axis=0))
+    if not keep_all:
+
+        values, counts = np.unique(X_max_index[:, 0], return_counts=True)
+        x_index_unique, x_index_repeat = values[counts == 1], values[counts != 1]
+        X_max_index_unique = X_max_index[np.isin(X_max_index[:, 0], x_index_unique)]
+
+        for i in x_index_repeat:
+            i_max_index = X_max_index[X_max_index[:, 0] == i]
+            i_kdtree = cKDTree(Y[i_max_index[:, 1]])
+            _, ii = i_kdtree.query(X[i], k=1)
+            X_max_index_unique = np.concatenate([X_max_index_unique, i_max_index[ii].reshape(1, 2)], axis=0)
+
+        values, counts = np.unique(Y_max_index[:, 1], return_counts=True)
+        y_index_unique, y_index_repeat = values[counts == 1], values[counts != 1]
+        Y_max_index_unique = Y_max_index[np.isin(Y_max_index[:, 1], y_index_unique)]
+
+        for i in y_index_repeat:
+            i_max_index = Y_max_index[Y_max_index[:, 1] == i]
+            i_kdtree = cKDTree(X[i_max_index[:, 0]])
+            _, ii = i_kdtree.query(Y[i], k=1)
+            Y_max_index_unique = np.concatenate([Y_max_index_unique, i_max_index[ii].reshape(1, 2)], axis=0)
+
+        X_max_index = X_max_index_unique.copy()
+        Y_max_index = Y_max_index_unique.copy()
+
+    X_pi_value = pi[X_max_index[:, 0], X_max_index[:, 1]].reshape(-1, 1)
+    Y_pi_value = pi[Y_max_index[:, 0], Y_max_index[:, 1]].reshape(-1, 1)
+    return X_max_index, X_pi_value, Y_max_index, Y_pi_value
+
+
+def mapping_aligned_coords(
+    X: np.ndarray,
+    Y: np.ndarray,
+    pi: np.ndarray,
+    keep_all: bool = False,
+) -> Tuple[dict, dict]:
+    """
+    Optimal mapping coordinates between X and Y.
+
+    Args:
+        X: Aligned spatial coordinates.
+        Y: Aligned spatial coordinates.
+        pi: Mapping between the two layers output by PASTE.
+        keep_all: Whether to retain all the optimal relationships obtained only based on the pi matrix, If ``keep_all``
+                  is False, the optimal relationships obtained based on the pi matrix and the nearest coordinates.
+
+    Returns:
+        Two dicts of mapping_X, mapping_Y, pi_index, pi_value.
+            mapping_X is X coordinates aligned with Y coordinates.
+            mapping_Y is the Y coordinate aligned with X coordinates.
+            pi_index is index between optimal mapping points in the pi matrix.
+            pi_value is the value of optimal mapping points.
+    """
+
+    X = X.copy()
+    Y = Y.copy()
+    pi = pi.copy()
+
+    # Obtain the optimal mapping between points
+    X_max_index, X_pi_value, Y_max_index, Y_pi_value = _get_optimal_mapping_relationship(
+        X=X, Y=Y, pi=pi, keep_all=keep_all
+    )
+
+    mappings = []
+    for max_index, pi_value, subset in zip(
+        [X_max_index, Y_max_index], [X_pi_value, Y_pi_value], ["index_x", "index_y"]
+    ):
+        mapping_data = pd.DataFrame(
+            np.concatenate([max_index, pi_value], axis=1),
+            columns=["index_x", "index_y", "pi_value"],
+        ).astype(
+            dtype={
+                "index_x": np.int32,
+                "index_y": np.int32,
+                "pi_value": np.float64,
+            }
+        )
+        mapping_data.sort_values(by=[subset, "pi_value"], ascending=[True, False], inplace=True)
+        mapping_data.drop_duplicates(subset=[subset], keep="first", inplace=True)
+        mappings.append(
+            {
+                "mapping_X": X[mapping_data["index_x"].values],
+                "mapping_Y": Y[mapping_data["index_y"].values],
+                "pi_index": mapping_data[["index_x", "index_y"]].values,
+                "pi_value": mapping_data["pi_value"].values,
+            }
+        )
+
+    return mappings[0], mappings[1]
+
+
+def mapping_center_coords(modelA: AnnData, modelB: AnnData, center_key: str) -> dict:
+    """
+    Optimal mapping coordinates between X and Y based on intermediate coordinates.
+
+    Args:
+        modelA: modelA aligned with center model.
+        modelB: modelB aligned with center model.
+        center_key: The key in ``.uns`` that corresponds to the alignment info between modelA/modelB and center model.
+
+    Returns:
+        A dict of raw_X, raw_Y, mapping_X, mapping_Y, pi_value.
+            raw_X is the raw X coordinates.
+            raw_Y is the raw Y coordinates.
+            mapping_X is the Y coordinates aligned with X coordinates.
+            mapping_Y is the X coordinates aligned with Y coordinates.
+            pi_value is the value of optimal mapping points.
+    """
+
+    modelA_dict = modelA.uns[center_key].copy()
+    modelB_dict = modelB.uns[center_key].copy()
+
+    mapping_X_cols = [f"mapping_X_{i}" for i in range(modelA_dict["mapping_Y"].shape[1])]
+    raw_X_cols = [f"raw_X_{i}" for i in range(modelA_dict["raw_Y"].shape[1])]
+    mapping_Y_cols = [f"mapping_Y_{i}" for i in range(modelB_dict["mapping_Y"].shape[1])]
+    raw_Y_cols = [f"raw_Y_{i}" for i in range(modelB_dict["raw_Y"].shape[1])]
+
+    X_cols = mapping_X_cols.copy() + raw_X_cols.copy() + ["mid"]
+    X_data = pd.DataFrame(
+        np.concatenate([modelA_dict["raw_Y"], modelA_dict["mapping_Y"], modelA_dict["pi_index"][:, [0]]], axis=1),
+        columns=X_cols,
+    )
+    X_data["pi_value_X"] = modelA_dict["pi_value"].astype(np.float64)
+
+    Y_cols = mapping_Y_cols.copy() + raw_Y_cols.copy() + ["mid"]
+    Y_data = pd.DataFrame(
+        np.concatenate([modelB_dict["raw_Y"], modelB_dict["mapping_Y"], modelB_dict["pi_index"][:, [0]]], axis=1),
+        columns=Y_cols,
+    )
+    Y_data["pi_value_Y"] = modelB_dict["pi_value"].astype(np.float64)
+
+    mapping_data = pd.merge(Y_data, X_data, on=["mid"], how="inner")
+    mapping_data["pi_value"] = mapping_data[["pi_value_X"]].values * mapping_data[["pi_value_Y"]].values
+
+    return {
+        "raw_X": mapping_data[raw_X_cols].values,
+        "raw_Y": mapping_data[raw_Y_cols].values,
+        "mapping_X": mapping_data[mapping_X_cols].values,
+        "mapping_Y": mapping_data[mapping_Y_cols].values,
+        "pi_value": mapping_data["pi_value"].astype(np.float64).values,
+    }

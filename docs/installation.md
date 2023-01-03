@@ -32,6 +32,16 @@ pip install git+https://github.com/aristoteleo/spateo-release@{branch}
 
 where `{branch}` is the branch name.
 
+## Known Issues and Fixes
+
+There sometimes may be issues reading datasets from AnnData objects. To remedy this, manually install the following 
+package versions into the environment that Spateo is contained in (if these versions are not already installed):
+
+```
+pip install h5py==3.7.0
+pip install anndata==0.8.0
+```
+
 ## Development
 
 If you are interested in contributing to Spateo, please read [](contributing).

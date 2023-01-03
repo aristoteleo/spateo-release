@@ -4,7 +4,7 @@ import numpy as np
 import vtk
 from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
-from ..models import collect_model, multiblock2model
+from ..models import collect_models, multiblock2model
 from .pick import _interactive_pick
 from .utils import _interactive_plotter
 
@@ -119,7 +119,7 @@ def interactive_rectangle_clip(
     p.show(cpos="iso")
 
     # Obtain final picked model
-    picked_model = collect_model([picking_r_list[0]]) if invert else collect_model(picked_models)
+    picked_model = collect_models([picking_r_list[0]]) if invert else collect_models(picked_models)
 
     return picked_model
 
@@ -158,6 +158,6 @@ def interactive_box_clip(
     p.show(cpos="iso")
 
     # obtain final picked models
-    picked_model = collect_model(models=p.box_clipped_meshes)
+    picked_model = collect_models(models=p.box_clipped_meshes)
 
     return picked_model

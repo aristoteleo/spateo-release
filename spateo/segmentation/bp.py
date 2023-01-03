@@ -5,7 +5,6 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from fbgbp import FastBinaryGridBeliefPropagation
 
 from ..configuration import config
 from . import utils
@@ -72,6 +71,13 @@ def cell_marginals(
     Returns:
         The marginal probability, at each pixel, of the pixel being a cell.
     """
+    try:
+        from fbgbp import FastBinaryGridBeliefPropagation
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `fbgbp`." "\nInstall fbgbp via `pip install --upgrade fbgbp`"
+        )
+
     if cell_probs.shape != background_probs.shape:
         raise ValueError("`cell_probs` and `background_probs` must have the same shape")
     neighborhood = neighborhood > 0 if neighborhood is not None else utils.circle(3).astype(bool)

@@ -5,15 +5,48 @@ https://iopscience.iop.org/article/10.1088/1742-6596/1324/1/012093/meta
 Written by @HailinPan, optimized by @Lioscro.
 """
 
+from functools import partial
 from typing import Dict, Optional, Tuple, Union
 
-import ngs_tools as ngs
 import numpy as np
-from joblib import delayed
+from joblib import Parallel, delayed
 from scipy import special, stats
+from tqdm import tqdm
 
 from ..configuration import config
 from ..errors import SegmentationError
+
+try:
+    from ngs_tools.utils import ParallelWithProgress
+except ModuleNotFoundError:
+    progress = partial(tqdm, ascii=True, smoothing=0.1)
+
+    class ParallelWithProgress(Parallel):
+        """Wrapper around joblib.Parallel that uses tqdm to print execution progress.
+        Taken from https://github.com/Lioscro/ngs-tools/blob/main/ngs_tools/utils.py
+        """
+
+        def __init__(
+            self,
+            pbar: Optional[tqdm] = None,
+            total: Optional[int] = None,
+            desc: Optional[str] = None,
+            disable: bool = False,
+            *args,
+            **kwargs
+        ):
+            self._pbar = pbar or progress(total=total, desc=desc, disable=disable)
+            super(ParallelWithProgress, self).__init__(*args, **kwargs)
+
+        def __call__(self, *args, **kwargs):
+            try:
+                return Parallel.__call__(self, *args, **kwargs)
+            finally:
+                self._pbar.close()
+
+        def print_progress(self):
+            self._pbar.n = self.n_completed_tasks
+            self._pbar.refresh()
 
 
 def lamtheta_to_r(lam: float, theta: float) -> float:
@@ -278,7 +311,7 @@ def run_em(
     results = {}
     for label, (res_w, res_r, res_p) in zip(
         final_samples.keys(),
-        ngs.utils.ParallelWithProgress(n_jobs=config.n_threads, total=len(final_samples), desc="Running EM")(
+        ParallelWithProgress(n_jobs=config.n_threads, total=len(final_samples), desc="Running EM")(
             delayed(nbn_em)(final_samples[label], max_iter=max_iter, precision=precision, **params.get(label, params))
             for label in final_samples
         ),

@@ -9,18 +9,12 @@ from itertools import cycle
 from typing import List, Optional, Tuple
 
 import numpy as np
-from dijkstar import Graph, find_path
 
 from ..logging import logger_manager as lm
-from anndata import AnnData
-import cv2
-import matplotlib.pyplot as plt
 
-path_list = []
 
 class LiveWireSegmentation(object):
     def __init__(self, image: Optional = None, smooth_image: bool = False, threshold_gradient_image: bool = False):
-
         super(LiveWireSegmentation, self).__init__()
 
         # init internal containers
@@ -88,6 +82,14 @@ class LiveWireSegmentation(object):
         self.edges = self.edges.astype(float)
 
     def _compute_graph(self):
+
+        try:
+            from dijkstar import Graph
+        except ImportError:
+            raise ImportError(
+                "You need to install the package `dijkstar`." "\nInstall dijkstar via `pip install --upgrade dijkstar`"
+            )
+
         vertex = self.edges
         h, w = self.edges.shape[1::-1]
 
@@ -119,6 +121,12 @@ class LiveWireSegmentation(object):
         self.G = graph
 
     def compute_shortest_path(self, startPt, endPt):
+        try:
+            from dijkstar import find_path
+        except ImportError:
+            raise ImportError(
+                "You need to install the package `dijkstar`." "\nInstall dijkstar via `pip install --upgrade dijkstar`"
+            )
         if self.image is None:
             raise AttributeError("Load an image first!")
 
@@ -132,10 +140,12 @@ def compute_shortest_path(image: np.ndarray, startPt: Tuple[float, float], endPt
     This function will create a new instance of LiveWireSegmentation class every time it is called, calling for a
     recomputation of the gradient image and the shortest path graph. If you need to compute the shortest path in one
     image more than once, use the class-form initialization instead.
+
     Args:
         image: image on which the shortest path should be computed
         startPt: starting point for path computation
         endPt: target point for path computation
+
     Returns:
         path: shortest path as a list of tuples (x, y), including startPt and endPt
     """
@@ -161,21 +171,24 @@ def live_wire(
     highlights the boundaries, and Dijkstra’s shortest path algorithm computes a path using gradient differences as
     segment costs. Thus the line avoids strong gradients in the gradient image, which corresponds to following object
     boundaries in the original image.
+
     Now let's display the image using matplotlib front end. A click on the image starts livewire segmentation.
     The suggestion for the best segmentation will appear as you will be moving mouse across the image. To submit a
     suggestion, click on the image for the second time. To finish the segmentation, press Escape key.
+
     Args:
         image: image on which the shortest path should be computed.
         smooth_image: Whether to smooth the original image using bilateral smoothing filter.
         threshold_gradient_image: Wheter to use otsu method generate a thresholded gradient image for shortest path
             computation.
         interactive: Wether to generate the path interactively.
+
     Returns:
         A list of paths that are generated when running this algorithm. Paths can be used to segment a particular
         spatial domain of interests.
     """
 
-    
+    import matplotlib.pyplot as plt
 
     algorithm = LiveWireSegmentation(
         image, smooth_image=smooth_image, threshold_gradient_image=threshold_gradient_image
@@ -251,68 +264,3 @@ def live_wire(
     plt.show()
 
     return path_list
-
-
-
-
-def draw_adata(adata, scale=10):
-    
-    adata.obsm['spatial'] /= scale
-    x_min, y_min = np.min(adata.obsm['spatial'],axis=0).astype(int) - 10
-    x_min, y_min = np.max(x_min, 0), np.max(y_min, 0)
-    # print(f'x_min: {x_min}, y_min: {y_min}')
-
-    x_max, y_max = np.max(adata.obsm['spatial'],axis=0).astype(int) + 10
-    # print(f'x_max: {x_max}, y_max: {y_max}')
-
-    img = np.zeros([y_max-y_min+1, x_max-x_min+1, 3], dtype=np.uint8)
-    coor = np.around(adata.obsm['spatial']).astype(np.int64) - [x_min, y_min]
-    coor = coor.T
-    coor = coor[[1,0],:]
-    coor_tup = tuple(coor)
-
-    adata.obs['louvain'] = adata.obs['louvain'].map(adata.uns['louvain_colors'])
-    colors = [hex_to_rgb(i)[::-1] for i in adata.obs['louvain']]
-
-    img[coor_tup] = colors
-
-    img = np.flip(img, axis=0)
-
-    return img, x_min, y_min
-
-
-def hex_to_rgb(value):
-    value = value.lstrip('#')
-    lv = len(value)
-    return tuple(int(value[i:i + lv // 3], 16) for i in range(0, lv, lv // 3))
-
-
-def lasso_adata(
-    adata: AnnData,
-    scale: float = 10,
-    smooth_image: bool = False,
-    threshold_gradient_image: bool = False,
-    interactive: bool = True,
-) -> AnnData:
-    """Using lasso to split out adata into a subset.
-    Args:
-        adata: an input Annodata object.
-        scale: The ratio to scale image. Higher value gets smaller image.
-        smooth_image: Whether to smooth the original image using bilateral smoothing filter.
-        threshold_gradient_image: Wheter to use otsu method generate a thresholded gradient image for shortest path
-            computation.
-        interactive: Wether to generate the path interactively.
-    Returns:
-        An Annodata object within selected regions.
-    """
-    
-    adata_raw = adata.copy()
-    adata = adata.copy()
-    
-    img, x_min, y_min = draw_adata(adata, scale)
-    
-    img = cv2.cvtColor(img,cv2.COLOR_RGB2GRAY)
-    plt.imshow(img)
-    # live_wire(img, smooth_image, threshold_gradient_image, interactive)
-    return(img)
-    

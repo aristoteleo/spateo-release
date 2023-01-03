@@ -23,6 +23,7 @@ def digitize(
     spatial_key: str = "spatial",
     dgl_layer_key: str = "digital_layer",
     dgl_column_key: str = "digital_column",
+    max_itr: int = 1e5,
     lh: float = 1,
     hh: float = 100,
 ) -> None:
@@ -43,6 +44,7 @@ def digitize(
         dgl_layer_key: The key name in `adata.obs` to store layer digital-heat (temperature). Default to
             "digital_layer".
         dgl_column_key: The key name to store column digital-heat (temperature).
+        max_itr: Maximum number of iterations dedicated to solving the heat equation.
         lh: lowest digital-heat (temperature). Defaults to 1.
         hh: highest digital-heat (temperature). Defaults to 100.
 
@@ -66,21 +68,40 @@ def digitize(
     lm.main_info("Solve the layer heat equation on spatial domain with the iso-layer-line conditions.")
     # of: the optimal field after solving the heat equation.
     of_layer = domain_heat_eqn_solver(
-        empty_field, min_line_l, max_line_l, min_line_c, max_line_c, field_border, field_mask, lh=lh, hh=hh
+        empty_field,
+        min_line_l,
+        max_line_l,
+        min_line_c,
+        max_line_c,
+        field_border,
+        field_mask,
+        lh=lh,
+        hh=hh,
+        max_itr=max_itr,
     )
 
     lm.main_info(f"Saving layer heat values to {dgl_layer_key}.")
-    adata.obs[dgl_layer_key] = 0
+    adata.obs[dgl_layer_key] = 0.0
+    print(adata.obs[dgl_layer_key])
     for i in range(len(adata)):
         adata.obs[dgl_layer_key][i] = of_layer[int(adata.obsm[spatial_key][i, 0]), int(adata.obsm[spatial_key][i, 1])]
 
     lm.main_info("Solve the column heat equation on spatial domain with the iso-column-line conditions.")
     of_column = domain_heat_eqn_solver(
-        empty_field, min_line_c, max_line_c, min_line_l, max_line_l, field_border, field_mask, lh=lh, hh=hh
+        empty_field,
+        min_line_c,
+        max_line_c,
+        min_line_l,
+        max_line_l,
+        field_border,
+        field_mask,
+        lh=lh,
+        hh=hh,
+        max_itr=max_itr,
     )
 
     lm.main_info(f"Saving column heat values to {dgl_column_key}.")
-    adata.obs[dgl_column_key] = 0
+    adata.obs[dgl_column_key] = 0.0
     for i in range(len(adata)):
         adata.obs[dgl_column_key][i] = of_column[int(adata.obsm[spatial_key][i, 0]), int(adata.obsm[spatial_key][i, 1])]
 

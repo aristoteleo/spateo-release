@@ -1,9 +1,8 @@
 """IO functions for 10x Visium technology.
 """
 import os
-from typing import List, Optional, Union
+from typing import List, NamedTuple, Optional, Union
 
-import ngs_tools as ngs
 import numpy as np
 import pandas as pd
 import scipy.io
@@ -14,9 +13,19 @@ from ..configuration import SKM
 from ..logging import logger_manager as lm
 from .utils import get_points_props
 
-VERSIONS = {
-    "visium": ngs.chemistry.get_chemistry("Visium"),
-}
+try:
+    import ngs_tools as ngs
+
+    VERSIONS = {
+        "visium": ngs.chemistry.get_chemistry("Visium").resolution,
+    }
+except ModuleNotFoundError:
+
+    class SpatialResolution(NamedTuple):
+        scale: float = 1.0
+        unit: Optional[Literal["nm", "um", "mm"]] = None
+
+    VERSIONS = {"visium": SpatialResolution(55.0, "um")}
 
 
 def read_10x_as_anndata(matrix_dir: str) -> AnnData:
@@ -69,7 +78,7 @@ def read_10x(matrix_dir: str, positions_path: str, version: Literal["visium"] = 
 
     scale, scale_unit = 1.0, None
     if version in VERSIONS:
-        resolution = VERSIONS[version].resolution
+        resolution = VERSIONS[version]
         scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
