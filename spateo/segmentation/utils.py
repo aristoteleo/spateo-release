@@ -347,15 +347,6 @@ def cal_cell_area(cell_labels: np.ndarray):
         dict
     """
     areas = {}
-    '''
-    for row in cell_labels:
-        for item in row:
-            if item == 0:
-                continue
-            if item not in areas:
-                areas[item] = 0
-            areas[item] += 1
-    '''
 
     t = np.bincount(cell_labels.flatten())
     for i in range(len(t)):
