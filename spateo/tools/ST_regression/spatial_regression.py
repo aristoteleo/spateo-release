@@ -368,7 +368,7 @@ class Base_Model:
         if self.data_id is not None:
             self.logger.info(f"Checking for pre-computed adjacency matrix for dataset {self.data_id}...")
             try:
-                self.adata.obsm["adj"] = pd.read_csv(
+                self.adata.obsp["adj"] = pd.read_csv(
                     os.path.join(os.getcwd(), f"neighbors/{self.data_id}_neighbors.csv"), index_col=0
                 ).values
                 self.logger.info(f"Adjacency matrix loaded from file.")
@@ -388,7 +388,7 @@ class Base_Model:
                     os.makedirs("./neighbors")
                 # And save computed adjacency matrix:
                 self.logger.info(f"Saving adjacency matrix to path neighbors/{self.data_id}_neighbors.csv")
-                adj = pd.DataFrame(self.adata.obsm["adj"], index=self.adata.obs_names, columns=self.adata.obs_names)
+                adj = pd.DataFrame(self.adata.obsp["adj"], index=self.adata.obs_names, columns=self.adata.obs_names)
                 adj.to_csv(os.path.join(os.getcwd(), f"neighbors/{self.data_id}_neighbors.csv"))
         else:
             self.logger.info(f"Path to pre-computed adjacency matrix not given. Computing adjacency matrix.")
@@ -406,10 +406,10 @@ class Base_Model:
                 os.makedirs("./neighbors")
             # And save computed adjacency matrix:
             self.logger.info(f"Saving adjacency matrix to path neighbors/{self.data_id}_neighbors.csv")
-            adj = pd.DataFrame(self.adata.obsm["adj"], index=self.adata.obs_names, columns=self.adata.obs_names)
+            adj = pd.DataFrame(self.adata.obsp["adj"], index=self.adata.obs_names, columns=self.adata.obs_names)
             adj.to_csv(os.path.join(os.getcwd(), f"neighbors/{self.data_id}_neighbors.csv"))
 
-        adj = self.adata.obsm["adj"]
+        adj = self.adata.obsp["adj"]
 
         # Construct category adjacency matrix (n_samples x n_categories array that records how many neighbors of
         # each category are present within the neighborhood of each sample):
@@ -689,7 +689,7 @@ class Base_Model:
                     expr.obs[f"{rec}_lag"] = rec_lag
                 # Multiply one-hot category array by the expression of select receptor within that cell:
                 if not niche_lr_r_lag:
-                    rec_vals = expr[:, rec].X.toarray() if scipy.sparse.issparse(expr.X) else expr[:, rec].X
+                    rec_vals = rec_expr_values
                 else:
                     rec_vals = expr.obs[f"{rec}_lag"].values
                 rec_expr = np.multiply(X.values, np.tile(rec_vals.reshape(-1, 1), X.shape[1]))
@@ -1227,7 +1227,7 @@ class Base_Model:
             self.qvalues = qvalues.T
             self.is_significant = is_significant.T
 
-    def type_coupling(
+    def niche_differential_expression(
         self,
         cmap: str = "Reds",
         fontsize: Union[None, int] = None,

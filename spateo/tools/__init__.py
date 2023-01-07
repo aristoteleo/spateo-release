@@ -45,9 +45,9 @@ from .paste import (
     pairwise_align,
 )
 from .spatial_degs import cellbin_morani, moran_i
-from .spatial_impute import *
-from .spatial_impute.impute import STGNN
-from .spatial_impute.run_impute import impute_and_downsample
+from .spatial_smooth import *
+from .spatial_smooth.run_smoothing import impute_and_downsample
+from .spatial_smooth.smooth import STGNN
 from .ST_regression import *
 from .ST_regression.generalized_lm import fit_glm
 from .ST_regression.regression_utils import plot_prior_vs_data
