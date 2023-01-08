@@ -20,6 +20,7 @@ from ..utilities import add_model_labels
 
 def construct_pc(
     adata: AnnData,
+    layer: str = "X",
     spatial_key: str = "spatial",
     groupby: Union[str, tuple] = None,
     key_added: str = "groups",
@@ -48,6 +49,7 @@ def construct_pc(
     """
 
     # create an initial pc.
+    adata = adata.copy()
     bucket_xyz = adata.obsm[spatial_key].astype(np.float64)
     if isinstance(bucket_xyz, DataFrame):
         bucket_xyz = bucket_xyz.values
@@ -63,6 +65,7 @@ def construct_pc(
     elif groupby in obs_names:
         groups = np.asarray(adata.obs[groupby].map(lambda x: "mask" if x in mask_list else x).values)
     elif groupby in gene_names or set(groupby) <= gene_names:
+        adata.X = adata.X if layer == "X" else adata.layers[layer]
         groups = np.asarray(adata[:, groupby].X.sum(axis=1).flatten())
     else:
         raise ValueError(
