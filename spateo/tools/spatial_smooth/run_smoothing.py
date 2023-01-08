@@ -92,7 +92,7 @@ def impute_and_downsample(
 
             # For the genes with nonsignificant Moran's index, perform spatial smoothing:
             adata_m_filt_out_rex = adata_m_filt_out.copy()
-            n_neighbors = int(0.01 * adata_m_filt_out.n_obs) if n_neighbors is None else n_neighbors
+            n_neighbors = np.ceil(0.01 * adata_m_filt_out.n_obs) if n_neighbors is None else n_neighbors
             w = weights.distance.KNN.from_array(adata_m_filt_out.obsm[spatial_key], k=n_neighbors)
             rec_lag = scipy.sparse.csr_matrix(spreg.utils.lag_spatial(w, adata_m_filt_out.X))
             rec_lag.eliminate_zeros()

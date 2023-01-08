@@ -1318,7 +1318,6 @@ class Base_Model:
     def sender_effect_on_all_receivers(
         self,
         sender: str,
-        plot_mode: str = "effect_size",
         gene_subset: Union[None, List[str]] = None,
         significance_threshold: float = 0.05,
         cut_pvals: float = -5,
@@ -1333,11 +1332,6 @@ class Base_Model:
 
         Args:
             sender: sender cell type label
-            plot_mode: specifies what gets plotted.
-                Options:
-                    - "qvals": elements of the plot represent statistical significance of the interaction
-                    - "effect_size": elements of the plot represent numerical expression change induced in the
-                        sender by the sender
             gene_subset: Names of genes to subset for plot. If None, will use all genes that were used in the
                 regression.
             significance_threshold: Set non-significant effect sizes to zero, where the threshold is given here
@@ -1369,57 +1363,30 @@ class Base_Model:
         if self.square:
             sender_idx = self.celltype_names.index(sender)
 
-            if plot_mode == "qvals":
-                # In the analysis process, the receiving cell types become aligned along the column axis:
-                arr = np.log(self.qvalues[sender_idx, :, :].copy())
-                arr[arr < cut_pvals] = cut_pvals
-                df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
-                if gene_subset:
-                    df = df.drop(index=sender)[gene_subset]
+            arr = self.effect_size[sender_idx, :, :].copy()
+            arr[np.where(self.qvalues[sender_idx, :, :] > significance_threshold)] = 0
+            df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
+            if gene_subset:
+                df = df.drop(index=sender)[gene_subset]
+            vmax = np.max(np.abs(df.values))
 
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-                qv = sns.heatmap(
-                    df.T,
-                    square=True,
-                    linecolor="grey",
-                    linewidths=0.3,
-                    cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
-                    cmap=cmap,
-                    vmin=-5,
-                    vmax=0.0,
-                    ax=ax,
-                )
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+            es = sns.heatmap(
+                df.T,
+                square=True,
+                linecolor="grey",
+                linewidths=0.3,
+                cbar_kws={"label": "Effect size", "location": "top"},
+                cmap=cmap,
+                vmin=-vmax,
+                vmax=vmax,
+                ax=ax,
+            )
 
-                # Outer frame:
-                for _, spine in qv.spines.items():
-                    spine.set_visible(True)
-                    spine.set_linewidth(0.75)
-
-            elif plot_mode == "effect_size":
-                arr = self.effect_size[sender_idx, :, :].copy()
-                arr[np.where(self.qvalues[sender_idx, :, :] > significance_threshold)] = 0
-                df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
-                if gene_subset:
-                    df = df.drop(index=sender)[gene_subset]
-                vmax = np.max(np.abs(df.values))
-
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-                es = sns.heatmap(
-                    df.T,
-                    square=True,
-                    linecolor="grey",
-                    linewidths=0.3,
-                    cbar_kws={"label": "Effect size", "location": "top"},
-                    cmap=cmap,
-                    vmin=-vmax,
-                    vmax=vmax,
-                    ax=ax,
-                )
-
-                # Outer frame:
-                for _, spine in es.spines.items():
-                    spine.set_visible(True)
-                    spine.set_linewidth(0.75)
+            # Outer frame:
+            for _, spine in es.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
 
             else:
                 logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
@@ -1434,60 +1401,32 @@ class Base_Model:
             sender_cols = [col for col in self.effect_size.columns if sender in col.split("-")[1]]
             # (note that what should be considered the "receiver" is the first cell type listed)
 
-            if plot_mode == "qvals":
-                df = np.log(self.qvalues[sender_cols].copy())
-                # Reformat columns for visual purposes:
-                receivers = [ct[0] for ct in df.columns.str.split("-")]
-                df.columns = [col.split("_")[1] for col in receivers]
-                df[df < cut_pvals] = cut_pvals
-                if gene_subset:
-                    df = df.loc[gene_subset]
+            df = self.effect_size[sender_cols].copy()
+            # Reformat columns for visual purposes:
+            receivers = [ct[0] for ct in df.columns.str.split("-")]
+            df.columns = [col.split("_")[1] for col in receivers]
+            df.values[np.where(self.qvalues[sender_cols] > significance_threshold)] = 0
+            if gene_subset:
+                df = df.loc[gene_subset]
+            vmax = np.max(np.abs(df.values))
 
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-                qv = sns.heatmap(
-                    df,
-                    square=True,
-                    linecolor="grey",
-                    linewidths=0.3,
-                    cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
-                    cmap=cmap,
-                    vmin=-5,
-                    vmax=0.0,
-                    ax=ax,
-                )
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+            es = sns.heatmap(
+                df,
+                square=True,
+                linecolor="grey",
+                linewidths=0.3,
+                cbar_kws={"label": "Effect size", "location": "top"},
+                cmap=cmap,
+                vmin=-vmax,
+                vmax=vmax,
+                ax=ax,
+            )
 
-                # Outer frame:
-                for _, spine in qv.spines.items():
-                    spine.set_visible(True)
-                    spine.set_linewidth(0.75)
-
-            elif plot_mode == "effect_size":
-                df = self.effect_size[sender_cols].copy()
-                # Reformat columns for visual purposes:
-                receivers = [ct[0] for ct in df.columns.str.split("-")]
-                df.columns = [col.split("_")[1] for col in receivers]
-                df.values[np.where(self.qvalues[sender_cols] > significance_threshold)] = 0
-                if gene_subset:
-                    df = df.loc[gene_subset]
-                vmax = np.max(np.abs(df.values))
-
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-                es = sns.heatmap(
-                    df,
-                    square=True,
-                    linecolor="grey",
-                    linewidths=0.3,
-                    cbar_kws={"label": "Effect size", "location": "top"},
-                    cmap=cmap,
-                    vmin=-vmax,
-                    vmax=vmax,
-                    ax=ax,
-                )
-
-                # Outer frame:
-                for _, spine in es.spines.items():
-                    spine.set_visible(True)
-                    spine.set_linewidth(0.75)
+            # Outer frame:
+            for _, spine in es.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
 
             else:
                 logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
@@ -1512,7 +1451,6 @@ class Base_Model:
     def all_senders_effect_on_receiver(
         self,
         receiver: str,
-        plot_mode: str = "effect_size",
         gene_subset: Union[None, List[str]] = None,
         significance_threshold: float = 0.05,
         cut_pvals: float = -5,
@@ -1562,56 +1500,30 @@ class Base_Model:
         if self.square:
             receiver_idx = self.celltype_names.index(receiver)
 
-            if plot_mode == "qvals":
-                arr = np.log(self.qvalues[:, receiver_idx, :].copy())
-                arr[arr < cut_pvals] = cut_pvals
-                df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
-                if gene_subset:
-                    df = df.drop(index=receiver)[gene_subset]
+            arr = self.effect_size[:, receiver_idx, :].copy()
+            arr[np.where(self.qvalues[:, receiver_idx, :] > significance_threshold)] = 0
+            df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
+            if gene_subset:
+                df = df.drop(index=receiver)[gene_subset]
+            vmax = np.max(np.abs(df.values))
 
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-                qv = sns.heatmap(
-                    df.T,
-                    square=True,
-                    linecolor="grey",
-                    linewidths=0.3,
-                    cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
-                    cmap=cmap,
-                    vmin=-5,
-                    vmax=0.0,
-                    ax=ax,
-                )
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+            es = sns.heatmap(
+                df.T,
+                square=True,
+                linecolor="grey",
+                linewidths=0.3,
+                cbar_kws={"label": "Effect size", "location": "top"},
+                cmap=cmap,
+                vmin=-vmax,
+                vmax=vmax,
+                ax=ax,
+            )
 
-                # Outer frame:
-                for _, spine in qv.spines.items():
-                    spine.set_visible(True)
-                    spine.set_linewidth(0.75)
-
-            elif plot_mode == "effect_size":
-                arr = self.effect_size[:, receiver_idx, :].copy()
-                arr[np.where(self.qvalues[:, receiver_idx, :] > significance_threshold)] = 0
-                df = pd.DataFrame(arr, index=self.celltype_names, columns=self.genes)
-                if gene_subset:
-                    df = df.drop(index=receiver)[gene_subset]
-                vmax = np.max(np.abs(df.values))
-
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-                es = sns.heatmap(
-                    df.T,
-                    square=True,
-                    linecolor="grey",
-                    linewidths=0.3,
-                    cbar_kws={"label": "Effect size", "location": "top"},
-                    cmap=cmap,
-                    vmin=-vmax,
-                    vmax=vmax,
-                    ax=ax,
-                )
-
-                # Outer frame:
-                for _, spine in es.spines.items():
-                    spine.set_visible(True)
-                    spine.set_linewidth(0.75)
+            # Outer frame:
+            for _, spine in es.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
 
             else:
                 logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
@@ -1626,60 +1538,32 @@ class Base_Model:
             receiver_cols = [col for col in self.effect_size.columns if receiver in col.split("-")[0]]
             # (note that what should be considered the "receiver" is the first cell type listed)
 
-            if plot_mode == "qvals":
-                df = np.log(self.qvalues[receiver_cols].copy())
-                # Reformat columns for visual purposes:
-                senders = [ct[1] for ct in df.columns.str.split("-")]
-                df.columns = [col.split("_")[1] for col in senders]
-                df[df < cut_pvals] = cut_pvals
-                if gene_subset:
-                    df = df.loc[gene_subset]
+            df = self.effect_size[receiver_cols].copy()
+            # Reformat columns for visual purposes:
+            senders = [ct[1] for ct in df.columns.str.split("-")]
+            df.columns = [col.split("_")[1] for col in senders]
+            df.values[np.where(self.qvalues[receiver_cols] > significance_threshold)] = 0
+            if gene_subset:
+                df = df.loc[gene_subset]
+            vmax = np.max(np.abs(df.values))
 
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-                qv = sns.heatmap(
-                    df,
-                    square=True,
-                    linecolor="grey",
-                    linewidths=0.3,
-                    cbar_kws={"label": "$\log_{10}$ FDR-corrected pvalues", "location": "top"},
-                    cmap=cmap,
-                    vmin=-5,
-                    vmax=0.0,
-                    ax=ax,
-                )
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+            es = sns.heatmap(
+                df,
+                square=True,
+                linecolor="grey",
+                linewidths=0.3,
+                cbar_kws={"label": "Effect size", "location": "top"},
+                cmap=cmap,
+                vmin=-vmax,
+                vmax=vmax,
+                ax=ax,
+            )
 
-                # Outer frame:
-                for _, spine in qv.spines.items():
-                    spine.set_visible(True)
-                    spine.set_linewidth(0.75)
-
-            elif plot_mode == "effect_size":
-                df = self.effect_size[receiver_cols].copy()
-                # Reformat columns for visual purposes:
-                senders = [ct[1] for ct in df.columns.str.split("-")]
-                df.columns = [col.split("_")[1] for col in senders]
-                df.values[np.where(self.qvalues[receiver_cols] > significance_threshold)] = 0
-                if gene_subset:
-                    df = df.loc[gene_subset]
-                vmax = np.max(np.abs(df.values))
-
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-                es = sns.heatmap(
-                    df,
-                    square=True,
-                    linecolor="grey",
-                    linewidths=0.3,
-                    cbar_kws={"label": "Effect size", "location": "top"},
-                    cmap=cmap,
-                    vmin=-vmax,
-                    vmax=vmax,
-                    ax=ax,
-                )
-
-                # Outer frame:
-                for _, spine in es.spines.items():
-                    spine.set_visible(True)
-                    spine.set_linewidth(0.75)
+            # Outer frame:
+            for _, spine in es.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
 
             else:
                 logger.error("Invalid input to 'plot_mode'. Options: 'qvals', 'effect_size'.")
@@ -1703,8 +1587,8 @@ class Base_Model:
 
     def sender_receiver_effect_volcanoplot(
         self,
-        receiver: str,
         sender: str,
+        receiver: str,
         significance_threshold: float = 0.05,
         effect_size_threshold: Union[None, float] = None,
         fontsize: Union[None, int] = None,
@@ -1716,8 +1600,8 @@ class Base_Model:
         given sender cell type.
 
         Args:
-            receiver: Receiver cell type label
             sender: Sender cell type label
+            receiver: Receiver cell type label
             significance_threshold:  Set non-significant effect sizes (given by q-values) to zero, where the
                 threshold is given here
             effect_size_threshold: Set absolute value effect-size threshold beyond which observations are marked as
@@ -1773,18 +1657,14 @@ class Base_Model:
             # Identify subset that may be significant, but which doesn't pass the fold-change threshold:
             qval_filter = np.where(self.qvalues[sender_idx, receiver_idx, :] < significance_threshold)
             x = self.effect_size[sender_idx, receiver_idx, :][qval_filter]
-            y = -np.nan_to_num(
-                np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter], posinf=14.5, neginf=-14.5
-            )
+            y = -np.nan_to_num(np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter], posinf=10, neginf=-10)
             fc_filter = np.where(x < effect_size_threshold)
             if qval_filter[0].size > 0:
                 sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color="darkgrey", edgecolor="black", s=50, ax=ax)
 
             # Identify subset that are significantly downregulated:
             dreg_color = matplotlib.cm.get_cmap("winter")(0)
-            y = -np.nan_to_num(
-                np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter], posinf=14.5, neginf=-14.5
-            )
+            y = -np.nan_to_num(np.log10(self.qvalues[sender_idx, receiver_idx, :])[qval_filter], posinf=10, neginf=-10)
             fc_filter = np.where(x <= -effect_size_threshold)
             if qval_filter[0].size > 0:
                 sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=50, ax=ax)
@@ -1821,9 +1701,7 @@ class Base_Model:
 
             qval_filter = np.where(self.qvalues[sender_receiver_cols] < significance_threshold)
             x = self.effect_size[sender_receiver_cols].values[qval_filter]
-            y = -np.nan_to_num(
-                np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter], posinf=14.5, neginf=-14.5
-            )
+            y = -np.nan_to_num(np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter], posinf=10, neginf=-10)
 
             # Identify subset that may be significant, but which doesn't pass the effect size threshold:
             fc_filter = np.where(x < effect_size_threshold)
@@ -1833,9 +1711,7 @@ class Base_Model:
             # Identify subset that are significantly downregulated:
             dreg_color = matplotlib.cm.get_cmap("winter")(0)
             fc_filter = np.where(x <= -effect_size_threshold)
-            y = -np.nan_to_num(
-                np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter], posinf=14.5, neginf=-14.5
-            )
+            y = -np.nan_to_num(np.log10(self.qvalues[sender_receiver_cols].values)[qval_filter], posinf=10, neginf=-10)
             if qval_filter[0].size > 0:
                 sns.scatterplot(x=x[fc_filter], y=y[fc_filter], color=dreg_color, edgecolor="black", s=50, ax=ax)
 
