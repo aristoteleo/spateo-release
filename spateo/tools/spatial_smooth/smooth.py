@@ -21,7 +21,7 @@ from tqdm import tqdm
 from ...configuration import SKM
 from ...logging import logger_manager as lm
 from ..find_neighbors import construct_nn_graph, normalize_adj
-from .impute_model import Encoder
+from .smooth_model import Encoder
 
 
 # -------------------------------------------- Tensor operations -------------------------------------------- #
@@ -83,8 +83,8 @@ def add_contrastive_label(adata):
     n_spot = adata.n_obs
     one_matrix = np.ones([n_spot, 1])
     zero_matrix = np.zeros([n_spot, 1])
-    label_CSL = np.concatenate([one_matrix, zero_matrix], axis=1)
-    adata.obsm["label_CSL"] = label_CSL
+    label_contrastive = np.concatenate([one_matrix, zero_matrix], axis=1)
+    adata.obsm["label_contrastive"] = label_contrastive
 
 
 class STGNN:
@@ -226,7 +226,7 @@ class Trainer:
 
         self.features = torch.FloatTensor(adata.obsm["feat"].copy()).to(self.device)
         self.features_a = torch.FloatTensor(adata.obsm["feat_a"].copy()).to(self.device)
-        self.label_CSL = torch.FloatTensor(adata.obsm["label_CSL"]).to(self.device)
+        self.label_contrastive = torch.FloatTensor(adata.obsm["label_contrastive"]).to(self.device)
         self.adj = adata.obsm["adj"]
         self.graph_neigh = torch.FloatTensor(adata.obsm["graph_neigh"].copy() + np.eye(self.adj.shape[0])).to(
             self.device
@@ -268,8 +268,8 @@ class Trainer:
             self.features_a = permutation(self.features)
             self.hidden_feat, self.emb, ret, ret_a = self.model(self.features, self.features_a, self.adj)
 
-            self.loss_sl_1 = self.loss_CSL(ret, self.label_CSL)
-            self.loss_sl_2 = self.loss_CSL(ret_a, self.label_CSL)
+            self.loss_sl_1 = self.loss_CSL(ret, self.label_contrastive)
+            self.loss_sl_2 = self.loss_CSL(ret_a, self.label_contrastive)
             self.loss_feat = F.mse_loss(self.features, self.emb)
 
             if self.add_regularization:

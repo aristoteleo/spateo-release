@@ -178,21 +178,21 @@ def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: fl
     return qval
 
 
-def _get_p_value(variables: np.array, fisher_inv: np.array, coef_loc_totest: int) -> np.ndarray:
-    """Computes p-values for differential expression for each feature
+def get_p_value(variables: np.array, fisher_inv: np.array, coef_loc: int) -> np.ndarray:
+    """Computes p-value for differential expression for a target feature
 
     Args:
         variables: Array where each column corresponds to a feature
         fisher_inv: Inverse Fisher information matrix
-        coef_loc_totest: Numerical column of the array corresponding to the coefficient to test
+        coef_loc: Numerical column of the array corresponding to the coefficient to test
 
     Returns:
         pvalues: Array of identical shape to variables, where each element is a p-value for that instance of that
             feature
     """
 
-    theta_mle = variables[coef_loc_totest]
-    theta_sd = fisher_inv[:, coef_loc_totest, coef_loc_totest]
+    theta_mle = variables[coef_loc]
+    theta_sd = fisher_inv[:, coef_loc, coef_loc]
     theta_sd = np.nextafter(0, np.inf, out=theta_sd, where=theta_sd < np.nextafter(0, np.inf))
     theta_sd = np.sqrt(theta_sd)
 
@@ -222,7 +222,7 @@ def compute_wald_test(
 
     # Compute p-values for each feature, store in temporary list:
     for idx in range(params.T.shape[0]):
-        pvals = _get_p_value(params.T, fisher_inv, idx)
+        pvals = get_p_value(params.T, fisher_inv, idx)
         pvalues.append(pvals)
 
     pvalues = np.concatenate(pvalues)
