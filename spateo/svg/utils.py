@@ -19,6 +19,8 @@ from scipy.sparse import csr_matrix, issparse
 from scipy.sparse.csgraph import floyd_warshall
 from typing_extensions import Literal
 
+from ..logging import logger_manager as lm
+
 
 def bin_adata(
     adata: AnnData,
@@ -104,8 +106,15 @@ def get_genes_by_pos_ratio(
     return adata.var_names[adata.var["nCells"] / adata.n_obs > pos_ratio].to_list(), adata
 
 
-def add_pos_ratio_to_adata(adata, var_name="pos_ratio_raw"):
-    adata.var[var_name] = np.sum(adata.X.A > 0, axis=0) if issparse(adata.X) else np.sum(adata.X > 0, axis=0)
+def add_pos_ratio_to_adata(adata, layer=None, var_name="pos_ratio_raw"):
+    if layer:
+        adata.var[var_name] = (
+            np.sum(adata.layers[layer].A > 0, axis=0)
+            if issparse(adata.layers[layer])
+            else np.sum(adata.layers[layer] > 0, axis=0)
+        )
+    else:
+        adata.var[var_name] = np.sum(adata.X.A > 0, axis=0) if issparse(adata.X) else np.sum(adata.X > 0, axis=0)
     adata.var[var_name] = adata.var[var_name] / adata.n_obs
 
 
@@ -133,11 +142,11 @@ def cal_geodesic_distance(
         )
         <= min_dis_cutoff
     ]
-    print(f"The cell/buckets number after filtering by min_dis_cutoff is {len(b)}")
+    lm.main_info(f"The cell/buckets number after filtering by min_dis_cutoff is {len(b)}")
 
     # remove sparse cells
     b = b[np.max(b.obsp["spatial_distances"].A, axis=1) <= max_dis_cutoff]
-    print(f"The cell/buckets number after filtering by max_dis_cutoff is {len(b)}")
+    lm.main_info(f"The cell/buckets number after filtering by max_dis_cutoff is {len(b)}")
 
     dyn.tl.neighbors(
         b,

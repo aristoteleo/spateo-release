@@ -7,8 +7,6 @@ import dynamo as dyn
 import numpy as np
 import ot
 import pandas as pd
-
-# sys.path.insert(0, "/home/panhailin/software/source/git_hub/spateo-release_daniel/")
 import scipy
 import scipy.stats
 import statsmodels
@@ -21,6 +19,7 @@ from typing_extensions import Literal
 
 import spateo as st
 
+from ..tools.spatial_impute.run_impute import impute_and_downsample
 from .utils import *
 
 
@@ -93,16 +92,27 @@ def get_std(l, n_nei=30):
 
 def imputataion_and_sampling(
     adata: AnnData,
-    positive_ratio_cutoff: float = 0.1,
     imputation: bool = True,
     downsampling: int = 400,
+    device: str = "cpu",
 ) -> AnnData:
-    adata.X = adata.X.astype("int64")
-    adata = filter_adata_by_pos_ratio(adata, positive_ratio_cutoff)
+    """Imputation and downsampling
 
+    Args:
+        adata: input AnnData,
+        imputation: whether do imputation or not
+        dowsampling: the number of cells
+
+    Returns:
+        adata: imputation and downsampling
+        adata_im: only imputation result, not do dwonsampling
+    """
     # imputation
+    adata = adata.copy()
     if imputation:
-        adata = st.tl.run_denoise_impute(adata)
+        # adata = st.tl.run_denoise_impute(adata)
+        adata.X = adata.X.astype("int64")
+        adata, _ = impute_and_downsample(adata, device=device, positive_ratio_cutoff=0.0, n_ds=downsampling)
     adata_im = adata.copy()
 
     # downsampling
@@ -110,6 +120,44 @@ def imputataion_and_sampling(
     adata = adata[ind].copy()
 
     return adata, adata_im
+
+
+def imputataion(
+    adata: AnnData,
+    device: str = "cpu",
+) -> AnnData:
+    """Imputation and downsampling
+
+    Args:
+        adata: input AnnData,
+        device: the device to use: cpu, cuda
+
+    Returns:
+        adata_im: imputation result
+    """
+    adata = adata.copy()
+    adata.X = adata.X.astype("int64")
+    adata_im, _ = impute_and_downsample(adata, device=device, positive_ratio_cutoff=0.0, n_ds=400)
+    return adata_im
+
+
+def downsampling(
+    adata: AnnData,
+    downsampling: int = 400,
+) -> AnnData:
+    """Imputation and downsampling
+
+    Args:
+        adata: input AnnData,
+        dowsampling: the number of cells
+
+    Returns:
+        adata: adata of downsampling
+    """
+    adata = adata.copy()
+    ind = sample(arr=np.array(range(adata.X.shape[0])), n=downsampling, method="trn", X=adata.obsm["spatial"])
+    adata = adata[ind].copy()
+    return adata
 
 
 def cal_wass_dis_on_genes(inp0, inp1):
