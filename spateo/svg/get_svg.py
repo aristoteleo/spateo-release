@@ -19,7 +19,7 @@ from typing_extensions import Literal
 
 import spateo as st
 
-from ..tools.spatial_impute.run_impute import impute_and_downsample
+from ..tools.spatial_smooth.run_smoothing import impute_and_downsample
 from .utils import *
 
 
