@@ -48,6 +48,7 @@ from .spatial_degs import cellbin_morani, moran_i
 from .spatial_smooth import *
 from .spatial_smooth.run_smoothing import impute_and_downsample
 from .spatial_smooth.smooth import STGNN
+from .spatially_variable_gene_ot import cal_wass_dis_bs
 from .ST_regression import *
 from .ST_regression.generalized_lm import fit_glm
 from .ST_regression.regression_utils import plot_prior_vs_data
@@ -67,11 +68,9 @@ from .three_dims_align import (
     rigid_transform_3D,
 )
 
-#from .live_wire import (
+# from .live_wire import (
 #    compute_shortest_path,
 #    live_wire,
 #    draw_adata,
 #    lasso_adata,
-#)
-
-from .spatially_variable_gene_ot import cal_wass_dis_bs  
+# )

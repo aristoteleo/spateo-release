@@ -11,8 +11,6 @@ from . import interpolation_nn
 from .deep_interpolation import DataSampler, DeepInterpolation
 
 
-
-
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def deep_intepretation_2d(
     adata: Optional[AnnData] = None,
@@ -41,17 +39,21 @@ def deep_intepretation_2d(
         within the convex hull formed by the input data points while each column corresponds a gene whose expression
         values are interpolated.
     """
-    #X, Y, Grid, grid_in_hull = get_X_Y_grid(adata=adata, X=X, Y=Y, grid_num=grid_num)
-    #X, Y, Grid, grid_in_hull = get_X_Y_grid(adata=adata, genes=genes, X=X, Y=Y, grid_num=grid_num)
-    #Y = adata[:,genes].X.A if issparse(adata[:,genes].X) else adata[:,genes].X if genes else Y
-    Y = Y if not isinstance(Y, type(None)) else adata[:,genes].X.A if issparse(adata[:,genes].X) else adata[:,genes].X
+    # X, Y, Grid, grid_in_hull = get_X_Y_grid(adata=adata, X=X, Y=Y, grid_num=grid_num)
+    # X, Y, Grid, grid_in_hull = get_X_Y_grid(adata=adata, genes=genes, X=X, Y=Y, grid_num=grid_num)
+    # Y = adata[:,genes].X.A if issparse(adata[:,genes].X) else adata[:,genes].X if genes else Y
+    Y = (
+        Y
+        if not isinstance(Y, type(None))
+        else adata[:, genes].X.A
+        if issparse(adata[:, genes].X)
+        else adata[:, genes].X
+    )
     if train_on_pos:
         Y = Y.flatten()
-        X = X[Y>0]
-        Y = Y[Y>0]
-        Y = Y[:,None]
-
-     
+        X = X[Y > 0]
+        Y = Y[Y > 0]
+        Y = Y[:, None]
 
     data_dict = {"X": X, "Y": Y}
 
@@ -77,5 +79,3 @@ def deep_intepretation_2d(
     )
 
     return interp_adata
-
-
