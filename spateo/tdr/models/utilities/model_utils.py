@@ -26,7 +26,7 @@ def merge_models(
     return merged_model
 
 
-def collect_model(
+def collect_models(
     models: List[PolyData or UnstructuredGrid or DataSet],
     models_name: Optional[List[str]] = None,
 ) -> MultiBlock:
@@ -35,11 +35,11 @@ def collect_model(
     You can think of MultiBlock like lists or dictionaries as we can iterate over this data structure by index
     and we can also access blocks by their string name.
     If the input is a dictionary, it can be iterated in the following ways:
-        >>> blocks = collect_model(models, models_name)
+        >>> blocks = collect_models(models, models_name)
         >>> for name in blocks.keys():
         ...     print(blocks[name])
     If the input is a list, it can be iterated in the following ways:
-        >>> blocks = collect_model(models)
+        >>> blocks = collect_models(models)
         >>> for block in blocks:
         ...    print(block)
     """

@@ -12,12 +12,14 @@ from typing import List, Optional, Union
 import numpy as np
 import pyvista as pv
 from pyvista import PolyData
+from scipy.spatial.distance import cdist
 
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
 
+from ....tools.three_dims_align import rigid_transform_3D
 from ..utilities import scale_model
 
 ###############
@@ -54,7 +56,7 @@ def pv_mesh(pc: PolyData, alpha: float = 2.0) -> PolyData:
 ###########################
 
 
-def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0):
+def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_factor: Union[int, float] = 1.0):
     """
     Computes a triangle mesh from a point cloud based on the marching cube algorithm.
     Algorithm Overview:
@@ -65,6 +67,7 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0):
     Args:
         pc: A point cloud model.
         levelset: The levelset of iso-surface. It is recommended to set levelset to 0 or 0.5.
+        mc_scale_factor: The scale of the model. The scaled model is used to construct the mesh model.
 
     Returns:
         A mesh model.
@@ -76,26 +79,31 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0):
             "You need to install the package `mcubes`." "\nInstall mcubes via `pip install --upgrade PyMCubes`"
         )
 
-    z_arr = np.asarray(pc.points[:, 2])
-    z_unique = np.sort(np.unique(z_arr))
-    z_diff = np.diff(z_unique).astype(float)
-    mc_scale_factor = np.max(z_diff) * 2
+    pc = pc.copy()
 
-    pc = scale_model(model=pc, scale_factor=1 / mc_scale_factor)
-    pc_points = np.asarray(pc.points)
-    pc_points_int = np.ceil(pc_points).astype(np.int64)
+    # Move the model so that the coordinate minimum is at (0, 0, 0).
+    raw_points = np.asarray(pc.points)
+    pc.points = new_points = raw_points - np.min(raw_points, axis=0)
 
-    rmd = pc_points_int - pc_points
-    rmd_mean = np.mean(rmd, axis=0)
+    # Generate new models for calculatation.
+    dist = cdist(XA=new_points, XB=new_points, metric="euclidean")
+    row, col = np.diag_indices_from(dist)
+    dist[row, col] = None
+    max_dist = np.nanmin(dist, axis=1).max()
+    mc_sf = max_dist * mc_scale_factor
 
+    scale_pc = scale_model(model=pc, scale_factor=1 / mc_sf)
+    scale_pc_points = scale_pc.points = np.ceil(np.asarray(scale_pc.points)).astype(np.int64)
+
+    # Generate grid for calculatation based on new model.
     volume_array = np.zeros(
         shape=[
-            pc_points_int[:, 0].max() + 3,
-            pc_points_int[:, 1].max() + 3,
-            pc_points_int[:, 2].max() + 3,
+            scale_pc_points[:, 0].max() + 3,
+            scale_pc_points[:, 1].max() + 3,
+            scale_pc_points[:, 2].max() + 3,
         ]
     )
-    volume_array[pc_points_int[:, 0], pc_points_int[:, 1], pc_points_int[:, 2]] = 1
+    volume_array[scale_pc_points[:, 0], scale_pc_points[:, 1], scale_pc_points[:, 2]] = 1
 
     # Extract the iso-surface based on marching cubes algorithm.
     # volume_array = mcubes.smooth(volume_array)
@@ -104,16 +112,20 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0):
     if len(vertices) == 0:
         raise ValueError(f"The point cloud cannot generate a surface mesh with `marching_cube` method.")
 
-    vertices = vertices - rmd_mean
-
     v = np.asarray(vertices).astype(np.float64)
     f = np.asarray(triangles).astype(np.int64)
     f = np.c_[np.full(len(f), 3), f]
 
+    # Generate mesh model.
     mesh = pv.PolyData(v, f.ravel()).extract_surface().triangulate()
     mesh.clean(inplace=True)
-    mesh = scale_model(model=mesh, scale_factor=mc_scale_factor)
+    mesh = scale_model(model=mesh, scale_factor=mc_sf)
 
+    # Transform.
+    scale_pc = scale_model(model=scale_pc, scale_factor=mc_sf)
+    mesh.points = rigid_transform_3D(
+        coords=np.asarray(mesh.points), coords_refA=np.asarray(scale_pc.points), coords_refB=raw_points
+    )
     return mesh
 
 
@@ -161,6 +173,7 @@ def alpha_shape_mesh(pc: PolyData, alpha: float = 2.0) -> PolyData:
     Computes a triangle mesh from a point cloud based on the alpha shape algorithm.
     Algorithm Overview:
         For each real number α, define the concept of a generalized disk of radius 1/α as follows:
+
             If α = 0, it is a closed half-plane;
             If α > 0, it is a closed disk of radius 1/α;
             If α < 0, it is the closure of the complement of a disk of radius −1/α.
@@ -209,6 +222,7 @@ def ball_pivoting_mesh(pc: PolyData, radii: List[float] = None):
         the three vertices form a triangle if the ball is getting "caught" and settle between the points, without
         containing any other point.
         The algorithm stimulates a virtual ball of radius r. Each iteration consists of two steps:
+
             * Seed triangle - The ball rolls over the point cloud until it gets "caught" between three vertices and
                               settles between in them. Choosing the right r promises no other point is contained in the
                               formed triangle. This triangle is called "Seed triangle".
@@ -269,8 +283,10 @@ def poisson_mesh(
         pc: A point cloud model.
         depth: Maximum depth of the tree that will be used for surface reconstruction.
                Running at depth d corresponds to solving on a grid whose resolution is no larger than 2^d x 2^d x 2^d.
+
                Note that since the reconstructor adapts the octree to the sampling density, the specified reconstruction
                depth is only an upper bound.
+
                The depth that defines the depth of the octree used for the surface reconstruction and hence implies the
                resolution of the resulting triangle mesh. A higher depth value means a mesh with more details.
         width: Specifies the target width of the finest level octree cells.

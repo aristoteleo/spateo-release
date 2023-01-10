@@ -4,6 +4,7 @@ import math
 import warnings
 from typing import Dict, Optional, Tuple, Union
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from anndata import AnnData
@@ -29,6 +30,8 @@ def imshow(
     use_scale: bool = True,
     absolute: bool = False,
     labels: bool = False,
+    downscale: float = 1.0,
+    downscale_interpolation: Optional[int] = None,
     background: Optional[str] = None,
     save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
     save_kwargs: Optional[Dict] = None,
@@ -48,6 +51,13 @@ def imshow(
             zero).
         labels: Whether the input data contains labels, encoded as positive
             integers.
+        downscale: Downscale image by this amount for faster plotting.
+        downscale_interpolation: Use this CV2 interpolation method when downscaling.
+            By default, bilinear interpolation is used when `labels=True` and nearest
+            neighbor interpolation when `labels=False`.
+            Available options are located here:
+            https://docs.opencv.org/3.4/da/d54/group__imgproc__transform.html#ga5bb5a1fea74ea38e1a5445ca803ff121
+            Only has an effect when `downscale` < 1.
         background: string or None (optional, default 'None`)
             The color of the background. Usually this will be either
             'white' or 'black', but any color name will work. Ideally
@@ -72,23 +82,28 @@ def imshow(
     from matplotlib import rcParams
     from matplotlib.colors import to_hex
 
-    if SKM.get_adata_type(adata) != SKM.ADATA_AGG_TYPE:
-        raise PlottingError("Only `AGG` type AnnDatas are supported.")
-
     if ax is None:
         fig, ax = plt.subplots(figsize=(5, 5), tight_layout=True)
     else:
         fig = ax.get_figure()
 
     mtx = SKM.select_layer_data(adata, layer, make_dense=True)
+    if downscale < 1:
+        default = cv2.INTER_NEAREST if labels else cv2.INTER_LINEAR
+        if mtx.dtype == np.dtype(bool):
+            mtx = mtx.astype(np.uint8)
+            default = cv2.INTER_NEAREST
+        mtx = cv2.resize(
+            mtx,
+            dsize=None,
+            fx=downscale,
+            fy=downscale,
+            interpolation=default if downscale_interpolation is None else downscale_interpolation,
+        )
+
     if labels:
         mtx = label2rgb(mtx, bg_label=0)
 
-    kwargs.update({"interpolation": "none"})
-    im = ax.imshow(mtx, **kwargs)
-    ax.set_title(layer)
-    if show_cbar:
-        fig.colorbar(im)
     unit = SKM.get_uns_spatial_attribute(adata, SKM.UNS_SPATIAL_SCALE_UNIT_KEY)
     adata_bounds = SKM.get_agg_bounds(adata)
     # Note that we +1 to the xmax and ymax values because the first and last
@@ -96,7 +111,7 @@ def imshow(
     extent = (
         [adata_bounds[0], adata_bounds[1] + 1, adata_bounds[3] + 1, adata_bounds[2]]
         if absolute
-        else [0, mtx.shape[1], mtx.shape[0], 0]
+        else [0, mtx.shape[1] / downscale, mtx.shape[0] / downscale, 0]
     )
     xlabel = "Y"
     ylabel = "X"
@@ -107,6 +122,25 @@ def imshow(
         xlabel += f" ({unit})"
         ylabel += f" ({unit})"
 
+    # Make sure any existing images match the size and extent of the one we are about to plot.
+    if any(mtx.shape[:2] != im.get_array().shape[:2] for im in ax.get_images()):
+        raise PlottingError(
+            f"The dimensions of the matrix, {mtx.shape[:2]} must be equal to the dimensions of "
+            "the images present in the axis. Make sure you are using the same AnnData and the `downscale` argument "
+            "as you used to show the previous image(s)."
+        )
+    if any(not np.allclose(extent, im.get_extent(), atol=0.5) for im in ax.get_images()):
+        raise PlottingError(
+            f"The extent of the matrix, {extent} must be equal to the extent of "
+            "the images present in the axis. Make sure you are using the same AnnData and the "
+            "`use_scale` and `absolute` arguments as you used to show the previous image(s)."
+        )
+
+    kwargs.update({"interpolation": "none"})
+    im = ax.imshow(mtx, **kwargs)
+    ax.set_title(layer)
+    if show_cbar:
+        fig.colorbar(im)
     im.set_extent(tuple(extent))
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)

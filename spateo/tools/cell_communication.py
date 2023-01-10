@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -6,7 +6,11 @@ from anndata import AnnData
 from scipy import sparse
 from scipy.sparse import issparse
 from scipy.stats import gmean, pearsonr
-from typing_extensions import Literal
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 from ..configuration import SKM
 
@@ -16,12 +20,13 @@ from ..configuration import SKM
 def niches(
     adata: AnnData,
     path: str,
+    layer: Tuple[None, str] = None,
     weighted: bool = False,
     spatial_neighbors: str = "spatial_neighbors",
     spatial_distances: str = "spatial_distances",
-    species: Literal["human", "mouse"] = "human",
-    system: Literal["niches_c2c", "niches_n2c"] = "niches_n2c",
-    method: Literal["gmean", "mean"] = "gmean",
+    species: Literal["human", "mouse", "drosophila", "zebrafish", "axolotl"] = "human",
+    system: Literal["niches_c2c", "niches_n2c", "niches_c2n", "niches_n2n"] = "niches_n2n",
+    method: Literal["gmean", "mean", "sum"] = "sum",
 ) -> AnnData:
     """Performing cell-cell transformation on an anndata object, while also
        limiting the nearest neighbor per cell to k. This function returns
@@ -30,26 +35,31 @@ def niches(
        anndated object allows flexible downstream manipulations such as the
        dimensional reduction of the row or column of this object.
 
-    Our method is adapted from:
-         Robin Browaeys, Wouter Saelens & Yvan Saeys. NicheNet: modeling intercellular communication by linking ligands
-        to target genes. Nature Methods volume 17, pages159–162 (2020).
+        Our method is adapted from:
+        Micha Sam Brickman Raredon, Junchen Yang, Neeharika Kothapalli,  Naftali Kaminski, Laura E. Niklason,
+        Yuval Kluger. Comprehensive visualization of cell-cell interactions in single-cell and spatial transcriptomics
+        with NICHES. doi: https://doi.org/10.1101/2022.01.23.477401
+
+
 
     Args:
-        path: Path to ligand_receptor network of NicheNet (prior lr_network).
         adata: An Annodata object.
+        path: Path to ligand_receptor network of NicheNet (prior lr_network).
+        layer: the key to the layer. If it is None, adata.X will be used by default.
         weighted: 'False' (defult)
             whether to supply the edge weights according to the actual spatial
             distance(just as weighted kNN). Defult is 'False', means all neighbor
             edge weights equal to 1, others is 0.
         spatial_neighbors : neighbor_key {spatial_neighbors} in adata.uns.keys(),
         spatial_distances : neighbor_key {spatial_distances} in adata.obsp.keys().
-        system: 'niches_c2c'(defult)
-            cell-cell signaling (niches_c2c), defined as the signals passed between
+        system: 'niches_n2n'(defult)
+            cell-cell signaling ('niches_c2c'), defined as the signals passed between
             cells, determined by the product of the ligand expression of the sending
-            cell and the receptor expression of the receiving cell) and system-cell
-            signaling (niche_n2c), defined as the signaling input to a cell,
+            cell and the receptor expression of the receiving cell, and system-cell
+            signaling ('niches_n2c'), defined as the signaling input to a cell,
             determined by taking the geometric mean of the ligand profiles of the
-            surrounding cells and the receptor profile of the receiving cell).
+            surrounding cells and the receptor profile of the receiving cell.similarly,
+            'niches_c2n','niches_n2n'.
 
 
     Returns:
@@ -57,12 +67,36 @@ def niches(
         possible cell x cell interactions.
 
     """
+
     # prior lr_network
     if species == "human":
-        lr_network = pd.read_csv(path + "lr_network.csv", index_col=0)
-    else:
+        lr_network = pd.read_csv(path + "lr_network_human.csv", index_col=0)
+        if system == "niches_n2c":
+            lr_network[["from", "to"]] = lr_network[["to", "from"]]
+    elif species == "mouse":
         lr_network = pd.read_csv(path + "lr_network_mouse.csv", index_col=0)
+        if system == "niches_n2c":
+            lr_network[["from", "to"]] = lr_network[["to", "from"]]
+    elif species == "drosophila":
+        lr_network = pd.read_csv(path + "lr_network_drosophila.csv", index_col=0)
+        if system == "niches_n2c":
+            lr_network[["from", "to"]] = lr_network[["to", "from"]]
+    elif species == "zebrafish":
+        lr_network = pd.read_csv(path + "lr_network_zebrafish.csv", index_col=0)
+        if system == "niches_n2c":
+            lr_network[["from", "to"]] = lr_network[["to", "from"]]
+    elif species == "axolotl":
+        lr_network = pd.read_csv(path + "lr_network_axolotl.csv", index_col=0)
+        if system == "niches_n2c":
+            lr_network[["from", "to"]] = lr_network[["to", "from"]]
+
+    if layer is None:
+        adata.X = adata.X
+    else:
+        adata.X = adata.layers[layer]
+
     x_sparse = issparse(adata.X)
+
     # expressed lr_network
     ligand = lr_network["from"].unique()
     expressed_ligand = list(set(ligand) & set(adata.var_names))
@@ -87,12 +121,11 @@ def niches(
             f"No spatial_key {spatial_distances} exists in adata,"
             f"using 'dyn.tl.neighbors' to calulate the spatial diatances first."
         )
-    nw = {}
+
     nw = {"neighbors": adata.uns["spatial_neighbors"]["indices"], "weights": adata.obsp["spatial_distances"]}
     k = adata.uns["spatial_neighbors"]["params"]["n_neighbors"]
 
     # construct c2c matrix
-    cell_pair = []  # bucket-bucket pair
     if system == "niches_c2c":
         X = np.zeros(shape=(ligand_matrix.shape[0], k * adata.n_obs))
         if weighted:
@@ -109,14 +142,16 @@ def niches(
             for i in range(ligand_matrix.shape[1]):
                 receptor_matrix = adata[nw["neighbors"][i], lr_network["to"]].X.A.T
                 X[:, i * k : (i + 1) * k] = receptor_matrix * ligand_matrix[:, i].reshape(-1, 1)
+        # bucket-bucket pair
+        cell_pair = []
         for i, cell_id in enumerate(nw["neighbors"]):
             cell_pair.append(adata.obs.index[i] + "-" + adata.obs.index[cell_id])
         cell_pair = [i for j in cell_pair for i in j]
         cell_pair = pd.DataFrame({"cell_pair_name": cell_pair})
         cell_pair.set_index("cell_pair_name", inplace=True)
 
-    # construct n2c matrix
-    if system == "niches_n2c":
+    # construct n2c matrix or construct c2n matrix
+    if system == "niches_n2c" or system == "niches_c2n":
         X = np.zeros(shape=(ligand_matrix.shape[0], adata.n_obs))
         if weighted:
             # weighted matrix (weighted distance)
@@ -132,11 +167,17 @@ def niches(
                         if x_sparse
                         else gmean((adata[nw["neighbors"][i], lr_network["to"]].X.T + 1) * weight[i, :], axis=1)
                     )
-                else:
+                elif method == "mean":
                     receptor_matrix = (
                         np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
                         if x_sparse
                         else np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.T * weight[i, :], axis=1)
+                    )
+                else:
+                    receptor_matrix = (
+                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
+                        if x_sparse
+                        else np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.T * weight[i, :], axis=1)
                     )
                 X[:, i] = receptor_matrix * ligand_matrix[:, i]
         else:
@@ -147,13 +188,110 @@ def niches(
                         if x_sparse
                         else gmean((adata[nw["neighbors"][i], lr_network["to"]].X.T + 1), axis=1)
                     )
-                else:
+                elif method == "mean":
                     receptor_matrix = (
                         np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T, axis=1)
                         if x_sparse
                         else np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.T, axis=1)
                     )
+                else:
+                    receptor_matrix = (
+                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.A.T, axis=1)
+                        if x_sparse
+                        else np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.T, axis=1)
+                    )
                 X[:, i] = receptor_matrix * ligand_matrix[:, i]
+        # bucket-bucket pair
+        cell_pair = []
+        for i, cell_id in enumerate(nw["neighbors"]):
+            cell_pair.append(adata.obs.index[i] + "-" + adata.obs.index[cell_id])
+        cell_pair = pd.DataFrame({"cell_pair_name": cell_pair})
+
+    # construct n2n matrix
+    if system == "niches_n2n":
+        X = np.zeros(shape=(ligand_matrix.shape[0], adata.n_obs))
+        if weighted:
+            # weighted matrix (weighted distance)
+            row, col = np.diag_indices_from(nw["weights"])
+            nw["weights"][row, col] = 1
+            weight = np.zeros(shape=(adata.n_obs, k))
+            for i, row in enumerate(nw["weights"].A):
+                weight[i, :] = 1 / row[nw["neighbors"][i]]
+            for i in range(ligand_matrix.shape[1]):
+                if method == "gmean":
+                    receptor_matrix = (
+                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.A.T + 1) * weight[i, :], axis=1)
+                        if x_sparse
+                        else gmean((adata[nw["neighbors"][i], lr_network["to"]].X.T + 1) * weight[i, :], axis=1)
+                    )
+                    ligand_matrix = (
+                        gmean((adata[nw["neighbors"][i], lr_network["from"]].X.A.T + 1) * weight[i, :], axis=1)
+                        if x_sparse
+                        else gmean((adata[nw["neighbors"][i], lr_network["from"]].X.T + 1) * weight[i, :], axis=1)
+                    )
+                elif method == "mean":
+                    receptor_matrix = (
+                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
+                        if x_sparse
+                        else np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.T * weight[i, :], axis=1)
+                    )
+                    ligand_matrix = (
+                        np.mean(adata[nw["neighbors"][i], lr_network["from"]].X.A.T * weight[i, :], axis=1)
+                        if x_sparse
+                        else np.mean(adata[nw["neighbors"][i], lr_network["from"]].X.T * weight[i, :], axis=1)
+                    )
+                else:
+                    receptor_matrix = (
+                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
+                        if x_sparse
+                        else np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.T * weight[i, :], axis=1)
+                    )
+                    ligand_matrix = (
+                        np.sum(adata[nw["neighbors"][i], lr_network["from"]].X.A.T * weight[i, :], axis=1)
+                        if x_sparse
+                        else np.sum(adata[nw["neighbors"][i], lr_network["from"]].X.T * weight[i, :], axis=1)
+                    )
+                X[:, i] = np.array(receptor_matrix).reshape(receptor_matrix.shape[0]) * np.array(ligand_matrix).reshape(
+                    ligand_matrix.shape[0]
+                )
+        else:
+            for i in range(ligand_matrix.shape[1]):
+                if method == "gmean":
+                    receptor_matrix = (
+                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.A.T + 1), axis=1)
+                        if x_sparse
+                        else gmean((adata[nw["neighbors"][i], lr_network["to"]].X.T + 1), axis=1)
+                    )
+                    ligand_matrix = (
+                        gmean((adata[nw["neighbors"][i], lr_network["from"]].X.A.T + 1), axis=1)
+                        if x_sparse
+                        else gmean((adata[nw["neighbors"][i], lr_network["from"]].X.T + 1), axis=1)
+                    )
+                elif method == "mean":
+                    receptor_matrix = (
+                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T, axis=1)
+                        if x_sparse
+                        else np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.T, axis=1)
+                    )
+                    ligand_matrix = (
+                        np.mean(adata[nw["neighbors"][i], lr_network["from"]].X.A.T, axis=1)
+                        if x_sparse
+                        else np.mean(adata[nw["neighbors"][i], lr_network["from"]].X.T, axis=1)
+                    )
+                else:
+                    receptor_matrix = (
+                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.A.T, axis=1)
+                        if x_sparse
+                        else np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.T, axis=1)
+                    )
+                    ligand_matrix = (
+                        np.sum(adata[nw["neighbors"][i], lr_network["from"]].X.A.T, axis=1)
+                        if x_sparse
+                        else np.sum(adata[nw["neighbors"][i], lr_network["from"]].X.T, axis=1)
+                    )
+                X[:, i] = np.array(receptor_matrix).reshape(receptor_matrix.shape[0]) * np.array(ligand_matrix).reshape(
+                    ligand_matrix.shape[0]
+                )
         # bucket-bucket pair
         cell_pair = []
         for i, cell_id in enumerate(nw["neighbors"]):
@@ -181,14 +319,14 @@ def predict_ligand_activities(
     sender_cells: Optional[List[str]] = None,
     receiver_cells: Optional[List[str]] = None,
     geneset: Optional[List[str]] = None,
+    ratio_expr_thresh: float = 0.01,
     species: Literal["human", "mouse"] = "human",
 ) -> pd.DataFrame:
     """Function to predict the ligand activity.
 
         Our method is adapted from:
-        Micha Sam Brickman Raredon, Junchen Yang, Neeharika Kothapalli,  Naftali Kaminski, Laura E. Niklason,
-        Yuval Kluger. Comprehensive visualization of cell-cell interactions in single-cell and spatial transcriptomics
-        with NICHES. doi: https://doi.org/10.1101/2022.01.23.477401
+        Robin Browaeys, Wouter Saelens & Yvan Saeys. NicheNet: modeling intercellular communication by linking ligands
+        to target genes. Nature Methods volume 17, pages159–162 (2020).
 
     Args:
         path: Path to ligand_target_matrix, lr_network (human and mouse).
@@ -199,17 +337,21 @@ def predict_ligand_activities(
             expressed genes in receiver cells (comparing cells in case and
             control group). Ligands activity prediction is based on this gene
             set. By default, all genes expressed in receiver cells is used.
+        ratio_expr_thresh: The minimum percentage of buckets expressing the ligand
+            (target) in sender(receiver) cells.
     Returns:
         A pandas DataFrame of the predicted activity ligands.
 
     """
     # load ligand_target_matrix
     if species == "human":
-        ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix.csv", index_col=0)
-        lr_network = pd.read_csv(path + "lr_network.csv", index_col=0)
+        ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix_human_nichenet.csv", index_col=0)
+        lr_network = pd.read_csv(path + "lr_network_human.csv", index_col=0)
     else:
-        ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix_mouse.csv", index_col=0)
+        ligand_target_matrix = pd.read_csv(path + "ligand_target_matrix_mouse_nichenet.csv", index_col=0)
         lr_network = pd.read_csv(path + "lr_network_mouse.csv", index_col=0)
+    ligand_target_matrix = ligand_target_matrix.T  # row:ligand,col:target gene
+    lr_network = lr_network.loc[lr_network["from"].isin(ligand_target_matrix.index)]
 
     # Define expressed genes in sender and receiver cell populations(pct>0.1)
     expressed_genes_sender = np.array(adata.var_names)[

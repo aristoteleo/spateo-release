@@ -7,21 +7,23 @@ dynamo-release>=1.0.9
 fbgbp>=0.2.0
 folium>=0.12.1
 geopandas>=0.10.2
+ipywidgets>=7.7.1
+KDEpy>=1.1.0
 kneed>=0.7.0
 kornia>=0.6.4
 loompy>=3.0.5
 logging-release>=0.0.4
 mapclassify>=2.4.2
 matplotlib>=3.1.0
+nbconvert
 networkx>=2.6.3
-ngs_tools>=1.6.0
+# ngs_tools>=1.6.0
 nudged>=0.3.1
 numba>=0.46.0
 numpy>=1.18.1<=2.10.0
 opencv-python>=4.5.4.60
 pandana
 pandas>=0.25.1
-PATSY>=0.5.1
 plotly>=5.1.0
 POT>=0.8.1
 pynndescent>=0.4.8

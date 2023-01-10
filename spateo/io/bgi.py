@@ -3,16 +3,16 @@
 import gzip
 import math
 import warnings
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import cv2
-import ngs_tools as ngs
 import numpy as np
 import pandas as pd
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import skimage.io
+
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 from typing_extensions import Literal
@@ -29,9 +29,20 @@ from .utils import (
     in_concave_hull,
 )
 
-VERSIONS = {
-    "stereo": ngs.chemistry.get_chemistry("Stereo-seq"),
-}
+try:
+    import ngs_tools as ngs
+
+    VERSIONS = {
+        "stereo": ngs.chemistry.get_chemistry("Stereo-seq").resolution,
+    }
+except ModuleNotFoundError:
+
+    class SpatialResolution(NamedTuple):
+        scale: float = 1.0
+        unit: Optional[Literal["nm", "um", "mm"]] = None
+
+    VERSIONS = {"stereo": SpatialResolution(0.5, "um")}
+
 COUNT_COLUMN_MAPPING = {
     SKM.X_LAYER: 3,
     SKM.SPLICED_LAYER_KEY: 4,
@@ -258,7 +269,7 @@ def read_bgi_agg(
 
     scale, scale_unit = 1.0, None
     if version in VERSIONS:
-        resolution = VERSIONS[version].resolution
+        resolution = VERSIONS[version]
         scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
@@ -418,7 +429,7 @@ def read_bgi(
 
     scale, scale_unit = 1.0, None
     if version in VERSIONS:
-        resolution = VERSIONS[version].resolution
+        resolution = VERSIONS[version]
         scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns

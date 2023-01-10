@@ -110,7 +110,7 @@ def scatters(
     img_layers: Optional[int] = None,
     **kwargs,
 ) -> Union[None, Axes]:
-    """Plot an embedding as points. Currently this only works
+    """Plot an embedding as points. Currently, this only works
     for 2D embeddings. While there are many optional parameters
     to further control and tailor the plotting, you need only
     pass in the trained/fit umap model to get results. This plot
@@ -122,7 +122,7 @@ def scatters(
 
     Args:
         adata: :class:`~anndata.AnnData`
-            an Annodata object
+            an Anndata object
         basis: `str`
             The reduced dimension.
         x: `int` (default: `0`)
@@ -134,7 +134,7 @@ def scatters(
         layer: `str` (default: `X`)
             The layer of data to use for the scatter plot.
         highlights: `list` (default: None)
-            Which color group will be highlighted. if highligts is a list of lists - each list is relate to each color
+            Which color group will be highlighted. if highlights is a list of lists - each list is relate to each color
             element.
         labels: array, shape (n_samples,) (optional, default None)
             An array of labels (assumed integer or categorical),
@@ -221,10 +221,10 @@ def scatters(
         save_show_or_return: Whether to save, show or return the figure.
             If "both", it will save and plot the figure at the same time. If
             "all", the figure will be saved, displayed and the associated axis and other object will be return.
-        save_kwargs: A dictionary that will passed to the save_fig function.
-            By default it is an empty dictionary and the save_fig function will use the
+        save_kwargs: A dictionary that will be passed to the save_fig function.
+            By default, it is an empty dictionary and the save_fig function will use the
             {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True, "verbose": True}
-            as its parameters. Otherwise you can provide a dictionary that
+            as its parameters. Otherwise, you can provide a dictionary that
             properly modify those keys according to your needs.
         return_all: `bool` (default: `False`)
             Whether to return all the scatter related variables. Default is False.

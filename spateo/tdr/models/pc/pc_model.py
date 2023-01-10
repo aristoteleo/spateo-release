@@ -20,6 +20,7 @@ from ..utilities import add_model_labels
 
 def construct_pc(
     adata: AnnData,
+    layer: str = "X",
     spatial_key: str = "spatial",
     groupby: Union[str, tuple] = None,
     key_added: str = "groups",
@@ -32,22 +33,23 @@ def construct_pc(
 
     Args:
         adata: AnnData object.
-        spatial_key: The key in `.obsm` that corresponds to the spatial coordinate of each bucket.
-        groupby: The key that stores clustering or annotation information in adata.obs,
-                 a gene's name or a list of genes' name in adata.var.
+        spatial_key: The key in ``.obsm`` that corresponds to the spatial coordinate of each bucket.
+        groupby: The key that stores clustering or annotation information in ``.obs``,
+                 a gene name or a list of gene names in ``.var``.
         key_added: The key under which to add the labels.
         mask: The part that you don't want to be displayed.
-        colormap: Colors to use for plotting pcd. The default colormap is `'rainbow'`.
-        alphamap: The opacity of the colors to use for plotting pcd. The default alphamap is `1.0`.
+        colormap: Colors to use for plotting pcd. The default colormap is ``'rainbow'``.
+        alphamap: The opacity of the colors to use for plotting pcd. The default alphamap is ``1.0``.
 
     Returns:
         pc: A point cloud, which contains the following properties:
-            `pc.point_data[key_added]`, the `groupby` information.
-            `pc.point_data[f'{key_added}_rgba']`, the rgba colors of the `groupby` information.
-            `pc.point_data["obs_index"]`, the obs_index of each coordinate in the original adata.
+            ``pc.point_data[key_added]``, the ``groupby`` information.
+            ``pc.point_data[f'{key_added}_rgba']``, the rgba colors of the ``groupby`` information.
+            ``pc.point_data['obs_index']``, the obs_index of each coordinate in the original adata.
     """
 
     # create an initial pc.
+    adata = adata.copy()
     bucket_xyz = adata.obsm[spatial_key].astype(np.float64)
     if isinstance(bucket_xyz, DataFrame):
         bucket_xyz = bucket_xyz.values
@@ -59,11 +61,12 @@ def construct_pc(
     obs_names = set(adata.obs_keys())
     gene_names = set(adata.var_names.tolist())
     if groupby is None:
-        groups = np.array(["same"] * adata.obs.shape[0])
+        groups = np.asarray(["same"] * adata.obs.shape[0], dtype=str)
     elif groupby in obs_names:
-        groups = adata.obs[groupby].map(lambda x: "mask" if x in mask_list else x).values
+        groups = np.asarray(adata.obs[groupby].map(lambda x: "mask" if x in mask_list else x).values)
     elif groupby in gene_names or set(groupby) <= gene_names:
-        groups = adata[:, groupby].X.sum(axis=1).flatten().round(2)
+        adata.X = adata.X if layer == "X" else adata.layers[layer]
+        groups = np.asarray(adata[:, groupby].X.sum(axis=1).flatten())
     else:
         raise ValueError(
             "`groupby` value is wrong."

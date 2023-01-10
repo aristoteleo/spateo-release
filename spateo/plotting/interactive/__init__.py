@@ -1,1 +1,1 @@
-from .agg import contours
+from .agg import contours, select_polygon

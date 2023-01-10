@@ -1,8 +1,7 @@
 """IO functions for Slide-seq technology.
 """
-from typing import List, Optional, Union
+from typing import List, NamedTuple, Optional, Union
 
-import ngs_tools as ngs
 import numpy as np
 import pandas as pd
 from anndata import AnnData
@@ -12,7 +11,19 @@ from typing_extensions import Literal
 from ..configuration import SKM
 from ..logging import logger_manager as lm
 
-VERSIONS = {"slide2": ngs.chemistry.get_chemistry("Slide-seqV2")}
+try:
+    import ngs_tools as ngs
+
+    VERSIONS = {
+        "slide2": ngs.chemistry.get_chemistry("Slide-seqV2").resolution,
+    }
+except ModuleNotFoundError:
+
+    class SpatialResolution(NamedTuple):
+        scale: float = 1.0
+        unit: Optional[Literal["nm", "um", "mm"]] = None
+
+    VERSIONS = {"slide2": SpatialResolution(10.0, "um")}
 
 
 def read_slideseq_as_dataframe(path: str) -> pd.DataFrame:
@@ -108,7 +119,7 @@ def read_slideseq(
 
     scale, scale_unit = 1.0, None
     if version in VERSIONS:
-        resolution = VERSIONS[version].resolution
+        resolution = VERSIONS[version]
         scale, scale_unit = resolution.scale, resolution.unit
 
     # Set uns
