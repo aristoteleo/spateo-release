@@ -17,7 +17,11 @@ from scipy.sparse import csr_matrix, issparse
 # import scipy.stats
 # import statsmodels
 from scipy.sparse.csgraph import floyd_warshall
-from typing_extensions import Literal
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 from ..logging import logger_manager as lm
 

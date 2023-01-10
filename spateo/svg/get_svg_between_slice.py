@@ -12,7 +12,11 @@ import statsmodels
 from anndata import AnnData
 from scipy.sparse import issparse
 from tqdm import tqdm
-from typing_extensions import Literal
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 from .get_svg import bin_scale_adata_get_distance
 from .utils import *
