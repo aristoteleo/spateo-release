@@ -15,7 +15,7 @@ def construct_space(
     label: str = "space",
     color: str = "gainsboro",
     alpha: float = 0.5,
-) -> UniformGrid:
+) -> Tuple[UniformGrid, Optional[str]]:
     """
     Construct a model(space-model) with uniform spacing in the three coordinate directions.
     The six surfaces of the commonly generated space-model are exactly the boundaries of the model, but the space-model
@@ -32,6 +32,7 @@ def construct_space(
 
     Returns:
         A space-model with uniform spacing in the three coordinate directions.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     # return the bounds of the model.
@@ -62,8 +63,9 @@ def construct_space(
         dims=dims, origin=min_bounds.tolist(), spacing=spacing  # The bottom left corner of the grid model.
     )
 
+    plot_cmap = None
     if not (key_added is None):
-        add_model_labels(
+        _, plot_cmap = add_model_labels(
             model=grid,
             key_added=key_added,
             labels=np.asarray([label] * grid.n_points),
@@ -73,7 +75,7 @@ def construct_space(
             inplace=True,
         )
 
-    return grid
+    return grid, plot_cmap
 
 
 def construct_bounding_box(
@@ -84,7 +86,7 @@ def construct_bounding_box(
     label: str = "bounding_box",
     color: str = "gainsboro",
     alpha: float = 0.5,
-) -> PolyData:
+) -> Tuple[PolyData, Optional[str]]:
     """
     Construct a bounding box model of the model.
 
@@ -101,7 +103,7 @@ def construct_bounding_box(
         A bounding box model.
     """
 
-    grid_model = construct_space(
+    grid_model, plot_cmap = construct_space(
         model=model,
         expand_dist=expand_dist,
         grid_num=grid_num,
@@ -110,4 +112,4 @@ def construct_bounding_box(
         color=color,
         alpha=alpha,
     )
-    return grid_model.triangulate().extract_surface().clean()
+    return grid_model.triangulate().extract_surface().clean(), plot_cmap

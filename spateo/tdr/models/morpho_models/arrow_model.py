@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import pyvista as pv
@@ -61,7 +61,7 @@ def construct_arrow(
     color: str = "gainsboro",
     alpha: float = 1.0,
     **kwargs,
-) -> PolyData:
+) -> Tuple[PolyData, Optional[str]]:
     """
     Create a 3D arrow model.
 
@@ -76,15 +76,17 @@ def construct_arrow(
         **kwargs: Additional parameters that will be passed to ``_construct_arrow`` function.
 
     Returns:
-        Arrow model.
+        model: Arrow model.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     model = _construct_arrow(
         start_point=start_point, direction=direction, scale="auto" if arrow_scale is None else arrow_scale, **kwargs
     )
 
+    plot_cmap = None
     if not (key_added is None):
-        add_model_labels(
+        _, plot_cmap = add_model_labels(
             model=model,
             key_added=key_added,
             labels=np.asarray([label] * model.n_points),
@@ -94,7 +96,7 @@ def construct_arrow(
             inplace=True,
         )
 
-    return model
+    return model, plot_cmap
 
 
 def construct_arrows(
@@ -109,7 +111,7 @@ def construct_arrows(
     color: Union[str, list, dict, np.ndarray] = "gainsboro",
     alpha: Union[float, int, list, dict, np.ndarray] = 1.0,
     **kwargs,
-) -> PolyData:
+) -> Tuple[PolyData, Optional[str]]:
     """
     Create multiple 3D arrows model.
 
@@ -129,7 +131,8 @@ def construct_arrows(
         **kwargs: Additional parameters that will be passed to ``_construct_arrow`` function.
 
     Returns:
-        Arrows model.
+        model: Arrows model.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     from dynamo.tools.sampling import sample
@@ -157,8 +160,9 @@ def construct_arrows(
 
     labels = np.asarray([label] * len(start_points)) if isinstance(label, str) else np.asarray(label)[index_arr]
     assert len(labels) == len(start_points), "The number of labels is not equal to the number of start points."
+    plot_cmap = None
     if not (key_added is None):
-        add_model_labels(
+        _, plot_cmap = add_model_labels(
             model=model,
             key_added=key_added,
             labels=labels,
@@ -169,4 +173,4 @@ def construct_arrows(
         )
 
     glyph = model.glyph(orient="direction", geom=_construct_arrow(**kwargs), scale="scale", factor=factor)
-    return glyph
+    return glyph, plot_cmap

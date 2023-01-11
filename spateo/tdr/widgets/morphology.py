@@ -1,7 +1,7 @@
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
-from pyvista import PolyData, UnstructuredGrid
+from pyvista import DataSet, PolyData, UnstructuredGrid
 from sklearn.neighbors import KernelDensity
 
 from ...logging import logger_manager as lm
@@ -79,7 +79,7 @@ def pc_KDE(
     colormap: Union[str, list, dict] = "hot_r",
     alphamap: Union[float, list, dict] = 1.0,
     inplace: bool = False,
-) -> Union[PolyData, UnstructuredGrid]:
+) -> Tuple[Union[DataSet, PolyData, None], Optional[str]]:
     """
     Calculate the kernel density of a 3D point cloud model.
 
@@ -101,13 +101,14 @@ def pc_KDE(
     Returns:
         pc: Reconstructed 3D point cloud, which contains the following properties:
             `pc[key_added]`, the kernel density.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     pc = pc.copy() if not inplace else pc
     coords = pc.points
     pc_kde = KernelDensity(kernel=kernel, bandwidth=bandwidth).fit(coords).score_samples(coords)
 
-    add_model_labels(
+    _, plot_cmap = add_model_labels(
         model=pc,
         labels=pc_kde,
         key_added=key_added,
@@ -117,4 +118,4 @@ def pc_KDE(
         inplace=True,
     )
 
-    return pc if not inplace else None
+    return pc if not inplace else None, plot_cmap

@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import pyvista as pv
@@ -18,7 +18,7 @@ def construct_genesis_X(
     label: Optional[Union[str, list, np.ndarray]] = None,
     color: Union[str, list, dict] = "skyblue",
     alpha: Union[float, list, dict] = 1.0,
-) -> MultiBlock:
+) -> Tuple[MultiBlock, Optional[str]]:
     """
     Reconstruction of cell-level cell developmental change model based on the cell fate prediction results. Here we only
     need to enter the three-dimensional coordinates of the cells at different developmental stages.
@@ -33,6 +33,7 @@ def construct_genesis_X(
 
     Returns:
         A MultiBlock contains cell models for all stages.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     if n_spacing is None:
@@ -63,10 +64,10 @@ def construct_genesis_X(
     colors = color if isinstance(color, list) else [color] * len(cells_points)
 
     # Generate point cloud models
-    cells_models = []
+    cells_models, plot_cmap = [], None
     for pts, la, co in zip(cells_points, labels, colors):
         model = pv.PolyData(pts)
-        add_model_labels(
+        _, plot_cmap = add_model_labels(
             model=model,
             key_added=key_added,
             labels=la,
@@ -77,7 +78,7 @@ def construct_genesis_X(
         )
         cells_models.append(model)
 
-    return collect_models(models=cells_models)
+    return collect_models(models=cells_models), plot_cmap
 
 
 def construct_genesis(
@@ -90,7 +91,7 @@ def construct_genesis(
     label: Optional[Union[str, list, np.ndarray]] = None,
     color: Union[str, list, dict] = "skyblue",
     alpha: Union[float, list, dict] = 1.0,
-) -> MultiBlock:
+) -> Tuple[MultiBlock, Optional[str]]:
     """
     Reconstruction of cell-level cell developmental change model based on the cell fate prediction results. Here we only
     need to enter the three-dimensional coordinates of the cells at different developmental stages.
@@ -110,6 +111,7 @@ def construct_genesis(
 
     Returns:
         A MultiBlock contains cell models for all stages.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     from dynamo.vectorfield import SvcVectorField
@@ -145,11 +147,11 @@ def construct_genesis(
         pts = [displace(cur_pts, time_vec[i])[1].tolist() for cur_pts in pts]
         stages_X.append(np.asarray(pts))
 
-    cells_developmental_model = construct_genesis_X(
+    cells_developmental_model, plot_cmap = construct_genesis_X(
         stages_X=stages_X, n_spacing=None, key_added=key_added, label=label, color=color, alpha=alpha
     )
 
-    return cells_developmental_model
+    return cells_developmental_model, plot_cmap
 
 
 def construct_trajectory_X(
@@ -164,7 +166,7 @@ def construct_trajectory_X(
     trajectory_color: Union[str, list, dict] = "gainsboro",
     tip_color: Union[str, list, dict] = "orangered",
     alpha: Union[float, list, dict] = 1.0,
-) -> PolyData:
+) -> Tuple[Any, Optional[str]]:
     """
     Reconstruction of cell developmental trajectory model.
 
@@ -185,6 +187,7 @@ def construct_trajectory_X(
 
     Returns:
         trajectory_model: 3D cell developmental trajectory model.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     from dynamo.tools.sampling import sample
@@ -239,7 +242,7 @@ def construct_trajectory_X(
         tips_vectors.append(trajectory_points[-1] - trajectory_points[-2])
         tips_labels.append(labels[ind])
 
-    streamlines = construct_lines(
+    streamlines, plot_cmap = construct_lines(
         points=np.concatenate(trajectories_points, axis=0),
         edges=np.concatenate(trajectories_edges, axis=0),
         key_added=key_added,
@@ -248,7 +251,7 @@ def construct_trajectory_X(
         alpha=alpha,
     )
 
-    arrows = construct_arrows(
+    arrows, plot_cmap = construct_arrows(
         start_points=np.asarray(tips_points),
         direction=np.asarray(tips_vectors),
         arrows_scale=np.ones(shape=(len(tips_points), 1)),
@@ -262,7 +265,7 @@ def construct_trajectory_X(
     )
 
     trajectory_model = merge_models([streamlines, arrows])
-    return trajectory_model
+    return trajectory_model, plot_cmap
 
 
 def construct_trajectory(
@@ -277,7 +280,7 @@ def construct_trajectory(
     trajectory_color: Union[str, list, dict] = "gainsboro",
     tip_color: Union[str, list, dict] = "orangered",
     alpha: float = 1.0,
-) -> PolyData:
+) -> Tuple[Any, Optional[str]]:
     """
     Reconstruction of cell developmental trajectory model based on cell fate prediction.
 
@@ -298,6 +301,7 @@ def construct_trajectory(
 
     Returns:
         trajectory_model: 3D cell developmental trajectory model.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     if fate_key not in adata.uns_keys():
@@ -312,7 +316,7 @@ def construct_trajectory(
     cell_states_sort_ind = np.argsort(cell_states_ind)
     cells_states = np.asarray(list(adata.uns[fate_key]["prediction"].values()))[cell_states_sort_ind]
 
-    trajectory_model = construct_trajectory_X(
+    trajectory_model, plot_cmap = construct_trajectory_X(
         cells_states=cells_states,
         init_states=init_states,
         n_sampling=n_sampling,
@@ -326,4 +330,4 @@ def construct_trajectory(
         alpha=alpha,
     )
 
-    return trajectory_model
+    return trajectory_model, plot_cmap

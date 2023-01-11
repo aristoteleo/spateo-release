@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import pyvista as pv
@@ -27,25 +27,27 @@ def construct_pc(
     mask: Union[str, int, float, list] = None,
     colormap: Union[str, list, dict] = "rainbow",
     alphamap: Union[float, list, dict] = 1.0,
-) -> PolyData:
+) -> Tuple[PolyData, Optional[str]]:
     """
     Construct a point cloud model based on 3D coordinate information.
 
     Args:
         adata: AnnData object.
+        layer: If ``'X'``, uses ``.X``, otherwise uses the representation given by ``.layers[layer]``.
         spatial_key: The key in ``.obsm`` that corresponds to the spatial coordinate of each bucket.
         groupby: The key that stores clustering or annotation information in ``.obs``,
                  a gene name or a list of gene names in ``.var``.
         key_added: The key under which to add the labels.
         mask: The part that you don't want to be displayed.
-        colormap: Colors to use for plotting pcd. The default colormap is ``'rainbow'``.
-        alphamap: The opacity of the colors to use for plotting pcd. The default alphamap is ``1.0``.
+        colormap: Colors to use for plotting pc. The default colormap is ``'rainbow'``.
+        alphamap: The opacity of the colors to use for plotting pc. The default alphamap is ``1.0``.
 
     Returns:
         pc: A point cloud, which contains the following properties:
             ``pc.point_data[key_added]``, the ``groupby`` information.
             ``pc.point_data[f'{key_added}_rgba']``, the rgba colors of the ``groupby`` information.
             ``pc.point_data['obs_index']``, the obs_index of each coordinate in the original adata.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     # create an initial pc.
@@ -74,7 +76,7 @@ def construct_pc(
             "\n`groupby` can also be a list and is a subset of adata.var_names."
         )
 
-    add_model_labels(
+    _, plot_cmap = add_model_labels(
         model=pc,
         labels=groups,
         key_added=key_added,
@@ -87,4 +89,4 @@ def construct_pc(
     # The obs_index of each coordinate in the original adata.
     pc.point_data["obs_index"] = np.array(adata.obs_names.tolist())
 
-    return pc
+    return pc, plot_cmap

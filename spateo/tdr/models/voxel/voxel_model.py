@@ -3,7 +3,7 @@ import pyvista as pv
 from pyvista import PolyData, UnstructuredGrid
 
 try:
-    from typing import Literal
+    from typing import Any, Literal, Optional, Tuple, Union
 except ImportError:
     from typing_extensions import Literal
 
@@ -66,7 +66,7 @@ def voxelize_mesh(
     color: Optional[str] = "gainsboro",
     alpha: Union[float, int] = 1.0,
     smooth: Optional[int] = 200,
-) -> UnstructuredGrid:
+) -> Tuple[Union[UnstructuredGrid, Any], Optional[str]]:
     """
     Construct a volumetric mesh based on surface mesh.
 
@@ -84,6 +84,7 @@ def voxelize_mesh(
             `voxel_model.cell_data[key_added]`, the `label` array;
             `voxel_model.cell_data[f'{key_added}_rgba']`,  the rgba colors of the `label` array.
             `voxel_model.cell_data['obs_index']`, the cell labels if not (voxel_pc is None).
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     density = mesh.length / smooth
@@ -91,7 +92,7 @@ def voxelize_mesh(
 
     # Add labels and the colormap of the volumetric mesh
     labels = np.array([label] * voxel_model.n_cells).astype(str)
-    add_model_labels(
+    _, plot_cmap = add_model_labels(
         model=voxel_model,
         labels=labels,
         key_added=key_added,
@@ -104,4 +105,4 @@ def voxelize_mesh(
         voxel_model.cell_data["obs_index"] = np.asarray(["no_cell"] * voxel_model.n_cells).astype(str)
         voxel_model = merge_models(models=[voxel_model, voxel_pc])
 
-    return voxel_model
+    return voxel_model, plot_cmap

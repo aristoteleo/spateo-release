@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 import matplotlib as mpl
 import numpy as np
@@ -20,7 +20,7 @@ def add_model_labels(
     mask_color: Optional[str] = "gainsboro",
     mask_alpha: Optional[float] = 0.0,
     inplace: bool = False,
-) -> PolyData or UnstructuredGrid:
+) -> Tuple[Optional[PolyData or UnstructuredGrid], Optional[Union[str]]]:
     """
     Add rgba color to each point of model based on labels.
 
@@ -36,9 +36,10 @@ def add_model_labels(
         inplace: Updates model in-place.
 
     Returns:
-         A model, which contains the following properties:
+        A model, which contains the following properties:
             ``model.cell_data[key_added]`` or ``model.point_data[key_added]``, the labels array;
             ``model.cell_data[f'{key_added}_rgba']`` or ``model.point_data[f'{key_added}_rgba']``, the rgba colors of the labels.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     model = model.copy() if not inplace else model
@@ -94,10 +95,14 @@ def add_model_labels(
         else:
             model.cell_data[f"{key_added}_rgba"] = labels_rgba
 
+        plot_cmap = (None,)
+    else:
+        plot_cmap = colormap
+
     # Added labels.
     if where == "point_data":
         model.point_data[key_added] = labels
     else:
         model.cell_data[key_added] = labels
 
-    return model if not inplace else None
+    return model if not inplace else None, plot_cmap

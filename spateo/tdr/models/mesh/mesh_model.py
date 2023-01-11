@@ -2,7 +2,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 import pyvista as pv
-from pyvista import PolyData
+from pyvista import PolyData, UnstructuredGrid
 
 try:
     from typing import Literal
@@ -107,7 +107,7 @@ def construct_surface(
     smooth: Optional[int] = 1000,
     scale_distance: Union[float, int, list, tuple] = None,
     scale_factor: Union[float, int, list, tuple] = None,
-) -> Tuple[PolyData, PolyData]:
+) -> Tuple[Union[PolyData, UnstructuredGrid, None], PolyData, Optional[str]]:
     """
     Surface mesh reconstruction based on 3D point cloud model.
 
@@ -151,6 +151,7 @@ def construct_surface(
             ``inside_pc.point_data['obs_index']``, the obs_index of each coordinate in the original adata.
             ``inside_pc.point_data[key_added]``, the ``groupby`` information.
             ``inside_pc.point_data[f'{key_added}_rgba']``, the rgba colors of the ``groupby`` information.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     # Generates a uniform point cloud with a larger number of points or not.
@@ -243,7 +244,7 @@ def construct_surface(
 
     # Add labels and the colormap of the surface mesh.
     labels = np.asarray([label] * uniform_surf.n_cells, dtype=str)
-    add_model_labels(
+    _, plot_cmap = add_model_labels(
         model=uniform_surf,
         labels=labels,
         key_added=key_added,
@@ -259,4 +260,4 @@ def construct_surface(
     select_pc2 = select_pc.threshold(0.5, scalars="SelectedPoints", invert=True).extract_surface()
     inside_pc = select_pc1 if select_pc1.n_points > select_pc2.n_points else select_pc2
 
-    return uniform_surf, inside_pc
+    return uniform_surf, inside_pc, plot_cmap

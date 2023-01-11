@@ -361,7 +361,7 @@ def changes_along_branch(
     color: str = "gainsboro",
     inplace: bool = False,
     **kwargs,
-) -> Tuple[Union[DataSet, PolyData, UnstructuredGrid], PolyData, float]:
+) -> Tuple[Union[DataSet, PolyData, UnstructuredGrid, None], PolyData, float, Optional[str]]:
     """
     Find the closest tree node to any point in the model.
 
@@ -381,6 +381,7 @@ def changes_along_branch(
         model: Updated model if inplace is True.
         tree_model: A three-dims principal tree model.
         tree_length: The length of the tree model.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
     model = model.copy() if not inplace else model
     X = model.points if spatial_key is None else model[spatial_key]
@@ -397,11 +398,11 @@ def changes_along_branch(
         )
 
     map_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=nodes_key, inplace=True)
-    tree_model = construct_lines(points=nodes, edges=edges, key_added=key_added, label=label, color=color)
+    tree_model, plot_cmap = construct_lines(points=nodes, edges=edges, key_added=key_added, label=label, color=color)
     tree_model.point_data[nodes_key] = np.arange(0, len(nodes), 1)
     tree_length = calc_tree_length(tree_model=tree_model)
 
     if not (map_key is None):
         map_gene_to_branch(model=model, tree=tree_model, key=map_key, nodes_key=nodes_key, inplace=True)
 
-    return model if not inplace else None, tree_model, tree_length
+    return model if not inplace else None, tree_model, tree_length, plot_cmap
