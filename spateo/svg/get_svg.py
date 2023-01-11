@@ -15,9 +15,11 @@ from dynamo.tools.sampling import sample
 from loess import loess_1d
 from scipy.sparse import issparse
 from tqdm import tqdm
-from typing_extensions import Literal
 
-import spateo as st
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 
 from ..tools.spatial_smooth.run_smoothing import impute_and_downsample
 from .utils import *
