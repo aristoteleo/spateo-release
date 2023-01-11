@@ -207,7 +207,7 @@ def apply_threshold(X: np.ndarray, k: int, threshold: Optional[Union[float, np.n
     """
     # Apply threshold and mclose,mopen
     threshold = threshold if threshold is not None else knee_threshold(X)
-    print(f'threshold: {threshold}')
+    print(f"threshold: {threshold}")
     mask = mclose_mopen(X >= threshold, k)
     return mask
 
@@ -350,7 +350,7 @@ def cal_cell_area(cell_labels: np.ndarray):
 
     t = np.bincount(cell_labels.flatten())
     for i in range(len(t)):
-        if i>0 and t[i]>0:
+        if i > 0 and t[i] > 0:
             areas[i] = t[i]
     return areas
 

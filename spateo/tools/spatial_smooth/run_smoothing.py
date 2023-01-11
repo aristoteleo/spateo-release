@@ -16,7 +16,7 @@ from ...preprocessing.filter import filter_genes
 from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
 from ...tools.spatial_degs import moran_i
-from .impute import STGNN
+from .smooth import STGNN
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
@@ -24,6 +24,7 @@ def impute_and_downsample(
     adata: anndata.AnnData,
     filter_by_moran: bool = False,
     spatial_key: str = "spatial",
+    n_neighbors: Optional[int] = 20,
     positive_ratio_cutoff: float = 0.1,
     imputation: bool = True,
     n_ds: Optional[int] = None,
@@ -41,6 +42,7 @@ def impute_and_downsample(
             smoothing will be used. For samples with localized patterns, graph neural network will be used for
             smoothing. If False, graph neural network will be applied to all genes.
         spatial_key: Only used if 'filter_by_moran' is True; key in .obsm where x- and y-coordinates are stored.
+        n_neighbors: Number of neighbors for each
         positive_ratio_cutoff: Filter condition for genes- each gene must be present in higher than this proportion
             of the total number of cells to be retained
         imputation: Set True to perform imputation. If False, will only downsample.
@@ -90,7 +92,7 @@ def impute_and_downsample(
 
             # For the genes with nonsignificant Moran's index, perform spatial smoothing:
             adata_m_filt_out_rex = adata_m_filt_out.copy()
-            n_neighbors = int(0.01 * adata_m_filt_out.n_obs)
+            n_neighbors = np.ceil(0.01 * adata_m_filt_out.n_obs) if n_neighbors is None else n_neighbors
             w = weights.distance.KNN.from_array(adata_m_filt_out.obsm[spatial_key], k=n_neighbors)
             rec_lag = scipy.sparse.csr_matrix(spreg.utils.lag_spatial(w, adata_m_filt_out.X))
             rec_lag.eliminate_zeros()
@@ -118,8 +120,7 @@ def impute_and_downsample(
                 for feat in to_visualize:
                     # For plotting, normalize all columns of imputed and original data such that the maximum value is 1:
                     feat_idx = adata_orig.var_names.get_loc(feat)
-                    adata_orig.X[:, feat_idx] /= np.max(adata_orig.X[:, feat_idx])
-                    adata_rex.X[:, feat_idx] /= np.max(adata_rex.X[:, feat_idx])
+                    adata_orig.X[:, feat] /= np.max(adata_orig.X[:, feat])
 
                     # Generate two plots: one for observed data and one for imputed:
                     print(f"{feat} Observed")

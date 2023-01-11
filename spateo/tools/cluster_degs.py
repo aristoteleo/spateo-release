@@ -544,7 +544,7 @@ def top_n_degs(
         )
 
     for i in range(len(adata.obs[group].unique())):
-        #cur_table = adata.uns["cluster_markers"]["deg_tables"][i][i]
+        # cur_table = adata.uns["cluster_markers"]["deg_tables"][i][i]
         cur_table = adata.uns["cluster_markers"]["deg_tables"][i]
 
         if custom_score_func is not None:
@@ -554,7 +554,6 @@ def top_n_degs(
             deg_table = cur_table
         else:
             deg_table = deg_table.append(cur_table)
-
 
     sort_by = sort_by if custom_score_func is None else "custom_score"
     deg_table = deg_table.groupby("test_group").apply(lambda grp: grp.nlargest(top_n_genes, sort_by))

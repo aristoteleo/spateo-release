@@ -264,6 +264,9 @@ def shiftedColorMap(cmap, start=0, midpoint=0.5, stop=1.0, name="shiftedcmap"):
           Defaults to 1.0 (no upper offset). Should be between
           `midpoint` and 1.0.
     """
+    # Check for existing shifted colormap:
+    matplotlib.cm.ColormapRegistry.unregister(plt.colormaps, name="shiftedcmap")
+
     cdict = {"red": [], "green": [], "blue": [], "alpha": []}
 
     # regular index to compute the colors

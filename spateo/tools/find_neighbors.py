@@ -119,9 +119,7 @@ def weighted_expr_neighbors_graph(
     """
     logger = lm.get_main_logger()
 
-    nbrs, adata = transcriptomic_connectivity(
-        adata, nbr_object, basis, n_neighbors_method, n_pca_components, num_neighbors
-    )
+    nbrs, adata = transcriptomic_connectivity(adata, nbr_object, basis, n_neighbors_method, n_pca_components)
 
     assert isinstance(num_neighbors, int), f"Number of neighbors {num_neighbors} is not an integer."
 
@@ -208,7 +206,6 @@ def transcriptomic_connectivity(
             Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
             "ball_tree" and "kd_tree".
         n_pca_components: Only used if 'basis' is 'pca'. Sets number of principal components to compute.
-        num_neighbors: Number of neighbors for each bucket, used in computing distance graph
 
     Returns:
         nbrs : Object of class `sklearn.neighbors.NearestNeighbors`
@@ -377,7 +374,8 @@ def generate_spatial_weights_fixed_nbrs(
     decay_type: str = "reciprocal",
     nbr_object: NearestNeighbors = None,
 ) -> Union[Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]]:
-    """Starting from a k-nearest neighbor graph, generate a nearest neighbor graph.
+    """Starting from a k-nearest neighbor graph, generate a nearest neighbor graph. Specifically, this function
+    calculates spatial weights for the k-nearest neighbors of each bucket.
 
     Args:
         spatial_key: Key in .obsm where x- and y-coordinates are stored.
@@ -410,7 +408,7 @@ def generate_spatial_weights_fixed_nbrs(
 
     # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
     # NearestNeighbors run:
-    distances, knn = nbrs.kneighbors(locations, n_neighbors=num_neighbors)
+    distances, knn = nbrs.kneighbors(n_neighbors=num_neighbors)
     n_obs, n_neighbors = knn.shape
     distances = scipy.sparse.csr_matrix(
         (
@@ -854,6 +852,7 @@ def construct_nn_graph(
     dist_metric: str = "euclidean",
     n_neighbors: int = 8,
     exclude_self: bool = True,
+    make_symmetrical: bool = False,
     save_id: Union[None, str] = None,
 ) -> None:
     """Constructing bucket-to-bucket nearest neighbors graph.
@@ -867,6 +866,8 @@ def construct_nn_graph(
             ‘sqeuclidean’, ‘yule’.
         n_neighbors: Number of nearest neighbors to compute for each bucket.
         exclude_self: Set True to set elements along the diagonal to zero.
+        make_symmetrical: Set True to make sure adjacency matrix is symmetrical (i.e. ensure that if A is a neighbor
+            of B, B is also included among the neighbors of A)
         save_id: Optional string; if not None, will save distance matrix and neighbors matrix to path:
         './neighbors/{save_id}_distance.csv' and path: './neighbors/{save_id}_neighbors.csv', respectively.
     """
@@ -875,7 +876,7 @@ def construct_nn_graph(
     distance_matrix = calculate_distance(position, dist_metric)
     n_bucket = distance_matrix.shape[0]
 
-    adata.obsm["distance_matrix"] = distance_matrix
+    adata.obsp["distance_matrix"] = distance_matrix
 
     # find k-nearest neighbors
     interaction = np.zeros([n_bucket, n_bucket])
@@ -894,16 +895,19 @@ def construct_nn_graph(
         neighbors_df = pd.DataFrame(interaction, index=list(adata.obs_names), columns=list(adata.obs_names))
         neighbors_df.to_csv(os.path.join(os.getcwd(), f"./neighbors/{save_id}_neighbors.csv"))
 
-    adata.obsm["graph_neigh"] = interaction
+    adata.obsp["graph_neigh"] = interaction
 
     # transform adj to symmetrical adj
     adj = interaction
-    adj = adj + adj.T
-    adj = np.where(adj > 1, 1, adj)
+
+    if make_symmetrical:
+        adj = adj + adj.T
+        adj = np.where(adj > 1, 1, adj)
+
     if exclude_self:
         np.fill_diagonal(adj, 0)
 
-    adata.obsm["adj"] = adj
+    adata.obsp["adj"] = adj
 
 
 def normalize_adj(adj: np.ndarray, exclude_self: bool = True) -> np.ndarray:

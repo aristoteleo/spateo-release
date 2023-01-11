@@ -30,9 +30,9 @@ def _cal_dis(adata, x1):
         adata:
     """
     adata = adata.copy()
-    x1 = np.array(adata.obsm['spatial'], dtype=np.float64)
+    x1 = np.array(adata.obsm["spatial"], dtype=np.float64)
     M = ot.dist(x1)
-    adata.obsp['geodesic_distance'] = M
+    adata.obsp["geodesic_distance"] = M
     return adata
 
 
