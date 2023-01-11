@@ -95,7 +95,7 @@ def add_model_labels(
         else:
             model.cell_data[f"{key_added}_rgba"] = labels_rgba
 
-        plot_cmap = (None,)
+        plot_cmap = None
     else:
         plot_cmap = colormap
 
