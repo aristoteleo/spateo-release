@@ -37,7 +37,7 @@ def svg_iden_reg(
     min_dis_cutoff: float = 500,
     max_dis_cutoff: float = 1000,
     n_nei_for_std: int = 30,
-):
+) -> pd.DataFrame:
     """Identify SVGs compared to uniform distribution.
 
     Args:

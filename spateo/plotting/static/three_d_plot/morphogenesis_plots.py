@@ -7,7 +7,7 @@ from anndata import AnnData
 from matplotlib.colors import LinearSegmentedColormap
 from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
-from ....tdr import add_model_labels, collect_models
+from ....three_dimension_reconstruction import add_model_labels, collect_models
 from .three_dims_plots import three_d_multi_plot, three_d_plot
 
 try:
@@ -94,7 +94,7 @@ def jacobian(
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
-                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
@@ -154,10 +154,10 @@ def jacobian(
     Returns:
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
 
     Examples:
 
@@ -256,7 +256,7 @@ def feature(
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
-                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
@@ -386,7 +386,7 @@ def torsion(
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
-                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
@@ -423,11 +423,11 @@ def torsion(
 
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
 
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
     Examples:
 
         Visualize only in one model:
@@ -491,7 +491,7 @@ def acceleration(
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
-                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
@@ -528,11 +528,11 @@ def acceleration(
 
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
 
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
 
     Examples:
 
@@ -597,7 +597,7 @@ def curvature(
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
-                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
@@ -634,11 +634,11 @@ def curvature(
 
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
 
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
 
     Examples:
 
@@ -703,7 +703,7 @@ def curl(
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
-                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
@@ -740,11 +740,11 @@ def curl(
 
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
 
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
 
     Examples:
 
@@ -809,7 +809,7 @@ def divergence(
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
-                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
@@ -846,11 +846,11 @@ def divergence(
 
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
 
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
 
     Examples:
 

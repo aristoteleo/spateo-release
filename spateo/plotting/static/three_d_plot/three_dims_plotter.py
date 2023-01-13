@@ -530,7 +530,7 @@ def output_plotter(
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
-                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         view_up: The normal to the orbital plane. Only available when filename ending with ``.mp4`` or ``.gif``.
@@ -546,10 +546,10 @@ def output_plotter(
     Returns:
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
     """
 
     def _to_graph(_screenshot, _jupyter_backend):
@@ -594,7 +594,7 @@ def output_plotter(
         # Output the plotter in the format of the output file.
         if filename_format in ["png", "tif", "tiff", "bmp", "jpeg", "jpg"]:
             _to_graph(_screenshot=filename, _jupyter_backend=jupyter_backend)
-        elif filename_format in ["svg", "eps", "ps", "pdf", "tex"]:
+        elif filename_format in ["spatial_variable_genes", "eps", "ps", "pdf", "tex"]:
             plotter.save_graphic(filename, title="PyVista Export", raster=True, painter=True)
             _to_graph(_screenshot=None, _jupyter_backend=jupyter_backend)
         elif filename_format == "gif":
@@ -608,7 +608,7 @@ def output_plotter(
                 "\nFilename is wrong."
                 "\nIf outputting an image file, "
                 "please enter a filename ending with "
-                "`.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.svg`, `.eps`, `.ps`, `.pdf`, `.tex`."
+                "`.png`, `.tif`, `.tiff`, `.bmp`, `.jpeg`, `.jpg`, `.spatial_variable_genes`, `.eps`, `.ps`, `.pdf`, `.tex`."
                 "\nIf outputting a gif file, please enter a filename ending with `.gif`."
                 "\nIf outputting a mp4 file, please enter a filename ending with `.mp4`."
             )

@@ -1445,7 +1445,7 @@ def save_fig(
         ext: `string` (default='pdf')
             The file extension. This must be supported by the active
             matplotlib backend (see matplotlib.backends module).  Most
-            backends support 'png', 'pdf', 'ps', 'eps', and 'svg'.
+            backends support 'png', 'pdf', 'ps', 'eps', and 'spatial_variable_genes'.
         close: `boolean` (default=True)
             Whether to close the figure after saving.  If you want to save_fig
             the figure multiple times (e.g., to multiple formats), you
