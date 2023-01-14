@@ -9,11 +9,12 @@ import ot
 import pandas as pd
 import scipy
 import scipy.stats
-import statsmodels
 from anndata import AnnData
 from dynamo.tools.sampling import sample
-from loess import loess_1d
+from loess.loess_1d import loess_1d
 from scipy.sparse import issparse
+from scipy.stats.norm import sf
+from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 try:
@@ -21,7 +22,8 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ..tools.spatial_smooth.run_smoothing import impute_and_downsample
+from ..logging import logger_manager as lm
+from ..tools.spatial_smooth.run_smoothing import smooth_and_downsample
 from .utils import *
 
 
@@ -36,15 +38,43 @@ def svg_iden_reg(
     target: Union[List, np.ndarray, str] = [],
     min_dis_cutoff: float = 500,
     max_dis_cutoff: float = 1000,
-    n_nei_for_std: int = 30,
+    n_neighbors_for_std: int = 30,
 ) -> pd.DataFrame:
-    """Identify SVGs compared to uniform distribution.
+    """Identifying SVGs using a spatial uniform distribution as the reference.
 
     Args:
-        adata: AnnData
+        adata: AnnData object
+        bin_layer: Data in this layer will be binned according to the spatial information.
+        cell_distance_method: The method for calculating distance between two cells, either geodesic or euclidean.
+        distance_layer: Data in this layer will be used to calculate the spatial distance.
+        n_neighbors: The number of nearest neighbors that will be considered for calculating spatial distance.
+        numItermax: The maximum number of iterations before stopping the optimization algorithm if it has not converged.
+        gene_set: Gene set that will be used to identified spatial variable genes, default is for all genes.
+        target: The target gene expression distribution or the target gene name.
+        min_dis_cutoff: Cells/Bins whose min distance to 30th neighbors are larger than this cutoff would be filtered.
+        max_dis_cutoff: Cells/Bins whose max distance to 30th neighbors are larger than this cutoff would be filtered.
+        n_neighbors_for_std: Number of neighbors that will be used to calculate the standard deviation of the
+            Wasserstein distances.
 
     Returns:
-        Anndata, df
+        w0: a pandas data frame that stores the information of spatial variable genes results. It includes the following
+        columns:
+             "raw_pos_rate": The raw positive ratio (the fraction of cells that have non-zero expression ) of the gene
+                across all cells.
+             "Wasserstein_distance": The computed Wasserstein distance of each gene to the reference uniform
+                distribution.
+             "expectation_reg": The predicted Wasserstein distance after fitting a loess regression using the gene
+                positive rate as the predictor.
+             "std": Standard deviation of the Wasserstein distance.
+             "std_reg": The predicted standard deviation of the Wasserstein distance after fitting a loess regression
+                using the gene positive rate as the predictor.
+             "zscore": The z-score of the Wasserstein distance.
+             "pvalue": The p-value based on the z-score.
+             "adj_pvalue": Adjusted p-value.
+
+        In addition, the input adata object has updated with the following information:
+            adata.var["raw_pos_rate"]: The positive rate of each gene.
+
     """
     w0 = cal_wass_dis_nobs(
         adata,
@@ -60,101 +90,113 @@ def svg_iden_reg(
         max_dis_cutoff=max_dis_cutoff,
     )
 
-    w0["pos_ratio_raw"] = adata.var["pos_ratio_raw"][w0.index]
-    w0.sort_values(by="pos_ratio_raw", inplace=True)
+    w0["raw_pos_rate"] = adata.var["raw_pos_rate"][w0.index]
+    w0.sort_values(by="raw_pos_rate", inplace=True)
 
-    xout, yout, wout = loess_1d.loess_1d(x=w0["pos_ratio_raw"], y=w0["Wasserstein_distance"])
-    w0["mean_reg"] = yout
-    w0["std"] = get_std(w0["Wasserstein_distance"], n_nei=n_nei_for_std)
+    xout, yout, _ = loess_1d(x=w0["raw_pos_rate"], y=w0["Wasserstein_distance"])
+    w0["expectation_reg"] = yout
+    w0["std"] = get_std_wasserstein(w0["Wasserstein_distance"], n_neighbors=n_neighbors_for_std)
 
-    std_xout, std_yout, _ = loess_1d.loess_1d(x=w0["pos_ratio_raw"], y=w0["std"])
+    std_xout, std_yout, _ = loess_1d(x=w0["raw_pos_rate"], y=w0["std"])
     w0["std_reg"] = std_yout
-    w0["zscore"] = (w0["Wasserstein_distance"] - w0["mean_reg"]) / w0["std_reg"]
-    w0["pvalue"] = scipy.stats.norm.sf(w0["zscore"])
-    w0["adj_pvalue"] = statsmodels.stats.multitest.multipletests(w0["pvalue"])[1]
+    w0["zscore"] = (w0["Wasserstein_distance"] - w0["expectation_reg"]) / w0["std_reg"]
+    w0["pvalue"] = sf(w0["zscore"].abs())
+    w0["adj_pvalue"] = multipletests(w0["pvalue"])[1]
 
     return w0
 
 
-def get_std(l, n_nei=30):
+def get_std_wasserstein(l: Union[np.ndarray, pd.DataFrame], n_neighbors: int = 30) -> np.ndarray:
+    """Calculate the standard deviation of the Wasserstein distance.
+
+    Args:
+        l: The vector of the Wasserstein distance.
+        n_neighbors: number of nearest neighbors.
+
+    Returns:
+        std: The standard deviation of the Wasserstein distance.
+    """
+
     std = l.copy()
-    left = int(n_nei / 2)
-    right = n_nei - left
+    left = int(n_neighbors / 2)
+    right = n_neighbors - left
     for i in range(0, left):
-        std[i] = np.std(l[0 : n_nei + 2])
+        std[i] = np.std(l[0 : n_neighbors + 2])
 
     for i in range(left, len(l) - right + 1):
         std[i] = np.std(l[i - left : i + right + 2])
 
     for i in range(len(l) - right, len(l)):
-        std[i] = np.std(l[len(l) - n_nei - 1 : len(l)])
+        std[i] = np.std(l[len(l) - n_neighbors - 1 : len(l)])
 
     return std
 
 
-def imputataion_and_sampling(
+def smoothing_and_sampling(
     adata: AnnData,
-    imputation: bool = True,
+    smoothing: bool = True,
     downsampling: int = 400,
     device: str = "cpu",
-) -> AnnData:
-    """Imputation and downsampling
+) -> Tuple[AnnData, AnnData]:
+    """Smoothing the gene expression using a graph neural network and downsampling the cells from the adata object.
 
     Args:
-        adata: input AnnData,
-        imputation: whether do imputation or not
-        dowsampling: the number of cells
+        adata: The input AnnData object.
+        smoothing: Whether to do smooth the gene expression.
+        downsampling: The number of cells to down sample.
+        device: The device to run the deep learning smoothing model. Can be either "cpu" or proper "cuda" related
+            devices, such as: "cuda:0".
 
     Returns:
-        adata: imputation and downsampling
-        adata_im: only imputation result, not do dwonsampling
+        adata: The adata after smoothing and downsampling.
+        adata_smoothed: The adata after smoothing but not downsampling.
     """
-    # imputation
+    # smoothing
     adata = adata.copy()
-    if imputation:
-        # adata = st.tl.run_denoise_impute(adata)
+    if smoothing:
         adata.X = adata.X.astype("int64")
-        adata, _ = impute_and_downsample(adata, device=device, positive_ratio_cutoff=0.0, n_ds=downsampling)
-    adata_im = adata.copy()
+        adata, _ = smooth_and_downsample(adata, device=device, positive_ratio_cutoff=0.0, n_ds=downsampling)
+    adata_smoothed = adata.copy()
 
     # downsampling
     ind = sample(arr=np.array(range(adata.X.shape[0])), n=downsampling, method="trn", X=adata.obsm["spatial"])
     adata = adata[ind].copy()
 
-    return adata, adata_im
+    return adata, adata_smoothed
 
 
-def imputataion(
+def smoothing(
     adata: AnnData,
     device: str = "cpu",
 ) -> AnnData:
-    """Imputation and downsampling
+    """Smoothing the gene expression using a graph neural network.
 
     Args:
-        adata: input AnnData,
-        device: the device to use: cpu, cuda
+        adata: The input AnnData object.
+        device: The device to run the deep learning smoothing model. Can be either "cpu" or proper "cuda" related
+            devices, such as: "cuda:0".
 
     Returns:
-        adata_im: imputation result
+        adata_smoothed: imputation result
     """
     adata = adata.copy()
     adata.X = adata.X.astype("int64")
-    adata_im, _ = impute_and_downsample(adata, device=device, positive_ratio_cutoff=0.0, n_ds=400)
-    return adata_im
+    adata_smoothed, _ = smooth_and_downsample(adata, device=device, positive_ratio_cutoff=0.0, n_ds=400)
+    return adata_smoothed
 
 
 def downsampling(
     adata: AnnData,
     downsampling: int = 400,
 ) -> AnnData:
-    """Imputation and downsampling
+    """Downsampling the cells from the adata object.
 
     Args:
-        adata: input AnnData,
-        dowsampling: the number of cells
+        adata: The input AnnData object.
+        downsampling: The number of cells to down sample.
 
     Returns:
-        adata: adata of downsampling
+        adata: adata after the downsampling.
     """
     adata = adata.copy()
     ind = sample(arr=np.array(range(adata.X.shape[0])), n=downsampling, method="trn", X=adata.obsm["spatial"])
@@ -162,7 +204,22 @@ def downsampling(
     return adata
 
 
-def cal_wass_dis_on_genes(inp0, inp1):
+def cal_wass_dis_for_genes(
+    inp0: Tuple[scipy.sparse._csr.csr_matrix, AnnData], inp1: Tuple[int, List, np.ndarray, int]
+) -> Tuple[List, np.ndarray, np.ndarray]:
+    """Calculate Wasserstein distances for a list of genes.
+
+    Args:
+        inp0: A tuple of the sparse matrix of spatial distance between nearest neighbors, and the adata object.
+        inp1: A tuple of the seed, the list of genes, the target gene expression vector (need to be normalized to have a
+                sum of 1), and the maximal number of iterations.
+
+    Returns:
+        gene_ids: The gene list that is used to calculate the Wasserstein distribution.
+        ws: The Wasserstein distances from each gene to the target gene.
+        pos_rs: The expression positive rate vector related to the gene list.
+    """
+
     M, adata = inp0
     seed, gene_ids, b, numItermax = inp1
     adata = shuffle_adata(adata, seed)
@@ -183,7 +240,7 @@ def cal_wass_dis_on_genes(inp0, inp1):
 
 
 # within slice
-def cal_wass_dis_bs(
+def cal_wass_dist_bs(
     adata: AnnData,
     bin_size: int = 1,
     bin_layer: str = "spatial",
@@ -200,45 +257,33 @@ def cal_wass_dis_bs(
     rank_p: bool = True,
     bin_num: int = 100,
     larger_or_small: str = "larger",
-):
-    """Computing Wasserstein distance for a AnnData to identify spatially variable genes.
+) -> Tuple[pd.DataFrame, AnnData]:
+    """Computing Wasserstein distance for an AnnData to identify spatially variable genes.
 
     Args:
-        adata: AnnData object
-        bin_size: bin size for mergeing cells.
-        bin_layer: data for this layer would be used to bin data
-        cell_distance_method: the method for calculating distance of two cells. geodesic or spatial
-        distance_layer: the data of this layer would be used to calculate distance
-        n_neighbors: the number of neighbors for calculating geodesic distance
-        numItermax: The maximum number of iterations before stopping the optimization algorithm if it has not converged
-        gene_set: Gene set for computing, default is for all genes.
-        target: the target distribution or the target gene name.
-        processes: process number for parallelly running
-        bootstrap: bootstrap number for permutation to calculate p-value
-        min_dis_cutoff: Cells/Bins whose min distance to 30 neighbors are larger than this cutoff would be filtered.
-        max_dis_cutoff: Cells/Bins whose max distance to 30 neighbors are larger than this cutoff would be filtered.
-        rank_p: whether to calculate p value in ranking manner.
-        bin_num: classy genes into bin_num groups acording to mean Wasserstein distance from bootstrap.
-        larger_or_small: in what direction to get p value. Larger means the right tail area of the null distribution.
+        adata: AnnData object.
+        bin_size: Bin size for mergeing cells.
+        bin_layer: Data in this layer will be binned according to the spatial information.
+        cell_distance_method: The method for calculating distance between two cells, either geodesic or euclidean.
+        distance_layer: The data of this layer would be used to calculate distance
+        n_neighbors: The number of neighbors for calculating spatial distance.
+        numItermax: The maximum number of iterations before stopping the optimization algorithm if it has not converged.
+        gene_set: Gene set that will be used to compute Wasserstein distances, default is for all genes.
+        target: The target gene expression distribution or the target gene name.
+        processes: The process number for parallel computing
+        bootstrap: Bootstrap number for permutation to calculate p-value
+        min_dis_cutoff: Cells/Bins whose min distance to 30th neighbors are larger than this cutoff would be filtered.
+        max_dis_cutoff: Cells/Bins whose max distance to 30th neighbors are larger than this cutoff would be filtered.
+        rank_p: Whether to calculate p value in ranking manner.
+        bin_num: Classy genes into bin_num groups according to mean Wasserstein distance from bootstrap.
+        larger_or_small: In what direction to get p value. Larger means the right tail area of the null distribution.
+
     Returns:
-        w_df: a dataframe
-        adata0: binned AnnData object
+        w_df: A dataframe storing information related to the Wasserstein distances.
+        bin_scale_adata: Binned AnnData object
     """
 
-    # adata0 = bin_adata(adata, bin_size, layer=bin_layer)
-    # adata0 = adata0[:,np.sum(adata0.X,axis=0) > 0]
-    # adata0 = scale_to(adata0)
-    # print(adata0)
-    # if cell_distance_method == 'geodesic':
-    #     adata0 = cal_geodesic_distance(adata0, min_dis_cutoff=min_dis_cutoff, max_dis_cutoff=max_dis_cutoff, layer=distance_layer)
-    # elif cell_distance_method == 'spatial':
-    #     adata0 = cal_spatial_distance(adata0, min_dis_cutoff=min_dis_cutoff, max_dis_cutoff=max_dis_cutoff, layer=distance_layer)
-    # M = adata0.obsp['distance']
-    # if np.sum(~np.isfinite(M)) > 0:
-    #     print("distance has inf value")
-    #     sys.exit()
-
-    adata0, M = bin_scale_adata_get_distance(
+    bin_scale_adata, M = bin_scale_adata_get_distance(
         adata,
         bin_size=bin_size,
         bin_layer=bin_layer,
@@ -250,23 +295,29 @@ def cal_wass_dis_bs(
     )
 
     if gene_set is None:
-        gene_set = adata0.var_names
+        gene_set = bin_scale_adata.var_names
 
     if isinstance(target, (list, np.ndarray)):
         b = target
     if isinstance(target, str):
-        b = adata0[:, target].X.A.flatten() if issparse(adata0[:, target].X) else adata0[:, target].X.flatten()
+        b = (
+            bin_scale_adata[:, target].X.A.flatten()
+            if issparse(bin_scale_adata[:, target].X)
+            else bin_scale_adata[:, target].X.flatten()
+        )
         b = np.array(b, dtype=np.float64)
         b = b / np.sum(b)
 
-    genes, ws, pos_rs = cal_wass_dis_on_genes((M, adata0), (0, gene_set, b, numItermax))
-    w_df0 = pd.DataFrame({"gene_id": genes, "Wasserstein_distance": ws, "positive_ratio": pos_rs})
+    genes, ws, pos_rs = cal_wass_dis_for_genes((M, bin_scale_adata), (0, gene_set, b, numItermax))
+    w_df_ori = pd.DataFrame({"gene_id": genes, "Wasserstein_distance": ws, "positive_ratio": pos_rs})
 
     pool = multiprocessing.Pool(processes=processes)
 
     inputs = [(i, gene_set, b, numItermax) for i in range(1, bootstrap + 1)]
     res = []
-    for result in tqdm(pool.imap_unordered(partial(cal_wass_dis_on_genes, (M, adata0)), inputs), total=len(inputs)):
+    for result in tqdm(
+        pool.imap_unordered(partial(cal_wass_dis_for_genes, (M, bin_scale_adata)), inputs), total=len(inputs)
+    ):
         res.append(result)
 
     genes, ws, pos_rs = zip(*res)
@@ -281,18 +332,18 @@ def cal_wass_dis_bs(
         },
         index=w_df.groupby("gene_id")["Wasserstein_distance"].mean().index,
     )
-    w_df = pd.concat([w_df0.set_index("gene_id"), mean_std_df], axis=1)
+    w_df = pd.concat([w_df_ori.set_index("gene_id"), mean_std_df], axis=1)
     w_df["zscore"] = (w_df["Wasserstein_distance"] - w_df["mean"]) / w_df["std"]
 
     w_df = w_df.replace(np.inf, 0).replace(np.nan, 0)
 
     # find p-value
     if larger_or_small == "larger":
-        w_df["pvalue"] = scipy.stats.norm.sf(w_df["zscore"])
+        w_df["pvalue"] = sf(w_df["zscore"].abs())
     elif larger_or_small == "small":
-        w_df["pvalue"] = 1 - scipy.stats.norm.sf(w_df["zscore"])
+        w_df["pvalue"] = 1 - sf(w_df["zscore"].abs())
 
-    w_df["adj_pvalue"] = statsmodels.stats.multitest.multipletests(w_df["pvalue"])[1]
+    w_df["adj_pvalue"] = multipletests(w_df["pvalue"])[1]
 
     w_df["fc"] = w_df["Wasserstein_distance"] / w_df["mean"]
     w_df["log2fc"] = np.log2(w_df["fc"])
@@ -302,10 +353,10 @@ def cal_wass_dis_bs(
     if rank_p:
         w_df["rank_p"], each_bin_ws = cal_rank_p(genes, ws, w_df, bin_num=bin_num)
         w_df.loc[w_df["positive_ratio"] == 0, "rank_p"] = 1.0
-        w_df["adj_rank_p"] = statsmodels.stats.multitest.multipletests(w_df["rank_p"])[1]
+        w_df["adj_rank_p"] = multipletests(w_df["rank_p"])[1]
 
     w_df = w_df.replace(np.inf, 0).replace(np.nan, 0)
-    return w_df, adata0  # , each_bin_ws
+    return w_df, bin_scale_adata  # , each_bin_ws
 
 
 # within slice
@@ -321,14 +372,14 @@ def cal_wass_dis_nobs(
     target: Union[List, np.ndarray, str] = [],
     min_dis_cutoff: float = 2.0,
     max_dis_cutoff: float = 6.0,
-):
+) -> Tuple[pd.DataFrame, AnnData]:
     """Computing Wasserstein distance for a AnnData to identify spatially variable genes.
 
     Args:
         adata: AnnData object
         bin_size: bin size for mergeing cells.
-        bin_layer: data for this layer would be used to bin data
-        cell_distance_method: the method for calculating distance of two cells. geodesic or spatial
+        bin_layer: data in this layer will be binned according to spatial information.
+        cell_distance_method: the method for calculating distance of two cells. geodesic or euclidean
         distance_layer: the data of this layer would be used to calculate distance
         n_neighbors: the number of neighbors for calculation geodesic distance
         numItermax: The maximum number of iterations before stopping the optimization algorithm if it has not converged
@@ -336,24 +387,11 @@ def cal_wass_dis_nobs(
         target: the target distribution or the target gene name.
         min_dis_cutoff: Cells/Bins whose min distance to 30 neighbors are larger than this cutoff would be filtered.
         max_dis_cutoff: Cells/Bins whose max distance to 30 neighbors are larger than this cutoff would be filtered.
+
     Returns:
-        w_df0: a dataframe
+        w_df: A dataframe storing information related to the Wasserstein distances.
     """
-
-    # adata0 = bin_adata(adata, bin_size, layer=bin_layer)
-    # adata0 = adata0[:,np.sum(adata0.X,axis=0) > 0]
-    # adata0 = scale_to(adata0)
-    # #print(adata0)
-    # if cell_distance_method == 'geodesic':
-    #     adata0 = cal_geodesic_distance(adata0, min_dis_cutoff=min_dis_cutoff, max_dis_cutoff=max_dis_cutoff, layer=distance_layer)
-    # elif cell_distance_method == 'spatial':
-    #     adata0 = cal_spatial_distance(adata0, min_dis_cutoff=min_dis_cutoff, max_dis_cutoff=max_dis_cutoff, layer=distance_layer)
-    # M = adata0.obsp['distance']
-    # if np.sum(~np.isfinite(M)) > 0:
-    #     print("distance has inf value")
-    #     sys.exit()
-
-    adata0, M = bin_scale_adata_get_distance(
+    bin_scale_adata, M = bin_scale_adata_get_distance(
         adata,
         bin_size=bin_size,
         bin_layer=bin_layer,
@@ -365,18 +403,22 @@ def cal_wass_dis_nobs(
     )
 
     if gene_set is None:
-        gene_set = adata0.var_names
+        gene_set = bin_scale_adata.var_names
 
     if isinstance(target, (list, np.ndarray)):
         b = target
     if isinstance(target, str):
-        b = adata0[:, target].X.A.flatten() if issparse(adata0[:, target].X) else adata0[:, target].X.flatten()
+        b = (
+            bin_scale_adata[:, target].X.A.flatten()
+            if issparse(bin_scale_adata[:, target].X)
+            else bin_scale_adata[:, target].X.flatten()
+        )
         b = np.array(b, dtype=np.float64)
         b = b / np.sum(b)
 
-    genes, ws, pos_rs = cal_wass_dis_on_genes((M, adata0), (0, gene_set, b, numItermax))
-    w_df0 = pd.DataFrame({"Wasserstein_distance": ws, "positive_ratio": pos_rs}, index=genes)
-    return w_df0
+    genes, ws, pos_rs = cal_wass_dis_for_genes((M, bin_scale_adata), (0, gene_set, b, numItermax))
+    w_df = pd.DataFrame({"Wasserstein_distance": ws, "positive_ratio": pos_rs}, index=genes)
+    return w_df
 
 
 def bin_scale_adata_get_distance(
@@ -388,27 +430,45 @@ def bin_scale_adata_get_distance(
     min_dis_cutoff: float = 2.0,
     max_dis_cutoff: float = 6.0,
     n_neighbors: int = 30,
-):
-    adata0 = bin_adata(adata, bin_size, layer=bin_layer)
-    adata0 = adata0[:, np.sum(adata0.X, axis=0) > 0]
-    adata0 = scale_to(adata0)
+) -> Tuple[AnnData, scipy.sparse._csr.csr_matrix]:
+    """Bin (based on spatial information), scale adata object and calculate the distance matrix based on the specified
+    method (either geodesic or euclidean).
+
+    Args:
+        adata: AnnData object.
+        bin_size: Bin size for mergeing cells.
+        bin_layer: Data in this layer will be binned according to the spatial information.
+        distance_layer: The data of this layer would be used to calculate distance
+        cell_distance_method: The method for calculating distance between two cells, either geodesic or euclidean.
+        min_dis_cutoff: Cells/Bins whose min distance to 30th neighbors are larger than this cutoff would be filtered.
+        max_dis_cutoff: Cells/Bins whose max distance to 30th neighbors are larger than this cutoff would be filtered.
+        n_neighbors: The number of nearest neighbors that will be considered for calculating spatial distance.
+
+    Returns:
+        bin_scale_adata: Bin, scaled anndata object.
+        M: The scipy sparse matrix of the calculated distance of nearest neighbors.
+    """
+    bin_scale_adata = bin_adata(adata, bin_size, layer=bin_layer)
+    bin_scale_adata = bin_scale_adata[:, np.sum(bin_scale_adata.X, axis=0) > 0]
+    bin_scale_adata = scale_to(bin_scale_adata)
     if cell_distance_method == "geodesic":
-        adata0 = cal_geodesic_distance(
-            adata0,
+        bin_scale_adata = cal_geodesic_distance(
+            bin_scale_adata,
             min_dis_cutoff=min_dis_cutoff,
             max_dis_cutoff=max_dis_cutoff,
             layer=distance_layer,
             n_neighbors=n_neighbors,
         )
-    elif cell_distance_method == "spatial":
-        adata0 = cal_spatial_distance(
-            adata0, min_dis_cutoff=min_dis_cutoff, max_dis_cutoff=max_dis_cutoff, layer=distance_layer
+    elif cell_distance_method == "euclidean":
+        bin_scale_adata = cal_euclidean_distance(
+            bin_scale_adata, min_dis_cutoff=min_dis_cutoff, max_dis_cutoff=max_dis_cutoff, layer=distance_layer
         )
-    M = adata0.obsp["distance"]
+
+    M = bin_scale_adata.obsp["distance"]
     if np.sum(~np.isfinite(M)) > 0:
-        print("distance has inf value")
+        lm.main_exception("distance has inf values.")
         sys.exit()
-    return adata0, M
+    return bin_scale_adata, M
 
 
 def cal_wass_dis_target_on_genes(
@@ -423,12 +483,34 @@ def cal_wass_dis_target_on_genes(
     gene_set: Union[List, np.ndarray] = None,
     processes: int = 1,
     bootstrap: int = 0,
-    top: int = 100,
+    top_n: int = 100,
     min_dis_cutoff: float = 2.0,
     max_dis_cutoff: float = 6.0,
-) -> pd.DataFrame:
-    """Find genes in gene_set that have similar distribution to each target_genes."""
-    adata0, M = bin_scale_adata_get_distance(
+) -> Tuple[dict, AnnData]:
+    """Find genes in gene_set that have similar distribution to each target_genes.
+
+    Args:
+        adata: AnnData object.
+        bin_size: Bin size for mergeing cells.
+        bin_layer: Data in this layer will be binned according to the spatial information.
+        distance_layer: The data of this layer would be used to calculate distance
+        cell_distance_method: The method for calculating distance between two cells, either geodesic or euclidean.
+        n_neighbors: The number of neighbors for calculating spatial distance.
+        numItermax: The maximum number of iterations before stopping the optimization algorithm if it has not converged.
+        target_genes: The list of the target genes.
+        gene_set: Gene set that will be used to compute Wasserstein distances, default is for all genes.
+        processes: The process number for parallel computing.
+        bootstrap: Number of bootstraps.
+        top_n: Number of top genes to select.
+        min_dis_cutoff: Cells/Bins whose min distance to 30th neighbors are larger than this cutoff would be filtered.
+        max_dis_cutoff: Cells/Bins whose max distance to 30th neighbors are larger than this cutoff would be filtered.
+
+    Returns:
+        w_genes: The dictionary of the Wasserstein distance. Each key corresponds to a gene name while the corresponding
+            value the pandas DataFrame of the Wasserstein distance related information.
+        bin_scale_adata: binned, scaled anndata object.
+    """
+    bin_scale_adata, M = bin_scale_adata_get_distance(
         adata,
         bin_size=bin_size,
         bin_layer=bin_layer,
@@ -439,31 +521,27 @@ def cal_wass_dis_target_on_genes(
         n_neighbors=n_neighbors,
     )
 
-    # print(adata0.shape)
-    # print(M.shape)
-
     if gene_set is None:
-        gene_set = adata0.var_names
+        gene_set = bin_scale_adata.var_names
 
-    if issparse(adata0.X):
-        df = pd.DataFrame(adata0.X.A, columns=adata0.var_names)
+    if issparse(bin_scale_adata.X):
+        df = pd.DataFrame(bin_scale_adata.X.A, columns=bin_scale_adata.var_names)
     else:
-        df = pd.DataFrame(adata0.X, columns=adata0.var_names)
+        df = pd.DataFrame(bin_scale_adata.X, columns=bin_scale_adata.var_names)
 
     w_genes = {}
     for gene in target_genes:
-        b = np.array(df.loc[:, gene], dtype=(np.float64)) / np.array(df.loc[:, gene], dtype=(np.float64)).sum()
-        # print(b.shape)
-        genes, ws, pos_rs = cal_wass_dis_on_genes((M, adata0), (0, gene_set, b, numItermax))
+        b = np.array(df.loc[:, gene], dtype=np.float64) / np.array(df.loc[:, gene], dtype=np.float64).sum(0)
+        genes, ws, pos_rs = cal_wass_dis_for_genes((M, bin_scale_adata), (0, gene_set, b, numItermax))
         w_genes[gene] = pd.DataFrame({"gene_id": genes, "Wasserstein_distance": ws, "positive_ratio": pos_rs})
 
     if bootstrap == 0:
-        return w_genes, adata0
+        return w_genes, bin_scale_adata
 
     for gene in target_genes:
         tmp = w_genes[gene]
-        gene_set = tmp[tmp["positive_ratio"] > 0].sort_values(by="Wasserstein_distance")["gene_id"].head(top + 1)
-        w_df, _ = cal_wass_dis_bs(
+        gene_set = tmp[tmp["positive_ratio"] > 0].sort_values(by="Wasserstein_distance")["gene_id"].head(top_n + 1)
+        w_df, _ = cal_wass_dist_bs(
             adata,
             gene_set=gene_set,
             target=gene,
@@ -480,4 +558,4 @@ def cal_wass_dis_target_on_genes(
         )
 
         w_genes[gene] = w_df
-    return w_genes, adata0
+    return w_genes, bin_scale_adata

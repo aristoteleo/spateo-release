@@ -106,11 +106,11 @@ def get_genes_by_pos_ratio(
 ) -> list:
     adata = adata.copy()
     adata.var["nCells"] = np.sum(adata.X.A > 0, axis=0) if issparse(adata.X) else np.sum(adata.X > 0, axis=0)
-    adata.var["pos_ratio_raw"] = adata.var["nCells"] / adata.n_obs
+    adata.var["raw_pos_rate"] = adata.var["nCells"] / adata.n_obs
     return adata.var_names[adata.var["nCells"] / adata.n_obs > pos_ratio].to_list(), adata
 
 
-def add_pos_ratio_to_adata(adata, layer=None, var_name="pos_ratio_raw"):
+def add_pos_ratio_to_adata(adata, layer=None, var_name="raw_pos_rate"):
     if layer:
         adata.var[var_name] = (
             np.sum(adata.layers[layer].A > 0, axis=0)
@@ -169,7 +169,7 @@ def cal_geodesic_distance(
     return b
 
 
-def cal_spatial_distance(
+def cal_euclidean_distance(
     adata: AnnData,
     layer: str = "spatial",
     min_dis_cutoff: float = np.inf,

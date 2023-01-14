@@ -46,7 +46,7 @@ from .paste import (
 )
 from .spatial_degs import cellbin_morani, moran_i
 from .spatial_smooth import *
-from .spatial_smooth.run_smoothing import impute_and_downsample
+from .spatial_smooth.run_smoothing import smooth_and_downsample
 from .spatial_smooth.smooth import STGNN
 from .spatially_variable_gene_ot import cal_wass_dis_bs
 from .ST_regression import *

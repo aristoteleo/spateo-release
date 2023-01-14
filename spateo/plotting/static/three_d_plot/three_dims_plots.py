@@ -205,7 +205,7 @@ def three_d_plot(
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
-                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
@@ -282,11 +282,11 @@ def three_d_plot(
 
         cpo: List of camera position, focal point, and view up.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
 
         img: Numpy array of the last image.
              Returned only if filename is None or filename ending with
-             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
+             ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
     """
     plotter_kws = dict(
         jupyter=False if jupyter is False else True,
@@ -368,7 +368,7 @@ def three_d_multi_plot(
         filename: Filename of output file. Writer type is inferred from the extension of the filename.
 
                 * Output an image file,please enter a filename ending with
-                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.spatial_variable_genes', '.eps', '.ps', '.pdf', '.tex'``.
+                  ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
