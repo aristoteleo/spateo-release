@@ -671,10 +671,10 @@ def set_figure_params(
         frameon: `bool` or None (default: `None`)
             Add frames and axes labels to scatter plots.
         vector_friendly: `bool` (default: `True`)
-            Plot scatter plots using `png` backend even when exporting as `pdf` or `spatial_variable_genes`.
+            Plot scatter plots using `png` backend even when exporting as `pdf` or `svg`.
         color_map: `str` (default: `None`)
             Convenience method for setting the default color map.
-        format: {'png', 'pdf', 'spatial_variable_genes', etc.} (default: 'pdf')
+        format: {'png', 'pdf', 'svg', etc.} (default: 'pdf')
             This sets the default format for saving figures: `file_format_figs`.
         transparent: `bool` (default: `False`)
             Save figures with transparent back ground. Sets `rcParams['savefig.transparent']`.

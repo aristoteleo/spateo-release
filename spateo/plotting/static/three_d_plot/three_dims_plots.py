@@ -11,7 +11,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ....three_dimension_reconstruction import collect_models
+from ....tdr import collect_models
 from .three_dims_plotter import (
     _set_jupyter,
     add_legend,

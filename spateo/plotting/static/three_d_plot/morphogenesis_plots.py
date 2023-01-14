@@ -7,7 +7,7 @@ from anndata import AnnData
 from matplotlib.colors import LinearSegmentedColormap
 from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
-from ....three_dimension_reconstruction import add_model_labels, collect_models
+from ....tdr import add_model_labels, collect_models
 from .three_dims_plots import three_d_multi_plot, three_d_plot
 
 try:

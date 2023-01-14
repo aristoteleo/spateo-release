@@ -238,7 +238,7 @@ nbsphinx_thumbnails = {
     "tutorials/notebooks/cell_segmentation": "_static/tutorials/cell_segmentation.png",
     "tutorials/notebooks/cluster_digitization": "_static/tutorials/cluster_digitization.png",
     "tutorials/notebooks/cci": "_static/tutorials/cci.png",
-    "tutorials/notebooks/three_dimension_reconstruction": "_static/tutorials/three_dimension_reconstruction.png",
+    "tutorials/notebooks/tdr": "_static/tutorials/tdr.png",
     "tutorials/notebooks/morphogenesis": "_static/tutorials/morphogenesis.png",
     "tutorials/notebooks/interactive": "_static/tutorials/interactive.png",
     "tutorials/notebooks/svg_identification": "_static/tutorials/svg_tutorial.png",
