@@ -1,21 +1,11 @@
 from typing import List, Optional, Union
 
 import dynamo as dyn
-
-# import ot
 import numpy as np
 import ot
 import pandas as pd
 from anndata import AnnData
-
-# import multiprocessing
 from scipy.sparse import csr_matrix, issparse
-
-# import sys
-# from tqdm import tqdm
-# from functools import partial
-# import scipy.stats
-# import statsmodels
 from scipy.sparse.csgraph import floyd_warshall
 
 try:
@@ -96,6 +86,16 @@ def filter_adata_by_pos_ratio(
     adata,
     pos_ratio,
 ):
+    """Filter out cells with positive ratio lower than a setting value.
+
+    Args:
+        adata: AnnData object.
+        pos_ratio: Cells with positive ratio lower than this value would be discarded.
+
+    Return:
+        AnnData object.
+
+    """
     genes, adata = get_genes_by_pos_ratio(adata, pos_ratio)
     return adata[:, genes].copy()
 
@@ -104,13 +104,34 @@ def get_genes_by_pos_ratio(
     adata: AnnData,
     pos_ratio: float = 0.1,
 ) -> list:
+    """Get genes that have postive ratio higher than a setting value.
+
+    Args:
+        adata: AnnData object.
+        pos_ratio: The threshold of positive ratio.
+
+    Returns:
+        Gene list.
+        AnnData object.
+    """
     adata = adata.copy()
     adata.var["nCells"] = np.sum(adata.X.A > 0, axis=0) if issparse(adata.X) else np.sum(adata.X > 0, axis=0)
     adata.var["raw_pos_rate"] = adata.var["nCells"] / adata.n_obs
     return adata.var_names[adata.var["nCells"] / adata.n_obs > pos_ratio].to_list(), adata
 
 
-def add_pos_ratio_to_adata(adata, layer=None, var_name="raw_pos_rate"):
+def add_pos_ratio_to_adata(adata: AnnData, layer: str = None, var_name: str = "raw_pos_rate"):
+    """Calculate positive ratios for all genes, and return to AnnData.
+    We defind positive ratio of a gene as the percent of cells express this gene.
+
+    Args:
+        adata: AnnData object.
+        layer: The layer of AnnData, in which the data are used. If not given, we use data in X.
+        var_name: The var name for storing positive ratios.
+
+    Return:
+        None
+    """
     if layer:
         adata.var[var_name] = (
             np.sum(adata.layers[layer].A > 0, axis=0)
@@ -129,6 +150,21 @@ def cal_geodesic_distance(
     min_dis_cutoff: float = 2.0,
     max_dis_cutoff: float = 4.0,
 ) -> AnnData:
+    """Calculate geodesic distance between any pair of genes.
+
+    Args:
+        adata: AnnData object.
+        layer: The layer of AnnData, in which the data are used.
+        n_neighbors: The number of neighbor to connect a cell to its nearest neighbors.
+        min_dis_cutoff: Remove cells with minimal distance with its neighbors larger than this value.
+                        These cells are like islated cells.
+        max_dis_cutoff: Remove cells with maximal distance with its neighbors larger than this value.
+                        These cells are like sparse cells.
+
+    Return:
+        AnnData object.
+
+    """
 
     dyn.tl.neighbors(
         adata,
@@ -158,8 +194,8 @@ def cal_geodesic_distance(
         n_neighbors=n_neighbors,
         result_prefix="spatial",
     )
-    from scipy.sparse import csr_matrix
-    from scipy.sparse.csgraph import floyd_warshall
+    # from scipy.sparse import csr_matrix
+    # from scipy.sparse.csgraph import floyd_warshall
 
     conn = b.obsp["spatial_distances"].toarray()
     conn[conn == np.inf] = 0
@@ -196,8 +232,8 @@ def cal_euclidean_distance(
     # remove sparse cells
     b = b[np.max(b.obsp["spatial_distances"].A, axis=1) <= max_dis_cutoff]
 
-    from scipy.sparse import csr_matrix
-    from scipy.sparse.csgraph import floyd_warshall
+    # from scipy.sparse import csr_matrix
+    # from scipy.sparse.csgraph import floyd_warshall
 
     conn = b.obsp["spatial_distances"].toarray()
     conn[conn == np.inf] = 0
@@ -212,6 +248,17 @@ def scale_to(
     to_median: bool = True,
     N: int = 10000,
 ) -> AnnData:
+    """Scale the X array in AnnData.
+
+    Args:
+        adata: AnnData object.
+        to_median: Whether scale to the median of cell total expressions.
+        N: if `to_median` is False, scale data to this value.
+
+    Return:
+        AnnData object.
+
+    """
     adata = adata.copy()
     if issparse(adata.X):
         adata.X.A = adata.X.A.astype(np.float64)

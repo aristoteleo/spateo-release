@@ -100,7 +100,7 @@ def svg_iden_reg(
     std_xout, std_yout, _ = loess_1d(x=w0["raw_pos_rate"], y=w0["std"])
     w0["std_reg"] = std_yout
     w0["zscore"] = (w0["Wasserstein_distance"] - w0["expectation_reg"]) / w0["std_reg"]
-    w0["pvalue"] = norm.sf(w0["zscore"].abs())
+    w0["pvalue"] = norm.sf(w0["zscore"])
     w0["adj_pvalue"] = multipletests(w0["pvalue"])[1]
 
     return w0
@@ -339,9 +339,9 @@ def cal_wass_dist_bs(
 
     # find p-value
     if larger_or_small == "larger":
-        w_df["pvalue"] = norm.sf(w_df["zscore"].abs())
+        w_df["pvalue"] = norm.sf(w_df["zscore"])
     elif larger_or_small == "small":
-        w_df["pvalue"] = 1 - norm.sf(w_df["zscore"].abs())
+        w_df["pvalue"] = 1 - norm.sf(w_df["zscore"])
 
     w_df["adj_pvalue"] = multipletests(w_df["pvalue"])[1]
 
