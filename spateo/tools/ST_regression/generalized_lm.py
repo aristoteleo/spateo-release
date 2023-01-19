@@ -33,7 +33,7 @@ from .regression_utils import L1_L2_penalty, softplus
 # ---------------------------------------------------------------------------------------------------
 # Intermediates for generalized linear modeling
 # ---------------------------------------------------------------------------------------------------
-def _z(beta0: float, beta: np.ndarray, X: np.ndarray, fit_intercept: bool) -> np.ndarray:
+def calc_z(beta0: float, beta: np.ndarray, X: np.ndarray, fit_intercept: bool) -> np.ndarray:
     """Computes z, an intermediate comprising the result of a linear regression, just before non-linearity is applied.
 
     Args:
@@ -53,7 +53,7 @@ def _z(beta0: float, beta: np.ndarray, X: np.ndarray, fit_intercept: bool) -> np
     return z
 
 
-def _nl(
+def apply_nonlinear(
     distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"],
     z: np.ndarray,
     eta: float,
@@ -86,7 +86,9 @@ def _nl(
     return nl
 
 
-def _grad_nl(distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"], z: np.ndarray, eta: float):
+def nonlinear_gradient(
+    distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"], z: np.ndarray, eta: float
+):
     """Derivative of the non-linearity.
 
     Args:
@@ -95,20 +97,20 @@ def _grad_nl(distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "
         eta: A threshold parameter that linearizes the exp() function above threshold eta
 
     Returns:
-        grad_nl: Array of size [n_samples, n_features]; first derivative of each parameter estimate
+        nl_grad: Array of size [n_samples, n_features]; first derivative of each parameter estimate
     """
     logger = lm.get_main_logger()
 
     if distr in ["softplus", "gamma", "neg-binomial"]:
-        grad_nl = expit(z)
+        nl_grad = expit(z)
     elif distr == "poisson":
-        grad_nl = z.copy()
-        grad_nl[z > eta] = np.ones_like(z)[z > eta] * np.exp(eta)
-        grad_nl[z <= eta] = np.exp(z[z <= eta])
+        nl_grad = z.copy()
+        nl_grad[z > eta] = np.ones_like(z)[z > eta] * np.exp(eta)
+        nl_grad[z <= eta] = np.exp(z[z <= eta])
     elif distr == "gaussian":
-        grad_nl = np.ones_like(z)
+        nl_grad = np.ones_like(z)
 
-    return grad_nl
+    return nl_grad
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -159,36 +161,36 @@ def batch_grad(
     InvCov = np.dot(Tau.T, Tau)
 
     # Compute linear intermediate, nonlinearity, first derivative of the nonlinearity
-    z = _z(beta[0], beta[1:], X, fit_intercept)
-    nl = _nl(distr, z, eta, fit_intercept)
-    grad_nl = _grad_nl(distr, z, eta)
+    z = calc_z(beta[0], beta[1:], X, fit_intercept)
+    nl = apply_nonlinear(distr, z, eta, fit_intercept)
+    nl_grad = nonlinear_gradient(distr, z, eta)
 
     # Initialize gradient:
     grad_beta0 = 0.0
 
     if distr in ["poisson", "softplus"]:
         if fit_intercept:
-            grad_beta0 = np.sum(grad_nl) - np.sum(y * grad_nl / nl)
-        grad_beta = (np.dot(grad_nl.T, X) - np.dot((y * grad_nl / nl).T, X)).T
+            grad_beta0 = np.sum(nl_grad) - np.sum(y * nl_grad / nl)
+        grad_beta = (np.dot(nl_grad.T, X) - np.dot((y * nl_grad / nl).T, X)).T
 
     elif distr == "gamma":
         # Degrees of freedom (one because the parameter array is 1D)
         nu = 1.0
-        grad_logl = (y / nl**2 - 1 / nl) * grad_nl
+        grad_logl = (y / nl**2 - 1 / nl) * nl_grad
         if fit_intercept:
             grad_beta0 = -nu * np.sum(grad_logl)
         grad_beta = -nu * np.dot(grad_logl.T, X).T
 
     elif distr == "neg-binomial":
-        partial_beta_0 = grad_nl * ((theta + y) / (nl + theta) - y / nl)
+        partial_beta_0 = nl_grad * ((theta + y) / (nl + theta) - y / nl)
         if fit_intercept:
             grad_beta0 = np.sum(partial_beta_0)
         grad_beta = np.dot(partial_beta_0.T, X)
 
     elif distr == "gaussian":
         if fit_intercept:
-            grad_beta0 = np.sum((nl - y) * grad_nl)
-        grad_beta = np.dot((nl - y).T, X * grad_nl[:, None]).T
+            grad_beta0 = np.sum((nl - y) * nl_grad)
+        grad_beta = np.dot((nl - y).T, X * nl_grad[:, None]).T
 
     grad_beta0 *= 1.0 / n_samples
     grad_beta *= 1.0 / n_samples
@@ -282,8 +284,8 @@ def _loss(
         loss: Numerical value for loss
     """
     n_samples, n_features = X.shape
-    z = _z(beta[0], beta[1:], X, fit_intercept)
-    y_hat = _nl(distr, z, eta, fit_intercept)
+    z = calc_z(beta[0], beta[1:], X, fit_intercept)
+    y_hat = apply_nonlinear(distr, z, eta, fit_intercept)
     ll = 1.0 / n_samples * log_likelihood(distr, y, y_hat, z, theta)
 
     if fit_intercept:
@@ -561,8 +563,8 @@ class GLM(BaseEstimator):
             self.logger.error(f"Input data should be of type ndarray (got {type(X)}).")
 
         # Compute intermediate state and then apply nonlinearity:
-        z = _z(self.beta0_, self.beta_, X, self.fit_intercept)
-        yhat = _nl(self.distr, z, self.eta, self.fit_intercept)
+        z = calc_z(self.beta0_, self.beta_, X, self.fit_intercept)
+        yhat = apply_nonlinear(self.distr, z, self.eta, self.fit_intercept)
         yhat = np.asarray(yhat)
         return yhat
 

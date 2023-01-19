@@ -20,7 +20,7 @@ from .smooth import STGNN
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
-def impute_and_downsample(
+def smooth_and_downsample(
     adata: anndata.AnnData,
     filter_by_moran: bool = False,
     spatial_key: str = "spatial",

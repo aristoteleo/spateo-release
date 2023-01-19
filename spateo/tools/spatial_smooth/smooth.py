@@ -48,19 +48,19 @@ def get_aug_feature(adata: AnnData, highly_variable: bool = False):
         adata_Vars = adata
 
     if isinstance(adata_Vars.X, scipy.sparse.csc_matrix) or isinstance(adata_Vars.X, scipy.sparse.csr_matrix):
-        feat = adata_Vars.X.toarray()[
+        expr = adata_Vars.X.toarray()[
             :,
         ]
     else:
-        feat = adata_Vars.X[
+        expr = adata_Vars.X[
             :,
         ]
 
     # Data augmentation:
-    feat_a = permutation(feat)
+    expr_permuted = permutation(expr)
 
-    adata.obsm["feat"] = feat
-    adata.obsm["feat_a"] = feat_a
+    adata.obsm["expr"] = expr
+    adata.obsm["expr_permuted"] = expr_permuted
 
 
 def fix_seed(seed: int = 888):
@@ -189,9 +189,9 @@ class Trainer:
         weight_decay: Controls degradation rate of parameters
         epochs: Number of iterations of training loop to perform
         dim_output: Dimensionality of the output representation
-        alpha: Controls influence of reconstruction loss in representation learning
-        beta: Weight factor to control the influence of contrastive loss in representation learning
-        theta: Weight factor to control the influence of the regularization term in representation learning
+        gamma_1: Controls influence of reconstruction loss in representation learning
+        gamma_2: Weight factor to control the influence of contrastive loss in representation learning
+        gamma_3: Weight factor to control the influence of the regularization term in representation learning
         add_regularization: Adds penalty term to representation learning
     """
 
@@ -206,9 +206,9 @@ class Trainer:
         weight_decay: float = 0.00,
         epochs: int = 1000,
         dim_output: int = 64,
-        alpha: float = 10,
-        beta: float = 1,
-        theta: float = 0.1,
+        gamma_1: float = 10,
+        gamma_2: float = 1,
+        gamma_3: float = 0.1,
         add_regularization: bool = False,
     ):
         self.adata = adata.copy()
@@ -219,20 +219,20 @@ class Trainer:
         self.clip = clip
         self.weight_decay = weight_decay
         self.epochs = epochs
-        self.alpha = alpha
-        self.beta = beta
-        self.theta = theta
+        self.gamma_1 = gamma_1
+        self.gamma_2 = gamma_2
+        self.gamma_3 = gamma_3
         self.add_regularization = add_regularization
 
-        self.features = torch.FloatTensor(adata.obsm["feat"].copy()).to(self.device)
-        self.features_a = torch.FloatTensor(adata.obsm["feat_a"].copy()).to(self.device)
+        self.expr = torch.FloatTensor(adata.obsm["expr"].copy()).to(self.device)
+        self.expr_permuted = torch.FloatTensor(adata.obsm["expr_permuted"].copy()).to(self.device)
         self.label_contrastive = torch.FloatTensor(adata.obsm["label_contrastive"]).to(self.device)
         self.adj = adata.obsm["adj"]
         self.graph_neigh = torch.FloatTensor(adata.obsm["graph_neigh"].copy() + np.eye(self.adj.shape[0])).to(
             self.device
         )
 
-        self.dim_input = self.features.shape[1]
+        self.dim_input = self.expr.shape[1]
         self.dim_output = dim_output
 
         # Further preprocessing on the adjacency matrix:
@@ -255,7 +255,7 @@ class Trainer:
         self.model = Encoder(self.dim_input, self.dim_output, self.graph_neigh, self.dropout, self.act, self.clip).to(
             self.device
         )
-        self.loss_CSL = nn.BCEWithLogitsLoss()
+        self.loss_contrastive = nn.BCEWithLogitsLoss()
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), self.learn_rate, weight_decay=self.weight_decay)
 
@@ -265,12 +265,12 @@ class Trainer:
             self.model.train()
             # Construct augmented graph (negative pair w/ the target graph) and then feed augmented graph and
             # original graph through the model:
-            self.features_a = permutation(self.features)
-            self.hidden_feat, self.emb, ret, ret_a = self.model(self.features, self.features_a, self.adj)
+            self.expr_a = permutation(self.expr)
+            self.hidden_feat, self.emb, norm_graph, permuted = self.model(self.expr, self.expr_a, self.adj)
 
-            self.loss_sl_1 = self.loss_CSL(ret, self.label_contrastive)
-            self.loss_sl_2 = self.loss_CSL(ret_a, self.label_contrastive)
-            self.loss_feat = F.mse_loss(self.features, self.emb)
+            self.loss_cont_true_graph = self.loss_contrastive(norm_graph, self.label_contrastive)
+            self.loss_cont_permuted = self.loss_contrastive(permuted, self.label_contrastive)
+            self.loss_feat = F.mse_loss(self.expr, self.emb)
 
             if self.add_regularization:
                 self.loss_norm = 0
@@ -279,12 +279,14 @@ class Trainer:
                         self.loss_norm = self.loss_norm + torch.norm(parameters, p=2)
 
                 loss = (
-                    self.alpha * self.loss_feat
-                    + self.beta * (self.loss_sl_1 + self.loss_sl_2)
-                    + self.theta * self.loss_norm
+                    self.gamma_1 * self.loss_feat
+                    + self.gamma_2 * (self.loss_cont_true_graph + self.loss_cont_permuted)
+                    + self.gamma_3 * self.loss_norm
                 )
             else:
-                loss = self.alpha * self.loss_feat + self.beta * (self.loss_sl_1 + self.loss_sl_2)
+                loss = self.gamma_1 * self.loss_feat + self.gamma_2 * (
+                    self.loss_cont_true_graph + self.loss_cont_permuted
+                )
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -293,6 +295,6 @@ class Trainer:
         with torch.no_grad():
             self.model.eval()
             # Return reconstruction:
-            self.emb_rec = self.model(self.features, self.features_a, self.adj)[1].detach().cpu().numpy()
+            self.emb_rec = self.model(self.expr, self.expr_a, self.adj)[1].detach().cpu().numpy()
 
         return self.emb_rec
