@@ -1,4 +1,5 @@
 import math
+import os
 import re
 from typing import List, Optional, Union
 
@@ -11,7 +12,8 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ....tdr import collect_models
+from spateo.tdr import collect_models
+
 from .three_dims_plotter import (
     _set_jupyter,
     add_legend,
@@ -127,7 +129,7 @@ def wrap_to_plotter(
             legend_size=None,
             legend_loc=None,
             font_color=cbg_rgb,
-            title_font_size=15,
+            title_font_size=-1,
             label_font_size=12,
             font_family="arial",
             fmt="%.2e",
@@ -135,6 +137,7 @@ def wrap_to_plotter(
             vertical=True,
         )
         if not (legend_kwargs is None):
+
             lg_kwargs.update((k, legend_kwargs[k]) for k in lg_kwargs.keys() & legend_kwargs.keys())
 
         add_legend(
@@ -361,6 +364,7 @@ def three_d_multi_plot(
 ):
     """
     Multi-view visualization of reconstructed 3D model.
+    If you want to draw a legend in each sub-window, please ensure that the key names used in each legend are different.
 
     Args:
         model: A MultiBlock of reconstructed models or a reconstructed model.
@@ -458,7 +462,18 @@ def three_d_multi_plot(
     ops = opacity if isinstance(opacity, list) else [opacity]
     texts = text if isinstance(text, list) else [text]
 
-    n_window = max(len(models), len(keys), len(cpos), len(mts), len(mss), len(cmaps), len(ams), len(ops), len(texts))
+    n_window = max(
+        len(models),
+        len(keys),
+        len(cpos),
+        len(mts),
+        len(mss),
+        len(cmaps),
+        len(ams),
+        len(ops),
+        len(texts),
+    )
+
     models = collect_models([models[0].copy() for i in range(n_window)]) if len(models) == 1 else models
     keys = keys * n_window if len(keys) == 1 else keys
     cpos = cpos * n_window if len(cpos) == 1 else cpos
@@ -469,7 +484,7 @@ def three_d_multi_plot(
     ops = ops * n_window if len(ops) == 1 else ops
     texts = texts * n_window if len(texts) == 1 else texts
 
-    shape = (math.ceil(n_window / 4), n_window if n_window < 4 else 4) if shape is None else shape
+    shape = (math.ceil(n_window / 3), n_window if n_window < 3 else 3) if shape is None else shape
     if isinstance(shape, (tuple, list)):
         n_subplots = shape[0] * shape[1]
         subplots = []
@@ -482,9 +497,10 @@ def three_d_multi_plot(
         n_subplots = int(shape_x) * int(shape_y)
         subplots = [i for i in range(n_subplots)]
 
-    if window_size is None:
-        win_x, win_y = (shape[1], shape[0]) if isinstance(shape, (tuple, list)) else (1, 1)
-        window_size = (512 * win_x, 512 * win_y)
+    win_x, win_y = shape[1], shape[0]
+    window_size = (
+        (512 * win_x, 512 * win_y) if window_size is None else (window_size[0] * win_x, window_size[1] * win_y)
+    )
 
     plotter_kws = dict(
         jupyter=False if jupyter is False else True,
@@ -507,9 +523,18 @@ def three_d_multi_plot(
 
     # Create a plotting object to display pyvista/vtk model.
     p = create_plotter(off_screen=off_screen1, **plotter_kws)
-    for sub_model, sub_key, sub_cpo, sub_mt, sub_ms, sub_cmap, sub_am, sub_op, sub_text, subplot_index in zip(
-        models, keys, cpos, mts, mss, cmaps, ams, ops, texts, subplots
-    ):
+    for (
+        sub_model,
+        sub_key,
+        sub_cpo,
+        sub_mt,
+        sub_ms,
+        sub_cmap,
+        sub_am,
+        sub_op,
+        sub_text,
+        subplot_index,
+    ) in zip(models, keys, cpos, mts, mss, cmaps, ams, ops, texts, subplots):
         p.subplot(subplot_index[0], subplot_index[1])
         wrap_to_plotter(
             plotter=p,

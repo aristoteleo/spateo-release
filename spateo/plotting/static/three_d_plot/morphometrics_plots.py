@@ -338,7 +338,13 @@ def feature(
     for m in models:
         obs_index_ind = _check_index_in_adata(adata=adata, model=m)
         m_feature_values = feature_values[obs_index_ind].copy()
-        add_model_labels(model=m, labels=m_feature_values, key_added=feature_key, where="point_data", inplace=True)
+        add_model_labels(
+            model=m,
+            labels=m_feature_values,
+            key_added=feature_key,
+            where="point_data",
+            inplace=True,
+        )
 
     # Visualization.
     colormap = _get_default_cmap() if colormap is None or colormap == "default_cmap" else colormap

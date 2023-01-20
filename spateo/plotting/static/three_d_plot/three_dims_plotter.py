@@ -1,9 +1,7 @@
-import math
 from typing import Optional, Tuple, Union
 
 import matplotlib as mpl
 import numpy as np
-import pandas as pd
 import pyvista as pv
 from pyvista import MultiBlock, Plotter, PolyData, UnstructuredGrid
 
@@ -11,8 +9,6 @@ try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
-
-from ....logging import logger_manager as lm
 
 
 def create_plotter(
@@ -151,7 +147,10 @@ def add_model(
             )
         else:
             added_kwargs = (
-                dict(scalars=_key if _key in _model.array_names else _model.active_scalars_name, cmap=_colormap)
+                dict(
+                    scalars=_key if _key in _model.array_names else _model.active_scalars_name,
+                    cmap=_colormap,
+                )
                 if _colormap in list(mpl.colormaps())
                 else dict(color=_colormap)
             )
@@ -247,7 +246,10 @@ def add_str_legend(
                 * ``legend_loc = 'center'``
     """
 
-    legend_data = np.concatenate([labels.reshape(-1, 1).astype(object), colors.reshape(-1, 1).astype(object)], axis=1)
+    legend_data = np.concatenate(
+        [labels.reshape(-1, 1).astype(object), colors.reshape(-1, 1).astype(object)],
+        axis=1,
+    )
     legend_data = legend_data[legend_data[:, 0] != "mask", :]
     assert len(legend_data) != 0, "No legend can be added, please set `show_legend=False`."
 
@@ -301,7 +303,6 @@ def add_num_legend(
                       legend_loc[1]: The percentage (0 to 1) along the windows’s vertical direction to place the bottom left corner of the legend.
         vertical: Use vertical or horizontal legend.
     """
-
     plotter.add_scalar_bar(
         title=title,
         n_labels=n_labels,
@@ -469,7 +470,7 @@ def add_text(
     plotter: Plotter,
     text: str,
     font_family: Literal["times", "courier", "arial"] = "arial",
-    font_size: Union[int, float] = 12,
+    font_size: Union[int, float] = 15,
     font_color: Union[str, tuple, list] = "black",
     text_loc: Literal[
         "lower_left",

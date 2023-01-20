@@ -3,11 +3,11 @@ import pyvista as pv
 from pyvista import PolyData, UnstructuredGrid
 
 try:
-    from typing import Any, Literal, Optional, Tuple, Union
+    from typing import Literal
 except ImportError:
     from typing_extensions import Literal
 
-from typing import Optional, Union
+from typing import Any, Optional, Tuple, Union
 
 from ..utilities import add_model_labels, merge_models
 

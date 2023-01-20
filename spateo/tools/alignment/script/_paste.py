@@ -9,8 +9,8 @@ from anndata import AnnData
 from scipy.sparse import issparse
 from sklearn.decomposition import NMF
 
-from ..configuration import SKM
-from ..logging import logger_manager as lm
+from spateo.configuration import SKM
+from spateo.logging import logger_manager as lm
 
 # Get the intersection of lists
 intersect_lsts = lambda *lsts: list(set(lsts[0]).intersection(*lsts[1:]))
