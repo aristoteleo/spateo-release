@@ -19,7 +19,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ....tools.three_dims_align import rigid_transform_3D
+from ....tools.alignment import rigid_transform
 from ..utilities import scale_model
 
 ###############
@@ -123,7 +123,7 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_f
 
     # Transform.
     scale_pc = scale_model(model=scale_pc, scale_factor=mc_sf)
-    mesh.points = rigid_transform_3D(
+    mesh.points = rigid_transform(
         coords=np.asarray(mesh.points), coords_refA=np.asarray(scale_pc.points), coords_refB=raw_points
     )
     return mesh

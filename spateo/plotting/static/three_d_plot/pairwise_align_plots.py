@@ -12,7 +12,7 @@ import seaborn as sns
 from anndata import AnnData
 
 from ....tdr import collect_models, construct_align_lines, construct_pc
-from ....tools.paste import _get_optimal_mapping_relationship
+from ....tools.alignment import get_optimal_mapping_connections
 from .three_dims_plots import three_d_animate, three_d_plot
 
 
@@ -190,7 +190,7 @@ def pairwise_connections(
         adataB.obsm[spatial_key] = np.c_[adataB.obsm[spatial_key], z]
 
     # Obtain the optimal mapping connections between two samples
-    max_index, pi_value, _, _ = _get_optimal_mapping_relationship(
+    max_index, pi_value, _, _ = get_optimal_mapping_connections(
         X=adataA.obsm[spatial_key].copy(),
         Y=adataB.obsm[spatial_key].copy(),
         pi=pi,

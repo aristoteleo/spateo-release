@@ -22,6 +22,10 @@ def _interactive_rectangle_clip(
     def _split_model(original_model):
         """Adds a new model to the plotter each time cells are picked, and removes them from the original model"""
 
+        try:
+            original_model = original_model[0]
+        except:
+            pass
         # If nothing selected.
         if not original_model.n_cells:
             return

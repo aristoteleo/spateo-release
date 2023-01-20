@@ -10,8 +10,7 @@ except ImportError:
     from typing_extensions import Literal
 
 from ...logging import logger_manager as lm
-from ...tools import pairwise_align
-from ...tools.paste import _get_optimal_mapping_relationship
+from ...tools.alignment import get_optimal_mapping_connections, pairwise_align
 from .interpolations import get_X_Y_grid
 
 
@@ -80,7 +79,7 @@ def cell_directions(
             **kwargs,
         )
 
-        max_index, pi_value, _, _ = _get_optimal_mapping_relationship(
+        max_index, pi_value, _, _ = get_optimal_mapping_connections(
             X=adataA.obsm[spatial_key].copy(), Y=adataB.obsm[spatial_key].copy(), pi=pi, keep_all=keep_all
         )
 
@@ -91,7 +90,7 @@ def cell_directions(
             dtype={
                 "index_x": np.int32,
                 "index_y": np.int32,
-                "pi_value": np.float32,
+                "pi_value": np.float64,
             }
         )
         mapping_data.sort_values(by=["index_x", "pi_value"], ascending=[True, False], inplace=True)

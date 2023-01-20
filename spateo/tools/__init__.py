@@ -1,5 +1,6 @@
 from .alignment import (
     get_align_labels,
+    get_optimal_mapping_connections,
     models_align,
     models_align_ref,
     paste_transform,
