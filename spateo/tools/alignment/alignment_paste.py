@@ -196,7 +196,9 @@ def models_align_ref(
     align_models = []
     for i, (align_model_ref, model) in enumerate(zip(align_models_ref, models)):
         align_model = model.copy()
-        if i != 0:
+        if i == 0:
+            align_model.obsm[key_added] = align_model.obsm[spatial_key]
+        else:
             align_model = paste_transform(
                 adata=align_model,
                 adata_ref=align_model_ref,
@@ -205,6 +207,7 @@ def models_align_ref(
                 mapping_key=mapping_key_added,
             )
             align_model.uns[mapping_key_added] = align_model_ref.uns[mapping_key_added]
+
         align_models.append(align_model)
 
     return align_models, align_models_ref, pis
