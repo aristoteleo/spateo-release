@@ -12,7 +12,7 @@ import scipy.stats
 from anndata import AnnData
 from dynamo.tools.sampling import sample
 from loess.loess_1d import loess_1d
-from scipy.sparse import issparse
+from scipy.sparse import csr_matrix, issparse
 from scipy.stats import norm
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
@@ -205,7 +205,7 @@ def downsampling(
 
 
 def cal_wass_dis_for_genes(
-    inp0: Tuple[scipy.sparse._csr.csr_matrix, AnnData], inp1: Tuple[int, List, np.ndarray, int]
+    inp0: Tuple[csr_matrix, AnnData], inp1: Tuple[int, List, np.ndarray, int]
 ) -> Tuple[List, np.ndarray, np.ndarray]:
     """Calculate Wasserstein distances for a list of genes.
 
@@ -430,7 +430,7 @@ def bin_scale_adata_get_distance(
     min_dis_cutoff: float = 2.0,
     max_dis_cutoff: float = 6.0,
     n_neighbors: int = 30,
-) -> Tuple[AnnData, scipy.sparse._csr.csr_matrix]:
+) -> Tuple[AnnData, csr_matrix]:
     """Bin (based on spatial information), scale adata object and calculate the distance matrix based on the specified
     method (either geodesic or euclidean).
 

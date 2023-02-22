@@ -178,3 +178,61 @@ def select_polygon(
         return_all_list=None,
     )
     return lasso
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def cellbin_select(
+    adata: AnnData,
+    binsize: int = 50,
+    spatial_key: str = "spatial",
+    layer: Optional[str] = None,
+    scale: float = 0.5,
+    scale_unit: str = "um",
+    return_all: bool = False,
+) -> Union[PolygonSelector, Tuple[PolygonSelector, AnnData]]:
+    """Select cells by drawing a polygon on a binning image of the spatial transcriptomics data.
+
+    Args:
+        adata: Anndata containing segmented cells.
+        binsize: Size of bins to use for aggregating the expression data.
+        spatial_key: The key to the spatial coordinates in the `adata.obsm` attribute.
+        layer: The layer to use for the expression data. Defaults to None (adata.X will be used).
+        scale: The scale of the spatial coordinates.
+        scale_unit: The unit of the spatial coordinates.
+        return_all: Whether to return both the `PolygonSelector` and the aggregated image.
+
+    Returns:
+        When return_all is False, only a `PolygonSelector` object will be returned; otherwise both a tuple of both
+            the aggregated image data and the `PolygonSelector` object will be used.
+    """
+    half_bin = binsize / 2
+
+    expression = adata.layers[layer] if layer else adata.X
+    aggregation = expression.sum(axis=1).A1 if issparse(expression) else expression.sum(axis=1)
+
+    coor = np.column_stack((adata.obsm[spatial_key], aggregation)).astype("int")
+    coor[:, 0] = ((coor[:, 0] - half_bin) / binsize).astype("int")
+    coor[:, 1] = ((coor[:, 1] - half_bin) / binsize).astype("int")
+    img = np.zeros(shape=[max(coor[:, 0]) + 1, max(coor[:, 1]) + 1], dtype="int")
+
+    for line in coor:
+        img[line[0], line[1]] = line[2]
+
+    cellbin_img = anndata.AnnData(
+        X=img,
+        layers={"spliced": img},
+        uns={
+            "__type": "AGG",
+            "pp": {},
+            "spatial": {
+                "scale": scale,
+                "scale_unit": scale_unit,
+            },
+        },
+    )
+
+    selection = select_polygon(cellbin_img, layer="spliced")
+
+    if return_all:
+        return selection, cellbin_img
+    return selection

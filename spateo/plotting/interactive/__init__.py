@@ -1,1 +1,1 @@
-from .agg import contours, select_polygon
+from .agg import cellbin_select, contours, select_polygon
