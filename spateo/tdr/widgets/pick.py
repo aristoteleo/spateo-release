@@ -118,9 +118,10 @@ def interactive_pick(
     label_models = []
     if key in model.point_data.keys():
         for label in np.unique(model.point_data[key]):
-            label_model = model.remove_points(model.point_data[key] != label)
-            print(label_model[0])
-            label_models.append(label_model[0])
+            # label_model = model.remove_points(model.point_data[key] != label)
+            # print(label_model[0])
+            # label_models.append(label_model[0])
+            label_models.append(model.remove_cells(model[key] != label))
     elif key in model.cell_data.keys():
         for label in np.unique(model.cell_data[key]):
             label_models.append(model.remove_cells(model.cell_data[key] != label))
