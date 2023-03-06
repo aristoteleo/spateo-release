@@ -21,7 +21,7 @@ setup(
         "docs": read_requirements(os.path.join("docs", "requirements.txt")),
         "3d": read_requirements("3d-requirements.txt"),
     },
-    packages=find_packages(exclude=("tests", "docs")),
+    packages=find_packages(exclude=("tests", "docs")),#find_namespace_packages(include=['spateo*']),
     classifiers=[
         "Development Status :: 4 - Beta",
         "Programming Language :: Python :: 3.7",
