@@ -200,7 +200,7 @@ class Base_Model:
         # Normalize to size factor:
         if normalize:
             if self.distr not in ["poisson", "softplus", "neg-binomial"]:
-                self.logger.info("Setting total counts in each cell to 1e4 inplace.")
+                self.logger.info("Setting total counts in each cell to 1e4 inplace...")
                 normalize_total(self.adata)
             else:
                 self.logger.info("Setting total counts in each cell to 1e4, storing in adata.layers['X_norm'].")
@@ -351,6 +351,9 @@ class Base_Model:
 
         self.preprocess_data()
 
+        if mod_type != "ligand_lag" and self.group_key is None:
+            self.logger.error("No .obs key was given- must provide the location of cell type labels.")
+
         # General preprocessing required by multiple model types (for the models that use cellular niches):
         # Convert groups/categories into one-hot array:
         group_name = self.adata.obs[self.group_key]
@@ -387,9 +390,12 @@ class Base_Model:
                 if not os.path.exists("./neighbors"):
                     os.makedirs("./neighbors")
                 # And save computed adjacency matrix:
-                self.logger.info(f"Saving adjacency matrix to path neighbors/{self.data_id}_neighbors.csv")
-                adj = pd.DataFrame(self.adata.obsp["adj"], index=self.adata.obs_names, columns=self.adata.obs_names)
-                adj.to_csv(os.path.join(os.getcwd(), f"neighbors/{self.data_id}_neighbors.csv"))
+                if self.data_id is not None:
+                    self.logger.info(f"Saving adjacency matrix to path neighbors/{self.data_id}_neighbors.csv")
+                    adj = pd.DataFrame(self.adata.obsp["adj"], index=self.adata.obs_names, columns=self.adata.obs_names)
+                    adj.to_csv(os.path.join(os.getcwd(), f"neighbors/{self.data_id}_neighbors.csv"))
+                else:
+                    self.logger.info("Argument not given to 'data_id'- proceeding without saving adjacency matrix.")
         else:
             self.logger.info(f"Path to pre-computed adjacency matrix not given. Computing adjacency matrix.")
             start = time.time()
@@ -401,13 +407,16 @@ class Base_Model:
             )
             self.logger.info(f"Computed adjacency matrix, time elapsed: {time.time() - start}s.")
 
-            # Create 'neighbors' directory, if necessary:
-            if not os.path.exists("./neighbors"):
-                os.makedirs("./neighbors")
-            # And save computed adjacency matrix:
-            self.logger.info(f"Saving adjacency matrix to path neighbors/{self.data_id}_neighbors.csv")
-            adj = pd.DataFrame(self.adata.obsp["adj"], index=self.adata.obs_names, columns=self.adata.obs_names)
-            adj.to_csv(os.path.join(os.getcwd(), f"neighbors/{self.data_id}_neighbors.csv"))
+            if self.data_id is not None:
+                # Create 'neighbors' directory, if necessary:
+                if not os.path.exists("./neighbors"):
+                    os.makedirs("./neighbors")
+                # And save computed adjacency matrix:
+                self.logger.info(f"Saving adjacency matrix to path neighbors/{self.data_id}_neighbors.csv")
+                adj = pd.DataFrame(self.adata.obsp["adj"], index=self.adata.obs_names, columns=self.adata.obs_names)
+                adj.to_csv(os.path.join(os.getcwd(), f"neighbors/{self.data_id}_neighbors.csv"))
+            else:
+                self.logger.info("Argument not given to 'data_id'- proceeding without saving adjacency matrix.")
 
         adj = self.adata.obsp["adj"]
 
@@ -804,7 +813,6 @@ class Base_Model:
         Args:
             gs_params: Optional dictionary where keys are variable names for the regressor and
                 values are lists of potential values for which to find the best combination using grid search.
-                Classifier parameters should be given in the following form: 'classifier__{parameter name}'.
             n_gs_cv: Number of folds for grid search cross-validation, will only be used if gs_params is not None. If
                 None, will default to a 5-fold cross-validation.
             n_jobs: For parallel processing, number of tasks to run at once
@@ -833,8 +841,8 @@ class Base_Model:
                     ":func `GLMCV_fit_predict` error: 'Categories' were given, but not 'cat_key' "
                     "specifying where in .obs to look."
                 )
-            # Filter adata for rows annotated as being any category in 'categories', and X block for columns annotated with
-            # any of the categories in 'categories'.
+            # Filter adata for rows annotated as being any category in 'categories', and X block for columns annotated
+            # with any of the categories in 'categories'.
             self.adata = self.adata[self.adata.obs[cat_key].isin(self.categories)]
             self.cell_names = self.adata.obs_names
             X = X.filter(regex="|".join(self.categories))
@@ -863,6 +871,9 @@ class Base_Model:
         reconst = [item[3] for item in results]
 
         coeffs = pd.DataFrame(coeffs, index=self.genes, columns=X.columns)
+        # Store coefficients as attribute for access outside of the class:
+        self.coefficients = coeffs
+
         for cn in coeffs.columns:
             self.adata.var.loc[:, cn] = coeffs[cn]
         self.adata.uns["pseudo_r2"] = dict(zip(self.genes, opt_scores))
@@ -1960,6 +1971,30 @@ class Lagged_Model(Base_Model):
 
         # Outputs for a single gene:
         return adata.var.loc[cur_g, :].values, y_pred.reshape(-1, 1), resid.reshape(-1, 1)
+
+
+class LR_Model(Base_Model):
+    """Wraps all necessary methods for data loading and preparation, model initialization, parameterization,
+    evaluation and prediction when instantiating a model for spatially-aware regression using the prevalence of and
+    connections between categories within spatial neighborhoods and the non-specific expression of ligands and
+    receptors to predict the regression target.
+
+    Arguments passed to :class `Base_Model`.
+
+    Args:
+        lig: Name(s) of ligands to use as predictors
+        rec: Name(s) of receptors to use as regression targets. If not given, will search through database for all
+            genes that correspond to the provided genes from 'ligands'
+        rec_ds: Name(s) of receptor-downstream genes to use as regression targets. If not given, will search through
+            database for all genes that correspond to receptors
+        species: Specifies L:R database to use
+        niche_lr_r_lag: Only used if 'mod_type' is "niche_lr". Uses the spatial lag of the receptor as the
+            dependent variable rather than each spot's unique receptor expression. Defaults to True.
+        args: Additional positional arguments to :class `Base_Model`
+        kwargs: Additional keyword arguments to :class `Base_Model`
+    """
+
+    # NOTE: see if Base_Model prepare_data needs to be adjusted for this.
 
 
 class Niche_LR_Model(Base_Model):

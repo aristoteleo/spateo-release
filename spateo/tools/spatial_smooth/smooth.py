@@ -92,12 +92,13 @@ class STGNN:
     Graph neural network for representation learning of spatial transcriptomics data from only the gene expression
     matrix. Wraps preprocessing and training.
 
-    adata: class `anndata.AnnData`
-    spatial_key: Key in .obsm where x- and y-coordinates are stored
-    random_seed: Sets seed for all random number generators
-    add_regularization: Set True to include weight-based penalty term in representation learning.
-    device: Options: 'cpu', 'cuda:_'. Perform computations on CPU or GPU. If GPU, provide the name of the device to run
-        computations
+    Args:
+        adata: class `anndata.AnnData`
+        spatial_key: Key in .obsm where x- and y-coordinates are stored
+        random_seed: Sets seed for all random number generators
+        add_regularization: Set True to include weight-based penalty term in representation learning.
+        device: Options: 'cpu', 'cuda:_'. Perform computations on CPU or GPU. If GPU, provide the name of the device
+            to run computations
     """
 
     def __init__(
@@ -241,10 +242,8 @@ class Trainer:
 
     def train(self):
         """
-        Returns
-        -------
-        emb_rec : np.ndarray
-            Reconstruction of the counts matrix
+        Returns:
+            emb_rec: Reconstruction of the counts matrix
         """
         logger = lm.get_main_logger()
         logger.info(
@@ -256,10 +255,7 @@ class Trainer:
             self.device
         )
         self.loss_contrastive = nn.BCEWithLogitsLoss()
-
         self.optimizer = torch.optim.Adam(self.model.parameters(), self.learn_rate, weight_decay=self.weight_decay)
-
-        self.model.train()
 
         for epoch in tqdm(range(self.epochs)):
             self.model.train()

@@ -29,15 +29,7 @@ from .cluster_degs import (
 )
 from .cluster_lasso import *
 from .coarse_align import AffineTrans, align_slices_pca, pca_align, procrustes
-from .find_neighbors import (
-    construct_geodesic_distance_matrix,
-    construct_nn_graph,
-    construct_spatial_distance_matrix,
-    generate_spatial_weights_fixed_nbrs,
-    generate_spatial_weights_fixed_radius,
-    weighted_expr_neighbors_graph,
-    weighted_spatial_graph,
-)
+from .find_neighbors import construct_nn_graph
 from .glm import glm_degs
 
 # from .image import add_image_layer

@@ -132,7 +132,7 @@ def normalize_total(
     else:
         counts_per_cell = X.sum(1)
 
-    logger.info(msg)
+    # logger.info(msg)
     counts_per_cell = np.ravel(counts_per_cell)
 
     cell_subset = counts_per_cell > 0

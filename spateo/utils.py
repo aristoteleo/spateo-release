@@ -30,3 +30,15 @@ def copy_adata(adata: AnnData) -> AnnData:
     )
     data = adata.copy()
     return data
+
+
+# ---------------------------------------------------------------------------------------------------
+# Keyword argument manipulation
+# ---------------------------------------------------------------------------------------------------
+def remove_kwargs(my_dict, keys):
+    new_list = []
+    for key in keys:
+        print(key)
+        if key in my_dict.keys():
+            new_list.append((key, my_dict.pop(key)))
+    return new_list

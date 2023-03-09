@@ -6,7 +6,7 @@ although allows also for normal (Gaussian) modeling.
 Additionally features capability to perform elastic net regularized regression.
 """
 import time
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 try:
     from typing import Literal
@@ -15,6 +15,7 @@ except ImportError:
 
 import numpy as np
 import pandas as pd
+import scipy
 from anndata import AnnData
 from scipy.sparse import diags, issparse
 from scipy.special import expit, loggamma
@@ -26,7 +27,7 @@ from ...configuration import SKM
 from ...logging import logger_manager as lm
 from ...preprocessing.normalize import normalize_total
 from ...preprocessing.transform import log1p
-from ...tools.find_neighbors import transcriptomic_connectivity
+from ...tools.find_neighbors import Kernel, transcriptomic_connectivity
 from .regression_utils import L1_L2_penalty, softplus
 
 
@@ -127,6 +128,7 @@ def batch_grad(
     eta: float = 2.0,
     theta: float = 1.0,
     fit_intercept: bool = True,
+    w: Optional[np.ndarray, scipy.sparse.spmatrix] = None,
 ) -> np.ndarray:
     """Computes the gradient (for parameter updating) via batch gradient descent
 
@@ -146,6 +148,8 @@ def batch_grad(
             Used only if 'distr' is "neg-binomial"
         fit_intercept: Specifies if a constant (a.k.a. bias or intercept) should be added to the decision function.
             Defaults to True.
+        w: Optional weights vector for spatially-weighted regression. If given, will perform calculations for
+            spatially-weighted regression rather than generalized linear regression.
 
     Returns:
         g: Gradient for each parameter
@@ -168,29 +172,63 @@ def batch_grad(
     # Initialize gradient:
     grad_beta0 = 0.0
 
-    if distr in ["poisson", "softplus"]:
-        if fit_intercept:
-            grad_beta0 = np.sum(nl_grad) - np.sum(y * nl_grad / nl)
-        grad_beta = (np.dot(nl_grad.T, X) - np.dot((y * nl_grad / nl).T, X)).T
+    # Check if spatially-weighted regression should be performed:
+    if w is not None:
+        if distr in ["poisson", "softplus"]:
+            # Weighted gradient update- elementwise multiplication:
+            w_grad_logl = w * nl_grad
+            w_y = w * y
 
-    elif distr == "gamma":
-        # Degrees of freedom (one because the parameter array is 1D)
-        nu = 1.0
-        grad_logl = (y / nl**2 - 1 / nl) * nl_grad
-        if fit_intercept:
-            grad_beta0 = -nu * np.sum(grad_logl)
-        grad_beta = -nu * np.dot(grad_logl.T, X).T
+            if fit_intercept:
+                grad_beta0 = np.sum(w_grad_logl) - np.sum(w_y * nl_grad / nl)
+            grad_beta = (np.dot(w_grad_logl.T, X) - np.dot((w_y * nl_grad / nl).T, X)).T
 
-    elif distr == "neg-binomial":
-        partial_beta_0 = nl_grad * ((theta + y) / (nl + theta) - y / nl)
-        if fit_intercept:
-            grad_beta0 = np.sum(partial_beta_0)
-        grad_beta = np.dot(partial_beta_0.T, X)
+        elif distr == "gamma":
+            # Degrees of freedom (one because the parameter array is 1D)
+            nu = 1.0
 
-    elif distr == "gaussian":
-        if fit_intercept:
-            grad_beta0 = np.sum((nl - y) * nl_grad)
-        grad_beta = np.dot((nl - y).T, X * nl_grad[:, None]).T
+            # Weighted gradient update:
+            w_grad_logl = w * (y / nl**2 - 1 / nl) * nl_grad
+            if fit_intercept:
+                grad_beta0 = -nu * np.sum(w_grad_logl)
+            grad_beta = -nu * np.dot(w_grad_logl.T, X).T
+
+        elif distr == "neg-binomial":
+            w_partial_beta_0 = w * nl_grad * ((theta + y) / (nl + theta) - y / nl)
+            if fit_intercept:
+                grad_beta0 = np.sum(w_partial_beta_0)
+            grad_beta = np.dot(w_partial_beta_0.T, X)
+
+        elif distr == "gaussian":
+            w_y = w * (nl - y)
+            if fit_intercept:
+                grad_beta0 = np.sum(w_y * nl_grad)
+            grad_beta = np.dot(w_y.T, X * nl_grad[:, None]).T
+
+    else:
+        if distr in ["poisson", "softplus"]:
+            if fit_intercept:
+                grad_beta0 = np.sum(nl_grad) - np.sum(y * nl_grad / nl)
+            grad_beta = (np.dot(nl_grad.T, X) - np.dot((y * nl_grad / nl).T, X)).T
+
+        elif distr == "gamma":
+            # Degrees of freedom (one because the parameter array is 1D)
+            nu = 1.0
+            grad_logl = (y / nl**2 - 1 / nl) * nl_grad
+            if fit_intercept:
+                grad_beta0 = -nu * np.sum(grad_logl)
+            grad_beta = -nu * np.dot(grad_logl.T, X).T
+
+        elif distr == "neg-binomial":
+            partial_beta_0 = nl_grad * ((theta + y) / (nl + theta) - y / nl)
+            if fit_intercept:
+                grad_beta0 = np.sum(partial_beta_0)
+            grad_beta = np.dot(partial_beta_0.T, X)
+
+        elif distr == "gaussian":
+            if fit_intercept:
+                grad_beta0 = np.sum((nl - y) * nl_grad)
+            grad_beta = np.dot((nl - y).T, X * nl_grad[:, None]).T
 
     grad_beta0 *= 1.0 / n_samples
     grad_beta *= 1.0 / n_samples
@@ -214,6 +252,7 @@ def log_likelihood(
     y: np.ndarray,
     y_hat: Union[np.ndarray, float],
     theta: float = 1.0,
+    w: Optional[np.ndarray, scipy.sparse.spmatrix] = None,
 ) -> float:
     """Computes negative log-likelihood of an observation, based on true values and predictions from the regression.
 
@@ -222,30 +261,60 @@ def log_likelihood(
             sensitive.
         y: Target values
         y_hat: Predicted values, either array of predictions or scalar value
+        theta: Shape parameter of the negative binomial distribution (number of successes before the first failure).
+            Used only if 'distr' is "neg-binomial"
+        w: Optional weights vector for spatially-weighted regression. If given, will perform calculations for
+            spatially-weighted regression rather than generalized linear regression.
 
     Returns:
         logL: Numerical value for the log-likelihood
     """
-    if distr in ["poisson", "softplus"]:
-        eps = np.spacing(1)
-        logL = np.sum(y * np.log(y_hat + eps) - y_hat)
+    if w is not None:
+        if distr in ["poisson", "softplus"]:
+            eps = np.spacing(1)
+            logL = np.sum(w * (y * np.log(y_hat + eps) - y_hat))
 
-    elif distr == "gamma":
-        nu = 1.0  # shape parameter, exponential for now
-        logL = np.sum(nu * (-y / y_hat - np.log(y_hat)))
+        elif distr == "gamma":
+            nu = 1.0  # shape parameter, exponential for now
+            logL = np.sum(w * (nu * (-y / y_hat - np.log(y_hat))))
 
-    elif distr == "neg-binomial":
-        logL = np.sum(
-            loggamma(y + theta)
-            - loggamma(theta)
-            - loggamma(y + 1)
-            + theta * np.log(theta)
-            + y * np.log(y_hat)
-            - (theta + y) * np.log(y_hat + theta)
-        )
+        elif distr == "neg-binomial":
+            logL = np.sum(
+                w
+                * (
+                    loggamma(y + theta)
+                    - loggamma(theta)
+                    - loggamma(y + 1)
+                    + theta * np.log(theta)
+                    + y * np.log(y_hat)
+                    - (theta + y) * np.log(y_hat + theta)
+                )
+            )
 
-    elif distr == "gaussian":
-        logL = -0.5 * np.sum((y - y_hat) ** 2)
+        elif distr == "gaussian":
+            logL = -0.5 * np.sum(w * (y - y_hat) ** 2)
+
+    else:
+        if distr in ["poisson", "softplus"]:
+            eps = np.spacing(1)
+            logL = np.sum(y * np.log(y_hat + eps) - y_hat)
+
+        elif distr == "gamma":
+            nu = 1.0  # shape parameter, exponential for now
+            logL = np.sum(nu * (-y / y_hat - np.log(y_hat)))
+
+        elif distr == "neg-binomial":
+            logL = np.sum(
+                loggamma(y + theta)
+                - loggamma(theta)
+                - loggamma(y + 1)
+                + theta * np.log(theta)
+                + y * np.log(y_hat)
+                - (theta + y) * np.log(y_hat + theta)
+            )
+
+        elif distr == "gaussian":
+            logL = -0.5 * np.sum((y - y_hat) ** 2)
 
     return logL
 
@@ -261,6 +330,7 @@ def _loss(
     eta: float = 2.0,
     theta: float = 1.0,
     fit_intercept: bool = True,
+    w: Optional[np.ndarray, scipy.sparse.spmatrix] = None,
 ) -> float:
     """Objective function, comprised of a combination of the log-likelihood and regularization losses.
 
@@ -279,6 +349,8 @@ def _loss(
             Used only if 'distr' is "neg-binomial"
         fit_intercept: Specifies if a constant (a.k.a. bias or intercept) should be added to the decision function.
             Defaults to True.
+        w: Optional weights vector for spatially-weighted regression. If given, will perform calculations for
+            spatially-weighted regression rather than generalized linear regression.
 
     Returns:
         loss: Numerical value for loss
@@ -286,7 +358,7 @@ def _loss(
     n_samples, n_features = X.shape
     z = calc_z(beta[0], beta[1:], X, fit_intercept)
     y_hat = apply_nonlinear(distr, z, eta, fit_intercept)
-    ll = 1.0 / n_samples * log_likelihood(distr, y, y_hat, z, theta)
+    ll = 1.0 / n_samples * log_likelihood(distr, y, y_hat, theta, w=w)
 
     if fit_intercept:
         P = L1_L2_penalty(alpha, beta[1:], Tau)
@@ -847,6 +919,139 @@ class GLMCV(BaseEstimator):
         return score
 
 
+class GLM_WR(GLM):
+    """
+    Variant of generalized linear modeling that accounts for spatial heterogeneity in the dependent variable.
+
+    The basis of these models are generalized linear models (Gaussian, Poisson, negative binomial, gamma) for modeling
+    gene expression.
+
+    NOTES: 'Tau' is the Tikhonov matrix (a square factorization of the inverse covariance matrix), used to set the
+    degree to which the algorithm tends towards solutions with smaller norms. If not given, defaults to the ridge (
+    L2) penalty.
+
+    Args:
+        coords: Array of shape [n, 2], collection of n sets of (x,y) coordinates specifying the location of each point.
+        bandwidth: Bandwidth value consisting of either a distance or N nearest neighbors; user specified or
+            obtained using :class `~BW_Selector`.
+        kernel: The name of the kernel function to use. Options: "gaussian", "triangular", "quadratic", "uniform",
+            "exponential", "bisquare".
+        fixed: If True, `bandwidth` is treated as a fixed bandwidth parameter. Otherwise, it is treated as the number
+            of nearest neighbors to include in the bandwidth estimation.
+        distr: Distribution family- can be "gaussian", "poisson", "neg-binomial", or "gamma". Case sensitive.
+        alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function
+        Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
+            provided, Tau will default to the identity matrix.
+        reg_lambda: Regularization parameter :math:`\\lambda` of penalty term
+        learning_rate: Governs the magnitude of parameter updates for the gradient descent algorithm
+        max_iter: Maximum number of iterations for the solver
+        tol: Convergence threshold or stopping criteria. Optimization loop will stop when relative change in
+            parameter norm is below the threshold.
+        eta: A threshold parameter that linearizes the exp() function above eta.
+        clip_coeffs: Coefficients of lower absolute value than this threshold are set to zero.
+        score_metric: Scoring metric. Options:
+            - "deviance": Uses the difference between the saturated (perfectly predictive) model and the true model.
+            - "pseudo_r2": Uses the coefficient of determination b/w the true and predicted values.
+        fit_intercept: Specifies if a constant (a.k.a. bias or intercept) should be added to the decision function
+        random_seed: Seed of the random number generator used to initialize the solution. Default: 888
+        theta: Shape parameter of the negative binomial distribution (number of successes before the first
+            failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
+        verbose: If True, will display information about number of iterations until convergence. Defaults to False.
+    """
+
+    def __init__(
+        self,
+        coords: np.ndarray,
+        bandwidth: float,
+        kernel: Literal["gaussian", "triangular", "quadratic", "uniform", "exponential", "bisquare"],
+        fixed: bool = True,
+        distr: Literal["gaussian", "poisson", "softplus", "neg-binomial", "gamma"] = "poisson",
+        alpha: float = 0.5,
+        Tau: Union[None, np.ndarray] = None,
+        reg_lambda: Union[None, List[float]] = None,
+        learning_rate: float = 0.2,
+        max_iter: int = 1000,
+        tol: float = 1e-6,
+        eta: float = 2.0,
+        clip_coeffs: float = 0.01,
+        score_metric: Literal["deviance", "pseudo_r2"] = "deviance",
+        fit_intercept: bool = True,
+        random_seed: int = 888,
+        theta: float = 1.0,
+    ):
+        self.logger = lm.get_main_logger()
+        allowable_dists = ["gaussian", "poisson", "softplus", "neg-binomial", "gamma"]
+        if distr not in allowable_dists:
+            self.logger.error(f"'distr' must be one of {', '.join(allowable_dists)}, got {distr}.")
+        if not isinstance(max_iter, int):
+            self.logger.error("'max_iter' must be an integer.")
+        if not isinstance(fit_intercept, bool):
+            self.logger.error(f"'fit_intercept' must be Boolean, got {type(fit_intercept)}")
+        if not isinstance(coords, np.ndarray):
+            self.logger.error("Coordinates must be provided in array form.")
+
+        GLM.__init__(
+            self,
+            distr=distr,
+            alpha=alpha,
+            Tau=Tau,
+            reg_lambda=reg_lambda,
+            learning_rate=learning_rate,
+            max_iter=max_iter,
+            tol=tol,
+            eta=eta,
+            clip_coeffs=clip_coeffs,
+            theta=theta,
+            score_metric=score_metric,
+            fit_intercept=fit_intercept,
+            random_seed=random_seed,
+            verbose=False,
+        )
+
+        self.coords = coords
+        self.n = len(coords)
+        self.bandwidth = bandwidth
+        self.kernel = kernel
+        self.fixed = fixed
+
+    def _build_wi(self, i: int, bw: float):
+        if bw == np.inf:
+            wi = np.ones((self.n))
+            return wi
+
+        wi = Kernel(i, data=self.coords, bw=self.bandwidth, fixed=self.fixed, function=self.kernel)
+        return wi
+
+    def local_fit(self, i: int, X: np.ndarray, y: np.ndarray):
+        """Local fitting of regression model at location i.
+
+        Args:
+            i: Index of the "center point" for spatially-weighted regression
+            X: Independent variable array of shape [n, k]
+            y: Dependent variable array of shape [n, 1]
+
+        Returns:
+            intercept: Scalar, value of the intercept
+            Beta: Array of shape [n_parameters, 1], contains weight for each parameter
+            rex: Array of shape [n_samples, 1]. Reconstructed dependent variable values.
+            resid: Difference between local actual value of dependent variable and model prediction
+        """
+        rex = self.fit_predict(X, y)[i]
+        resid = y[i] - rex
+        intercept = self.beta0_
+        Beta = self.beta_
+
+        return intercept, Beta, rex, resid
+
+    def fit_all(self, num_processes: Optional[int] = None):
+        """Applies spatially-weighted regression across entire sample, compiling results appropriately.
+
+        Args:
+            num_processes: The number of processes to use for parallel computation. If None (default),
+                the number of processes is set to the number of available CPU cores on the system.
+        """
+
+
 # ---------------------------------------------------------------------------------------------------
 # Wrapper for GLM CV, with parameter optimization
 # ---------------------------------------------------------------------------------------------------
@@ -860,6 +1065,7 @@ def fit_glm(
     gs_params: Union[None, dict] = None,
     n_gs_cv: Union[None, int] = None,
     return_model: bool = True,
+    verbose: bool = True,
     **kwargs,
 ) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray, Union[None, GLMCV]]:
     """Wrapper for fitting a generalized elastic net linear model to large biological data, with automated finding of
@@ -902,8 +1108,9 @@ def fit_glm(
                     failure). It is used only if 'distr' is equal to "neg-binomial", otherwise it is ignored.
 
     Returns:
+        intercept: Scalar, value of the intercept
         Beta: Array of shape [n_parameters, 1], contains weight for each parameter
-        rex: Array of shape [n_samples, 1]. Reconstructed independent variable values.
+        rex: Array of shape [n_samples, 1]. Reconstructed dependent variable values.
         reg: Instance of regression model. Returned only if 'return_model' is True.
     """
     logger = lm.get_main_logger()
@@ -946,20 +1153,24 @@ def fit_glm(
     if gs_params is not None:
         reg_lambda_given = kwargs.get("reg_lambda", None)
         if reg_lambda_given is None or len(reg_lambda_given) > 3:
-            logger.info(
-                "Beginning grid search procedure. Temporarily running on reduced range of lambda values for "
-                "conciseness."
-            )
+            if verbose:
+                logger.info(
+                    "Beginning grid search procedure. Temporarily running on reduced range of lambda values for "
+                    "conciseness."
+                )
             kwargs["reg_lambda"] = [0.1, 1e-4]
         else:
-            logger.info("Beginning grid search procedure.")
+            if verbose:
+                logger.info("Beginning grid search procedure.")
 
         reg = GLMCV(**kwargs)
         grid = GridSearchCV(estimator=reg, param_grid=gs_params, cv=n_gs_cv)
         grid.fit(X, y)
-        logger.info(f"Grid search finished for {y_feat}. Elapsed time: {time.time()-start_gs_time}s.")
+        if verbose:
+            logger.info(f"Grid search finished for {y_feat}. Elapsed time: {time.time()-start_gs_time}s.")
         best_params = grid.best_params_
-        msg = f"Grid search best parameters for {y_feat}: "
+        if verbose:
+            msg = f"Grid search best parameters for {y_feat}: "
         for k, v in best_params.items():
             msg += f"\n{k}: {v}"
         logger.info(msg)
@@ -973,7 +1184,8 @@ def fit_glm(
     reg = GLMCV(**kwargs)
 
     rex = reg.fit_predict(X, y)
-    logger.info(f"Optimal lambda regularization value for {y_feat}: {reg.reg_lambda_opt_}.")
+    if verbose:
+        logger.info(f"Optimal lambda regularization value for {y_feat}: {reg.reg_lambda_opt_}.")
     intercept = reg.beta0_
     Beta = reg.beta_
     opt_score = reg.opt_score
