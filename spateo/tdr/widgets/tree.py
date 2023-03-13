@@ -24,6 +24,18 @@ from tensorflow.keras import optimizers
 
 
 def cal_ncenter(ncells, ncells_limit=100):
+    """
+    Calculate the number of centroids based on the cell number.
+
+    Args:
+        ncells: Number of cells in the data.
+        ncells_limit: The minimal number of cells that will start to use centroids instead of cells to approximate the
+            the principal tree.
+
+    Returns:
+
+    """
+
     if ncells >= ncells_limit:
         return np.round(2 * ncells_limit * np.log(ncells) / (np.log(ncells) + np.log(ncells_limit)))
     else:

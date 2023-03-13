@@ -7,6 +7,9 @@ from pyvista import PolyData
 from scipy.sparse import csr_matrix, diags, issparse, lil_matrix, spmatrix
 from scipy.spatial import ConvexHull, Delaunay, cKDTree
 
+from ...configuration import SKM
+from ...logging import main_info
+
 
 def rescaling(mat: Union[np.ndarray, spmatrix], new_shape: Union[List, Tuple]) -> Union[np.ndarray, spmatrix]:
     """This function rescale the resolution of the input matrix that represents a spatial domain. For example, if you
@@ -166,3 +169,34 @@ def in_hull(p: np.ndarray, hull: Tuple[Delaunay, np.ndarray]) -> np.ndarray:
 
     res = hull.find_simplex(p) >= 0
     return res
+
+
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE, "adata")
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE, "selection_adata")
+def cellbin_select(
+    adata: AnnData, selection_adata: AnnData, selection_key: str, spatial_key: str = "spatial", inplace: bool = False
+) -> Optional[AnnData]:
+    """Select cells from adata based on the cell binning of selection_adata.
+
+    Args:
+        adata: AnnData object whose cells of interests will be selected based on mask from selection_adata.
+        selection_adata: AnnData object whose spatial mask will be used to select cells from adata.
+        inplace: Whether to update adata or return a new AnnData object.
+
+    Returns:
+        When inplace is set to be True, the adata object will be subset with only the selected cells, otherwise a new
+        AnnData object will be returned.
+    """
+    within_inds = np.vstack(np.where(selection_adata.layers[selection_key])).T.tolist()
+
+    binsize = selection_adata.uns[spatial_key]["binsize"]
+    selection_area = [list((x - int(binsize)) // binsize) in within_inds for x in adata.obsm[spatial_key].astype("int")]
+
+    main_info.info(f"Selecting {sum(selection_area)} cells from {adata.shape[0]} cells.")
+
+    if inplace:
+        adata = adata[selection_area]
+        return adata
+    else:
+        subset = adata[selection_area, :]
+        return subset
