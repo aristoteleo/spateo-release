@@ -1,6 +1,6 @@
 """Interactive plotting functions for aggregated UMI counts.
 """
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import cv2
 import matplotlib as mpl
