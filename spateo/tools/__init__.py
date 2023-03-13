@@ -1,3 +1,11 @@
+from .alignment import (
+    get_align_labels,
+    get_optimal_mapping_connections,
+    models_align,
+    models_align_ref,
+    paste_transform,
+    rigid_transform,
+)
 from .architype import (
     archetypes,
     archetypes_genes,
@@ -37,13 +45,6 @@ from .glm import glm_degs
 from .labels import Label, create_label_class
 from .lisa import GM_lag_model, lisa_geo_df, local_moran_i
 from .live_wire import LiveWireSegmentation, compute_shortest_path, live_wire
-from .paste import (
-    center_align,
-    generalized_procrustes_analysis,
-    mapping_aligned_coords,
-    mapping_center_coords,
-    pairwise_align,
-)
 from .spatial_degs import cellbin_morani, moran_i
 from .spatial_smooth import *
 from .spatial_smooth.run_smoothing import smooth_and_downsample
@@ -58,6 +59,7 @@ from .ST_regression.spatial_regression import (
     Niche_LR_Model,
     Niche_Model,
 )
+
 from .three_dims_align import (
     get_align_labels,
     models_align,
@@ -75,3 +77,4 @@ from .three_dims_align import (
 #    lasso_adata,
 # )
 from .utils import cellbin_select
+

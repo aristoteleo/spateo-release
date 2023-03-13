@@ -25,7 +25,7 @@ def construct_field(
     color: Union[str, list, dict, np.ndarray] = "gainsboro",
     alpha: float = 1.0,
     **kwargs,
-) -> PolyData:
+) -> Tuple[PolyData, Optional[str]]:
     """
     Create a 3D vector field arrows model.
 
@@ -46,6 +46,7 @@ def construct_field(
 
     Returns:
         A 3D vector field arrows model.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     return construct_arrows(
@@ -99,13 +100,14 @@ def construct_field_streams(
     Returns:
         streams_model: 3D vector field streamlines model.
         src: The source particles as pyvista.PolyData as well as the streamlines.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     # generate the streamlines based on the vector field.
     streamlines, src = model.streamlines(
         vf_key, return_source=True, source_center=source_center, source_radius=source_radius, **kwargs
     )
-    add_model_labels(
+    _, plot_cmap = add_model_labels(
         model=streamlines,
         key_added=key_added,
         labels=np.asarray([label] * streamlines.n_points),
@@ -121,7 +123,7 @@ def construct_field_streams(
         tips_points.append(streamline.points[-1])
         tips_vectors.append(streamline.point_data[vf_key][-1])
 
-    arrows = construct_arrows(
+    arrows, plot_cmap = construct_arrows(
         start_points=np.asarray(tips_points),
         direction=np.asarray(tips_vectors),
         arrows_scale=np.ones(shape=(len(tips_points), 1)),
@@ -135,4 +137,4 @@ def construct_field_streams(
     )
 
     streams_model = merge_models([streamlines, arrows])
-    return streams_model, src
+    return streams_model, src, plot_cmap

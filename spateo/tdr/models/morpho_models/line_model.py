@@ -37,7 +37,7 @@ def construct_line(
     label: str = "line",
     color: str = "gainsboro",
     alpha: float = 1.0,
-) -> PolyData:
+) -> Tuple[PolyData, Optional[str]]:
     """
     Create a 3D line model.
 
@@ -50,13 +50,15 @@ def construct_line(
         alpha: The opacity of the color to use for plotting model.
 
     Returns:
-        Line model.
+        model: Line model.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     model = _construct_line(start_point=start_point, end_point=end_point)
 
+    plot_cmap = None
     if not (key_added is None):
-        add_model_labels(
+        _, plot_cmap = add_model_labels(
             model=model,
             key_added=key_added,
             labels=np.asarray([label] * model.n_points),
@@ -66,7 +68,7 @@ def construct_line(
             inplace=True,
         )
 
-    return model
+    return model, plot_cmap
 
 
 def construct_lines(
@@ -76,7 +78,7 @@ def construct_lines(
     label: Union[str, list, np.ndarray] = "lines",
     color: Union[str, list, dict] = "gainsboro",
     alpha: Union[float, int, list, dict] = 1.0,
-) -> PolyData:
+) -> Tuple[PolyData, Optional[str]]:
     """
     Create 3D lines model.
 
@@ -89,7 +91,8 @@ def construct_lines(
         alpha: The opacity of the color to use for plotting model.
 
     Returns:
-        Lines model.
+        model: Lines model.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     padding = np.array([2] * edges.shape[0], int)
@@ -98,8 +101,9 @@ def construct_lines(
 
     labels = np.asarray([label] * points.shape[0]) if isinstance(label, str) else np.asarray(label)
     assert len(labels) == points.shape[0], "The number of labels is not equal to the number of points."
+    plot_cmap = None
     if not (key_added is None):
-        add_model_labels(
+        _, plot_cmap = add_model_labels(
             model=model,
             key_added=key_added,
             labels=labels,
@@ -109,7 +113,7 @@ def construct_lines(
             inplace=True,
         )
 
-    return model
+    return model, plot_cmap
 
 
 def generate_edges(
@@ -134,7 +138,7 @@ def construct_align_lines(
     label: Union[str, list, np.ndarray] = "align_mapping",
     color: Union[str, list, dict, np.ndarray] = "gainsboro",
     alpha: Union[float, int, list, dict, np.ndarray] = 1.0,
-) -> PolyData:
+) -> Tuple[PolyData, Optional[str]]:
     """
     Construct alignment lines between models after model alignment.
 
@@ -147,12 +151,15 @@ def construct_align_lines(
         alpha: The opacity of the color to use for plotting model.
 
     Returns:
-        Alignment lines model.
+        model: Alignment lines model.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     points, edges = generate_edges(points1=model1_points, points2=model2_points)
-    model = construct_lines(points=points, edges=edges, key_added=key_added, label=label, color=color, alpha=alpha)
-    return model
+    model, plot_cmap = construct_lines(
+        points=points, edges=edges, key_added=key_added, label=label, color=color, alpha=alpha
+    )
+    return model, plot_cmap
 
 
 def construct_axis_line(
@@ -161,7 +168,7 @@ def construct_axis_line(
     label: str = "axis_line",
     color: str = "gainsboro",
     alpha: Union[float, int, list, dict, np.ndarray] = 1.0,
-) -> PolyData:
+) -> Tuple[PolyData, Optional[str]]:
     """
     Construct axis line.
 
@@ -173,13 +180,14 @@ def construct_axis_line(
         alpha: The opacity of the color to use for plotting model.
 
     Returns:
-        Axis line model.
+        axis_line: Axis line model.
+        plot_cmap: Recommended colormap parameter values for plotting.
     """
 
     start_point = axis_points.min(axis=0)
     end_point = axis_points.max(axis=0)
-    axis_line = construct_line(
+    axis_line, plot_cmap = construct_line(
         start_point=start_point, end_point=end_point, key_added=key_added, label=label, color=color, alpha=alpha
     )
 
-    return axis_line
+    return axis_line, plot_cmap

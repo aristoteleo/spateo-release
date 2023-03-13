@@ -98,6 +98,8 @@ def get_fisher_inverse(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """Computes the Fisher matrix that measures the amount of information each feature in x provides about y- that is,
     whether the log-likelihood is sensitive to change in the parameter x.
 
+    Function from diffxpy: https://github.com/theislab/diffxpy
+
     Args:
         x: Independent variable array
         y: Dependent variable array
@@ -118,6 +120,8 @@ def get_fisher_inverse(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 def wald_test(theta_mle: np.ndarray, theta_sd: np.ndarray, theta0: Union[float, np.ndarray] = 0) -> np.ndarray:
     """Perform single-coefficient Wald test, informing whether a given coefficient deviates significantly from the
     supplied reference value (theta0), based on the standard deviation of the posterior of the parameter estimate.
+
+    Function from diffxpy: https://github.com/theislab/diffxpy
 
     Args:
         theta_mle: Maximum likelihood estimation of given parameter by feature
@@ -147,6 +151,8 @@ def wald_test(theta_mle: np.ndarray, theta_sd: np.ndarray, theta0: Union[float, 
 def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: float = 0.05) -> np.ndarray:
     """In the case of testing multiple hypotheses from the same experiment, perform multiple test correction to adjust
     q-values.
+
+    Function from diffxpy: https://github.com/theislab/diffxpy
 
     Args:
     pvals: Uncorrected p-values; must be given as a one-dimensional array
@@ -181,6 +187,8 @@ def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: fl
 def get_p_value(variables: np.array, fisher_inv: np.array, coef_loc: int) -> np.ndarray:
     """Computes p-value for differential expression for a target feature
 
+    Function from diffxpy: https://github.com/theislab/diffxpy
+
     Args:
         variables: Array where each column corresponds to a feature
         fisher_inv: Inverse Fisher information matrix
@@ -204,6 +212,8 @@ def compute_wald_test(
     params: np.ndarray, fisher_inv: np.ndarray, significance_threshold: float = 0.01
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
+    Function from diffxpy: https://github.com/theislab/diffxpy
+
     Args:
         params: Array of shape [n_features, n_params]
         fisher_inv: Inverse Fisher information matrix

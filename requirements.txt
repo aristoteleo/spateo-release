@@ -21,7 +21,7 @@ networkx>=2.6.3
 # ngs_tools>=1.6.0
 nudged>=0.3.1
 numba>=0.46.0
-numpy>=1.18.1<=2.10.0
+numpy>=1.18.1
 opencv-python>=4.5.4.60
 pandana
 pandas>=0.25.1
@@ -31,7 +31,7 @@ pynndescent>=0.4.8
 pysal>=1.14.4
 pyro-ppl
 python-igraph>=0.7.1
-pyvista>=0.33.3
+pyvista>=0.37.0
 scipy>=1.0
 scikit-image>=0.18.0
 scikit-learn>=0.19.1
@@ -41,7 +41,7 @@ Shapely>=1.8.0
 statsmodels>=0.9.0
 tensorflow
 tqdm>=4.62.3
-torch>=1.10.1+cu113
+torch
 typing_extensions>=4.0.1
 umap-learn>=0.5.1
-vtk>=9.1.0
+vtk==9.2.2
