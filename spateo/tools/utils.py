@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from anndata import AnnData
 from pyvista import PolyData
 from scipy.sparse import csr_matrix, diags, issparse, lil_matrix, spmatrix
 from scipy.spatial import ConvexHull, Delaunay, cKDTree
