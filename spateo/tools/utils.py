@@ -7,8 +7,8 @@ from pyvista import PolyData
 from scipy.sparse import csr_matrix, diags, issparse, lil_matrix, spmatrix
 from scipy.spatial import ConvexHull, Delaunay, cKDTree
 
-from ...configuration import SKM
-from ...logging import main_info
+from ..configuration import SKM
+from ..logging import logger_manager as lm
 
 
 def rescaling(mat: Union[np.ndarray, spmatrix], new_shape: Union[List, Tuple]) -> Union[np.ndarray, spmatrix]:
@@ -114,7 +114,7 @@ def compute_smallest_distance(
     if len(coords.shape) != 2:
         raise ValueError("Coordinates should be a NxM array.")
     if use_unique_coords:
-        # main_info("using unique coordinates for computing smallest distance")
+        # lm.main_info("using unique coordinates for computing smallest distance")
         coords = [tuple(coord) for coord in coords]
         coords = np.array(list(set(coords)))
     # use cKDTree which is implmented in C++ and is much faster than KDTree
@@ -192,7 +192,7 @@ def cellbin_select(
     binsize = selection_adata.uns[spatial_key]["binsize"]
     selection_area = [list((x - int(binsize)) // binsize) in within_inds for x in adata.obsm[spatial_key].astype("int")]
 
-    main_info.info(f"Selecting {sum(selection_area)} cells from {adata.shape[0]} cells.")
+    lm.main_info(f"Selecting {sum(selection_area)} cells from {adata.shape[0]} cells.")
 
     if inplace:
         adata = adata[selection_area]
