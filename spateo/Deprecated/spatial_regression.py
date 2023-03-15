@@ -34,15 +34,18 @@ from pysal.model import spreg
 from scipy.sparse import diags, issparse
 from tqdm import tqdm
 
-from ...configuration import config_spateo_rcParams, shiftedColorMap
-from ...logging import logger_manager as lm
-from ...plotting.static.utils import save_return_show_fig_utils
-from ...preprocessing.normalize import normalize_total
-from ...preprocessing.transform import log1p
-from ...tools.find_neighbors import construct_nn_graph, transcriptomic_connectivity
-from ...tools.utils import update_dict
-from .generalized_lm import fit_glm
-from .regression_utils import compute_wald_test, get_fisher_inverse
+from spateo.configuration import config_spateo_rcParams, shiftedColorMap
+from spateo.Deprecated.generalized_lm import fit_glm
+from spateo.logging import logger_manager as lm
+from spateo.plotting.static.utils import save_return_show_fig_utils
+from spateo.preprocessing.normalize import normalize_total
+from spateo.preprocessing.transform import log1p
+from spateo.tools.find_neighbors import construct_nn_graph, transcriptomic_connectivity
+from spateo.tools.ST_regression.regression_utils import (
+    compute_wald_test,
+    get_fisher_inverse,
+)
+from spateo.tools.utils import update_dict
 
 
 # ---------------------------------------------------------------------------------------------------

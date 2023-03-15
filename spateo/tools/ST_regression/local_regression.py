@@ -8,12 +8,13 @@ from typing import List, Literal, Optional, Union
 from anndata import AnnData
 from sklearn.cluster import KMeans
 
+from spateo.Deprecated.generalized_lm import GLMCV
+from spateo.Deprecated.spatial_regression import Niche_LR_Model, Niche_Model
+
 from ...logging import logger_manager as lm
 from ...plotting.static.space import space
 from ...utils import remove_kwargs
-from .generalized_lm import GLMCV
 from .regression_utils import compute_kmeans
-from .spatial_regression import Base_Model, Niche_LR_Model, Niche_Model
 
 
 # ---------------------------------------------------------------------------------------------------

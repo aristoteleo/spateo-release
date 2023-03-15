@@ -42,11 +42,4 @@ from .spatial_smooth import *
 from .spatial_smooth.run_smoothing import smooth_and_downsample
 from .spatial_smooth.smooth import STGNN
 from .ST_regression import *
-from .ST_regression.generalized_lm import fit_glm
 from .ST_regression.regression_utils import plot_prior_vs_data
-from .ST_regression.spatial_regression import (
-    Category_Model,
-    Lagged_Model,
-    Niche_LR_Model,
-    Niche_Model,
-)

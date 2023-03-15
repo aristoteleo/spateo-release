@@ -23,12 +23,12 @@ from sklearn.base import BaseEstimator
 from sklearn.model_selection import GridSearchCV
 from sklearn.utils.validation import check_array, check_is_fitted, check_X_y
 
-from ...configuration import SKM
-from ...logging import logger_manager as lm
-from ...preprocessing.normalize import normalize_total
-from ...preprocessing.transform import log1p
-from ...tools.find_neighbors import Kernel, transcriptomic_connectivity
-from .regression_utils import L1_L2_penalty, softplus
+from spateo.configuration import SKM
+from spateo.logging import logger_manager as lm
+from spateo.preprocessing.normalize import normalize_total
+from spateo.preprocessing.transform import log1p
+from spateo.tools.find_neighbors import Kernel, transcriptomic_connectivity
+from spateo.tools.ST_regression.regression_utils import L1_L2_penalty, softplus
 
 
 # ---------------------------------------------------------------------------------------------------
