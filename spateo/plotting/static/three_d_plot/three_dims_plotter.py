@@ -555,13 +555,16 @@ def output_plotter(
 
     def _to_graph(_screenshot, _jupyter_backend):
         if jupyter is False or jupyter is "none":
-            cpo, img = plotter.show(
-                screenshot=_screenshot,
-                return_img=True,
-                return_cpos=True,
-                jupyter_backend=_jupyter_backend,
-            )
-            return cpo, img
+            if plotter.shape == (1, 1):
+                cpo, img = plotter.show(
+                    screenshot=_screenshot,
+                    return_img=True,
+                    return_cpos=True,
+                    jupyter_backend=_jupyter_backend,
+                )
+                return cpo, img
+            else:
+                plotter.show(screenshot=_screenshot, jupyter_backend=_jupyter_backend)
         else:
             plotter.show(screenshot=_screenshot, jupyter_backend=_jupyter_backend)
 
@@ -585,8 +588,11 @@ def output_plotter(
     if filename is None:
         # p.show(jupyter_backend=jupyter_backend)
         if jupyter is False or jupyter is "none":
-            cpo, img = plotter.show(return_img=True, return_cpos=True, jupyter_backend=jupyter_backend)
-            return cpo, img
+            if plotter.shape == (1, 1):
+                cpo, img = plotter.show(return_img=True, return_cpos=True, jupyter_backend=jupyter_backend)
+                return cpo, img
+            else:
+                plotter.show(jupyter_backend=jupyter_backend)
         else:
             plotter.show(jupyter_backend=jupyter_backend)
     else:
