@@ -11,8 +11,8 @@ import pandas as pd
 import seaborn as sns
 from anndata import AnnData
 
+from ....alignment import get_optimal_mapping_relationship
 from ....tdr import collect_models, construct_align_lines, construct_pc
-from ....tools.alignment import get_optimal_mapping_connections
 from .three_dims_plots import three_d_animate, three_d_plot
 
 
@@ -67,7 +67,10 @@ def pi_heatmap(
         fontweight="regular",
     )
     sns.despine(ax=ax, top=False, right=False, left=False, bottom=False)
-    fig.savefig(filename, dpi=300, bbox_inches="tight", format=filename.split(".")[-1])
+    if not (filename is None):
+        fig.savefig(filename, dpi=300, bbox_inches="tight")
+    else:
+        return fig
 
 
 def pairwise_connections(
@@ -190,7 +193,7 @@ def pairwise_connections(
         adataB.obsm[spatial_key] = np.c_[adataB.obsm[spatial_key], z]
 
     # Obtain the optimal mapping connections between two samples
-    max_index, pi_value, _, _ = get_optimal_mapping_connections(
+    max_index, pi_value, _, _ = get_optimal_mapping_relationship(
         X=adataA.obsm[spatial_key].copy(),
         Y=adataB.obsm[spatial_key].copy(),
         pi=pi,

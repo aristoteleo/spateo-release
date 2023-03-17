@@ -15,6 +15,7 @@ from spateo.tdr import (
     collect_models,
     construct_pc,
     merge_models,
+    translate_model,
 )
 
 from .three_dims_plots import three_d_multi_plot
@@ -305,7 +306,7 @@ def deformation(
     spatial_key: str = "align_spatial",
     id_key: str = "slices",
     deformation_key: Optional[str] = "deformation",
-    center_zero: bool = True,
+    center_zero: bool = False,
     show_model: bool = True,
     filename: Optional[str] = None,
     jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
@@ -316,13 +317,13 @@ def deformation(
     background: str = "white",
     model_color: Union[str, list] = "red",
     model_alpha: Union[float, list, dict] = 1,
-    colormap: Union[str, list, dict] = "Blues",
+    colormap: Union[str, list, dict] = "black",
     alphamap: Union[float, list, dict] = 1.0,
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
     grid_size: Union[float, list] = 2.0,
     model_size: Union[float, list] = 3.0,
-    show_legend: bool = True,
+    show_legend: bool = False,
     legend_kwargs: Optional[dict] = None,
     text: Union[bool, str] = True,
     text_kwargs: Optional[dict] = None,
@@ -339,7 +340,7 @@ def deformation(
     # Construct a point cloud model
     plot_models, ids, keys, cmaps = [], [], [], []
     for adata, grid in zip(adata_list, grid_list):
-        adata = adata.copy()
+        adata, raw_grid = adata.copy(), grid.copy()
         adata_id = str(adata.obs[id_key].unique().tolist()[0])
         group_key = id_key if group_key is None else group_key
 
@@ -373,7 +374,12 @@ def deformation(
                 alphamap=model_alpha,
             )
             if center_zero is True:
-                center_to_zero(model=pc, inplace=True)
+                translate_distance = (
+                    -raw_grid.center[0],
+                    -raw_grid.center[1],
+                    -raw_grid.center[2],
+                )
+                translate_model(model=pc, distance=translate_distance, inplace=True)
             plot_model = collect_models([pc, grid])
         else:
             plot_model = grid.copy()
