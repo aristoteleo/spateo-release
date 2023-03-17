@@ -19,7 +19,7 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ....tools.alignment import rigid_transform
+from ....alignment import rigid_transform
 from ..utilities import scale_model
 
 ###############
