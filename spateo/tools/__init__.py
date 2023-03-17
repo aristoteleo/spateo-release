@@ -1,11 +1,3 @@
-from .alignment import (
-    get_align_labels,
-    get_optimal_mapping_connections,
-    models_align,
-    models_align_ref,
-    paste_transform,
-    rigid_transform,
-)
 from .architype import (
     archetypes,
     archetypes_genes,
@@ -39,9 +31,6 @@ from .find_neighbors import (
     weighted_spatial_graph,
 )
 from .glm import glm_degs
-
-# from .image import add_image_layer
-# from .interpolation_utils import *
 from .labels import Label, create_label_class
 from .lisa import GM_lag_model, lisa_geo_df, local_moran_i
 from .live_wire import LiveWireSegmentation, compute_shortest_path, live_wire
@@ -59,20 +48,4 @@ from .ST_regression.spatial_regression import (
     Niche_LR_Model,
     Niche_Model,
 )
-from .three_dims_align import (
-    get_align_labels,
-    models_align,
-    models_align_ref,
-    models_center_align,
-    models_center_align_ref,
-    rigid_transform_2D,
-    rigid_transform_3D,
-)
-
-# from .live_wire import (
-#    compute_shortest_path,
-#    live_wire,
-#    draw_adata,
-#    lasso_adata,
-# )
 from .utils import cellbin_select
