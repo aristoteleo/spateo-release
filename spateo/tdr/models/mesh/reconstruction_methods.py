@@ -19,7 +19,6 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ....alignment import rigid_transform
 from ..utilities import scale_model
 
 ###############
@@ -54,6 +53,64 @@ def pv_mesh(pc: PolyData, alpha: float = 2.0) -> PolyData:
 ###########################
 # marching cube algorithm #
 ###########################
+
+
+def rigid_transform(
+    coords: np.ndarray,
+    coords_refA: np.ndarray,
+    coords_refB: np.ndarray,
+) -> np.ndarray:
+    """
+    Compute optimal transformation based on the two sets of points and apply the transformation to other points.
+
+    Args:
+        coords: Coordinate matrix needed to be transformed.
+        coords_refA: Referential coordinate matrix before transformation.
+        coords_refB: Referential coordinate matrix after transformation.
+
+    Returns:
+        The coordinate matrix after transformation
+    """
+    # Check the spatial coordinates
+
+    coords, coords_refA, coords_refB = (
+        coords.copy(),
+        coords_refA.copy(),
+        coords_refB.copy(),
+    )
+    assert (
+        coords.shape[1] == coords_refA.shape[1] == coords_refA.shape[1]
+    ), "The dimensions of the input coordinates must be uniform, 2D or 3D."
+    coords_dim = coords.shape[1]
+    if coords_dim == 2:
+        coords = np.c_[coords, np.zeros(shape=(coords.shape[0], 1))]
+        coords_refA = np.c_[coords_refA, np.zeros(shape=(coords_refA.shape[0], 1))]
+        coords_refB = np.c_[coords_refB, np.zeros(shape=(coords_refB.shape[0], 1))]
+
+    # Compute optimal transformation based on the two sets of points.
+    coords_refA = coords_refA.T
+    coords_refB = coords_refB.T
+
+    centroid_A = np.mean(coords_refA, axis=1).reshape(-1, 1)
+    centroid_B = np.mean(coords_refB, axis=1).reshape(-1, 1)
+
+    Am = coords_refA - centroid_A
+    Bm = coords_refB - centroid_B
+    H = Am @ np.transpose(Bm)
+
+    U, S, Vt = np.linalg.svd(H)
+    R = Vt.T @ U.T
+
+    if np.linalg.det(R) < 0:
+        Vt[2, :] *= -1
+        R = Vt.T @ U.T
+
+    t = -R @ centroid_A + centroid_B
+
+    # Apply the transformation to other points
+    new_coords = (R @ coords.T) + t
+    new_coords = np.asarray(new_coords.T)
+    return new_coords[:, :2] if coords_dim == 2 else new_coords
 
 
 def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_factor: Union[int, float] = 1.0):

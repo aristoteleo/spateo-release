@@ -20,7 +20,6 @@ from .transform import (
     BA_transform,
     BA_transform_and_assignment,
     paste_transform,
-    rigid_transform,
     shape_transform,
 )
 from .utils import (

@@ -9,10 +9,9 @@ from .alignment import (
     morpho_align_ref,
     morpho_align_ref_withlabel,
     morpho_global_align,
+    paste_align,
     paste_align_ref,
-    paste_alignment,
     paste_transform,
-    rigid_transform,
     shape_align,
     shape_transform,
 )
