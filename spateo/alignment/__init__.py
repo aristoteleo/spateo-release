@@ -1,11 +1,3 @@
-from utils import (
-    downsampling,
-    get_labels_based_on_coords,
-    get_optimal_mapping_relationship,
-    mapping_aligned_coords,
-    mapping_center_coords,
-)
-
 from .deformation import grid_deformation
 from .methods import (
     PCA_project,
@@ -30,4 +22,11 @@ from .transform import (
     paste_transform,
     rigid_transform,
     shape_transform,
+)
+from .utils import (
+    downsampling,
+    get_labels_based_on_coords,
+    get_optimal_mapping_relationship,
+    mapping_aligned_coords,
+    mapping_center_coords,
 )
