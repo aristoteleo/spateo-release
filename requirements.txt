@@ -15,7 +15,7 @@ loess>=2.1.2
 loompy>=3.0.5
 logging-release>=0.0.4
 mapclassify>=2.4.2
-matplotlib>=3.1.0
+matplotlib<=3.5.3
 nbconvert
 networkx>=2.6.3
 # ngs_tools>=1.6.0
