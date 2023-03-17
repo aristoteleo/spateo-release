@@ -11,9 +11,14 @@ import pyvista as pv
 from anndata import AnnData
 from scipy.spatial import ConvexHull, Delaunay
 
-from spateo.tdr import merge_models
-
 from .transform import BA_transform
+
+
+def _merge_models(models):
+    merged_model = models[0]
+    for model in models[1:]:
+        merged_model = merged_model.merge(model)
+    return merged_model
 
 
 def grid_deformation(
@@ -89,8 +94,8 @@ def grid_deformation(
         pv_deform_linex.point_data[key_added] = velocities
         deformed_grid.append(pv_deform_linex)
 
-    pv_grid = merge_models(grid)
-    pv_deformed_grid = merge_models(deformed_grid)
+    pv_grid = _merge_models(grid)
+    pv_deformed_grid = _merge_models(deformed_grid)
     return pv_grid, pv_deformed_grid
 
 

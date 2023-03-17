@@ -9,8 +9,8 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+from ...alignment import get_optimal_mapping_relationship, paste_pairwise_align
 from ...logging import logger_manager as lm
-from ...tools.alignment import get_optimal_mapping_connections, pairwise_align
 from .interpolations import get_X_Y_grid
 
 
@@ -65,7 +65,7 @@ def cell_directions(
         adataB = mapping_adatas[i + 1]
 
         # Calculate and returns optimal alignment of two models.
-        pi, _ = pairwise_align(
+        pi, _ = paste_pairwise_align(
             sampleA=adataA.copy(),
             sampleB=adataB.copy(),
             spatial_key=spatial_key,
@@ -79,7 +79,7 @@ def cell_directions(
             **kwargs,
         )
 
-        max_index, pi_value, _, _ = get_optimal_mapping_connections(
+        max_index, pi_value, _, _ = get_optimal_mapping_relationship(
             X=adataA.obsm[spatial_key].copy(), Y=adataB.obsm[spatial_key].copy(), pi=pi, keep_all=keep_all
         )
 

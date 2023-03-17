@@ -7,6 +7,8 @@ from .methods import (
     _unsqueeze,
     align_preprocess,
     calc_exp_dissimilarity,
+    paste_center_align,
+    paste_pairwise_align,
     shape_align,
 )
 from .morpho_alignment import (
