@@ -4,8 +4,8 @@ import numpy as np
 from pyvista import DataSet, PolyData, UnstructuredGrid
 from sklearn.neighbors import KernelDensity
 
-from ...logging import logger_manager as lm
-from ..models import add_model_labels
+from spateo.logging import logger_manager as lm
+from spateo.tdr.models import add_model_labels
 
 
 def model_morphology(
