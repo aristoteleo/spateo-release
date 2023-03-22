@@ -29,7 +29,7 @@ def pi_heatmap(
     model1_name: str = "model1",
     model2_name: str = "model2",
     colormap: str = "hot_r",
-    fig_height: Union[int, float] = 5,
+    fig_height: Union[int, float] = 3,
     robust: bool = False,
     vmin: Optional[Union[int, float]] = None,
     vmax: Optional[Union[int, float]] = None,
@@ -53,6 +53,9 @@ def pi_heatmap(
         filename:  Filename of output file.
         **kwargs: Additional parameters that will be passed to ``sns.heatmap`` function.
     """
+
+    pi = pi.copy()
+    pi = pi.T[np.lexsort(pi[::-1, :])].T
     pi_shape = pi.shape
     aspect_ratio = pi_shape[1] / pi_shape[0]
     figsize = (fig_height * aspect_ratio, fig_height)
