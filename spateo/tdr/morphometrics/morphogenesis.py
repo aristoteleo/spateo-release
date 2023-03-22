@@ -29,7 +29,7 @@ def cell_directions(
     keep_all: bool = False,
     inplace: bool = True,
     **kwargs,
-) -> Optional[List[AnnData], np.ndarray]:
+) -> Tuple[Optional[AnnData], np.ndarray]:
     """
     Obtain the optimal mapping relationship and developmental direction between cells for samples between continuous developmental stages.
 
