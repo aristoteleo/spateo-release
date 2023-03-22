@@ -11,6 +11,7 @@ import pandas as pd
 import seaborn as sns
 from anndata import AnnData
 from pyvista import PolyData
+from scipy.sparse import issparse
 
 from ....alignment import get_optimal_mapping_relationship
 from ....tdr import (
@@ -18,6 +19,7 @@ from ....tdr import (
     collect_models,
     construct_align_lines,
     construct_pc,
+    merge_models,
 )
 from .three_dims_plots import three_d_animate, three_d_plot
 
@@ -98,12 +100,14 @@ def pairwise_mapping(
     jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
     off_screen: bool = False,
     cpo: Optional[Union[str, list]] = "iso",
-    window_size: Optional[tuple] = None,
+    window_size: Optional[tuple] = (1024, 1024),
     background: str = "black",
     modelA_cmap: str = "dodgerblue",
+    modelA_amap: Union[float, list] = 1.0,
     modelB_cmap: str = "red",
-    alphamap: Union[float, list] = 1.0,
+    modelB_amap: Union[float, list] = 1.0,
     line_color: str = "gainsboro",
+    line_alpha: Union[float, list] = 1.0,
     ambient: float = 0.3,
     model_opacity: float = 1,
     line_opacity: float = 0.03,
@@ -155,12 +159,14 @@ def pairwise_mapping(
                     ``E.g.: [-1.0, 2.0, -5.0].``
                 * A string containing the plane orthogonal to the view direction.
                     ``E.g.: 'xy', 'xz', 'yz', 'yx', 'zx', 'zy', 'iso'.``
-        window_size: Window size in pixels. The default window_size is ``[512, 512]``.
+        window_size: Window size in pixels. The default window_size is ``(1024, 1024)``.
         background: The background color of the window.
         modelA_cmap: Colors to use for plotting modelA. The default colormap is ``'dodgerblue'``.
+        modelA_amap: The opacity of the colors to use for plotting modelA. The default alphamap is ``1.0``.
         modelB_cmap: Colors to use for plotting modelB. The default colormap is ``'red'``.
-        alphamap: The opacity of the colors to use for plotting modelA&modelB. The default alphamap is ``1.0``.
+        modelB_amap: The opacity of the colors to use for plotting modelB. The default alphamap is ``1.0``.
         line_color: Colors to use for plotting lines. The default colormap is ``'gainsboro'``.
+        line_alpha: Alpha to use for plotting lines. The default colormap is ``'gainsboro'``.
         ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
                  the actor when not directed at the light source emitted from the viewer.
         model_opacity: Opacity of the modelA and modelB.
@@ -187,7 +193,7 @@ def pairwise_mapping(
     Returns:
         pcA: The point cloud models of adataA.
         pcB: The point cloud models of adataB.
-        connection_lines: Cell connection lines between modelA and modelB
+        model_lines: Cell mapping lines between modelA and modelB.
     """
     # Check the spatial coordinates
     if adataA is not None and adataA.obsm[spatial_key].shape[1] == 2:
@@ -206,9 +212,9 @@ def pairwise_mapping(
 
     # Construct lines
     if model_lines is None:
-        assert adataA != None, "If ``model_lines`` is None, ``adataA`` cannot be None."
-        assert adataB != None, "If ``model_lines`` is None, ``adataB`` cannot be None."
-        assert pi != None, "If ``model_lines`` is None, ``pi`` cannot be None."
+        assert adataA is not None, "If ``model_lines`` is None, ``adataA`` cannot be None."
+        assert adataB is not None, "If ``model_lines`` is None, ``adataB`` cannot be None."
+        assert pi is not None, "If ``model_lines`` is None, ``pi`` cannot be None."
 
         # Obtain the optimal mapping connections between two samples
         max_index, pi_value, _, _ = get_optimal_mapping_relationship(
@@ -236,20 +242,28 @@ def pairwise_mapping(
             key_added="mapping",
             label="lines",
             color=line_color,
+            alpha=line_alpha,
         )
     else:
         model_lines, plot_cmapL = add_model_labels(
             model=model_lines,
             labels=np.asarray(["lines"] * model_lines.n_points),
             key_added="mapping",
+            where="point_data",
             colormap=line_color,
+            alphamap=line_alpha,
             inplace=False,
         )
 
     # Construct point cloud models
     pc_models, plot_cmaps = [], []
-    for _adata, _model, _cmap, _id, _name in zip(
-        [adataA, adataB], [modelA, modelB], [modelA_cmap, modelB_cmap], [idA, idB], ["A", "B"]
+    for _adata, _model, _cmap, _amap, _id, _name in zip(
+        [adataA, adataB],
+        [modelA, modelB],
+        [modelA_cmap, modelB_cmap],
+        [modelA_amap, modelB_amap],
+        [idA, idB],
+        ["A", "B"],
     ):
         if _adata is None:
             assert _model != None, f"If ``adata{_name}`` is None, ``model{_name}`` cannot be None."
@@ -257,15 +271,16 @@ def pairwise_mapping(
                 model=_model,
                 labels=np.asarray([_id] * _model.n_points),
                 key_added="mapping",
+                where="point_data",
                 colormap=_cmap,
-                alphamap=alphamap,
+                alphamap=_amap,
                 inplace=False,
             )
         else:
             _adata.obs["id"] = _id
             group_key = "id" if group_key is None else group_key
 
-            if modelA is None:
+            if _model is None:
                 pc_model, plot_cmapPC = construct_pc(
                     adata=_adata.copy(),
                     layer=layer,
@@ -273,32 +288,37 @@ def pairwise_mapping(
                     groupby=group_key,
                     key_added="mapping",
                     colormap=_cmap,
-                    alphamap=alphamap,
+                    alphamap=_amap,
                 )
-                if _name == "B":
-                    pc_model.points = pc_model.points + models_distance
             else:
                 if group_key in _adata.obs_keys():
                     labels_arr = _adata.obs[group_key]
                 elif group_key in _adata.var_names:
                     _adata.X = _adata.X if layer == "X" else _adata.layers[layer]
-                    labels_arr = _adata[:, group_key].X.flatten()
+                    labels_arr = (
+                        _adata[:, group_key].X.todense().flatten()
+                        if issparse(_adata.X)
+                        else _adata[:, group_key].X.flatten()
+                    )
                 else:
                     raise ValueError("`group_key` value is wrong.")
                 pc_model, plot_cmapPC = add_model_labels(
                     model=_model,
                     labels=labels_arr,
                     key_added="mapping",
+                    where="point_data",
                     colormap=_cmap,
-                    alphamap=alphamap,
+                    alphamap=_amap,
                     inplace=False,
                 )
+        if _name == "B":
+            pc_model.points = pc_model.points + models_distance
         pc_models.append(pc_model)
         plot_cmaps.append(plot_cmapPC)
 
     # Visualization
-    three_d_plot(
-        model=collect_models([model_lines] + pc_models),
+    return three_d_plot(
+        model=collect_models([model_lines, merge_models(pc_models)]),
         key="mapping",
         filename=filename,
         jupyter=jupyter,
@@ -307,18 +327,16 @@ def pairwise_mapping(
         background=background,
         window_size=window_size,
         ambient=ambient,
-        opacity=[line_opacity, model_opacity, model_opacity],
-        colormap=[plot_cmapL] + plot_cmaps,
-        model_style=["wireframe", "points", "points"],
-        model_size=[line_size, model_size, model_size],
+        opacity=[line_opacity, model_opacity],
+        colormap=None if plot_cmaps[0] is None else [plot_cmapL, plot_cmaps[0]],
+        model_style=["wireframe", "points"],
+        model_size=[line_size, model_size],
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
         text=f"\nModels id: {idA} & {idB}" if text is True else text,
         text_kwargs=text_kwargs,
         **kwargs,
     )
-
-    return pc_models[0], pc_models[1], model_lines
 
 
 """
