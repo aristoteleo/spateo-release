@@ -54,14 +54,13 @@ def pi_heatmap(
         **kwargs: Additional parameters that will be passed to ``sns.heatmap`` function.
     """
 
-    pi = pi.copy()
-    pi = pi.T[np.lexsort(pi[::-1, :])].T
-    pi_shape = pi.shape
+    sort_pi = pi.T[np.lexsort(pi[::-1, :])].T
+    pi_shape = sort_pi.shape
     aspect_ratio = pi_shape[1] / pi_shape[0]
     figsize = (fig_height * aspect_ratio, fig_height)
     fig, ax = plt.subplots(figsize=figsize)
 
-    sns.heatmap(data=pi, cmap=colormap, vmin=vmin, vmax=vmax, robust=robust, ax=ax, **kwargs)
+    sns.heatmap(data=sort_pi, cmap=colormap, vmin=vmin, vmax=vmax, robust=robust, ax=ax, **kwargs)
     ax.set_xticks([]), ax.set_yticks([])
     ax.set_xlabel(
         xlabel=model2_name,
