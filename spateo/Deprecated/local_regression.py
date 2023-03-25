@@ -10,11 +10,10 @@ from sklearn.cluster import KMeans
 
 from spateo.Deprecated.generalized_lm import GLMCV
 from spateo.Deprecated.spatial_regression import Niche_LR_Model, Niche_Model
-
 from spateo.logging import logger_manager as lm
 from spateo.plotting.static.space import space
-from spateo.utils import remove_kwargs
 from spateo.tools.ST_regression.regression_utils import compute_kmeans
+from spateo.utils import remove_kwargs
 
 
 # ---------------------------------------------------------------------------------------------------
