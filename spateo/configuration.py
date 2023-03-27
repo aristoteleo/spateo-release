@@ -19,6 +19,9 @@ from scipy import sparse
 from .errors import ConfigurationError
 from .logging import logger_manager as lm
 
+# Global tolerance value:
+EPS = np.finfo(float).eps
+
 
 class SpateoConfig:
     def __init__(
