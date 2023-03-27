@@ -1,12 +1,15 @@
-import os
 import math
+from typing import Tuple, Union
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
+
 import numpy as np
-import pyvista as pv
+from numpy.linalg import norm
 from scipy.linalg import lstsq
 from scipy.spatial import cKDTree
-from numpy.linalg import norm
-from pyvista import PolyData
-from typing import Literal, Union, Tuple
 
 
 def rough_subspace(pcs: np.ndarray, n: int = 20) -> list:
@@ -15,17 +18,25 @@ def rough_subspace(pcs: np.ndarray, n: int = 20) -> list:
     """
     cuboid_startpoint = np.min(pcs, axis=0)
     cuboid_l, cuboid_w, cuboid_h = np.ptp(pcs, axis=0)
-    cuboid_l, cuboid_w, cuboid_h = math.ceil(cuboid_l), math.ceil(cuboid_w), math.ceil(cuboid_h),
+    cuboid_l, cuboid_w, cuboid_h = (
+        math.ceil(cuboid_l),
+        math.ceil(cuboid_w),
+        math.ceil(cuboid_h),
+    )
 
     n_layer_subspace = int(math.pow(n, 2))
     n_cuboid_subspace = int(math.pow(n, 3))
-    subspace_l, subspace_w, subspace_h = cuboid_l / n, cuboid_w / n, cuboid_h / n,
+    subspace_l, subspace_w, subspace_h = (
+        cuboid_l / n,
+        cuboid_w / n,
+        cuboid_h / n,
+    )
 
     rough_subspaces = []
     for i in range(n_cuboid_subspace):
         i_layer = math.floor(i / n_layer_subspace)
-        i_line = math.floor((i -  n_layer_subspace * i_layer) / n)
-        i_piece = i -  n_layer_subspace * i_layer - n * i_line
+        i_line = math.floor((i - n_layer_subspace * i_layer) / n)
+        i_piece = i - n_layer_subspace * i_layer - n * i_line
 
         start_l = cuboid_startpoint[0] + i_piece * subspace_l
         start_w = cuboid_startpoint[1] + i_line * subspace_w
@@ -45,10 +56,7 @@ def rough_subspace(pcs: np.ndarray, n: int = 20) -> list:
     return rough_subspaces
 
 
-def subspace_surface_fitting(
-    pcs: np.ndarray,
-    order: Literal["linear", "quadratic", "cubic"] = "linear"
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def subspace_surface_fitting(pcs: np.ndarray, order: Literal["linear", "quadratic", "cubic"] = "linear") -> np.ndarray:
     """
     Determines the best fitting plane/surface over a set of 3D points based on ordinary least squares regression.\
     Reference: https://gist.github.com/amroamroamro/1db8d69b4b65e8bc66a6
@@ -62,7 +70,12 @@ def subspace_surface_fitting(
     YY = Y.flatten()
 
     n_control_pcs = control_pcs.shape[0]
-    control_x, control_y, control_z, control_xy = control_pcs[:, 0], control_pcs[:, 1], control_pcs[:, 2], control_pcs[:, :2]
+    control_x, control_y, control_z, control_xy = (
+        control_pcs[:, 0],
+        control_pcs[:, 1],
+        control_pcs[:, 2],
+        control_pcs[:, :2],
+    )
     if order == "linear":
         # best-fit linear plane
         A = np.c_[control_x, control_y, np.ones(n_control_pcs)]
@@ -70,43 +83,40 @@ def subspace_surface_fitting(
         Z = C[0] * X + C[1] * Y + C[2]
     elif order == "quadratic":
         # best-fit quadratic curve
-        A = np.c_[np.ones(n_control_pcs), control_xy, np.prod(control_xy, axis=1), control_xy ** 2]
+        A = np.c_[np.ones(n_control_pcs), control_xy, np.prod(control_xy, axis=1), control_xy**2]
         C, _, _, _ = lstsq(A, control_z)
-        Z = np.dot(np.c_[np.ones(XX.shape), XX, YY, XX * YY, XX ** 2, YY ** 2], C).reshape(X.shape)
+        Z = np.dot(np.c_[np.ones(XX.shape), XX, YY, XX * YY, XX**2, YY**2], C).reshape(X.shape)
     elif order == "cubic":
         # best-fit cubic surface
         A = np.c_[
             np.ones(n_control_pcs),
             control_pcs[:, :2],
-            control_x ** 2,
+            control_x**2,
             np.prod(control_xy, axis=1),
-            control_y ** 2,
-            control_x ** 3,
-            np.prod(np.c_[control_x ** 2,control_y], axis=1),
-            np.prod(np.c_[control_x, control_y ** 2], axis=1),
-            control_y ** 3
+            control_y**2,
+            control_x**3,
+            np.prod(np.c_[control_x**2, control_y], axis=1),
+            np.prod(np.c_[control_x, control_y**2], axis=1),
+            control_y**3,
         ]
         C, _, _, _ = lstsq(A, control_z)
         Z = np.dot(
-            np.c_[np.ones(XX.shape), XX, YY, XX ** 2, XX * YY, YY ** 2, XX ** 3, XX ** 2 * YY, XX * YY ** 2, YY ** 3],
-            C).reshape(X.shape)
+            np.c_[np.ones(XX.shape), XX, YY, XX**2, XX * YY, YY**2, XX**3, XX**2 * YY, XX * YY**2, YY**3], C
+        ).reshape(X.shape)
     else:
         raise ValueError("``order`` value is wrong.")
 
-    surface_pc_coords = np.asarray([i.flatten() for i in [X, Y, Z]]).T
-    return surface_pc_coords
+    surface_pcs = np.asarray([i.flatten() for i in [X, Y, Z]]).T
+    return surface_pcs
 
 
 def dist_global_centroid_to_subspace(
-    centroid: Union[tuple, list, np.ndarray],
-    subspace_surface: np.ndarray,
-    **kwargs
+    centroid: Union[tuple, list, np.ndarray], subspace_surface: np.ndarray, **kwargs
 ) -> np.ndarray:
-    """Calculate the average distance from the centroid to the surface of subspace based on KDtree.
-    """
+    """Calculate the average distance from the centroid to the surface of subspace based on KDtree."""
     n_sc = len(np.asarray(subspace_surface))
     surface_kdtree = cKDTree(np.asarray(subspace_surface), **kwargs)
-    d, _ = surface_kdtree.query(np.asarray(centroid), k=[i for i in range(1, n_sc+1)])
+    d, _ = surface_kdtree.query(np.asarray(centroid), k=[i for i in range(1, n_sc + 1)])
     return np.mean(d)
 
 
@@ -114,8 +124,7 @@ def cos_global_centroid_to_subspace(
     global_centroid: Union[tuple, list, np.ndarray],
     subspace_pcs: np.ndarray,
 ) -> np.ndarray:
-    """Calculate the cosine of the included angle from the centroid to the pcs of subspace.
-    """
+    """Calculate the cosine of the included angle from the centroid to the pcs of subspace."""
     subspace_centroid = np.mean(subspace_pcs, axis=0)
     # v_i = global_centroid - subspace_centroid
     # v_z = global_centroid - np.asarray([global_centroid[0], global_centroid[1], subspace_centroid[2]])
@@ -125,6 +134,7 @@ def cos_global_centroid_to_subspace(
 
 
 def calculate_eigenvector(vetorspaces: np.ndarray, m: int = 10, s: int = 5) -> Tuple[np.ndarray, np.ndarray]:
+    """Calculate the eigenvector and weight vector of the model."""
     eigenvector, weightvector = [], []
     for i in range(1, m + 1):
         w_i1, w_i2 = (i - 1) / m, i / m
@@ -151,7 +161,9 @@ def calculate_eigenvector(vetorspaces: np.ndarray, m: int = 10, s: int = 5) -> T
     return np.asarray(eigenvector), np.asarray(weightvector) / np.sum(weightvector)
 
 
-def model_eigenvector(model_pcs: np.ndarray, n_subspace: int = 10, m: int = 10, s: int = 5):
+def model_eigenvector(
+    model_pcs: np.ndarray, n_subspace: int = 20, m: int = 10, s: int = 5
+) -> Tuple[np.ndarray, np.ndarray]:
     rough_subspaces = rough_subspace(pcs=np.asarray(model_pcs).copy(), n=n_subspace)
     subspace_vetorspaces = []
     for subspace_pcs in rough_subspaces:
@@ -164,16 +176,11 @@ def model_eigenvector(model_pcs: np.ndarray, n_subspace: int = 10, m: int = 10, 
     return eigenvector, weightvector
 
 
-def pairwise_similarity(model1_pcs: np.ndarray, model2_pcs: np.ndarray, n_subspace: int = 20, m: int = 10, s: int = 5):
+def pairwise_shape_similarity(
+    model1_pcs: np.ndarray, model2_pcs: np.ndarray, n_subspace: int = 20, m: int = 10, s: int = 5
+) -> float:
     e1, w1 = model_eigenvector(model_pcs=model1_pcs, n_subspace=n_subspace, m=m, s=s)
     e2, w2 = model_eigenvector(model_pcs=model2_pcs, n_subspace=n_subspace, m=m, s=s)
     w = np.max(np.c_[w1, w2], axis=1)
     similarity_score = np.sum(w * e1 * e2) / (norm(np.dot(w, e1)) * norm(np.dot(w, e2)))
     return similarity_score
-
-import matplotlib.pyplot as plt
-os.chdir(r"C:\Users\lenovo\Desktop\drosophila_CNS\pc_models")
-pc1 = pv.read(filename="1_CNS_E12_13h_aligned_pc_model.vtk")
-pc2 = pv.read(filename="1_CNS_E13_14h_aligned_pc_model.vtk")
-similarity_score = pairwise_similarity(model1_pcs=np.asarray(pc1.points), model2_pcs=np.asarray(pc2.points))
-print(similarity_score)
