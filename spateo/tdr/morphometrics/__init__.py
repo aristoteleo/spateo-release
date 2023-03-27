@@ -12,3 +12,4 @@ from .morphogenesis import (
     morphopath,
 )
 from .morphology import model_morphology, pc_KDE
+from .shape_similarity import pairwise_shape_similarity
