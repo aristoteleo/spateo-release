@@ -483,10 +483,10 @@ class Negative_Binomial_Variance(object):
         V(fitted) = fitted + disp * fitted ** 2
 
     Args:
-        disp: The dispersion parameter for the negative binomial. Assumed to be nonstochastic, defaults to 1.
+        disp: The dispersion parameter for the negative binomial. Assumed to be nonstochastic, defaults to 0.5.
     """
 
-    def __init__(self, disp: float = 1.0):
+    def __init__(self, disp: float = 0.5):
         self.disp = disp
 
     def clip(self, vals: np.ndarray) -> np.ndarray:
@@ -533,7 +533,7 @@ nbinom_variance = Negative_Binomial_Variance()
 nbinom_variance.__doc__ = """
 Negative Binomial variance function.
 
-This is an alias of NegativeBinomial(disp=1.)
+This is an alias of NegativeBinomial(disp=0.5)
 """
 
 
@@ -617,9 +617,6 @@ class Distribution(object):
         Returns:
             dev: The value of the deviance function
         """
-        if freq_weights is None:
-            freq_weights = 1.0
-
         raise NotImplementedError
 
     def deviance_residuals(
@@ -729,7 +726,10 @@ class Poisson(Distribution):
         if freq_weights is None:
             freq_weights = 1.0
 
+        endog = self.clip(endog)
+        fitted = self.clip(fitted)
         endog_fitted = self.clip(endog / fitted)
+
         dev = 2 * np.sum(freq_weights * endog * np.log(endog_fitted)) / scale
         return dev
 
@@ -745,7 +745,10 @@ class Poisson(Distribution):
         Returns:
             dev_resid: The deviance residuals
         """
+        endog = self.clip(endog)
+        fitted = self.clip(fitted)
         endog_fitted = self.clip(endog / fitted)
+
         dev_resid = (
             np.sign(endog - fitted) * np.sqrt(2 * (endog * np.log(endog_fitted) - np.subtract(endog, fitted))) / scale
         )
@@ -766,6 +769,12 @@ class Poisson(Distribution):
         Returns:
             ll: The value of the log-likelihood function
         """
+        if freq_weights is None:
+            freq_weights = 1.0
+
+        endog = self.clip(endog)
+        fitted = self.clip(fitted)
+
         ll = np.sum(freq_weights * (endog * np.log(fitted) - fitted - special.gammaln(endog + 1)))
         ll = scale * ll
         return ll
@@ -948,7 +957,7 @@ class Gamma(Distribution):
             dev_resid: The deviance residuals
         """
         endog_fitted = self.clip(endog / fitted)
-        dev_resid = np.sign(endog - fitted) * np.sqrt(-2 * (-(endog - fitted) / fitted + np.log(endog_fitted)))
+        dev_resid = np.sign(endog - fitted) * np.sqrt(-2 * (-(endog - fitted) / fitted + np.log(endog_fitted + EPS)))
         return dev_resid
 
     def log_likelihood(
@@ -1013,7 +1022,7 @@ class NegativeBinomial(Distribution):
     variance = nbinom_variance
     suggested_link = Log
 
-    def __init__(self, link=Log):
+    def __init__(self, link=Log, disp: Optional[float] = None):
         self.logger = lm.get_main_logger()
 
         if link not in NegativeBinomial.valid_links:
@@ -1027,6 +1036,10 @@ class NegativeBinomial(Distribution):
             )
 
         self.variance = NegativeBinomial.variance
+        # Modify the variance function to update the dispersion parameter, if applicable:
+        if disp is not None:
+            self.variance.disp = disp
+
         self.link = link()
 
     def clip(self, vals: np.ndarray) -> np.ndarray:
@@ -1060,14 +1073,7 @@ class NegativeBinomial(Distribution):
             freq_weights = 1.0
 
         dispersion = self.variance.disp
-        endog_fitted = self.clip(endog / fitted)
-        dev = 2 * np.sum(
-            freq_weights * special.betaln(dispersion * endog_fitted + 1, 1 - dispersion)
-            - dispersion * np.log(fitted)
-            + dispersion * endog_fitted * np.log(dispersion * endog_fitted / (1 - dispersion))
-            - special.gammaln(dispersion * endog_fitted + 1)
-            + special.gammaln(endog_fitted + 1)
-        )
+        dev = "filler"
         return dev
 
     def deviance_residuals(self, endog: np.ndarray, fitted: np.ndarray, scale: np.float = 1.0) -> np.ndarray:
@@ -1082,20 +1088,8 @@ class NegativeBinomial(Distribution):
         Returns:
             dev_resid: The deviance residuals
         """
-        dispersion = self.variance.dispersion
-        endog_fitted = self.clip(endog / fitted)
-        dev_resid = np.sign(endog - fitted) * np.sqrt(
-            -2
-            * (
-                special.betaln(dispersion * endog_fitted + 1, 1 - dispersion)
-                - dispersion * np.log(fitted)
-                + dispersion * endog_fitted * np.log(dispersion * endog_fitted / (1 - dispersion))
-                - special.gammaln(dispersion * endog_fitted + 1)
-                + special.gammaln(endog_fitted + 1)
-                + np.log(endog)
-                - np.log(dispersion * endog_fitted + endog / dispersion)
-            )
-        )
+        dispersion = self.variance.disp
+        dev_resid = "filler"
 
         return dev_resid
 
@@ -1117,21 +1111,18 @@ class NegativeBinomial(Distribution):
         if freq_weights is None:
             freq_weights = 1.0
 
-        dispersion = self.variance.dispersion
-        endog_fitted = self.clip(endog / fitted)
-        ll = (
-            -1
-            / scale
-            * np.sum(
-                freq_weights
-                * (
-                    special.gammaln(dispersion * endog_fitted + endog / dispersion)
-                    - special.gammaln(endog / dispersion + 1)
-                    - special.gammaln(dispersion * endog_fitted + 1)
-                    + dispersion * endog_fitted * np.log(dispersion * endog_fitted / (1 - dispersion))
-                    + endog / dispersion * np.log(1 - dispersion)
-                    - np.log(endog)
-                )
+        dispersion = self.variance.disp
+        endog = self.clip(endog)
+        fitted = self.clip(fitted)
+
+        ll = np.sum(
+            freq_weights
+            * (
+                special.gammaln(dispersion + endog)
+                - special.gammaln(dispersion)
+                - special.gammaln(endog + 1)
+                + dispersion * np.log(dispersion / (dispersion + fitted * scale))
+                + endog * np.log(fitted * scale / (dispersion + fitted * scale))
             )
         )
 
