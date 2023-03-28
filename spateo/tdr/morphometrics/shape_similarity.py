@@ -134,7 +134,7 @@ def cos_global_centroid_to_subspace(
 
 
 def calculate_eigenvector(vetorspaces: np.ndarray, m: int = 10, s: int = 5) -> Tuple[np.ndarray, np.ndarray]:
-    """Calculate the eigenvector and weight vector of the model."""
+    """Calculate the subspace eigenvectors."""
     eigenvector, weightvector = [], []
     for i in range(1, m + 1):
         w_i1, w_i2 = (i - 1) / m, i / m
@@ -164,6 +164,7 @@ def calculate_eigenvector(vetorspaces: np.ndarray, m: int = 10, s: int = 5) -> T
 def model_eigenvector(
     model_pcs: np.ndarray, n_subspace: int = 20, m: int = 10, s: int = 5
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """Calculate the subspace eigenvectors of the 3D point cloud model."""
     rough_subspaces = rough_subspace(pcs=np.asarray(model_pcs).copy(), n=n_subspace)
     subspace_vetorspaces = []
     for subspace_pcs in rough_subspaces:
@@ -179,8 +180,22 @@ def model_eigenvector(
 def pairwise_shape_similarity(
     model1_pcs: np.ndarray, model2_pcs: np.ndarray, n_subspace: int = 20, m: int = 10, s: int = 5
 ) -> float:
+    """
+    Calculate the shape similarity of pairwise 3D point cloud models based on the eigenvectors of the 3D point cloud model subspace.
+    References: Hu Xiaotong, Wang Jiandong. Similarity analysis of three-dimensional point cloud based on eigenvector of subspace.
+
+    Args:
+        model1_pcs: The coordinates of the 3D point cloud model1.
+        model2_pcs: The coordinates of the 3D point cloud model2.
+        n_subspace: The number of subspaces initially divided is ``n_subspace``**3.
+        m: The number of eigenvalues contained in the eigenvector is m*s.
+        s: The number of eigenvalues contained in the eigenvector is m*s.
+
+    Returns:
+        similarity_score: Shape similarity score.
+    """
     e1, w1 = model_eigenvector(model_pcs=model1_pcs, n_subspace=n_subspace, m=m, s=s)
     e2, w2 = model_eigenvector(model_pcs=model2_pcs, n_subspace=n_subspace, m=m, s=s)
     w = np.max(np.c_[w1, w2], axis=1)
-    similarity_score = np.sum(w * e1 * e2) / (norm((np.sqrt(w)*e1)) * norm((np.sqrt(w)*e2)))
-    return similarity_score
+    similarity_score = np.sum(w * e1 * e2) / (norm((np.sqrt(w) * e1)) * norm((np.sqrt(w) * e2)))
+    return round(similarity_score, 4)
