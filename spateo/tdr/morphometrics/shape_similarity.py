@@ -182,5 +182,5 @@ def pairwise_shape_similarity(
     e1, w1 = model_eigenvector(model_pcs=model1_pcs, n_subspace=n_subspace, m=m, s=s)
     e2, w2 = model_eigenvector(model_pcs=model2_pcs, n_subspace=n_subspace, m=m, s=s)
     w = np.max(np.c_[w1, w2], axis=1)
-    similarity_score = np.sum(w * e1 * e2) / (norm(np.dot(w, e1)) * norm(np.dot(w, e2)))
+    similarity_score = np.sum(w * e1 * e2) / (norm((np.sqrt(w)*e1)) * norm((np.sqrt(w)*e2)))
     return similarity_score
