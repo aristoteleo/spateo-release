@@ -1,6 +1,7 @@
 """
 Defining the types of distributions that the dependent variable can be assumed to take.
 """
+from typing import Optional
 
 import numpy as np
 from scipy import special
@@ -69,7 +70,7 @@ class Link(object):
                 generalized linear model
 
         Returns:
-            g^(-1)'(p): The value of the derivative of the inverse of the link function
+            g^(-1)'(p): The value of the derivative of the fitted mean response variable (inverse of the link function
         """
         inv_deriv = 1 / self.deriv(self.inverse(z))
         return inv_deriv
@@ -510,8 +511,8 @@ class Negative_Binomial_Variance(object):
         Returns:
             var: Variance, given by mu + disp * mu ** 2
         """
-        p = self.clip(mu)
-        var = p + self.disp * p**2
+        mu = self.clip(mu)
+        var = mu + self.disp * mu**2
         return var
 
     def deriv(self, mu):
@@ -601,28 +602,35 @@ class Distribution(object):
         w = 1.0 / (self.link.deriv(mu) ** 2 * self.variance(mu))
         return w
 
-    def deviance(self, endog: np.ndarray, mu: np.ndarray, freq_weights: np.ndarray, scale: np.float = 1.0) -> float:
+    def deviance(
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+    ) -> float:
         """Deviance function to measure goodness-of-fit of model fitting. Defined as twice the log-likelihood ratio.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
             scale: Optional scale of the response variable
 
         Returns:
             dev: The value of the deviance function
         """
+        if freq_weights is None:
+            freq_weights = 1.0
+
         raise NotImplementedError
 
     def deviance_residuals(
-        self, endog: np.ndarray, mu: np.ndarray, freq_weights: np.ndarray, scale: np.float = 1.0
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
     ) -> np.ndarray:
         """Deviance residuals for the model.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
             scale: Optional scale of the response variable- residuals will be divided by the scale
 
@@ -632,13 +640,14 @@ class Distribution(object):
         raise NotImplementedError
 
     def log_likelihood(
-        self, endog: np.ndarray, mu: np.ndarray, freq_weights: np.ndarray, scale: np.float = 1.0
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
     ) -> np.ndarray:
         """Log-likelihood function for the model.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
             scale: Optional scale of the response variable
 
@@ -653,8 +662,9 @@ class Distribution(object):
         additional standardization by dividing by the square root of the variance of the residuals.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
 
         Returns:
             anscombe_res: The Anscombe residuals
@@ -701,18 +711,24 @@ class Poisson(Distribution):
         vals = np.clip(vals, EPS, np.inf)
         return vals
 
-    def deviance(self, endog: np.ndarray, mu: np.ndarray, freq_weights: np.ndarray, scale: np.float = 1.0) -> float:
+    def deviance(
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+    ) -> float:
         """Poisson deviance function.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
             scale: Optional scale of the response variable
 
         Returns:
             dev: The value of the deviance function
         """
+        if freq_weights is None:
+            freq_weights = 1.0
+
         endog_mu = self.clip(endog / mu)
         dev = 2 * np.sum(freq_weights * endog * np.log(endog_mu)) / scale
         return dev
@@ -721,8 +737,9 @@ class Poisson(Distribution):
         """Poisson deviance residuals.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             scale: Optional scale of the response variable- residuals will be divided by the scale
 
         Returns:
@@ -733,13 +750,14 @@ class Poisson(Distribution):
         return dev_resid
 
     def log_likelihood(
-        self, endog: np.ndarray, mu: np.ndarray, freq_weights: np.ndarray = 1.0, scale: np.float = 1.0
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
     ) -> np.ndarray:
         """Poisson log likelihood of the fitted mean response.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
             scale: Optional scale of the response variable
 
@@ -754,8 +772,9 @@ class Poisson(Distribution):
         """Anscombe residuals for Poisson family distributions.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
 
         Returns:
             anscombe_resid: The Anscombe residuals
@@ -790,18 +809,27 @@ class Gaussian(Distribution):
         self.variance = Gaussian.variance
         self.link = link()
 
-    def deviance(self, endog: np.ndarray, mu: np.ndarray, freq_weights: np.ndarray, scale: np.float = 1.0) -> float:
+    def deviance(
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+    ) -> float:
         """Gaussian deviance function.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
             scale: Optional scale of the response variable
 
         Returns:
             dev: The value of the deviance function
         """
+        if freq_weights is None:
+            freq_weights = 1.0
+
+        if freq_weights is None:
+            freq_weights = 1.0
+
         dev = np.sum((freq_weights * (endog - mu) ** 2)) / scale
         return dev
 
@@ -809,8 +837,9 @@ class Gaussian(Distribution):
         """Gaussian deviance residuals.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             scale: Optional scale of the response- residuals will be divided by the scale
 
         Returns:
@@ -819,18 +848,24 @@ class Gaussian(Distribution):
         dev_resid = (endog - mu) / np.sqrt(self.variance(mu)) / scale
         return dev_resid
 
-    def log_likelihood(self, endog: np.ndarray, mu: np.ndarray, freq_weights: np.ndarray, scale: np.float = 1.0):
+    def log_likelihood(
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+    ):
         """Gaussian log likelihood of the fitted mean response.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
             scale: Optional scale of the response variable
 
         Returns:
             ll: The value of the log-likelihood function
         """
+        if freq_weights is None:
+            freq_weights = 1.0
+
         ll = np.sum(
             freq_weights
             * ((endog * mu - mu**2 / 2) / scale - endog**2 / (2 * scale) - 0.5 * np.log(2 * np.pi * scale))
@@ -876,18 +911,24 @@ class Gamma(Distribution):
         vals = np.clip(vals, EPS, np.inf)
         return vals
 
-    def deviance(self, endog: np.ndarray, mu: np.ndarray, freq_weights: np.ndarray, scale: np.float = 1.0) -> float:
+    def deviance(
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+    ) -> float:
         """Gamma deviance function.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
             scale: Optional scale of the response variable
 
         Returns:
             dev: The value of the deviance function
         """
+        if freq_weights is None:
+            freq_weights = 1.0
+
         endog_mu = self.clip(endog / mu)
         dev = 2 * np.sum(freq_weights * ((endog - mu) / mu - np.log(endog_mu)))
         return dev
@@ -896,8 +937,9 @@ class Gamma(Distribution):
         """Gamma deviance residuals.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             scale: Optional scale of the response variable- residuals will be divided by the scale
 
         Returns:
@@ -908,19 +950,23 @@ class Gamma(Distribution):
         return dev_resid
 
     def log_likelihood(
-        self, endog: np.ndarray, mu: np.ndarray, freq_weights: np.ndarray, scale: np.float = 1.0
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
     ) -> np.ndarray:
         """Gamma log likelihood of the fitted mean response.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
             freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
             scale: Optional scale of the response variable
 
         Returns:
             ll: The value of the log-likelihood function
         """
+        if freq_weights is None:
+            freq_weights = 1.0
+
         ll = (
             -1.0
             / scale
@@ -941,8 +987,9 @@ class Gamma(Distribution):
         """Anscombe residuals for Gamma family distributions.
 
         Args:
-            endog: Array of shape [n_params, ]; untransformed dependent variable
-            mu: Array of shape [n_params, ]; inverse of the link function evaluated at the linear predicted values
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
 
         Returns:
             anscombe_resid: The Anscombe residuals
@@ -952,4 +999,157 @@ class Gamma(Distribution):
 
 
 class NegativeBinomial(Distribution):
-    "filler"
+    """
+    Negative binomial distribution for modeling count data.
+
+    Args:
+        link: The link function to use for the distribution, for performing transformation of the linear outputs. The
+            default link is the inverse link, but available links are "log", "identity", and "inverse".
+    """
+
+    valid_links = [Log, identity, sqrt]
+    variance = nbinom_variance
+    suggested_link = Log
+
+    def __init__(self, link=Log):
+        self.logger = lm.get_main_logger()
+
+        if link not in NegativeBinomial.valid_links:
+            raise ValueError(
+                "Invalid link for NegativeBinomial distribution. Valid links are: %s" % NegativeBinomial.valid_links
+            )
+        if link != NegativeBinomial.suggested_link:
+            self.logger.warning(
+                "The suggested link function for NegativeBinomial is the log link, but %s is currently "
+                "chosen." % link
+            )
+
+        self.variance = NegativeBinomial.variance
+        self.link = link()
+
+    def clip(self, vals: np.ndarray) -> np.ndarray:
+        """Clips values to avoid numerical issues.
+
+        Args:
+            vals: Values to clip
+
+        Returns:
+            vals: The clipped values
+        """
+        vals = np.clip(vals, EPS, np.inf)
+        return vals
+
+    def deviance(
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+    ) -> float:
+        """Negative binomial deviance function.
+
+        Args:
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
+            freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
+            scale: Optional scale of the response variable
+
+        Returns:
+            dev: The value of the deviance function
+        """
+        if freq_weights is None:
+            freq_weights = 1.0
+
+        dispersion = self.variance.disp
+        endog_mu = self.clip(endog / mu)
+        dev = 2 * np.sum(
+            freq_weights * special.betaln(dispersion * endog_mu + 1, 1 - dispersion)
+            - dispersion * np.log(mu)
+            + dispersion * endog_mu * np.log(dispersion * endog_mu / (1 - dispersion))
+            - special.gammaln(dispersion * endog_mu + 1)
+            + special.gammaln(endog_mu + 1)
+        )
+        return dev
+
+    def deviance_residuals(self, endog: np.ndarray, mu: np.ndarray, scale: np.float = 1.0) -> np.ndarray:
+        """Negative binomial deviance residuals.
+
+        Args:
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
+            scale: Optional scale of the response variable- residuals will be divided by the scale
+
+        Returns:
+            dev_resid: The deviance residuals
+        """
+        dispersion = self.variance.dispersion
+        endog_mu = self.clip(endog / mu)
+        dev_resid = np.sign(endog - mu) * np.sqrt(
+            -2
+            * (
+                special.betaln(dispersion * endog_mu + 1, 1 - dispersion)
+                - dispersion * np.log(mu)
+                + dispersion * endog_mu * np.log(dispersion * endog_mu / (1 - dispersion))
+                - special.gammaln(dispersion * endog_mu + 1)
+                + special.gammaln(endog_mu + 1)
+                + np.log(endog)
+                - np.log(dispersion * endog_mu + endog / dispersion)
+            )
+        )
+
+        return dev_resid
+
+    def log_likelihood(
+        self, endog: np.ndarray, mu: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+    ) -> np.ndarray:
+        """Negative binomial log likelihood of the fitted mean response.
+
+        Args:
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
+            freq_weights: 1D array of frequency weights, used to e.g. adjust for unequal sampling frequencies
+            scale: Optional scale of the response variable
+
+        Returns:
+            ll: The value of the log-likelihood function
+        """
+        if freq_weights is None:
+            freq_weights = 1.0
+
+        dispersion = self.variance.dispersion
+        endog_mu = self.clip(endog / mu)
+        ll = (
+            -1
+            / scale
+            * np.sum(
+                freq_weights
+                * (
+                    special.gammaln(dispersion * endog_mu + endog / dispersion)
+                    - special.gammaln(endog / dispersion + 1)
+                    - special.gammaln(dispersion * endog_mu + 1)
+                    + dispersion * endog_mu * np.log(dispersion * endog_mu / (1 - dispersion))
+                    + endog / dispersion * np.log(1 - dispersion)
+                    - np.log(endog)
+                )
+            )
+        )
+
+        return ll
+
+    def anscombe_residuals(self, endog: np.ndarray, mu: np.ndarray) -> np.ndarray:
+        """Anscombe residuals for negative binomial family distributions.
+
+        Args:
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            mu: Array of shape [n_samples, ]; fitted mean response variable (inverse of the link function evaluated
+            at the linear predicted values)
+
+        Returns:
+            anscombe_resid: The Anscombe residuals
+        """
+        dispersion = self.variance.dispersion
+        anscombe_resid = (
+            special.ndtri(special.betaincinv(dispersion, endog, 1))
+            - special.ndtri(special.betaincinv(dispersion, mu, 1))
+        ) / np.sqrt(dispersion * mu)
+
+        return anscombe_resid
