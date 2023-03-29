@@ -71,6 +71,12 @@ print("Poisson deviance on Poisson data: ", deviance_null)
 deviance_alt = poisson_family.deviance(y, pred_gaussian)
 print("Gaussian deviance on Poisson data: ", deviance_alt)
 
+# Test residual deviance function
+resid_dev_null = poisson_family.deviance_residuals(y, pred_poisson)
+print("Sum of absolute value Poisson residual deviance on Poisson data: ", np.sum(np.abs(resid_dev_null)))
+resid_dev_alt = poisson_family.deviance_residuals(y, pred_gaussian)
+print("Sum of absolute value Gaussian residual deviance on Poisson data: ", np.sum(np.abs(resid_dev_alt)))
+
 # Test log-likelihood:
 loglike_null = poisson_family.log_likelihood(y, pred_poisson)
 print("Poisson log-likelihood on Poisson data: ", loglike_null)
@@ -87,7 +93,7 @@ p = 0.5
 
 y = np.random.negative_binomial(n, p, size=n_obs)
 # What is the dispersion?
-dispersion = n*(1-p)/p**2
+dispersion = n * (1 - p) / p**2
 print("Dispersion: ", dispersion)
 
 # Define the independent variable according to a negative binomial relationship:
@@ -110,12 +116,17 @@ pred_gaussian = result_gaussian.predict(sm.add_constant(x))
 # Instantiate Poisson family with default log link function
 nb_family = NegativeBinomial(disp=dispersion)
 
-"""
 # Test deviance function
 deviance_null = nb_family.deviance(y, pred_nb)
 print("NB deviance on NB data: ", deviance_null)
-deviance_alt = poisson_family.deviance(y, pred_gaussian)
-print("Gaussian deviance on NB data: ", deviance_alt)"""
+deviance_alt = nb_family.deviance(y, pred_gaussian)
+print("Gaussian deviance on NB data: ", deviance_alt)
+
+# Test residual deviance function
+resid_dev_null = nb_family.deviance_residuals(y, pred_nb)
+print("Sum of absolute value NB residual deviance on NB data: ", np.sum(np.abs(resid_dev_null)))
+resid_dev_alt = nb_family.deviance_residuals(y, pred_gaussian)
+print("Sum of absolute value Gaussian residual deviance on NB data: ", np.sum(np.abs(resid_dev_alt)))
 
 # Test log likelihood:
 loglike_null = nb_family.log_likelihood(y, pred_nb)

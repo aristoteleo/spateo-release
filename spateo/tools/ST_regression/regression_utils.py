@@ -145,7 +145,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray):
 def iwls(
     y: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
     x: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
-    distr: Literal["gaussian", "poisson", "binomial", "nb"] = "gaussian",
+    distr: Literal["gaussian", "poisson", "nb"] = "gaussian",
     init_betas: Optional[np.ndarray] = None,
     tol: float = 1e-6,
     max_iter: int = 100,
@@ -160,7 +160,7 @@ def iwls(
     Args:
         y: Array of shape [n_samples,]; dependent variable
         x: Array of shape [n_samples, n_features]; independent variables
-        distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "binomial", "nb"
+        distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb"
         init_betas: Array of shape [n_features,]; initial regression coefficients
         tol: Convergence tolerance
         max_iter: Maximum number of iterations if convergence is not reached
@@ -175,6 +175,9 @@ def iwls(
         w: Array of shape [n_samples,]; final spatial weights used for IWLS.
 
     """
+    # Get appropriate distribution family based on specified:
+
+
     if init_betas is None:
         betas = np.zeros(x.shape[1], 1)
     else:
