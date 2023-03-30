@@ -578,8 +578,8 @@ class Distribution(object):
         self._link = link
         self.variance = variance
 
-    def initial_fitted(self, y: np.ndarray) -> np.ndarray:
-        """Starting value for fitted in the IRLS algorithm.
+    def initial_predictors(self, y: np.ndarray) -> np.ndarray:
+        """Starting value for predictors in the IRLS algorithm.
 
         Args:
             y: The untransformed dependent variable
@@ -679,21 +679,6 @@ class Distribution(object):
 
         Returns:
             ll: The value of the log-likelihood function
-        """
-        raise NotImplementedError
-
-    def anscombe_residuals(self, endog: np.ndarray, fitted: np.ndarray) -> np.ndarray:
-        """Anscombe residuals for the model. These residuals are useful for goodness-of-fit assessments for models
-        that assume nonlinear relationships between the dependent and independent variables, and do so through
-        additional standardization by dividing by the square root of the variance of the residuals.
-
-        Args:
-            endog: Array of shape [n_samples, ]; untransformed dependent variable
-            fitted: Array of shape [n_samples, ]; fitted mean response variable (link function evaluated
-                at the linear predicted values)
-
-        Returns:
-            anscombe_res: The Anscombe residuals
         """
         raise NotImplementedError
 
@@ -813,20 +798,6 @@ class Poisson(Distribution):
         ll = np.sum(freq_weights * (endog * np.log(fitted) - fitted - special.gammaln(endog + 1)))
         ll = scale * ll
         return ll
-
-    def anscombe_residuals(self, endog: np.ndarray, fitted: np.ndarray) -> np.ndarray:
-        """Anscombe residuals for Poisson family distributions.
-
-        Args:
-            endog: Array of shape [n_samples, ]; untransformed dependent variable
-            fitted: Array of shape [n_samples, ]; fitted mean response variable (link function evaluated
-                at the linear predicted values)
-
-        Returns:
-            anscombe_resid: The Anscombe residuals
-        """
-        anscombe_resid = (3 / 2.0) * (endog ** (2 / 3.0) - fitted ** (2 / 3.0)) / fitted ** (1 / 6.0)
-        return anscombe_resid
 
 
 class Gaussian(Distribution):
@@ -1056,20 +1027,6 @@ class Gamma(Distribution):
         )
         return ll
 
-    def anscombe_residuals(self, endog: np.ndarray, fitted: np.ndarray) -> np.ndarray:
-        """Anscombe residuals for Gamma family distributions.
-
-        Args:
-            endog: Array of shape [n_samples, ]; untransformed dependent variable
-            fitted: Array of shape [n_samples, ]; fitted mean response variable (link function evaluated
-                at the linear predicted values)
-
-        Returns:
-            anscombe_resid: The Anscombe residuals
-        """
-        anscombe_resid = 3 * (endog ** (1 / 3.0) - fitted ** (1 / 3.0)) / fitted ** (1 / 3.0)
-        return anscombe_resid
-
 
 class NegativeBinomial(Distribution):
     """
@@ -1218,25 +1175,6 @@ class NegativeBinomial(Distribution):
         )
 
         return ll
-
-    def anscombe_residuals(self, endog: np.ndarray, fitted: np.ndarray) -> np.ndarray:
-        """Anscombe residuals for negative binomial family distributions.
-
-        Args:
-            endog: Array of shape [n_samples, ]; untransformed dependent variable
-            fitted: Array of shape [n_samples, ]; fitted mean response variable (link function evaluated
-            at the linear predicted values)
-
-        Returns:
-            anscombe_resid: The Anscombe residuals
-        """
-        dispersion = self.variance.dispersion
-        anscombe_resid = (
-            special.ndtri(special.betaincinv(dispersion, endog, 1))
-            - special.ndtri(special.betaincinv(dispersion, fitted, 1))
-        ) / np.sqrt(dispersion * fitted)
-
-        return anscombe_resid
 
 
 # ADD APPROPRIATE ZINB FUNCTIONS LATER

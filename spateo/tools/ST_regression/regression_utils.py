@@ -19,6 +19,7 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 from ...configuration import SKM
 from ...logging import logger_manager as lm
 from ...preprocessing.transform import log1p
+from .distributions import Gaussian, Link, NegativeBinomial, Poisson, VarianceFunction
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -150,6 +151,8 @@ def iwls(
     tol: float = 1e-6,
     max_iter: int = 100,
     wi: Optional[np.ndarray] = None,
+    link: Optional[Link] = None,
+    variance: Optional[Link] = None
 ):
     """Iteratively reweighted least squares (IWLS) algorithm to compute the regression coefficients for a given set of
     dependent and independent variables.
@@ -175,13 +178,30 @@ def iwls(
         w: Array of shape [n_samples,]; final spatial weights used for IWLS.
 
     """
-    # Get appropriate distribution family based on specified:
+    # Initialization:
+    n_iter = 0
+    difference = 1.0e10
 
+    # Get appropriate distribution family based on specified:
+    if distr == "gaussian":
+        link = link or Gaussian.__init__.__defaults__[0]
+        distr = Gaussian(link)
+    elif distr == "poisson":
+        link = link or Poisson.__init__.__defaults__[0]
+        distr = Poisson(link)
+    elif distr == "nb":
+        link = link or NegativeBinomial.__init__.__defaults__[0]
+        distr = NegativeBinomial(link)
 
     if init_betas is None:
         betas = np.zeros(x.shape[1], 1)
     else:
         betas = init_betas
+
+    init_predictor = distr.initial_predictors(y)
+    init_y_bar = distr.link(init_predictor)
+
+
 
 
 # ---------------------------------------------------------------------------------------------------
