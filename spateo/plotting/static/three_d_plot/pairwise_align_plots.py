@@ -55,6 +55,7 @@ def pi_heatmap(
     """
 
     sort_pi = pi.T[np.lexsort(pi[::-1, :])].T
+    sort_pi = sort_pi[np.lexsort(sort_pi[:, ::-1].T)]
     pi_shape = sort_pi.shape
     aspect_ratio = pi_shape[1] / pi_shape[0]
     figsize = (fig_height * aspect_ratio, fig_height)
