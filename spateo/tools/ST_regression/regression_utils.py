@@ -140,7 +140,11 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray):
     """
     xT = (x * w).T
     xtx = np.dot(xT, x)
-    xtx_inv_xt = linalg.solve(xtx, xT)
+    try:
+        xtx_inv_xt = np.dot(linalg.inv(xtx), xT)
+        # xtx_inv_xt = linalg.solve(xtx, xT)
+    except:
+        xtx_inv_xt = np.dot(linalg.pinv(xtx), xT)
     betas = np.dot(xtx_inv_xt, y)
 
     influence_matrix = xtx_inv_xt
