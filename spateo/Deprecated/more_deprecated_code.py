@@ -464,3 +464,24 @@ def compute_spectral_clustering(
     clust_predicted = spec.fit_predict(data)
 
     return clust_predicted
+
+
+def L1_L2_penalty(
+    alpha: float,
+    beta: np.ndarray,
+    Tau: Union[None, np.ndarray] = None,
+) -> float:
+    """
+    Combination of the L1 and L2 penalties.
+
+    Args:
+        alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function.
+        beta: Array of shape [n_features,]; learned model coefficients
+        Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
+        provided, Tau will default to the identity matrix.
+
+    Returns:
+        P: Value for the regularization parameter
+    """
+    P = 0.5 * (1 - alpha) * L2_penalty(beta, Tau) + alpha * L1_penalty(beta)
+    return P

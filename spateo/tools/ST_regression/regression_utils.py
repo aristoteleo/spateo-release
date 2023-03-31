@@ -19,7 +19,7 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 from ...configuration import SKM
 from ...logging import logger_manager as lm
 from ...preprocessing.transform import log1p
-from .distributions import Gaussian, Link, NegativeBinomial, Poisson, VarianceFunction
+from .distributions import Gaussian, Link, NegativeBinomial, Poisson
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -98,7 +98,8 @@ def compute_betas(
     x: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
 ):
     """Maximum likelihood estimation procedure, to be used in iteratively weighted least squares to compute the
-    regression coefficients for a given set of dependent and independent variables.
+    regression coefficients for a given set of dependent and independent variables. Can be combined with either Lasso
+    (L1), Ridge (L2), or Elastic Net (L1 + L2) regularization.
 
     Source: Iteratively (Re)weighted Least Squares (IWLS), Fotheringham, A. S., Brunsdon, C., & Charlton, M. (2002).
     Geographically weighted regression: the analysis of spatially varying relationships.
@@ -134,15 +135,19 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray):
 
     Returns:
         betas: Array of shape [n_features,]; regression coefficients
+        influence_matrix: Array of shape [n_samples, n_samples]; influence matrix that describes how much the
+            estimated coefficients change in response to the deletion of each observation in a dataset.
     """
     xT = (x * w).T
     xtx = np.dot(xT, x)
     xtx_inv_xt = linalg.solve(xtx, xT)
     betas = np.dot(xtx_inv_xt, y)
-    return betas
+
+    influence_matrix = xtx_inv_xt
+
+    return betas, influence_matrix
 
 
-# NOTE: add lasso to this
 def iwls(
     y: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
     x: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
@@ -150,11 +155,12 @@ def iwls(
     init_betas: Optional[np.ndarray] = None,
     tol: float = 1e-6,
     max_iter: int = 100,
-    wi: Optional[np.ndarray] = None,
+    spatial_weights: Optional[np.ndarray] = None,
     link: Optional[Link] = None,
-    variance: Optional[Link] = None
+    alpha: Optional[float] = None,
+    tau: Optional[float] = None,
 ):
-    """Iteratively reweighted least squares (IWLS) algorithm to compute the regression coefficients for a given set of
+    """Iteratively weighted least squares (IWLS) algorithm to compute the regression coefficients for a given set of
     dependent and independent variables.
 
     Source: Iteratively (Re)weighted Least Squares (IWLS), Fotheringham, A. S., Brunsdon, C., & Charlton, M. (2002).
@@ -167,17 +173,35 @@ def iwls(
         init_betas: Array of shape [n_features,]; initial regression coefficients
         tol: Convergence tolerance
         max_iter: Maximum number of iterations if convergence is not reached
-        wi: Array of shape [n_samples, 1]; weights to transform observations from location i for a
+        spatial_weights: Array of shape [n_samples, 1]; weights to transform observations from location i for a
             geographically-weighted regression
+        link: Link function for the distribution family. If None, will default to the default value for the specified
+            distribution family.
+        variance: Variance function for the distribution family. If None, will default to the default value for the
+            specified distribution family.
+        alpha: L1 regularization strength; must be between 0 and 1. The L2 regularization strength is 1 - alpha.
+        tau: Optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
+            provided, Tau will default to the identity matrix.
 
     Returns:
         betas: Array of shape [n_features,]; regression coefficients
         y_bar: Array of shape [n_samples,]; predicted values of the dependent variable
         wx: Array of shape [n_samples,]; final weights used for IWLS. These are the weights assigned to each
-            observation based on the generalized linear model's likelihood function.
-        w: Array of shape [n_samples,]; final spatial weights used for IWLS.
+            observation based on the generalized linear model's likelihood function. Only returned if
+            "spatial_weights" is not None- in this case linear_predictor_final and adjusted_predictor_final are given.
+        n_iter: Number of iterations completed upon convergence
+        w_final: Array of shape [n_samples,]; final spatial weights used for IWLS.
+        linear_predictor_final: Array of shape [n_samples,]; final unadjusted linear predictor used for IWLS. Only
+            returned if "spatial_weights" is not None.
+        adjusted_predictor_final: Array of shape [n_samples,]; final adjusted linear predictor used for IWLS. Only
+            returned if "spatial_weights" is not None.
+        influence_matrix: Array of shape [n_samples, n_samples]; optional influence matrix that is only returned if
+            "spatial_weights" is not None. The influence matrix describes how much the estimated coefficients change
+            in response to the deletion of each observation in a dataset.
 
     """
+    logger = lm.get_main_logger()
+
     # Initialization:
     n_iter = 0
     difference = 1.0e10
@@ -198,10 +222,50 @@ def iwls(
     else:
         betas = init_betas
 
-    init_predictor = distr.initial_predictors(y)
-    init_y_bar = distr.link(init_predictor)
+    # Initial values:
+    y_bar = distr.initial_predictions(y)
+    linear_predictor = distr.predict(y_bar)
 
+    while difference > tol and n_iter < max_iter:
+        n_iter += 1
+        weights = distr.weights(linear_predictor)
+        # Compute adjusted predictor from the difference between the predicted mean response variable and observed y:
+        adjusted_predictor = linear_predictor + (distr.link.deriv(y_bar) * (y - y_bar))
+        weights = np.sqrt(weights)
+        if not isinstance(x, np.ndarray):
+            weights = scipy.sparse.csr_matrix(weights)
+            adjusted_predictor = scipy.sparse.csr_matrix(adjusted_predictor)
+        wx = sparse_element_by_element(x, weights, return_array=False)
+        w_adjusted_predictor = sparse_element_by_element(adjusted_predictor, weights, return_array=False)
 
+        if spatial_weights is None:
+            new_betas = compute_betas(w_adjusted_predictor, wx)
+        else:
+            new_betas, influence_matrix = compute_betas_local(w_adjusted_predictor, wx, spatial_weights)
+
+        # Update coefficients with the elastic net penalty, if applicable:
+        if alpha is not None:
+            if not (alpha is None or (0 <= alpha <= 1)):
+                logger.error("alpha must be between 0 and 1.")
+
+            l1_penalty = alpha * L1_penalty(new_betas)
+            l2_penalty = (1 - alpha) * L2_penalty(new_betas, tau)
+            new_betas = (
+                np.sign(new_betas)
+                * np.maximum(np.abs(new_betas) - l1_penalty, 0)
+                / (1 + l2_penalty / (2 * (1 - alpha)))
+            )
+
+        linear_predictor = np.dot(x, new_betas)
+        y_bar = distr.predict(linear_predictor)
+
+        difference = min(abs(new_betas - betas))
+        betas = new_betas
+
+    if spatial_weights is None:
+        return betas, y_bar, wx, n_iter
+    else:
+        return betas, y_bar, n_iter, spatial_weights, linear_predictor, adjusted_predictor, influence_matrix
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -298,27 +362,6 @@ def L2_penalty(beta: np.ndarray, Tau: Union[None, np.ndarray] = None) -> float:
             L2penalty = np.linalg.norm(np.dot(Tau, beta), 2) ** 2
 
     return L2penalty
-
-
-def L1_L2_penalty(
-    alpha: float,
-    beta: np.ndarray,
-    Tau: Union[None, np.ndarray] = None,
-) -> float:
-    """
-    Combination of the L1 and L2 penalties.
-
-    Args:
-        alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function.
-        beta: Array of shape [n_features,]; learned model coefficients
-        Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
-        provided, Tau will default to the identity matrix.
-
-    Returns:
-        P: Value for the regularization parameter
-    """
-    P = 0.5 * (1 - alpha) * L2_penalty(beta, Tau) + alpha * L1_penalty(beta)
-    return P
 
 
 # ---------------------------------------------------------------------------------------------------

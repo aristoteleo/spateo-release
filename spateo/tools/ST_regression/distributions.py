@@ -37,14 +37,15 @@ class Link(object):
         """
         return NotImplementedError
 
-    def deriv(self, p: np.ndarray) -> np.ndarray:
-        """Derivative of the transformation.
+    def deriv(self, fitted: np.ndarray) -> np.ndarray:
+        """Derivative of the logit transformation evaluated at the fitted mean response variable and with respect to the
+        linear predictor.
 
         Args:
-            p: Logits to model the probability of an event, given predictor variables with specified values
+            fitted: The fitted mean response variable
 
         Returns:
-            g'(p): The value of the derivative of the link function
+            deriv: The value of the derivative of the logit function evaluated at the fitted mean response variable
         """
         return NotImplementedError
 
@@ -135,17 +136,18 @@ class Logit(Link):
         inv_deriv = z / (1 + z) ** 2
         return inv_deriv
 
-    def deriv(self, p: np.ndarray) -> np.ndarray:
-        """Derivative of the logit transformation.
+    def deriv(self, fitted: np.ndarray) -> np.ndarray:
+        """Derivative of the logit transformation evaluated at the fitted mean response variable and with respect to the
+        linear predictor.
 
         Args:
-            p: Logits to model the probability of an event, given predictor variables with specified values
+            fitted: The fitted mean response variable
 
         Returns:
-            deriv: The value of the derivative of the logit function at "p"
+            deriv: The value of the derivative of the logit function evaluated at the fitted mean response variable
         """
-        p = self.clip(p)
-        deriv = 1.0 / (p * (1 - p))
+        fitted = self.clip(fitted)
+        deriv = 1.0 / (fitted * (1 - fitted))
         return deriv
 
     def second_deriv(self, p: np.ndarray) -> np.ndarray:
@@ -220,17 +222,17 @@ class Power(Link):
         inv_deriv = z ** ((1 - self.power) / self.power) / self.power
         return inv_deriv
 
-    def deriv(self, p: np.ndarray) -> np.ndarray:
-        """Derivative of the power transformation.
+    def deriv(self, fitted: np.ndarray) -> np.ndarray:
+        """Derivative of the logit transformation evaluated at the fitted mean response variable and with respect to the
+        linear predictor.
 
         Args:
-            p: (non-transformed) logits to model the probability of an event, given predictor variables with specified
-                values
+            fitted: The fitted mean response variable
 
         Returns:
-            deriv: The value of the derivative of the logit function at "p"
+            deriv: The value of the derivative of the logit function evaluated at the fitted mean response variable
         """
-        deriv = self.power * p ** (self.power - 1)
+        deriv = self.power * fitted ** (self.power - 1)
         return deriv
 
     def second_deriv(self, p: np.ndarray) -> np.ndarray:
@@ -341,32 +343,32 @@ class Log(Link):
         inv_deriv = np.exp(z)
         return inv_deriv
 
-    def deriv(self, p: np.ndarray) -> np.ndarray:
-        """Derivative of the logit transformation.
+    def deriv(self, fitted: np.ndarray) -> np.ndarray:
+        """Derivative of the logit transformation evaluated at the fitted mean response variable and with respect to the
+        linear predictor.
 
         Args:
-            p: (non-transformed) logits to model the probability of an event, given predictor variables with specified
-                values
+            fitted: The fitted mean response variable
 
         Returns:
-            deriv: The value of the derivative of the logit function at "p"
+            deriv: The value of the derivative of the logit function evaluated at the fitted mean response variable
         """
-        p = self.clip(p)
-        deriv = 1.0 / p
+        fitted = self.clip(fitted)
+        deriv = 1.0 / fitted
         return deriv
 
-    def second_deriv(self, p: np.ndarray) -> np.ndarray:
-        """Second derivative of the logit transformation.
+    def second_deriv(self, y: np.ndarray) -> np.ndarray:
+        """Second derivative of the logit transformation evaluated at the mean response variable and with respect to
+        the linear predictor.
 
         Args:
-            p: (non-transformed) logits to model the probability of an event, given predictor variables with specified
-                values
+            y: The mean response variable
 
         Returns:
             second_deriv: The value of the second derivative of the logit function at "p"
         """
-        p = self.clip(p)
-        second_deriv = -1.0 / p**2
+        y = self.clip(y)
+        second_deriv = -1.0 / y**2
         return second_deriv
 
 
@@ -578,41 +580,41 @@ class Distribution(object):
         self._link = link
         self.variance = variance
 
-    def initial_predictors(self, y: np.ndarray) -> np.ndarray:
-        """Starting value for predictors in the IRLS algorithm.
+    def initial_predictions(self, y: np.ndarray) -> np.ndarray:
+        """Starting value for linear predictions in the IRLS algorithm.
 
         Args:
             y: The untransformed dependent variable
 
         Returns:
-            fitted_0 : Array of shape [n_samples,]; the initial estimate of the transformed dependent variable.
+            y_bar_0 : Array of shape [n_samples,]; the initial linear predictors.
         """
-        fitted_0 = (y + y.mean()) / 2
-        return fitted_0
+        y_bar_0 = (y + y.mean()) / 2
+        return y_bar_0
 
-    def weights(self, fitted: np.ndarray) -> np.ndarray:
+    def weights(self, y_pred: np.ndarray) -> np.ndarray:
         """Weights for the IRLS algorithm.
 
         Args:
-            fitted: The transformed mean of the dependent variable
+            y_pred: Transformed mean response variable
 
         Returns:
             w: Weights for the IRLS steps
         """
-        w = 1.0 / (self.link.deriv(fitted) ** 2 * self.variance(fitted))
+        w = 1.0 / (self.link.deriv(y_pred) ** 2 * self.variance(y_pred))
         return w
 
     def predict(self, fitted: np.ndarray) -> np.ndarray:
-        """Given model fit (linear predictors), return the predicted dependent variable using the link function.
+        """Given the linear predictors, map back to the scale of the dependent variable.
 
         Args:
             fitted: Linear predictors
 
         Returns:
-            x_bar: The predicted dependent variable values
+            y_bar: The predicted dependent variable values
         """
-        x_bar = self.link(fitted)
-        return x_bar
+        y_bar = self.link(fitted)
+        return y_bar
 
     def get_predictors(self, outputs: np.ndarray) -> np.ndarray:
         """Given model fit (outputs obtained from applying the link function), map back to the scale of the linear
