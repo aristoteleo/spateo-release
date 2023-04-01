@@ -189,7 +189,7 @@ def iwls(
 
     Returns:
         betas: Array of shape [n_features,]; regression coefficients
-        y_bar: Array of shape [n_samples,]; predicted values of the dependent variable
+        y_hat: Array of shape [n_samples,]; predicted values of the dependent variable
         wx: Array of shape [n_samples,]; final weights used for IWLS. These are the weights assigned to each
             observation based on the generalized linear model's likelihood function. Only returned if
             "spatial_weights" is not None- in this case linear_predictor_final and adjusted_predictor_final are given.
@@ -227,14 +227,14 @@ def iwls(
         betas = init_betas
 
     # Initial values:
-    y_bar = distr.initial_predictions(y)
-    linear_predictor = distr.predict(y_bar)
+    y_hat = distr.initial_predictions(y)
+    linear_predictor = distr.predict(y_hat)
 
     while difference > tol and n_iter < max_iter:
         n_iter += 1
         weights = distr.weights(linear_predictor)
         # Compute adjusted predictor from the difference between the predicted mean response variable and observed y:
-        adjusted_predictor = linear_predictor + (distr.link.deriv(y_bar) * (y - y_bar))
+        adjusted_predictor = linear_predictor + (distr.link.deriv(y_hat) * (y - y_hat))
         weights = np.sqrt(weights)
         if not isinstance(x, np.ndarray):
             weights = scipy.sparse.csr_matrix(weights)
@@ -261,15 +261,15 @@ def iwls(
             )
 
         linear_predictor = np.dot(x, new_betas)
-        y_bar = distr.predict(linear_predictor)
+        y_hat = distr.predict(linear_predictor)
 
         difference = min(abs(new_betas - betas))
         betas = new_betas
 
     if spatial_weights is None:
-        return betas, y_bar, wx, n_iter
+        return betas, y_hat, wx, n_iter
     else:
-        return betas, y_bar, n_iter, spatial_weights, linear_predictor, adjusted_predictor, influence_matrix
+        return betas, y_hat, n_iter, spatial_weights, linear_predictor, adjusted_predictor, influence_matrix
 
 
 # ---------------------------------------------------------------------------------------------------

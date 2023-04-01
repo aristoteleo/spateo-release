@@ -106,7 +106,7 @@ class Kernel(object):
                             \dfrac{15}{16}(1-u^2)^2 & \text{if} |u| \leq 1 \\ 0 & \text{otherwise}
                         \end{cases}.
         eps: Error-correcting factor to avoid division by zero
-        points: Optional list of indices that can be used to subset data. If `points` is None, the density is
+        subset_idxs: Optional list of indices that can be used to subset data. If `points` is None, the density is
             estimated for each point in `data`.
     """
 
@@ -114,16 +114,16 @@ class Kernel(object):
         self,
         i: int,
         data: Union[np.ndarray, scipy.sparse.spmatrix],
-        bw: float,
+        bw: Union[int, float],
         fixed: bool = True,
         function: str = "triangular",
         eps: float = 1.0000001,
-        points: Optional[Iterable[int]] = None,
+        subset_idxs: Optional[Iterable[int]] = None,
     ):
         self.logger = lm.get_main_logger()
 
-        if points is not None:
-            data = data[points, :]
+        if subset_idxs is not None:
+            data = data[subset_idxs, :]
 
         self.dist_vector = local_dist(data[i], data).reshape(-1)
 
@@ -132,6 +132,10 @@ class Kernel(object):
         if fixed:
             self.bandwidth = float(bw)
         else:
+            self.logger.info(
+                "'fixed' selected for the bandwidth estimation. Input to 'bw' will be taken to be the "
+                "number of nearest neighbors to use in the bandwidth estimation."
+            )
             self.bandwidth = np.partition(self.dist_vector, int(bw) - 1)[int(bw) - 1] * eps
 
         self.kernel = self._kernel_functions(self.dist_vector / self.bandwidth)

@@ -587,10 +587,10 @@ class Distribution(object):
             y: The untransformed dependent variable
 
         Returns:
-            y_bar_0 : Array of shape [n_samples,]; the initial linear predictors.
+            y_hat_0 : Array of shape [n_samples,]; the initial linear predictors.
         """
-        y_bar_0 = (y + y.mean()) / 2
-        return y_bar_0
+        y_hat_0 = (y + y.mean()) / 2
+        return y_hat_0
 
     def weights(self, y_pred: np.ndarray) -> np.ndarray:
         """Weights for the IRLS algorithm.
@@ -611,10 +611,10 @@ class Distribution(object):
             fitted: Linear predictors
 
         Returns:
-            y_bar: The predicted dependent variable values
+            y_hat: The predicted dependent variable values
         """
-        y_bar = self.link(fitted)
-        return y_bar
+        y_hat = self.link(fitted)
+        return y_hat
 
     def get_predictors(self, outputs: np.ndarray) -> np.ndarray:
         """Given model fit (outputs obtained from applying the link function), map back to the scale of the linear
