@@ -120,7 +120,6 @@ class Kernel(object):
         eps: float = 1.0000001,
         subset_idxs: Optional[Iterable[int]] = None,
     ):
-        self.logger = lm.get_main_logger()
 
         if subset_idxs is not None:
             data = data[subset_idxs, :]
@@ -132,7 +131,7 @@ class Kernel(object):
         if fixed:
             self.bandwidth = float(bw)
         else:
-            self.logger.info(
+            print(
                 "'fixed' selected for the bandwidth estimation. Input to 'bw' will be taken to be the "
                 "number of nearest neighbors to use in the bandwidth estimation."
             )
@@ -141,7 +140,7 @@ class Kernel(object):
         self.kernel = self._kernel_functions(self.dist_vector / self.bandwidth)
 
         # Bisquare and uniform need to be truncated if the sample is outside of the provided bandwidth:
-        if self.function.isin(["bisquare", "uniform"]):
+        if self.function in ["bisquare", "uniform"]:
             self.kernel[(self.dist_vector >= self.bandwidth)] = 0
 
     def _kernel_functions(self, x):
@@ -158,10 +157,45 @@ class Kernel(object):
         elif self.function == "exponential":
             return np.exp(-x)
         else:
-            self.logger.error(
+            raise ValueError(
                 f'Unsupported kernel function. Valid options: "triangular", "uniform", "quadratic", '
                 f'"bisquare", "gaussian" or "exponential". Got {self.function}.'
             )
+
+
+def get_wi(
+    i: int,
+    n_samples: int,
+    coords: np.ndarray,
+    fixed_bw: bool = True,
+    kernel: str = "gaussian",
+    bw: Union[float, int] = 100,
+) -> np.ndarray:
+    """Get spatial weights for an individual sample, given the coordinates of all samples in space.
+
+    Args:
+        i: Index of sample for which weights are to be calculated to all other samples in the dataset
+        n_samples: Total number of samples in the dataset
+        coords: Array of shape (n_samples, 2) or (n_samples, 3) representing the spatial coordinates of each sample
+        fixed_bw: If True, `bw` is treated as a spatial distance for computing spatial weights. Otherwise,
+            it is treated as the number of neighbors.
+        kernel: The name of the kernel function to use. Valid options: "triangular", "uniform", "quadratic",
+            "bisquare", "gaussian" or "exponential"
+        bw: Bandwidth for the spatial kernel
+
+    Returns:
+        wi: Array of weights for sample of interest
+    """
+
+    if bw == np.inf:
+        wi = np.ones(n_samples)
+        return wi
+
+    try:
+        wi = Kernel(i, coords, bw, fixed=fixed_bw, function=kernel, subset_idxs=None).kernel
+    except:
+        raise RuntimeError(f"Error in getting weights for sample {i}")
+    return wi
 
 
 # ---------------------------------------------------------------------------------------------------

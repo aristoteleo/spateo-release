@@ -5,6 +5,8 @@ relationships of) the response variable.
 import argparse
 import copy
 import os
+import sys
+from functools import partial
 from multiprocessing import Pool
 from typing import Optional, Union
 
@@ -13,17 +15,18 @@ import numpy as np
 import numpy.linalg
 import pandas as pd
 import scipy
-from joblib import Parallel, delayed
 from mpi4py import MPI
 
-from ...logging import logger_manager as lm
-from ...preprocessing.normalize import normalize_total
-from ...preprocessing.transform import log1p
-from ...tools.find_neighbors import transcriptomic_connectivity
-from ...tools.spatial_degs import moran_i
-from ...tools.spatial_smooth.smooth import calc_1nd_moment
-from ..find_neighbors import Kernel
-from .regression_utils import compute_betas_local, iwls
+# For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
+sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
+
+from spateo.logging import logger_manager as lm
+from spateo.preprocessing.normalize import normalize_total
+from spateo.preprocessing.transform import log1p
+from spateo.tools.find_neighbors import get_wi, transcriptomic_connectivity
+from spateo.tools.spatial_degs import moran_i
+from spateo.tools.spatial_smooth.smooth import calc_1nd_moment
+from spateo.tools.ST_regression.regression_utils import compute_betas_local, iwls
 
 # NOTE: set lower bound AND upper bound bandwidth much lower for membrane-bound ligands/receptors pairs
 
@@ -79,7 +82,6 @@ class STGWR:
 
         coords_key: Key in .obsm of the AnnData object that contains the coordinates of the cells
         group_key: Key in .obs of the AnnData object that contains the category grouping for each cell
-        y_key: Name of the gene to be the dependent variable
 
 
         bw: Used to provide previously obtained bandwidth for the spatial kernel. Consists of either a distance
@@ -129,15 +131,18 @@ class STGWR:
         self.n_features = None
         self.iterations = None
 
+        self.parse_stgwr_args()
+
         # Check if the program is currently in the master process:
         if self.comm.rank == 0:
-            "filler"
+            self.load_and_process()
 
     def parse_stgwr_args(self):
         """
         Parse command line arguments for arguments pertinent to modeling.
         """
         arg_retrieve = self.parser.parse_args()
+        self.mod_type = arg_retrieve.mod_type
         self.adata_path = arg_retrieve.data_path
         self.cci_dir = arg_retrieve.cci_dir
         self.species = arg_retrieve.species
@@ -152,7 +157,6 @@ class STGWR:
 
         self.coords_key = arg_retrieve.coords_key
         self.group_key = arg_retrieve.group_key
-        self.y_key = arg_retrieve.y_key
 
         self.bw_fixed = arg_retrieve.bw_fixed
         self.distr = arg_retrieve.distr
@@ -176,27 +180,29 @@ class STGWR:
         if self.comm.rank == 0:
             print("-" * 60, flush=True)
             self.logger.info(f"Running STGWR on {self.comm.size} processes...")
-            fixed_or_adaptive = "Fixed" if self.bw_fixed else "Adaptive"
+            fixed_or_adaptive = "Fixed " if self.bw_fixed else "Adaptive "
             type = fixed_or_adaptive + self.kernel.capitalize()
-            self.logger.info(f"Spatial kernel: {type}", flush=True)
+            self.logger.info(f"Spatial kernel: {type}")
+            self.logger.info(f"Model type: {self.mod_type}")
 
-            self.logger.info("Loading AnnData object from: ", self.adata_path, flush=True)
-            self.logger.info(
-                "Loading cell-cell interaction databases from the following folder: ", self.cci_dir, flush=True
-            )
+            self.logger.info(f"Loading AnnData object from: {self.adata_path}")
+            self.logger.info(f"Loading cell-cell interaction databases from the following folder: {self.cci_dir}")
             if self.custom_ligands_path is not None:
-                self.logger.info("Using list of custom ligands from: ", self.custom_ligands_path, flush=True)
+                self.logger.info(f"Using list of custom ligands from: {self.custom_ligands_path}")
             if self.custom_receptors_path is not None:
-                self.logger.info("Using list of custom receptors from: ", self.custom_receptors_path, flush=True)
+                self.logger.info(f"Using list of custom receptors from: {self.custom_receptors_path}")
             if self.targets_path is not None:
-                self.logger.info("Using list of target genes from: ", self.targets_path, flush=True)
-            self.logger.info("Saving results to: ", self.output_path, flush=True)
+                self.logger.info(f"Using list of target genes from: {self.targets_path}")
+            self.logger.info(f"Saving results to: {self.output_path}")
 
     def load_and_process(self):
         """
         Load AnnData object and process it for modeling.
         """
         self.adata = anndata.read_h5ad(self.adata_path)
+        self.coords = self.adata.obsm[self.coords_key]
+        self.n_samples = self.adata.n_obs
+        self.n_features = self.adata.n_vars
 
         if self.distr in ["poisson", "neg-binomial"]:
             if self.normalize or self.smooth or self.log_transform:
@@ -325,21 +331,29 @@ class STGWR:
             self.cell_categories = X.reindex(sorted(X.columns), axis=1)
 
         # Ligand-receptor expression array
-        elif self.mod_type == "lr" or self.mod_type == "slice":
+        if self.mod_type == "lr" or self.mod_type == "slice":
             if self.species == "human":
                 lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
             elif self.species == "mouse":
                 lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
             else:
                 self.logger.error("Invalid species specified. Must be one of 'human' or 'mouse'.")
-            available_l = set(lr_db["from"])
-            available_r = set(lr_db["to"])
+            database_ligands = set(lr_db["from"])
+            database_receptors = set(lr_db["to"])
 
             if self.custom_ligands_path is not None:
                 with open(self.custom_ligands_path, "r") as f:
                     ligands = f.read().splitlines()
-                    ligands = [l for l in ligands if l in available_l]
+                    ligands = [l for l in ligands if l in database_ligands]
+                    l_complexes = [elem for elem in ligands if "_" in elem]
+                    # Get individual components if any complexes are included in this list:
+                    ligands = [l for item in ligands for l in item.split("_")]
             else:
+                # List of possible complexes to search through:
+                l_complexes = [elem for elem in database_ligands if "_" in elem]
+                # And all possible ligand molecules:
+                all_ligands = [l for item in database_ligands for l in item.split("_")]
+
                 # Get list of ligands from among the most highly spatially-variable genes, indicative of potentially
                 # interesting spatially-enriched signal:
                 self.logger.info(
@@ -347,7 +361,7 @@ class STGWR:
                 )
                 m_degs = moran_i(self.adata)
                 m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
-                ligands = [g for g in m_filter_genes if g in available_l]
+                ligands = [g for g in m_filter_genes if g in all_ligands]
 
                 # If no significant spatially-variable ligands are found, use the top 10 most spatially-variable
                 # ligands:
@@ -357,12 +371,12 @@ class STGWR:
                         "spatially-variable ligands."
                     )
                     m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
-                    ligands = [g for g in m_filter_genes if g in available_l][:10]
+                    ligands = [g for g in m_filter_genes if g in all_ligands][:10]
 
                 # If any ligands are part of complexes, add all complex components to this list:
-                for element in available_l:
-                    if "-" in element:
-                        complex_members = element.split("-")
+                for element in l_complexes:
+                    if "_" in element:
+                        complex_members = element.split("_")
                         for member in complex_members:
                             if member in ligands:
                                 other_members = [m for m in complex_members if m != member]
@@ -383,34 +397,46 @@ class STGWR:
             # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
             # but store them in a temporary list to do so later because some may contribute to multiple complexes:
             to_drop = []
-            for element in available_l:
-                if "-" in element:
-                    parts = element.split("-")
-                    if all(part in self.ligands_expr.columns for part in parts):
-                        # Combine the columns into a new column with the name of the hyphenated element- here we will
-                        # compute the geometric mean of the expression values of the complex components:
-                        self.ligands_expr[element] = self.ligands_expr[parts].apply(
-                            lambda x: x.prod() ** (1 / len(parts)), axis=1
-                        )
-                        # Mark the individual components for removal:
-                        to_drop.extend(parts)
-                    else:
-                        # Drop the hyphenated element from the dataframe if all components are not found in the
-                        # dataframe columns
-                        partial_components = [l for l in ligands if l in parts]
-                        to_drop.extend(partial_components)
+            for element in l_complexes:
+                parts = element.split("_")
+                if all(part in self.ligands_expr.columns for part in parts):
+                    # Combine the columns into a new column with the name of the hyphenated element- here we will
+                    # compute the geometric mean of the expression values of the complex components:
+                    self.ligands_expr[element] = self.ligands_expr[parts].apply(
+                        lambda x: x.prod() ** (1 / len(parts)), axis=1
+                    )
+                    # Mark the individual components for removal if the individual components cannot also be
+                    # found as ligands:
+                    to_drop.extend([part for part in parts if part not in database_ligands])
+                else:
+                    # Drop the hyphenated element from the dataframe if all components are not found in the
+                    # dataframe columns
+                    partial_components = [l for l in ligands if l in parts]
+                    to_drop.extend(partial_components)
+                    if len(partial_components) > 0:
                         self.logger.info(
                             f"Not all components from the {element} heterocomplex could be found in the " f"dataset."
                         )
 
+            # Drop any possible duplicate ligands alongside any other columns to be dropped:
             to_drop = list(set(to_drop))
             self.ligands_expr.drop(to_drop, axis=1, inplace=True)
+            first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
+            self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
 
             if self.custom_receptors_path is not None:
                 with open(self.custom_receptors_path, "r") as f:
                     receptors = f.read().splitlines()
-                    receptors = [r for r in receptors if r in available_r]
+                    receptors = [r for r in receptors if r in database_receptors]
+                    r_complexes = [elem for elem in receptors if "_" in elem]
+                    # Get individual components if any complexes are included in this list:
+                    receptors = [r for item in receptors for r in item.split("_")]
             else:
+                # List of possible complexes to search through:
+                r_complexes = [elem for elem in database_receptors if "_" in elem]
+                # And all possible receptor molecules:
+                all_receptors = [r for item in database_receptors for r in item.split("_")]
+
                 # Get list of receptors from among the most highly spatially-variable genes, indicative of
                 # potentially interesting spatially-enriched signal:
                 self.logger.info(
@@ -418,7 +444,7 @@ class STGWR:
                 )
                 m_degs = moran_i(self.adata)
                 m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
-                receptors = [g for g in m_filter_genes if g in available_r]
+                receptors = [g for g in m_filter_genes if g in all_receptors]
 
                 # If no significant spatially-variable receptors are found, use the top 10 most spatially-variable
                 # receptors:
@@ -428,12 +454,12 @@ class STGWR:
                         "spatially-variable receptors."
                     )
                     m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
-                    receptors = [g for g in m_filter_genes if g in available_r][:10]
+                    receptors = [g for g in m_filter_genes if g in all_receptors][:10]
 
-                # If any ligands are part of complexes, add all complex components to this list:
-                for element in available_r:
-                    if "-" in element:
-                        complex_members = element.split("-")
+                # If any receptors are part of complexes, add all complex components to this list:
+                for element in r_complexes:
+                    if "_" in element:
+                        complex_members = element.split("_")
                         for member in complex_members:
                             if member in receptors:
                                 other_members = [m for m in complex_members if m != member]
@@ -457,28 +483,34 @@ class STGWR:
             # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
             # but store them in a temporary list to do so later because some may contribute to multiple complexes:
             to_drop = []
-            for element in available_r:
-                if "-" in element:
-                    parts = element.split("-")
+            for element in r_complexes:
+                if "_" in element:
+                    parts = element.split("_")
                     if all(part in self.receptors_expr.columns for part in parts):
                         # Combine the columns into a new column with the name of the hyphenated element- here we will
                         # compute the geometric mean of the expression values of the complex components:
                         self.receptors_expr[element] = self.receptors_expr[parts].apply(
                             lambda x: x.prod() ** (1 / len(parts)), axis=1
                         )
-                        # Mark the original individual columns for removal:
-                        to_drop.extend(parts)
+                        # Mark the individual components for removal if the individual components cannot also be
+                        # found as receptors:
+                        to_drop.extend([part for part in parts if part not in database_receptors])
                     else:
                         # Drop the hyphenated element from the dataframe if all components are not found in the
                         # dataframe columns
                         partial_components = [r for r in receptors if r in parts]
                         to_drop.extend(partial_components)
-                        self.logger.info(
-                            f"Not all components from the {element} heterocomplex could be found in the " f"dataset."
-                        )
+                        if len(partial_components) > 0:
+                            self.logger.info(
+                                f"Not all components from the {element} heterocomplex could be found in the "
+                                f"dataset, so this complex was not included."
+                            )
 
+            # Drop any possible duplicate ligands alongside any other columns to be dropped:
             to_drop = list(set(to_drop))
             self.receptors_expr.drop(to_drop, axis=1, inplace=True)
+            first_occurrences = self.receptors_expr.columns.duplicated(keep="first")
+            self.receptors_expr = self.receptors_expr.loc[:, ~first_occurrences]
 
         else:
             self.logger.error("Invalid `mod_type` specified. Must be one of 'niche', 'slice', or 'lr'.")
@@ -501,31 +533,15 @@ class STGWR:
 
         # Parallelized computation of spatial weights for all samples:
         w = np.zeros((self.n_samples, self.n_samples))
-        weights = Parallel(n_jobs=-1)(delayed(self._get_wi)(i, bw) for i in range(self.n_samples))
+        get_wi_partial = partial(
+            get_wi, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
+        )
+
+        with Pool() as pool:
+            weights = pool.map(get_wi_partial, range(self.n_samples))
         for i, row in enumerate(weights):
             w[i, :] = row
         return w
-
-    def _get_wi(self, i: int, bw: Union[float, int]) -> np.ndarray:
-        """Get spatial weights for an individual sample.
-
-        Args:
-            i: Index of sample for which weights are to be calculated to all other samples in the dataset
-            bw: Bandwidth for the spatial kernel
-
-        Returns:
-            wi: Array of weights for sample of interest
-        """
-
-        if bw == np.inf:
-            wi = np.ones(self.n_samples)
-            return wi
-
-        try:
-            wi = Kernel(i, self.coords, bw, fixed=self.fixed_bw, function=self.kernel, subset_idxs=None).kernel
-        except:
-            self.logger.error(f"Error in getting weights for sample {i}")
-        return wi
 
     def _adjust_x(self):
         """Adjust the independent variable array based on the defined bandwidth."""
