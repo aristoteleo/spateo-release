@@ -1,4 +1,4 @@
-,0,1,2,3
+,from,to,pathway,type
 0,TGFB1,TGFBR1_TGFBR2,TGFb,Secreted Signaling
 1,TGFB2,TGFBR1_TGFBR2,TGFb,Secreted Signaling
 2,TGFB3,TGFBR1_TGFBR2,TGFb,Secreted Signaling

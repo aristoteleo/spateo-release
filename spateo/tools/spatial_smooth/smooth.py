@@ -7,13 +7,14 @@ Also note that this provides an alternative method for finding spatial domains (
 """
 import os
 import random
-from typing import Union
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import scipy
 import torch
 import torch.nn.functional as F
 from anndata import AnnData
+from scipy.sparse import diags, issparse
 from torch import FloatTensor, Tensor, nn
 from torch.backends import cudnn
 from tqdm import tqdm
@@ -24,7 +25,21 @@ from ..find_neighbors import construct_nn_graph, normalize_adj
 from .smooth_model import Encoder
 
 
-# -------------------------------------------- Tensor operations -------------------------------------------- #
+def calc_1nd_moment(X, W, normalize_W=True) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    if normalize_W:
+        if type(W) == np.ndarray:
+            d = np.sum(W, 1).flatten()
+        else:
+            d = np.sum(W, 1).A.flatten()
+        W = diags(1 / d) @ W if issparse(W) else np.diag(1 / d) @ W
+        return W @ X, W
+    else:
+        return W @ X
+
+
+# ---------------------------------------------------------------------------------------------------
+# Tensor operations
+# ---------------------------------------------------------------------------------------------------
 def permutation(feature: FloatTensor) -> Tensor:
     """Given counts matrix in tensor form, return counts matrix with scrambled rows/spot names"""
     ids = np.arange(feature.shape[0])
