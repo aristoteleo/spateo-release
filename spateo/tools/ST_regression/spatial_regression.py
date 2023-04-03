@@ -8,7 +8,7 @@ import os
 import sys
 from functools import partial
 from multiprocessing import Pool
-from typing import Optional, Union
+from typing import Callable, Optional, Tuple, Union
 
 import anndata
 import numpy as np
@@ -163,6 +163,8 @@ class STGWR:
         self.kernel = arg_retrieve.kernel
 
         self.fit_intercept = arg_retrieve.fit_intercept
+        # Parameters related to the fitting process (initial betas, tolerance, number of iterations, etc.)
+        self.fit_params = {}
 
         if arg_retrieve.bw:
             if self.bw_fixed:
@@ -204,7 +206,7 @@ class STGWR:
         self.n_samples = self.adata.n_obs
         self.n_features = self.adata.n_vars
 
-        if self.distr in ["poisson", "neg-binomial"]:
+        if self.distr in ["poisson", "nb"]:
             if self.normalize or self.smooth or self.log_transform:
                 self.logger.info(
                     f"With a {self.distr} assumption, discrete counts are required for the response variable. "
@@ -521,6 +523,9 @@ class STGWR:
     # NOTE TO SELF: DURING THE PROCESS OF FINDING THE OPTIMAL BANDWIDTH, RECOMPUTE X AT EACH ITERATION BASED ON THE
     # NEW NEIGHBORHOODS THAT GET RETURNED FROM THE BANDWIDTH SELECTION.
 
+    def _set_search_range(self):
+        "filler"
+
     def _compute_all_wi(self, bw: Union[float, int]) -> np.ndarray:
         """Compute spatial weights for all samples in the dataset given a specified bandwidth.
 
@@ -548,33 +553,163 @@ class STGWR:
         if self.mod_type:
             "filler"
 
-    def _local_fit(self, i: int):
+    def local_fit(
+        self, i: int, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False
+    ) -> Union[Tuple[int, float, np.ndarray, np.ndarray, np.ndarray], Tuple[float, np.ndarray]]:
         """Fit a local regression model for each sample.
 
         Args:
             i: Index of sample for which local regression model is to be fitted
+            y: Response variable
+            X: Independent variable array
+            bw: Bandwidth for the spatial kernel
+            final: Set True to indicate that no additional parameter selection needs to be performed; the model can
+                be fit and more stats can be returned.
+
+        Returns:
+            i: Index of sample for which local regression model was fitted
+            residual: Residual for the fitted response variable value compared to the observed value
+            hat_i: Row i of the hat matrix, which is the effect of deleting sample i from the dataset on the
+                estimated predicted value for the other samples
+            betas: Estimated coefficients for sample i
+            CCT: Squared canonical correlation coefficients b/w the predicted values and the response variable
         """
-        wi = self._get_wi(i, self.bw).reshape(-1, 1)
+        wi = get_wi(
+            i, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
+        ).reshape(-1, 1)
 
         if self.distr == "gaussian":
-            betas, influence_matrix = compute_betas_local(self.y, self.X, wi)
-            y_hat = np.dot(self.X[i], betas)[0]
-            residual = self.y[i] - y_hat
+            betas, pseudoinverse = compute_betas_local(y, X, wi)
+            pred_y = np.dot(X[i], betas)[0]
 
-            # Effect of deleting sample i from the dataset on the estimated coefficients
-            influence_i = np.dot(self.X[i], influence_matrix[:, i])
-            w = 1
+            # Effect of deleting sample i from the dataset on the estimated predicted values
+            hat_i = np.dot(X[i], pseudoinverse[:, i])
 
         elif self.distr == "poisson" or self.distr == "nb":
             # init_betas (initial coefficients) to be incorporated at runtime:
-            betas, y_hat, n_iter, spatial_weights, linear_predictor, adjusted_predictor, influence_matrix = iwls(
-                self.y,
-                self.X,
+            betas, y_hat, _, final_irls_weights, _, _, pseudoinverse = iwls(
+                y,
+                X,
                 distr=self.distr,
-                init_betas=self.init_params["init_betas"],
+                init_betas=self.fit_params["init_betas"],
+                tol=self.fit_params["tol"],
+                max_iter=self.fit_params["max_iter"],
+                spatial_weights=wi,
+                link=None,
+                alpha=self.fit_params["alpha"],
+                tau=self.fit_params["tau"],
             )
 
+            pred_y = y_hat[i]
+            # Effect of deleting sample i from the dataset on the estimated predicted values:
+            hat_i = np.dot(X[i], pseudoinverse[:, i]) * final_irls_weights[i][0]
+
+        else:
+            self.logger.error("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
+
+        residual = y[i] - pred_y
+        # Canonical correlation:
+        CCT = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
+
+        if final:
+            return i, residual, hat_i, betas, CCT
+        else:
+            # For bandwidth optimization:
+            err = residual * residual
+            return err, hat_i
+
+    def golden_section(self, range_lowest: float, range_highest: float, function: Callable) -> float:
+        """Perform golden section search to find the optimal bandwidth.
+
+        Args:
+            range_lowest: Lower bound of the search range
+            range_highest: Upper bound of the search range
+            function: Function to be minimized
+
+        Returns:
+            bw: Optimal bandwidth
+        """
+        delta = 0.38197
+        new_lb = range_lowest + delta * np.abs(range_highest - range_lowest)
+        new_ub = range_highest - delta * np.abs(range_highest - range_lowest)
+
+        score = None
+        optimum_bw = None
+        difference = 1.0e10
+        iterations = 0
+        results_dict = {}
+
+        while np.abs(difference) > self.fit_params["tol"] and iterations < self.fit_params["max_iter"]:
+            iterations += 1
+
+            # Bandwidth needs to be discrete:
+            if not self.bw_fixed:
+                new_lb = np.round(new_lb)
+                new_ub = np.round(new_ub)
+
+            if new_lb in results_dict:
+                lb_score = results_dict[new_lb]
+            else:
+                lb_score = function(new_lb)
+                results_dict[new_lb] = lb_score
+
+            if new_ub in results_dict:
+                ub_score = results_dict[new_ub]
+            else:
+                ub_score = function(new_ub)
+                results_dict[new_ub] = ub_score
+
+            if self.comm.rank == 0:
+                # Follow direction of increasing score until score stops increasing:
+                if lb_score <= ub_score:
+                    # Set new optimum score and bandwidth:
+                    optimum_score = lb_score
+                    optimum_bw = new_lb
+
+                    # Update new max upper bound and test lower bound:
+                    range_highest = new_ub
+                    new_ub = new_lb
+                    new_lb = range_lowest + delta * np.abs(range_highest - range_lowest)
+
+                # Else follow direction of decreasing score until score stops decreasing:
+                else:
+                    # Set new optimum score and bandwidth:
+                    optimum_score = ub_score
+                    optimum_bw = new_ub
+
+                    # Update new max lower bound and test upper bound:
+                    range_lowest = new_lb
+                    new_lb = new_ub
+                    new_ub = range_highest - delta * np.abs(range_highest - range_lowest)
+
+                difference = lb_score - ub_score
+                # Update new value for score:
+                score = optimum_score
+
+            new_lb = self.comm.bcast(new_lb, root=0)
+            new_ub = self.comm.bcast(new_ub, root=0)
+            score = self.comm.bcast(score, root=0)
+            difference = self.comm.bcast(difference, root=0)
+            optimum_bw = self.comm.bcast(optimum_bw, root=0)
+
+        return optimum_bw
+
+    def mpi_fit(self, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False):
+        "filler"
+
     # Main fit function here:
+
+    # First, define fitting parameters:
+    # self.fit_params['ini_params'] = ini_params
+    # self.fit_params['tol'] = tol
+    # self.fit_params['max_iter'] = max_iter
+    # self.fit_params['solve'] = solve
+    # self.fit_params['lite'] = lite
+
+    # if y is None:
+    #   y = self.y
+    #   X = self.X
+    #   Here, adjust X using self.all_spatial_weights
 
     # Finish putting together appropriate X blocks by combining relevant ligands and receptors if applicable:
 

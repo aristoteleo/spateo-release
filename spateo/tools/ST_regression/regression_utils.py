@@ -135,8 +135,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray):
 
     Returns:
         betas: Array of shape [n_features,]; regression coefficients
-        influence_matrix: Array of shape [n_samples, n_samples]; influence matrix that describes how much the
-            estimated coefficients change in response to the deletion of each observation in a dataset.
+        pseudoinverse: Array of shape [n_samples, n_samples]; Moore-Penrose pseudoinverse of the X matrix
     """
     xT = (x * w).T
     xtx = np.dot(xT, x)
@@ -147,9 +146,9 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray):
         xtx_inv_xt = np.dot(linalg.pinv(xtx), xT)
     betas = np.dot(xtx_inv_xt, y)
 
-    influence_matrix = xtx_inv_xt
+    pseudoinverse = xtx_inv_xt
 
-    return betas, influence_matrix
+    return betas, pseudoinverse
 
 
 def iwls(
@@ -190,18 +189,15 @@ def iwls(
     Returns:
         betas: Array of shape [n_features,]; regression coefficients
         y_hat: Array of shape [n_samples,]; predicted values of the dependent variable
-        wx: Array of shape [n_samples,]; final weights used for IWLS. These are the weights assigned to each
-            observation based on the generalized linear model's likelihood function. Only returned if
-            "spatial_weights" is not None- in this case linear_predictor_final and adjusted_predictor_final are given.
+        wx: Array of shape [n_samples,]; weighted independent variables
         n_iter: Number of iterations completed upon convergence
         w_final: Array of shape [n_samples,]; final spatial weights used for IWLS.
         linear_predictor_final: Array of shape [n_samples,]; final unadjusted linear predictor used for IWLS. Only
             returned if "spatial_weights" is not None.
         adjusted_predictor_final: Array of shape [n_samples,]; final adjusted linear predictor used for IWLS. Only
             returned if "spatial_weights" is not None.
-        influence_matrix: Array of shape [n_samples, n_samples]; optional influence matrix that is only returned if
-            "spatial_weights" is not None. The influence matrix describes how much the estimated coefficients change
-            in response to the deletion of each observation in a dataset.
+        pseudoinverse: Array of shape [n_samples, n_samples]; optional influence matrix that is only returned if
+            "spatial_weights" is not None. The pseudoinverse is the Moore-Penrose pseudoinverse of the X matrix.
 
     """
     logger = lm.get_main_logger()
@@ -245,7 +241,7 @@ def iwls(
         if spatial_weights is None:
             new_betas = compute_betas(w_adjusted_predictor, wx)
         else:
-            new_betas, influence_matrix = compute_betas_local(w_adjusted_predictor, wx, spatial_weights)
+            new_betas, pseudoinverse = compute_betas_local(w_adjusted_predictor, wx, spatial_weights)
 
         # Update coefficients with the elastic net penalty, if applicable:
         if alpha is not None:
@@ -260,7 +256,7 @@ def iwls(
                 / (1 + l2_penalty / (2 * (1 - alpha)))
             )
 
-        linear_predictor = np.dot(x, new_betas)
+        linear_predictor = sparse_dot(x, new_betas)
         y_hat = distr.predict(linear_predictor)
 
         difference = min(abs(new_betas - betas))
@@ -269,7 +265,8 @@ def iwls(
     if spatial_weights is None:
         return betas, y_hat, wx, n_iter
     else:
-        return betas, y_hat, n_iter, spatial_weights, linear_predictor, adjusted_predictor, influence_matrix
+        w_final = weights
+        return betas, y_hat, n_iter, w_final, linear_predictor, adjusted_predictor, pseudoinverse
 
 
 # ---------------------------------------------------------------------------------------------------
