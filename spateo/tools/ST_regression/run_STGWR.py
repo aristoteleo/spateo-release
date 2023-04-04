@@ -16,11 +16,14 @@ if __name__ == "__main__":
     parser.add_argument("-output_path", default="./output/stgwr_results.csv", type=str)
     parser.add_argument("-custom_lig_path", type=str)
     parser.add_argument("-custom_rec_path", type=str)
+    parser.add_argument("-custom_pathway_path", type=str)
     parser.add_argument("-targets_path", type=str)
+    parser.add_argument("-init_betas_path", type=str)
 
     parser.add_argument("-normalize", action="store_true")
     parser.add_argument("-smooth", action="store_true")
     parser.add_argument("-log_transform", action="store_true")
+    parser.add_argument("-target_expr_threshold", default=0.2, type=float)
 
     parser.add_argument("-coords_key", default="spatial", type=str)
     parser.add_argument("-group_key", default="cell_type", type=str)
@@ -29,10 +32,14 @@ if __name__ == "__main__":
     parser.add_argument("-minbw")
     parser.add_argument("-maxbw")
     parser.add_argument("-bw_fixed", action="store_true")
+    parser.add_argument("-exclude_self", action="store_true")
     parser.add_argument("-kernel", default="gaussian", type=str)
 
     parser.add_argument("-distr", default="gaussian", type=str)
     parser.add_argument("-fit_intercept", action="store_true")
+    parser.add_argument("-tolerance", default=1e-5, type=float)
+    parser.add_argument("-max_iter", default=500, type=int)
+    parser.add_argument("-alpha", default=0.5, type=float)
 
     # For now, use a dummy class for Comm:
     class Comm:
@@ -46,3 +53,4 @@ if __name__ == "__main__":
     print(test_model.cell_categories)
     print(test_model.ligands_expr)
     print(test_model.receptors_expr)
+    print(test_model.targets_expr)

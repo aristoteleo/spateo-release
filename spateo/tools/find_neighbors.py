@@ -80,6 +80,7 @@ class Kernel(object):
         bw: Bandwidth parameter for the kernel density estimation
         fixed: If True, `bw` is treated as a fixed bandwidth parameter. Otherwise, it is treated as the number
             of nearest neighbors to include in the bandwidth estimation.
+        exclude_self: If True, ignore each sample itself when computing the kernel density estimation
         function: The name of the kernel function to use. Valid options are as follows (note that in equations,
             any "1" can be substituted for any other value(s)):
             - 'triangular': linearly decaying kernel,
@@ -116,6 +117,7 @@ class Kernel(object):
         data: Union[np.ndarray, scipy.sparse.spmatrix],
         bw: Union[int, float],
         fixed: bool = True,
+        exclude_self: bool = True,
         function: str = "triangular",
         eps: float = 1.0000001,
         subset_idxs: Optional[Iterable[int]] = None,
@@ -137,7 +139,11 @@ class Kernel(object):
             )
             self.bandwidth = np.partition(self.dist_vector, int(bw) - 1)[int(bw) - 1] * eps
 
-        self.kernel = self._kernel_functions(self.dist_vector / self.bandwidth)
+        bw_dist = self.dist_vector / self.bandwidth
+        # Exclude self as a neighbor:
+        if exclude_self:
+            bw_dist = np.where(bw_dist == 0.0, np.max(bw_dist), bw_dist)
+        self.kernel = self._kernel_functions(bw_dist)
 
         # Bisquare and uniform need to be truncated if the sample is outside of the provided bandwidth:
         if self.function in ["bisquare", "uniform"]:
@@ -168,6 +174,7 @@ def get_wi(
     n_samples: int,
     coords: np.ndarray,
     fixed_bw: bool = True,
+    exclude_self: bool = True,
     kernel: str = "gaussian",
     bw: Union[float, int] = 100,
 ) -> np.ndarray:
@@ -179,6 +186,7 @@ def get_wi(
         coords: Array of shape (n_samples, 2) or (n_samples, 3) representing the spatial coordinates of each sample
         fixed_bw: If True, `bw` is treated as a spatial distance for computing spatial weights. Otherwise,
             it is treated as the number of neighbors.
+        exclude_self: If True, ignore each sample itself when computing the kernel density estimation
         kernel: The name of the kernel function to use. Valid options: "triangular", "uniform", "quadratic",
             "bisquare", "gaussian" or "exponential"
         bw: Bandwidth for the spatial kernel
@@ -192,7 +200,7 @@ def get_wi(
         return wi
 
     try:
-        wi = Kernel(i, coords, bw, fixed=fixed_bw, function=kernel, subset_idxs=None).kernel
+        wi = Kernel(i, coords, bw, fixed=fixed_bw, exclude_self=exclude_self, function=kernel, subset_idxs=None).kernel
     except:
         raise RuntimeError(f"Error in getting weights for sample {i}")
     return wi

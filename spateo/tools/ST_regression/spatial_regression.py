@@ -4,18 +4,20 @@ relationships of) the response variable.
 """
 import argparse
 import copy
+import math
 import os
+import re
 import sys
 from functools import partial
 from multiprocessing import Pool
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, List, Union
 
 import anndata
 import numpy as np
-import numpy.linalg
 import pandas as pd
 import scipy
 from mpi4py import MPI
+from scipy.spatial.distance import cdist
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
@@ -60,6 +62,9 @@ class STGWR:
             expression. It is advisable not to do this if performing Poisson or negative binomial regression.
         log_transform: Set True if log-transformation should be applied to expression. It is advisable not to do
             this if performing Poisson or negative binomial regression.
+        target_expr_threshold: Only used if :param `mod_type` is "lr" or "slice" and :param `targets_path` is not
+            given. When manually selecting targets, expression above a threshold percentage of cells will be used to
+            filter to a smaller subset of interesting genes. Defaults to 0.2.
 
 
         custom_lig_path: Only used if :param `mod_type` is "lr" or "slice". Optional path to a .txt file containing a
@@ -70,8 +75,13 @@ class STGWR:
             list of receptors for the model, separated by newlines. Only used if :attr `mod_type` is "lr" or "slice"
             (and thus uses ligand/receptor expression directly in the inference). If not provided, will select
             receptors using a threshold based on expression levels in the data.
+        custom_pathways_path: Rather than providing a list of receptors, can provide a list of signaling pathways- all
+            receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
+            is "lr" or "slice".
         targets_path: Optional path to a .txt file containing a list of prediction target genes for the model,
             separated by newlines. If not provided, targets will be strategically selected from the given receptors.
+        init_betas_path: Optional path to a .npy file containing initial coefficient values for the model. Initial
+            coefficients should have shape [n_features, ].
 
 
         cci_dir: Full path to the directory containing cell-cell communication databases
@@ -98,6 +108,7 @@ class STGWR:
 
 
         bw_fixed: Set True for distance-based kernel function and False for nearest neighbor-based kernel function
+        exclude_self: If True, ignore each sample itself when computing the kernel density estimation
         fit_intercept: Set True to include intercept in the model and False to exclude intercept
     """
 
@@ -115,6 +126,7 @@ class STGWR:
         self.normalize = None
         self.smooth = None
         self.log_transform = None
+        self.target_expr_threshold = None
 
         self.coords = None
         self.groups = None
@@ -129,13 +141,39 @@ class STGWR:
         self.kernel = None
         self.n_samples = None
         self.n_features = None
-        self.iterations = None
+        # Number of STGWR runs to go through:
+        self.n_runs_parallel = None
 
         self.parse_stgwr_args()
 
         # Check if the program is currently in the master process:
         if self.comm.rank == 0:
             self.load_and_process()
+            self.n_runs_parallel = np.arange(self.n_samples)
+
+        # Broadcast data to other processes:
+        if self.mod_type == "niche" or self.mod_type == "slice":
+            self.cell_categories = comm.bcast(self.cell_categories, root=0)
+        if self.mod_type == "lr" or self.mod_type == "slice":
+            self.ligands_expr = comm.bcast(self.ligands_expr, root=0)
+            self.receptors_expr = comm.bcast(self.receptors_expr, root=0)
+        self.targets_expr = comm.bcast(self.targets_expr, root=0)
+
+        self.X = comm.bcast(self.X, root=0)
+        self.y = comm.bcast(self.y, root=0)
+        self.bw = comm.bcast(self.bw, root=0)
+        self.coords = comm.bcast(self.coords, root=0)
+        self.tolerance = comm.bcast(self.tolerance, root=0)
+        self.max_iter = comm.bcast(self.max_iter, root=0)
+        self.alpha = comm.bcast(self.alpha, root=0)
+        self.n_samples = comm.bcast(self.n_samples, root=0)
+        self.n_features = comm.bcast(self.n_features, root=0)
+        self.n_runs_parallel = comm.bcast(self.n_runs_parallel, root=0)
+
+        # Split data into chunks for each process:
+        chunk_size = int(math.ceil(float(len(self.n_runs_parallel)) / self.comm.size))
+        # Assign chunks to each process:
+        self.x_chunk = self.n_runs_parallel[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
 
     def parse_stgwr_args(self):
         """
@@ -149,22 +187,28 @@ class STGWR:
         self.output_path = arg_retrieve.output_path
         self.custom_ligands_path = arg_retrieve.custom_lig_path
         self.custom_receptors_path = arg_retrieve.custom_rec_path
+        self.custom_pathways_path = arg_retrieve.custom_pathways_path
         self.targets_path = arg_retrieve.targets_path
+        self.init_betas_path = arg_retrieve.init_betas_path
 
         self.normalize = arg_retrieve.normalize
         self.smooth = arg_retrieve.smooth
         self.log_transform = arg_retrieve.log_transform
+        self.target_expr_threshold = arg_retrieve.target_expr_threshold
 
         self.coords_key = arg_retrieve.coords_key
         self.group_key = arg_retrieve.group_key
 
         self.bw_fixed = arg_retrieve.bw_fixed
+        self.exclude_self = arg_retrieve.exclude_self
         self.distr = arg_retrieve.distr
         self.kernel = arg_retrieve.kernel
 
         self.fit_intercept = arg_retrieve.fit_intercept
-        # Parameters related to the fitting process (initial betas, tolerance, number of iterations, etc.)
-        self.fit_params = {}
+        # Parameters related to the fitting process (tolerance, number of iterations, etc.)
+        self.tolerance = arg_retrieve.tolerance
+        self.max_iter = arg_retrieve.max_iter
+        self.alpha = arg_retrieve.alpha
 
         if arg_retrieve.bw:
             if self.bw_fixed:
@@ -204,7 +248,13 @@ class STGWR:
         self.adata = anndata.read_h5ad(self.adata_path)
         self.coords = self.adata.obsm[self.coords_key]
         self.n_samples = self.adata.n_obs
+        # Placeholder- this will change at time of fitting:
         self.n_features = self.adata.n_vars
+
+        # Check if path to init betas is given:
+        if self.init_betas_path is not None:
+            self.logger.info(f"Loading initial betas from: {self.init_betas_path}")
+            self.init_betas = np.load(self.init_betas_path)
 
         if self.distr in ["poisson", "nb"]:
             if self.normalize or self.smooth or self.log_transform:
@@ -336,12 +386,17 @@ class STGWR:
         if self.mod_type == "lr" or self.mod_type == "slice":
             if self.species == "human":
                 lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
+                tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_target_db.csv"), index_col=0)
             elif self.species == "mouse":
                 lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+                r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
+                tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_target_db.csv"), index_col=0)
             else:
                 self.logger.error("Invalid species specified. Must be one of 'human' or 'mouse'.")
             database_ligands = set(lr_db["from"])
             database_receptors = set(lr_db["to"])
+            database_pathways = set(r_tf_db["pathway"])
 
             if self.custom_ligands_path is not None:
                 with open(self.custom_ligands_path, "r") as f:
@@ -433,6 +488,18 @@ class STGWR:
                     r_complexes = [elem for elem in receptors if "_" in elem]
                     # Get individual components if any complexes are included in this list:
                     receptors = [r for item in receptors for r in item.split("_")]
+
+            elif self.custom_pathways_path is not None:
+                with open(self.custom_pathways_path, "r") as f:
+                    pathways = f.read().splitlines()
+                    pathways = [p for p in pathways if p in database_pathways]
+                # Get all receptors associated with these pathway(s):
+                r_tf_db_subset = r_tf_db[r_tf_db["pathway"].isin(pathways)]
+                receptors = set(r_tf_db_subset["receptor"])
+                r_complexes = [elem for elem in receptors if "_" in elem]
+                # Get individual components if any complexes are included in this list:
+                receptors = [r for item in receptors for r in item.split("_")]
+
             else:
                 # List of possible complexes to search through:
                 r_complexes = [elem for elem in database_receptors if "_" in elem]
@@ -517,14 +584,89 @@ class STGWR:
         else:
             self.logger.error("Invalid `mod_type` specified. Must be one of 'niche', 'slice', or 'lr'.")
 
-        # Compute initial spatial weights for all samples:
+        # Get gene targets:
+        self.logger.info("Preparing data: getting gene targets.")
+        # For niche model, targets must be manually provided:
+        if self.targets_path is None and self.mod_type == "niche":
+            self.logger.error(
+                "For niche model, `targets_path` must be provided. For slice and L:R models, targets can be "
+                "automatically inferred, but ligand/receptor information does not exist for the niche model."
+            )
+
+        if self.targets_path is not None:
+            with open(self.targets_path, "r") as f:
+                targets = f.read().splitlines()
+                targets = [t for t in targets if t in self.adata.var_names]
+
+        # Else get targets by connecting to the targets of the L:R-downstream transcription factors:
+        else:
+            # Get the targets of the L:R-downstream transcription factors:
+            tf_subset = r_tf_db[r_tf_db["receptor"].isin(self.receptors_expr.columns)]
+            tfs = set(tf_subset["tf"])
+            tfs = [tf for tf in tfs if tf in self.adata.var_names]
+            # Subset to TFs that are expressed in > threshold number of cells:
+            if scipy.sparse.issparse(self.adata.X):
+                tf_expr_percentage = np.array((self.adata[:, tfs].X > 0).sum(axis=0) / self.adata.n_obs)[0]
+            else:
+                tf_expr_percentage = np.count_nonzero(self.adata[:, tfs].X, axis=0) / self.adata.n_obs
+            tfs = np.array(tfs)[tf_expr_percentage > self.target_expr_threshold]
+
+            targets_subset = tf_target_db[tf_target_db["TF"].isin(tfs)]
+            targets = list(set(targets_subset["target"]))
+            targets = [target for target in targets if target in self.adata.var_names]
+            # Subset to targets that are expressed in > threshold number of cells:
+            if scipy.sparse.issparse(self.adata.X):
+                target_expr_percentage = np.array((self.adata[:, targets].X > 0).sum(axis=0) / self.adata.n_obs)[0]
+            else:
+                target_expr_percentage = np.count_nonzero(self.adata[:, targets].X, axis=0) / self.adata.n_obs
+            targets = np.array(targets)[target_expr_percentage > self.target_expr_threshold]
+
+        self.targets_expr = pd.DataFrame(
+            self.adata[:, targets].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
+            index=self.adata.obs_names,
+            columns=targets,
+        )
+
+        # Compute initial spatial weights for all samples- use twice the min distance as initial bandwidth if not
+        # provided (for fixed bw) or 10 nearest neighbors (for adaptive bw):
+        if self.bw is None:
+            if self.bw_fixed:
+                self.bw = (
+                    np.min(
+                        np.array(
+                            [np.min(np.delete(cdist([self.coords[i]], self.coords), 0)) for i in range(self.n_samples)]
+                        )
+                    )
+                    * 2
+                )
+            else:
+                self.bw = 10
         self.all_spatial_weights = self._compute_all_wi(self.bw)
 
     # NOTE TO SELF: DURING THE PROCESS OF FINDING THE OPTIMAL BANDWIDTH, RECOMPUTE X AT EACH ITERATION BASED ON THE
     # NEW NEIGHBORHOODS THAT GET RETURNED FROM THE BANDWIDTH SELECTION.
 
     def _set_search_range(self):
-        "filler"
+        """Set the search range for the bandwidth selection procedure."""
+
+        # If the bandwidth is defined by a fixed spatial distance:
+        if self.bw_fixed:
+            max_dist = np.max(np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)]))
+            # Set max bandwidth higher than the max distance between any two given samples:
+            self.maxbw = max_dist * 2
+
+            if self.minbw is None:
+                min_dist = np.min(
+                    np.array([np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n)])
+                )
+                self.minbw = min_dist / 2
+
+        # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
+        else:
+            self.maxbw = 40
+
+            if self.minbw is None:
+                self.minbw = 10
 
     def _compute_all_wi(self, bw: Union[float, int]) -> np.ndarray:
         """Compute spatial weights for all samples in the dataset given a specified bandwidth.
@@ -539,23 +681,35 @@ class STGWR:
         # Parallelized computation of spatial weights for all samples:
         w = np.zeros((self.n_samples, self.n_samples))
         get_wi_partial = partial(
-            get_wi, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
+            get_wi,
+            n_samples=self.n_samples,
+            coords=self.coords,
+            fixed_bw=self.bw_fixed,
+            exclude_self=self.exclude_self,
+            kernel=self.kernel,
+            bw=bw,
         )
 
         with Pool() as pool:
             weights = pool.map(get_wi_partial, range(self.n_samples))
         for i, row in enumerate(weights):
+            # Threshold very small weights to 0:
+            row[row < self.tolerance] = 0
             w[i, :] = row
         return w
 
     def _adjust_x(self):
         """Adjust the independent variable array based on the defined bandwidth."""
-        if self.mod_type:
+        if self.mod_type == "niche":
+            # Compute "presence" of each cell type in the neighborhood of each sample:
+            dmat_neighbors = self.all_spatial_weights.dot(self.cell_categories.values)
+
+        elif self.mod_type == "lr":
             "filler"
 
     def local_fit(
-        self, i: int, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False
-    ) -> Union[Tuple[int, float, np.ndarray, np.ndarray, np.ndarray], Tuple[float, np.ndarray]]:
+        self, i: int, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False, mgwr: bool = False
+    ) -> Union[np.ndarray, List[float]]:
         """Fit a local regression model for each sample.
 
         Args:
@@ -565,14 +719,19 @@ class STGWR:
             bw: Bandwidth for the spatial kernel
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
+            mgwr: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary over
+                different spatial scales
 
         Returns:
-            i: Index of sample for which local regression model was fitted
-            residual: Residual for the fitted response variable value compared to the observed value
-            hat_i: Row i of the hat matrix, which is the effect of deleting sample i from the dataset on the
-                estimated predicted value for the other samples
-            betas: Estimated coefficients for sample i
-            CCT: Squared canonical correlation coefficients b/w the predicted values and the response variable
+            A single output will be given for each case, and can contain either `betas` or a list w/ combinations of
+            the following:
+                - i: Index of sample for which local regression model was fitted
+                - residual: Residual for the fitted response variable value compared to the observed value
+                - hat_i: Row i of the hat matrix, which is the effect of deleting sample i from the dataset on the
+                    estimated predicted value for sample i
+                - err: Squared residual, one of the returns if :param `final` is False
+                - betas: Estimated coefficients for sample i- if :param `mgwr` is True, betas is the only return
+                - CCT: Squared canonical correlation coefficients b/w the predicted values and the response variable
         """
         wi = get_wi(
             i, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
@@ -582,7 +741,7 @@ class STGWR:
             betas, pseudoinverse = compute_betas_local(y, X, wi)
             pred_y = np.dot(X[i], betas)[0]
 
-            # Effect of deleting sample i from the dataset on the estimated predicted values
+            # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
             hat_i = np.dot(X[i], pseudoinverse[:, i])
 
         elif self.distr == "poisson" or self.distr == "nb":
@@ -591,17 +750,17 @@ class STGWR:
                 y,
                 X,
                 distr=self.distr,
-                init_betas=self.fit_params["init_betas"],
-                tol=self.fit_params["tol"],
-                max_iter=self.fit_params["max_iter"],
+                init_betas=self.init_betas,
+                tol=self.tolerance,
+                max_iter=self.max_iter,
                 spatial_weights=wi,
                 link=None,
-                alpha=self.fit_params["alpha"],
-                tau=self.fit_params["tau"],
+                alpha=self.alpha,
+                tau=None,
             )
 
             pred_y = y_hat[i]
-            # Effect of deleting sample i from the dataset on the estimated predicted values:
+            # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
             hat_i = np.dot(X[i], pseudoinverse[:, i]) * final_irls_weights[i][0]
 
         else:
@@ -612,11 +771,13 @@ class STGWR:
         CCT = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
 
         if final:
-            return i, residual, hat_i, betas, CCT
+            if mgwr:
+                return betas
+            return np.concatenate(([i, residual, hat_i], betas, CCT))
         else:
             # For bandwidth optimization:
             err = residual * residual
-            return err, hat_i
+            return [err, hat_i]
 
     def golden_section(self, range_lowest: float, range_highest: float, function: Callable) -> float:
         """Perform golden section search to find the optimal bandwidth.
@@ -639,7 +800,7 @@ class STGWR:
         iterations = 0
         results_dict = {}
 
-        while np.abs(difference) > self.fit_params["tol"] and iterations < self.fit_params["max_iter"]:
+        while np.abs(difference) > self.tolerance and iterations < self.max_iter:
             iterations += 1
 
             # Bandwidth needs to be discrete:
@@ -694,17 +855,118 @@ class STGWR:
 
         return optimum_bw
 
-    def mpi_fit(self, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False):
+    def mpi_fit(self, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False, mgwr: bool = False):
+        """Fit local regression model for each sample in parallel, given a specified bandwidth.
+
+        Args:
+            y: Response variable
+            X: Independent variable array
+            bw: Bandwidth for the spatial kernel
+            final: Set True to indicate that no additional parameter selection needs to be performed; the model can
+                be fit and more stats can be returned.
+            mgwr: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary over
+                different spatial scales
+        """
+        if final:
+            if mgwr:
+                local_fit_outputs = np.empty((self.x_chunk.shape[0], self.n_samples), dtype=np.float64)
+            else:
+                local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * self.n_samples + 3), dtype=np.float64)
+
+            # Fitting for each location:
+            pos = 0
+            for i in self.x_chunk:
+                local_fit_outputs[pos] = self.local_fit(i, y, X, bw, final=final, mgwr=mgwr)
+                pos += 1
+
+            # Gather data to the central process such that an array is formed where each sample has its own
+            # measurements:
+            all_fit_outputs = self.comm.gather(local_fit_outputs, root=0)
+            # Column 0: Index of the sample
+            # Column 1: Residual
+            # Column 2: Contribution of each sample to its own value
+            # Column 3: Estimated coefficients
+            # Column 4: Canonical correlations
+
+            # If mgwr, do not need to fit using fixed bandwidth:
+            if mgwr:
+                all_fit_outputs = self.comm.bcast(all_fit_outputs, root=0)
+                all_fit_outputs = np.vstack(all_fit_outputs)
+                return all_fit_outputs
+
+            if self.comm.rank == 0:
+                all_fit_outputs = np.vstack(all_fit_outputs)
+                self.logger.info(f"Computing metrics for GWR using bandwidth: {bw}")
+
+                # Residual sum of squares:
+                RSS = np.sum(all_fit_outputs[:, 1] ** 2)
+                # Total sum of squares:
+                TSS = np.sum((y - np.mean(y)) ** 2)
+                r_squared = 1 - RSS / TSS
+                # Trace of the hat matrix- measure of influence of each data point on the response variable:
+                trace_hat = np.sum(all_fit_outputs[:, 2])
+                # Residual variance:
+                sigma_squared = RSS / (self.n_samples - trace_hat)
+                # Corrected Akaike Information Criterion:
+                aicc = self.compute_aicc(RSS, trace_hat)
+                # Scale the canonical correlation coefficients by their standard errors:
+                all_fit_outputs[:, -self.n_features :] = np.sqrt(all_fit_outputs[:, -self.n_features :] * sigma_squared)
+
+                # Save results:
+                header = "name,residual,influence,"
+                varNames = self.feature_names
+                if self.fit_intercept:
+                    varNames = ["intercept"] + list(varNames)
+                # Columns for coefficients and standard errors:
+                for x in varNames:
+                    header += "b_" + x + ","
+                for x in varNames:
+                    header += "se_" + x + ","
+
+                # Return output diagnostics and save result:
+                self.output_diagnostics(aicc, trace_hat, r_squared)
+                self.save_results(all_fit_outputs, header)
+
+            return
+
+        # If not the final run:
+        RSS = 0
+        trace_hat = 0
+
+        for i in self.x_chunk:
+            fit_outputs = self.local_fit(i, y, X, bw, final=False)
+            err_sq, hat_i = fit_outputs[0], fit_outputs[1]
+            RSS += err_sq
+            trace_hat += hat_i
+
+        # Gather data to the central process such that an array is formed where each sample has its own measurements:
+        RSS_list = self.comm.gather(RSS, root=0)
+        trace_hat_list = self.comm.gather(trace_hat, root=0)
+
+        if self.comm.rank == 0:
+            RSS = np.sum(RSS_list)
+            trace_hat = np.sum(trace_hat_list)
+            aicc = self.compute_aicc(RSS, trace_hat)
+            if not mgwr:
+                self.logger.info(f"Bandwidth: {bw}, AICc: {aicc}")
+            return aicc
+
+        return
+
+    def fit(
+        self,
+    ):
         "filler"
 
     # Main fit function here:
 
-    # First, define fitting parameters:
-    # self.fit_params['ini_params'] = ini_params
-    # self.fit_params['tol'] = tol
-    # self.fit_params['max_iter'] = max_iter
-    # self.fit_params['solve'] = solve
-    # self.fit_params['lite'] = lite
+    # Here, refine cell type array or ligands+receptors arrays to get X and y:
+
+    # Get the feature names of the independent variables and save for later:
+    # self.feature_names = X.columns
+
+    # Redefine self.n_features and re-broadcast:
+    # self.n_features = self.comm.bcast(self.n_features, root=0)
 
     # if y is None:
     #   y = self.y
@@ -713,7 +975,17 @@ class STGWR:
 
     # Finish putting together appropriate X blocks by combining relevant ligands and receptors if applicable:
 
-    # Selecting optimial bandwidth:
+    # Selecting optimal bandwidth:
+
+    def compute_aicc(self, RSS: float, trace_hat: float) -> float:
+        """Compute the corrected Akaike Information Criterion (AICc) for the GWR model."""
+        aicc = (
+            self.n_samples * np.log(RSS / self.n_samples)
+            + self.n_samples * np.log(2 * np.pi)
+            + self.n_samples * (self.n_samples + trace_hat) / (self.n_samples - trace_hat - 2.0)
+        )
+
+        return aicc
 
 
 # MGWR:
