@@ -30,6 +30,7 @@ from spateo.preprocessing.transform import log1p
 from spateo.tools.find_neighbors import get_wi, transcriptomic_connectivity
 from spateo.tools.spatial_degs import moran_i
 from spateo.tools.spatial_smooth.smooth import calc_1nd_moment
+from spateo.tools.ST_regression.distributions import NegativeBinomial, Poisson
 from spateo.tools.ST_regression.regression_utils import compute_betas_local, iwls
 
 # NOTE: set lower bound AND upper bound bandwidth much lower for membrane-bound ligands/receptors pairs
@@ -837,7 +838,7 @@ class STGWR:
 
         self.n_features = self.X.shape[1]
         # Rebroadcast the number of features to fit:
-        self.n_features_bc = self.comm.bcast(self.n_features, root=0)
+        self.n_features = self.comm.bcast(self.n_features, root=0)
 
     def local_fit(
         self, i: int, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False, mgwr: bool = False
@@ -858,10 +859,15 @@ class STGWR:
             A single output will be given for each case, and can contain either `betas` or a list w/ combinations of
             the following:
                 - i: Index of sample for which local regression model was fitted
-                - residual: Residual for the fitted response variable value compared to the observed value
+                - diagnostic: Portion of the output to be used for diagnostic purposes- for Gaussian regression,
+                    this is the residual for the fitted response variable value compared to the observed value. For
+                    non-Gaussian generalized linear regression, this is the fitted response variable value (which
+                    will be used to compute deviance and log-likelihood later on).
                 - hat_i: Row i of the hat matrix, which is the effect of deleting sample i from the dataset on the
                     estimated predicted value for sample i
-                - err: Squared residual, one of the returns if :param `final` is False
+                - bw_diagnostic: Output to be used for diagnostic purposes during bandwidth selection- for Gaussian
+                    regression, this is the squared residual, for non-Gaussian generalized linear regression,
+                    this is the fitted response variable value. One of the returns if :param `final` is False
                 - betas: Estimated coefficients for sample i- if :param `mgwr` is True, betas is the only return
                 - CCT: Squared canonical correlation coefficients b/w the predicted values and the response variable
         """
@@ -872,6 +878,8 @@ class STGWR:
         if self.distr == "gaussian":
             betas, pseudoinverse = compute_betas_local(y, X, wi)
             pred_y = np.dot(X[i], betas)[0]
+            residual = y[i] - pred_y
+            diagnostic = residual
 
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
             hat_i = np.dot(X[i], pseudoinverse[:, i])
@@ -892,24 +900,28 @@ class STGWR:
             )
 
             pred_y = y_hat[i]
+            diagnostic = pred_y
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
             hat_i = np.dot(X[i], pseudoinverse[:, i]) * final_irls_weights[i][0]
 
         else:
             self.logger.error("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
 
-        residual = y[i] - pred_y
         # Canonical correlation:
         CCT = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
 
         if final:
             if mgwr:
                 return betas
-            return np.concatenate(([i, residual, hat_i], betas, CCT))
+            return np.concatenate(([i, diagnostic, hat_i], betas, CCT))
         else:
             # For bandwidth optimization:
-            err = residual * residual
-            return [err, hat_i]
+            if self.distr == "gaussian":
+                bw_diagnostic = residual * residual
+            elif self.distr == "poisson" or self.distr == "nb":
+                # Else just return fitted value for diagnostic purposes:
+                bw_diagnostic = pred_y
+            return [bw_diagnostic, hat_i]
 
     def find_optimal_bw(self, range_lowest: float, range_highest: float, function: Callable) -> float:
         """Perform golden section search to find the optimal bandwidth.
@@ -1015,7 +1027,7 @@ class STGWR:
             # measurements:
             all_fit_outputs = self.comm.gather(local_fit_outputs, root=0)
             # Column 0: Index of the sample
-            # Column 1: Residual
+            # Column 1: Diagnostic (residual for Gaussian, fitted response value for Poisson/NB)
             # Column 2: Contribution of each sample to its own value
             # Column 3: Estimated coefficients
             # Column 4: Canonical correlations
@@ -1030,19 +1042,32 @@ class STGWR:
                 all_fit_outputs = np.vstack(all_fit_outputs)
                 self.logger.info(f"Computing metrics for GWR using bandwidth: {bw}")
 
-                # Residual sum of squares:
-                RSS = np.sum(all_fit_outputs[:, 1] ** 2)
-                # Total sum of squares:
-                TSS = np.sum((y - np.mean(y)) ** 2)
-                r_squared = 1 - RSS / TSS
-                # Trace of the hat matrix- measure of influence of each data point on the response variable:
-                trace_hat = np.sum(all_fit_outputs[:, 2])
-                # Residual variance:
-                sigma_squared = RSS / (self.n_samples - trace_hat)
-                # Corrected Akaike Information Criterion:
-                aicc = self.compute_aicc(RSS, trace_hat)
-                # Scale the canonical correlation coefficients by their standard errors:
-                all_fit_outputs[:, -self.n_features :] = np.sqrt(all_fit_outputs[:, -self.n_features :] * sigma_squared)
+                # Residual sum of squares for Gaussian model:
+                if self.distr == "gaussian":
+                    RSS = np.sum(all_fit_outputs[:, 1] ** 2)
+                    # Total sum of squares:
+                    TSS = np.sum((y - np.mean(y)) ** 2)
+                    r_squared = 1 - RSS / TSS
+
+                    # Note: trace of the hat matrix and effective number of parameters (ENP) will be used interchangeably::
+                    ENP = np.sum(all_fit_outputs[:, 2])
+                    # Residual variance:
+                    sigma_squared = RSS / (self.n_samples - ENP)
+                    # Corrected Akaike Information Criterion:
+                    aicc = self.compute_aicc(RSS, ENP)
+                    # Scale the canonical correlation coefficients by their standard errors:
+                    all_fit_outputs[:, -self.n_features :] = np.sqrt(
+                        all_fit_outputs[:, -self.n_features :] * sigma_squared
+                    )
+                else:
+                    r_squared = None
+
+                if self.distr == "poisson" or self.distr == "nb":
+                    if self.distr == "poisson":
+                        distr = Poisson()
+                    else:
+                        distr = NegativeBinomial()
+                    # Compute deviance:
 
                 # Save results:
                 header = "name,residual,influence,"
@@ -1055,33 +1080,40 @@ class STGWR:
                 for x in varNames:
                     header += "se_" + x + ","
 
-                # Return output diagnostics and save result:
-                self.output_diagnostics(aicc, trace_hat, r_squared)
+                # Return output diagnostics and save result- NOTE: PASS DEVIANCE AS WELL:
+                self.output_diagnostics(aicc, ENP, r_squared, None)
                 self.save_results(all_fit_outputs, header)
 
             return
 
         # If not the final run:
-        RSS = 0
-        trace_hat = 0
+        if self.distr == "gaussian":
+            # Compute AICc using the sum of squared residuals:
+            RSS = 0
+            trace_hat = 0
 
-        for i in self.x_chunk:
-            fit_outputs = self.local_fit(i, y, X, bw, final=False)
-            err_sq, hat_i = fit_outputs[0], fit_outputs[1]
-            RSS += err_sq
-            trace_hat += hat_i
+            for i in self.x_chunk:
+                fit_outputs = self.local_fit(i, y, X, bw, final=False)
+                err_sq, hat_i = fit_outputs[0], fit_outputs[1]
+                RSS += err_sq
+                trace_hat += hat_i
 
-        # Gather data to the central process such that an array is formed where each sample has its own measurements:
-        RSS_list = self.comm.gather(RSS, root=0)
-        trace_hat_list = self.comm.gather(trace_hat, root=0)
+            # Gather data to the central process such that an array is formed where each sample has its own measurements:
+            RSS_list = self.comm.gather(RSS, root=0)
+            trace_hat_list = self.comm.gather(trace_hat, root=0)
 
-        if self.comm.rank == 0:
-            RSS = np.sum(RSS_list)
-            trace_hat = np.sum(trace_hat_list)
-            aicc = self.compute_aicc(RSS, trace_hat)
-            if not mgwr:
-                self.logger.info(f"Bandwidth: {bw}, AICc: {aicc}")
-            return aicc
+            if self.comm.rank == 0:
+                RSS = np.sum(RSS_list)
+                trace_hat = np.sum(trace_hat_list)
+                aicc = self.compute_aicc(RSS, trace_hat)
+                if not mgwr:
+                    self.logger.info(f"Bandwidth: {bw}, AICc: {aicc}")
+                return aicc
+
+        elif self.distr == "poisson" or self.distr == "nb":
+            # Compute AICc using the fitted and observed values:
+            y_pred = []
+            trace_hat = []
 
         return
 
@@ -1091,8 +1123,9 @@ class STGWR:
         X: Optional[Union[scipy.sparse.spmatrix, np.ndarray]] = None,
         mgwr: bool = False,
     ):
-        """If given bandwidth, run :func `STGWR.mpi_fit()` with the given bandwidth. Otherwise, compute optimal
-        bandwidth using :func `STGWR.select_optimal_bw()`, minimizing AICc.
+        """For a single column of the dependent variable array, fit model. If given bandwidth, run :func
+        `STGWR.mpi_fit()` with the given bandwidth. Otherwise, compute optimal bandwidth using :func
+        `STGWR.select_optimal_bw()`, minimizing AICc.
 
         Args:
             y: Optional, can be used to provide dependent variable array directly to the fit function. If None,
@@ -1103,46 +1136,57 @@ class STGWR:
             mgwr: Set True to indicate that a multiscale model should be fitted
 
         Returns:
-            data: Output of :func `STGWR.mpi_fit()` with the chosen or determined bandwidth
-            opt_bw: Optional output in the case that bandwidth is not already known, resulting from the conclusion of
-                the optimization process
+            all_data: Dictionary containing outputs of :func `STGWR.mpi_fit()` with the chosen or determined bandwidth-
+                note that this will either be None or in the case that :param `mgwr` is True, an array of shape [
+                n_samples, n_features] representing the coefficients for each sample (if :param `mgwr` is False,
+                these arrays will instead be saved to file).
+            all_bws: Dictionary containing outputs in the case that bandwidth is not already known, resulting from
+                the conclusion of the optimization process. Will also be None if :param `mgwr` is True.
         """
+
         if y is None:
             y_arr = self.targets_expr
             X = self.X
 
             X = self._adjust_x()
+        else:
+            y_arr = y
 
-        if self.bw is not None:
-            # If bandwidth is already known, run the main fit function:
-            self.mpi_fit(y, X, self.bw, final=True)
-            return
+        # Compute fit for each column of the dependent variable array individually- store each output array (if
+        # applicable) and optimal bandwidth (also if applicable):
+        all_data, all_bws = {}, {}
 
-        if self.comm.rank == 0:
-            self._set_search_range()
-            if not mgwr:
-                # Add a good name here!...
-                self.logger.info(f"Computing optimal bandwidth using {self.bw_search_method} method")
+        for target in y_arr.columns:
+            y = y_arr[target].values
 
-    # Main fit function here:
+            if self.bw is not None:
+                # If bandwidth is already known, run the main fit function:
+                self.mpi_fit(y, X, self.bw, final=True)
+                return
 
-    # Here, refine cell type array or ligands+receptors arrays to get X and y:
+            if self.comm.rank == 0:
+                self._set_search_range()
+                if not mgwr:
+                    self.logger.info(f"Computing optimal bandwidth over range {self.minbw}-{self.maxbw}...")
+            self.minbw = self.comm.bcast(self.minbw, root=0)
+            self.maxbw = self.comm.bcast(self.maxbw, root=0)
 
-    # Get the feature names of the independent variables and save for later:
-    # self.feature_names = X.columns
+            fit_function = lambda bw: self.mpi_fit(y, X, bw, final=False, mgwr=mgwr)
+            optimal_bw = self.find_optimal_bw(self.minbw, self.maxbw, fit_function)
+            if self.bw_fixed:
+                optimal_bw = round(optimal_bw, 2)
 
-    # Redefine self.n_features and re-broadcast:
-    # self.n_features = self.comm.bcast(self.n_features, root=0)
+            data = self.mpi_fit(y, X, optimal_bw, final=True, mgwr=mgwr)
+            if data is not None:
+                all_data[target] = data
+            if optimal_bw is not None:
+                all_bws[target] = optimal_bw
 
-    # if y is None:
-    #   y = self.y
-    #   X = self.X
-    #   Here, adjust X using self.all_spatial_weights
+        return all_data, all_bws
 
-    # Finish putting together appropriate X blocks by combining relevant ligands and receptors if applicable:
-
-    # Selecting optimal bandwidth:
-
+    # ---------------------------------------------------------------------------------------------------
+    # Diagnostics
+    # ---------------------------------------------------------------------------------------------------
     def compute_aicc(self, RSS: float, trace_hat: float) -> float:
         """Compute the corrected Akaike Information Criterion (AICc) for the GWR model."""
         aicc = (
@@ -1152,6 +1196,23 @@ class STGWR:
         )
 
         return aicc
+
+    def output_diagnostics(
+        self, aicc: float, ENP: float, r_squared: Optional[float] = None, deviance: Optional[float] = None
+    ) -> None:
+        """Output diagnostic information about the GWR model."""
+        self.logger.info(f"Corrected Akaike information criterion: {aicc}")
+        self.logger.info(f"Effective number of parameters: {ENP}")
+        # Print R-squared for Gaussian assumption:
+        if self.distr == "gaussian":
+            if r_squared is None:
+                self.logger.error(":param `r_squared` must be provided when performing Gaussian regression.")
+            self.logger.info(f"R-squared: {r_squared}")
+        # Else log the deviance:
+        else:
+            if deviance is None:
+                self.logger.error(":param `deviance` must be provided when performing non-Gaussian regression.")
+            self.logger.info(f"Deviance: {deviance}")
 
 
 # MGWR:
