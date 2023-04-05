@@ -9,14 +9,16 @@ import os
 import re
 import sys
 from functools import partial
+from itertools import product
 from multiprocessing import Pool
-from typing import Callable, List, Union
+from typing import Callable, List, Optional, Union
 
 import anndata
 import numpy as np
 import pandas as pd
 import scipy
 from mpi4py import MPI
+from patsy import dmatrix
 from scipy.spatial.distance import cdist
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
@@ -67,16 +69,16 @@ class STGWR:
             filter to a smaller subset of interesting genes. Defaults to 0.2.
 
 
-        custom_lig_path: Only used if :param `mod_type` is "lr" or "slice". Optional path to a .txt file containing a
-            list of ligands for the model, separated by newlines. Only used if :attr `mod_type` is "lr" or "slice" (
-            and thus uses ligand/receptor expression directly in the inference). If not provided, will select
-            ligands using a threshold based on expression levels in the data.
-        custom_rec_path: Only used if :param `mod_type` is "lr" or "slice". Optional path to a .txt file containing a
-            list of receptors for the model, separated by newlines. Only used if :attr `mod_type` is "lr" or "slice"
-            (and thus uses ligand/receptor expression directly in the inference). If not provided, will select
-            receptors using a threshold based on expression levels in the data.
-        custom_pathways_path: Rather than providing a list of receptors, can provide a list of signaling pathways- all
-            receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
+        custom_lig_path: Optional path to a .txt file containing a list of ligands for the model, separated by
+            newlines. Only used if :attr `mod_type` is "lr" or "slice" (and thus uses ligand/receptor expression
+            directly in the inference). If not provided, will select ligands using a threshold based on expression
+            levels in the data.
+        custom_rec_path: Optional path to a .txt file containing a list of receptors for the model, separated by
+            newlines. Only used if :attr `mod_type` is "lr" or "slice" (and thus uses ligand/receptor expression
+            directly in the inference). If not provided, will select receptors using a threshold based on expression
+            levels in the data.
+        custom_pathways_path: Rather than  providing a list of receptors, can provide a list of signaling pathways-
+            all receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
             is "lr" or "slice".
         targets_path: Optional path to a .txt file containing a list of prediction target genes for the model,
             separated by newlines. If not provided, targets will be strategically selected from the given receptors.
@@ -204,6 +206,14 @@ class STGWR:
         self.distr = arg_retrieve.distr
         self.kernel = arg_retrieve.kernel
 
+        if not self.bw_fixed and self.kernel not in ["bisquare", "uniform"]:
+            self.logger.error(
+                "`bw_fixed` is set to False for adaptive kernel- it is assumed the chosen bandwidth is "
+                "the number of neighbors for each sample. However, only the `bisquare` and `uniform` "
+                "kernels perform hard thresholding and so it is recommended to use one of these kernels- "
+                "the other kernels may result in different results."
+            )
+
         self.fit_intercept = arg_retrieve.fit_intercept
         # Parameters related to the fitting process (tolerance, number of iterations, etc.)
         self.tolerance = arg_retrieve.tolerance
@@ -241,6 +251,7 @@ class STGWR:
                 self.logger.info(f"Using list of target genes from: {self.targets_path}")
             self.logger.info(f"Saving results to: {self.output_path}")
 
+    # NOTE: ADJUST THIS FOR THE TRANSCRIPTION FACTOR MODEL
     def load_and_process(self):
         """
         Load AnnData object and process it for modeling.
@@ -509,7 +520,7 @@ class STGWR:
                 # Get list of receptors from among the most highly spatially-variable genes, indicative of
                 # potentially interesting spatially-enriched signal:
                 self.logger.info(
-                    "Preparing data: getting list of ligands from among the most highly " "spatially-variable genes."
+                    "Preparing data: getting list of ligands from among the most highly spatially-variable genes."
                 )
                 m_degs = moran_i(self.adata)
                 m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
@@ -541,6 +552,7 @@ class STGWR:
                 )
 
             receptors = [r for r in receptors if r in self.adata.var_names]
+
             self.receptors_expr = pd.DataFrame(
                 self.adata[:, receptors].X.toarray()
                 if scipy.sparse.issparse(self.adata.X)
@@ -580,6 +592,46 @@ class STGWR:
             self.receptors_expr.drop(to_drop, axis=1, inplace=True)
             first_occurrences = self.receptors_expr.columns.duplicated(keep="first")
             self.receptors_expr = self.receptors_expr.loc[:, ~first_occurrences]
+
+            # Ensure there is some degree of compatibility between the selected ligands and receptors:
+            self.logger.info("Preparing data: finding matched pairs between the selected ligands and receptors.")
+            starting_n_ligands = len(self.ligands_expr.columns)
+            starting_n_receptors = len(self.receptors_expr.columns)
+
+            lr_ref = lr_db[["from", "to"]]
+            # Don't need entire dataframe, just take the first two rows of each:
+            lig_melt = self.ligands_expr.iloc[[0, 1], :].melt(var_name="from", value_name="value_ligand")
+            rec_melt = self.receptors_expr.iloc[[0, 1], :].melt(var_name="to", value_name="value_receptor")
+
+            merged_df = pd.merge(lr_ref, rec_melt, on="to")
+            merged_df = pd.merge(merged_df, lig_melt, on="from")
+            pairs = merged_df[["from", "to"]].drop_duplicates(keep="first")
+            self.lr_pairs = [tuple(x) for x in zip(pairs["from"], pairs["to"])]
+            if len(self.lr_pairs) == 0:
+                self.logger.error(
+                    "No matched pairs between the selected ligands and receptors were found. If path to custom list of "
+                    "ligands and/or receptors was provided, ensure ligand-receptor pairings exist among these lists, "
+                    "or check data to make sure these ligands and/or receptors were measured and were not filtered out."
+                )
+
+            pivoted_df = merged_df.pivot_table(values=["value_ligand", "value_receptor"], index=["from", "to"])
+            filtered_df = pivoted_df[pivoted_df.notna().all(axis=1)]
+            # Filter ligand and receptor expression to those that have a matched pair:
+            self.ligands_expr = self.ligands_expr[filtered_df.index.get_level_values("from").unique()]
+            self.receptors_expr = self.receptors_expr[filtered_df.index.get_level_values("to").unique()]
+            final_n_ligands = len(self.ligands_expr.columns)
+            final_n_receptors = len(self.receptors_expr.columns)
+
+            self.logger.info(
+                f"Found {final_n_ligands} ligands and {final_n_receptors} receptors that have matched pairs. "
+                f"{starting_n_ligands - final_n_ligands} ligands removed from the list and "
+                f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the list due to not "
+                f"having matched pairs among the corresponding set of receptors/ligands, respectively."
+                f"Remaining ligands: {self.ligands_expr.columns.tolist()}."
+                f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
+            )
+
+            self.logger.info(f"Set of ligand-receptor pairs: {self.lr_pairs}")
 
         else:
             self.logger.error("Invalid `mod_type` specified. Must be one of 'niche', 'slice', or 'lr'.")
@@ -643,9 +695,6 @@ class STGWR:
                 self.bw = 10
         self.all_spatial_weights = self._compute_all_wi(self.bw)
 
-    # NOTE TO SELF: DURING THE PROCESS OF FINDING THE OPTIMAL BANDWIDTH, RECOMPUTE X AT EACH ITERATION BASED ON THE
-    # NEW NEIGHBORHOODS THAT GET RETURNED FROM THE BANDWIDTH SELECTION.
-
     def _set_search_range(self):
         """Set the search range for the bandwidth selection procedure."""
 
@@ -668,7 +717,7 @@ class STGWR:
             if self.minbw is None:
                 self.minbw = 10
 
-    def _compute_all_wi(self, bw: Union[float, int]) -> np.ndarray:
+    def _compute_all_wi(self, bw: Union[float, int]) -> scipy.sparse.spmatrix:
         """Compute spatial weights for all samples in the dataset given a specified bandwidth.
 
         Args:
@@ -679,7 +728,12 @@ class STGWR:
         """
 
         # Parallelized computation of spatial weights for all samples:
-        w = np.zeros((self.n_samples, self.n_samples))
+        if not self.bw_fixed:
+            self.logger.info(
+                "Note that 'fixed' was not selected for the bandwidth estimation. Input to 'bw' will be "
+                "taken to be the number of nearest neighbors to use in the bandwidth estimation."
+            )
+
         get_wi_partial = partial(
             get_wi,
             n_samples=self.n_samples,
@@ -688,24 +742,102 @@ class STGWR:
             exclude_self=self.exclude_self,
             kernel=self.kernel,
             bw=bw,
+            threshold=0.01,
+            sparse_array=True,
         )
 
         with Pool() as pool:
             weights = pool.map(get_wi_partial, range(self.n_samples))
-        for i, row in enumerate(weights):
-            # Threshold very small weights to 0:
-            row[row < self.tolerance] = 0
-            w[i, :] = row
+        w = scipy.sparse.vstack(weights)
         return w
+
+    def _compute_niche_mat(self):
+        """Compute the niche matrix for the dataset."""
+        # Compute "presence" of each cell type in the neighborhood of each sample:
+        dmat_neighbors = self.all_spatial_weights.dot(self.cell_categories.values)
+
+        # Encode the "niche" or each sample by taking into account each sample's own cell type:
+        data = {"categories": self.cell_categories, "dmat_neighbors": dmat_neighbors}
+        niche_mat = np.asarray(dmatrix("categories:dmat_neighbors-1", data))
+        return niche_mat
 
     def _adjust_x(self):
         """Adjust the independent variable array based on the defined bandwidth."""
-        if self.mod_type == "niche":
-            # Compute "presence" of each cell type in the neighborhood of each sample:
-            dmat_neighbors = self.all_spatial_weights.dot(self.cell_categories.values)
 
+        # If applicable, use the cell type category array to encode the niche of each sample:
+        if self.mod_type == "niche":
+            self.X = self._compute_niche_mat()
+            connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
+            connections_cols.sort(key=lambda x: x[1])
+            self.feature_names = [f"{i[0]}-{i[1]}" for i in connections_cols]
+
+        # If applicable, use the ligand expression array, the receptor expression array and the spatial weights array
+        # to compute the ligand-receptor expression signature of each spatial neighborhood:
         elif self.mod_type == "lr":
-            "filler"
+            X_df = pd.DataFrame(
+                np.zeros((self.n_samples, len(self.lr_pairs))), columns=self.feature_names, index=self.adata.obs_names
+            )
+
+            for lr_pair in self.lr_pairs:
+                lig, rec = lr_pair[0], lr_pair[1]
+                lig_expr_values = scipy.sparse.csr_matrix(self.ligands_expr[lig].values.reshape(-1, 1))
+                rec_expr_values = scipy.sparse.csr_matrix(self.receptors_expr[rec].values.reshape(-1, 1))
+
+                # Communication signature b/w receptor in target and ligand in neighbors:
+                lr_product = np.dot(rec_expr_values, lig_expr_values.T)
+                # Neighborhood mask:
+                X_df[f"{lig}-{rec}"] = scipy.sparse.csr_matrix.sum(
+                    scipy.sparse.csr_matrix.multiply(self.all_spatial_weights, lr_product), axis=1
+                ).A.flatten()
+
+            self.X = X_df.values
+            self.feature_names = [pair[0] + "-" + pair[1] for pair in self.lr_pairs]
+
+        # If applicable, combine the above quantities:
+        elif self.mod_type == "slice":
+            X = self._compute_niche_mat()
+
+            # Each ligand-receptor pair will have an associated niche matrix:
+            niche_mats = {}
+
+            for lr_pair in self.lr_pairs:
+                lig, rec = lr_pair[0], lr_pair[1]
+                lig_expr_values = scipy.sparse.csr_matrix(self.ligands_expr[lig].values.reshape(-1, 1))
+                rec_expr_values = scipy.sparse.csr_matrix(self.receptors_expr[rec].values.reshape(-1, 1))
+                # Multiply one-hot category array by the expression of select receptor within that cell:
+                rec_expr = np.multiply(X, np.tile(rec_expr_values.toarray(), X.shape[1]))
+                lig_expr = np.multiply(X, np.tile(lig_expr_values.toarray(), X.shape[1]))
+
+                # Multiply adjacency matrix by the cell-specific expression of select ligand:
+                nbhd_lig_expr = self.all_spatial_weights.dot(lig_expr)
+
+                # Construct the category interaction matrix (1D array w/ n_categories ** 2 elements, encodes the
+                # ligand-receptor niches of each sample by documenting the cell type-specific L:R enrichment within
+                # the niche:
+                data = {"category_rec_expr": rec_expr, "neighborhood_lig_expr": nbhd_lig_expr}
+                lr_connections = np.asarray(dmatrix("category_rec_expr:neighborhood_lig_expr-1", data))
+
+                lr_connections_cols = list(product(X.columns, X.columns))
+                lr_connections_cols.sort(key=lambda x: x[1])
+                # Swap sending & receiving cell types because we're looking at receptor expression in the "source" cell
+                # and ligand expression in the surrounding cells.
+                lr_connections_cols = [f"{i[1]}-{i[0]}_{lig}-{rec}" for i in lr_connections_cols]
+                niche_mats[f"{lig}-{rec}"] = pd.DataFrame(lr_connections, columns=lr_connections_cols)
+                niche_mats = {key: value for key, value in sorted(niche_mats.items())}
+
+            # Combine the niche matrices for each ligand-receptor pair:
+            self.X = pd.concat(niche_mats.values(), axis=1)
+            self.X.columns = self.X.columns.droplevel()
+            self.X.index = self.adata.obs_names
+
+            # Drop all-zero columns (represent cell type pairs with no spatial coupled L/R expression):
+            self.X = self.X.loc[:, (self.X != 0).any(axis=0)]
+            self.feature_names = self.X.columns.tolist()
+            self.X = self.X.values
+
+        self.n_features = self.X.shape[1]
+        # Rebroadcast the number of features to fit:
+        self.n_features_bc = self.comm.bcast(self.n_features, root=0)
 
     def local_fit(
         self, i: int, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False, mgwr: bool = False
@@ -779,7 +911,7 @@ class STGWR:
             err = residual * residual
             return [err, hat_i]
 
-    def golden_section(self, range_lowest: float, range_highest: float, function: Callable) -> float:
+    def find_optimal_bw(self, range_lowest: float, range_highest: float, function: Callable) -> float:
         """Perform golden section search to find the optimal bandwidth.
 
         Args:
@@ -955,8 +1087,42 @@ class STGWR:
 
     def fit(
         self,
+        y: Optional[Union[scipy.sparse.spmatrix, np.ndarray]] = None,
+        X: Optional[Union[scipy.sparse.spmatrix, np.ndarray]] = None,
+        mgwr: bool = False,
     ):
-        "filler"
+        """If given bandwidth, run :func `STGWR.mpi_fit()` with the given bandwidth. Otherwise, compute optimal
+        bandwidth using :func `STGWR.select_optimal_bw()`, minimizing AICc.
+
+        Args:
+            y: Optional, can be used to provide dependent variable array directly to the fit function. If None,
+                will use :attr `targets_expr` computed using the given AnnData object to create this (each individual
+                column will serve as an independent variable).
+            X: Optional, can be used to provide dependent variable array directly to the fit function. If None,
+                will use :attr `X` computed using the given AnnData object and the type of the model to create.
+            mgwr: Set True to indicate that a multiscale model should be fitted
+
+        Returns:
+            data: Output of :func `STGWR.mpi_fit()` with the chosen or determined bandwidth
+            opt_bw: Optional output in the case that bandwidth is not already known, resulting from the conclusion of
+                the optimization process
+        """
+        if y is None:
+            y_arr = self.targets_expr
+            X = self.X
+
+            X = self._adjust_x()
+
+        if self.bw is not None:
+            # If bandwidth is already known, run the main fit function:
+            self.mpi_fit(y, X, self.bw, final=True)
+            return
+
+        if self.comm.rank == 0:
+            self._set_search_range()
+            if not mgwr:
+                # Add a good name here!...
+                self.logger.info(f"Computing optimal bandwidth using {self.bw_search_method} method")
 
     # Main fit function here:
 

@@ -106,9 +106,12 @@ class Kernel(object):
                         \begin{cases}
                             \dfrac{15}{16}(1-u^2)^2 & \text{if} |u| \leq 1 \\ 0 & \text{otherwise}
                         \end{cases}.
+        threshold: Threshold for the kernel density estimation. If the density is below this threshold, the density
+            will be set to zero.
         eps: Error-correcting factor to avoid division by zero
         subset_idxs: Optional list of indices that can be used to subset data. If `points` is None, the density is
             estimated for each point in `data`.
+        sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
     """
 
     def __init__(
@@ -119,8 +122,10 @@ class Kernel(object):
         fixed: bool = True,
         exclude_self: bool = True,
         function: str = "triangular",
+        threshold: float = 1e-5,
         eps: float = 1.0000001,
         subset_idxs: Optional[Iterable[int]] = None,
+        sparse_array: bool = False,
     ):
 
         if subset_idxs is not None:
@@ -133,11 +138,10 @@ class Kernel(object):
         if fixed:
             self.bandwidth = float(bw)
         else:
-            print(
-                "'fixed' selected for the bandwidth estimation. Input to 'bw' will be taken to be the "
-                "number of nearest neighbors to use in the bandwidth estimation."
-            )
-            self.bandwidth = np.partition(self.dist_vector, int(bw) - 1)[int(bw) - 1] * eps
+            if exclude_self:
+                self.bandwidth = np.partition(self.dist_vector, int(bw) + 1)[int(bw) + 1] * eps
+            else:
+                self.bandwidth = np.partition(self.dist_vector, int(bw))[int(bw)] * eps
 
         bw_dist = self.dist_vector / self.bandwidth
         # Exclude self as a neighbor:
@@ -147,7 +151,13 @@ class Kernel(object):
 
         # Bisquare and uniform need to be truncated if the sample is outside of the provided bandwidth:
         if self.function in ["bisquare", "uniform"]:
-            self.kernel[(self.dist_vector >= self.bandwidth)] = 0
+            self.kernel[bw_dist > 1] = 0
+
+        # Set density to zero if below threshold:
+        self.kernel[self.kernel < threshold] = 0
+
+        if sparse_array:
+            self.kernel = scipy.sparse.csr_matrix(self.kernel)
 
     def _kernel_functions(self, x):
         if self.function == "triangular":
@@ -177,6 +187,8 @@ def get_wi(
     exclude_self: bool = True,
     kernel: str = "gaussian",
     bw: Union[float, int] = 100,
+    threshold: float = 1e-5,
+    sparse_array: bool = False,
 ) -> np.ndarray:
     """Get spatial weights for an individual sample, given the coordinates of all samples in space.
 
@@ -190,6 +202,9 @@ def get_wi(
         kernel: The name of the kernel function to use. Valid options: "triangular", "uniform", "quadratic",
             "bisquare", "gaussian" or "exponential"
         bw: Bandwidth for the spatial kernel
+        threshold: Threshold for the kernel density estimation. If the density is below this threshold, the density
+            will be set to zero.
+        sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
 
     Returns:
         wi: Array of weights for sample of interest
@@ -200,7 +215,17 @@ def get_wi(
         return wi
 
     try:
-        wi = Kernel(i, coords, bw, fixed=fixed_bw, exclude_self=exclude_self, function=kernel, subset_idxs=None).kernel
+        wi = Kernel(
+            i,
+            coords,
+            bw,
+            fixed=fixed_bw,
+            exclude_self=exclude_self,
+            function=kernel,
+            threshold=threshold,
+            sparse_array=sparse_array,
+            subset_idxs=None,
+        ).kernel
     except:
         raise RuntimeError(f"Error in getting weights for sample {i}")
     return wi
