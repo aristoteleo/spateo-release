@@ -580,3 +580,32 @@ class STGWR:
                 distr=self.distr,
                 init_betas=self.init_params["init_betas"],
             )
+
+    # For now, use a dummy class for Comm:
+    class Comm:
+        def __init__(self):
+            self.rank = 0
+            self.size = 1
+
+    Comm_obj = Comm()
+
+    test_model = STGWR(Comm_obj, parser)
+    """
+    print(test_model.adata[:, "SDC1"].X)
+    #print(test_model.cell_categories)
+    print(test_model.ligands_expr)
+    print(test_model.receptors_expr)
+    print(test_model.targets_expr)
+
+    # See if the correct numbers show up:
+    print(test_model.all_spatial_weights[121])
+    print(test_model.all_spatial_weights[121].shape)
+    neighbors = np.argpartition(test_model.all_spatial_weights[121].toarray().ravel(), -10)[-10:]
+
+    print(neighbors)
+    print(test_model.receptors_expr["SDC1"].iloc[121])
+    print(test_model.ligands_expr["TNC"].iloc[neighbors])
+    print(test_model.ligands_expr["TNC"].iloc[103])"""
+
+    test_model._adjust_x()
+    # print(test_model.X[121])

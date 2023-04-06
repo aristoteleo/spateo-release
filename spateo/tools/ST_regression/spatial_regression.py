@@ -57,7 +57,7 @@ class STGWR:
                     and receptor expression to perform regression on select receptor-downstream genes.
 
 
-        data_path: Path to the AnnData object from which to extract data for modeling
+        adata_path: Path to the AnnData object from which to extract data for modeling
         normalize: Set True to Perform library size normalization, to set total counts in each cell to the same
             number (adjust for cell size). It is advisable not to do this if performing Poisson or negative binomial
             regression.
@@ -145,25 +145,44 @@ class STGWR:
         self.n_samples = None
         self.n_features = None
         # Number of STGWR runs to go through:
-        self.n_runs_parallel = None
+        self.n_runs_alls = None
 
         self.parse_stgwr_args()
 
         # Check if the program is currently in the master process:
         if self.comm.rank == 0:
-            self.load_and_process()
-            self.n_runs_parallel = np.arange(self.n_samples)
+            # If AnnData object is given, process it:
+            if self.adata_path is not None:
+                self.load_and_process()
+            else:
+                if self.data_path is None:
+                    self.logger.error(
+                        "No AnnData path or .csv path provided; need to provide at least one of these "
+                        "to provide a default dataset to fit."
+                    )
+                else:
+                    custom_data = pd.read_csv(self.data_path, index_col=0)
+                    self.coords = custom_data.iloc[:, :2].values
+                    self.target = custom_data.iloc[:, 2]
+                    self.X = custom_data.iloc[:, 3:].values
+                    self.n_samples = self.X.shape[0]
+                    self.n_features = self.X.shape[1]
 
-        # Broadcast data to other processes:
+            self.n_runs_alls = np.arange(self.n_samples)
+
+        # Broadcast data to other processes- initial broadcasts:
         if self.mod_type == "niche" or self.mod_type == "slice":
             self.cell_categories = comm.bcast(self.cell_categories, root=0)
         if self.mod_type == "lr" or self.mod_type == "slice":
             self.ligands_expr = comm.bcast(self.ligands_expr, root=0)
             self.receptors_expr = comm.bcast(self.receptors_expr, root=0)
-        self.targets_expr = comm.bcast(self.targets_expr, root=0)
+        if hasattr(self, "targets_expr"):
+            self.targets_expr = comm.bcast(self.targets_expr, root=0)
+        elif hasattr(self, "target"):
+            self.target = comm.bcast(self.target, root=0)
 
+        # Broadcast data to other processes:
         self.X = comm.bcast(self.X, root=0)
-        self.y = comm.bcast(self.y, root=0)
         self.bw = comm.bcast(self.bw, root=0)
         self.coords = comm.bcast(self.coords, root=0)
         self.tolerance = comm.bcast(self.tolerance, root=0)
@@ -171,12 +190,12 @@ class STGWR:
         self.alpha = comm.bcast(self.alpha, root=0)
         self.n_samples = comm.bcast(self.n_samples, root=0)
         self.n_features = comm.bcast(self.n_features, root=0)
-        self.n_runs_parallel = comm.bcast(self.n_runs_parallel, root=0)
+        self.n_runs_alls = comm.bcast(self.n_runs_alls, root=0)
 
         # Split data into chunks for each process:
-        chunk_size = int(math.ceil(float(len(self.n_runs_parallel)) / self.comm.size))
+        chunk_size = int(math.ceil(float(len(self.n_runs_alls)) / self.comm.size))
         # Assign chunks to each process:
-        self.x_chunk = self.n_runs_parallel[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+        self.x_chunk = self.n_runs_alls[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
 
     def parse_stgwr_args(self):
         """
@@ -184,7 +203,8 @@ class STGWR:
         """
         arg_retrieve = self.parser.parse_args()
         self.mod_type = arg_retrieve.mod_type
-        self.adata_path = arg_retrieve.data_path
+        self.adata_path = arg_retrieve.adata_path
+        self.data_path = arg_retrieve.data_path
         self.cci_dir = arg_retrieve.cci_dir
         self.species = arg_retrieve.species
         self.output_path = arg_retrieve.output_path
@@ -252,7 +272,6 @@ class STGWR:
                 self.logger.info(f"Using list of target genes from: {self.targets_path}")
             self.logger.info(f"Saving results to: {self.output_path}")
 
-    # NOTE: ADJUST THIS FOR THE TRANSCRIPTION FACTOR MODEL
     def load_and_process(self):
         """
         Load AnnData object and process it for modeling.
@@ -1199,10 +1218,12 @@ class STGWR:
         """
 
         if y is None:
-            y_arr = self.targets_expr
+            y_arr = self.targets_expr or self.target
             X = self.X
 
-            X = self._adjust_x()
+            if hasattr(self, "adata"):
+                self.X = self._adjust_x()
+                X = self.X
         else:
             y_arr = y
 
@@ -1212,6 +1233,7 @@ class STGWR:
 
         for target in y_arr.columns:
             y = y_arr[target].values
+            y = self.comm.bcast(y, root=0)
 
             if self.bw is not None:
                 # If bandwidth is already known, run the main fit function:
@@ -1311,5 +1333,6 @@ class STGWR:
 
         if self.comm.rank == 0:
             np.savetxt(path, data, delimiter=",", header=header[:-1], comments="")
+
 
 # MGWR:
