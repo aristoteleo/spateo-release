@@ -11,7 +11,7 @@ import sys
 from functools import partial
 from itertools import product
 from multiprocessing import Pool
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import anndata
 import numpy as np
@@ -58,6 +58,9 @@ class STGWR:
 
 
         adata_path: Path to the AnnData object from which to extract data for modeling
+        csv_path: Can also be used to specify path to non-AnnData .csv object. Assumes the first three columns
+            contain x- and y-coordinates and then dependent variable values, in that order, with all subsequent
+            columns containing independent variable values.
         normalize: Set True to Perform library size normalization, to set total counts in each cell to the same
             number (adjust for cell size). It is advisable not to do this if performing Poisson or negative binomial
             regression.
@@ -155,13 +158,13 @@ class STGWR:
             if self.adata_path is not None:
                 self.load_and_process()
             else:
-                if self.data_path is None:
+                if self.csv_path is None:
                     self.logger.error(
                         "No AnnData path or .csv path provided; need to provide at least one of these "
                         "to provide a default dataset to fit."
                     )
                 else:
-                    custom_data = pd.read_csv(self.data_path, index_col=0)
+                    custom_data = pd.read_csv(self.csv_path, index_col=0)
                     self.coords = custom_data.iloc[:, :2].values
                     self.target = custom_data.iloc[:, 2]
                     self.X = custom_data.iloc[:, 3:].values
@@ -204,7 +207,7 @@ class STGWR:
         arg_retrieve = self.parser.parse_args()
         self.mod_type = arg_retrieve.mod_type
         self.adata_path = arg_retrieve.adata_path
-        self.data_path = arg_retrieve.data_path
+        self.csv_path = arg_retrieve.csv_path
         self.cci_dir = arg_retrieve.cci_dir
         self.species = arg_retrieve.species
         self.output_path = arg_retrieve.output_path
@@ -416,17 +419,17 @@ class STGWR:
         # Ligand-receptor expression array
         if self.mod_type == "lr" or self.mod_type == "slice":
             if self.species == "human":
-                lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
                 r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
                 tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_target_db.csv"), index_col=0)
             elif self.species == "mouse":
-                lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+                self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
                 r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
                 tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_target_db.csv"), index_col=0)
             else:
                 self.logger.error("Invalid species specified. Must be one of 'human' or 'mouse'.")
-            database_ligands = set(lr_db["from"])
-            database_receptors = set(lr_db["to"])
+            database_ligands = set(self.lr_db["from"])
+            database_receptors = set(self.lr_db["to"])
             database_pathways = set(r_tf_db["pathway"])
 
             if self.custom_ligands_path is not None:
@@ -618,7 +621,7 @@ class STGWR:
             starting_n_ligands = len(self.ligands_expr.columns)
             starting_n_receptors = len(self.receptors_expr.columns)
 
-            lr_ref = lr_db[["from", "to"]]
+            lr_ref = self.lr_db[["from", "to"]]
             # Don't need entire dataframe, just take the first two rows of each:
             lig_melt = self.ligands_expr.iloc[[0, 1], :].melt(var_name="from", value_name="value_ligand")
             rec_melt = self.receptors_expr.iloc[[0, 1], :].melt(var_name="to", value_name="value_receptor")
@@ -714,7 +717,11 @@ class STGWR:
             else:
                 self.bw = 10
         self.all_spatial_weights = self._compute_all_wi(self.bw)
+        self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
 
+    # NOTE: CHANGE THIS TO REFLECT THE DIFFERENT SCALES OVER WHICH SECRETED AND MEMBRANE-BOUND SIGNALING CAN OCCUR-
+    # FOR NOW, CAN BE SIMPLE, W/ MEMBRANE-BOUND MAX BEING THE DISTANCE TO THE 10TH NEAREST NEIGHBOR AND SECRETED'S
+    # BEING UNRESTRICTED- SELF.MINBW WILL BE A LIST NOW, ONE FOR EACH FEATURE
     def _set_search_range(self):
         """Set the search range for the bandwidth selection procedure."""
 
@@ -771,7 +778,7 @@ class STGWR:
         w = scipy.sparse.vstack(weights)
         return w
 
-    def _compute_niche_mat(self):
+    def _compute_niche_mat(self) -> Tuple[np.ndarray, List[str]]:
         """Compute the niche matrix for the dataset."""
         # Compute "presence" of each cell type in the neighborhood of each sample:
         dmat_neighbors = self.all_spatial_weights.dot(self.cell_categories.values)
@@ -779,17 +786,19 @@ class STGWR:
         # Encode the "niche" or each sample by taking into account each sample's own cell type:
         data = {"categories": self.cell_categories, "dmat_neighbors": dmat_neighbors}
         niche_mat = np.asarray(dmatrix("categories:dmat_neighbors-1", data))
-        return niche_mat
+        connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
+        connections_cols.sort(key=lambda x: x[1])
+        return niche_mat, connections_cols
 
     def _adjust_x(self):
         """Adjust the independent variable array based on the defined bandwidth."""
 
         # If applicable, use the cell type category array to encode the niche of each sample:
         if self.mod_type == "niche":
-            self.X = self._compute_niche_mat()
-            connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
-            connections_cols.sort(key=lambda x: x[1])
-            self.feature_names = [f"{i[0]}-{i[1]}" for i in connections_cols]
+            self.X, connections_cols = self._compute_niche_mat()
+            # If feature names doesn't already exist, create it:
+            if not hasattr(self, "feature_names"):
+                self.feature_names = [f"{i[0]}-{i[1]}" for i in connections_cols]
 
         # If applicable, use the ligand expression array, the receptor expression array and the spatial weights array
         # to compute the ligand-receptor expression signature of each spatial neighborhood:
@@ -811,12 +820,19 @@ class STGWR:
                 ).A.flatten()
 
             self.X = X_df.values
-            self.feature_names = [pair[0] + "-" + pair[1] for pair in self.lr_pairs]
+            # If feature names doesn't already exist, create it:
+            if not hasattr(self, "feature_names"):
+                self.feature_names = [pair[0] + "-" + pair[1] for pair in self.lr_pairs]
+            # If list of L:R labels (secreted vs. membrane-bound vs. ECM) doesn't already exist, create it:
+            if not hasattr(self, "signaling_types"):
+                self.signaling_types = self.lr_db.loc[
+                    (self.lr_db["from"].isin([x[0] for x in self.lr_pairs]))
+                    & (self.lr_db["to"].isin([x[1] for x in self.lr_pairs])),
+                    "type",
+                ].tolist()
 
-        # If applicable, combine the above quantities:
+        # If applicable, combine the ideas of the above two models:
         elif self.mod_type == "slice":
-            X = self._compute_niche_mat()
-
             # Each ligand-receptor pair will have an associated niche matrix:
             niche_mats = {}
 
@@ -825,8 +841,8 @@ class STGWR:
                 lig_expr_values = scipy.sparse.csr_matrix(self.ligands_expr[lig].values.reshape(-1, 1))
                 rec_expr_values = scipy.sparse.csr_matrix(self.receptors_expr[rec].values.reshape(-1, 1))
                 # Multiply one-hot category array by the expression of select receptor within that cell:
-                rec_expr = np.multiply(X, np.tile(rec_expr_values.toarray(), X.shape[1]))
-                lig_expr = np.multiply(X, np.tile(lig_expr_values.toarray(), X.shape[1]))
+                rec_expr = np.multiply(self.cell_categories, np.tile(rec_expr_values.toarray(), self.cell_categories.shape[1]))
+                lig_expr = np.multiply(self.cell_categories, np.tile(lig_expr_values.toarray(), self.cell_categories.shape[1]))
 
                 # Multiply adjacency matrix by the cell-specific expression of select ligand:
                 nbhd_lig_expr = self.all_spatial_weights.dot(lig_expr)
@@ -837,27 +853,43 @@ class STGWR:
                 data = {"category_rec_expr": rec_expr, "neighborhood_lig_expr": nbhd_lig_expr}
                 lr_connections = np.asarray(dmatrix("category_rec_expr:neighborhood_lig_expr-1", data))
 
-                lr_connections_cols = list(product(X.columns, X.columns))
+                lr_connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
                 lr_connections_cols.sort(key=lambda x: x[1])
+                n_connections_pairs = len(lr_connections_cols)
                 # Swap sending & receiving cell types because we're looking at receptor expression in the "source" cell
                 # and ligand expression in the surrounding cells.
-                lr_connections_cols = [f"{i[1]}-{i[0]}_{lig}-{rec}" for i in lr_connections_cols]
+                lr_connections_cols = [f"{i[1]}-{i[0]}:{lig}-{rec}" for i in lr_connections_cols]
                 niche_mats[f"{lig}-{rec}"] = pd.DataFrame(lr_connections, columns=lr_connections_cols)
                 niche_mats = {key: value for key, value in sorted(niche_mats.items())}
 
             # Combine the niche matrices for each ligand-receptor pair:
             self.X = pd.concat(niche_mats.values(), axis=1)
-            self.X.columns = self.X.columns.droplevel()
             self.X.index = self.adata.obs_names
+            n_cols = self.X.shape[1]
 
             # Drop all-zero columns (represent cell type pairs with no spatial coupled L/R expression):
             self.X = self.X.loc[:, (self.X != 0).any(axis=0)]
             self.feature_names = self.X.columns.tolist()
+            self.logger.info(f"Dropped all-zero columns from cell type-specific signaling array, from {n_cols} to "
+                             f"{self.X.shape[1]}.")
             self.X = self.X.values
+            # If list of L:R labels (secreted vs. membrane-bound vs. ECM) doesn't already exist, create it:
+            if not hasattr(self, "signaling_types"):
+                query = re.compile(r"\w+-\w+:(\w+-\w+)")
+                self.signaling_types = []
+                for col in self.feature_names:
+                    ligrec = re.search(query, col).group(1)
+                    result = self.lr_db.loc[(self.lr_db["from"] == ligrec.split('-')[0]) &
+                                            (self.lr_db["to"] == ligrec.split('-')[1]), "type"].iloc[0]
+
+                    self.signaling_types.append(result)
 
         self.n_features = self.X.shape[1]
         # Rebroadcast the number of features to fit:
         self.n_features = self.comm.bcast(self.n_features, root=0)
+        # Broadcast secreted vs. membrane-bound reference:
+        if hasattr(self, "signaling_types"):
+            self.signaling_types = self.comm.bcast(self.signaling_types, root=0)
 
     def local_fit(
         self, i: int, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False, mgwr: bool = False
@@ -1032,7 +1064,8 @@ class STGWR:
 
         Args:
             y: Response variable
-            X: Independent variable array
+            X: Independent variable array- if not given, will default to :attr `X`. Note that if object was initialized
+                using an AnnData object, this will be overridden with :attr `X` even if a different array is given.
             bw: Bandwidth for the spatial kernel
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
@@ -1040,6 +1073,17 @@ class STGWR:
                 different spatial scales
             y_label: Optional, can be used to provide a unique ID for the dependent variable for saving purposes
         """
+        # If model to be run is a "niche", "lr" or "slice" model, update the spatial weights and then update X given
+        # the current value of the bandwidth:
+        if hasattr(self, "adata"):
+            self.all_spatial_weights = self._compute_all_wi(bw)
+            self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
+            self._adjust_x()
+            self.X = self.comm.bcast(self.X, root=0)
+            X = self.X
+        else:
+            X = X
+
         if final:
             if mgwr:
                 local_fit_outputs = np.empty((self.x_chunk.shape[0], self.n_features), dtype=np.float64)
@@ -1219,11 +1263,6 @@ class STGWR:
 
         if y is None:
             y_arr = self.targets_expr or self.target
-            X = self.X
-
-            if hasattr(self, "adata"):
-                self.X = self._adjust_x()
-                X = self.X
         else:
             y_arr = y
 
@@ -1237,7 +1276,10 @@ class STGWR:
 
             if self.bw is not None:
                 # If bandwidth is already known, run the main fit function:
-                self.mpi_fit(y, X, self.bw, final=True)
+                if X is None:
+                    self.mpi_fit(y, self.X, self.bw, final=True)
+                else:
+                    self.mpi_fit(y, X, self.bw, final=True)
                 return
 
             if self.comm.rank == 0:
@@ -1247,7 +1289,10 @@ class STGWR:
             self.minbw = self.comm.bcast(self.minbw, root=0)
             self.maxbw = self.comm.bcast(self.maxbw, root=0)
 
-            fit_function = lambda bw: self.mpi_fit(y, X, bw, final=False, mgwr=mgwr)
+            if X is None:
+                fit_function = lambda bw: self.mpi_fit(y, self.X, bw, final=False, mgwr=mgwr)
+            else:
+                fit_function = lambda bw: self.mpi_fit(y, X, bw, final=False, mgwr=mgwr)
             optimal_bw = self.find_optimal_bw(self.minbw, self.maxbw, fit_function)
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)
