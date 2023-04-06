@@ -44,6 +44,7 @@ np.random.seed(123)
 n_obs = 1000
 mu = 5
 y = np.random.poisson(mu, size=n_obs)
+print(y)
 
 # Define the independent variable according to a Poisson relationship:
 x = np.random.rand(1000) + 0.5 * np.log(y + 1e-6)

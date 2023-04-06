@@ -869,7 +869,8 @@ class STGWR:
                     regression, this is the squared residual, for non-Gaussian generalized linear regression,
                     this is the fitted response variable value. One of the returns if :param `final` is False
                 - betas: Estimated coefficients for sample i- if :param `mgwr` is True, betas is the only return
-                - CCT: Squared canonical correlation coefficients b/w the predicted values and the response variable
+                - eig: Squared canonical correlation coefficients b/w the predicted values and the response variable,
+                    aka the eigenvalues
         """
         wi = get_wi(
             i, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
@@ -907,13 +908,13 @@ class STGWR:
         else:
             self.logger.error("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
 
-        # Canonical correlation:
-        CCT = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
+        # Squared canonical correlation:
+        eig = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
 
         if final:
             if mgwr:
                 return betas
-            return np.concatenate(([i, diagnostic, hat_i], betas, CCT))
+            return np.concatenate(([i, diagnostic, hat_i], betas, eig))
         else:
             # For bandwidth optimization:
             if self.distr == "gaussian":
@@ -999,7 +1000,15 @@ class STGWR:
 
         return optimum_bw
 
-    def mpi_fit(self, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False, mgwr: bool = False):
+    def mpi_fit(
+        self,
+        y: np.ndarray,
+        X: np.ndarray,
+        bw: Union[float, int],
+        final: bool = False,
+        mgwr: bool = False,
+        y_label: Optional[str] = None,
+    ):
         """Fit local regression model for each sample in parallel, given a specified bandwidth.
 
         Args:
@@ -1010,12 +1019,13 @@ class STGWR:
                 be fit and more stats can be returned.
             mgwr: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary over
                 different spatial scales
+            y_label: Optional, can be used to provide a unique ID for the dependent variable for saving purposes
         """
         if final:
             if mgwr:
-                local_fit_outputs = np.empty((self.x_chunk.shape[0], self.n_samples), dtype=np.float64)
+                local_fit_outputs = np.empty((self.x_chunk.shape[0], self.n_features), dtype=np.float64)
             else:
-                local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * self.n_samples + 3), dtype=np.float64)
+                local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * self.n_features + 3), dtype=np.float64)
 
             # Fitting for each location:
             pos = 0
@@ -1049,16 +1059,20 @@ class STGWR:
                     TSS = np.sum((y - np.mean(y)) ** 2)
                     r_squared = 1 - RSS / TSS
 
-                    # Note: trace of the hat matrix and effective number of parameters (ENP) will be used interchangeably::
+                    # Note: trace of the hat matrix and effective number of parameters (ENP) will be used
+                    # interchangeably:
                     ENP = np.sum(all_fit_outputs[:, 2])
                     # Residual variance:
                     sigma_squared = RSS / (self.n_samples - ENP)
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc(RSS, ENP)
-                    # Scale the canonical correlation coefficients by their standard errors:
+                    aicc = self.compute_aicc_linear(RSS, ENP)
+                    # Scale the squared canonical correlation coefficients by their standard errors:
                     all_fit_outputs[:, -self.n_features :] = np.sqrt(
                         all_fit_outputs[:, -self.n_features :] * sigma_squared
                     )
+
+                    # For saving outputs:
+                    header = "name,residual,influence,"
                 else:
                     r_squared = None
 
@@ -1067,22 +1081,37 @@ class STGWR:
                         distr = Poisson()
                     else:
                         distr = NegativeBinomial()
-                    # Compute deviance:
+                    # Deviance:
+                    deviance = distr.deviance(y, all_fit_outputs[:, 1])
+                    # Residual deviance:
+                    residual_deviance = distr.deviance_residuals(y, all_fit_outputs[:, 1])
+                    # ENP:
+                    ENP = np.sum(all_fit_outputs[:, 2])
+                    # Corrected Akaike Information Criterion:
+                    aicc = self.compute_aicc_glm(residual_deviance, ENP)
+                    # Scale the squared canonical correlation coefficients using the residual deviance:
+                    all_fit_outputs[:, -self.n_features :] = np.sqrt(
+                        all_fit_outputs[:, -self.n_features :] * residual_deviance
+                    )
+
+                    # For saving outputs:
+                    header = "name,deviance,influence,"
+                else:
+                    deviance = None
 
                 # Save results:
-                header = "name,residual,influence,"
                 varNames = self.feature_names
                 if self.fit_intercept:
                     varNames = ["intercept"] + list(varNames)
-                # Columns for coefficients and standard errors:
+                # Columns for coefficients and squared canonical coefficients:
                 for x in varNames:
                     header += "b_" + x + ","
                 for x in varNames:
-                    header += "se_" + x + ","
+                    header += "sq_cc_" + x + ","
 
                 # Return output diagnostics and save result- NOTE: PASS DEVIANCE AS WELL:
-                self.output_diagnostics(aicc, ENP, r_squared, None)
-                self.save_results(all_fit_outputs, header)
+                self.output_diagnostics(aicc, ENP, r_squared, deviance)
+                self.save_results(all_fit_outputs, header, label=y_label)
 
             return
 
@@ -1098,22 +1127,47 @@ class STGWR:
                 RSS += err_sq
                 trace_hat += hat_i
 
-            # Gather data to the central process such that an array is formed where each sample has its own measurements:
+            # Send data to the central process:
             RSS_list = self.comm.gather(RSS, root=0)
             trace_hat_list = self.comm.gather(trace_hat, root=0)
 
             if self.comm.rank == 0:
                 RSS = np.sum(RSS_list)
                 trace_hat = np.sum(trace_hat_list)
-                aicc = self.compute_aicc(RSS, trace_hat)
+                aicc = self.compute_aicc_linear(RSS, trace_hat)
                 if not mgwr:
-                    self.logger.info(f"Bandwidth: {bw}, AICc: {aicc}")
+                    self.logger.info(f"Bandwidth: {bw}, Linear AICc: {aicc}")
                 return aicc
 
         elif self.distr == "poisson" or self.distr == "nb":
             # Compute AICc using the fitted and observed values:
-            y_pred = []
-            trace_hat = []
+            trace_hat = 0
+            pos = 0
+            y_pred = np.empty(self.x_chunk.shape[0], dtype=np.float64)
+
+            for i in self.x_chunk:
+                fit_outputs = self.local_fit(i, y, X, bw, final=False)
+                y_pred_i, hat_i = fit_outputs[0], fit_outputs[1]
+                y_pred[pos] = y_pred_i
+                trace_hat += hat_i
+                pos += 1
+
+            # Send data to the central process:
+            all_y_pred = self.comm.gather(y_pred, root=0)
+            trace_hat_list = self.comm.gather(trace_hat, root=0)
+
+            if self.comm.rank == 0:
+                if self.distr == "poisson":
+                    distr = Poisson()
+                else:
+                    distr = NegativeBinomial()
+
+                deviance_residuals = distr.deviance_residuals(y, all_y_pred)
+                trace_hat = np.sum(trace_hat_list)
+                aicc = self.compute_aicc_glm(deviance_residuals, trace_hat)
+                if not mgwr:
+                    self.logger.info(f"Bandwidth: {bw}, GLM AICc: {aicc}")
+                return aicc
 
         return
 
@@ -1176,7 +1230,7 @@ class STGWR:
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)
 
-            data = self.mpi_fit(y, X, optimal_bw, final=True, mgwr=mgwr)
+            data = self.mpi_fit(y, X, optimal_bw, final=True, mgwr=mgwr, y_label=target)
             if data is not None:
                 all_data[target] = data
             if optimal_bw is not None:
@@ -1187,8 +1241,8 @@ class STGWR:
     # ---------------------------------------------------------------------------------------------------
     # Diagnostics
     # ---------------------------------------------------------------------------------------------------
-    def compute_aicc(self, RSS: float, trace_hat: float) -> float:
-        """Compute the corrected Akaike Information Criterion (AICc) for the GWR model."""
+    def compute_aicc_linear(self, RSS: float, trace_hat: float) -> float:
+        """Compute the corrected Akaike Information Criterion (AICc) for the linear GWR model."""
         aicc = (
             self.n_samples * np.log(RSS / self.n_samples)
             + self.n_samples * np.log(2 * np.pi)
@@ -1197,22 +1251,65 @@ class STGWR:
 
         return aicc
 
+    def compute_aicc_glm(self, resid_dev: np.ndarray, trace_hat: float) -> float:
+        """Compute the corrected Akaike Information Criterion (AICc) for the generalized linear GWR models."""
+        aicc = (
+            np.sum(resid_dev**2)
+            + 2.0 * trace_hat
+            + 2.0 * trace_hat * (trace_hat + 1.0) / (self.n_samples - trace_hat - 1.0)
+        )
+
+        return aicc
+
     def output_diagnostics(
-        self, aicc: float, ENP: float, r_squared: Optional[float] = None, deviance: Optional[float] = None
+        self,
+        aicc: float,
+        ENP: float,
+        r_squared: Optional[float] = None,
+        deviance: Optional[float] = None,
+        y_label: Optional[str] = None,
     ) -> None:
         """Output diagnostic information about the GWR model."""
-        self.logger.info(f"Corrected Akaike information criterion: {aicc}")
-        self.logger.info(f"Effective number of parameters: {ENP}")
+
+        if y_label is None:
+            y_label = self.distr
+
+        self.logger.info(f"Corrected Akaike information criterion for {y_label} model: {aicc}")
+        self.logger.info(f"Effective number of parameters for {y_label} model: {ENP}")
         # Print R-squared for Gaussian assumption:
         if self.distr == "gaussian":
             if r_squared is None:
                 self.logger.error(":param `r_squared` must be provided when performing Gaussian regression.")
-            self.logger.info(f"R-squared: {r_squared}")
+            self.logger.info(f"R-squared for {y_label} model: {r_squared}")
         # Else log the deviance:
         else:
             if deviance is None:
                 self.logger.error(":param `deviance` must be provided when performing non-Gaussian regression.")
-            self.logger.info(f"Deviance: {deviance}")
+            self.logger.info(f"Deviance for {y_label} model: {deviance}")
 
+    # ---------------------------------------------------------------------------------------------------
+    # Save to file
+    # ---------------------------------------------------------------------------------------------------
+    def save_results(self, data: np.ndarray, header: str, label: Optional[str]) -> None:
+        """Save the results of the GWR model to file.
+
+        Args:
+            data: Elements of data to save to .csv
+            header: Column names
+            label: Optional, can be used to provide unique ID to save file- notably used when multiple dependent
+                variables with different names are fit during this process.
+        """
+        # Check if output_path was left as the default:
+        if self.output_path == "./output/stgwr_results.csv":
+            if not os.path.exists("./output"):
+                os.makedirs("./output")
+
+        if label is not None:
+            path = os.path.splitext(self.output_path)[0] + f"_{label}" + os.path.splitext(self.output_path)[1]
+        else:
+            path = self.output_path
+
+        if self.comm.rank == 0:
+            np.savetxt(path, data, delimiter=",", header=header[:-1], comments="")
 
 # MGWR:
