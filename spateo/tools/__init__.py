@@ -42,4 +42,3 @@ from .spatial_smooth import *
 from .spatial_smooth.run_smoothing import smooth_and_downsample
 from .spatial_smooth.smooth import STGNN
 from .ST_regression import *
-from .ST_regression.regression_utils import plot_prior_vs_data

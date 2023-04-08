@@ -3,6 +3,7 @@ import argparse
 import numpy as np
 import pandas as pd
 from mpi4py import MPI
+from regression_utils import multicollinearity_check
 from spatial_regression import STGWR
 
 if __name__ == "__main__":
@@ -47,6 +48,12 @@ if __name__ == "__main__":
 
     parser.add_argument("-coords_key", default="spatial", type=str)
     parser.add_argument("-group_key", default="cell_type", type=str)
+    parser.add_argument(
+        "-covariate_keys",
+        nargs="+",
+        type=str,
+        help="Any number of keys to entry in .obs or " ".var_names of an " "AnnData object.",
+    )
 
     parser.add_argument("-bw")
     parser.add_argument("-minbw")
@@ -61,7 +68,6 @@ if __name__ == "__main__":
     parser.add_argument("-max_iter", default=500, type=int)
     parser.add_argument("-alpha", type=float)
 
-
     # For now, use a dummy class for Comm:
     class Comm:
         def __init__(self):
@@ -71,13 +77,12 @@ if __name__ == "__main__":
         def bcast(self, a, root=0):
             return a
 
-
     Comm_obj = Comm()
 
     test_model = STGWR(Comm_obj, parser)
 
     print(test_model.adata[:, "SDC1"].X)
-    #print(test_model.cell_categories)
+    # print(test_model.cell_categories)
     print(test_model.ligands_expr)
     print(test_model.receptors_expr)
     print(test_model.targets_expr)
@@ -85,6 +90,12 @@ if __name__ == "__main__":
     test_model._adjust_x()
     print(test_model.signaling_types)
     print(test_model.feature_names)
+
+    # Multicollinearity check test:
+    print(test_model.X.shape)
+    test_model_df = pd.DataFrame(test_model.X, columns=test_model.feature_names)
+    test = multicollinearity_check(test_model_df, thresh=5.0)
+    print(test.shape)
 
     """
     # See if the correct numbers show up:
@@ -99,7 +110,7 @@ if __name__ == "__main__":
 
     test_model._adjust_x()
     print(test_model.X[121])"""
-    
+
     """
     start = MPI.Wtime()
 

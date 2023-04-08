@@ -1,6 +1,7 @@
 """
 Auxiliary functions to aid in the interpretation functions for the spatial and spatially-lagged regression models.
 """
+import sys
 from typing import Optional, Tuple, Union
 
 try:
@@ -16,10 +17,23 @@ from anndata import AnnData
 from numpy import linalg
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-from ...configuration import SKM
-from ...logging import logger_manager as lm
-from ...preprocessing.transform import log1p
-from .distributions import Gaussian, Link, NegativeBinomial, Poisson
+# For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
+sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
+
+from spateo.configuration import SKM
+from spateo.logging import logger_manager as lm
+from spateo.preprocessing.transform import log1p
+from spateo.tools.ST_regression.distributions import (
+    Gaussian,
+    Link,
+    NegativeBinomial,
+    Poisson,
+)
+
+# from ...configuration import SKM
+# from ...logging import logger_manager as lm
+# from ...preprocessing.transform import log1p
+# from .distributions import Gaussian, Link, NegativeBinomial, Poisson
 
 
 # ---------------------------------------------------------------------------------------------------

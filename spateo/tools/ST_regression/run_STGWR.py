@@ -5,11 +5,11 @@ Enables STGWR to be run using the "run" command rather than needing to navigate 
 import os
 import sys
 
+import click
+
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 import spateo.tools.ST_regression as fast_stgwr
-
-import click
 
 
 @click.group()
@@ -17,16 +17,28 @@ import click
 def main():
     pass
 
+
 @main.command()
-@click.option("n_processes", default=2, help="Number of processes to use. Note the max number of processes is "
-                                             "determined by the number of CPUs.", required=True)
+@click.option(
+    "n_processes",
+    default=2,
+    help="Number of processes to use. Note the max number of processes is " "determined by the number of CPUs.",
+    required=True,
+)
 @click.option("adata_path")
-@click.option("csv_path", help="Can be used to provide a .csv file, containing gene expression data or any other kind of data. "
-                               "Assumes the first three columns contain x- and y-coordinates and then dependent variable "
-                               "values, in that order.")
+@click.option(
+    "csv_path",
+    help="Can be used to provide a .csv file, containing gene expression data or any other kind of data. "
+    "Assumes the first three columns contain x- and y-coordinates and then dependent variable "
+    "values, in that order.",
+)
 @click.option("mgwr", default=False, required=False, is_flag=True)
-@click.option("mod_type", default="niche", required=False, help="If adata_path is provided, one of the STGWR models "
-                                                                "will be used. Options: 'niche', 'lr', 'slice'.")
+@click.option(
+    "mod_type",
+    default="niche",
+    required=False,
+    help="If adata_path is provided, one of the STGWR models " "will be used. Options: 'niche', 'lr', 'slice'.",
+)
 def run():
     "filler"
 

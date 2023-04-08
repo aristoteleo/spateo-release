@@ -11,7 +11,7 @@ import sys
 from functools import partial
 from itertools import product
 from multiprocessing import Pool
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import anndata
 import numpy as np
@@ -98,6 +98,8 @@ class STGWR:
 
         coords_key: Key in .obsm of the AnnData object that contains the coordinates of the cells
         group_key: Key in .obs of the AnnData object that contains the category grouping for each cell
+        covariate_keys: Can be used to optionally provide any number of keys in .obs or .var containing a continuous
+            covariate (e.g. expression of a particular TF, avg. distance from a perturbed cell, etc.)
 
 
         bw: Used to provide previously obtained bandwidth for the spatial kernel. Consists of either a distance
@@ -167,22 +169,27 @@ class STGWR:
                     custom_data = pd.read_csv(self.csv_path, index_col=0)
                     self.coords = custom_data.iloc[:, :2].values
                     self.target = custom_data.iloc[:, 2]
-                    self.X = custom_data.iloc[:, 3:].values
+                    self.logger.info(f"Extracting target from column labeled '{custom_data.columns[2]}'.")
+                    independent_variables = custom_data.iloc[:, 3:]
+                    self.X = independent_variables.values
                     self.n_samples = self.X.shape[0]
                     self.n_features = self.X.shape[1]
+                    self.feature_names = independent_variables.columns
+                    self.sample_names = custom_data.index
 
             self.n_runs_alls = np.arange(self.n_samples)
 
         # Broadcast data to other processes- initial broadcasts:
-        if self.mod_type == "niche" or self.mod_type == "slice":
-            self.cell_categories = comm.bcast(self.cell_categories, root=0)
-        if self.mod_type == "lr" or self.mod_type == "slice":
-            self.ligands_expr = comm.bcast(self.ligands_expr, root=0)
-            self.receptors_expr = comm.bcast(self.receptors_expr, root=0)
-        if hasattr(self, "targets_expr"):
-            self.targets_expr = comm.bcast(self.targets_expr, root=0)
-        elif hasattr(self, "target"):
-            self.target = comm.bcast(self.target, root=0)
+        if self.adata_path is not None:
+            if self.mod_type == "niche" or self.mod_type == "slice":
+                self.cell_categories = comm.bcast(self.cell_categories, root=0)
+            if self.mod_type == "lr" or self.mod_type == "slice":
+                self.ligands_expr = comm.bcast(self.ligands_expr, root=0)
+                self.receptors_expr = comm.bcast(self.receptors_expr, root=0)
+            if hasattr(self, "targets_expr"):
+                self.targets_expr = comm.bcast(self.targets_expr, root=0)
+            elif hasattr(self, "target"):
+                self.target = comm.bcast(self.target, root=0)
 
         # Broadcast data to other processes:
         self.X = comm.bcast(self.X, root=0)
@@ -224,6 +231,7 @@ class STGWR:
 
         self.coords_key = arg_retrieve.coords_key
         self.group_key = arg_retrieve.group_key
+        self.covariate_keys = arg_retrieve.covariate_keys
 
         self.bw_fixed = arg_retrieve.bw_fixed
         self.exclude_self = arg_retrieve.exclude_self
@@ -280,6 +288,7 @@ class STGWR:
         Load AnnData object and process it for modeling.
         """
         self.adata = anndata.read_h5ad(self.adata_path)
+        self.sample_names = self.adata.obs_names
         self.coords = self.adata.obsm[self.coords_key]
         self.n_samples = self.adata.n_obs
         # Placeholder- this will change at time of fitting:
@@ -841,8 +850,12 @@ class STGWR:
                 lig_expr_values = scipy.sparse.csr_matrix(self.ligands_expr[lig].values.reshape(-1, 1))
                 rec_expr_values = scipy.sparse.csr_matrix(self.receptors_expr[rec].values.reshape(-1, 1))
                 # Multiply one-hot category array by the expression of select receptor within that cell:
-                rec_expr = np.multiply(self.cell_categories, np.tile(rec_expr_values.toarray(), self.cell_categories.shape[1]))
-                lig_expr = np.multiply(self.cell_categories, np.tile(lig_expr_values.toarray(), self.cell_categories.shape[1]))
+                rec_expr = np.multiply(
+                    self.cell_categories, np.tile(rec_expr_values.toarray(), self.cell_categories.shape[1])
+                )
+                lig_expr = np.multiply(
+                    self.cell_categories, np.tile(lig_expr_values.toarray(), self.cell_categories.shape[1])
+                )
 
                 # Multiply adjacency matrix by the cell-specific expression of select ligand:
                 nbhd_lig_expr = self.all_spatial_weights.dot(lig_expr)
@@ -870,8 +883,10 @@ class STGWR:
             # Drop all-zero columns (represent cell type pairs with no spatial coupled L/R expression):
             self.X = self.X.loc[:, (self.X != 0).any(axis=0)]
             self.feature_names = self.X.columns.tolist()
-            self.logger.info(f"Dropped all-zero columns from cell type-specific signaling array, from {n_cols} to "
-                             f"{self.X.shape[1]}.")
+            self.logger.info(
+                f"Dropped all-zero columns from cell type-specific signaling array, from {n_cols} to "
+                f"{self.X.shape[1]}."
+            )
             self.X = self.X.values
             # If list of L:R labels (secreted vs. membrane-bound vs. ECM) doesn't already exist, create it:
             if not hasattr(self, "signaling_types"):
@@ -879,10 +894,33 @@ class STGWR:
                 self.signaling_types = []
                 for col in self.feature_names:
                     ligrec = re.search(query, col).group(1)
-                    result = self.lr_db.loc[(self.lr_db["from"] == ligrec.split('-')[0]) &
-                                            (self.lr_db["to"] == ligrec.split('-')[1]), "type"].iloc[0]
+                    result = self.lr_db.loc[
+                        (self.lr_db["from"] == ligrec.split("-")[0]) & (self.lr_db["to"] == ligrec.split("-")[1]),
+                        "type",
+                    ].iloc[0]
 
                     self.signaling_types.append(result)
+
+        # Optionally, add continuous covariate value for each cell:
+        if self.covariate_keys is not None:
+            matched_obs = []
+            matched_var_names = []
+            for key in self.covariate_keys:
+                if key in self.adata.obs:
+                    matched_obs.append(key)
+                elif key in self.adata.var_names:
+                    matched_var_names.append(key)
+                else:
+                    self.logger.info(
+                        f"Specified covariate key '{key}' not found in adata.obs. Not adding this "
+                        f"covariate to the X matrix."
+                    )
+            matched_obs_matrix = self.adata.obs[matched_obs].to_numpy()
+            matched_var_matrix = self.adata[:, matched_var_names].X.toarray()
+            cov_names = matched_obs + matched_var_names
+            concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
+            self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
+            self.feature_names += cov_names
 
         self.n_features = self.X.shape[1]
         # Rebroadcast the number of features to fit:
@@ -1305,6 +1343,33 @@ class STGWR:
 
         return all_data, all_bws
 
+    def predict(
+        self, input: Optional[np.ndarray] = None, coeffs: Optional[Union[np.ndarray, Dict[pd.DataFrame]]] = None
+    ) -> pd.DataFrame:
+        """Given input data and learned coefficients, predict the dependent variables.
+
+        Args:
+            input: Input data to be predicted on.
+            coeffs: Coefficients to be used in the prediction. If None, will attempt to load the coefficients learned
+                in the fitting process from file.
+        """
+        if input is None:
+            input = self.X
+
+        if coeffs is None:
+            coeffs = self.return_outputs()
+            # If dictionary, compute outputs for the multiple dependent variables and concatenate together:
+            if isinstance(coeffs, Dict):
+                all_y_pred = pd.DataFrame(index=self.adata.obs_names, columns=coeffs.keys())
+                for target in coeffs:
+                    y_pred = np.sum(input * coeffs[target], axis=1)
+                    all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
+                return all_y_pred
+
+            else:
+                y_pred = pd.DataFrame(np.sum(input * coeffs, axis=1), index=self.adata.obs_names, columns=["y_pred"])
+                return y_pred
+
     # ---------------------------------------------------------------------------------------------------
     # Diagnostics
     # ---------------------------------------------------------------------------------------------------
@@ -1358,13 +1423,16 @@ class STGWR:
     # Save to file
     # ---------------------------------------------------------------------------------------------------
     def save_results(self, data: np.ndarray, header: str, label: Optional[str]) -> None:
-        """Save the results of the GWR model to file.
+        """Save the results of the GWR model to file, and return the coefficients.
 
         Args:
             data: Elements of data to save to .csv
             header: Column names
             label: Optional, can be used to provide unique ID to save file- notably used when multiple dependent
                 variables with different names are fit during this process.
+
+        Returns:
+            betas: Model coefficients
         """
         # Check if output_path was left as the default:
         if self.output_path == "./output/stgwr_results.csv":
@@ -1377,7 +1445,51 @@ class STGWR:
             path = self.output_path
 
         if self.comm.rank == 0:
+            # Save to .csv:
             np.savetxt(path, data, delimiter=",", header=header[:-1], comments="")
+
+    def return_outputs(self) -> Union[pd.DataFrame, Dict[pd.DataFrame]]:
+        """Return final coefficients for all fitted models."""
+        parent_dir = os.path.dirname(self.output_path)
+        all_coeffs = {}
+        for file in os.listdir(parent_dir):
+            all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
+            betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
+            betas.index = self.sample_names
+
+            # If there were multiple dependent variables, save coefficients to dictionary:
+            if file != os.path.basename(self.output_path):
+                all_coeffs[file.split("_")[-1]] = betas
+            else:
+                all_coeffs = betas
+            """
+            # If the final portion of the path is not equal to that of the original output path, it means there were
+            # multiple dependent variables- add the additional label of each to the column names:
+            if file != os.path.basename(self.output_path):
+                betas.columns = [col + "_" + file.split("_")[-1] for col in betas.columns]
+
+            all_coeffs = pd.concat([all_coeffs, betas], axis=1)"""
+        return all_coeffs
+
+    def return_intercepts(self) -> Union[None, np.ndarray, Dict[np.ndarray]]:
+        """Return final intercepts for all fitted models."""
+        if not self.fit_intercept:
+            self.logger.info("No intercepts were fit, returning None.")
+            return
+
+        parent_dir = os.path.dirname(self.output_path)
+        all_intercepts = {}
+        for file in os.listdir(parent_dir):
+            all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
+            intercepts = all_outputs["intercept"].values
+
+            # If there were multiple dependent variables, save coefficients to dictionary:
+            if file != os.path.basename(self.output_path):
+                all_intercepts[file.split("_")[-1]] = intercepts
+            else:
+                all_intercepts = intercepts
+
+        return all_intercepts
 
 
 # MGWR:
