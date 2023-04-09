@@ -3,14 +3,17 @@ Modeling putative gene regulatory networks using a regression model that is cons
 (and thus the context-dependency of the relationships of) the response variable.
 """
 import argparse
+import math
 import os
 import sys
+from typing import Optional
 
 import anndata
 import numpy as np
 import pandas as pd
 import scipy
 from mpi4py import MPI
+from scipy.spatial.distance import cdist
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
@@ -93,6 +96,23 @@ class GWRGRN(STGWR):
         self.regulators = None
         self.parse_stgwr_args()
         self.custom_regulators_path = self.arg_retrieve.custom_regulators_path
+
+        self.grn_load_and_process()
+
+        self.X = self.comm.bcast(self.X, root=0)
+        self.bw = self.comm.bcast(self.bw, root=0)
+        self.coords = self.comm.bcast(self.coords, root=0)
+        self.tolerance = self.comm.bcast(self.tolerance, root=0)
+        self.max_iter = self.comm.bcast(self.max_iter, root=0)
+        self.alpha = self.comm.bcast(self.alpha, root=0)
+        self.n_samples = self.comm.bcast(self.n_samples, root=0)
+        self.n_features = self.comm.bcast(self.n_features, root=0)
+        self.n_runs_alls = self.comm.bcast(self.n_runs_alls, root=0)
+
+        # Split data into chunks for each process:
+        chunk_size = int(math.ceil(float(len(self.n_runs_alls)) / self.comm.size))
+        # Assign chunks to each process:
+        self.x_chunk = self.n_runs_alls[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
 
     def grn_load_and_process(self):
         """
@@ -178,6 +198,7 @@ class GWRGRN(STGWR):
         database_ligands = set(lr_db["from"])
         database_receptors = set(lr_db["to"])
         database_pathways = set(r_tf_db["pathway"])
+        database_tfs = grn.columns
 
         # Ligand array:
         if self.custom_ligands_path is not None:
@@ -255,9 +276,10 @@ class GWRGRN(STGWR):
             # Get list of receptors from among the most highly spatially-variable genes, indicative of
             # potentially interesting spatially-enriched signal:
             self.logger.info(
-                "Preparing data: getting list of ligands from among the most highly spatially-variable genes."
+                "Preparing data: getting list of receptors from among the most highly spatially-variable genes."
             )
-            m_degs = moran_i(self.adata)
+            if "m_degs" not in locals():
+                m_degs = moran_i(self.adata)
             m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
             receptors = [g for g in m_filter_genes if g in all_receptors]
 
@@ -311,11 +333,24 @@ class GWRGRN(STGWR):
                 regulators = f.read().splitlines()
                 regulators = [r for r in regulators if r in self.adata.var_names]
         else:
-            all_regulators = []
-            for mol in all_molecule_targets:
-                reg_tfs = list(grn.columns[grn.loc[mol] == 1])
-                all_regulators.extend(reg_tfs)
-            regulators = list(set(all_regulators))
+            # Get list of regulatory factors from among the most highly spatially-variable genes, indicative of
+            # potentially interesting spatially-enriched signal:
+            self.logger.info(
+                "Preparing data: getting list of regulators from among the most highly spatially-variable genes."
+            )
+            if "m_degs" not in locals():
+                m_degs = moran_i(self.adata)
+            m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
+            regulators = [g for g in m_filter_genes if g in database_tfs]
+
+            # If no significant spatially-variable receptors are found, use the top 100 most spatially-variable TFs:
+            if len(regulators) == 0:
+                self.logger.info(
+                    "No significant spatially-variable regulatory factors found. Using top 100 most "
+                    "spatially-variable TFs."
+                )
+                m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
+                regulators = [g for g in m_filter_genes if g in database_tfs][:100]
 
         self.regulators_expr = pd.DataFrame(
             self.adata[:, regulators].X.toarray()
@@ -324,15 +359,49 @@ class GWRGRN(STGWR):
             index=self.adata.obs_names,
             columns=regulators,
         )
+        self.X = self.regulators_expr.values
 
         # To initialize coefficients, filter the GRN rows and columns to only include the regulators and targets:
         self.all_betas = {}
         grn = grn.loc[all_molecule_targets, regulators]
         for row in grn.index:
             self.all_betas[row] = grn.loc[row, :].values
+        self.all_betas = self.comm.bcast(self.all_betas, root=0)
 
-    def grn_mpi_fit(self):
-        "filler"
+    def grn_fit(
+        self,
+        y: Optional[pd.DataFrame] = None,
+        X: Optional[pd.DataFrame] = None,
+        mgwr: bool = False,
+    ):
+        """For each column of the dependent variable array (in this specific case, for each gene expression vector
+        for ligands/receptors/other targets), fit model. If given bandwidth, run :func `STGWR.mpi_fit()` with the
+        given bandwidth. Otherwise, compute optimal bandwidth using :func `STGWR.select_optimal_bw()`, minimizing AICc.
 
-    def grn_fit(self):
-        "filler"
+        Args:
+            y: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
+                None, will use :attr `targets_expr` computed using the given AnnData object to create this (each
+                individual column will serve as an independent variable).
+            X: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
+                None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
+            mgwr: Set True to indicate that a multiscale model should be fitted
+
+        Returns:
+            all_data: Dictionary containing outputs of :func `STGWR.mpi_fit()` with the chosen or determined bandwidth-
+                note that this will either be None or in the case that :param `mgwr` is True, an array of shape [
+                n_samples, n_features] representing the coefficients for each sample (if :param `mgwr` is False,
+                these arrays will instead be saved to file).
+            all_bws: Dictionary containing outputs in the case that bandwidth is not already known, resulting from
+                the conclusion of the optimization process. Will also be None if :param `mgwr` is True.
+        """
+
+        if y is None:
+            y_arr = self.molecule_expr
+        else:
+            y_arr = y
+        if X is None:
+            X = self.X
+
+        all_data, all_bws = self.fit(y_arr, X, mgwr=mgwr)
+
+        return all_data, all_bws

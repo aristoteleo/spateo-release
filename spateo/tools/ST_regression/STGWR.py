@@ -189,7 +189,7 @@ class STGWR:
 
             self.n_runs_alls = np.arange(self.n_samples)
 
-        # Broadcast data to other processes- initial broadcasts:
+        # Broadcast data to other processes- gene expression variables:
         if self.adata_path is not None:
             if self.mod_type == "niche" or self.mod_type == "slice":
                 self.cell_categories = self.comm.bcast(self.cell_categories, root=0)
@@ -1131,6 +1131,9 @@ class STGWR:
                 X = self.X
             else:
                 X = self.X
+        if X.shape[1] != self.n_features:
+            self.n_features = X.shape[1]
+            self.n_features = self.comm.bcast(self.n_features, root=0)
 
         if final:
             if mgwr:
@@ -1288,7 +1291,7 @@ class STGWR:
         X: Optional[pd.DataFrame] = None,
         mgwr: bool = False,
     ):
-        """For a single column of the dependent variable array, fit model. If given bandwidth, run :func
+        """For each column of the dependent variable array, fit model. If given bandwidth, run :func
         `STGWR.mpi_fit()` with the given bandwidth. Otherwise, compute optimal bandwidth using :func
         `STGWR.select_optimal_bw()`, minimizing AICc.
 
@@ -1337,7 +1340,7 @@ class STGWR:
             if self.comm.rank == 0:
                 self._set_search_range()
                 if not mgwr:
-                    self.logger.info(f"Computing optimal bandwidth over range {self.minbw}-{self.maxbw}...")
+                    self.logger.info(f"Calculated range for bandwidth: {self.minbw}-{self.maxbw}.")
             self.minbw = self.comm.bcast(self.minbw, root=0)
             self.maxbw = self.comm.bcast(self.maxbw, root=0)
 
