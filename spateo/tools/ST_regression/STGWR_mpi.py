@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from mpi4py import MPI
 from regression_utils import multicollinearity_check
-from spatial_regression import STGWR
+from STGWR import STGWR
 
 if __name__ == "__main__":
     # From the command line, run spatial GWR
@@ -24,13 +24,21 @@ if __name__ == "__main__":
         "values, in that order.",
     )
     parser.add_argument("-mgwr", action="store_true")
+    # Flag to run a GRN model- if not given, will run STGWR CCI model, taking inputs such as mod_type and cci_dir
+    # into consideration.
+    parser.add_argument("-grn", action="store_true", help="If this argument is provided, 'mod_type', 'cci_dir")
     parser.add_argument("-mod_type", default="niche", type=str)
     parser.add_argument("-cci_dir", type=str)
     parser.add_argument("-species", type=str, default="human")
     parser.add_argument("-output_path", default="./output/stgwr_results.csv", type=str)
     parser.add_argument("-custom_lig_path", type=str)
     parser.add_argument("-custom_rec_path", type=str)
-    parser.add_argument("-custom_tf_path", type=str)
+    parser.add_argument(
+        "-custom_tf_path",
+        type=str,
+        help="Only used for GRN models. This file contains a list of TFs"
+        "to constitute the independent variable block.",
+    )
     parser.add_argument("-custom_pathways_path", type=str)
     parser.add_argument("-targets_path", type=str)
     parser.add_argument("-init_betas_path", type=str)

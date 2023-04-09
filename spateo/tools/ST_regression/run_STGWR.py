@@ -39,7 +39,7 @@ def main():
     required=False,
     help="If adata_path is provided, one of the STGWR models " "will be used. Options: 'niche', 'lr', 'slice'.",
 )
-def run():
+def run_STGWR():
     "filler"
 
 

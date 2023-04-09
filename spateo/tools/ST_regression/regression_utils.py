@@ -567,6 +567,27 @@ def mse(y_true, y_pred) -> float:
 
 
 # ---------------------------------------------------------------------------------------------------
+# Spatial smoothing
+# ---------------------------------------------------------------------------------------------------
+def smooth(X, W, normalize_W=True, return_discrete=False) -> Tuple[scipy.sparse.csr_matrix, Optional[np.ndarray]]:
+    if normalize_W:
+        if type(W) == np.ndarray:
+            d = np.sum(W, 1).flatten()
+        else:
+            d = np.sum(W, 1).A.flatten()
+        W = scipy.sparse.diags(1 / d) @ W if scipy.sparse.issparse(W) else np.diag(1 / d) @ W
+        x_new = scipy.sparse.csr_matrix(W @ X)
+        if return_discrete:
+            x_new = scipy.sparse.csr_matrix.round(x_new).astype(int)
+        return x_new, d
+    else:
+        x_new = W @ X
+        if return_discrete:
+            x_new = scipy.sparse.csr_matrix.round(x_new).astype(int)
+        return x_new
+
+
+# ---------------------------------------------------------------------------------------------------
 # Testing Model Accuracy
 # ---------------------------------------------------------------------------------------------------
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")

@@ -38,7 +38,4 @@ from .labels import Label, create_label_class
 from .lisa import GM_lag_model, lisa_geo_df, local_moran_i
 from .live_wire import LiveWireSegmentation, compute_shortest_path, live_wire
 from .spatial_degs import cellbin_morani, moran_i
-from .spatial_smooth import *
-from .spatial_smooth.run_smoothing import smooth_and_downsample
-from .spatial_smooth.smooth import STGNN
 from .ST_regression import *
