@@ -153,8 +153,16 @@ class STGWR:
         self.n_features = None
         # Number of STGWR runs to go through:
         self.n_runs_alls = None
+        # Flag for whether model has been set up and AnnData has been processed:
+        self.set_up = False
 
         self.parse_stgwr_args()
+
+    def _set_up_model(self):
+        if self.mod_type is None:
+            self.logger.error(
+                "No model type provided; need to provide a model type to fit. Options: 'niche', 'lr', " "'slice'."
+            )
 
         # Check if the program is currently in the master process:
         if self.comm.rank == 0:
@@ -184,25 +192,25 @@ class STGWR:
         # Broadcast data to other processes- initial broadcasts:
         if self.adata_path is not None:
             if self.mod_type == "niche" or self.mod_type == "slice":
-                self.cell_categories = comm.bcast(self.cell_categories, root=0)
+                self.cell_categories = self.comm.bcast(self.cell_categories, root=0)
             if self.mod_type == "lr" or self.mod_type == "slice":
-                self.ligands_expr = comm.bcast(self.ligands_expr, root=0)
-                self.receptors_expr = comm.bcast(self.receptors_expr, root=0)
+                self.ligands_expr = self.comm.bcast(self.ligands_expr, root=0)
+                self.receptors_expr = self.comm.bcast(self.receptors_expr, root=0)
             if hasattr(self, "targets_expr"):
-                self.targets_expr = comm.bcast(self.targets_expr, root=0)
+                self.targets_expr = self.comm.bcast(self.targets_expr, root=0)
             elif hasattr(self, "target"):
-                self.target = comm.bcast(self.target, root=0)
+                self.target = self.comm.bcast(self.target, root=0)
 
         # Broadcast data to other processes:
-        self.X = comm.bcast(self.X, root=0)
-        self.bw = comm.bcast(self.bw, root=0)
-        self.coords = comm.bcast(self.coords, root=0)
-        self.tolerance = comm.bcast(self.tolerance, root=0)
-        self.max_iter = comm.bcast(self.max_iter, root=0)
-        self.alpha = comm.bcast(self.alpha, root=0)
-        self.n_samples = comm.bcast(self.n_samples, root=0)
-        self.n_features = comm.bcast(self.n_features, root=0)
-        self.n_runs_alls = comm.bcast(self.n_runs_alls, root=0)
+        self.X = self.comm.bcast(self.X, root=0)
+        self.bw = self.comm.bcast(self.bw, root=0)
+        self.coords = self.comm.bcast(self.coords, root=0)
+        self.tolerance = self.comm.bcast(self.tolerance, root=0)
+        self.max_iter = self.comm.bcast(self.max_iter, root=0)
+        self.alpha = self.comm.bcast(self.alpha, root=0)
+        self.n_samples = self.comm.bcast(self.n_samples, root=0)
+        self.n_features = self.comm.bcast(self.n_features, root=0)
+        self.n_runs_alls = self.comm.bcast(self.n_runs_alls, root=0)
 
         # Split data into chunks for each process:
         chunk_size = int(math.ceil(float(len(self.n_runs_alls)) / self.comm.size))
@@ -213,32 +221,32 @@ class STGWR:
         """
         Parse command line arguments for arguments pertinent to modeling.
         """
-        arg_retrieve = self.parser.parse_args()
-        self.mod_type = arg_retrieve.mod_type
-        self.adata_path = arg_retrieve.adata_path
-        self.csv_path = arg_retrieve.csv_path
-        self.cci_dir = arg_retrieve.cci_dir
-        self.species = arg_retrieve.species
-        self.output_path = arg_retrieve.output_path
-        self.custom_ligands_path = arg_retrieve.custom_lig_path
-        self.custom_receptors_path = arg_retrieve.custom_rec_path
-        self.custom_pathways_path = arg_retrieve.custom_pathways_path
-        self.targets_path = arg_retrieve.targets_path
-        self.init_betas_path = arg_retrieve.init_betas_path
+        self.arg_retrieve = self.parser.parse_args()
+        self.mod_type = self.arg_retrieve.mod_type
+        self.adata_path = self.arg_retrieve.adata_path
+        self.csv_path = self.arg_retrieve.csv_path
+        self.cci_dir = self.arg_retrieve.cci_dir
+        self.species = self.arg_retrieve.species
+        self.output_path = self.arg_retrieve.output_path
+        self.custom_ligands_path = self.arg_retrieve.custom_lig_path
+        self.custom_receptors_path = self.arg_retrieve.custom_rec_path
+        self.custom_pathways_path = self.arg_retrieve.custom_pathways_path
+        self.targets_path = self.arg_retrieve.targets_path
+        self.init_betas_path = self.arg_retrieve.init_betas_path
 
-        self.normalize = arg_retrieve.normalize
-        self.smooth = arg_retrieve.smooth
-        self.log_transform = arg_retrieve.log_transform
-        self.target_expr_threshold = arg_retrieve.target_expr_threshold
+        self.normalize = self.arg_retrieve.normalize
+        self.smooth = self.arg_retrieve.smooth
+        self.log_transform = self.arg_retrieve.log_transform
+        self.target_expr_threshold = self.arg_retrieve.target_expr_threshold
 
-        self.coords_key = arg_retrieve.coords_key
-        self.group_key = arg_retrieve.group_key
-        self.covariate_keys = arg_retrieve.covariate_keys
+        self.coords_key = self.arg_retrieve.coords_key
+        self.group_key = self.arg_retrieve.group_key
+        self.covariate_keys = self.arg_retrieve.covariate_keys
 
-        self.bw_fixed = arg_retrieve.bw_fixed
-        self.exclude_self = arg_retrieve.exclude_self
-        self.distr = arg_retrieve.distr
-        self.kernel = arg_retrieve.kernel
+        self.bw_fixed = self.arg_retrieve.bw_fixed
+        self.exclude_self = self.arg_retrieve.exclude_self
+        self.distr = self.arg_retrieve.distr
+        self.kernel = self.arg_retrieve.kernel
 
         if not self.bw_fixed and self.kernel not in ["bisquare", "uniform"]:
             self.logger.error(
@@ -248,23 +256,23 @@ class STGWR:
                 "the other kernels may result in different results."
             )
 
-        self.fit_intercept = arg_retrieve.fit_intercept
+        self.fit_intercept = self.arg_retrieve.fit_intercept
         # Parameters related to the fitting process (tolerance, number of iterations, etc.)
-        self.tolerance = arg_retrieve.tolerance
-        self.max_iter = arg_retrieve.max_iter
-        self.alpha = arg_retrieve.alpha
+        self.tolerance = self.arg_retrieve.tolerance
+        self.max_iter = self.arg_retrieve.max_iter
+        self.alpha = self.arg_retrieve.alpha
 
-        if arg_retrieve.bw:
+        if self.arg_retrieve.bw:
             if self.bw_fixed:
-                self.bw = float(arg_retrieve.bw)
+                self.bw = float(self.arg_retrieve.bw)
             else:
-                self.bw = int(arg_retrieve.bw)
+                self.bw = int(self.arg_retrieve.bw)
 
-        if arg_retrieve.minbw:
+        if self.arg_retrieve.minbw:
             if self.bw_fixed:
-                self.minbw = float(arg_retrieve.minbw)
+                self.minbw = float(self.arg_retrieve.minbw)
             else:
-                self.minbw = int(arg_retrieve.minbw)
+                self.minbw = int(self.arg_retrieve.minbw)
 
         # Helpful messages at process start:
         if self.comm.rank == 0:
@@ -273,17 +281,18 @@ class STGWR:
             fixed_or_adaptive = "Fixed " if self.bw_fixed else "Adaptive "
             type = fixed_or_adaptive + self.kernel.capitalize()
             self.logger.info(f"Spatial kernel: {type}")
-            self.logger.info(f"Model type: {self.mod_type}")
 
             self.logger.info(f"Loading AnnData object from: {self.adata_path}")
-            self.logger.info(f"Loading cell-cell interaction databases from the following folder: {self.cci_dir}")
-            if self.custom_ligands_path is not None:
-                self.logger.info(f"Using list of custom ligands from: {self.custom_ligands_path}")
-            if self.custom_receptors_path is not None:
-                self.logger.info(f"Using list of custom receptors from: {self.custom_receptors_path}")
-            if self.targets_path is not None:
-                self.logger.info(f"Using list of target genes from: {self.targets_path}")
-            self.logger.info(f"Saving results to: {self.output_path}")
+            if self.mod_type is not None:
+                self.logger.info(f"Model type: {self.mod_type}")
+                self.logger.info(f"Loading cell-cell interaction databases from the following folder: {self.cci_dir}")
+                if self.custom_ligands_path is not None:
+                    self.logger.info(f"Using list of custom ligands from: {self.custom_ligands_path}")
+                if self.custom_receptors_path is not None:
+                    self.logger.info(f"Using list of custom receptors from: {self.custom_receptors_path}")
+                if self.targets_path is not None:
+                    self.logger.info(f"Using list of target genes from: {self.targets_path}")
+                self.logger.info(f"Saving results to: {self.output_path}")
 
     def load_and_process(self):
         """
@@ -426,6 +435,7 @@ class STGWR:
                                 other_members = [m for m in complex_members if m != member]
                                 for member in other_members:
                                     ligands.append(member)
+                ligands = list(set(ligands))
 
                 self.logger.info(
                     f"Found {len(ligands)} among significantly spatially-variable genes and associated "
@@ -486,6 +496,7 @@ class STGWR:
                 r_complexes = [elem for elem in receptors if "_" in elem]
                 # Get individual components if any complexes are included in this list:
                 receptors = [r for item in receptors for r in item.split("_")]
+                receptors = list(set(receptors))
 
             else:
                 # List of possible complexes to search through:
@@ -521,6 +532,7 @@ class STGWR:
                                 other_members = [m for m in complex_members if m != member]
                                 for member in other_members:
                                     receptors.append(member)
+                receptors = list(set(receptors))
 
                 self.logger.info(
                     f"Found {len(receptors)} among significantly spatially-variable genes and associated "
@@ -1296,6 +1308,10 @@ class STGWR:
             all_bws: Dictionary containing outputs in the case that bandwidth is not already known, resulting from
                 the conclusion of the optimization process. Will also be None if :param `mgwr` is True.
         """
+
+        if not self.set_up:
+            self.logger.info("Model has not yet been set up to run, running :func `STGWR._set_up_model()` now...")
+            self._set_up_model()
 
         if y is None:
             y_arr = self.targets_expr or self.target

@@ -2,6 +2,7 @@ import argparse
 
 import numpy as np
 import pandas as pd
+from GWRGRN import GWRGRN
 from mpi4py import MPI
 from regression_utils import multicollinearity_check
 from STGWR import STGWR
@@ -27,16 +28,16 @@ if __name__ == "__main__":
     # Flag to run a GRN model- if not given, will run STGWR CCI model, taking inputs such as mod_type and cci_dir
     # into consideration.
     parser.add_argument("-grn", action="store_true", help="If this argument is provided, 'mod_type', 'cci_dir")
-    parser.add_argument("-mod_type", default="niche", type=str)
+    parser.add_argument("-mod_type", type=str)
     parser.add_argument("-cci_dir", type=str)
     parser.add_argument("-species", type=str, default="human")
     parser.add_argument("-output_path", default="./output/stgwr_results.csv", type=str)
     parser.add_argument("-custom_lig_path", type=str)
     parser.add_argument("-custom_rec_path", type=str)
     parser.add_argument(
-        "-custom_tf_path",
+        "-custom_regulators_path",
         type=str,
-        help="Only used for GRN models. This file contains a list of TFs"
+        help="Only used for GRN models. This file contains a list of TFs (or other regulatory molecules)"
         "to constitute the independent variable block.",
     )
     parser.add_argument("-custom_pathways_path", type=str)
@@ -88,7 +89,10 @@ if __name__ == "__main__":
     Comm_obj = Comm()
 
     test_model = STGWR(Comm_obj, parser)
+    test_model_2 = GWRGRN(Comm_obj, parser)
+    print(test_model_2.distr)
 
+    """
     print(test_model.adata[:, "SDC1"].X)
     # print(test_model.cell_categories)
     print(test_model.ligands_expr)
@@ -103,7 +107,7 @@ if __name__ == "__main__":
     print(test_model.X.shape)
     test_model_df = pd.DataFrame(test_model.X, columns=test_model.feature_names)
     test = multicollinearity_check(test_model_df, thresh=5.0)
-    print(test.shape)
+    print(test.shape)"""
 
     """
     # See if the correct numbers show up:
