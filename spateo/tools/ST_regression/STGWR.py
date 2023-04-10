@@ -41,11 +41,11 @@ from spateo.tools.ST_regression.regression_utils import (
 # GWR for cell-cell communication
 # ---------------------------------------------------------------------------------------------------
 class STGWR:
-    """Geographically weighted regression on spatial omics data with parallel processing. Runs after being called
+    """Spatially weighted regression on spatial omics data with parallel processing. Runs after being called
     from the command line.
 
     Args:
-        MPI_comm: MPI communicator object initialized with mpi4py, to control parallel processing operations
+        comm: MPI communicator object initialized with mpi4py, to control parallel processing operations
         parser: ArgumentParser object initialized with argparse, to parse command line arguments for arguments
             pertinent to modeling.
 
@@ -1340,7 +1340,7 @@ class STGWR:
             if self.comm.rank == 0:
                 self._set_search_range()
                 if not mgwr:
-                    self.logger.info(f"Calculated range for bandwidth: {self.minbw}-{self.maxbw}.")
+                    self.logger.info(f"Calculated bandwidth range over which to search: {self.minbw}-{self.maxbw}.")
             self.minbw = self.comm.bcast(self.minbw, root=0)
             self.maxbw = self.comm.bcast(self.maxbw, root=0)
 
@@ -1465,6 +1465,22 @@ class STGWR:
             # Save to .csv:
             np.savetxt(path, data, delimiter=",", header=header[:-1], comments="")
 
+    def predict_and_save(
+        self, input: Optional[np.ndarray] = None, coeffs: Optional[Union[np.ndarray, Dict[str, pd.DataFrame]]] = None
+    ):
+        """Given input data and learned coefficients, predict the dependent variables and then save the output.
+
+        Args:
+            input: Input data to be predicted on.
+            coeffs: Coefficients to be used in the prediction. If None, will attempt to load the coefficients learned
+                in the fitting process from file.
+        """
+        y_pred = self.predict(input, coeffs)
+        # Save to parent directory of the output path:
+        parent_dir = os.path.dirname(self.output_path)
+        pred_path = os.path.join(parent_dir, "predictions.csv")
+        y_pred.to_csv(pred_path)
+
     def return_outputs(self) -> Union[pd.DataFrame, Dict[str, pd.DataFrame]]:
         """Return final coefficients for all fitted models."""
         parent_dir = os.path.dirname(self.output_path)
@@ -1510,3 +1526,94 @@ class STGWR:
 
 
 # MGWR:
+class STMGWR(STGWR):
+    """Modified version of the spatially weighted regression on spatial omics data with parallel processing,
+    enabling each feature to have its own distinct spatial scale parameter. Runs after being called from the command
+    line.
+
+    Args:
+        comm: MPI communicator object initialized with mpi4py, to control parallel processing operations
+        parser: ArgumentParser object initialized with argparse, to parse command line arguments for arguments
+            pertinent to modeling.
+
+    Attributes:
+        mod_type: The type of model that will be employed- this dictates how the data will be processed and
+            prepared. Options:
+                - "niche": Spatially-aware, uses spatial connections between samples as independent variables
+                - "lr": Spatially-aware, uses the combination of receptor expression in the "target" cell and spatially
+                    lagged ligand expression in the neighboring cells as independent variables.
+                - "slice": Spatially-aware, uses a coupling of spatial category connections, ligand expression
+                    and receptor expression to perform regression on select receptor-downstream genes.
+
+
+        adata_path: Path to the AnnData object from which to extract data for modeling
+        csv_path: Can also be used to specify path to non-AnnData .csv object. Assumes the first three columns
+            contain x- and y-coordinates and then dependent variable values, in that order, with all subsequent
+            columns containing independent variable values.
+        normalize: Set True to Perform library size normalization, to set total counts in each cell to the same
+            number (adjust for cell size). It is advisable not to do this if performing Poisson or negative binomial
+            regression.
+        smooth: Set True to correct for dropout effects by leveraging gene expression neighborhoods to smooth
+            expression. It is advisable not to do this if performing Poisson or negative binomial regression.
+        log_transform: Set True if log-transformation should be applied to expression. It is advisable not to do
+            this if performing Poisson or negative binomial regression.
+        target_expr_threshold: Only used if :param `mod_type` is "lr" or "slice" and :param `targets_path` is not
+            given. When manually selecting targets, expression above a threshold percentage of cells will be used to
+            filter to a smaller subset of interesting genes. Defaults to 0.2.
+
+
+        custom_lig_path: Optional path to a .txt file containing a list of ligands for the model, separated by
+            newlines. Only used if :attr `mod_type` is "lr" or "slice" (and thus uses ligand/receptor expression
+            directly in the inference). If not provided, will select ligands using a threshold based on expression
+            levels in the data.
+        custom_rec_path: Optional path to a .txt file containing a list of receptors for the model, separated by
+            newlines. Only used if :attr `mod_type` is "lr" or "slice" (and thus uses ligand/receptor expression
+            directly in the inference). If not provided, will select receptors using a threshold based on expression
+            levels in the data.
+        custom_pathways_path: Rather than  providing a list of receptors, can provide a list of signaling pathways-
+            all receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
+            is "lr" or "slice".
+        targets_path: Optional path to a .txt file containing a list of prediction target genes for the model,
+            separated by newlines. If not provided, targets will be strategically selected from the given receptors.
+        init_betas_path: Optional path to a .npy file containing initial coefficient values for the model. Initial
+            coefficients should have shape [n_features, ].
+
+
+        cci_dir: Full path to the directory containing cell-cell communication databases
+        species: Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
+                "human", "mouse".
+        output_path: Full path name for the .csv file in which results will be saved
+
+
+        coords_key: Key in .obsm of the AnnData object that contains the coordinates of the cells
+        group_key: Key in .obs of the AnnData object that contains the category grouping for each cell
+        covariate_keys: Can be used to optionally provide any number of keys in .obs or .var containing a continuous
+            covariate (e.g. expression of a particular TF, avg. distance from a perturbed cell, etc.)
+
+
+        minbw: For use in automated bandwidth selection- the lower-bound bandwidth to test.
+        maxbw: For use in automated bandwidth selection- the upper-bound bandwidth to test.
+
+
+        distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb"
+        kernel: Type of kernel function used to weight observations; one of "bisquare", "exponential", "gaussian",
+            "quadratic", "triangular" or "uniform".
+
+
+        bw_fixed: Set True for distance-based kernel function and False for nearest neighbor-based kernel function
+        exclude_self: If True, ignore each sample itself when computing the kernel density estimation
+        fit_intercept: Set True to include intercept in the model and False to exclude intercept
+    """
+
+    def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser):
+        super().__init__(comm, parser)
+
+    def backfitting(self):
+        """
+        Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths.
+        """
+        if self.comm.rank == 0:
+            self.logger.info("MGWR Backfitting...")
+
+        # Initialize parameters:
+        betas, bw = self.fit(mgwr=True)

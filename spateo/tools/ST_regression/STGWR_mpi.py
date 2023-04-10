@@ -27,9 +27,9 @@ if __name__ == "__main__":
     parser.add_argument("-mgwr", action="store_true")
     # Flag to run a GRN model- if not given, will run STGWR CCI model, taking inputs such as mod_type and cci_dir
     # into consideration.
-    parser.add_argument("-grn", action="store_true", help="If this argument is provided, 'mod_type', 'cci_dir")
+    parser.add_argument("-grn", action="store_true", help="If this argument is provided, 'mod_type' will not be used.")
     parser.add_argument("-mod_type", type=str)
-    parser.add_argument("-cci_dir", type=str)
+    parser.add_argument("-cci_dir", type=str, required=True)
     parser.add_argument("-species", type=str, default="human")
     parser.add_argument("-output_path", default="./output/stgwr_results.csv", type=str)
     parser.add_argument("-custom_lig_path", type=str)
@@ -52,24 +52,46 @@ if __name__ == "__main__":
         default=0.2,
         type=float,
         help="For automated selection, the threshold proportion of cells for which transcript "
-        "needs to be expressed in to be selected as a target of interest.",
+        "needs to be expressed in to be selected as a target of interest. Not used if 'targets_path' is not None.",
     )
 
     parser.add_argument("-coords_key", default="spatial", type=str)
-    parser.add_argument("-group_key", default="cell_type", type=str)
+    parser.add_argument(
+        "-group_key",
+        default="cell_type",
+        type=str,
+        help="Key to entry in .obs containing cell type "
+        "or other category labels. Required if "
+        "'mod_type' is 'niche' or 'slice'.",
+    )
     parser.add_argument(
         "-covariate_keys",
         nargs="+",
         type=str,
-        help="Any number of keys to entry in .obs or " ".var_names of an " "AnnData object.",
+        help="Any number of keys to entry in .obs or .var_names of an "
+        "AnnData object. Values here will be added to"
+        "the model as covariates.",
     )
 
     parser.add_argument("-bw")
     parser.add_argument("-minbw")
     parser.add_argument("-maxbw")
-    parser.add_argument("-bw_fixed", action="store_true")
-    parser.add_argument("-exclude_self", action="store_true")
-    parser.add_argument("-kernel", default="gaussian", type=str)
+    parser.add_argument(
+        "-bw_fixed",
+        action="store_true",
+        help="If this argument is provided, the bandwidth will be "
+        "interpreted as a distance during kernel operations. If not, it will be interpreted "
+        "as the number of nearest neighbors.",
+    )
+    parser.add_argument(
+        "-exclude_self",
+        action="store_true",
+        help="When computing spatial weights, do not count the "
+        "cell itself as a neighbor. Recommended to set to "
+        "True for the CCI models because the independent "
+        "variable array is also spatially-dependent.",
+    )
+    parser.add_argument("-kernel", default="bisquare", type=str)
 
     parser.add_argument("-distr", default="gaussian", type=str)
     parser.add_argument("-fit_intercept", action="store_true")
