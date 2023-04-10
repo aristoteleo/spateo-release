@@ -11,9 +11,9 @@ if __name__ == "__main__":
     # From the command line, run spatial GWR
 
     # Initialize MPI
-    # comm = MPI.COMM_WORLD
-    # rank = comm.Get_rank()
-    # size = comm.Get_size()
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
 
     parser = argparse.ArgumentParser(description="Spatial GWR")
     parser.add_argument("-adata_path", type=str)
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     # into consideration.
     parser.add_argument("-grn", action="store_true", help="If this argument is provided, 'mod_type' will not be used.")
     parser.add_argument("-mod_type", type=str)
-    parser.add_argument("-cci_dir", type=str, required=True)
+    parser.add_argument("-cci_dir", type=str)
     parser.add_argument("-species", type=str, default="human")
     parser.add_argument("-output_path", default="./output/stgwr_results.csv", type=str)
     parser.add_argument("-custom_lig_path", type=str)
@@ -99,6 +99,7 @@ if __name__ == "__main__":
     parser.add_argument("-max_iter", default=500, type=int)
     parser.add_argument("-alpha", type=float)
 
+    """
     # For now, use a dummy class for Comm:
     class Comm:
         def __init__(self):
@@ -108,11 +109,21 @@ if __name__ == "__main__":
         def bcast(self, a, root=0):
             return a
 
-    Comm_obj = Comm()
+    comm = Comm()"""
 
-    test_model = STGWR(Comm_obj, parser)
-    test_model_2 = GWRGRN(Comm_obj, parser)
-    print(test_model_2.distr)
+    t1 = MPI.Wtime()
+
+    test_model = STGWR(comm, parser)
+    test_model.fit()
+
+    t_last = MPI.Wtime()
+
+    wt = comm.gather(t_last - t1, root=0)
+    if rank == 0:
+        print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
+        print("-" * 60)
+    #test_model_2 = GWRGRN(Comm_obj, parser)
+    #print(test_model_2.distr)
 
     """
     print(test_model.adata[:, "SDC1"].X)

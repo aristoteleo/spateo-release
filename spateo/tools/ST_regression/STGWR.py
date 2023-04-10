@@ -152,7 +152,7 @@ class STGWR:
         self.n_samples = None
         self.n_features = None
         # Number of STGWR runs to go through:
-        self.n_runs_alls = None
+        self.n_runs_all = None
         # Flag for whether model has been set up and AnnData has been processed:
         self.set_up = False
 
@@ -168,6 +168,12 @@ class STGWR:
         if self.comm.rank == 0:
             # If AnnData object is given, process it:
             if self.adata_path is not None:
+                # Ensure CCI directory is provided:
+                if self.cci_dir is None:
+                    self.logger.error(
+                        "No CCI directory provided; need to provide a CCI directory to fit a model with "
+                        "ligand/receptor expression."
+                    )
                 self.load_and_process()
             else:
                 if self.csv_path is None:
@@ -178,7 +184,10 @@ class STGWR:
                 else:
                     custom_data = pd.read_csv(self.csv_path, index_col=0)
                     self.coords = custom_data.iloc[:, :2].values
-                    self.target = custom_data.iloc[:, 2]
+                    self.target = pd.DataFrame(
+                        custom_data.iloc[:, 2],
+                        index=custom_data.index,
+                        columns=[custom_data.columns[2]])
                     self.logger.info(f"Extracting target from column labeled '{custom_data.columns[2]}'.")
                     independent_variables = custom_data.iloc[:, 3:]
                     self.X = independent_variables.values
@@ -187,7 +196,7 @@ class STGWR:
                     self.feature_names = independent_variables.columns
                     self.sample_names = custom_data.index
 
-            self.n_runs_alls = np.arange(self.n_samples)
+            self.n_runs_all = np.arange(self.n_samples)
 
         # Broadcast data to other processes- gene expression variables:
         if self.adata_path is not None:
@@ -210,12 +219,12 @@ class STGWR:
         self.alpha = self.comm.bcast(self.alpha, root=0)
         self.n_samples = self.comm.bcast(self.n_samples, root=0)
         self.n_features = self.comm.bcast(self.n_features, root=0)
-        self.n_runs_alls = self.comm.bcast(self.n_runs_alls, root=0)
+        self.n_runs_all = self.comm.bcast(self.n_runs_all, root=0)
 
         # Split data into chunks for each process:
-        chunk_size = int(math.ceil(float(len(self.n_runs_alls)) / self.comm.size))
+        chunk_size = int(math.ceil(float(len(self.n_runs_all)) / self.comm.size))
         # Assign chunks to each process:
-        self.x_chunk = self.n_runs_alls[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+        self.x_chunk = self.n_runs_all[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
 
     def parse_stgwr_args(self):
         """
@@ -274,6 +283,12 @@ class STGWR:
             else:
                 self.minbw = int(self.arg_retrieve.minbw)
 
+        if self.arg_retrieve.maxbw:
+            if self.bw_fixed:
+                self.maxbw = float(self.arg_retrieve.maxbw)
+            else:
+                self.maxbw = int(self.arg_retrieve.maxbw)
+
         # Helpful messages at process start:
         if self.comm.rank == 0:
             print("-" * 60, flush=True)
@@ -282,7 +297,10 @@ class STGWR:
             type = fixed_or_adaptive + self.kernel.capitalize()
             self.logger.info(f"Spatial kernel: {type}")
 
-            self.logger.info(f"Loading AnnData object from: {self.adata_path}")
+            if self.adata_path is not None:
+                self.logger.info(f"Loading AnnData object from: {self.adata_path}")
+            elif self.csv_path is not None:
+                self.logger.info(f"Loading CSV file from: {self.csv_path}")
             if self.mod_type is not None:
                 self.logger.info(f"Model type: {self.mod_type}")
                 self.logger.info(f"Loading cell-cell interaction databases from the following folder: {self.cci_dir}")
@@ -299,6 +317,7 @@ class STGWR:
         Load AnnData object and process it for modeling.
         """
         self.adata = anndata.read_h5ad(self.adata_path)
+        self.adata.uns["__type"] = "UMI"
         self.sample_names = self.adata.obs_names
         self.coords = self.adata.obsm[self.coords_key]
         self.n_samples = self.adata.n_obs
@@ -734,7 +753,8 @@ class STGWR:
 
         # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
         else:
-            self.maxbw = 100
+            if self.maxbw is None:
+                self.maxbw = 100
 
             if self.minbw is None:
                 self.minbw = 5
@@ -976,7 +996,7 @@ class STGWR:
 
         if self.distr == "gaussian":
             betas, pseudoinverse = compute_betas_local(y, X, wi)
-            pred_y = np.dot(X[i], betas)[0]
+            pred_y = np.dot(X[i], betas)
             residual = y[i] - pred_y
             diagnostic = residual
 
@@ -1039,7 +1059,7 @@ class STGWR:
 
         score = None
         optimum_bw = None
-        difference = 1.0e10
+        difference = 1.0e9
         iterations = 0
         results_dict = {}
 
@@ -1317,7 +1337,7 @@ class STGWR:
             self._set_up_model()
 
         if y is None:
-            y_arr = self.targets_expr or self.target
+            y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
         else:
             y_arr = y
 

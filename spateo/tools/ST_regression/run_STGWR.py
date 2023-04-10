@@ -198,8 +198,6 @@ def run_STGWR(
         + mpi_path
         + " -mod_type "
         + mod_type
-        + " -cci_dir "
-        + cci_dir
         + " -species "
         + species
         + " -output_path "
@@ -229,6 +227,8 @@ def run_STGWR(
         command += " -mgwr "
     if grn:
         command += " -grn "
+    if cci_dir is not None:
+        command += " -cci_dir " + cci_dir
     if custom_lig_path is not None:
         command += " -custom_lig_path " + custom_lig_path
     if custom_rec_path is not None:

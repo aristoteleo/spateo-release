@@ -3,6 +3,7 @@ Functions for finding nearest neighbors, the distances between them and the spat
 spatial transcriptomics data.
 """
 import os
+import sys
 from typing import Iterable, Optional, Tuple, Union
 
 import numpy as np
@@ -120,7 +121,7 @@ class Kernel(object):
         data: Union[np.ndarray, scipy.sparse.spmatrix],
         bw: Union[int, float],
         fixed: bool = True,
-        exclude_self: bool = True,
+        exclude_self: bool = False,
         function: str = "triangular",
         threshold: float = 1e-5,
         eps: float = 1.0000001,
@@ -132,7 +133,6 @@ class Kernel(object):
             data = data[subset_idxs, :]
 
         self.dist_vector = local_dist(data[i], data).reshape(-1)
-
         self.function = function.lower()
 
         if fixed:
@@ -166,8 +166,10 @@ class Kernel(object):
             return np.ones(x.shape) * 0.5
         elif self.function == "quadratic":
             return (3.0 / 4) * (1 - x**2)
-        elif self.function == "bisquare":
-            return (15.0 / 16) * (1 - x**2) ** 2
+        # elif self.function == "bisquare":
+        #     return (15.0 / 16) * (1 - x**2) ** 2
+        elif self.function == 'bisquare':
+            return (1 - (x) ** 2) ** 2
         elif self.function == "gaussian":
             return np.exp(-0.5 * (x) ** 2)
         elif self.function == "exponential":
@@ -184,12 +186,12 @@ def get_wi(
     n_samples: int,
     coords: np.ndarray,
     fixed_bw: bool = True,
-    exclude_self: bool = True,
+    exclude_self: bool = False,
     kernel: str = "gaussian",
     bw: Union[float, int] = 100,
     threshold: float = 1e-5,
     sparse_array: bool = False,
-) -> np.ndarray:
+) -> scipy.sparse.csr_matrix:
     """Get spatial weights for an individual sample, given the coordinates of all samples in space.
 
     Args:

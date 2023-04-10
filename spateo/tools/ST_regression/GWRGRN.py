@@ -25,8 +25,7 @@ from spateo.tools.find_neighbors import transcriptomic_connectivity
 from spateo.tools.spatial_degs import moran_i
 from spateo.tools.ST_regression.distributions import NegativeBinomial, Poisson
 from spateo.tools.ST_regression.regression_utils import smooth
-
-from .STGWR import STGWR
+from spateo.tools.ST_regression.STGWR import STGWR
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -94,7 +93,6 @@ class GWRGRN(STGWR):
         super().__init__(comm, parser)
 
         self.regulators = None
-        self.parse_stgwr_args()
         self.custom_regulators_path = self.arg_retrieve.custom_regulators_path
 
         self.grn_load_and_process()
@@ -107,21 +105,23 @@ class GWRGRN(STGWR):
         self.alpha = self.comm.bcast(self.alpha, root=0)
         self.n_samples = self.comm.bcast(self.n_samples, root=0)
         self.n_features = self.comm.bcast(self.n_features, root=0)
-        self.n_runs_alls = self.comm.bcast(self.n_runs_alls, root=0)
+        self.n_runs_all = self.comm.bcast(self.n_runs_all, root=0)
 
         # Split data into chunks for each process:
-        chunk_size = int(math.ceil(float(len(self.n_runs_alls)) / self.comm.size))
+        chunk_size = int(math.ceil(float(len(self.n_runs_all)) / self.comm.size))
         # Assign chunks to each process:
-        self.x_chunk = self.n_runs_alls[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+        self.x_chunk = self.n_runs_all[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
 
     def grn_load_and_process(self):
         """
         Load AnnData object and process data for modeling.
         """
         self.adata = anndata.read_h5ad(self.adata_path)
+        self.adata.uns["__type"] = "UMI"
         self.sample_names = self.adata.obs_names
         self.coords = self.adata.obsm[self.coords_key]
         self.n_samples = self.adata.n_obs
+        self.n_runs_all = np.arange(self.n_samples)
         # Placeholder- this will change at time of fitting:
         self.n_features = self.adata.n_vars
 
