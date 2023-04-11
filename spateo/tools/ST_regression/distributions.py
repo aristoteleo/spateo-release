@@ -613,7 +613,7 @@ class Distribution(object):
         Returns:
             y_hat: The predicted dependent variable values
         """
-        y_hat = self.link(fitted)
+        y_hat = self.link.inverse(fitted)
         return y_hat
 
     def get_predictors(self, outputs: np.ndarray) -> np.ndarray:
@@ -626,7 +626,7 @@ class Distribution(object):
         Returns:
             predictor: The linear predictors
         """
-        predictors = self.link.inverse(outputs)
+        predictors = self.link(outputs)
         return predictors
 
     def deviance(

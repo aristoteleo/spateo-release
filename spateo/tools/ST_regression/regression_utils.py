@@ -170,8 +170,8 @@ def iwls(
     x: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
     distr: Literal["gaussian", "poisson", "nb"] = "gaussian",
     init_betas: Optional[np.ndarray] = None,
-    tol: float = 1e-6,
-    max_iter: int = 100,
+    tol: float = 1e-8,
+    max_iter: int = 200,
     spatial_weights: Optional[np.ndarray] = None,
     link: Optional[Link] = None,
     alpha: Optional[float] = None,
@@ -218,7 +218,7 @@ def iwls(
 
     # Initialization:
     n_iter = 0
-    difference = 1.0e10
+    difference = 1.0e6
 
     # Get appropriate distribution family based on specified:
     if distr == "gaussian":
@@ -232,13 +232,13 @@ def iwls(
         distr = NegativeBinomial(link)
 
     if init_betas is None:
-        betas = np.zeros(x.shape[1], 1)
+        betas = np.zeros((x.shape[1], 1))
     else:
         betas = init_betas
 
     # Initial values:
     y_hat = distr.initial_predictions(y)
-    linear_predictor = distr.predict(y_hat)
+    linear_predictor = distr.get_predictors(y_hat)
 
     while difference > tol and n_iter < max_iter:
         n_iter += 1

@@ -31,7 +31,12 @@ if __name__ == "__main__":
     parser.add_argument("-mod_type", type=str)
     parser.add_argument("-cci_dir", type=str)
     parser.add_argument("-species", type=str, default="human")
-    parser.add_argument("-output_path", default="./output/stgwr_results.csv", type=str)
+    parser.add_argument(
+        "-output_path",
+        default="./output/stgwr_results.csv",
+        type=str,
+        help="Path to output file. Make sure the parent " "directory is empty- any existing files will " "be deleted.",
+    )
     parser.add_argument("-custom_lig_path", type=str)
     parser.add_argument("-custom_rec_path", type=str)
     parser.add_argument(
@@ -115,6 +120,7 @@ if __name__ == "__main__":
 
     test_model = STGWR(comm, parser)
     test_model.fit()
+    test_model.predict_and_save()
 
     t_last = MPI.Wtime()
 
@@ -122,8 +128,8 @@ if __name__ == "__main__":
     if rank == 0:
         print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
         print("-" * 60)
-    #test_model_2 = GWRGRN(Comm_obj, parser)
-    #print(test_model_2.distr)
+    # test_model_2 = GWRGRN(Comm_obj, parser)
+    # print(test_model_2.distr)
 
     """
     print(test_model.adata[:, "SDC1"].X)

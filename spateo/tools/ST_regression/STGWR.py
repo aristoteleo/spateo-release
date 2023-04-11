@@ -28,7 +28,7 @@ from spateo.preprocessing.normalize import normalize_total
 from spateo.preprocessing.transform import log1p
 from spateo.tools.find_neighbors import get_wi, transcriptomic_connectivity
 from spateo.tools.spatial_degs import moran_i
-from spateo.tools.ST_regression.distributions import NegativeBinomial, Poisson
+from spateo.tools.ST_regression.distributions import Gaussian, NegativeBinomial, Poisson
 from spateo.tools.ST_regression.regression_utils import (
     compute_betas_local,
     iwls,
@@ -185,9 +185,8 @@ class STGWR:
                     custom_data = pd.read_csv(self.csv_path, index_col=0)
                     self.coords = custom_data.iloc[:, :2].values
                     self.target = pd.DataFrame(
-                        custom_data.iloc[:, 2],
-                        index=custom_data.index,
-                        columns=[custom_data.columns[2]])
+                        custom_data.iloc[:, 2], index=custom_data.index, columns=[custom_data.columns[2]]
+                    )
                     self.logger.info(f"Extracting target from column labeled '{custom_data.columns[2]}'.")
                     independent_variables = custom_data.iloc[:, 3:]
                     self.X = independent_variables.values
@@ -242,6 +241,12 @@ class STGWR:
         self.custom_pathways_path = self.arg_retrieve.custom_pathways_path
         self.targets_path = self.arg_retrieve.targets_path
         self.init_betas_path = self.arg_retrieve.init_betas_path
+        # Check if path to init betas is given:
+        if self.init_betas_path is not None:
+            self.logger.info(f"Loading initial betas from: {self.init_betas_path}")
+            self.init_betas = np.load(self.init_betas_path)
+        else:
+            self.init_betas = None
 
         self.normalize = self.arg_retrieve.normalize
         self.smooth = self.arg_retrieve.smooth
@@ -255,6 +260,16 @@ class STGWR:
         self.bw_fixed = self.arg_retrieve.bw_fixed
         self.exclude_self = self.arg_retrieve.exclude_self
         self.distr = self.arg_retrieve.distr
+        # Get appropriate distribution family based on specified:
+        if self.distr == "gaussian":
+            link = Gaussian.__init__.__defaults__[0]
+            self.distr_obj = Gaussian(link)
+        elif self.distr == "poisson":
+            link = Poisson.__init__.__defaults__[0]
+            self.distr_obj = Poisson(link)
+        elif self.distr == "nb":
+            link = NegativeBinomial.__init__.__defaults__[0]
+            self.distr_obj = NegativeBinomial(link)
         self.kernel = self.arg_retrieve.kernel
 
         if not self.bw_fixed and self.kernel not in ["bisquare", "uniform"]:
@@ -310,7 +325,11 @@ class STGWR:
                     self.logger.info(f"Using list of custom receptors from: {self.custom_receptors_path}")
                 if self.targets_path is not None:
                     self.logger.info(f"Using list of target genes from: {self.targets_path}")
-                self.logger.info(f"Saving results to: {self.output_path}")
+                self.logger.info(
+                    f"Saving results to: {self.output_path}. Note that running `fit` or "
+                    f"`predict_and_save` will clear the contents of this folder- copy any essential "
+                    f"files beforehand."
+                )
 
     def load_and_process(self):
         """
@@ -323,11 +342,6 @@ class STGWR:
         self.n_samples = self.adata.n_obs
         # Placeholder- this will change at time of fitting:
         self.n_features = self.adata.n_vars
-
-        # Check if path to init betas is given:
-        if self.init_betas_path is not None:
-            self.logger.info(f"Loading initial betas from: {self.init_betas_path}")
-            self.init_betas = np.load(self.init_betas_path)
 
         if self.distr in ["poisson", "nb"]:
             if self.normalize or self.smooth or self.log_transform:
@@ -990,6 +1004,10 @@ class STGWR:
                 - eig: Squared canonical correlation coefficients b/w the predicted values and the response variable,
                     aka the eigenvalues
         """
+        # Reshape y if necessary:
+        if self.n_features > 1:
+            y = y.reshape(-1, 1)
+
         wi = get_wi(
             i, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
         ).reshape(-1, 1)
@@ -1018,6 +1036,8 @@ class STGWR:
                 tau=None,
             )
 
+            # Reshape coefficients if necessary:
+            betas = betas.flatten()
             pred_y = y_hat[i]
             diagnostic = pred_y
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
@@ -1219,6 +1239,9 @@ class STGWR:
                     deviance = distr.deviance(y, all_fit_outputs[:, 1])
                     # Residual deviance:
                     residual_deviance = distr.deviance_residuals(y, all_fit_outputs[:, 1])
+                    # Reshape if necessary:
+                    if self.n_features > 1:
+                        residual_deviance = residual_deviance.reshape(-1, 1)
                     # ENP:
                     ENP = np.sum(all_fit_outputs[:, 2])
                     # Corrected Akaike Information Criterion:
@@ -1397,14 +1420,16 @@ class STGWR:
             coeffs = self.return_outputs()
             # If dictionary, compute outputs for the multiple dependent variables and concatenate together:
             if isinstance(coeffs, Dict):
-                all_y_pred = pd.DataFrame(index=self.adata.obs_names, columns=coeffs.keys())
+                all_y_pred = pd.DataFrame(index=self.sample_names, columns=coeffs.keys())
                 for target in coeffs:
                     y_pred = np.sum(input * coeffs[target], axis=1)
+                    if self.distr != "gaussian":
+                        y_pred = self.distr_obj.predict(y_pred)
                     all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
                 return all_y_pred
 
             else:
-                y_pred = pd.DataFrame(np.sum(input * coeffs, axis=1), index=self.adata.obs_names, columns=["y_pred"])
+                y_pred = pd.DataFrame(np.sum(input * coeffs, axis=1), index=self.sample_names, columns=["y_pred"])
                 return y_pred
 
     # ---------------------------------------------------------------------------------------------------
@@ -1476,6 +1501,15 @@ class STGWR:
             if not os.path.exists("./output"):
                 os.makedirs("./output")
 
+        # If output path already has files in it, clear them:
+        output_dir = os.path.dirname(self.output_path)
+        if os.listdir(output_dir):
+            # If there are files, delete them
+            for file_name in os.listdir(output_dir):
+                file_path = os.path.join(output_dir, file_name)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+
         if label is not None:
             path = os.path.splitext(self.output_path)[0] + f"_{label}" + os.path.splitext(self.output_path)[1]
         else:
@@ -1505,23 +1539,18 @@ class STGWR:
         """Return final coefficients for all fitted models."""
         parent_dir = os.path.dirname(self.output_path)
         all_coeffs = {}
-        for file in os.listdir(parent_dir):
+        file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
+        for file in file_list:
             all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
             betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
             betas.index = self.sample_names
 
             # If there were multiple dependent variables, save coefficients to dictionary:
-            if file != os.path.basename(self.output_path):
-                all_coeffs[file.split("_")[-1]] = betas
+            if len(file_list) > 1:
+                all_coeffs[file.split("_")[-1][:-4]] = betas
             else:
                 all_coeffs = betas
-            """
-            # If the final portion of the path is not equal to that of the original output path, it means there were
-            # multiple dependent variables- add the additional label of each to the column names:
-            if file != os.path.basename(self.output_path):
-                betas.columns = [col + "_" + file.split("_")[-1] for col in betas.columns]
 
-            all_coeffs = pd.concat([all_coeffs, betas], axis=1)"""
         return all_coeffs
 
     def return_intercepts(self) -> Union[None, np.ndarray, Dict[str, np.ndarray]]:

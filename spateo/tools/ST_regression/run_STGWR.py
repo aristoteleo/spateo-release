@@ -50,7 +50,11 @@ def main():
 @click.option("grn", default=False, is_flag=True)
 @click.option("cci_dir", required=True)
 @click.option("species", default="human")
-@click.option("output_path", default="./output/stgwr_results.csv")
+@click.option(
+    "output_path",
+    default="./output/stgwr_results.csv",
+    help="Path to output file. Make sure the parent " "directory is empty- any existing files will " "be deleted.",
+)
 @click.option("custom_lig_path", required=False)
 @click.option("custom_rec_path", required=False)
 @click.option(

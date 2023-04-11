@@ -168,7 +168,7 @@ class Kernel(object):
             return (3.0 / 4) * (1 - x**2)
         # elif self.function == "bisquare":
         #     return (15.0 / 16) * (1 - x**2) ** 2
-        elif self.function == 'bisquare':
+        elif self.function == "bisquare":
             return (1 - (x) ** 2) ** 2
         elif self.function == "gaussian":
             return np.exp(-0.5 * (x) ** 2)
