@@ -287,6 +287,7 @@ class STGWR:
         self.max_iter = self.arg_retrieve.max_iter
         self.patience = self.arg_retrieve.patience
         self.alpha = self.arg_retrieve.alpha
+        self.multiscale_chunks = self.arg_retrieve.chunks
 
         if self.arg_retrieve.bw:
             if self.bw_fixed:
@@ -1004,8 +1005,8 @@ class STGWR:
                     regression, this is the squared residual, for non-Gaussian generalized linear regression,
                     this is the fitted response variable value. One of the returns if :param `final` is False
                 - betas: Estimated coefficients for sample i- if :param `multiscale` is True, betas is the only return
-                - eig: Squared canonical correlation coefficients b/w the predicted values and the response variable,
-                    aka the eigenvalues
+                - ssv: Squared canonical correlation coefficients b/w the predicted values and the response variable,
+                    aka the squared singular values that describe the variance explained by each independent feature.
         """
         # Reshape y if necessary:
         if self.n_features > 1:
@@ -1049,13 +1050,13 @@ class STGWR:
         else:
             self.logger.error("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
 
-        # Squared canonical correlation:
-        eig = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
+        # Squared canonical correlation coefficients:
+        ssv = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
 
         if final:
             if multiscale:
                 return betas
-            return np.concatenate(([i, diagnostic, hat_i], betas, eig))
+            return np.concatenate(([i, diagnostic, hat_i], betas, ssv))
         else:
             # For bandwidth optimization:
             if self.distr == "gaussian":
@@ -1097,12 +1098,14 @@ class STGWR:
             if new_lb in results_dict:
                 lb_score = results_dict[new_lb]
             else:
+                # Return score metric (e.g. AICc) for the lower bound bandwidth:
                 lb_score = function(new_lb)
                 results_dict[new_lb] = lb_score
 
             if new_ub in results_dict:
                 ub_score = results_dict[new_ub]
             else:
+                # Return score metric (e.g. AICc) for the upper bound bandwidth:
                 ub_score = function(new_ub)
                 results_dict[new_ub] = ub_score
 
@@ -1340,7 +1343,7 @@ class STGWR:
         y: Optional[pd.DataFrame] = None,
         X: Optional[pd.DataFrame] = None,
         multiscale: bool = False,
-    ):
+    ) -> Tuple[Union[None, Dict[str, np.ndarray]], Dict[str, float]]:
         """For each column of the dependent variable array, fit model. If given bandwidth, run :func
         `STGWR.mpi_fit()` with the given bandwidth. Otherwise, compute optimal bandwidth using :func
         `STGWR.select_optimal_bw()`, minimizing AICc.
@@ -1359,7 +1362,7 @@ class STGWR:
                 n_samples, n_features] representing the coefficients for each sample (if :param `multiscale` is False,
                 these arrays will instead be saved to file).
             all_bws: Dictionary containing outputs in the case that bandwidth is not already known, resulting from
-                the conclusion of the optimization process. Will also be None if :param `multiscale` is True.
+                the conclusion of the optimization process.
         """
 
         if not self.set_up:
@@ -1373,7 +1376,8 @@ class STGWR:
         self.y_arr = y_arr
 
         # Compute fit for each column of the dependent variable array individually- store each output array (if
-        # applicable) and optimal bandwidth (also if applicable):
+        # applicable, i.e. if :param `multiscale` is True) and optimal bandwidth (also if applicable, i.e. if :param
+        # `multiscale` is True):
         all_data, all_bws = {}, {}
 
         for target in self.y_arr.columns:
@@ -1395,6 +1399,8 @@ class STGWR:
             self.minbw = self.comm.bcast(self.minbw, root=0)
             self.maxbw = self.comm.bcast(self.maxbw, root=0)
 
+            # Searching for optimal bandwidth- set final=False to return AICc for each run of the optimization
+            # function:
             if X is None:
                 fit_function = lambda bw: self.mpi_fit(y, self.X, bw, final=False, multiscale=multiscale)
             else:
@@ -1406,8 +1412,7 @@ class STGWR:
             data = self.mpi_fit(y, X, optimal_bw, final=True, multiscale=multiscale, y_label=target)
             if data is not None:
                 all_data[target] = data
-            if optimal_bw is not None:
-                all_bws[target] = optimal_bw
+            all_bws[target] = optimal_bw
 
         return all_data, all_bws
 
@@ -1437,7 +1442,12 @@ class STGWR:
                 return all_y_pred
 
             else:
-                y_pred = pd.DataFrame(np.sum(input * coeffs, axis=1), index=self.sample_names, columns=["y_pred"])
+                if self.distr == "gaussian":
+                    y_pred_all = input * coeffs
+                else:
+                    y_pred_all_nontransformed = input * coeffs
+                    y_pred_all = self.distr_obj.predict(y_pred_all_nontransformed)
+                y_pred = pd.DataFrame(np.sum(y_pred_all, axis=1), index=self.sample_names, columns=["y_pred"])
                 return y_pred
 
     # ---------------------------------------------------------------------------------------------------
@@ -1672,13 +1682,18 @@ class MuSIC(STGWR):
     def backfitting(self):
         """
         Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths by iterating one
-        predictor while holding all others constant.
+        predictor while holding all others constant. Run before :func `fit` to obtain initial covariate-specific
+        bandwidths.
+
+        Reference: Fotheringham et al. 2017. Annals of AAG.
         """
         if self.comm.rank == 0:
             self.logger.info("MGWR Backfitting...")
 
-        # Initialize parameters:
+        # Initialize parameters, with a uniform initial bandwidth for all features:
         all_betas, all_bws = self.fit(multiscale=True)
+
+        self.all_bws_init = all_bws
 
         if self.comm.rank == 0:
             self.logger.info("Initialization complete.")
@@ -1687,7 +1702,7 @@ class MuSIC(STGWR):
         self.params_all_targets = {}
         for target in self.y_arr.columns:
             y = self.y_arr[target].values
-            y_label = target + "_multiscale"
+            y_label = target + "_multiscale_backfitting"
 
             # Initial values- multiply input by the array corresponding to the correct target:
             linear_predictors = self.X * all_betas[target]
@@ -1792,5 +1807,30 @@ class MuSIC(STGWR):
                 output = np.hstack([self.sample_names, error.reshape(-1, 1), self.params_all_targets[target]])
                 self.save_results(header, output, label=y_label)
 
+    def chunk_compute_hat(self, chunk_id: int = 0, target_label: Optional[str] = None):
+        """Compute multiscale inference by chunks to reduce memory footprint.
+        Reference: Li and Fotheringham, 2020. IJGIS and Yu et al., 2019. GA.
 
-# ADD CHUNKING FUNCTION
+        Args:
+            chunk_id: Numerical index of the partition to be computed
+            target_label: Name of the target variable to compute. Must be one of the keys of the :attr `all_bws_init`
+                dictionary.
+
+        Returns:
+            all_ENP: Effective number of parameters for each independent variable
+            ssv: Squared canonical correlation coefficients b/w the predicted values and the response variable,
+                    aka the squared singular values that describe the variance explained by each independent feature.
+        """
+
+    def multiscale_fit(self, n_chunks: int = 2):
+        """Compute multiscale inference and output results.
+
+        Args:
+            n_chunks: Number of partitions comprising each covariate-specific hat matrix.
+        """
+        # Check that initial bandwidths and bandwidth history are present (e.g. that :func `backfitting` has been
+        # called):
+        if not hasattr(self, "init_bandwidth"):
+            self.logger.error(
+                "Initial bandwidths must be computed before calling `multiscale_fit`. Run :func " "`backfitting` first."
+            )

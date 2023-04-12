@@ -285,5 +285,8 @@ def run_STGWR(
     if alpha is not None:
         command += " -alpha " + str(alpha)
 
+    os.system(command)
+    pass
+
 
 # ADD SOME DEFAULT OPTIONS LATER

@@ -113,18 +113,6 @@ if __name__ == "__main__":
         "memory runs out, otherwise keep as low as possible.",
     )
 
-    """
-    # For now, use a dummy class for Comm:
-    class Comm:
-        def __init__(self):
-            self.rank = 0
-            self.size = 1
-
-        def bcast(self, a, root=0):
-            return a
-
-    comm = Comm()"""
-
     t1 = MPI.Wtime()
     # For use only with MuSIC:
     n_multiscale_chunks = parser.parse_args().chunks
