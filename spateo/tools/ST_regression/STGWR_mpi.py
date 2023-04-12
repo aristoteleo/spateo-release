@@ -24,7 +24,7 @@ if __name__ == "__main__":
         "Assumes the first three columns contain x- and y-coordinates and then dependent variable "
         "values, in that order.",
     )
-    parser.add_argument("-mgwr", action="store_true")
+    parser.add_argument("-multiscale", action="store_true")
     # Flag to run a GRN model- if not given, will run STGWR CCI model, taking inputs such as mod_type and cci_dir
     # into consideration.
     parser.add_argument("-grn", action="store_true", help="If this argument is provided, 'mod_type' will not be used.")
@@ -102,7 +102,16 @@ if __name__ == "__main__":
     parser.add_argument("-fit_intercept", action="store_true")
     parser.add_argument("-tolerance", default=1e-5, type=float)
     parser.add_argument("-max_iter", default=500, type=int)
+    parser.add_argument("-patience", default=5, type=int)
     parser.add_argument("-alpha", type=float)
+
+    parser.add_argument(
+        "-chunks",
+        default=1,
+        type=int,
+        help="For use if `multiscale` is True- increase the number of"
+        "memory runs out, otherwise keep as low as possible.",
+    )
 
     """
     # For now, use a dummy class for Comm:
@@ -117,10 +126,19 @@ if __name__ == "__main__":
     comm = Comm()"""
 
     t1 = MPI.Wtime()
+    # For use only with MuSIC:
+    n_multiscale_chunks = parser.parse_args().chunks
 
-    test_model = STGWR(comm, parser)
-    test_model.fit()
-    test_model.predict_and_save()
+    if parser.parse_args().multiscale:
+        print(
+            "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
+            "case, it is advisable to reduce the number of parameters."
+        )
+
+    else:
+        test_model = STGWR(comm, parser)
+        test_model.fit()
+        test_model.predict_and_save()
 
     t_last = MPI.Wtime()
 
@@ -166,7 +184,7 @@ if __name__ == "__main__":
     start = MPI.Wtime()
 
     # Check to see if multiscale model is specified:
-    if parser.parse_args().mgwr:
+    if parser.parse_args().multiscale:
         # SPACE FOR LATER
         "filler"
     else:

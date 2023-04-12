@@ -7,6 +7,7 @@ import math
 import os
 import re
 import sys
+from copy import deepcopy
 from functools import partial
 from itertools import product
 from multiprocessing import Pool
@@ -284,6 +285,7 @@ class STGWR:
         # Parameters related to the fitting process (tolerance, number of iterations, etc.)
         self.tolerance = self.arg_retrieve.tolerance
         self.max_iter = self.arg_retrieve.max_iter
+        self.patience = self.arg_retrieve.patience
         self.alpha = self.arg_retrieve.alpha
 
         if self.arg_retrieve.bw:
@@ -973,7 +975,7 @@ class STGWR:
             self.signaling_types = self.comm.bcast(self.signaling_types, root=0)
 
     def local_fit(
-        self, i: int, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False, mgwr: bool = False
+        self, i: int, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False, multiscale: bool = False
     ) -> Union[np.ndarray, List[float]]:
         """Fit a local regression model for each sample.
 
@@ -984,7 +986,8 @@ class STGWR:
             bw: Bandwidth for the spatial kernel
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
-            mgwr: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary over
+            multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
+            over
                 different spatial scales
 
         Returns:
@@ -1000,7 +1003,7 @@ class STGWR:
                 - bw_diagnostic: Output to be used for diagnostic purposes during bandwidth selection- for Gaussian
                     regression, this is the squared residual, for non-Gaussian generalized linear regression,
                     this is the fitted response variable value. One of the returns if :param `final` is False
-                - betas: Estimated coefficients for sample i- if :param `mgwr` is True, betas is the only return
+                - betas: Estimated coefficients for sample i- if :param `multiscale` is True, betas is the only return
                 - eig: Squared canonical correlation coefficients b/w the predicted values and the response variable,
                     aka the eigenvalues
         """
@@ -1050,7 +1053,7 @@ class STGWR:
         eig = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
 
         if final:
-            if mgwr:
+            if multiscale:
                 return betas
             return np.concatenate(([i, diagnostic, hat_i], betas, eig))
         else:
@@ -1140,13 +1143,13 @@ class STGWR:
 
     def mpi_fit(
         self,
-        y: np.ndarray,
-        X: np.ndarray,
+        y: Optional[np.ndarray],
+        X: Optional[np.ndarray],
         bw: Union[float, int],
         final: bool = False,
-        mgwr: bool = False,
+        multiscale: bool = False,
         y_label: Optional[str] = None,
-    ):
+    ) -> Union[None, np.ndarray]:
         """Fit local regression model for each sample in parallel, given a specified bandwidth.
 
         Args:
@@ -1156,7 +1159,8 @@ class STGWR:
             bw: Bandwidth for the spatial kernel
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
-            mgwr: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary over
+            multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
+            over
                 different spatial scales
             y_label: Optional, can be used to provide a unique ID for the dependent variable for saving purposes
         """
@@ -1176,7 +1180,7 @@ class STGWR:
             self.n_features = self.comm.bcast(self.n_features, root=0)
 
         if final:
-            if mgwr:
+            if multiscale:
                 local_fit_outputs = np.empty((self.x_chunk.shape[0], self.n_features), dtype=np.float64)
             else:
                 local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * self.n_features + 3), dtype=np.float64)
@@ -1184,20 +1188,23 @@ class STGWR:
             # Fitting for each location:
             pos = 0
             for i in self.x_chunk:
-                local_fit_outputs[pos] = self.local_fit(i, y, X, bw, final=final, mgwr=mgwr)
+                local_fit_outputs[pos] = self.local_fit(i, y, X, bw, final=final, multiscale=multiscale)
                 pos += 1
 
             # Gather data to the central process such that an array is formed where each sample has its own
             # measurements:
             all_fit_outputs = self.comm.gather(local_fit_outputs, root=0)
+            # For non-MGWR:
             # Column 0: Index of the sample
             # Column 1: Diagnostic (residual for Gaussian, fitted response value for Poisson/NB)
             # Column 2: Contribution of each sample to its own value
-            # Column 3: Estimated coefficients
-            # Column 4: Canonical correlations
+            # Columns 3-n_feats+3: Estimated coefficients
+            # Columns n_feats+3-end: Canonical correlations
+            # All columns are betas for MGWR
 
-            # If mgwr, do not need to fit using fixed bandwidth:
-            if mgwr:
+            # If multiscale, do not need to fit using fixed bandwidth:
+            if multiscale:
+                # For MGWR, this function is only needed to initialize parameters:
                 all_fit_outputs = self.comm.bcast(all_fit_outputs, root=0)
                 all_fit_outputs = np.vstack(all_fit_outputs)
                 return all_fit_outputs
@@ -1292,7 +1299,7 @@ class STGWR:
                 RSS = np.sum(RSS_list)
                 trace_hat = np.sum(trace_hat_list)
                 aicc = self.compute_aicc_linear(RSS, trace_hat)
-                if not mgwr:
+                if not multiscale:
                     self.logger.info(f"Bandwidth: {bw}, Linear AICc: {aicc}")
                 return aicc
 
@@ -1322,7 +1329,7 @@ class STGWR:
                 deviance_residuals = distr.deviance_residuals(y, all_y_pred)
                 trace_hat = np.sum(trace_hat_list)
                 aicc = self.compute_aicc_glm(deviance_residuals, trace_hat)
-                if not mgwr:
+                if not multiscale:
                     self.logger.info(f"Bandwidth: {bw}, GLM AICc: {aicc}")
                 return aicc
 
@@ -1332,7 +1339,7 @@ class STGWR:
         self,
         y: Optional[pd.DataFrame] = None,
         X: Optional[pd.DataFrame] = None,
-        mgwr: bool = False,
+        multiscale: bool = False,
     ):
         """For each column of the dependent variable array, fit model. If given bandwidth, run :func
         `STGWR.mpi_fit()` with the given bandwidth. Otherwise, compute optimal bandwidth using :func
@@ -1344,15 +1351,15 @@ class STGWR:
                 individual column will serve as an independent variable).
             X: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
                 None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
-            mgwr: Set True to indicate that a multiscale model should be fitted
+            multiscale: Set True to indicate that a multiscale model should be fitted
 
         Returns:
             all_data: Dictionary containing outputs of :func `STGWR.mpi_fit()` with the chosen or determined bandwidth-
-                note that this will either be None or in the case that :param `mgwr` is True, an array of shape [
-                n_samples, n_features] representing the coefficients for each sample (if :param `mgwr` is False,
+                note that this will either be None or in the case that :param `multiscale` is True, an array of shape [
+                n_samples, n_features] representing the coefficients for each sample (if :param `multiscale` is False,
                 these arrays will instead be saved to file).
             all_bws: Dictionary containing outputs in the case that bandwidth is not already known, resulting from
-                the conclusion of the optimization process. Will also be None if :param `mgwr` is True.
+                the conclusion of the optimization process. Will also be None if :param `multiscale` is True.
         """
 
         if not self.set_up:
@@ -1363,13 +1370,14 @@ class STGWR:
             y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
         else:
             y_arr = y
+        self.y_arr = y_arr
 
         # Compute fit for each column of the dependent variable array individually- store each output array (if
         # applicable) and optimal bandwidth (also if applicable):
         all_data, all_bws = {}, {}
 
-        for target in y_arr.columns:
-            y = y_arr[target].values
+        for target in self.y_arr.columns:
+            y = self.y_arr[target].values
             y = self.comm.bcast(y, root=0)
 
             if self.bw is not None:
@@ -1382,20 +1390,20 @@ class STGWR:
 
             if self.comm.rank == 0:
                 self._set_search_range()
-                if not mgwr:
+                if not multiscale:
                     self.logger.info(f"Calculated bandwidth range over which to search: {self.minbw}-{self.maxbw}.")
             self.minbw = self.comm.bcast(self.minbw, root=0)
             self.maxbw = self.comm.bcast(self.maxbw, root=0)
 
             if X is None:
-                fit_function = lambda bw: self.mpi_fit(y, self.X, bw, final=False, mgwr=mgwr)
+                fit_function = lambda bw: self.mpi_fit(y, self.X, bw, final=False, multiscale=multiscale)
             else:
-                fit_function = lambda bw: self.mpi_fit(y, X.values, bw, final=False, mgwr=mgwr)
+                fit_function = lambda bw: self.mpi_fit(y, X.values, bw, final=False, multiscale=multiscale)
             optimal_bw = self.find_optimal_bw(self.minbw, self.maxbw, fit_function)
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)
 
-            data = self.mpi_fit(y, X, optimal_bw, final=True, mgwr=mgwr, y_label=target)
+            data = self.mpi_fit(y, X, optimal_bw, final=True, multiscale=multiscale, y_label=target)
             if data is not None:
                 all_data[target] = data
             if optimal_bw is not None:
@@ -1457,8 +1465,8 @@ class STGWR:
 
     def output_diagnostics(
         self,
-        aicc: float,
-        ENP: float,
+        aicc: Optional[float] = None,
+        ENP: Optional[float] = None,
         r_squared: Optional[float] = None,
         deviance: Optional[float] = None,
         y_label: Optional[str] = None,
@@ -1468,8 +1476,12 @@ class STGWR:
         if y_label is None:
             y_label = self.distr
 
-        self.logger.info(f"Corrected Akaike information criterion for {y_label} model: {aicc}")
-        self.logger.info(f"Effective number of parameters for {y_label} model: {ENP}")
+        if aicc is not None:
+            self.logger.info(f"Corrected Akaike information criterion for {y_label} model: {aicc}")
+
+        if ENP is not None:
+            self.logger.info(f"Effective number of parameters for {y_label} model: {ENP}")
+
         # Print R-squared for Gaussian assumption:
         if self.distr == "gaussian":
             if r_squared is None:
@@ -1574,8 +1586,8 @@ class STGWR:
         return all_intercepts
 
 
-# MGWR:
-class STMGWR(STGWR):
+# Multiscale Spatially-weighted Inference of Cell-cell communication:
+class MuSIC(STGWR):
     """Modified version of the spatially weighted regression on spatial omics data with parallel processing,
     enabling each feature to have its own distinct spatial scale parameter. Runs after being called from the command
     line.
@@ -1659,10 +1671,126 @@ class STMGWR(STGWR):
 
     def backfitting(self):
         """
-        Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths.
+        Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths by iterating one
+        predictor while holding all others constant.
         """
         if self.comm.rank == 0:
             self.logger.info("MGWR Backfitting...")
 
         # Initialize parameters:
-        betas, bw = self.fit(mgwr=True)
+        all_betas, all_bws = self.fit(multiscale=True)
+
+        if self.comm.rank == 0:
+            self.logger.info("Initialization complete.")
+
+        self.all_bws_history = {}
+        self.params_all_targets = {}
+        for target in self.y_arr.columns:
+            y = self.y_arr[target].values
+            y_label = target + "_multiscale"
+
+            # Initial values- multiply input by the array corresponding to the correct target:
+            linear_predictors = self.X * all_betas[target]
+            # Array of shape [n_samples, n_features] containing initial spatially-weighted regression predictions:
+            if self.distr != "gaussian":
+                y_pred_init = self.distr_obj.predict(linear_predictors)
+            else:
+                y_pred_init = linear_predictors
+            all_pred_y = y_pred_init.sum(axis=1)
+
+            error = y.reshape(-1) - all_pred_y
+            bws = [None] * self.n_features
+            bw_plateau_counter = 0
+            bw_history = []
+
+            n_iters = max(200, self.max_iter)
+            for iter in range(1, n_iters + 1):
+                new_ys = np.empty(linear_predictors.shape, dtype=np.float64)
+                new_betas = np.empty(linear_predictors.shape, dtype=np.float64)
+
+                for n_feat in range(self.n_features):
+                    # Use each individual feature to predict the response:
+                    temp_y = (y_pred_init[:, n_feat] - error).reshape(-1, 1)
+                    temp_X = (self.X[:, n_feat]).reshape(-1, 1)
+
+                    # Check if the bandwidth has plateaued for all features in this iteration:
+                    if bw_plateau_counter > self.patience:
+                        # Use the bandwidths from the previous iteration before plateau was determined to have been
+                        # reached:
+                        bw = bws[n_feat]
+                        betas = self.mpi_fit(temp_y, temp_X, bw, final=True, multiscale=True)
+                    else:
+                        betas, bw = self.fit(temp_y, temp_X, multiscale=True)
+
+                    # Update the linear predictor and betas:
+                    new_v = (temp_X * betas).reshape(-1)
+                    if self.distr != "gaussian":
+                        new_y = self.distr_obj.predict(new_v)
+                    else:
+                        new_y = new_v
+                    error = temp_y.reshape(-1) - new_y
+                    new_ys[:, n_feat] = new_y
+                    new_betas[:, n_feat] = betas.reshape(-1)
+                    bws[n_feat] = bw
+
+                # Check if ALL bandwidths remain the same between iterations:
+                if (iter > 1) and np.all(bw_history[-1] == bws):
+                    bw_plateau_counter += 1
+                else:
+                    bw_plateau_counter = 0
+
+                # Compute normalized sum-of-squared-errors-of-prediction using the updated predicted values:
+                bw_history.append(deepcopy(bws))
+                numerator = np.sum((new_ys - y_pred_init) ** 2) / self.n_samples
+                denominator = np.sum(np.sum(new_ys, axis=1) ** 2)
+                score = (numerator / denominator) ** 0.5
+                # Use the new predicted values as the initial values for the next iteration:
+                y_pred_init = new_ys
+
+                if self.comm.rank == 0:
+                    self.logger.info(f"Target: {target}, Iteration: {iter}, Score: {score}")
+                    self.logger.info(f"Bandwidths: {bws}")
+
+                if score < self.tolerance:
+                    self.logger.info(f"For target {target}, multiscale optimization converged after {iter} iterations.")
+                    break
+
+            self.all_bws_history[target] = bw_history
+            # Compute diagnostics for current target using the final errors:
+            if self.distr == "gaussian":
+                RSS = np.sum(error**2)
+                # Total sum of squares:
+                TSS = np.sum((y - np.mean(y)) ** 2)
+                self.r_squared = 1 - RSS / TSS
+
+                # For saving outputs:
+                header = "name,residual,"
+            else:
+                r_squared = None
+
+            if self.distr == "poisson" or self.distr == "nb":
+                # Deviance:
+                deviance = self.distr_obj.deviance(y, error)
+
+                # For saving outputs:
+                header = "name,deviance,"
+            else:
+                deviance = None
+            self.params_all_targets[target] = new_betas
+
+            # Save results without standard errors or influence measures:
+            if self.comm.rank == 0:
+                varNames = self.feature_names
+                if self.fit_intercept:
+                    varNames = ["intercept"] + list(varNames)
+                # Save parameter estimates:
+                for x in varNames:
+                    header += "b_" + x + ","
+
+                # Return output diagnostics and save result:
+                self.output_diagnostics(None, None, r_squared, deviance)
+                output = np.hstack([self.sample_names, error.reshape(-1, 1), self.params_all_targets[target]])
+                self.save_results(header, output, label=y_label)
+
+
+# ADD CHUNKING FUNCTION

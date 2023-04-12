@@ -41,7 +41,7 @@ def main():
     "Assumes the first three columns contain x- and y-coordinates and then dependent variable "
     "values, in that order.",
 )
-@click.option("mgwr", default=False, is_flag=True)
+@click.option("multiscale", default=False, is_flag=True)
 @click.option(
     "mod_type",
     default="niche",
@@ -111,6 +111,12 @@ def main():
 @click.option("fit_intercept", default=False, is_flag=True)
 @click.option("tolerance", default=1e-5)
 @click.option("max_iter", default=1000)
+@click.option(
+    "patience",
+    default=5,
+    help="Number of iterations to wait before stopping if parameters have "
+    "stabilized. Only used if `multiscale` is True.",
+)
 @click.option("alpha", required=False)
 def run_STGWR(
     np,
@@ -118,7 +124,7 @@ def run_STGWR(
     coords_key,
     group_key,
     csv_path,
-    mgwr,
+    multiscale,
     mod_type,
     grn,
     cci_dir,
@@ -144,7 +150,9 @@ def run_STGWR(
     fit_intercept,
     tolerance,
     max_iter,
+    patience,
     alpha,
+    chunks,
 ):
     """Command line shortcut to run any STGWR models.
 
@@ -157,7 +165,7 @@ def run_STGWR(
         csv_path: Can be used to provide a .csv file, containing gene expression data or any other kind of data.
             Assumes the first three columns contain x- and y-coordinates and then dependent variable values,
             in that order.
-        mgwr: If True, the MGWR model will be used
+        multiscale: If True, the MGWR model will be used
         mod_type: If adata_path is provided, one of the STGWR models will be used. Options: 'niche', 'lr', 'slice'.
         grn: If True, the GRN model will be used
         cci_dir: Path to directory containing CCI files
@@ -189,7 +197,12 @@ def run_STGWR(
         fit_intercept: If True, will include intercept in model
         tolerance: Tolerance for convergence of model
         max_iter: Maximum number of iterations for model
+        patience: Number of iterations to wait before stopping if parameters have stabilized. Only used if
+            `multiscale` is True.
         alpha: Alpha value to use for MGWR model
+        chunks: Number of chunks for multiscale computation (default: 1). Increase the number if run out of memory
+            but should keep it as low as possible.
+        params_only:
     """
 
     mpi_path = os.path.dirname(fast_stgwr.__file__) + "/STGWR_mpi.py"
@@ -220,6 +233,8 @@ def run_STGWR(
         + str(tolerance)
         + " -max_iter "
         + str(max_iter)
+        + " -patience "
+        + str(patience)
     )
 
     if adata_path is not None:
@@ -227,8 +242,8 @@ def run_STGWR(
     elif csv_path is not None:
         command += " -csv_path " + csv_path
 
-    if mgwr:
-        command += " -mgwr "
+    if multiscale:
+        command += " -multiscale "
     if grn:
         command += " -grn "
     if cci_dir is not None:
@@ -265,6 +280,8 @@ def run_STGWR(
         command += " -exclude_self "
     if fit_intercept:
         command += " -fit_intercept "
+    if chunks is not None:
+        command += " -chunks " + str(chunks)
     if alpha is not None:
         command += " -alpha " + str(alpha)
 
