@@ -33,6 +33,7 @@ from spateo.tools.ST_regression.distributions import Gaussian, NegativeBinomial,
 from spateo.tools.ST_regression.regression_utils import (
     compute_betas_local,
     iwls,
+    multicollinearity_check,
     smooth,
 )
 
@@ -253,11 +254,13 @@ class STGWR:
         self.smooth = self.arg_retrieve.smooth
         self.log_transform = self.arg_retrieve.log_transform
         self.target_expr_threshold = self.arg_retrieve.target_expr_threshold
+        self.multicollinear_threshold = self.arg_retrieve.multicollinear_threshold
 
         self.coords_key = self.arg_retrieve.coords_key
         self.group_key = self.arg_retrieve.group_key
         self.covariate_keys = self.arg_retrieve.covariate_keys
 
+        self.multiscale_flag = self.arg_retrieve.multiscale
         self.bw_fixed = self.arg_retrieve.bw_fixed
         self.exclude_self = self.arg_retrieve.exclude_self
         self.distr = self.arg_retrieve.distr
@@ -413,6 +416,11 @@ class STGWR:
             X = pd.get_dummies(data=db, drop_first=False)
             # Ensure columns are in order:
             self.cell_categories = X.reindex(sorted(X.columns), axis=1)
+            # Ensure each category is one word with no spaces or special characters:
+            self.cell_categories.columns = [
+                re.sub(r"\b([a-zA-Z0-9])", lambda match: match.group(1).upper(), re.sub(r"[^a-zA-Z0-9]+", "", s))
+                for s in self.cell_categories.columns
+            ]
 
         # Ligand-receptor expression array
         if self.mod_type == "lr" or self.mod_type == "slice":
@@ -722,37 +730,44 @@ class STGWR:
         self.all_spatial_weights = self._compute_all_wi(init_bw)
         self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
 
-    def _set_search_range(self):
-        """Set the search range for the bandwidth selection procedure."""
+    def _set_search_range(self, signaling_type: Optional[str] = None):
+        """Set the search range for the bandwidth selection procedure.
+
+        Args:
+            signaling_type: Optional category for the interaction, one of "Cell-Cell Contact", "Diffusive Signaling"
+                (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor"
+        """
+
+        if signaling_type is None:
+            signaling_type = self.signaling_types
 
         # Check whether the signaling types defined are membrane-bound or are composed of soluble molecules:
-        if hasattr(self, "signaling_types"):
-            if self.signaling_types == "Cell-Cell Contact":
-                # Signaling is limited to occurring between only the nearest neighbors of each cell:
-                if self.bw_fixed:
-                    distances = cdist(self.coords, self.coords)
-                    # Set max bandwidth to the average distance to the 20 nearest neighbors:
-                    nearest_idxs_all = np.argpartition(distances, 21, axis=1)[:, 1:21]
+        if signaling_type == "Cell-Cell Contact":
+            # Signaling is limited to occurring between only the nearest neighbors of each cell:
+            if self.bw_fixed:
+                distances = cdist(self.coords, self.coords)
+                # Set max bandwidth to the average distance to the 20 nearest neighbors:
+                nearest_idxs_all = np.argpartition(distances, 21, axis=1)[:, 1:21]
+                nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
+                self.maxbw = np.mean(nearest_distances, axis=1)
+
+                if self.minbw is None:
+                    # Set min bandwidth to the average distance to the 5 nearest neighbors:
+                    nearest_idxs_all = np.argpartition(distances, 6, axis=1)[:, 1:6]
                     nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
-                    self.maxbw = np.mean(nearest_distances, axis=1)
+                    self.minbw = np.mean(nearest_distances, axis=1)
+            else:
+                self.maxbw = 20
 
-                    if self.minbw is None:
-                        # Set min bandwidth to the average distance to the 5 nearest neighbors:
-                        nearest_idxs_all = np.argpartition(distances, 6, axis=1)[:, 1:6]
-                        nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
-                        self.minbw = np.mean(nearest_distances, axis=1)
-                else:
-                    self.maxbw = 20
+                if self.minbw is None:
+                    self.minbw = 5
 
-                    if self.minbw is None:
-                        self.minbw = 5
-
-                if self.minbw >= self.maxbw:
-                    self.logger.error(
-                        "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
-                        "parameter accordingly."
-                    )
-                return
+            if self.minbw >= self.maxbw:
+                self.logger.error(
+                    "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
+                    "parameter accordingly."
+                )
+            return
 
         # If the bandwidth is defined by a fixed spatial distance:
         if self.bw_fixed:
@@ -816,27 +831,21 @@ class STGWR:
         w = scipy.sparse.vstack(weights)
         return w
 
-    def _compute_niche_mat(self) -> Tuple[np.ndarray, List[str]]:
+    def _compute_niche_mat(self) -> np.ndarray:
         """Compute the niche matrix for the dataset."""
         # Compute "presence" of each cell type in the neighborhood of each sample:
         dmat_neighbors = self.all_spatial_weights.dot(self.cell_categories.values)
-
-        # Encode the "niche" or each sample by taking into account each sample's own cell type:
-        data = {"categories": self.cell_categories, "dmat_neighbors": dmat_neighbors}
-        niche_mat = np.asarray(dmatrix("categories:dmat_neighbors-1", data))
-        connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
-        connections_cols.sort(key=lambda x: x[1])
-        return niche_mat, connections_cols
+        return dmat_neighbors
 
     def _adjust_x(self):
         """Adjust the independent variable array based on the defined bandwidth."""
 
         # If applicable, use the cell type category array to encode the niche of each sample:
         if self.mod_type == "niche":
-            self.X, connections_cols = self._compute_niche_mat()
+            self.X = self._compute_niche_mat()
             # If feature names doesn't already exist, create it:
             if not hasattr(self, "feature_names"):
-                self.feature_names = [f"{i[0]}-{i[1]}" for i in connections_cols]
+                self.feature_names = self.cell_categories.columns
 
         # If applicable, use the ligand expression array, the receptor expression array and the spatial weights array
         # to compute the ligand-receptor expression signature of each spatial neighborhood:
@@ -878,31 +887,23 @@ class STGWR:
                 lig, rec = lr_pair[0], lr_pair[1]
                 lig_expr_values = scipy.sparse.csr_matrix(self.ligands_expr[lig].values.reshape(-1, 1))
                 rec_expr_values = scipy.sparse.csr_matrix(self.receptors_expr[rec].values.reshape(-1, 1))
-                # Multiply one-hot category array by the expression of select receptor within that cell:
-                rec_expr = np.multiply(
-                    self.cell_categories, np.tile(rec_expr_values.toarray(), self.cell_categories.shape[1])
-                )
+                # Multiply one-hot category array by the expression of select ligand to get a cell type-specific
+                # ligand expression matrix:
                 lig_expr = np.multiply(
                     self.cell_categories, np.tile(lig_expr_values.toarray(), self.cell_categories.shape[1])
                 )
+                # Tile receptor expression (for elementwise multiplication with the ligand expression matrix):
+                rec_expr = np.tile(rec_expr_values.toarray(), self.cell_categories.shape[1])
 
                 # Multiply adjacency matrix by the cell-specific expression of select ligand:
                 nbhd_lig_expr = self.all_spatial_weights.dot(lig_expr)
-
-                # Construct the category interaction matrix (1D array w/ n_categories ** 2 elements, encodes the
-                # ligand-receptor niches of each sample by documenting the cell type-specific L:R enrichment within
-                # the niche:
-                data = {"category_rec_expr": rec_expr, "neighborhood_lig_expr": nbhd_lig_expr}
-                lr_connections = np.asarray(dmatrix("category_rec_expr:neighborhood_lig_expr-1", data))
-
-                lr_connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
-                lr_connections_cols.sort(key=lambda x: x[1])
-                n_connections_pairs = len(lr_connections_cols)
-                # Swap sending & receiving cell types because we're looking at receptor expression in the "source" cell
-                # and ligand expression in the surrounding cells.
-                lr_connections_cols = [f"{i[1]}-{i[0]}:{lig}-{rec}" for i in lr_connections_cols]
-                niche_mats[f"{lig}-{rec}"] = pd.DataFrame(lr_connections, columns=lr_connections_cols)
-                niche_mats = {key: value for key, value in sorted(niche_mats.items())}
+                # Multiply by receptor expression to get a description of the ligand-receptor presence in each
+                # neighborhood:
+                niche_lr = np.multiply(nbhd_lig_expr, rec_expr)
+                # Indicate which cell type ligand expression comes from:
+                lr_connections_cols = [f"{i}-{lig}:{rec}" for i in self.cell_categories.columns]
+                # Add to dictionary of niche matrices:
+                niche_mats[f"{lig}-{rec}"] = pd.DataFrame(niche_lr, columns=lr_connections_cols)
 
             # Combine the niche matrices for each ligand-receptor pair:
             self.X = pd.concat(niche_mats.values(), axis=1)
@@ -916,13 +917,19 @@ class STGWR:
                 f"Dropped all-zero columns from cell type-specific signaling array, from {n_cols} to "
                 f"{self.X.shape[1]}."
             )
+
+            # If :attr `multicollinear_threshold` is given, drop multicollinear features:
+            if self.multicollinear_threshold is not None:
+                self.X = multicollinearity_check(self.X, self.multicollinear_threshold, logger=self.logger)
+
             self.X = self.X.values
+
             # If list of L:R labels (secreted vs. membrane-bound vs. ECM) doesn't already exist, create it:
             if not hasattr(self, "self.signaling_types"):
-                query = re.compile(r"\w+-\w+:(\w+-\w+)")
                 self.signaling_types = []
                 for col in self.feature_names:
-                    ligrec = re.search(query, col).group(1)
+                    match = re.search(r"(\w+)-(\w+):(\w+)", col)
+                    ligrec = f"{match.group(2)}-{match.group(3)}"
                     result = self.lr_db.loc[
                         (self.lr_db["from"] == ligrec.split("-")[0]) & (self.lr_db["to"] == ligrec.split("-")[1]),
                         "type",
@@ -956,23 +963,27 @@ class STGWR:
         self.n_features = self.comm.bcast(self.n_features, root=0)
         # Broadcast secreted vs. membrane-bound reference:
         if hasattr(self, "self.signaling_types"):
-            # Secreted + ECM-receptor can diffuse across larger distances, but membrane-bound interactions are
-            # limited by non-diffusivity. Therefore, it is not advisable to include a mixture of membrane-bound with
-            # either of the other two categories in the same model.
-            if (
-                "Cell-Cell Contact" in set(self.signaling_types) and "Secreted Signaling" in set(self.signaling_types)
-            ) or ("Cell-Cell Contact" in set(self.signaling_types) and "ECM-Receptor" in set(self.signaling_types)):
-                self.logger.error(
-                    "It is not advisable to include a mixture of membrane-bound with either secreted or ECM-receptor "
-                    "in the same model because the valid distance scales over which they operate is different. If you "
-                    "wish to include both, please run the model twice, once for each category."
-                )
+            # If all features are assumed to operate on the same length scale, there should not be a mix of secreted
+            # and membrane-bound-mediated signaling:
+            if not self.multiscale_flag:
+                # Secreted + ECM-receptor can diffuse across larger distances, but membrane-bound interactions are
+                # limited by non-diffusivity. Therefore, it is not advisable to include a mixture of membrane-bound with
+                # either of the other two categories in the same model.
+                if (
+                    "Cell-Cell Contact" in set(self.signaling_types)
+                    and "Secreted Signaling" in set(self.signaling_types)
+                ) or ("Cell-Cell Contact" in set(self.signaling_types) and "ECM-Receptor" in set(self.signaling_types)):
+                    self.logger.error(
+                        "It is not advisable to include a mixture of membrane-bound with either secreted or "
+                        "ECM-receptor in the same model because the valid distance scales over which they operate "
+                        "is different. If you wish to include both, please run the model twice, once for each category."
+                    )
 
-            self.signaling_types = set(self.signaling_types)
-            if "Secred Signaling" in self.signaling_types or "ECM-Receptor" in self.signaling_types:
-                self.signaling_types = "Diffusive Signaling"
-            else:
-                self.signaling_types = "Cell-Cell Contact"
+                self.signaling_types = set(self.signaling_types)
+                if "Secred Signaling" in self.signaling_types or "ECM-Receptor" in self.signaling_types:
+                    self.signaling_types = "Diffusive Signaling"
+                else:
+                    self.signaling_types = "Cell-Cell Contact"
             self.signaling_types = self.comm.bcast(self.signaling_types, root=0)
 
     def local_fit(
@@ -1173,6 +1184,7 @@ class STGWR:
             if hasattr(self, "adata"):
                 self.all_spatial_weights = self._compute_all_wi(bw)
                 self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
+                self.logger.info(f"Adjusting X for new bandwidth: {bw}")
                 self._adjust_x()
                 self.X = self.comm.bcast(self.X, root=0)
                 X = self.X
@@ -1274,7 +1286,7 @@ class STGWR:
                 for x in varNames:
                     header += "b_" + x + ","
                 for x in varNames:
-                    header += "sq_cc_" + x + ","
+                    header += "ssv_" + x + ","
 
                 # Return output diagnostics and save result- NOTE: PASS DEVIANCE AS WELL:
                 self.output_diagnostics(aicc, ENP, r_squared, deviance)
@@ -1343,7 +1355,8 @@ class STGWR:
         y: Optional[pd.DataFrame] = None,
         X: Optional[pd.DataFrame] = None,
         multiscale: bool = False,
-    ) -> Tuple[Union[None, Dict[str, np.ndarray]], Dict[str, float]]:
+        signaling_type: Optional[str] = None,
+    ) -> Optional[Tuple[Union[None, Dict[str, np.ndarray]], Dict[str, float]]]:
         """For each column of the dependent variable array, fit model. If given bandwidth, run :func
         `STGWR.mpi_fit()` with the given bandwidth. Otherwise, compute optimal bandwidth using :func
         `STGWR.select_optimal_bw()`, minimizing AICc.
@@ -1355,6 +1368,8 @@ class STGWR:
             X: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
                 None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
             multiscale: Set True to indicate that a multiscale model should be fitted
+            signaling_type: Optional category for the interaction, one of "Cell-Cell Contact", "Diffusive Signaling"
+                (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor".
 
         Returns:
             all_data: Dictionary containing outputs of :func `STGWR.mpi_fit()` with the chosen or determined bandwidth-
@@ -1385,6 +1400,7 @@ class STGWR:
             y = self.comm.bcast(y, root=0)
 
             if self.bw is not None:
+                self.logger.info(f"Starting fitting process for target {target}. Initial bandwidth: {self.bw}.")
                 # If bandwidth is already known, run the main fit function:
                 if X is None:
                     self.mpi_fit(y, self.X, self.bw, final=True)
@@ -1393,7 +1409,8 @@ class STGWR:
                 return
 
             if self.comm.rank == 0:
-                self._set_search_range()
+                self.logger.info(f"Starting fitting process for target {target}. First finding optimal bandwidth...")
+                self._set_search_range(signaling_type=signaling_type)
                 if not multiscale:
                     self.logger.info(f"Calculated bandwidth range over which to search: {self.minbw}-{self.maxbw}.")
             self.minbw = self.comm.bcast(self.minbw, root=0)
@@ -1724,6 +1741,7 @@ class MuSIC(STGWR):
                 new_betas = np.empty(linear_predictors.shape, dtype=np.float64)
 
                 for n_feat in range(self.n_features):
+                    signaling_type = self.signaling_types[n_feat]
                     # Use each individual feature to predict the response:
                     temp_y = (y_pred_init[:, n_feat] - error).reshape(-1, 1)
                     temp_X = (self.X[:, n_feat]).reshape(-1, 1)
@@ -1735,7 +1753,7 @@ class MuSIC(STGWR):
                         bw = bws[n_feat]
                         betas = self.mpi_fit(temp_y, temp_X, bw, final=True, multiscale=True)
                     else:
-                        betas, bw = self.fit(temp_y, temp_X, multiscale=True)
+                        betas, bw = self.fit(temp_y, temp_X, multiscale=True, signaling_type=signaling_type)
 
                     # Update the linear predictor and betas:
                     new_v = (temp_X * betas).reshape(-1)
@@ -1821,6 +1839,33 @@ class MuSIC(STGWR):
             ssv: Squared canonical correlation coefficients b/w the predicted values and the response variable,
                     aka the squared singular values that describe the variance explained by each independent feature.
         """
+        bw = self.all_bws_init[target_label]
+
+        chunk_size = int(np.ceil(float(self.n_samples / self.n_chunks)))
+        all_ENP = np.zeros(self.n_features)
+        ssv = np.zeros((self.n_samples, self.n_features))
+
+        chunk_index = np.arange(self.n_samples)[chunk_id * chunk_size : (chunk_id + 1) * chunk_size]
+
+        # Partial hat matrix:
+        init_partial_hat = np.zeros((self.n_samples, len(chunk_index)))
+        init_partial_hat[chunk_index, :] = np.eye(len(chunk_index))
+        partial_hat = np.zeros((self.n_samples, len(chunk_index), self.n_features))
+
+        # Compute coefficients for each chunk:
+        for i in range(self.n_samples):
+            wi = get_wi(
+                i, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
+            ).reshape(-1, 1)
+            xT = (self.X * wi).T
+            # Reconstitute the response-input mapping, but only for the current chunk:
+            est_coeffs = np.linalg.solve(xT.dot(self.X), xT).dot(init_partial_hat).T
+
+            # Estimate the dependent variable, but only for the current chunk:
+            partial_hat_i = est_coeffs * self.X[i]
+            partial_hat_est = np.sum(partial_hat, axis=2)
+
+        error = init_partial_hat - partial_hat_est
 
     def multiscale_fit(self, n_chunks: int = 2):
         """Compute multiscale inference and output results.
@@ -1834,3 +1879,5 @@ class MuSIC(STGWR):
             self.logger.error(
                 "Initial bandwidths must be computed before calling `multiscale_fit`. Run :func " "`backfitting` first."
             )
+
+        self.n_chunks = self.comm.size * n_chunks

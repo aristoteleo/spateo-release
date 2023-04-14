@@ -59,6 +59,13 @@ if __name__ == "__main__":
         help="For automated selection, the threshold proportion of cells for which transcript "
         "needs to be expressed in to be selected as a target of interest. Not used if 'targets_path' is not None.",
     )
+    parser.add_argument(
+        "-multicollinear_threshold",
+        type=float,
+        help="Used only if `mod_type` is 'slice'. If this argument is provided, independent variables that are highly "
+        "correlated will be filtered out based on variance inflation factor threshold. A value of 5 or 10 is "
+        "recommended. This can be useful in reducing computation time.",
+    )
 
     parser.add_argument("-coords_key", default="spatial", type=str)
     parser.add_argument(
@@ -134,53 +141,3 @@ if __name__ == "__main__":
     if rank == 0:
         print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
         print("-" * 60)
-    # test_model_2 = GWRGRN(Comm_obj, parser)
-    # print(test_model_2.distr)
-
-    """
-    print(test_model.adata[:, "SDC1"].X)
-    # print(test_model.cell_categories)
-    print(test_model.ligands_expr)
-    print(test_model.receptors_expr)
-    print(test_model.targets_expr)
-
-    test_model._adjust_x()
-    print(test_model.signaling_types)
-    print(test_model.feature_names)
-
-    # Multicollinearity check test:
-    print(test_model.X.shape)
-    test_model_df = pd.DataFrame(test_model.X, columns=test_model.feature_names)
-    test = multicollinearity_check(test_model_df, thresh=5.0)
-    print(test.shape)"""
-
-    """
-    # See if the correct numbers show up:
-    print(test_model.all_spatial_weights[121])
-    print(test_model.all_spatial_weights[121].shape)
-    neighbors = np.argpartition(test_model.all_spatial_weights[121].toarray().ravel(), -10)[-10:]
-
-    print(neighbors)
-    print(test_model.receptors_expr["SDC1"].iloc[121])
-    print(test_model.ligands_expr["TNC"].iloc[neighbors])
-    print(test_model.ligands_expr["TNC"].iloc[103])
-
-    test_model._adjust_x()
-    print(test_model.X[121])"""
-
-    """
-    start = MPI.Wtime()
-
-    # Check to see if multiscale model is specified:
-    if parser.parse_args().multiscale:
-        # SPACE FOR LATER
-        "filler"
-    else:
-        STGWR(comm, parser).fit()
-
-    end = MPI.Wtime()
-
-    wt = comm.gather(end - start, root=0)
-    if rank == 0:
-        print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
-        print("-" * 60)"""

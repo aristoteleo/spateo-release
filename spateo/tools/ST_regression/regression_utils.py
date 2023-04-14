@@ -184,7 +184,7 @@ def iwls(
     Geographically weighted regression: the analysis of spatially varying relationships.
 
     Args:
-        y: Array of shape [n_samples,]; dependent variable
+        y: Array of shape [n_samples, 1]; dependent variable
         x: Array of shape [n_samples, n_features]; independent variables
         distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb"
         init_betas: Array of shape [n_features,]; initial regression coefficients
@@ -298,18 +298,20 @@ def softplus(z):
 # ---------------------------------------------------------------------------------------------------
 # Check multicollinearity
 # ---------------------------------------------------------------------------------------------------
-def multicollinearity_check(X: pd.DataFrame, thresh: float = 5.0):
+def multicollinearity_check(X: pd.DataFrame, thresh: float = 5.0, logger: Optional = None):
     """Checks for multicollinearity in dependent variable array, and drops the most multicollinear features until
     all features have VIF less than a given threshold.
 
     Args:
         X: Dependent variable array, in dataframe format
         thresh: VIF threshold; features with values greater than this value will be removed from the regression
+        logger: If not provided, will create a new logger
 
     Returns:
         X: Dependent variable array following filtering
     """
-    logger = lm.get_main_logger()
+    if logger is None:
+        logger = lm.get_main_logger()
 
     int_cols = X.select_dtypes(
         include=["int", "int16", "int32", "int64", "float", "float16", "float32", "float64"]

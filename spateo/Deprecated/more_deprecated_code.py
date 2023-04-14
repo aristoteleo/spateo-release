@@ -609,3 +609,101 @@ class STGWR:
 
     test_model._adjust_x()
     # print(test_model.X[121])
+
+    # test_model_2 = GWRGRN(Comm_obj, parser)
+    # print(test_model_2.distr)
+
+    """
+    print(test_model.adata[:, "SDC1"].X)
+    # print(test_model.cell_categories)
+    print(test_model.ligands_expr)
+    print(test_model.receptors_expr)
+    print(test_model.targets_expr)
+
+    test_model._adjust_x()
+    print(test_model.signaling_types)
+    print(test_model.feature_names)
+
+    # Multicollinearity check test:
+    print(test_model.X.shape)
+    test_model_df = pd.DataFrame(test_model.X, columns=test_model.feature_names)
+    test = multicollinearity_check(test_model_df, thresh=5.0)
+    print(test.shape)"""
+
+    """
+    # See if the correct numbers show up:
+    print(test_model.all_spatial_weights[121])
+    print(test_model.all_spatial_weights[121].shape)
+    neighbors = np.argpartition(test_model.all_spatial_weights[121].toarray().ravel(), -10)[-10:]
+
+    print(neighbors)
+    print(test_model.receptors_expr["SDC1"].iloc[121])
+    print(test_model.ligands_expr["TNC"].iloc[neighbors])
+    print(test_model.ligands_expr["TNC"].iloc[103])
+
+    test_model._adjust_x()
+    print(test_model.X[121])"""
+
+    """
+    start = MPI.Wtime()
+
+    # Check to see if multiscale model is specified:
+    if parser.parse_args().multiscale:
+        # SPACE FOR LATER
+        "filler"
+    else:
+        STGWR(comm, parser).fit()
+
+    end = MPI.Wtime()
+
+    wt = comm.gather(end - start, root=0)
+    if rank == 0:
+        print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
+        print("-" * 60)"""
+
+
+# Old niche matrix code:
+# in self._compute_niche_mat():
+# Encode the "niche" or each sample by taking into account each sample's own cell type:
+data = {"categories": self.cell_categories, "dmat_neighbors": dmat_neighbors}
+niche_mat = np.asarray(dmatrix("categories:dmat_neighbors-1", data))
+connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
+connections_cols.sort(key=lambda x: x[1])
+return niche_mat, connections_cols
+
+# in self._adjust_x():
+# If feature names doesn't already exist, create it:
+if not hasattr(self, "feature_names"):
+    self.feature_names = [f"{i[0]}-{i[1]}" for i in connections_cols]
+
+
+# Old slice model code:
+rec_expr = np.multiply(self.cell_categories, np.tile(rec_expr_values.toarray(), self.cell_categories.shape[1]))
+
+# Construct the category interaction matrix (1D array w/ n_categories ** 2 elements, encodes the
+# ligand-receptor niches of each sample by documenting the cell type-specific L:R enrichment within
+# the niche:
+data = {"category_rec_expr": rec_expr, "neighborhood_lig_expr": nbhd_lig_expr}
+lr_connections = np.asarray(dmatrix("category_rec_expr:neighborhood_lig_expr-1", data))
+
+lr_connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
+lr_connections_cols.sort(key=lambda x: x[1])
+n_connections_pairs = len(lr_connections_cols)
+# Swap sending & receiving cell types because we're looking at receptor expression in the "source" cell
+# and ligand expression in the surrounding cells.
+lr_connections_cols = [f"{i[1]}-{i[0]}:{lig}-{rec}" for i in lr_connections_cols]
+niche_mats[f"{lig}-{rec}"] = pd.DataFrame(lr_connections, columns=lr_connections_cols)
+niche_mats = {key: value for key, value in sorted(niche_mats.items())}
+
+# If list of L:R labels (secreted vs. membrane-bound vs. ECM) doesn't already exist, create it:
+if not hasattr(self, "self.signaling_types"):
+    query = re.compile(r"\w+-\w+:(\w+-\w+)")
+    self.signaling_types = []
+    for col in self.feature_names:
+        ligrec = re.search(query, col).group(1)
+        result = self.lr_db.loc[
+            (self.lr_db["from"] == ligrec.split("-")[0]) & (self.lr_db["to"] == ligrec.split("-")[1]),
+            "type",
+        ].iloc[0]
+
+        self.signaling_types.append(result)

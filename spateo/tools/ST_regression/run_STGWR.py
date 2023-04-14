@@ -73,6 +73,13 @@ def main():
     "needs to be expressed in to be selected as a target of interest. "
     "Not used if 'targets_path' is not None.",
 )
+@click.option(
+    "multicollinear_threshold",
+    required=False,
+    help="Used only if `mod_type` is 'slice'. If this argument is provided, independent variables that are highly "
+    "correlated will be filtered out based on variance inflation factor threshold. A value of 5 or 10 is "
+    "recommended. This can be useful in reducing computation time.",
+)
 @click.option("init_betas_path", required=False)
 @click.option("normalize", default=False, is_flag=True)
 @click.option("smooth", default=False, is_flag=True)
