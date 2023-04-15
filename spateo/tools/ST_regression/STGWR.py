@@ -261,6 +261,7 @@ class STGWR:
         self.covariate_keys = self.arg_retrieve.covariate_keys
 
         self.multiscale_flag = self.arg_retrieve.multiscale
+        self.multiscale_params_only = self.arg_retrieve.multiscale_params_only
         self.bw_fixed = self.arg_retrieve.bw_fixed
         self.exclude_self = self.arg_retrieve.exclude_self
         self.distr = self.arg_retrieve.distr
@@ -1016,8 +1017,8 @@ class STGWR:
                     regression, this is the squared residual, for non-Gaussian generalized linear regression,
                     this is the fitted response variable value. One of the returns if :param `final` is False
                 - betas: Estimated coefficients for sample i- if :param `multiscale` is True, betas is the only return
-                - ssv: Squared canonical correlation coefficients b/w the predicted values and the response variable,
-                    aka the squared singular values that describe the variance explained by each independent feature.
+                - leverages: Leverages for sample i, representing the influence of each independent variable on the
+                    predicted values (linear predictor for GLMs, response variable for Gaussian regression).
         """
         # Reshape y if necessary:
         if self.n_features > 1:
@@ -1061,13 +1062,13 @@ class STGWR:
         else:
             self.logger.error("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
 
-        # Squared canonical correlation coefficients:
-        ssv = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
+        # Squared singular values:
+        lvg = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
 
         if final:
             if multiscale:
                 return betas
-            return np.concatenate(([i, diagnostic, hat_i], betas, ssv))
+            return np.concatenate(([i, diagnostic, hat_i], betas, lvg))
         else:
             # For bandwidth optimization:
             if self.distr == "gaussian":
@@ -1286,7 +1287,7 @@ class STGWR:
                 for x in varNames:
                     header += "b_" + x + ","
                 for x in varNames:
-                    header += "ssv_" + x + ","
+                    header += "lvg_" + x + ","
 
                 # Return output diagnostics and save result- NOTE: PASS DEVIANCE AS WELL:
                 self.output_diagnostics(aicc, ENP, r_squared, deviance)
@@ -1696,7 +1697,7 @@ class MuSIC(STGWR):
     def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser):
         super().__init__(comm, parser)
 
-    def backfitting(self):
+    def multiscale_backfitting(self):
         """
         Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths by iterating one
         predictor while holding all others constant. Run before :func `fit` to obtain initial covariate-specific
@@ -1705,7 +1706,7 @@ class MuSIC(STGWR):
         Reference: Fotheringham et al. 2017. Annals of AAG.
         """
         if self.comm.rank == 0:
-            self.logger.info("MGWR Backfitting...")
+            self.logger.info("Multiscale Backfitting...")
 
         # Initialize parameters, with a uniform initial bandwidth for all features:
         all_betas, all_bws = self.fit(multiscale=True)
@@ -1788,31 +1789,35 @@ class MuSIC(STGWR):
                     self.logger.info(f"For target {target}, multiscale optimization converged after {iter} iterations.")
                     break
 
+            # Final estimated values:
+            y_pred = new_ys
+
+            bw_history = np.array(bw_history)
             self.all_bws_history[target] = bw_history
             # Compute diagnostics for current target using the final errors:
             if self.distr == "gaussian":
-                RSS = np.sum(error**2)
+                self.RSS = np.sum(error**2)
                 # Total sum of squares:
-                TSS = np.sum((y - np.mean(y)) ** 2)
-                self.r_squared = 1 - RSS / TSS
+                self.TSS = np.sum((y - np.mean(y)) ** 2)
+                self.r_squared = 1 - self.RSS / self.TSS
 
                 # For saving outputs:
                 header = "name,residual,"
             else:
-                r_squared = None
+                self.r_squared = None
 
             if self.distr == "poisson" or self.distr == "nb":
                 # Deviance:
-                deviance = self.distr_obj.deviance(y, error)
+                self.deviance = self.distr_obj.deviance(y, y_pred)
 
                 # For saving outputs:
                 header = "name,deviance,"
             else:
-                deviance = None
+                self.deviance = None
             self.params_all_targets[target] = new_betas
 
             # Save results without standard errors or influence measures:
-            if self.comm.rank == 0:
+            if self.comm.rank == 0 and self.multiscale_params_only:
                 varNames = self.feature_names
                 if self.fit_intercept:
                     varNames = ["intercept"] + list(varNames)
@@ -1821,12 +1826,13 @@ class MuSIC(STGWR):
                     header += "b_" + x + ","
 
                 # Return output diagnostics and save result:
-                self.output_diagnostics(None, None, r_squared, deviance)
+                self.output_diagnostics(None, None, self.r_squared, self.deviance)
                 output = np.hstack([self.sample_names, error.reshape(-1, 1), self.params_all_targets[target]])
                 self.save_results(header, output, label=y_label)
 
     def chunk_compute_hat(self, chunk_id: int = 0, target_label: Optional[str] = None):
-        """Compute multiscale inference by chunks to reduce memory footprint.
+        """Compute multiscale inference by chunks to reduce memory footprint- used to calculate metrics to estimate
+        the importance of each feature to the variance in the data.
         Reference: Li and Fotheringham, 2020. IJGIS and Yu et al., 2019. GA.
 
         Args:
@@ -1835,15 +1841,18 @@ class MuSIC(STGWR):
                 dictionary.
 
         Returns:
-            all_ENP: Effective number of parameters for each independent variable
-            ssv: Squared canonical correlation coefficients b/w the predicted values and the response variable,
-                    aka the squared singular values that describe the variance explained by each independent feature.
+            ENP_chunk: Effective number of parameters for given chunk
+            lvg_chunk: Leverage values b/w the predicted values and the response variable for the given chunk
         """
         bw = self.all_bws_init[target_label]
+        bw_history = self.all_bws_history[target_label]
 
         chunk_size = int(np.ceil(float(self.n_samples / self.n_chunks)))
-        all_ENP = np.zeros(self.n_features)
-        ssv = np.zeros((self.n_samples, self.n_features))
+        # Vector storing ENP for each predictor:
+        ENP_chunk = np.zeros(self.n_features)
+        # Array storing leverages for each predictor (for each sample because of the spatially-weighted nature of the
+        # regression):
+        lvg_chunk = np.zeros((self.n_samples, self.n_features))
 
         chunk_index = np.arange(self.n_samples)[chunk_id * chunk_size : (chunk_id + 1) * chunk_size]
 
@@ -1859,20 +1868,65 @@ class MuSIC(STGWR):
             ).reshape(-1, 1)
             xT = (self.X * wi).T
             # Reconstitute the response-input mapping, but only for the current chunk:
-            est_coeffs = np.linalg.solve(xT.dot(self.X), xT).dot(init_partial_hat).T
+            proj = np.linalg.solve(xT.dot(self.X), xT).dot(init_partial_hat).T
 
-            # Estimate the dependent variable, but only for the current chunk:
-            partial_hat_i = est_coeffs * self.X[i]
-            partial_hat_est = np.sum(partial_hat, axis=2)
+            # Estimate the hat matrix, but only for the current chunk:
+            partial_hat_i = proj * self.X[i]
+            partial_hat[i, :, :] = partial_hat_i
 
-        error = init_partial_hat - partial_hat_est
+        error = init_partial_hat - np.sum(partial_hat, axis=2)
 
-    def multiscale_fit(self, n_chunks: int = 2):
+        for i in range(bw_history.shape[0]):
+            for j in range(self.n_features):
+                proj_j_old = partial_hat[:, :, j] + error
+                X_j = self.X[:, j]
+                chunk_size_j = int(np.ceil(float(self.n_samples / self.n_chunks)))
+                for n in range(self.n_chunks):
+                    chunk_index_temp = np.arange(self.n_samples)[n * chunk_size_j : (n + 1) * chunk_size_j]
+                    # Initialize response-input mapping:
+                    proj_j = np.empty((len(chunk_index_temp), self.n_samples))
+                    # Compute the hat matrix for the current chunk:
+                    for k in range(len(chunk_index_temp)):
+                        index = chunk_index_temp[k]
+                        wi = get_wi(
+                            index,
+                            n_samples=self.n_samples,
+                            coords=self.coords,
+                            fixed_bw=self.bw_fixed,
+                            kernel=self.kernel,
+                            # Use the bandwidth from the ith iteration for the jth independent variable:
+                            bw=bw_history[i, j],
+                        ).reshape(-1, 1)
+
+                        xw = X_j * wi
+                        proj_j[k] = X_j[index] / np.sum(xw * X_j) * xw
+
+                    # Update the hat matrix:
+                    partial_hat[chunk_index_temp, :, j] = proj_j.dot(proj_j_old)
+
+                error = proj_j_old - partial_hat[:, :, j]
+
+        # Compute leverages for each predictor and effective number of parameters of the model:
+        for j in range(self.n_features):
+            lvg_chunk[:, j] += ((partial_hat[:, :, j] / self.X[:, j].reshape(-1, 1)) ** 2).sum(axis=1)
+        for i in range(len(chunk_index)):
+            ENP_chunk += partial_hat[chunk_index[i], i, :]
+
+        return ENP_chunk, lvg_chunk
+
+    def multiscale_compute_metrics(self, n_chunks: int = 2):
         """Compute multiscale inference and output results.
 
         Args:
             n_chunks: Number of partitions comprising each covariate-specific hat matrix.
         """
+        if self.multiscale_params_only:
+            self.logger.warning(
+                "Chunked computations will not be performed because `multiscale_params_only` is set to True, "
+                "so only parameter values (and no other metrics) will be saved."
+            )
+            return
+
         # Check that initial bandwidths and bandwidth history are present (e.g. that :func `backfitting` has been
         # called):
         if not hasattr(self, "init_bandwidth"):
@@ -1880,4 +1934,31 @@ class MuSIC(STGWR):
                 "Initial bandwidths must be computed before calling `multiscale_fit`. Run :func " "`backfitting` first."
             )
 
+        if self.comm.rank == 0:
+            self.logger.info(f"Computing model metrics, using {n_chunks} chunks...")
+
         self.n_chunks = self.comm.size * n_chunks
+        self.chunks = np.arange(self.comm.rank * n_chunks, (self.comm.rank + 1) * n_chunks)
+
+        # For each target variable, compute metrics for each chunk and store in a dictionary of arrays:
+        ENP_dict = {}
+        lvg_dict = {}
+
+        for target_label in self.y_arr.columns:
+            # Lists to store the results of each chunk for this variable:
+            ENP_list = []
+            lvg_list = []
+
+            for chunk in self.chunks:
+                ENP_chunk, lvg_chunk = self.chunk_compute_hat(chunk_id=chunk, target_label=target_label)
+                ENP_list.append(ENP_chunk)
+                lvg_list.append(lvg_chunk)
+
+            # Gather results from all chunks:
+            ENP_list = np.array(self.comm.gather(ENP_list, root=0))
+            lvg_list = np.array(self.comm.gather(lvg_list, root=0))
+
+            if self.comm.rank == 0:
+                # Compile results from all chunks to get the ENP vector and leverage matrix for this response variable:
+                ENP_dict[target_label] = np.sum(np.vstack(ENP_list), axis=0)
+                lvg_dict[target_label] = np.vstack(lvg_list)

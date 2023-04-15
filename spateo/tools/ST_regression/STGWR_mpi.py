@@ -27,6 +27,8 @@ if __name__ == "__main__":
     parser.add_argument("-multiscale", action="store_true")
     # Flag to run a GRN model- if not given, will run STGWR CCI model, taking inputs such as mod_type and cci_dir
     # into consideration.
+    parser.add_argument("-multiscale_params_only", action="store_true")
+    # Flag to return additional metrics along with the coefficients for multiscale models.
     parser.add_argument("-grn", action="store_true", help="If this argument is provided, 'mod_type' will not be used.")
     parser.add_argument("-mod_type", type=str)
     parser.add_argument("-cci_dir", type=str)

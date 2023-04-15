@@ -132,6 +132,7 @@ def run_STGWR(
     group_key,
     csv_path,
     multiscale,
+    multiscale_params_only,
     mod_type,
     grn,
     cci_dir,
@@ -173,6 +174,8 @@ def run_STGWR(
             Assumes the first three columns contain x- and y-coordinates and then dependent variable values,
             in that order.
         multiscale: If True, the MGWR model will be used
+        multiscale_params_only: If True, will only fit parameters for MGWR model and no other metrics. Otherwise,
+            the effective number of parameters and leverages will be returned.
         mod_type: If adata_path is provided, one of the STGWR models will be used. Options: 'niche', 'lr', 'slice'.
         grn: If True, the GRN model will be used
         cci_dir: Path to directory containing CCI files
@@ -251,6 +254,8 @@ def run_STGWR(
 
     if multiscale:
         command += " -multiscale "
+    if multiscale_params_only:
+        command += " -multiscale_params_only "
     if grn:
         command += " -grn "
     if cci_dir is not None:
