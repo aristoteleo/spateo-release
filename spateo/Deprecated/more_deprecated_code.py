@@ -707,3 +707,35 @@ if not hasattr(self, "self.signaling_types"):
         ].iloc[0]
 
         self.signaling_types.append(result)
+
+
+elif self.distr == "poisson":
+    for j in range(self.n_features):
+        # Compute diagonal of the Hessian matrix:
+        hessian_chunk[j, j] = -np.sum(partial_hat[:, :, j] * self.X[:, j].reshape(-1, 1) * self.X[:, j] * y_pred)
+        # Compute off-diagonal of the Hessian matrix:
+        for k in range(j + 1, self.n_features):
+            hessian_chunk[j, k] = -np.sum(partial_hat[:, :, j] * self.X[:, j].reshape(-1, 1) * self.X[:, k] * y_pred)
+            hessian_chunk[k, j] = hessian_chunk[j, k]
+
+    return ENP_chunk, hessian_chunk
+
+# Hessian for NB:
+else:
+    for j in range(self.n_features):
+        # Compute diagonal of the Hessian matrix:
+        X_j = self.X[:, j].reshape(-1, 1)
+        psi_deriv = special.digamma(self.distr_obj.variance.disp + np.dot(X_j**2, y_pred)) - special.digamma(
+            self.distr_obj.variance.disp + np.dot(X_j, y_pred)
+        )
+        hessian_chunk = np.sum(partial_hat[:, :, j] * X_j**2 * y_pred * psi_deriv)
+
+        # Compute off-diagonal of the Hessian matrix:
+        for k in range(j + 1, self.n_features):
+            X_k = self.X[:, k].reshape(-1, 1)
+            psi_deriv = special.digamma(self.distr_obj.variance.disp + np.dot(X_j * X_k, y_pred)) - special.digamma(
+                self.distr_obj.variance.disp + np.dot(X_j, y_pred)
+            )
+            hessian_chunk = np.sum(partial_hat[:, :, j] * X_j * X_k * y_pred * psi_deriv)
+
+    return ENP_chunk, hessian_chunk

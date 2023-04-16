@@ -212,7 +212,6 @@ def iwls(
             returned if "spatial_weights" is not None.
         pseudoinverse: Array of shape [n_samples, n_samples]; optional influence matrix that is only returned if
             "spatial_weights" is not None. The pseudoinverse is the Moore-Penrose pseudoinverse of the X matrix.
-
     """
     logger = lm.get_main_logger()
 

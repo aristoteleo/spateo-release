@@ -1177,6 +1177,3 @@ class NegativeBinomial(Distribution):
         )
 
         return ll
-
-
-# ADD APPROPRIATE ZINB FUNCTIONS LATER

@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import scipy
 from mpi4py import MPI
-from patsy import dmatrix
+from scipy import special
 from scipy.spatial.distance import cdist
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
@@ -987,6 +987,24 @@ class STGWR:
                     self.signaling_types = "Cell-Cell Contact"
             self.signaling_types = self.comm.bcast(self.signaling_types, root=0)
 
+    def hessian(self, fitted: np.ndarray) -> np.ndarray:
+        """Compute the Hessian matrix for the given model, representing the confidence in the parameter estimates.
+
+        Args:
+            fitted: Array of shape [n_samples,]; fitted mean response variable (link function evaluated
+                at the linear predicted values)
+
+        Returns:
+            hessian: Hessian matrix
+        """
+        if self.distr == "gaussian":
+            hessian = np.dot(self.X.T, self.X)
+        elif self.distr == "poisson":
+            hessian = np.dot(self.X.T, np.dot(np.diag(fitted), self.X))
+        elif self.distr == "nb":
+            hessian = np.dot(self.X.T, np.dot(np.diag(fitted * (1 + fitted / self.distr_obj.variance.disp)), self.X))
+        return hessian
+
     def local_fit(
         self, i: int, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False, multiscale: bool = False
     ) -> Union[np.ndarray, List[float]]:
@@ -1243,7 +1261,7 @@ class STGWR:
                     sigma_squared = RSS / (self.n_samples - ENP)
                     # Corrected Akaike Information Criterion:
                     aicc = self.compute_aicc_linear(RSS, ENP)
-                    # Scale the squared canonical correlation coefficients by their standard errors:
+                    # Scale the leverages by their variance to compute standard errors of the predictor:
                     all_fit_outputs[:, -self.n_features :] = np.sqrt(
                         all_fit_outputs[:, -self.n_features :] * sigma_squared
                     )
@@ -1254,14 +1272,10 @@ class STGWR:
                     r_squared = None
 
                 if self.distr == "poisson" or self.distr == "nb":
-                    if self.distr == "poisson":
-                        distr = Poisson()
-                    else:
-                        distr = NegativeBinomial()
                     # Deviance:
-                    deviance = distr.deviance(y, all_fit_outputs[:, 1])
+                    deviance = self.distr_obj.deviance(y, all_fit_outputs[:, 1])
                     # Residual deviance:
-                    residual_deviance = distr.deviance_residuals(y, all_fit_outputs[:, 1])
+                    residual_deviance = self.distr_obj.deviance_residuals(y, all_fit_outputs[:, 1])
                     # Reshape if necessary:
                     if self.n_features > 1:
                         residual_deviance = residual_deviance.reshape(-1, 1)
@@ -1269,13 +1283,29 @@ class STGWR:
                     ENP = np.sum(all_fit_outputs[:, 2])
                     # Corrected Akaike Information Criterion:
                     aicc = self.compute_aicc_glm(residual_deviance, ENP)
-                    # Scale the squared canonical correlation coefficients using the residual deviance:
-                    all_fit_outputs[:, -self.n_features :] = np.sqrt(
-                        all_fit_outputs[:, -self.n_features :] * residual_deviance
-                    )
+                    # To obtain standard errors for each coefficient, take the square root of the diagonal elements
+                    # of the covariance matrix:
+                    # Compute the covariance matrix using the Hessian- first compute the estimate for dispersion of
+                    # the NB distribution:
+                    if self.distr == "nb":
+                        theta = 1 / self.distr_obj.variance(all_fit_outputs[:, 1])
+                        weights = self.distr_obj.weights(all_fit_outputs[:, 1])
+                        deviance = 2 * np.sum(
+                            weights
+                            * (
+                                y * np.log(y / all_fit_outputs[:, 1])
+                                + (theta - 1) * np.log(1 + all_fit_outputs[:, 1] / (theta - 1))
+                            )
+                        )
+                        dof = len(y) - self.X.shape[1]
+                        self.distr_obj.variance.disp = deviance / dof
+
+                    hessian = self.hessian(all_fit_outputs[:, 1])
+                    cov_matrix = np.linalg.inv(hessian)
+                    all_fit_outputs[:, -self.n_features :] = np.sqrt(np.diag(cov_matrix))
 
                     # For saving outputs:
-                    header = "name,deviance,influence,"
+                    header = "name,prediction,influence,"
                 else:
                     deviance = None
 
@@ -1287,9 +1317,9 @@ class STGWR:
                 for x in varNames:
                     header += "b_" + x + ","
                 for x in varNames:
-                    header += "lvg_" + x + ","
+                    header += "se_" + x + ","
 
-                # Return output diagnostics and save result- NOTE: PASS DEVIANCE AS WELL:
+                # Return output diagnostics and save result:
                 self.output_diagnostics(aicc, ENP, r_squared, deviance)
                 self.save_results(all_fit_outputs, header, label=y_label)
 
@@ -1337,12 +1367,7 @@ class STGWR:
             trace_hat_list = self.comm.gather(trace_hat, root=0)
 
             if self.comm.rank == 0:
-                if self.distr == "poisson":
-                    distr = Poisson()
-                else:
-                    distr = NegativeBinomial()
-
-                deviance_residuals = distr.deviance_residuals(y, all_y_pred)
+                deviance_residuals = self.distr_obj.deviance_residuals(y, all_y_pred)
                 trace_hat = np.sum(trace_hat_list)
                 aicc = self.compute_aicc_glm(deviance_residuals, trace_hat)
                 if not multiscale:
@@ -1718,6 +1743,19 @@ class MuSIC(STGWR):
 
         self.all_bws_history = {}
         self.params_all_targets = {}
+        self.errors_all_targets = {}
+        self.predictions_all_targets = {}
+        # For linear models:
+        self.all_RSS = {}
+        self.all_TSS = {}
+
+        # For GLM models:
+        self.all_deviances = {}
+        self.all_residual_deviances = {}
+
+        # Optional, to save the dispersion parameter for negative binomial fitted to each target:
+        self.nb_disp_dict = {}
+
         for target in self.y_arr.columns:
             y = self.y_arr[target].values
             y_label = target + "_multiscale_backfitting"
@@ -1791,30 +1829,51 @@ class MuSIC(STGWR):
 
             # Final estimated values:
             y_pred = new_ys
+            # Set dispersion for negative binomial:
+            if self.distr == "nb":
+                theta = 1 / self.distr_obj.variance(y_pred)
+                weights = self.distr_obj.weights(y_pred)
+                deviance = 2 * np.sum(
+                    weights * (y * np.log(y / y_pred) + (theta - 1) * np.log(1 + y_pred[:, 1] / (theta - 1)))
+                )
+                dof = len(y) - self.X.shape[1]
+                self.nb_disp_dict[target] = deviance / dof
 
             bw_history = np.array(bw_history)
             self.all_bws_history[target] = bw_history
+
             # Compute diagnostics for current target using the final errors:
             if self.distr == "gaussian":
-                self.RSS = np.sum(error**2)
+                RSS = np.sum(error**2)
+                self.all_RSS[target] = RSS
                 # Total sum of squares:
-                self.TSS = np.sum((y - np.mean(y)) ** 2)
-                self.r_squared = 1 - self.RSS / self.TSS
+                TSS = np.sum((y - np.mean(y)) ** 2)
+                self.all_TSS[target] = TSS
+                r_squared = 1 - RSS / TSS
 
                 # For saving outputs:
                 header = "name,residual,"
             else:
-                self.r_squared = None
+                r_squared = None
 
             if self.distr == "poisson" or self.distr == "nb":
                 # Deviance:
-                self.deviance = self.distr_obj.deviance(y, y_pred)
+                deviance = self.distr_obj.deviance(y, y_pred)
+                self.all_deviances[target] = deviance
+                residual_deviance = self.distr_obj.deviance_residuals(y, y_pred)
+                # Reshape if necessary:
+                if self.n_features > 1:
+                    residual_deviance = residual_deviance.reshape(-1, 1)
+                self.all_residual_deviances[target] = residual_deviance
 
                 # For saving outputs:
                 header = "name,deviance,"
             else:
-                self.deviance = None
+                deviance = None
+            # Store some of the final values of interest:
             self.params_all_targets[target] = new_betas
+            self.errors_all_targets[target] = error
+            self.predictions_all_targets[target] = y_pred
 
             # Save results without standard errors or influence measures:
             if self.comm.rank == 0 and self.multiscale_params_only:
@@ -1826,11 +1885,12 @@ class MuSIC(STGWR):
                     header += "b_" + x + ","
 
                 # Return output diagnostics and save result:
-                self.output_diagnostics(None, None, self.r_squared, self.deviance)
+                self.output_diagnostics(None, None, r_squared, deviance)
                 output = np.hstack([self.sample_names, error.reshape(-1, 1), self.params_all_targets[target]])
                 self.save_results(header, output, label=y_label)
 
-    def chunk_compute_hat(self, chunk_id: int = 0, target_label: Optional[str] = None):
+    # noinspection PyCallingNonCallable
+    def chunk_compute_metrics(self, chunk_id: int = 0, target_label: Optional[str] = None):
         """Compute multiscale inference by chunks to reduce memory footprint- used to calculate metrics to estimate
         the importance of each feature to the variance in the data.
         Reference: Li and Fotheringham, 2020. IJGIS and Yu et al., 2019. GA.
@@ -1841,8 +1901,10 @@ class MuSIC(STGWR):
                 dictionary.
 
         Returns:
-            ENP_chunk: Effective number of parameters for given chunk
-            lvg_chunk: Leverage values b/w the predicted values and the response variable for the given chunk
+            ENP_chunk: Effective number of parameters for the desired chunk
+            lvg_chunk: Only returned if model is a Gaussian regression model- leverage values b/w the predicted values
+                and the response variable for the desired chunk
+            cov_chunk: Only returned if model is a GLM- covariance matrix for the desired chunk
         """
         bw = self.all_bws_init[target_label]
         bw_history = self.all_bws_history[target_label]
@@ -1850,9 +1912,10 @@ class MuSIC(STGWR):
         chunk_size = int(np.ceil(float(self.n_samples / self.n_chunks)))
         # Vector storing ENP for each predictor:
         ENP_chunk = np.zeros(self.n_features)
-        # Array storing leverages for each predictor (for each sample because of the spatially-weighted nature of the
-        # regression):
-        lvg_chunk = np.zeros((self.n_samples, self.n_features))
+        # Array storing leverages for each predictor if the model is Gaussian (for each sample because of the
+        # spatially-weighted nature of the regression):
+        if self.distr == "gaussian":
+            lvg_chunk = np.zeros((self.n_samples, self.n_features))
 
         chunk_index = np.arange(self.n_samples)[chunk_id * chunk_size : (chunk_id + 1) * chunk_size]
 
@@ -1899,20 +1962,24 @@ class MuSIC(STGWR):
                         ).reshape(-1, 1)
 
                         xw = X_j * wi
-                        proj_j[k] = X_j[index] / np.sum(xw * X_j) * xw
+                        proj_j[k, :] = X_j[index] / np.sum(xw * X_j) * xw
 
                     # Update the hat matrix:
                     partial_hat[chunk_index_temp, :, j] = proj_j.dot(proj_j_old)
 
                 error = proj_j_old - partial_hat[:, :, j]
 
-        # Compute leverages for each predictor and effective number of parameters of the model:
-        for j in range(self.n_features):
-            lvg_chunk[:, j] += ((partial_hat[:, :, j] / self.X[:, j].reshape(-1, 1)) ** 2).sum(axis=1)
+        # Compute leverages for each predictor (if applicable- model assumes Gaussianity), Hessian matrix (if
+        # applicable- model assumes non-Gaussianity) and effective number of parameters of the model:
         for i in range(len(chunk_index)):
             ENP_chunk += partial_hat[chunk_index[i], i, :]
+        if self.distr == "gaussian":
+            for j in range(self.n_features):
+                lvg_chunk[:, j] += ((partial_hat[:, :, j] / self.X[:, j].reshape(-1, 1)) ** 2).sum(axis=1)
 
-        return ENP_chunk, lvg_chunk
+            return ENP_chunk, lvg_chunk
+        else:
+            return ENP_chunk
 
     def multiscale_compute_metrics(self, n_chunks: int = 2):
         """Compute multiscale inference and output results.
@@ -1940,25 +2007,81 @@ class MuSIC(STGWR):
         self.n_chunks = self.comm.size * n_chunks
         self.chunks = np.arange(self.comm.rank * n_chunks, (self.comm.rank + 1) * n_chunks)
 
-        # For each target variable, compute metrics for each chunk and store in a dictionary of arrays:
-        ENP_dict = {}
-        lvg_dict = {}
-
         for target_label in self.y_arr.columns:
-            # Lists to store the results of each chunk for this variable:
+            # Fitted coefficients, errors and predictions:
+            parameters = self.params_all_targets[target_label]
+            errors = self.errors_all_targets[target_label]
+            predictions = self.predictions_all_targets[target_label]
+            y_label = target_label + "_multiscale_backfitting"
+
+            # Lists to store the results of each chunk for this variable (lvg list only used if Gaussian):
             ENP_list = []
             lvg_list = []
 
             for chunk in self.chunks:
-                ENP_chunk, lvg_chunk = self.chunk_compute_hat(chunk_id=chunk, target_label=target_label)
-                ENP_list.append(ENP_chunk)
-                lvg_list.append(lvg_chunk)
+                if self.distr == "gaussian":
+                    ENP_chunk, lvg_chunk = self.chunk_compute_metrics(chunk_id=chunk, target_label=target_label)
+                    ENP_list.append(ENP_chunk)
+                    lvg_list.append(lvg_chunk)
+                else:
+                    ENP_chunk = self.chunk_compute_metrics(chunk_id=chunk, target_label=target_label)
+                    ENP_list.append(ENP_chunk)
 
             # Gather results from all chunks:
             ENP_list = np.array(self.comm.gather(ENP_list, root=0))
-            lvg_list = np.array(self.comm.gather(lvg_list, root=0))
+            if self.distr == "gaussian":
+                lvg_list = np.array(self.comm.gather(lvg_list, root=0))
 
             if self.comm.rank == 0:
-                # Compile results from all chunks to get the ENP vector and leverage matrix for this response variable:
-                ENP_dict[target_label] = np.sum(np.vstack(ENP_list), axis=0)
-                lvg_dict[target_label] = np.vstack(lvg_list)
+                indices = self.sample_names
+                # Compile results from all chunks to get the estimated number of parameters for this response variable:
+                ENP = np.sum(np.vstack(ENP_list), axis=0)
+
+                if self.distr == "gaussian":
+                    # Compile results from all chunks to get the leverage matrix for this response variable:
+                    lvg = np.sum(np.vstack(lvg_list), axis=0)
+
+                    # Get sums-of-squares corresponding to this feature:
+                    RSS = self.all_RSS[target_label]
+                    TSS = self.all_TSS[target_label]
+                    # Residual variance:
+                    sigma_squared = RSS / (self.n_samples - ENP)
+                    # R-squared:
+                    r_squared = 1 - RSS / TSS
+                    # Corrected Akaike Information Criterion:
+                    aicc = self.compute_aicc_linear(RSS, ENP)
+                    # Scale leverages by the residual variance to compute standard errors:
+                    standard_error = np.sqrt(lvg * sigma_squared)
+                    self.output_diagnostics(aicc, ENP, r_squared=r_squared, deviance=None, y_label=y_label)
+
+                    header = "index,residual,"
+                    outputs = np.hstack([indices, errors.reshape(-1, 1), parameters.reshape(-1, 1), standard_error])
+
+                if self.distr == "poisson" or self.distr == "nb":
+                    # Get deviances corresponding to this feature:
+                    deviance = self.all_deviances[target_label]
+                    residual_deviance = self.all_residual_deviances[target_label]
+
+                    # Corrected Akaike Information Criterion:
+                    aicc = self.compute_aicc_glm(residual_deviance, ENP)
+                    # Compute standard errors using the covariance:
+                    self.distr_obj.variance.disp = self.nb_disp_dict[target_label]
+                    hessian = self.hessian(predictions)
+                    cov_matrix = np.linalg.inv(hessian)
+                    standard_error = np.sqrt(np.diag(cov_matrix))
+                    self.output_diagnostics(aicc, ENP, r_squared=None, deviance=deviance, y_label=y_label)
+
+                    header = "index,prediction,"
+                    outputs = np.hstack(
+                        [indices, predictions.reshape(-1, 1), parameters.reshape(-1, 1), standard_error]
+                    )
+
+                varNames = self.feature_names
+                if self.fit_intercept:
+                    varNames = ["intercept"] + list(varNames)
+                for x in varNames:
+                    header += "b_" + x + ","
+                for x in varNames:
+                    header += "se_" + x + ","
+
+                self.save_results(outputs, header, label=y_label)
