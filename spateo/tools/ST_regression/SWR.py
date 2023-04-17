@@ -42,7 +42,7 @@ from spateo.tools.ST_regression.regression_utils import (
 # ---------------------------------------------------------------------------------------------------
 # GWR for cell-cell communication
 # ---------------------------------------------------------------------------------------------------
-class STGWR:
+class SWR:
     """Spatially weighted regression on spatial omics data with parallel processing. Runs after being called
     from the command line.
 
@@ -161,8 +161,8 @@ class STGWR:
         self.parse_stgwr_args()
 
     def _set_up_model(self):
-        if self.mod_type is None:
-            self.logger.error(
+        if self.mod_type is None and self.adata_path is not None:
+            raise ValueError(
                 "No model type provided; need to provide a model type to fit. Options: 'niche', 'lr', " "'slice'."
             )
 
@@ -172,14 +172,14 @@ class STGWR:
             if self.adata_path is not None:
                 # Ensure CCI directory is provided:
                 if self.cci_dir is None:
-                    self.logger.error(
+                    raise ValueError(
                         "No CCI directory provided; need to provide a CCI directory to fit a model with "
                         "ligand/receptor expression."
                     )
                 self.load_and_process()
             else:
                 if self.csv_path is None:
-                    self.logger.error(
+                    raise ValueError(
                         "No AnnData path or .csv path provided; need to provide at least one of these "
                         "to provide a default dataset to fit."
                     )
@@ -192,9 +192,15 @@ class STGWR:
                     self.logger.info(f"Extracting target from column labeled '{custom_data.columns[2]}'.")
                     independent_variables = custom_data.iloc[:, 3:]
                     self.X = independent_variables.values
+                    self.feature_names = list(independent_variables.columns)
+
+                    # Add intercept if applicable:
+                    if self.fit_intercept:
+                        self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
+                        self.feature_names = ["intercept"] + self.feature_names
+
                     self.n_samples = self.X.shape[0]
                     self.n_features = self.X.shape[1]
-                    self.feature_names = independent_variables.columns
                     self.sample_names = custom_data.index
 
             self.n_runs_all = np.arange(self.n_samples)
@@ -226,6 +232,9 @@ class STGWR:
         chunk_size = int(math.ceil(float(len(self.n_runs_all)) / self.comm.size))
         # Assign chunks to each process:
         self.x_chunk = self.n_runs_all[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+
+        # Indicate model has now been set up:
+        self.set_up = True
 
     def parse_stgwr_args(self):
         """
@@ -278,7 +287,7 @@ class STGWR:
         self.kernel = self.arg_retrieve.kernel
 
         if not self.bw_fixed and self.kernel not in ["bisquare", "uniform"]:
-            self.logger.error(
+            raise ValueError(
                 "`bw_fixed` is set to False for adaptive kernel- it is assumed the chosen bandwidth is "
                 "the number of neighbors for each sample. However, only the `bisquare` and `uniform` "
                 "kernels perform hard thresholding and so it is recommended to use one of these kernels- "
@@ -434,7 +443,7 @@ class STGWR:
                 r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
                 tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_target_db.csv"), index_col=0)
             else:
-                self.logger.error("Invalid species specified. Must be one of 'human' or 'mouse'.")
+                raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
             database_ligands = set(self.lr_db["from"])
             database_receptors = set(self.lr_db["to"])
             database_pathways = set(r_tf_db["pathway"])
@@ -641,7 +650,7 @@ class STGWR:
             pairs = merged_df[["from", "to"]].drop_duplicates(keep="first")
             self.lr_pairs = [tuple(x) for x in zip(pairs["from"], pairs["to"])]
             if len(self.lr_pairs) == 0:
-                self.logger.error(
+                raise RuntimeError(
                     "No matched pairs between the selected ligands and receptors were found. If path to custom list of "
                     "ligands and/or receptors was provided, ensure ligand-receptor pairings exist among these lists, "
                     "or check data to make sure these ligands and/or receptors were measured and were not filtered out."
@@ -667,13 +676,13 @@ class STGWR:
             self.logger.info(f"Set of ligand-receptor pairs: {self.lr_pairs}")
 
         else:
-            self.logger.error("Invalid `mod_type` specified. Must be one of 'niche', 'slice', or 'lr'.")
+            raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'slice', or 'lr'.")
 
         # Get gene targets:
         self.logger.info("Preparing data: getting gene targets.")
         # For niche model, targets must be manually provided:
         if self.targets_path is None and self.mod_type == "niche":
-            self.logger.error(
+            raise ValueError(
                 "For niche model, `targets_path` must be provided. For slice and L:R models, targets can be "
                 "automatically inferred, but ligand/receptor information does not exist for the niche model."
             )
@@ -739,64 +748,98 @@ class STGWR:
                 (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor"
         """
 
-        if signaling_type is None:
-            signaling_type = self.signaling_types
+        if self.adata_path is not None:
+            if signaling_type is None:
+                signaling_type = self.signaling_types
 
-        # Check whether the signaling types defined are membrane-bound or are composed of soluble molecules:
-        if signaling_type == "Cell-Cell Contact":
-            # Signaling is limited to occurring between only the nearest neighbors of each cell:
+            # Check whether the signaling types defined are membrane-bound or are composed of soluble molecules:
+            if signaling_type == "Cell-Cell Contact":
+                # Signaling is limited to occurring between only the nearest neighbors of each cell:
+                if self.bw_fixed:
+                    distances = cdist(self.coords, self.coords)
+                    # Set max bandwidth to the average distance to the 20 nearest neighbors:
+                    nearest_idxs_all = np.argpartition(distances, 21, axis=1)[:, 1:21]
+                    nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
+                    self.maxbw = np.mean(nearest_distances, axis=1)
+
+                    if self.minbw is None:
+                        # Set min bandwidth to the average distance to the 5 nearest neighbors:
+                        nearest_idxs_all = np.argpartition(distances, 6, axis=1)[:, 1:6]
+                        nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
+                        self.minbw = np.mean(nearest_distances, axis=1)
+                else:
+                    self.maxbw = 20
+
+                    if self.minbw is None:
+                        self.minbw = 5
+
+                if self.minbw >= self.maxbw:
+                    raise ValueError(
+                        "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
+                        "parameter accordingly."
+                    )
+                return
+
+            # If the bandwidth is defined by a fixed spatial distance:
             if self.bw_fixed:
-                distances = cdist(self.coords, self.coords)
-                # Set max bandwidth to the average distance to the 20 nearest neighbors:
-                nearest_idxs_all = np.argpartition(distances, 21, axis=1)[:, 1:21]
-                nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
-                self.maxbw = np.mean(nearest_distances, axis=1)
+                max_dist = np.max(
+                    np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)])
+                )
+                # Set max bandwidth higher than the max distance between any two given samples:
+                self.maxbw = max_dist * 2
 
                 if self.minbw is None:
-                    # Set min bandwidth to the average distance to the 5 nearest neighbors:
-                    nearest_idxs_all = np.argpartition(distances, 6, axis=1)[:, 1:6]
-                    nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
-                    self.minbw = np.mean(nearest_distances, axis=1)
+                    min_dist = np.min(
+                        np.array(
+                            [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
+                        )
+                    )
+                    self.minbw = min_dist / 2
+
+            # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
-                self.maxbw = 20
+                if self.maxbw is None:
+                    self.maxbw = 100
 
                 if self.minbw is None:
                     self.minbw = 5
 
             if self.minbw >= self.maxbw:
-                self.logger.error(
+                raise ValueError(
                     "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
                     "parameter accordingly."
                 )
-            return
 
-        # If the bandwidth is defined by a fixed spatial distance:
-        if self.bw_fixed:
-            max_dist = np.max(np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)]))
-            # Set max bandwidth higher than the max distance between any two given samples:
-            self.maxbw = max_dist * 2
-
-            if self.minbw is None:
-                min_dist = np.min(
-                    np.array(
-                        [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
-                    )
-                )
-                self.minbw = min_dist / 2
-
-        # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
         else:
-            if self.maxbw is None:
-                self.maxbw = 100
+            # For regression on non-AnnData objects, repeat the above conditional bandwidth definition:
+            if self.bw_fixed:
+                max_dist = np.max(
+                    np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)])
+                )
+                # Set max bandwidth higher than the max distance between any two given samples:
+                self.maxbw = max_dist * 2
 
-            if self.minbw is None:
-                self.minbw = 5
+                if self.minbw is None:
+                    min_dist = np.min(
+                        np.array(
+                            [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
+                        )
+                    )
+                    self.minbw = min_dist / 2
 
-        if self.minbw >= self.maxbw:
-            self.logger.error(
-                "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
-                "parameter accordingly."
-            )
+            # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
+            else:
+                if self.maxbw is None:
+                    self.maxbw = 100
+
+                if self.minbw is None:
+                    self.minbw = 5
+
+            if self.minbw >= self.maxbw:
+                raise ValueError(
+                    "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
+                    "parameter accordingly."
+                )
 
     def _compute_all_wi(self, bw: Union[float, int]) -> scipy.sparse.spmatrix:
         """Compute spatial weights for all samples in the dataset given a specified bandwidth.
@@ -959,6 +1002,11 @@ class STGWR:
             self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
             self.feature_names += cov_names
 
+        # Add intercept if applicable:
+        if self.fit_intercept:
+            self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
+            self.feature_names = ["intercept"] + self.feature_names
+
         self.n_features = self.X.shape[1]
         # Rebroadcast the number of features to fit:
         self.n_features = self.comm.bcast(self.n_features, root=0)
@@ -974,7 +1022,7 @@ class STGWR:
                     "Cell-Cell Contact" in set(self.signaling_types)
                     and "Secreted Signaling" in set(self.signaling_types)
                 ) or ("Cell-Cell Contact" in set(self.signaling_types) and "ECM-Receptor" in set(self.signaling_types)):
-                    self.logger.error(
+                    raise ValueError(
                         "It is not advisable to include a mixture of membrane-bound with either secreted or "
                         "ECM-receptor in the same model because the valid distance scales over which they operate "
                         "is different. If you wish to include both, please run the model twice, once for each category."
@@ -1052,6 +1100,8 @@ class STGWR:
             residual = y[i] - pred_y
             diagnostic = residual
 
+            # Reshape coefficients if necessary:
+            betas = betas.flatten()
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
             hat_i = np.dot(X[i], pseudoinverse[:, i])
 
@@ -1078,7 +1128,7 @@ class STGWR:
             hat_i = np.dot(X[i], pseudoinverse[:, i]) * final_irls_weights[i][0]
 
         else:
-            self.logger.error("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
+            raise ValueError("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
 
         # Squared singular values:
         lvg = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
@@ -1210,14 +1260,16 @@ class STGWR:
             else:
                 X = self.X
         if X.shape[1] != self.n_features:
-            self.n_features = X.shape[1]
-            self.n_features = self.comm.bcast(self.n_features, root=0)
+            n_features = X.shape[1]
+            n_features = self.comm.bcast(n_features, root=0)
+        else:
+            n_features = self.n_features
 
         if final:
             if multiscale:
-                local_fit_outputs = np.empty((self.x_chunk.shape[0], self.n_features), dtype=np.float64)
+                local_fit_outputs = np.empty((self.x_chunk.shape[0], n_features), dtype=np.float64)
             else:
-                local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * self.n_features + 3), dtype=np.float64)
+                local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * n_features + 3), dtype=np.float64)
 
             # Fitting for each location:
             pos = 0
@@ -1262,9 +1314,7 @@ class STGWR:
                     # Corrected Akaike Information Criterion:
                     aicc = self.compute_aicc_linear(RSS, ENP)
                     # Scale the leverages by their variance to compute standard errors of the predictor:
-                    all_fit_outputs[:, -self.n_features :] = np.sqrt(
-                        all_fit_outputs[:, -self.n_features :] * sigma_squared
-                    )
+                    all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * sigma_squared)
 
                     # For saving outputs:
                     header = "name,residual,influence,"
@@ -1302,7 +1352,7 @@ class STGWR:
 
                     hessian = self.hessian(all_fit_outputs[:, 1])
                     cov_matrix = np.linalg.inv(hessian)
-                    all_fit_outputs[:, -self.n_features :] = np.sqrt(np.diag(cov_matrix))
+                    all_fit_outputs[:, -n_features:] = np.sqrt(np.diag(cov_matrix))
 
                     # For saving outputs:
                     header = "name,prediction,influence,"
@@ -1311,9 +1361,7 @@ class STGWR:
 
                 # Save results:
                 varNames = self.feature_names
-                if self.fit_intercept:
-                    varNames = ["intercept"] + list(varNames)
-                # Columns for coefficients and squared canonical coefficients:
+                # Columns for the possible intercept, coefficients and squared canonical coefficients:
                 for x in varNames:
                     header += "b_" + x + ","
                 for x in varNames:
@@ -1379,9 +1427,10 @@ class STGWR:
     def fit(
         self,
         y: Optional[pd.DataFrame] = None,
-        X: Optional[pd.DataFrame] = None,
+        X: Optional[np.ndarray] = None,
         multiscale: bool = False,
         signaling_type: Optional[str] = None,
+        verbose: bool = True,
     ) -> Optional[Tuple[Union[None, Dict[str, np.ndarray]], Dict[str, float]]]:
         """For each column of the dependent variable array, fit model. If given bandwidth, run :func
         `STGWR.mpi_fit()` with the given bandwidth. Otherwise, compute optimal bandwidth using :func
@@ -1396,6 +1445,8 @@ class STGWR:
             multiscale: Set True to indicate that a multiscale model should be fitted
             signaling_type: Optional category for the interaction, one of "Cell-Cell Contact", "Diffusive Signaling"
                 (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor".
+            verbose: Set True to print out information about the bandwidth selection and/or fitting process. Will be
+                False for most multiscale runs, but defaults to True.
 
         Returns:
             all_data: Dictionary containing outputs of :func `STGWR.mpi_fit()` with the chosen or determined bandwidth-
@@ -1414,19 +1465,19 @@ class STGWR:
             y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
         else:
             y_arr = y
-        self.y_arr = y_arr
 
         # Compute fit for each column of the dependent variable array individually- store each output array (if
         # applicable, i.e. if :param `multiscale` is True) and optimal bandwidth (also if applicable, i.e. if :param
         # `multiscale` is True):
         all_data, all_bws = {}, {}
 
-        for target in self.y_arr.columns:
-            y = self.y_arr[target].values
+        for target in y_arr.columns:
+            y = y_arr[target].values
             y = self.comm.bcast(y, root=0)
 
             if self.bw is not None:
-                self.logger.info(f"Starting fitting process for target {target}. Initial bandwidth: {self.bw}.")
+                if verbose:
+                    self.logger.info(f"Starting fitting process for target {target}. Initial bandwidth: {self.bw}.")
                 # If bandwidth is already known, run the main fit function:
                 if X is None:
                     self.mpi_fit(y, self.X, self.bw, final=True)
@@ -1435,7 +1486,10 @@ class STGWR:
                 return
 
             if self.comm.rank == 0:
-                self.logger.info(f"Starting fitting process for target {target}. First finding optimal bandwidth...")
+                if verbose:
+                    self.logger.info(
+                        f"Starting fitting process for target {target}. First finding optimal " f"bandwidth..."
+                    )
                 self._set_search_range(signaling_type=signaling_type)
                 if not multiscale:
                     self.logger.info(f"Calculated bandwidth range over which to search: {self.minbw}-{self.maxbw}.")
@@ -1447,12 +1501,15 @@ class STGWR:
             if X is None:
                 fit_function = lambda bw: self.mpi_fit(y, self.X, bw, final=False, multiscale=multiscale)
             else:
-                fit_function = lambda bw: self.mpi_fit(y, X.values, bw, final=False, multiscale=multiscale)
+                fit_function = lambda bw: self.mpi_fit(y, X, bw, final=False, multiscale=multiscale)
             optimal_bw = self.find_optimal_bw(self.minbw, self.maxbw, fit_function)
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)
 
-            data = self.mpi_fit(y, X, optimal_bw, final=True, multiscale=multiscale, y_label=target)
+            if X is None:
+                data = self.mpi_fit(y, self.X, optimal_bw, final=True, multiscale=multiscale, y_label=target)
+            else:
+                data = self.mpi_fit(y, X, optimal_bw, final=True, multiscale=multiscale, y_label=target)
             if data is not None:
                 all_data[target] = data
             all_bws[target] = optimal_bw
@@ -1538,12 +1595,12 @@ class STGWR:
         # Print R-squared for Gaussian assumption:
         if self.distr == "gaussian":
             if r_squared is None:
-                self.logger.error(":param `r_squared` must be provided when performing Gaussian regression.")
+                raise ValueError(":param `r_squared` must be provided when performing Gaussian regression.")
             self.logger.info(f"R-squared for {y_label} model: {r_squared}")
         # Else log the deviance:
         else:
             if deviance is None:
-                self.logger.error(":param `deviance` must be provided when performing non-Gaussian regression.")
+                raise ValueError(":param `deviance` must be provided when performing non-Gaussian regression.")
             self.logger.info(f"Deviance for {y_label} model: {deviance}")
 
     # ---------------------------------------------------------------------------------------------------
@@ -1562,7 +1619,7 @@ class STGWR:
             betas: Model coefficients
         """
         # Check if output_path was left as the default:
-        if self.output_path == "./output/stgwr_results.csv":
+        if os.path.dirname(self.output_path) == "./output":
             if not os.path.exists("./output"):
                 os.makedirs("./output")
 
@@ -1640,7 +1697,7 @@ class STGWR:
 
 
 # Multiscale Spatially-weighted Inference of Cell-cell communication:
-class MuSIC(STGWR):
+class MuSIC(SWR):
     """Modified version of the spatially weighted regression on spatial omics data with parallel processing,
     enabling each feature to have its own distinct spatial scale parameter. Runs after being called from the command
     line.
@@ -1756,8 +1813,9 @@ class MuSIC(STGWR):
         # Optional, to save the dispersion parameter for negative binomial fitted to each target:
         self.nb_disp_dict = {}
 
-        for target in self.y_arr.columns:
-            y = self.y_arr[target].values
+        y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
+        for target in y_arr.columns:
+            y = y_arr[target].values
             y_label = target + "_multiscale_backfitting"
 
             # Initial values- multiply input by the array corresponding to the correct target:
@@ -1780,9 +1838,13 @@ class MuSIC(STGWR):
                 new_betas = np.empty(linear_predictors.shape, dtype=np.float64)
 
                 for n_feat in range(self.n_features):
-                    signaling_type = self.signaling_types[n_feat]
-                    # Use each individual feature to predict the response:
-                    temp_y = (y_pred_init[:, n_feat] - error).reshape(-1, 1)
+                    if self.adata_path is not None:
+                        signaling_type = self.signaling_types[n_feat]
+                    else:
+                        signaling_type = None
+                    # Use each individual feature to predict the response- note y is set up as a DataFrame because in
+                    # other cases column names/target names are taken from y:
+                    temp_y = pd.DataFrame((y_pred_init[:, n_feat] + error).reshape(-1, 1), columns=[target + " temp"])
                     temp_X = (self.X[:, n_feat]).reshape(-1, 1)
 
                     # Check if the bandwidth has plateaued for all features in this iteration:
@@ -1790,9 +1852,13 @@ class MuSIC(STGWR):
                         # Use the bandwidths from the previous iteration before plateau was determined to have been
                         # reached:
                         bw = bws[n_feat]
-                        betas = self.mpi_fit(temp_y, temp_X, bw, final=True, multiscale=True)
+                        betas = self.mpi_fit(temp_y.values, temp_X, bw, final=True, multiscale=True)
                     else:
-                        betas, bw = self.fit(temp_y, temp_X, multiscale=True, signaling_type=signaling_type)
+                        betas, bw_dict = self.fit(
+                            temp_y, temp_X, multiscale=True, signaling_type=signaling_type, verbose=False
+                        )
+                        # Get coefficients for this particular target:
+                        betas = betas[target + " temp"]
 
                     # Update the linear predictor and betas:
                     new_v = (temp_X * betas).reshape(-1)
@@ -1800,10 +1866,11 @@ class MuSIC(STGWR):
                         new_y = self.distr_obj.predict(new_v)
                     else:
                         new_y = new_v
-                    error = temp_y.reshape(-1) - new_y
+                    error = temp_y.values.reshape(-1) - new_y
                     new_ys[:, n_feat] = new_y
                     new_betas[:, n_feat] = betas.reshape(-1)
-                    bws[n_feat] = bw
+                    # Update running list of bandwidths for this feature:
+                    bws[n_feat] = bw_dict[target + " temp"]
 
                 # Check if ALL bandwidths remain the same between iterations:
                 if (iter > 1) and np.all(bw_history[-1] == bws):
@@ -1878,9 +1945,7 @@ class MuSIC(STGWR):
             # Save results without standard errors or influence measures:
             if self.comm.rank == 0 and self.multiscale_params_only:
                 varNames = self.feature_names
-                if self.fit_intercept:
-                    varNames = ["intercept"] + list(varNames)
-                # Save parameter estimates:
+                # Save intercept and parameter estimates:
                 for x in varNames:
                     header += "b_" + x + ","
 
@@ -1889,7 +1954,6 @@ class MuSIC(STGWR):
                 output = np.hstack([self.sample_names, error.reshape(-1, 1), self.params_all_targets[target]])
                 self.save_results(header, output, label=y_label)
 
-    # noinspection PyCallingNonCallable
     def chunk_compute_metrics(self, chunk_id: int = 0, target_label: Optional[str] = None):
         """Compute multiscale inference by chunks to reduce memory footprint- used to calculate metrics to estimate
         the importance of each feature to the variance in the data.
@@ -1959,7 +2023,7 @@ class MuSIC(STGWR):
                             kernel=self.kernel,
                             # Use the bandwidth from the ith iteration for the jth independent variable:
                             bw=bw_history[i, j],
-                        ).reshape(-1, 1)
+                        ).reshape(-1)
 
                         xw = X_j * wi
                         proj_j[k, :] = X_j[index] / np.sum(xw * X_j) * xw
@@ -1994,11 +2058,12 @@ class MuSIC(STGWR):
             )
             return
 
-        # Check that initial bandwidths and bandwidth history are present (e.g. that :func `backfitting` has been
-        # called):
-        if not hasattr(self, "init_bandwidth"):
-            self.logger.error(
-                "Initial bandwidths must be computed before calling `multiscale_fit`. Run :func " "`backfitting` first."
+        # Check that initial bandwidths and bandwidth history are present (e.g. that :func `multiscale_backfitting` has
+        # been called):
+        if not hasattr(self, "all_bws_history"):
+            raise ValueError(
+                "Initial bandwidths must be computed before calling `multiscale_fit`. Run :func "
+                "`multiscale_backfitting` first."
             )
 
         if self.comm.rank == 0:
@@ -2007,7 +2072,8 @@ class MuSIC(STGWR):
         self.n_chunks = self.comm.size * n_chunks
         self.chunks = np.arange(self.comm.rank * n_chunks, (self.comm.rank + 1) * n_chunks)
 
-        for target_label in self.y_arr.columns:
+        y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
+        for target_label in y_arr.columns:
             # Fitted coefficients, errors and predictions:
             parameters = self.params_all_targets[target_label]
             errors = self.errors_all_targets[target_label]
@@ -2033,7 +2099,7 @@ class MuSIC(STGWR):
                 lvg_list = np.array(self.comm.gather(lvg_list, root=0))
 
             if self.comm.rank == 0:
-                indices = self.sample_names
+                indices = np.array(self.sample_names).reshape(-1, 1)
                 # Compile results from all chunks to get the estimated number of parameters for this response variable:
                 ENP = np.sum(np.vstack(ENP_list), axis=0)
 
@@ -2055,7 +2121,7 @@ class MuSIC(STGWR):
                     self.output_diagnostics(aicc, ENP, r_squared=r_squared, deviance=None, y_label=y_label)
 
                     header = "index,residual,"
-                    outputs = np.hstack([indices, errors.reshape(-1, 1), parameters.reshape(-1, 1), standard_error])
+                    outputs = np.hstack([indices, errors.reshape(-1, 1), parameters, standard_error])
 
                 if self.distr == "poisson" or self.distr == "nb":
                     # Get deviances corresponding to this feature:
@@ -2077,8 +2143,7 @@ class MuSIC(STGWR):
                     )
 
                 varNames = self.feature_names
-                if self.fit_intercept:
-                    varNames = ["intercept"] + list(varNames)
+                # Save intercept and parameter estimates:
                 for x in varNames:
                     header += "b_" + x + ","
                 for x in varNames:

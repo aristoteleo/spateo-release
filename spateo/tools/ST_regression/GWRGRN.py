@@ -25,13 +25,13 @@ from spateo.tools.find_neighbors import transcriptomic_connectivity
 from spateo.tools.spatial_degs import moran_i
 from spateo.tools.ST_regression.distributions import NegativeBinomial, Poisson
 from spateo.tools.ST_regression.regression_utils import smooth
-from spateo.tools.ST_regression.STGWR import STGWR
+from spateo.tools.ST_regression.SWR import SWR
 
 
 # ---------------------------------------------------------------------------------------------------
 # GWR for inferring gene regulatory networks
 # ---------------------------------------------------------------------------------------------------
-class GWRGRN(STGWR):
+class GWRGRN(SWR):
     """
     Construct regulatory networks, taking prior knowledge network and spatial expression patterns into account.
 
@@ -372,7 +372,7 @@ class GWRGRN(STGWR):
         self,
         y: Optional[pd.DataFrame] = None,
         X: Optional[pd.DataFrame] = None,
-        mgwr: bool = False,
+        multiscale: bool = False,
     ):
         """For each column of the dependent variable array (in this specific case, for each gene expression vector
         for ligands/receptors/other targets), fit model. If given bandwidth, run :func `STGWR.mpi_fit()` with the
@@ -384,15 +384,15 @@ class GWRGRN(STGWR):
                 individual column will serve as an independent variable).
             X: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
                 None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
-            mgwr: Set True to indicate that a multiscale model should be fitted
+            multiscale: Set True to indicate that a multiscale model should be fitted
 
         Returns:
             all_data: Dictionary containing outputs of :func `STGWR.mpi_fit()` with the chosen or determined bandwidth-
-                note that this will either be None or in the case that :param `mgwr` is True, an array of shape [
-                n_samples, n_features] representing the coefficients for each sample (if :param `mgwr` is False,
+                note that this will either be None or in the case that :param `multiscale` is True, an array of shape [
+                n_samples, n_features] representing the coefficients for each sample (if :param `multiscale` is False,
                 these arrays will instead be saved to file).
             all_bws: Dictionary containing outputs in the case that bandwidth is not already known, resulting from
-                the conclusion of the optimization process. Will also be None if :param `mgwr` is True.
+                the conclusion of the optimization process. Will also be None if :param `multiscale` is True.
         """
 
         if y is None:
@@ -402,6 +402,6 @@ class GWRGRN(STGWR):
         if X is None:
             X = self.X
 
-        all_data, all_bws = self.fit(y_arr, X, mgwr=mgwr)
+        all_data, all_bws = self.fit(y_arr, X, multiscale=multiscale)
 
         return all_data, all_bws

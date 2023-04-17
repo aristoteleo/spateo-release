@@ -1,6 +1,6 @@
 """
 Enables STGWR to be run using the "run" command rather than needing to navigate to and call the main file
-(STGWR_mpi.py).
+(SWR_mpi.py).
 """
 import os
 import sys
@@ -215,7 +215,7 @@ def run_STGWR(
         params_only:
     """
 
-    mpi_path = os.path.dirname(fast_stgwr.__file__) + "/STGWR_mpi.py"
+    mpi_path = os.path.dirname(fast_stgwr.__file__) + "/SWR_mpi.py"
 
     command = (
         "mpiexec "

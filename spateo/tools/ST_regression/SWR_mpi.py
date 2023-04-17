@@ -5,7 +5,7 @@ import pandas as pd
 from GWRGRN import GWRGRN
 from mpi4py import MPI
 from regression_utils import multicollinearity_check
-from STGWR import STGWR
+from SWR import SWR, MuSIC
 
 if __name__ == "__main__":
     # From the command line, run spatial GWR
@@ -131,11 +131,15 @@ if __name__ == "__main__":
             "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
             "case, it is advisable to reduce the number of parameters."
         )
+        multiscale_model = MuSIC(comm, parser)
+        multiscale_model.multiscale_backfitting()
+        multiscale_model.multiscale_compute_metrics(int(n_multiscale_chunks))
+        multiscale_model.predict_and_save()
 
     else:
-        test_model = STGWR(comm, parser)
-        test_model.fit()
-        test_model.predict_and_save()
+        swr_model = SWR(comm, parser)
+        swr_model.fit()
+        swr_model.predict_and_save()
 
     t_last = MPI.Wtime()
 

@@ -4,4 +4,4 @@ General and generalized linear modeling of spatial transcriptomics
 Option to call functions from ST_regression (e.g. st.tl.ST_regression.Niche_Model) or directly from Spateo (e.g.
 st.tl.Niche_Model).
 """
-from .STGWR import STGWR
+from .SWR import SWR
