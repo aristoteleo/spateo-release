@@ -24,14 +24,14 @@ from spateo.preprocessing.transform import log1p
 from spateo.tools.find_neighbors import transcriptomic_connectivity
 from spateo.tools.spatial_degs import moran_i
 from spateo.tools.ST_regression.distributions import NegativeBinomial, Poisson
-from spateo.tools.ST_regression.regression_utils import smooth
-from spateo.tools.ST_regression.SWR import SWR
+from spateo.tools.ST_regression.regression_utils import multicollinearity_check, smooth
+from spateo.tools.ST_regression.SWR import MuSIC
 
 
 # ---------------------------------------------------------------------------------------------------
 # GWR for inferring gene regulatory networks
 # ---------------------------------------------------------------------------------------------------
-class GWRGRN(SWR):
+class GWRGRN(MuSIC):
     """
     Construct regulatory networks, taking prior knowledge network and spatial expression patterns into account.
 
@@ -359,9 +359,43 @@ class GWRGRN(SWR):
             index=self.adata.obs_names,
             columns=regulators,
         )
-        self.X = self.regulators_expr.values
 
-        # To initialize coefficients, filter the GRN rows and columns to only include the regulators and targets:
+        # If :attr `multicollinear_threshold` is given, drop multicollinear features:
+        if self.multicollinear_threshold is not None:
+            self.regulators_expr = multicollinearity_check(
+                self.regulators_expr, self.multicollinear_threshold, logger=self.logger
+            )
+
+        self.X = self.regulators_expr.values
+        self.feature_names = list(self.regulators_expr.columns)
+
+        # Optionally, add continuous covariate value for each cell:
+        if self.covariate_keys is not None:
+            matched_obs = []
+            matched_var_names = []
+            for key in self.covariate_keys:
+                if key in self.adata.obs:
+                    matched_obs.append(key)
+                elif key in self.adata.var_names:
+                    matched_var_names.append(key)
+                else:
+                    self.logger.info(
+                        f"Specified covariate key '{key}' not found in adata.obs. Not adding this "
+                        f"covariate to the X matrix."
+                    )
+            matched_obs_matrix = self.adata.obs[matched_obs].to_numpy()
+            matched_var_matrix = self.adata[:, matched_var_names].X.toarray()
+            cov_names = matched_obs + matched_var_names
+            concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
+            self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
+            self.feature_names += cov_names
+
+            if self.fit_intercept:
+                self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
+                self.feature_names = ["intercept"] + self.feature_names
+
+        # To initialize coefficients, filter the GRN rows and columns to only include the regulators and targets-
+        # note that initial betas will only be used in Poisson / negative binomial regressions:
         self.all_betas = {}
         grn = grn.loc[all_molecule_targets, regulators]
         for row in grn.index:
@@ -371,12 +405,11 @@ class GWRGRN(SWR):
     def grn_fit(
         self,
         y: Optional[pd.DataFrame] = None,
-        X: Optional[pd.DataFrame] = None,
-        multiscale: bool = False,
+        X: Optional[np.ndarray] = None,
     ):
         """For each column of the dependent variable array (in this specific case, for each gene expression vector
-        for ligands/receptors/other targets), fit model. If given bandwidth, run :func `STGWR.mpi_fit()` with the
-        given bandwidth. Otherwise, compute optimal bandwidth using :func `STGWR.select_optimal_bw()`, minimizing AICc.
+        for ligands/receptors/other targets), fit model. If given bandwidth, run :func `SWR.mpi_fit()` with the
+        given bandwidth. Otherwise, compute optimal bandwidth using :func `SWR.select_optimal_bw()`, minimizing AICc.
 
         Args:
             y: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
@@ -387,14 +420,13 @@ class GWRGRN(SWR):
             multiscale: Set True to indicate that a multiscale model should be fitted
 
         Returns:
-            all_data: Dictionary containing outputs of :func `STGWR.mpi_fit()` with the chosen or determined bandwidth-
+            all_data: Dictionary containing outputs of :func `SWR.mpi_fit()` with the chosen or determined bandwidth-
                 note that this will either be None or in the case that :param `multiscale` is True, an array of shape [
                 n_samples, n_features] representing the coefficients for each sample (if :param `multiscale` is False,
                 these arrays will instead be saved to file).
             all_bws: Dictionary containing outputs in the case that bandwidth is not already known, resulting from
                 the conclusion of the optimization process. Will also be None if :param `multiscale` is True.
         """
-
         if y is None:
             y_arr = self.molecule_expr
         else:
@@ -402,6 +434,20 @@ class GWRGRN(SWR):
         if X is None:
             X = self.X
 
-        all_data, all_bws = self.fit(y_arr, X, multiscale=multiscale)
+        all_data, all_bws = self.fit(y_arr, X, init_betas=self.all_betas, multiscale=False)
 
         return all_data, all_bws
+
+    def grn_fit_multiscale(
+        self,
+        y: Optional[pd.DataFrame] = None,
+        X: Optional[np.ndarray] = None,
+    ):
+        if y is None:
+            y_arr = self.molecule_expr
+        else:
+            y_arr = y
+        if X is None:
+            X = self.X
+
+        self.multiscale_backfitting(y_arr, X, init_betas=self.all_betas)

@@ -29,7 +29,11 @@ if __name__ == "__main__":
     # into consideration.
     parser.add_argument("-multiscale_params_only", action="store_true")
     # Flag to return additional metrics along with the coefficients for multiscale models.
-    parser.add_argument("-grn", action="store_true", help="If this argument is provided, 'mod_type' will not be used.")
+    parser.add_argument(
+        "-grn",
+        action="store_true",
+        help="Indicates that a GRN model should be run. If this argument " "is provided, 'mod_type' will not be used.",
+    )
     parser.add_argument("-mod_type", type=str)
     parser.add_argument("-cci_dir", type=str)
     parser.add_argument("-species", type=str, default="human")
@@ -133,7 +137,7 @@ if __name__ == "__main__":
         )
         multiscale_model = MuSIC(comm, parser)
         multiscale_model.multiscale_backfitting()
-        multiscale_model.multiscale_compute_metrics(int(n_multiscale_chunks))
+        multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
         multiscale_model.predict_and_save()
 
     else:

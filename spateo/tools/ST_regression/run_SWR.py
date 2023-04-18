@@ -116,7 +116,7 @@ def main():
 @click.option("kernel", default="bisquare")
 @click.option("distr", default="gaussian")
 @click.option("fit_intercept", default=False, is_flag=True)
-@click.option("tolerance", default=1e-5)
+@click.option("tolerance", default=1e-3)
 @click.option("max_iter", default=1000)
 @click.option(
     "patience",

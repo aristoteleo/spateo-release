@@ -242,6 +242,10 @@ class SWR:
         """
         self.arg_retrieve = self.parser.parse_args()
         self.mod_type = self.arg_retrieve.mod_type
+        # GRN inherits from this class and has slightly different preprocessing options that can be accessed using
+        # its own flag:
+        self.grn = self.arg_retrieve.grn
+
         self.adata_path = self.arg_retrieve.adata_path
         self.csv_path = self.arg_retrieve.csv_path
         self.cci_dir = self.arg_retrieve.cci_dir
@@ -323,7 +327,7 @@ class SWR:
         # Helpful messages at process start:
         if self.comm.rank == 0:
             print("-" * 60, flush=True)
-            self.logger.info(f"Running STGWR on {self.comm.size} processes...")
+            self.logger.info(f"Running SWR on {self.comm.size} processes...")
             fixed_or_adaptive = "Fixed " if self.bw_fixed else "Adaptive "
             type = fixed_or_adaptive + self.kernel.capitalize()
             self.logger.info(f"Spatial kernel: {type}")
@@ -740,6 +744,8 @@ class SWR:
         self.all_spatial_weights = self._compute_all_wi(init_bw)
         self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
 
+        # PLACEHOLDER FOR STRATIFIED SAMPLING:
+
     def _set_search_range(self, signaling_type: Optional[str] = None):
         """Set the search range for the bandwidth selection procedure.
 
@@ -1035,6 +1041,21 @@ class SWR:
                     self.signaling_types = "Cell-Cell Contact"
             self.signaling_types = self.comm.bcast(self.signaling_types, root=0)
 
+    def _adjust_x_nbhd_convolve(self, y: np.ndarray, X: np.ndarray):
+        """Adjust the independent and dependent variable arrays based on the defined bandwidth. Used specifically to
+        incorporate the neighborhood values of X and y for cell-intrinsic models. As models that use this inherit
+        from this class, y and X need to be manually provided.
+
+        Returns:
+            y: Adjusted dependent variable array
+            X: Adjusted independent variable array
+        """
+        y = self.all_spatial_weights.dot(y)
+        for i in range(X.shape[1]):
+            X[:, i] = self.all_spatial_weights.dot(X[:, i])
+
+        return y, X
+
     def hessian(self, fitted: np.ndarray) -> np.ndarray:
         """Compute the Hessian matrix for the given model, representing the confidence in the parameter estimates.
 
@@ -1119,6 +1140,8 @@ class SWR:
                 alpha=self.alpha,
                 tau=None,
             )
+            # if (i + 1) % 1000 == 0 or i == self.n_samples - 1:
+            #     self.logger.info(f"Completed IWLS fitting for sample {i+1} / {self.n_samples}.")
 
             # Reshape coefficients if necessary:
             betas = betas.flatten()
@@ -1215,6 +1238,8 @@ class SWR:
                 difference = lb_score - ub_score
                 # Update new value for score:
                 score = optimum_score
+            # self.logger.info(f"Iteration {iterations}- optimum bandwidth: {optimum_bw}, difference: "
+            #                  f"{np.abs(difference)}.")
 
             new_lb = self.comm.bcast(new_lb, root=0)
             new_ub = self.comm.bcast(new_ub, root=0)
@@ -1264,6 +1289,13 @@ class SWR:
             n_features = self.comm.bcast(n_features, root=0)
         else:
             n_features = self.n_features
+
+        if self.grn:
+            self.all_spatial_weights = self._compute_all_wi(bw)
+            # Row standardize spatial weights so as to ensure results aren't biased by the number of neighbors of
+            # each cell:
+            self.all_spatial_weights = self.all_spatial_weights / self.all_spatial_weights.sum(axis=1)[:, None]
+            y, X = self._adjust_x_nbhd_convolve(y, X)
 
         if final:
             if multiscale:
@@ -1428,6 +1460,7 @@ class SWR:
         self,
         y: Optional[pd.DataFrame] = None,
         X: Optional[np.ndarray] = None,
+        init_betas: Optional[Dict[str, np.ndarray]] = None,
         multiscale: bool = False,
         signaling_type: Optional[str] = None,
         verbose: bool = True,
@@ -1439,9 +1472,12 @@ class SWR:
         Args:
             y: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
                 None, will use :attr `targets_expr` computed using the given AnnData object to create this (each
-                individual column will serve as an independent variable).
-            X: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
+                individual column will serve as an independent variable). Needed to be given as a dataframe so that
+                column(s) are labeled, so each result can be associated with a labeled dependent variable.
+            X: Optional array, can be used to provide dependent variable array directly to the fit function. If
                 None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
+            init_betas: Optional dictionary containing arrays with initial values for the coefficients. Keys should
+                correspond to target genes and values should be arrays of shape [n_features, 1].
             multiscale: Set True to indicate that a multiscale model should be fitted
             signaling_type: Optional category for the interaction, one of "Cell-Cell Contact", "Diffusive Signaling"
                 (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor".
@@ -1465,6 +1501,12 @@ class SWR:
             y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
         else:
             y_arr = y
+            y_arr = self.comm.bcast(y_arr, root=0)
+
+        if X is None:
+            X = self.X
+        else:
+            X = self.comm.bcast(X, root=0)
 
         # Compute fit for each column of the dependent variable array individually- store each output array (if
         # applicable, i.e. if :param `multiscale` is True) and optimal bandwidth (also if applicable, i.e. if :param
@@ -1474,15 +1516,15 @@ class SWR:
         for target in y_arr.columns:
             y = y_arr[target].values
             y = self.comm.bcast(y, root=0)
+            # Check for initial weights:
+            if init_betas is not None:
+                self.init_betas = init_betas[target].reshape(-1, 1)
 
             if self.bw is not None:
                 if verbose:
                     self.logger.info(f"Starting fitting process for target {target}. Initial bandwidth: {self.bw}.")
                 # If bandwidth is already known, run the main fit function:
-                if X is None:
-                    self.mpi_fit(y, self.X, self.bw, final=True)
-                else:
-                    self.mpi_fit(y, X, self.bw, final=True)
+                self.mpi_fit(y, X, self.bw, final=True)
                 return
 
             if self.comm.rank == 0:
@@ -1498,18 +1540,12 @@ class SWR:
 
             # Searching for optimal bandwidth- set final=False to return AICc for each run of the optimization
             # function:
-            if X is None:
-                fit_function = lambda bw: self.mpi_fit(y, self.X, bw, final=False, multiscale=multiscale)
-            else:
-                fit_function = lambda bw: self.mpi_fit(y, X, bw, final=False, multiscale=multiscale)
+            fit_function = lambda bw: self.mpi_fit(y, X, bw, final=False, multiscale=multiscale)
             optimal_bw = self.find_optimal_bw(self.minbw, self.maxbw, fit_function)
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)
 
-            if X is None:
-                data = self.mpi_fit(y, self.X, optimal_bw, final=True, multiscale=multiscale, y_label=target)
-            else:
-                data = self.mpi_fit(y, X, optimal_bw, final=True, multiscale=multiscale, y_label=target)
+            data = self.mpi_fit(y, X, optimal_bw, final=True, multiscale=multiscale, y_label=target)
             if data is not None:
                 all_data[target] = data
             all_bws[target] = optimal_bw
@@ -1779,19 +1815,35 @@ class MuSIC(SWR):
     def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser):
         super().__init__(comm, parser)
 
-    def multiscale_backfitting(self):
+    def multiscale_backfitting(
+        self,
+        y: Optional[pd.DataFrame] = None,
+        X: Optional[np.ndarray] = None,
+        init_betas: Optional[Dict[str, np.ndarray]] = None,
+    ):
         """
         Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths by iterating one
         predictor while holding all others constant. Run before :func `fit` to obtain initial covariate-specific
         bandwidths.
 
         Reference: Fotheringham et al. 2017. Annals of AAG.
+
+        Args:
+            y: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
+                None, will use :attr `targets_expr` computed using the given AnnData object to create this (each
+                individual column will serve as an independent variable). Needed to be given as a dataframe so that
+                column(s) are labeled, so each result can be associated with a labeled dependent variable.
+            X: Optional array, can be used to provide dependent variable array directly to the fit function. If
+                None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
+            init_betas: Optional dictionary containing arrays with initial values for the coefficients. Keys should
+                correspond to target genes and values should be arrays of shape [n_features, 1].
         """
         if self.comm.rank == 0:
             self.logger.info("Multiscale Backfitting...")
+            self.logger.info("Finding uniform initial bandwidth for all features...")
 
         # Initialize parameters, with a uniform initial bandwidth for all features:
-        all_betas, all_bws = self.fit(multiscale=True)
+        all_betas, all_bws = self.fit(multiscale=True, init_betas=init_betas)
 
         self.all_bws_init = all_bws
 
@@ -1813,13 +1865,23 @@ class MuSIC(SWR):
         # Optional, to save the dispersion parameter for negative binomial fitted to each target:
         self.nb_disp_dict = {}
 
-        y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
+        if y is None:
+            y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
+        else:
+            y_arr = y
+            y_arr = self.comm.bcast(y_arr, root=0)
+
+        if X is None:
+            X = self.X
+        else:
+            X = self.comm.bcast(X, root=0)
+
         for target in y_arr.columns:
             y = y_arr[target].values
             y_label = target + "_multiscale_backfitting"
 
             # Initial values- multiply input by the array corresponding to the correct target:
-            linear_predictors = self.X * all_betas[target]
+            linear_predictors = X * all_betas[target]
             # Array of shape [n_samples, n_features] containing initial spatially-weighted regression predictions:
             if self.distr != "gaussian":
                 y_pred_init = self.distr_obj.predict(linear_predictors)
@@ -1838,14 +1900,15 @@ class MuSIC(SWR):
                 new_betas = np.empty(linear_predictors.shape, dtype=np.float64)
 
                 for n_feat in range(self.n_features):
+                    self.logger.info(f"Backfitting for independent feature {self.feature_names[n_feat]}")
                     if self.adata_path is not None:
                         signaling_type = self.signaling_types[n_feat]
                     else:
                         signaling_type = None
                     # Use each individual feature to predict the response- note y is set up as a DataFrame because in
                     # other cases column names/target names are taken from y:
-                    temp_y = pd.DataFrame((y_pred_init[:, n_feat] + error).reshape(-1, 1), columns=[target + " temp"])
-                    temp_X = (self.X[:, n_feat]).reshape(-1, 1)
+                    temp_y = pd.DataFrame((y_pred_init[:, n_feat] + error).reshape(-1, 1), columns=[target])
+                    temp_X = (X[:, n_feat]).reshape(-1, 1)
 
                     # Check if the bandwidth has plateaued for all features in this iteration:
                     if bw_plateau_counter > self.patience:
@@ -1855,10 +1918,15 @@ class MuSIC(SWR):
                         betas = self.mpi_fit(temp_y.values, temp_X, bw, final=True, multiscale=True)
                     else:
                         betas, bw_dict = self.fit(
-                            temp_y, temp_X, multiscale=True, signaling_type=signaling_type, verbose=False
+                            temp_y,
+                            temp_X,
+                            init_betas=init_betas,
+                            multiscale=True,
+                            signaling_type=signaling_type,
+                            verbose=False,
                         )
                         # Get coefficients for this particular target:
-                        betas = betas[target + " temp"]
+                        betas = betas[target]
 
                     # Update the linear predictor and betas:
                     new_v = (temp_X * betas).reshape(-1)
@@ -1870,7 +1938,7 @@ class MuSIC(SWR):
                     new_ys[:, n_feat] = new_y
                     new_betas[:, n_feat] = betas.reshape(-1)
                     # Update running list of bandwidths for this feature:
-                    bws[n_feat] = bw_dict[target + " temp"]
+                    bws[n_feat] = bw_dict[target]
 
                 # Check if ALL bandwidths remain the same between iterations:
                 if (iter > 1) and np.all(bw_history[-1] == bws):
@@ -1903,7 +1971,7 @@ class MuSIC(SWR):
                 deviance = 2 * np.sum(
                     weights * (y * np.log(y / y_pred) + (theta - 1) * np.log(1 + y_pred[:, 1] / (theta - 1)))
                 )
-                dof = len(y) - self.X.shape[1]
+                dof = len(y) - X.shape[1]
                 self.nb_disp_dict[target] = deviance / dof
 
             bw_history = np.array(bw_history)
@@ -1954,12 +2022,18 @@ class MuSIC(SWR):
                 output = np.hstack([self.sample_names, error.reshape(-1, 1), self.params_all_targets[target]])
                 self.save_results(header, output, label=y_label)
 
-    def chunk_compute_metrics(self, chunk_id: int = 0, target_label: Optional[str] = None):
+    def chunk_compute_metrics(
+        self, X: Optional[np.ndarray] = None, chunk_id: int = 0, target_label: Optional[str] = None
+    ):
         """Compute multiscale inference by chunks to reduce memory footprint- used to calculate metrics to estimate
         the importance of each feature to the variance in the data.
         Reference: Li and Fotheringham, 2020. IJGIS and Yu et al., 2019. GA.
 
         Args:
+            X: Optional array, can be used to provide dependent variable array directly to the fit function. If
+                None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
+                Must be the same X array as was used to fit the model (i.e. the same X given to :func
+                `multiscale_backfitting`).
             chunk_id: Numerical index of the partition to be computed
             target_label: Name of the target variable to compute. Must be one of the keys of the :attr `all_bws_init`
                 dictionary.
@@ -1970,6 +2044,9 @@ class MuSIC(SWR):
                 and the response variable for the desired chunk
             cov_chunk: Only returned if model is a GLM- covariance matrix for the desired chunk
         """
+        if X is None:
+            X = self.X
+
         bw = self.all_bws_init[target_label]
         bw_history = self.all_bws_history[target_label]
 
@@ -1993,12 +2070,12 @@ class MuSIC(SWR):
             wi = get_wi(
                 i, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
             ).reshape(-1, 1)
-            xT = (self.X * wi).T
+            xT = (X * wi).T
             # Reconstitute the response-input mapping, but only for the current chunk:
-            proj = np.linalg.solve(xT.dot(self.X), xT).dot(init_partial_hat).T
+            proj = np.linalg.solve(xT.dot(X), xT).dot(init_partial_hat).T
 
             # Estimate the hat matrix, but only for the current chunk:
-            partial_hat_i = proj * self.X[i]
+            partial_hat_i = proj * X[i]
             partial_hat[i, :, :] = partial_hat_i
 
         error = init_partial_hat - np.sum(partial_hat, axis=2)
@@ -2006,7 +2083,7 @@ class MuSIC(SWR):
         for i in range(bw_history.shape[0]):
             for j in range(self.n_features):
                 proj_j_old = partial_hat[:, :, j] + error
-                X_j = self.X[:, j]
+                X_j = X[:, j]
                 chunk_size_j = int(np.ceil(float(self.n_samples / self.n_chunks)))
                 for n in range(self.n_chunks):
                     chunk_index_temp = np.arange(self.n_samples)[n * chunk_size_j : (n + 1) * chunk_size_j]
@@ -2039,18 +2116,27 @@ class MuSIC(SWR):
             ENP_chunk += partial_hat[chunk_index[i], i, :]
         if self.distr == "gaussian":
             for j in range(self.n_features):
-                lvg_chunk[:, j] += ((partial_hat[:, :, j] / self.X[:, j].reshape(-1, 1)) ** 2).sum(axis=1)
+                lvg_chunk[:, j] += ((partial_hat[:, :, j] / X[:, j].reshape(-1, 1)) ** 2).sum(axis=1)
 
             return ENP_chunk, lvg_chunk
         else:
             return ENP_chunk
 
-    def multiscale_compute_metrics(self, n_chunks: int = 2):
+    def multiscale_compute_metrics(self, X: Optional[np.ndarray] = None, n_chunks: int = 2):
         """Compute multiscale inference and output results.
 
         Args:
+            X: Optional array, can be used to provide dependent variable array directly to the fit function. If
+                None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
+                Must be the same X array as was used to fit the model (i.e. the same X given to :func
+                `multiscale_backfitting`).
             n_chunks: Number of partitions comprising each covariate-specific hat matrix.
         """
+        if X is None:
+            X = self.X
+        else:
+            X = self.comm.bcast(X, root=0)
+
         if self.multiscale_params_only:
             self.logger.warning(
                 "Chunked computations will not be performed because `multiscale_params_only` is set to True, "
@@ -2086,11 +2172,11 @@ class MuSIC(SWR):
 
             for chunk in self.chunks:
                 if self.distr == "gaussian":
-                    ENP_chunk, lvg_chunk = self.chunk_compute_metrics(chunk_id=chunk, target_label=target_label)
+                    ENP_chunk, lvg_chunk = self.chunk_compute_metrics(X, chunk_id=chunk, target_label=target_label)
                     ENP_list.append(ENP_chunk)
                     lvg_list.append(lvg_chunk)
                 else:
-                    ENP_chunk = self.chunk_compute_metrics(chunk_id=chunk, target_label=target_label)
+                    ENP_chunk = self.chunk_compute_metrics(X, chunk_id=chunk, target_label=target_label)
                     ENP_list.append(ENP_chunk)
 
             # Gather results from all chunks:
