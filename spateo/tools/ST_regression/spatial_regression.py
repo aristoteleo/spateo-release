@@ -684,6 +684,7 @@ class Base_Model:
                     if not hasattr(self, "w"):
                         self.compute_spatial_weights()
                     from pysal.model import spreg
+
                     rec_lag = spreg.utils.lag_spatial(self.w, rec_expr_values)
                     expr.obs[f"{rec}_lag"] = rec_lag
                 # Multiply one-hot category array by the expression of select receptor within that cell:
@@ -1924,6 +1925,7 @@ class Lagged_Model(Base_Model):
 
         try:
             from pysal.model import spreg
+
             model = spreg.GM_Lag(
                 X[["log_expr"]].values,
                 X[X_variable_names].values,

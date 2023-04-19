@@ -9,9 +9,11 @@ import anndata
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import geopandas
+
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
+
 from ..configuration import SKM
 
 
