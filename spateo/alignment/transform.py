@@ -59,7 +59,6 @@ def BA_transform(
     deformation_scale: int = 1,
     dtype: str = "float64",
     device: str = "cpu",
-    return_similarity: bool = False,
 ):
     """Apply non-rigid transform to the quary points
 
@@ -69,7 +68,6 @@ def BA_transform(
         deformation_scale: If deformation_scale is greater than 1, increase the degree of deformation.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
         device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
-        return_similarity:
     """
     # Determine if gpu or cpu is being used
     nx, type_as = check_backend(device=device, dtype=dtype)
@@ -86,111 +84,28 @@ def BA_transform(
     s = _data(nx, vecfld["s"], type_as)
     R = _data(nx, vecfld["R"], type_as)
     t = _data(nx, vecfld["t"], type_as)
+    optimal_R = _data(nx, vecfld["optimal_R"], type_as)
+    optimal_t = _data(nx, vecfld["optimal_t"], type_as)
+    init_R = _data(nx, vecfld["init_R"], type_as)
+    init_t = _data(nx, vecfld["init_t"], type_as)
+    XA = _dot(nx)(XA, init_R.T) + init_t
+
     beta = vecfld["beta"]
     quary_kernel = con_K(XA, ctrl_pts, beta)
     quary_velocities = _dot(nx)(quary_kernel, Coff) * deformation_scale
     quary_similarity = s * _dot(nx)(XA, R.T) + t
+    quary_optimal_similarity = _dot(nx)(XA, optimal_R.T) + optimal_t
     XAHat = quary_velocities + quary_similarity
 
     if vecfld["normalize_c"]:
         XAHat = XAHat * normalize_scale + normalize_mean_ref
         quary_velocities = quary_velocities * normalize_scale
-        quary_similarity = quary_similarity * normalize_scale + normalize_mean_ref
+        quary_optimal_similarity = quary_optimal_similarity * normalize_scale + normalize_mean_ref
+
     XAHat = nx.to_numpy(XAHat)
     quary_velocities = nx.to_numpy(quary_velocities)
-    quary_similarity = nx.to_numpy(quary_similarity)
-    if return_similarity:
-        return XAHat, quary_velocities, quary_similarity
-    else:
-        return XAHat, quary_velocities
-
-
-# def BA_transform_and_assignment(
-#     samples,
-#     vecfld,
-#     layer: str = "X",
-#     genes: Optional[Union[List, torch.Tensor]] = None,
-#     spatial_key: str = "spatial",
-#     small_variance: bool = True,
-#     dtype: str = "float64",
-#     device: str = "cpu",
-#     verbose: bool = False,
-# ):
-#     # Determine if gpu or cpu is being used
-#     nx, type_as = check_backend(device=device, dtype=dtype)
-#     normalize_scale = _data(nx, vecfld["normalize_scale"], type_as)
-#     normalize_mean_ref = _data(nx, vecfld["normalize_mean_list"][0], type_as)
-#     normalize_mean_quary = _data(nx, vecfld["normalize_mean_list"][1], type_as)
-#     XA = _data(nx, samples[0].obsm[spatial_key], type_as)
-#     XB = _data(nx, samples[1].obsm[spatial_key], type_as)
-
-#     # normalize coordinate
-#     if vecfld["normalize_c"]:
-#         XA = (XA - normalize_mean_quary) / normalize_scale
-#         XB = (XB - normalize_mean_ref) / normalize_scale
-#     ctrl_pts = _data(nx, vecfld["ctrl_pts"], type_as)
-#     Coff = _data(nx, vecfld["Coff"], type_as)
-#     s = _data(nx, vecfld["s"], type_as)
-#     R = _data(nx, vecfld["R"], type_as)
-#     t = _data(nx, vecfld["t"], type_as)
-#     beta = vecfld["beta"]
-#     quary_kernel = con_K(XA, ctrl_pts, beta)
-#     quary_velocities = _dot(nx)(quary_kernel, Coff)
-#     quary_similarity = s * _dot(nx)(XA, R.T) + t
-#     XAHat = quary_velocities + quary_similarity
-
-#     new_samples = [s.copy() for s in samples]
-#     all_samples_genes = [s[0].var.index for s in new_samples]
-#     common_genes = filter_common_genes(*all_samples_genes, verbose=verbose)
-#     common_genes = (
-#         common_genes if genes is None else intersect_lsts(common_genes, genes)
-#     )
-#     new_samples = [s[:, common_genes] for s in new_samples]
-
-#     # Gene expression matrix of all samples
-#     exp_matrices = [
-#         nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as)
-#         for s in new_samples
-#     ]
-#     X_A, X_B = exp_matrices[0], exp_matrices[1]
-#     GeneDistMat = calc_exp_dissimilarity(
-#         X_A=X_A, X_B=X_B, dissimilarity=vecfld["dissimilarity"]
-#     )
-#     NA = vecfld["NA"]
-#     D = XA.shape[1]
-#     beta2 = _data(nx, vecfld["beta2"], type_as)
-#     if small_variance:
-#         sigma2 = _data(nx, 0.01, type_as)
-#     else:
-#         sigma2 = _data(nx, vecfld["sigma2"], type_as)
-#     outlier_g = _data(nx, vecfld["outlier_g"], type_as)
-#     gamma = _data(nx, vecfld["gamma"], type_as)
-#     alpha = nx.ones((XA.shape[0]), type_as=type_as)
-#     Sigma = nx.zeros((XA.shape[0]), type_as=type_as)
-#     SpatialDistMat = ot.dist(XAHat, XB)
-#     if not vecfld.__contains__("samples_s"):
-#         samples_s = nx.maximum(
-#             _prod(nx)(nx.max(XAHat, axis=0) - nx.min(XAHat, axis=0)),
-#             _prod(nx)(nx.max(XB, axis=0) - nx.min(XB, axis=0)),
-#         )
-#     outlier_s = samples_s * NA
-#     term1 = nx.einsum(
-#         "ij,i->ij",
-#         _mul(nx)(
-#             nx.exp(-SpatialDistMat / (2 * sigma2)), nx.exp(-GeneDistMat / (2 * beta2))
-#         ),
-#         (_mul(nx)(alpha, nx.exp(-Sigma / sigma2))),
-#     )
-#     term2 = _power(nx)((2 * _pi(nx) * sigma2), _data(nx, D / 2, type_as)) * (
-#         1 - gamma
-#     ) / (gamma * outlier_s * outlier_g) + nx.einsum("ij->j", term1)
-#     P = term1 / _unsqueeze(nx)(term2, 0)
-#     P = nx.to_numpy(P)
-#     P = P / np.max(P, axis=0)[np.newaxis, :]
-#     if vecfld["normalize_c"]:
-#         XAHat = XAHat * normalize_scale + normalize_mean_ref
-#     XAHat = nx.to_numpy(XAHat)
-#     return P.T, XAHat
+    quary_optimal_similarity = nx.to_numpy(quary_optimal_similarity)
+    return XAHat, quary_velocities, quary_optimal_similarity
 
 
 def BA_transform_and_assignment(
@@ -284,21 +199,3 @@ def BA_transform_and_assignment(
         XAHat = XAHat * normalize_scale + normalize_mean_ref
     XAHat = nx.to_numpy(XAHat)
     return P.T, XAHat
-
-
-def shape_transform(
-    quary_points,
-    transformation,
-):
-    # normalize
-    normalize_scale_list = transformation["normalize_scale_list"]
-    normalize_mean_list_points = transformation["normalize_mean_list_points"]
-    normalize_mean_list_mesh = transformation["normalize_mean_list_mesh"]
-    quary_points_n = (quary_points - normalize_mean_list_points[0]) / normalize_scale_list[0]
-    s = transformation["s"]
-    R = transformation["R"]
-    t = transformation["t"]
-    transformed_quary_points_n = s * np.dot(quary_points_n, R.T) + t
-    # un normalize
-    transformed_quary_points = transformed_quary_points_n * normalize_scale_list[1] + normalize_mean_list_mesh[0]
-    return transformed_quary_points

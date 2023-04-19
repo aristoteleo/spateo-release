@@ -1,11 +1,12 @@
 import os
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import ot
 import pandas as pd
 import torch
 from anndata import AnnData
+from numpy import ndarray
 from scipy.linalg import pinv
 from scipy.sparse import issparse
 from scipy.special import psi
@@ -167,44 +168,27 @@ def normalize_exps(
         nx: The proper backend.
         verbose: If ``True``, print progress updates.
     """
-    # n_matrix_index = [m.shape[0] for m in matrices]
-    # normalize_mean = nx.sum(_data(nx,[nx.sum(m,0) for m in matrices],matrices[0]),0) / sum(n_matrix_index)
-    # # print(normalize_mean.shape)
-    # # matrices = [m - normalize_mean[None,:] for m in matrices]
-    # # normalize_mean = sum([nx.einsum("ij->j", m) for m in matrices]) / (
-    # #     sum(n_matrix_index)
-    # # )
-    # normalize_scale = nx.maximum(
-    #         nx.sqrt(
-    #         sum([nx.sum(m**2,0) for m in matrices]) / sum(n_matrix_index)
-    #     ),
-    #     0.0001
-    # )
+    if type(matrices) in [np.ndarray, torch.Tensor]:
+        matrices = [matrices]
+    normalize_scale = 0
+    normalize_mean_list = []
+    for i in range(len(matrices)):
+        normalize_mean = nx.einsum("ij->j", matrices[i]) / matrices[i].shape[0]
+        normalize_mean_list.append(normalize_mean)
+        # coords[i] -= normalize_mean
+        normalize_scale += nx.sqrt(
+            nx.einsum("ij->", nx.einsum("ij,ij->ij", matrices[i], matrices[i])) / matrices[i].shape[0]
+        )
 
-    # # print(normalize_scale)
-    # N_matrices = [m / normalize_scale for m in matrices]
-
-    n_matrix_index = [m.shape[0] for m in matrices]
-    integrate_matrix = _cat(nx=nx, x=matrices, dim=0)
-
-    normalize_mean = nx.einsum("ij->j", integrate_matrix) / integrate_matrix.shape[0]
-    integrate_matrix = integrate_matrix - normalize_mean
-    normalize_scale = nx.sqrt(
-        nx.einsum("ij->", nx.einsum("ij,ij->ij", integrate_matrix, integrate_matrix)) / integrate_matrix.shape[0]
-    )
-    N_integrate_matrix = integrate_matrix / normalize_scale
-
-    N_matrices, start_i = [], 0
-    for i in n_matrix_index:
-        N_matrices.append(N_integrate_matrix[start_i : start_i + i, :])
-        start_i = start_i + i
-
+    normalize_scale /= len(matrices)
+    for i in range(len(matrices)):
+        matrices[i] /= normalize_scale
     if verbose:
         lm.main_info(message=f"Gene expression normalization params:", indent_level=1)
-        lm.main_info(message=f"Mean: {normalize_mean}.", indent_level=2)
+        # lm.main_info(message=f"Mean: {normalize_mean}.", indent_level=2)
         lm.main_info(message=f"Scale: {normalize_scale}.", indent_level=2)
 
-    return N_matrices
+    return matrices
 
 
 def align_preprocess(
@@ -434,7 +418,7 @@ def kl_distance(
                                             False,
                                         )
                                         + kl_divergence_backend(
-                                            nx.from_numpy(x_Bs, type_as=type_as).cuda(),
+                                            nx.from_numpy(x_Bs, type_as=type_as),
                                             nx.from_numpy(x_As, type_as=type_as),
                                             False,
                                         ).T
@@ -464,7 +448,7 @@ def calc_exp_dissimilarity(
     X_A: Union[np.ndarray, torch.Tensor],
     X_B: Union[np.ndarray, torch.Tensor],
     dissimilarity: str = "kl",
-    **kwargs,
+    chunk_num: int = 1,
 ) -> Union[np.ndarray, torch.Tensor]:
     """
     Calculate expression dissimilarity.
@@ -472,19 +456,42 @@ def calc_exp_dissimilarity(
         X_A: Gene expression matrix of sample A.
         X_B: Gene expression matrix of sample B.
         dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
+
+    Returns:
+        Union[np.ndarray, torch.Tensor]: The dissimilarity matrix of two feature samples.
     """
+    nx = ot.backend.get_backend(X_A, X_B)
+
     assert dissimilarity in [
         "kl",
         "euclidean",
         "euc",
     ], "``dissimilarity`` value is wrong. Available ``dissimilarity`` are: ``'kl'``, ``'euclidean'`` and ``'euc'``."
-    if dissimilarity.lower() == "euclidean" or dissimilarity.lower() == "euc":
-        GeneDistMat = cal_dist(X_A, X_B, **kwargs)
-    else:
-        s_A = X_A + 0.01
-        s_B = X_B + 0.01
-        GeneDistMat = kl_distance(s_A, s_B, **kwargs)
-    return GeneDistMat
+    if dissimilarity.lower() == "kl":
+        X_A = X_A + 0.01
+        X_B = X_B + 0.01
+        X_A = X_A / nx.sum(X_A, axis=1, keepdims=True)
+        X_B = X_B / nx.sum(X_B, axis=1, keepdims=True)
+    while True:
+        try:
+            if chunk_num == 1:
+                DistMat = _dist(X_A, X_B, dissimilarity)
+                break
+            else:
+                X_As = _chunk(nx, X_A, chunk_num, 0)
+                X_Bs = _chunk(nx, X_B, chunk_num, 0)
+                arr = []  # array for temporary storage of results
+                for x_As in X_As:
+                    arr2 = []
+                    for x_Bs in X_Bs:
+                        arr2.append(_dist(x_As, x_Bs, dissimilarity))
+                    arr.append(nx.concatenate(arr2, axis=1))
+                DistMat = nx.concatenate(arr, axis=0)
+                break
+        except:
+            chunk_num = chunk_num * 2
+            print("chunk more")
+    return DistMat
 
 
 def cal_dist(
@@ -492,6 +499,7 @@ def cal_dist(
     X_B: Union[np.ndarray, torch.Tensor],
     use_gpu: bool = True,
     chunk_num: int = 1,
+    return_gpu: bool = True,
 ) -> Union[np.ndarray, torch.Tensor]:
     """Calculate the distance between two vectors
 
@@ -499,7 +507,7 @@ def cal_dist(
         X_A (Union[np.ndarray, torch.Tensor]): The first input vector with shape n x d
         X_B (Union[np.ndarray, torch.Tensor]): The second input vector with shape m x d
         use_gpu (bool, optional): Whether to use GPU for chunk. Defaults to True.
-        chunk_num (int, optional): The number of chunks. The larger the number, the smaller the GPU memory usage, but the slower the calculation speed. Defaults to 20.
+        chunk_num (int, optional): The number of chunks. The larger the number, the smaller the GPU memory usage, but the slower the calculation speed. Defaults to 1.
 
     Returns:
         Union[np.ndarray, torch.Tensor]: Distance matrix of two vectors with shape n x m.
@@ -515,7 +523,7 @@ def cal_dist(
     while True:
         try:
             if chunk_num == 1:
-                DistMat = ot.dist(X_A, X_B)
+                DistMat = _dist(X_A, X_B, "euc")
                 break
             else:
                 # convert to numpy to save the GPU memory
@@ -549,30 +557,9 @@ def cal_dist(
         except:
             chunk_num = chunk_num * 2
             print("dist chunk more")
-    if data_on_gpu and chunk_num != 1:
+    if data_on_gpu and chunk_num != 1 and return_gpu:
         DistMat = DistMat.cuda()
     return DistMat
-
-    # if not use_chunk:
-    #     DistMat = ot.dist(X_A,X_B)
-    #     return DistMat
-    # else:
-    #     # convert to numpy to save the GPU memory
-    #     X_A, X_B = nx.to_numpy(X_A), nx.to_numpy(X_B)
-    #     # chunk
-    #     X_As = np.array_split(X_A, chunk_num, axis=0)
-    #     X_Bs = np.array_split(X_B, chunk_num, axis=0)
-    #     arr = [] # array for temporary storage of results
-    #     for x_As in X_As:
-    #         arr2 = [] # array for temporary storage of results
-    #         for x_Bs in X_Bs:
-    #             if use_gpu:
-    #                 arr2.append(ot.dist(nx.from_numpy(x_As,type_as=type_as).cuda(),nx.from_numpy(x_Bs,type_as=type_as).cuda()).cpu())
-    #             else:
-    #                 arr2.append(ot.dist(nx.from_numpy(x_As,type_as=type_as),nx.from_numpy(x_Bs,type_as=type_as)))
-    #         arr.append(nx.concatenate(arr2,axis=1))
-    #     DistMat = nx.concatenate(arr,axis=0) # not convert to GPU
-    #     return DistMat
 
 
 def cal_dot(
@@ -617,6 +604,80 @@ def cal_dot(
         return Mat
 
 
+def get_optimal_R(
+    coordsA: Union[np.ndarray, torch.Tensor],
+    coordsB: Union[np.ndarray, torch.Tensor],
+    P: Union[np.ndarray, torch.Tensor],
+    R_init: Union[np.ndarray, torch.Tensor],
+):
+    """Get the optimal rotation matrix R
+
+    Args:
+        coordsA (Union[np.ndarray, torch.Tensor]): The first input matrix with shape n x d
+        coordsB (Union[np.ndarray, torch.Tensor]): The second input matrix with shape n x d
+        P (Union[np.ndarray, torch.Tensor]): The optimal transport matrix with shape n x n
+
+    Returns:
+        Union[np.ndarray, torch.Tensor]: The optimal rotation matrix R with shape d x d
+    """
+    nx = ot.backend.get_backend(coordsA, coordsB, P, R_init)
+    NA, NB, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
+    used_gpu = False
+    if nx_torch(nx) and coordsA.is_cuda:
+        coordsA = coordsA.cpu()
+        coordsB = coordsB.cpu()
+        R_init = R_init.cpu()
+        used_gpu = True
+    if nx_torch(nx) and P.is_cuda:
+        P = P.cpu()
+    Sp = nx.einsum("ij->", P)
+    K_NA = nx.einsum("ij->i", P)
+    K_NB = nx.einsum("ij->j", P)
+    # get the optimal rotation matrix R
+    PXA, PXB = _dot(nx)(K_NA, coordsA)[None, :], _dot(nx)(K_NB, coordsB)[None, :]
+    t = ((PXB - _dot(nx)(PXA, R_init.T))) / (Sp)
+    A = -(_dot(nx)(PXA.T, t) - _dot(nx)(coordsA.T, _dot(nx)(P, coordsB))).T
+
+    svdU, svdS, svdV = _linalg(nx).svd(A)
+    C = _identity(nx, D, type_as=coordsA[0, 0])
+    C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
+    R = _dot(nx)(_dot(nx)(svdU, C), svdV)
+    optimal_RnA = _dot(nx)(coordsA, R.T) + t
+    # print(R)
+    if used_gpu:
+        return optimal_RnA.cuda(), R.cuda(), t.cuda()
+    else:
+        return optimal_RnA, R, t
+
+
+###############################
+# Distance Matrix Calculation #
+###############################
+
+
+def _dist(
+    mat1: Union[np.ndarray, torch.Tensor],
+    mat2: Union[np.ndarray, torch.Tensor],
+    metric: str = "euc",
+) -> Union[np.ndarray, torch.Tensor]:
+    assert metric in [
+        "euc",
+        "euclidean",
+        "kl",
+    ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'`` and ``'kl'``."
+    nx = ot.backend.get_backend(mat1, mat2)
+    if metric.lower() == "euc" or metric.lower() == "euclidean":
+        distMat = nx.sum(mat1**2, 1)[:, None] + nx.sum(mat2**2, 1)[None, :] - 2 * _dot(nx)(mat1, mat2.T)
+    else:
+        distMat = (
+            nx.sum(mat1 * nx.log(mat1), 1)[:, None]
+            + nx.sum(mat2 * nx.log(mat2), 1)[None, :]
+            - _dot(nx)(mat1, nx.log(mat2).T)
+            - _dot(nx)(mat2, nx.log(mat1).T).T
+        ) / 2
+    return distMat
+
+
 def PCA_reduction(
     data_mat: Union[np.ndarray, torch.Tensor],
     reduced_dim: int = 64,
@@ -652,13 +713,10 @@ def PCA_reduction(
 def PCA_project(
     data_mat: Union[np.ndarray, torch.Tensor],
     V_new_basis: Union[np.ndarray, torch.Tensor],
-    mean_data_mat: Optional[Union[np.ndarray, torch.Tensor]] = None,
     center: bool = True,
 ):
     nx = ot.backend.get_backend(data_mat)
-    if not center:
-        projected_data = nx.einsum("ij,jk->ik", data_mat, V_new_basis)
-    return projected_data
+    return nx.einsum("ij,jk->ik", data_mat, V_new_basis)
 
 
 def PCA_recover(
@@ -674,8 +732,151 @@ def PCA_recover(
 def coarse_rigid_alignment(
     coordsA: Union[np.ndarray, torch.Tensor],
     coordsB: Union[np.ndarray, torch.Tensor],
+    X_A: Union[np.ndarray, torch.Tensor],
+    X_B: Union[np.ndarray, torch.Tensor],
+    dissimilarity: str = "kl",
+    top_K: int = 10,
+    transformed_points: Optional[Union[np.ndarray, torch.Tensor]] = None,
+) -> Tuple[Any, Any, Any, Any, Union[ndarray, Any], Union[ndarray, Any]]:
+
+    nx = ot.backend.get_backend(coordsA, coordsB)
+    if transformed_points is None:
+        transformed_points = coordsA
+    N, M, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
+
+    if N > 1000:
+        coordsA, X_A = voxel_data(
+            coords=coordsA,
+            gene_exp=X_A,
+            voxel_num=1000,
+        )
+    else:
+        coordsA, X_A = nx.to_numpy(coordsA), nx.to_numpy(X_A)
+    if M > 1000:
+        coordsB, X_B = voxel_data(
+            coords=coordsB,
+            gene_exp=X_B,
+            voxel_num=1000,
+        )
+    else:
+        coordsB, X_B = nx.to_numpy(coordsB), nx.to_numpy(X_B)
+    DistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B, dissimilarity=dissimilarity)
+
+    transformed_points = nx.to_numpy(transformed_points)
+    sub_coordsA = coordsA
+    nx = ot.backend.NumpyBackend()
+
+    item2 = np.argpartition(DistMat, top_K, axis=0)[:top_K, :].T
+    item1 = np.repeat(np.arange(DistMat.shape[1])[:, None], top_K, axis=1)
+    NN1 = np.dstack((item1, item2)).reshape((-1, 2))
+    distance1 = DistMat.T[NN1[:, 0], NN1[:, 1]]
+
+    ## construct nearest neighbor set using brute force
+    item1 = np.argpartition(DistMat, top_K, axis=1)[:, :top_K]
+    item2 = np.repeat(np.arange(DistMat.shape[0])[:, None], top_K, axis=1)
+    NN2 = np.dstack((item1, item2)).reshape((-1, 2))
+    distance2 = DistMat.T[NN2[:, 0], NN2[:, 1]]
+
+    NN = np.vstack((NN1, NN2))
+    distance = np.r_[distance1, distance2]
+
+    train_x, train_y = sub_coordsA[NN[:, 1], :], coordsB[NN[:, 0], :]
+
+    R_flip = np.eye(D)
+    R_flip[-1, -1] = -1
+
+    P, R, t, init_weight, sigma2, gamma = inlier_from_NN(train_x, train_y, distance[:, None])
+    P2, R2, t2, init_weight, sigma2_2, gamma_2 = inlier_from_NN(train_x, np.dot(train_y, R_flip), distance[:, None])
+    if sigma2_2 < sigma2 and gamma_2 > gamma:
+        P = P2
+        R = R2
+        t = t2
+        sigma2 = sigma2_2
+        R = np.dot(R, R_flip)
+        print("flip")
+    inlier_threshold = min(P[np.argsort(-P[:, 0])[20], 0], 0.5)
+    inlier_set = np.where(P[:, 0] > inlier_threshold)[0]
+    inlier_x, inlier_y = train_x[inlier_set, :], train_y[inlier_set, :]
+    inlier_P = P[inlier_set, :]
+
+    transformed_points = np.dot(transformed_points, R.T) + t
+    inlier_x = np.dot(inlier_x, R.T) + t
+    return transformed_points, inlier_x, inlier_y, inlier_P, R, t
+
+
+def inlier_from_NN(
+    train_x,
+    train_y,
+    distance,
+):
+    N, D = train_x.shape[0], train_x.shape[1]
+    alpha = 1
+    distance = np.maximum(0, distance)
+    # normalize = np.sort(distance,0)[10]
+    normalize = np.max(distance) / (np.log(10) * 2)
+    # distance = distance / (np.maximum(normalize,1e-2))
+    distance = distance / (normalize)
+    R = np.eye(D)
+    t = np.ones((D, 1))
+    y_hat = train_x
+    sigma2 = np.sum((y_hat - train_y) ** 2) / (D * N)
+    weight = np.exp(-distance * alpha)
+    # weight = weight / np.max(weight)
+    # weight = np.ones((N,1))
+    init_weight = weight
+    P = np.multiply(np.ones((N, 1)), weight)
+    max_iter = 100
+    alpha_end = 0.1
+    alpha_decrease = np.power(alpha_end / alpha, 1 / (max_iter - 20))
+    gamma = 0.5
+    a = np.maximum(
+        np.prod(np.max(train_x, axis=0) - np.min(train_x, axis=0)),
+        np.prod(np.max(train_y, axis=0) - np.min(train_y, axis=0)),
+    )
+    Sp = np.sum(P)
+    for iter in range(max_iter):
+        # solve rigid transformation
+        mu_x = np.sum(np.multiply(train_x, P), 0) / (Sp)
+        mu_y = np.sum(np.multiply(train_y, P), 0) / (Sp)
+
+        X_mu, Y_mu = train_x - mu_x, train_y - mu_y
+        A = np.dot(Y_mu.T, np.multiply(X_mu, P))
+        svdU, svdS, svdV = np.linalg.svd(A)
+        C = np.eye(D)
+        C[-1, -1] = np.linalg.det(np.dot(svdU, svdV))
+        R = np.dot(np.dot(svdU, C), svdV)
+        t = mu_y - np.dot(mu_x, R.T)
+        y_hat = np.dot(train_x, R.T) + t
+        # get P
+        term1 = np.multiply(np.exp(-(np.sum((train_y - y_hat) ** 2, 1, keepdims=True)) / (2 * sigma2)), weight)
+        outlier_part = np.max(weight) * (1 - gamma) * np.power((2 * np.pi * sigma2), D / 2) / (gamma * a)
+        P = term1 / (term1 + outlier_part)
+        Sp = np.sum(P)
+        # num_ind = np.where(P > 0.5)[0].shape[0]
+        # gamma = np.minimum(np.maximum(num_ind / N, 0.05),0.95)
+        gamma = np.minimum(np.maximum(Sp / N, 0.01), 0.99)
+        P = np.maximum(P, 1e-6)
+
+        # update sigma2
+        sigma2 = np.sum(np.multiply((y_hat - train_y) ** 2, P)) / (D * Sp)
+        # print(sigma2)
+        if iter > 20:
+            alpha = alpha * alpha_decrease
+            weight = np.exp(-distance * alpha)
+            weight = weight / np.max(weight)
+    # print("sigma2: ", sigma2)
+    # print("gamma: ", gamma)
+    return P, R, t, init_weight, sigma2, gamma
+
+
+def coarse_rigid_alignment_debug(
+    coordsA: Union[np.ndarray, torch.Tensor],
+    coordsB: Union[np.ndarray, torch.Tensor],
     DistMat: Union[np.ndarray, torch.Tensor],
     nx: ot.backend.TorchBackend or ot.backend.NumpyBackend,
+    sub_sample_num: int = -1,
+    top_K: int = 10,
+    transformed_points: Optional[Union[np.ndarray, torch.Tensor]] = None,
 ) -> Union[np.ndarray, torch.Tensor]:
     assert (
         coordsA.shape[0] == DistMat.shape[0]
@@ -683,75 +884,204 @@ def coarse_rigid_alignment(
     assert (
         coordsB.shape[0] == DistMat.shape[1]
     ), "coordsB and the second dim of DistMat do not have the same number of features."
-    D = coordsA.shape[1]
-    coordsA = nx.to_numpy(coordsA)
-    coordsB = nx.to_numpy(coordsB)
-    DistMat = nx.to_numpy(DistMat)
-    nx = ot.backend.NumpyBackend()
+    nx = ot.backend.get_backend(coordsA, coordsB, DistMat)
+    if transformed_points is None:
+        transformed_points = coordsA
+    N, M, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
+    # coordsA = nx.to_numpy(coordsA)
+    # coordsB = nx.to_numpy(coordsB)
+    # DistMat = nx.to_numpy(DistMat)
+    # transformed_points = nx.to_numpy(transformed_points)
+    sub_coordsA = coordsA
 
-    # construct nearest neighbor set
-    minDistMat = np.min(DistMat, axis=1)
-    min_threshold = minDistMat[nx.argsort(minDistMat)[max(int(0.1 * minDistMat.shape[0]), 30)]]
-    nn = np.vstack((np.arange(DistMat.shape[0]), np.argsort(DistMat, axis=1)[:, 0])).T
-    nn = nn[minDistMat < min_threshold, :]
-    # _, unique_index = np.unique(nn[:,1],return_index=True)
+    ## subsample the data to saving time
+    if N > sub_sample_num and sub_sample_num > 0:
+        idxA = np.random.choice(N, sub_sample_num, replace=False)
+        idxB = np.random.choice(M, sub_sample_num, replace=False)
+        sub_coordsA = coordsA[idxA, :]
+        coordsB = coordsB[idxB, :]
+        DistMat = DistMat[idxA, :][:, idxB]
+    # nx = ot.backend.NumpyBackend()
 
-    unique_values, counts = np.unique(nn[:, 1], return_counts=True)
-    indices = np.where(counts < 5)[0]
-    unique_index = np.where(np.isin(nn[:, 1], unique_values[indices]))[0]
+    # construct nearest neighbor set using KDTree
+    # tree = KDTree(X_B)
+    # K = 10
+    # distance1, NN1 = tree.query(X_A, k=K, return_distance=True)
+    # print(NN1)
+    # print(NN1.shape)
+    # tree = KDTree(X_A)
+    # distance2, NN2 = tree.query(X_B, k=K, return_distance=True)
+    # print(NN2)
+    # print(NN2.shape)
+    # NN = np.vstack((NN1, NN2))
+    # distance = np.r_[distance1, distance2]
 
-    nn = nn[unique_index, :]
-    minDistMat = np.min(DistMat, axis=0)
-    min_threshold = minDistMat[np.argsort(minDistMat)[max(int(0.1 * minDistMat.shape[0]), 30)]]
-    nn2 = np.vstack((np.argsort(DistMat, axis=0)[0, :], np.arange(DistMat.shape[1]))).T
-    nn2 = nn2[minDistMat < min_threshold, :]
-    # _, unique_index = np.unique(nn2[:,1],return_index=True)
+    ## construct nearest neighbor set using brute force
+    # item2 = np.argsort(DistMat, axis=0)[:top_K,:].T
+    # item2 = np.argpartition(DistMat, top_K, axis=0)[:top_K,:].T
+    # print(_topk(nx,DistMat, top_K, 0))
+    item2 = _topk(nx, DistMat, top_K, 0)[:top_K, :].T
+    print(item2.shape)
+    item1 = _data(nx, nx.arange(DistMat.shape[1])[:, None].repeat(1, top_K), type_as=item2)
+    # item1 = np.repeat(np.arange(DistMat.shape[1])[:,None],top_K,axis=1)
+    NN1 = _dstack(nx)((item1, item2)).reshape((-1, 2))
+    # NN1 = np.dstack((item1,item2)).reshape((-1,2))
+    distance1 = DistMat.T[NN1[:, 0], NN1[:, 1]]
 
-    unique_values, counts = np.unique(nn2[:, 1], return_counts=True)
-    indices = np.where(counts < 5)[0]
-    unique_index = np.where(np.isin(nn2[:, 1], unique_values[indices]))[0]
+    # item1 = np.argsort(DistMat, axis=1)[:,:top_K]
+    # item1 = np.argpartition(DistMat, top_K, axis=1)[:,:top_K]
+    item1 = _topk(nx, DistMat, top_K, 1)[:, :top_K]
+    item2 = _data(nx, nx.arange(DistMat.shape[0])[:, None].repeat(1, top_K), type_as=item2)
+    # item2 = np.repeat(np.arange(DistMat.shape[0])[:,None],top_K,axis=1)
+    NN2 = _dstack(nx)((item1, item2)).reshape((-1, 2))
+    # NN2 = np.dstack((item1,item2)).reshape((-1,2))
+    distance2 = DistMat.T[NN2[:, 0], NN2[:, 1]]
 
-    nn2 = nn2[unique_index, :]
-    correspondence = np.vstack((nn, nn2))
-    # calculate rigid transformation based on nn correspondence
-    src_points = coordsA[correspondence[:, 0], :]
-    dst_points = coordsB[correspondence[:, 1], :]
+    # NN = np.vstack((NN1,NN2))
+    NN = _vstack(nx)((NN1, NN2))
+    # distance = np.r_[distance1,distance2]
+    # print(distance.shape)
+    # print(nx.stack((distance1, distance2), axis=0))
+    distance = nx.reshape(nx.stack((distance1, distance2), axis=0), (-1,))
+    # print(distance)
 
-    # Calculate the center of gravity
-    src_centroid = np.mean(src_points, axis=0)
-    dst_centroid = np.mean(dst_points, axis=0)
+    train_x, train_y = sub_coordsA[NN[:, 1], :], coordsB[NN[:, 0], :]
 
-    # Move all points to the origin
-    src_points_centered = src_points - src_centroid
-    dst_points_centered = dst_points - dst_centroid
+    P, R, t, init_weight = inlier_from_NN_debug(train_x, train_y, distance[:, None])
+    inlier_threshold = nx.minimum(P[nx.argsort(-P[:, 0])[20], 0], 0.5)
+    inlier_set = nx.where(P[:, 0] > inlier_threshold)[0]
+    inlier_x, inlier_y = train_x[inlier_set, :], train_y[inlier_set, :]
+    inlier_P = P[inlier_set, :]
 
-    # Calculate the rotation matrix
-    H = np.dot(src_points_centered.T, dst_points_centered)
-    U, S, Vt = np.linalg.svd(H)
-    R = np.dot(Vt.T, U.T)
+    transformed_points = _dot(nx)(transformed_points, R.T) + t
+    inlier_x = _dot(nx)(inlier_x, R.T) + t
+    # return transformed_points, inlier_x, inlier_y, inlier_P
+    return transformed_points, inlier_x, inlier_y, inlier_P, inlier_set, init_weight, P, NN
 
-    # If the determinant of the rotation matrix is less than 0, mirroring is required
-    if np.linalg.det(R) < 0:
-        Vt[D - 1, :] *= -1
-        R = np.dot(Vt.T, U.T)
 
-    # Calculate the translation vector
-    t = dst_centroid - np.dot(R, src_centroid)
+def inlier_from_NN_debug(
+    train_x,
+    train_y,
+    distance,
+):
+    nx = ot.backend.get_backend(train_x, train_y, distance)
+    N, D = train_x.shape[0], train_x.shape[1]
+    alpha = _data(nx, 1.0, type_as=distance)
+    distance = nx.maximum(0, distance)
+    # normalize = np.sort(distance,0)[10]
+    normalize = nx.max(distance) / nx.log(_data(nx, 10.0, type_as=distance))
+    # distance = distance / (np.maximum(normalize,1e-2))
+    distance = distance / (normalize)
+    R = nx.eye(D, type_as=distance)
+    t = nx.ones((D, 1), type_as=distance)
+    y_hat = train_x
+    sigma2 = nx.sum((y_hat - train_y) ** 2) / (D * N)
+    weight = nx.exp(-distance * alpha)
+    weight = weight / nx.max(weight)
+    # weight = np.ones_like(weight)
+    init_weight = weight
+    P = _mul(nx)(nx.ones((N, 1), type_as=distance), weight)
+    max_iter = 100
+    alpha_end = 1
+    alpha_decrease = nx.power(alpha_end / alpha, 1 / (max_iter - 20))
+    gamma = 0.5
+    a = nx.maximum(
+        nx.prod(nx.max(train_x, axis=0) - nx.min(train_x, axis=0)),
+        nx.prod(nx.max(train_y, axis=0) - nx.min(train_y, axis=0)),
+    )
+    Sp = nx.sum(P)
+    for iter in range(max_iter):
+        # solve rigid transformation
+        mu_x = nx.sum(_mul(nx)(train_x, P), 0) / (Sp)
+        mu_y = nx.sum(_mul(nx)(train_y, P), 0) / (Sp)
+        t = mu_y - _dot(nx)(mu_x, R.T)
+        X_mu, Y_mu = train_x - mu_x, train_y - mu_y
+        A = _dot(nx)(Y_mu.T, _mul(nx)(X_mu, P))
+        svdU, svdS, svdV = _linalg(nx).svd(A)
+        C = _identity(nx, D, type_as=distance)
+        C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
+        R = _dot(nx)(_dot(nx)(svdU, C), svdV)
+        y_hat = _dot(nx)(train_x, R.T) + t
+        # get P
+        term1 = _mul(nx)(nx.exp(-(nx.sum((train_y - y_hat) ** 2, 1, keepdims=True)) / (2 * sigma2)), weight)
+        outlier_part = nx.max(weight) * (1 - gamma) * nx.power((2 * _pi(nx) * sigma2), D / 2) / (gamma * a)
+        P = term1 / (term1 + outlier_part)
+        Sp = nx.sum(P)
+        # num_ind = np.where(P > 0.5)[0].shape[0]
+        # gamma = np.minimum(np.maximum(num_ind / N, 0.05),0.95)
+        gamma = nx.minimum(nx.maximum(Sp / N, 0.01), 0.99)
+        P = nx.maximum(P, 1e-6)
 
-    # Constructingtransformation matrix
-    T = np.identity(D + 1)
-    T[:D, :D] = R
-    T[:D, D] = t
+        # update sigma2
+        sigma2 = nx.sum(_mul(nx)((y_hat - train_y) ** 2, P)) / (D * Sp)
+        if iter > 20:
+            alpha = alpha * alpha_decrease
+            weight = nx.exp(-distance * alpha)
+            weight = weight / nx.max(weight)
+    # print(sigma2)
+    return P, R, t, init_weight
 
-    coordsA_h = np.hstack((coordsA, np.ones((len(coordsA), 1))))
-    dst_points_h = np.dot(T, coordsA_h.T).T
-    transformed_points = dst_points_h[:, :D]
-    return transformed_points
+
+def voxel_data(
+    coords: Union[np.ndarray, torch.Tensor],
+    gene_exp: Union[np.ndarray, torch.Tensor],
+    voxel_size: Optional[float] = None,
+    voxel_num: Optional[int] = 10000,
+):
+    """
+    Voxelization of the data.
+    Parameters
+    ----------
+    coords: np.ndarray or torch.Tensor
+        The coordinates of the data points.
+    gene_exp: np.ndarray or torch.Tensor
+        The gene expression of the data points.
+    voxel_size: float
+        The size of the voxel.
+    voxel_num: int
+        The number of voxels.
+    Returns
+    -------
+    voxel_coords: np.ndarray or torch.Tensor
+        The coordinates of the voxels.
+    voxel_gene_exp: np.ndarray or torch.Tensor
+        The gene expression of the voxels.
+    """
+    nx = ot.backend.get_backend(coords, gene_exp)
+    N, D = coords.shape[0], coords.shape[1]
+    coords = nx.to_numpy(coords)
+    gene_exp = nx.to_numpy(gene_exp)
+
+    # create the voxel grid
+    min_coords = np.min(coords, axis=0)
+    max_coords = np.max(coords, axis=0)
+    if voxel_size is None:
+        voxel_size = np.sqrt(np.prod(max_coords - min_coords)) / (np.sqrt(N) / 5)
+        # print(voxel_size)
+    voxel_steps = (max_coords - min_coords) / int(np.sqrt(voxel_num))
+    voxel_coords = [
+        np.arange(min_coord, max_coord, voxel_step)
+        for min_coord, max_coord, voxel_step in zip(min_coords, max_coords, voxel_steps)
+    ]
+    voxel_coords = np.stack(np.meshgrid(*voxel_coords), axis=-1).reshape(-1, D)
+    voxel_gene_exps = np.zeros((voxel_coords.shape[0], gene_exp.shape[1]))
+    is_voxels = np.zeros((voxel_coords.shape[0],))
+    # assign the data points to the voxels
+    for i, voxel_coord in enumerate(voxel_coords):
+        dists = np.sqrt(np.sum((coords - voxel_coord) ** 2, axis=1))
+        mask = dists < voxel_size / 2
+        if np.any(mask):
+            voxel_gene_exps[i] = np.mean(gene_exp[mask], axis=0)
+            is_voxels[i] = 1
+    voxel_coords = voxel_coords[is_voxels == 1, :]
+    voxel_gene_exps = voxel_gene_exps[is_voxels == 1, :]
+    return voxel_coords, voxel_gene_exps
 
 
 #################################
 # Funcs between Numpy and Torch #
 #################################
+
 
 # Empty cache
 def empty_cache(device: str = "cpu"):
@@ -792,6 +1122,19 @@ _chunk = (
     else np.array_split(x, chunk_num, axis=dim)
 )
 _unsqueeze = lambda nx: torch.unsqueeze if nx_torch(nx) else np.expand_dims
+_randperm = lambda nx: torch.randperm if nx_torch(nx) else np.random.permutation
+_roll = lambda nx: torch.roll if nx_torch(nx) else np.roll
+_choice = (
+    lambda nx, length, size: torch.randperm(length)[:size]
+    if nx_torch(nx)
+    else np.random.choice(length, size, replace=False)
+)
+_topk = (
+    lambda nx, x, topk, axis: torch.topk(x, topk, dim=axis)[1] if nx_torch(nx) else np.argpartition(x, topk, axis=axis)
+)
+_dstack = lambda nx: torch.dstack if nx_torch(nx) else np.dstack
+_vstack = lambda nx: torch.vstack if nx_torch(nx) else np.vstack
+_hstack = lambda nx: torch.hstack if nx_torch(nx) else np.hstack
 
 # _svd = (
 #     lambda nx, x, full_matrices=True, compute_uv=True: torch.svd(

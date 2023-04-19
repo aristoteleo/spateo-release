@@ -15,6 +15,7 @@ from typing import List, Optional, Tuple, Union
 from spateo.logging import logger_manager as lm
 
 from .utils import (
+    _chunk,
     _data,
     _dot,
     _identity,
@@ -25,13 +26,17 @@ from .utils import (
     _power,
     _prod,
     _psi,
+    _randperm,
+    _roll,
     _unique,
     _unsqueeze,
     align_preprocess,
     cal_dist,
     calc_exp_dissimilarity,
     coarse_rigid_alignment,
+    coarse_rigid_alignment_debug,
     empty_cache,
+    get_optimal_R,
     shape_align_preprocess,
 )
 
@@ -65,7 +70,7 @@ def con_K(
 ############
 # BioAlign #
 ############
-def get_P(
+def get_P_debug_v2(
     XnAHat: Union[np.ndarray, torch.Tensor],
     XnB: Union[np.ndarray, torch.Tensor],
     sigma2: Union[int, float, np.ndarray, torch.Tensor],
@@ -77,7 +82,7 @@ def get_P(
     SpatialDistMat: Union[np.ndarray, torch.Tensor],
     samples_s: Optional[List[float]] = None,
     outlier_variance: float = None,
-) -> Union[np.ndarray, torch.Tensor]:
+) -> Tuple[Any, Any, Any]:
     """Calculating the generating probability matrix P.
 
     Args:
@@ -128,7 +133,87 @@ def get_P(
     )
     P = term1 / (_unsqueeze(nx)(nx.einsum("ij->j", term1), 0) + 1e-8)
     P = nx.einsum("j,ij->ij", spatial_inlier, P)
-    return P, spatial_P
+
+    term1 = nx.einsum(
+        "ij,i->ij",
+        nx.exp(-SpatialDistMat / (2 * sigma2)),
+        (_mul(nx)(alpha, nx.exp(-Sigma / sigma2))),
+    )
+    sigma2_P = term1 / (_unsqueeze(nx)(nx.einsum("ij->j", term1), 0) + 1e-8)
+    sigma2_P = nx.einsum("j,ij->ij", spatial_inlier, sigma2_P)
+    return P, spatial_P, sigma2_P
+
+
+def get_P_chunk(
+    XnAHat: Union[np.ndarray, torch.Tensor],
+    XnB: Union[np.ndarray, torch.Tensor],
+    X_A: Union[np.ndarray, torch.Tensor],
+    X_B: Union[np.ndarray, torch.Tensor],
+    sigma2: Union[int, float, np.ndarray, torch.Tensor],
+    beta2: Union[int, float, np.ndarray, torch.Tensor],
+    alpha: Union[np.ndarray, torch.Tensor],
+    gamma: Union[float, np.ndarray, torch.Tensor],
+    Sigma: Union[np.ndarray, torch.Tensor],
+    samples_s: Optional[List[float]] = None,
+    outlier_variance: float = None,
+    chunk_size: int = 1000,
+    dissimilarity: str = "kl",
+) -> Union[np.ndarray, torch.Tensor]:
+    """Calculating the generating probability matrix P.
+
+    Args:
+        XAHat: Current spatial coordinate of sample A. Shape
+    """
+    # Get the number of cells in each sample
+    NA, NB = XnAHat.shape[0], XnB.shape[0]
+    # Get the number of genes
+    G = X_A.shape[1]
+    # Get the number of spatial dimensions
+    D = XnAHat.shape[1]
+    chunk_num = int(np.ceil(NA / chunk_size))
+
+    assert XnAHat.shape[1] == XnB.shape[1], "XnAHat and XnB do not have the same number of features."
+    assert XnAHat.shape[0] == alpha.shape[0], "XnAHat and alpha do not have the same length."
+    assert XnAHat.shape[0] == Sigma.shape[0], "XnAHat and Sigma do not have the same length."
+
+    nx = ot.backend.get_backend(XnAHat, XnB)
+    if samples_s is None:
+        samples_s = nx.maximum(
+            _prod(nx)(nx.max(XnAHat, axis=0) - nx.min(XnAHat, axis=0)),
+            _prod(nx)(nx.max(XnB, axis=0) - nx.min(XnB, axis=0)),
+        )
+    outlier_s = samples_s * NA
+    # chunk
+    X_Bs = _chunk(nx, X_B, chunk_num, dim=0)
+    XnBs = _chunk(nx, XnB, chunk_num, dim=0)
+
+    Ps = []
+    for x_Bs, xnBs in zip(X_Bs, XnBs):
+        SpatialDistMat = cal_dist(XnAHat, xnBs)
+        GeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=x_Bs, dissimilarity=dissimilarity)
+        if outlier_variance is None:
+            exp_SpatialMat = nx.exp(-SpatialDistMat / (2 * sigma2))
+        else:
+            exp_SpatialMat = nx.exp(-SpatialDistMat / (2 * sigma2 / outlier_variance))
+        spatial_term1 = nx.einsum(
+            "ij,i->ij",
+            exp_SpatialMat,
+            (_mul(nx)(alpha, nx.exp(-Sigma / sigma2))),
+        )
+        spatial_outlier = (
+            _power(nx)((2 * _pi(nx) * sigma2), _data(nx, D / 2, XnAHat)) * (1 - gamma) / (gamma * outlier_s)
+        )
+        spatial_inlier = 1 - spatial_outlier / (spatial_outlier + nx.einsum("ij->j", exp_SpatialMat))
+        term1 = nx.einsum(
+            "ij,i->ij",
+            _mul(nx)(nx.exp(-SpatialDistMat / (2 * sigma2)), nx.exp(-GeneDistMat / (2 * beta2))),
+            (_mul(nx)(alpha, nx.exp(-Sigma / sigma2))),
+        )
+        P = term1 / (_unsqueeze(nx)(nx.einsum("ij->j", term1), 0) + 1e-8)
+        P = nx.einsum("j,ij->ij", spatial_inlier, P)
+        Ps.append(P.cpu())
+    P = nx.concatenate(Ps, axis=1)
+    return P
 
 
 def BA_align(
@@ -161,7 +246,9 @@ def BA_align(
     partial_alignment: bool = False,
     proliferation_prior: Optional[Union[torch.Tensor, np.ndarray]] = None,
     proliferation_prior_weight: float = 1.0,
-    nn_init: bool = False,
+    nn_init: bool = True,
+    SVI_mode: bool = False,
+    batch_size: int = 1000,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
     """_summary_
 
@@ -194,7 +281,7 @@ def BA_align(
         added_scale: The scale of the added similarity matrix. Interval from 0 to 1.
         partial_alignment: Whether to use partial alignment. Note that setting to True does not affect the alignment of two very similar samples. If you are aligning two samples with very different morphology, e.g., across time, you can set to False.
     """
-
+    empty_cache(device=device)
     # Check the method of alignment.
     assert mode in [
         "S",
@@ -227,18 +314,72 @@ def BA_align(
         added_similarity = _data(nx, added_similarity, type_as)
     coordsA, coordsB = spatial_coords[1], spatial_coords[0]
     X_A, X_B = exp_matrices[1], exp_matrices[0]
+    del spatial_coords, exp_matrices
+
     NA, NB, D, G = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1], X_A.shape[1]
-    GeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B, dissimilarity=dissimilarity, chunk_num=5)
-    GeneDistMatMinus = GeneDistMat - nx.min(GeneDistMat, axis=1, keepdims=True)
+    # if NA*NB > 1e8:
+    #     use_numpy = True
+    #     GeneDistMat = calc_exp_dissimilarity(
+    #         X_A=X_A, X_B=X_B, dissimilarity=dissimilarity
+    #     )
+    sub_sample = False
+    if SVI_mode and (NA > 20000 or NB > 20000):
+        if NA > 15000:
+            sub_idx_A = np.random.choice(NA, 10000, replace=False)
+            sub_coordsA = coordsA[sub_idx_A, :]
+            sub_X_A = X_A[sub_idx_A, :]
+        else:
+            sub_coordsA = coordsA
+            sub_X_A = X_A
+        if NB > 15000:
+            sub_idx_B = np.random.choice(NB, 10000, replace=False)
+            sub_coordsB = coordsB[sub_idx_B, :]
+            sub_X_B = X_B[sub_idx_B, :]
+        else:
+            sub_coordsB = coordsB
+            sub_X_B = X_B
+
+        GeneDistMat = calc_exp_dissimilarity(X_A=sub_X_A, X_B=sub_X_B, dissimilarity=dissimilarity)
+        sub_sample = True
+    else:
+        GeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B, dissimilarity=dissimilarity)
     if added_similarity is not None:
         GeneDistMat = GeneDistMat + added_scale * added_similarity
         del added_similarity
     area = _prod(nx)(nx.max(coordsA, axis=0) - nx.min(coordsA, axis=0))
 
+    if nn_init:
+        # perform coarse rigid alignment
+        print("Performing coarse rigid alignment...")
+        if sub_sample:
+            # coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(sub_coordsA, sub_coordsB, GeneDistMat, nx, -1, top_K=10, transformed_points=coordsA)
+            coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(
+                sub_coordsA,
+                sub_coordsB,
+                sub_X_A,
+                sub_X_B,
+                dissimilarity=dissimilarity,
+                sub_sample_num=-1,
+                top_K=10,
+                transformed_points=coordsA,
+            )
+        else:
+            coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(
+                coordsA, coordsB, X_A, X_B, dissimilarity=dissimilarity, sub_sample_num=-1, top_K=10
+            )
+        print("Coarse rigid alignment done.")
+        empty_cache(device=device)
+        coordsA = _data(nx, coordsA, type_as)
+        inlier_A = _data(nx, inlier_A, type_as)
+        inlier_B = _data(nx, inlier_B, type_as)
+        inlier_P = _data(nx, inlier_P, type_as)
+    coarse_alignment = coordsA
+
     # Random select control points
     Unique_coordsA = _unique(nx, coordsA, 0)
     idx = random.sample(range(Unique_coordsA.shape[0]), min(K, Unique_coordsA.shape[0]))
     ctrl_pts = Unique_coordsA[idx, :]
+    K = ctrl_pts.shape[0]
 
     # construct the kernel
     GammaSparse = con_K(ctrl_pts, ctrl_pts, beta)
@@ -266,40 +407,59 @@ def BA_align(
     )
     SigmaDiag = nx.zeros((NA), type_as=type_as)
     XAHat, RnA = coordsA, coordsA
+    if sub_sample:
+        SpatialDistMat = cal_dist(sub_coordsA, sub_coordsB)
+        del sub_coordsA, sub_coordsB
+    else:
+        SpatialDistMat = cal_dist(XAHat, coordsB)
 
-    if nn_init:
-        # perform coarse rigid alignment
-        XAHat = _data(nx, coarse_rigid_alignment(XAHat, coordsB, GeneDistMat, nx), type_as)
-    # coarse_alignment = _data(nx,coarse_rigid_alignment(XAHat, coordsB, GeneDistMat, nx),type_as)
-    coarse_alignment = XAHat
-    SpatialDistMat = cal_dist(XAHat, coordsB)
-    sigma2 = 100 * nx.sum(SpatialDistMat) / (D * NA * NB)  # 2 for 3D
+    sigma2 = 0.1 * nx.sum(SpatialDistMat) / (D * NA * NB)  # 2 for 3D
     s = _data(nx, 1, type_as)
-    # minGeneDistMat = nx.maximum(nx.min(GeneDistMat,1),_data(nx,0.05,type_as))
+    R = _identity(nx, D, type_as)
     minGeneDistMat = nx.min(GeneDistMat, 1)
     # Automatically determine the value of beta2
     if beta2 is None:
         if partial_alignment:
-            # beta2_end = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0]*0.1)]] / 5
-            # beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0]*0.05)]] / 10
-            # beta2_end = nx.max(minGeneDistMat)
             beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] * 2
             beta2_end = nx.maximum(
                 minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.1)]] / 40,
                 _data(nx, 0.01, type_as),
-            )  # DLPFC partial
+            )
         else:
-            # beta2_end = minGeneDistMat[nx.argsort(minGeneDistMat)[int(max(GeneDistMat.shape[0]*0.1,min(30,GeneDistMat.shape[0])-1))]]  # C elegans
-            beta2_end = nx.max(minGeneDistMat)
+            beta2_end = nx.max(minGeneDistMat) / 5
             beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 5
+    del minGeneDistMat
+    if sub_sample:
+        del sub_X_A, sub_X_B, GeneDistMat
     # The value of beta2 becomes progressively larger
+    beta2 = nx.maximum(beta2, _data(nx, 1e-2, type_as))
+    # print(beta2)
     beta2_decrease = _power(nx)(beta2_end / beta2, 1 / (50))
     if verbose:
-        print("{:0>2f} --> {:0>2f}".format(beta2, beta2_end))
+        lm.main_info("{:0>2f} --> {:0>2f}".format(beta2, beta2_end))
+
     # If partial alignment, use smaller spatial variance to reduce tails
     outlier_variance = 1
-    max_outlier_variance = 5  # 20
+    max_outlier_variance = 50  # 20
     outlier_variance_decrease = _power(nx)(_data(nx, max_outlier_variance, type_as), 1 / (max_iter / 2))
+
+    if SVI_mode:
+        SVI_deacy = _data(nx, 10.0, type_as)
+        # Select a random subset of data
+        batch_size = min(max(int(NB / 10), batch_size), NB)
+        randomidx = _randperm(nx)(NB)
+        randIdx = randomidx[:batch_size]
+        randomIdx = _roll(nx)(randomidx, batch_size)
+        randcoordsB = coordsB[randIdx, :]  # batch_size x D
+        if sub_sample:
+            randGeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B[randIdx, :], dissimilarity=dissimilarity)
+            SpatialDistMat = cal_dist(coordsA, randcoordsB)
+        else:
+            randGeneDistMat = GeneDistMat[:, randIdx]  # NA x batch_size
+            SpatialDistMat = SpatialDistMat[:, randIdx]  # NA x batch_size
+        Sp, Sp_spatial, Sp_sigma2 = 0, 0, 0
+        SigmaInv = nx.zeros((K, K), type_as=type_as)  # K x K
+        PXB_term = nx.zeros((NA, D), type_as=type_as)  # NA x D
 
     iteration = (
         lm.progress_logger(range(max_iter), progress_name="Start morpho alignment") if verbose else range(max_iter)
@@ -318,51 +478,69 @@ def BA_align(
             sampleB.uns[iter_key_added]["sigma2"][iter] = nx.to_numpy(sigma2)
             sampleB.uns[iter_key_added]["beta2"][iter] = nx.to_numpy(beta2)
             sampleB.uns[iter_key_added]["scale"][iter] = nx.to_numpy(s)
-        P, spatial_P = get_P(
-            XnAHat=XAHat,
-            XnB=coordsB,
-            sigma2=sigma2,
-            beta2=beta2,
-            alpha=alpha,
-            gamma=gamma,
-            Sigma=SigmaDiag,
-            GeneDistMat=GeneDistMat,
-            SpatialDistMat=SpatialDistMat,
-            outlier_variance=outlier_variance,
-        )
-        # print(alpha)
+        if SVI_mode:
+            step_size = nx.minimum(_data(nx, 1.0, type_as), SVI_deacy / (iter + 1.0))
+            P, spatial_P, sigma2_P = get_P_debug_v2(
+                XnAHat=XAHat,
+                XnB=randcoordsB,
+                sigma2=sigma2,
+                beta2=beta2,
+                alpha=alpha,
+                gamma=gamma,
+                Sigma=SigmaDiag,
+                GeneDistMat=randGeneDistMat,
+                SpatialDistMat=SpatialDistMat,
+                outlier_variance=outlier_variance,
+            )
+        else:
+            P, spatial_P, sigma2_P = get_P_debug_v2(
+                XnAHat=XAHat,
+                XnB=coordsB,
+                sigma2=sigma2,
+                beta2=beta2,
+                alpha=alpha,
+                gamma=gamma,
+                Sigma=SigmaDiag,
+                GeneDistMat=GeneDistMat,
+                SpatialDistMat=SpatialDistMat,
+                outlier_variance=outlier_variance,
+            )
+
         if iter > 5:
-            if beta2_decrease < 1:
-                beta2 = nx.maximum(beta2 * beta2_decrease, beta2_end)
-            else:
-                beta2 = nx.minimum(beta2 * beta2_decrease, beta2_end)
-            if partial_alignment and iter > max_iter / 2:
-                outlier_variance = nx.minimum(outlier_variance * outlier_variance_decrease, max_outlier_variance)
+            beta2 = (
+                nx.maximum(beta2 * beta2_decrease, beta2_end)
+                if beta2_decrease < 1
+                else nx.minimum(beta2 * beta2_decrease, beta2_end)
+            )
+            outlier_variance = nx.minimum(outlier_variance * outlier_variance_decrease, max_outlier_variance)
+
         K_NA = nx.einsum("ij->i", P)
         K_NB = nx.einsum("ij->j", P)
         K_NA_spatial = nx.einsum("ij->i", spatial_P)
         K_NB_spatial = nx.einsum("ij->j", spatial_P)
+        K_NA_sigma2 = nx.einsum("ij->i", sigma2_P)
+        K_NB_sigma2 = nx.einsum("ij->j", sigma2_P)
 
         # Update gamma
-        Sp = nx.einsum("ij->", P)
-        Sp_spatial = nx.einsum("ij->", spatial_P)
-        gamma = nx.exp(_psi(nx)(gamma_a + Sp_spatial) - _psi(nx)(gamma_a + gamma_b + NB))
+        if SVI_mode:
+            Sp = step_size * nx.einsum("ij->", P) + (1 - step_size) * Sp
+            Sp_spatial = step_size * nx.einsum("ij->", spatial_P) + (1 - step_size) * Sp_spatial
+            Sp_sigma2 = step_size * nx.einsum("ij->", sigma2_P) + (1 - step_size) * Sp_sigma2
+            gamma = nx.exp(_psi(nx)(gamma_a + Sp_spatial) - _psi(nx)(gamma_a + gamma_b + batch_size))
+        else:
+            Sp = nx.einsum("ij->", P)
+            Sp_spatial = nx.einsum("ij->", spatial_P)
+            Sp_sigma2 = nx.einsum("ij->", sigma2_P)
+            gamma = nx.exp(_psi(nx)(gamma_a + Sp_spatial) - _psi(nx)(gamma_a + gamma_b + NB))
         gamma = _data(nx, 0.99, type_as) if gamma > 0.99 else gamma
         gamma = _data(nx, 0.01, type_as) if gamma < 0.01 else gamma
 
         # Update alpha
         if partial_alignment or (proliferation_prior is not None):
-            # print("term1",kappa + K_NA_spatial)
-            # print("term2",kappa * NA + Sp_spatial)
             alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
             alpha = alpha * kappa
-            # print('here')
-            # alpha = K_NA_spatial / NA
         else:
-            # alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
-            alpha = nx.ones((NA), type_as=type_as) / NA
-        # print("kappa: ",kappa)
-        # print("alpha: ",alpha)
+            alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
 
         # Update VnA
         if mode == "N":
@@ -378,55 +556,140 @@ def BA_align(
             )
         elif mode == "SN":
             if (sigma2 < 0.015 and s > 0.95) or (iter > 80):
-                term1 = _dot(nx)(
-                    _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
-                    U.T,
-                )
-                SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
-                Coff = _dot(nx)(term1, (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)))
-                VnA = _dot(nx)(
-                    U,
-                    Coff,
-                )
+                if SVI_mode:
+                    SigmaInv = (
+                        step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
+                        + (1 - step_size) * SigmaInv
+                    )
+                    term1 = _dot(nx)(_pinv(nx)(SigmaInv), U.T)
+                    PXB_term = (
+                        step_size * (_dot(nx)(P, randcoordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
+                        + (1 - step_size) * PXB_term
+                    )
+                    Coff = _dot(nx)(term1, PXB_term)
+                    VnA = _dot(nx)(
+                        U,
+                        Coff,
+                    )
+                    SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
+                else:
+                    term1 = _dot(nx)(
+                        _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
+                        U.T,
+                    )
+                    SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
+                    Coff = _dot(nx)(term1, (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)))
+                    VnA = _dot(nx)(
+                        U,
+                        Coff,
+                    )
 
         # Update R()
         if mode == "S" or mode == "SN":
-            mu_XnA, mu_VnA, mu_XnB = (
-                _dot(nx)(K_NA, coordsA) / Sp,
-                _dot(nx)(K_NA, VnA) / Sp,
-                _dot(nx)(K_NB, coordsB) / Sp,
-            )
-            XnABar, VnABar, XnBBar = coordsA - mu_XnA, VnA - mu_VnA, coordsB - mu_XnB
-            A = -_dot(nx)(nx.einsum("ij,i->ij", VnABar, K_NA).T - _dot(nx)(P, XnBBar).T, XnABar)
+            lambdaReg = 1e0 * Sp / nx.sum(inlier_P)
+            if SVI_mode:
+                PXA, PVA, PXB = (
+                    _dot(nx)(K_NA, coordsA)[None, :],
+                    _dot(nx)(K_NA, VnA)[None, :],
+                    _dot(nx)(K_NB, randcoordsB)[None, :],
+                )
+            else:
+                PXA, PVA, PXB = (
+                    _dot(nx)(K_NA, coordsA)[None, :],
+                    _dot(nx)(K_NA, VnA)[None, :],
+                    _dot(nx)(K_NB, coordsB)[None, :],
+                )
+            PCYC, PCXC = _dot(nx)(inlier_P.T, inlier_B), _dot(nx)(inlier_P.T, inlier_A)
+            if SVI_mode and iter > 1:
+                t = (
+                    step_size
+                    * (
+                        ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T)))
+                        / (Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P))
+                    )
+                    + (1 - step_size) * t
+                )
+            else:
+                t = ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T))) / (
+                    Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P)
+                )
+            if SVI_mode:
+                A = -(
+                    _dot(nx)(PXA.T, t)
+                    + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, randcoordsB))
+                    + 2
+                    * lambdaReg
+                    * sigma2
+                    * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
+                ).T
+            else:
+                A = -(
+                    _dot(nx)(PXA.T, t)
+                    + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, coordsB))
+                    + 2
+                    * lambdaReg
+                    * sigma2
+                    * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
+                ).T
 
             svdU, svdS, svdV = _linalg(nx).svd(A)
             C = _identity(nx, D, type_as)
             C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
-            R = _dot(nx)(_dot(nx)(svdU, C), svdV)
-            s = (nx.einsum("ii", _dot(nx)(A, R.T)) + 10 / sigma2 + iter**2) / (
-                nx.einsum("ii", _dot(nx)(nx.einsum("ij,i->ij", XnABar, K_NA).T, XnABar)) + 10 / sigma2 + iter**2
-            )
-            t = mu_XnB - mu_VnA - s * _dot(nx)(mu_XnA, R.T)
+            if SVI_mode and iter > 1:
+                R = step_size * (_dot(nx)(_dot(nx)(svdU, C), svdV)) + (1 - step_size) * R
+            else:
+                R = _dot(nx)(_dot(nx)(svdU, C), svdV)
             RnA = s * _dot(nx)(coordsA, R.T) + t
         XAHat = RnA + VnA
 
         # Update sigma2 and beta2
-        SpatialDistMat = cal_dist(XAHat, coordsB)
+        if SVI_mode:
+            SpatialDistMat = cal_dist(XAHat, randcoordsB)
+        else:
+            SpatialDistMat = cal_dist(XAHat, coordsB)
         sigma2_old = sigma2
         sigma2 = nx.maximum(
             (
-                nx.einsum("ij,ij", spatial_P, SpatialDistMat) / (D * Sp_spatial)
-                + nx.einsum("i,i", K_NA_spatial, SigmaDiag) / Sp_spatial
+                nx.einsum("ij,ij", sigma2_P, SpatialDistMat) / (D * Sp_sigma2)
+                + nx.einsum("i,i", K_NA_sigma2, SigmaDiag) / Sp_sigma2
             ),
             _data(nx, 1e-3, type_as),
         )
-        # if iter < 20:
-        #     sigma2 = sigma2 * 100
-        # beta2 = nx.maximum(
-        #     nx.einsum("ij,ij", P, GeneDistMat) / (D * Sp)
-        #     ,_data(nx,1e-3,type_as)
-        # )
         sigma2_terc = nx.abs((sigma2 - sigma2_old) / sigma2)
+
+        # Next batch
+        if SVI_mode and iter < max_iter - 1:
+            randIdx = randomidx[:batch_size]
+            randomidx = _roll(nx)(randomidx, batch_size)
+            randcoordsB = coordsB[randIdx, :]
+            if sub_sample:
+                randGeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B[randIdx, :], dissimilarity=dissimilarity)
+            else:
+                randGeneDistMat = GeneDistMat[:, randIdx]  # NA x batch_size
+            SpatialDistMat = cal_dist(XAHat, randcoordsB)
+        empty_cache(device=device)
+
+    # full data
+    if SVI_mode:
+        P = get_P_chunk(
+            XnAHat=XAHat,
+            XnB=coordsB,
+            X_A=X_A,
+            X_B=X_B,
+            sigma2=sigma2,
+            beta2=beta2,
+            alpha=alpha,
+            gamma=gamma,
+            Sigma=SigmaDiag,
+            outlier_variance=outlier_variance,
+        )
+    # Get optimal Rigid transformation
+    optimal_RnA, optimal_R, optimal_t = get_optimal_R(
+        coordsA=coordsA,
+        coordsB=coordsB,
+        P=P,
+        R_init=R,
+    )
 
     if verbose:
         lm.main_info(f"Key Parameters: gamma: {gamma}; beta2: {beta2}; sigma2: {sigma2}")
@@ -438,15 +701,16 @@ def BA_align(
     if normalize_c:
         XAHat = XAHat * normalize_scale + normalize_mean_list[0]
         RnA = RnA * normalize_scale + normalize_mean_list[0]
+        optimal_RnA = optimal_RnA * normalize_scale + normalize_mean_list[0]
         coarse_alignment = coarse_alignment * normalize_scale + normalize_mean_list[0]
 
     # Save aligned coordinates
     sampleA.obsm[key_added] = sampleA.obsm[spatial_key]
-    # sampleA.obsm["Rigid_3d_align_spatial"] = sampleA.obsm[spatial_key]
-    # sampleA.obsm["Coarse_alignment"] = sampleA.obsm[spatial_key]
     sampleB.obsm[key_added] = nx.to_numpy(XAHat).copy()
     sampleB.obsm["Rigid_3d_align_spatial"] = nx.to_numpy(RnA).copy()
+    sampleB.obsm["optimal_RnA"] = nx.to_numpy(optimal_RnA).copy()
     sampleB.obsm["Coarse_alignment"] = nx.to_numpy(coarse_alignment).copy()
+    sampleB.obsm["alpha"] = nx.to_numpy(alpha).copy()
 
     # save vector field
     if not (vecfld_key_added is None):
@@ -454,6 +718,10 @@ def BA_align(
             "s": nx.to_numpy(s),
             "R": nx.to_numpy(R),
             "t": nx.to_numpy(t),
+            "optimal_R": nx.to_numpy(optimal_R),
+            "optimal_t": nx.to_numpy(optimal_t),
+            "init_R": init_R,
+            "init_t": init_t,
             "beta": beta,
             "Coff": nx.to_numpy(Coff),
             "ctrl_pts": nx.to_numpy(ctrl_pts),
@@ -463,7 +731,7 @@ def BA_align(
             else None,
             "normalize_c": normalize_c,
             "dissimilarity": dissimilarity,
-            "beta2": beta2,
+            "beta2": nx.to_numpy(sigma2),
             "sigma2": nx.to_numpy(sigma2),
             "gamma": nx.to_numpy(gamma),
             "NA": NA,
@@ -471,578 +739,6 @@ def BA_align(
     empty_cache(device=device)
     return (
         None if inplace else (sampleA, sampleB),
-        nx.to_numpy(spatial_P.T),
+        nx.to_numpy(P.T),
         nx.to_numpy(sigma2),
     )
-
-
-def get_shape_P(
-    XnAHat: Union[np.ndarray, torch.Tensor],
-    XnB: Union[np.ndarray, torch.Tensor],
-    sigma2: Union[int, float, np.ndarray, torch.Tensor],
-    alpha: Union[np.ndarray, torch.Tensor],
-    gamma: Union[float, np.ndarray, torch.Tensor],
-    SpatialDistMat: Union[np.ndarray, torch.Tensor],
-) -> Union[np.ndarray, torch.Tensor]:
-    assert XnAHat.shape[1] == XnB.shape[1], "XnAHat and XnB do not have the same number of features."
-    assert XnAHat.shape[0] == alpha.shape[0], "XnAHat and alpha do not have the same length."
-    nx = ot.backend.get_backend(XnAHat, XnB)
-    NA, NB, D = XnAHat.shape[0], XnB.shape[0], XnAHat.shape[1]
-    samples_s = nx.maximum(
-        _prod(nx)(nx.max(XnAHat, axis=0) - nx.min(XnAHat, axis=0)),
-        _prod(nx)(nx.max(XnB, axis=0) - nx.min(XnB, axis=0)),
-    )
-    outlier_s = samples_s * NA
-    spatial_outlier = _power(nx)((2 * _pi(nx) * sigma2), _data(nx, D / 2, XnAHat)) * (1 - gamma) / (gamma * outlier_s)
-    term1 = spatial_term1 = nx.einsum(
-        "ij,i->ij",
-        nx.exp(-SpatialDistMat / (2 * sigma2)),
-        alpha,
-    )
-    term2 = spatial_outlier + nx.einsum("ij->j", term1)
-    P = term1 / _unsqueeze(nx)(term2, 0)
-    return P
-
-
-def shape_align(
-    points,
-    mesh_points,
-    R=None,
-    max_iter: int = 100,
-    dtype: str = "float64",
-    device: str = "cpu",
-    verbose: bool = True,
-):
-
-    (
-        nx,
-        type_as,
-        coordsA,
-        coordsB,
-        normalize_scale_list,
-        normalize_mean_list,
-    ) = shape_align_preprocess(coordsA=points, coordsB=mesh_points, dtype=dtype, device=device, verbose=verbose)
-    normalize_mean_list_points = normalize_mean_list[0]
-    normalize_mean_list_mesh = normalize_mean_list[1]
-    coordsA, coordsB = coordsA[0], coordsB[0]
-    NA, NB, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
-    kappa = nx.ones((NA), type_as=type_as)
-    alpha = nx.ones((NA), type_as=type_as)
-    gamma, gamma_a, gamma_b = (
-        _data(nx, 0.5, type_as),
-        _data(nx, 1.0, type_as),
-        _data(nx, 1.0, type_as),
-    )
-    minP, sigma2_terc, erc = (
-        _data(nx, 1e-5, type_as),
-        _data(nx, 1, type_as),
-        _data(nx, 1e-4, type_as),
-    )
-    if R is None:
-        R = np.eye(D)
-    R = _data(nx, R, type_as)
-    XAHat = coordsA
-    XAHat = nx.dot(XAHat, R.T)
-    VnA = nx.zeros(coordsA.shape, type_as=type_as)
-    SpatialDistMat = cal_dist(XAHat, coordsB)
-    sigma2 = 0.2 * nx.sum(SpatialDistMat) / (D * NA * NB)
-    s = _data(nx, 1, type_as)
-    iteration = (
-        lm.progress_logger(range(max_iter), progress_name="Start morpho shape alignment")
-        if verbose
-        else range(max_iter)
-    )
-    coords_A_vis = []
-    for iter in iteration:
-        coords_A_vis.append(nx.to_numpy(XAHat * normalize_scale_list[1] + normalize_mean_list_mesh[0]))
-        P = get_shape_P(
-            XnAHat=XAHat,
-            XnB=coordsB,
-            sigma2=sigma2,
-            alpha=alpha,
-            gamma=gamma,
-            SpatialDistMat=SpatialDistMat,
-        )
-        K_NA = nx.einsum("ij->i", P)
-        K_NB = nx.einsum("ij->j", P)
-        # Update gamma
-        Sp = nx.einsum("ij->", P)
-        gamma = nx.exp(_psi(nx)(gamma_a + Sp) - _psi(nx)(gamma_a + gamma_b + NB))
-        # print('gamma:'+str(gamma))
-        gamma = _data(nx, 0.99, type_as) if gamma > 0.99 else gamma
-        gamma = _data(nx, 0.01, type_as) if gamma < 0.01 else gamma
-
-        # Update alpha
-        alpha = nx.exp(_psi(nx)(kappa + K_NA) - _psi(nx)(kappa * NA + Sp))
-
-        # Update R()
-        mu_XnA, mu_VnA, mu_XnB = (
-            _dot(nx)(K_NA, coordsA) / Sp,
-            _dot(nx)(K_NA, VnA) / Sp,
-            _dot(nx)(K_NB, coordsB) / Sp,
-        )
-        XnABar, VnABar, XnBBar = coordsA - mu_XnA, VnA - mu_VnA, coordsB - mu_XnB
-        A = -_dot(nx)(nx.einsum("ij,i->ij", VnABar, K_NA).T - _dot(nx)(P, XnBBar).T, XnABar)
-
-        svdU, svdS, svdV = _linalg(nx).svd(A)
-        C = _identity(nx, D, type_as)
-        C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
-        R = _dot(nx)(_dot(nx)(svdU, C), svdV)
-        s = (nx.einsum("ii", _dot(nx)(A, R.T))) / (
-            nx.einsum("ii", _dot(nx)(nx.einsum("ij,i->ij", XnABar, K_NA).T, XnABar))
-        )
-        t = mu_XnB - mu_VnA - s * _dot(nx)(mu_XnA, R.T)
-        XAHat = s * _dot(nx)(coordsA, R.T) + t
-
-        # Update sigma2
-        SpatialDistMat = cal_dist(XAHat, coordsB)
-        sigma2_old = sigma2
-        sigma2 = nx.maximum((nx.einsum("ij,ij", P, SpatialDistMat) / (D * Sp)), _data(nx, 1e-3, type_as))
-        sigma2_terc = nx.abs((sigma2 - sigma2_old) / sigma2)
-    if verbose:
-        lm.main_info(f"Key Parameters: gamma: {gamma}; sigma2: {sigma2}")
-    transformation_param = {
-        "s": nx.to_numpy(s),
-        "R": nx.to_numpy(R),
-        "t": nx.to_numpy(t),
-        "normalize_scale_list": [nx.to_numpy(normalize_scale) for normalize_scale in normalize_scale_list],
-        "normalize_mean_list_points": [nx.to_numpy(normalize_mean) for normalize_mean in normalize_mean_list_points],
-        "normalize_mean_list_mesh": [nx.to_numpy(normalize_mean) for normalize_mean in normalize_mean_list_mesh],
-        "sigma2": nx.to_numpy(sigma2),
-        "gamma": nx.to_numpy(gamma),
-        "NA": NA,
-    }
-    empty_cache(device=device)
-    return transformation_param, coords_A_vis
-
-
-def get_global_P(
-    XnAHat: Union[np.ndarray, torch.Tensor],
-    XnB: Union[np.ndarray, torch.Tensor],
-    sigma2: Union[int, float, np.ndarray, torch.Tensor],
-    beta2: Union[int, float, np.ndarray, torch.Tensor],
-    alpha: Union[np.ndarray, torch.Tensor],
-    W: Union[np.ndarray, torch.Tensor],
-    gamma: Union[float, np.ndarray, torch.Tensor],
-    Sigma: Union[np.ndarray, torch.Tensor],
-    GeneDistMat: Union[np.ndarray, torch.Tensor],
-    SpatialDistMat: Union[np.ndarray, torch.Tensor],
-    samples_s: Optional[List[float]] = None,
-    outlier_variance: float = None,
-) -> Union[np.ndarray, torch.Tensor]:
-    """Calculating the generating probability matrix P.
-
-    Args:
-        XAHat: Current spatial coordinate of sample A. Shape: N x D.
-        XnB : spatial coordinate of sample B (reference sample). Shape: M x D.
-        sigma2: The spatial coordinate noise.
-        beta2: The gene expression noise.
-        alpha: A vector that encoding each probability generated by the spots of sample A. Shape: N x 1.
-        gamma: Inlier proportion of sample A.
-        Sigma: The posterior covariance matrix of Gaussian process. Shape: N x N or N x 1.
-        GeneDistMat: The gene expression distance matrix between sample A and sample B. Shape: N x M.
-        SpatialDistMat: The spatial coordinate distance matrix between sample A and sample B. Shape: N x M.
-        samples_s: The space size of each sample. Area size for 2D samples and volume size for 3D samples.
-        outlier_g: The outlier distribution output space volume attributed to gene expression.
-    Returns:
-        P: Generating probability matrix P. Shape: N x M.
-    """
-
-    assert XnAHat.shape[1] == XnB.shape[1], "XnAHat and XnB do not have the same number of features."
-    assert XnAHat.shape[0] == alpha.shape[0], "XnAHat and alpha do not have the same length."
-    assert XnB.shape[0] == W.shape[0], "XnB and W do not have the same length."
-    assert XnAHat.shape[0] == Sigma.shape[0], "XnAHat and Sigma do not have the same length."
-
-    nx = ot.backend.get_backend(XnAHat, XnB)
-    NA, NB, D = XnAHat.shape[0], XnB.shape[0], XnAHat.shape[1]
-    if samples_s is None:
-        samples_s = nx.maximum(
-            _prod(nx)(nx.max(XnAHat, axis=0) - nx.min(XnAHat, axis=0)),
-            _prod(nx)(nx.max(XnB, axis=0) - nx.min(XnB, axis=0)),
-        )
-    outlier_s = samples_s * NA
-    if outlier_variance is None:
-        exp_SpatialMat = nx.exp(-SpatialDistMat / (2 * sigma2))
-    else:
-        exp_SpatialMat = nx.exp(-SpatialDistMat / (2 * sigma2 / outlier_variance))
-    spatial_term1 = nx.einsum(
-        "ij,j->ij",
-        nx.einsum(
-            "ij,i->ij",
-            exp_SpatialMat,
-            (_mul(nx)(alpha, nx.exp(-Sigma / sigma2))),
-        ),
-        W,
-    )
-    spatial_outlier = _power(nx)((2 * _pi(nx) * sigma2), _data(nx, D / 2, XnAHat)) * (1 - gamma) / (gamma * outlier_s)
-    spatial_term2 = spatial_outlier + nx.einsum("ij->j", spatial_term1)
-    spatial_P = spatial_term1 / _unsqueeze(nx)(spatial_term2, 0)
-    spatial_inlier = 1 - spatial_outlier / (spatial_outlier + nx.einsum("ij->j", exp_SpatialMat))
-
-    term1 = nx.einsum(
-        "ij,j->ij",
-        nx.einsum(
-            "ij,i->ij",
-            _mul(nx)(
-                nx.exp(-SpatialDistMat / (2 * sigma2)),
-                nx.exp(-GeneDistMat / (2 * beta2)),
-            ),
-            (_mul(nx)(alpha, nx.exp(-Sigma / sigma2))),
-        ),
-        W,
-    )
-    P = term1 / (_unsqueeze(nx)(nx.einsum("ij->j", term1), 0) + 1e-8)
-    # P = nx.einsum("j,ij->ij",spatial_inlier,P)
-    # term2 = _power(nx)((2 * _pi(nx) * sigma2), _data(nx, D / 2, XnAHat)) * _power(nx)(
-    #     (2 * _pi(nx) * beta2), _data(nx, D / 2, XnAHat)
-    # ) * (1 - gamma) / (gamma * outlier_s * outlier_g) + nx.einsum("ij->j", term1)
-    # P = term1 / _unsqueeze(nx)(term2, 0)
-    return P, spatial_P
-
-
-def BA_align_multi(
-    coords_model: Union[np.ndarray, torch.Tensor],
-    genes_model: Union[np.ndarray, torch.Tensor],
-    neighbor_coords: List[Union[np.ndarray, torch.Tensor]],
-    neighbor_genes: List[Union[np.ndarray, torch.Tensor]],
-    neighbor_weight: Optional[Union[list, torch.Tensor]] = None,
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend] = ot.backend.NumpyBackend,
-    type_as: Union[torch.Tensor, np.ndarray] = np.ndarray,
-    iter_key_added: Optional[str] = "iter_spatial",
-    key_added: str = "align_spatial",
-    mode: Literal["S", "N", "SN"] = "SN",
-    dissimilarity: str = "kl",
-    max_iter: int = 100,
-    lambdaVF: Union[int, float] = 1e2,
-    beta: Union[int, float] = 0.01,
-    beta2: Optional[Union[int, float]] = None,
-    outlier_g: Union[int, float] = 1,
-    K: Union[int, float] = 15,
-    verbose: bool = True,
-    init_Param=None,
-    outlier_robust: bool = True,
-    vis_optimiation: bool = False,
-    file_name: Literal = "vis_optimization.gif",
-):
-    # convert data to nx type
-    coords_model, genes_model = _data(nx, coords_model, type_as), _data(nx, genes_model, type_as)
-    neighbor_coords = [_data(nx, neighbor_coord, type_as) for neighbor_coord in neighbor_coords]
-    neighbor_genes = [_data(nx, neighbor_gene, type_as) for neighbor_gene in neighbor_genes]
-    if type(neighbor_weight) is list:
-        neighbor_weight = _data(nx, neighbor_weight, type_as)
-    N_neighbor = len(neighbor_coords)
-    N, D, G = coords_model.shape[0], coords_model.shape[1], genes_model.shape[1]
-    neighbors_N = [neighbor.shape[0] for neighbor in neighbor_coords]
-    neighbors_N_index = [np.sum(np.array(neighbors_N)[: i + 1]) for i in range(N_neighbor)]
-    neighbors_N_index.insert(0, 0)
-    neighbor_coords_compact = nx.concatenate(neighbor_coords, axis=0)
-    neighbor_genes_cpmpact = nx.concatenate(neighbor_genes, axis=0)
-    N_neighbor_sum = neighbor_coords_compact.shape[0]
-    coords_model, neighbor_coords_compact = nx.from_numpy(coords_model, type_as=type_as), nx.from_numpy(
-        neighbor_coords_compact, type_as=type_as
-    )
-    genes_model, neighbor_genes_cpmpact = nx.from_numpy(genes_model, type_as=type_as), nx.from_numpy(
-        neighbor_genes_cpmpact, type_as=type_as
-    )
-
-    # Random select control points
-    Unique_coordsA = _unique(nx, coords_model, 0)
-    idx = random.sample(range(Unique_coordsA.shape[0]), min(K, Unique_coordsA.shape[0]))
-    ctrl_pts = Unique_coordsA[idx, :]
-
-    # construct the kernel
-    GammaSparse = con_K(ctrl_pts, ctrl_pts, beta)
-    U = con_K(coords_model, ctrl_pts, beta)
-
-    # initialize parameters
-    kappa = nx.ones((N), type_as=type_as)
-    rho = N * neighbor_weight
-    gamma_a, gamma_b = _data(nx, 1.0, type_as), _data(nx, 1.0, type_as)
-    minP, sigma2_terc, erc = (
-        _data(nx, 1e-5, type_as),
-        _data(nx, 1, type_as),
-        _data(nx, 1e-4, type_as),
-    )
-
-    if init_Param is not None:
-        alpha = nx.from_numpy(init_Param["alpha"], type_as=type_as)
-        P = nx.from_numpy(init_Param["P"], type_as=type_as)
-        XnHat = nx.from_numpy(init_Param["XnHat"], type_as=type_as)
-        Vn = nx.from_numpy(init_Param["Vn"], type_as=type_as)
-        sigma2 = 2 * nx.from_numpy(init_Param["sigma2"], type_as=type_as)
-        beta2 = nx.from_numpy(init_Param["beta2"], type_as=type_as)
-        outlier_variance = nx.from_numpy(init_Param["outlier_variance"], type_as=type_as)
-        gamma = nx.from_numpy(init_Param["gamma"], type_as=type_as)
-        SigmaDiag = nx.from_numpy(init_Param["SigmaDiag"], type_as=type_as)
-        Rn = nx.from_numpy(init_Param["Rn"], type_as=type_as)
-        s = nx.from_numpy(init_Param["s"], type_as=type_as)
-        R = nx.from_numpy(init_Param["R"], type_as=type_as)
-        t = nx.from_numpy(init_Param["t"], type_as=type_as)
-        W = nx.from_numpy(init_Param["W"], type_as=type_as)
-        SpatialDistMat = nx.from_numpy(init_Param["SpatialDistMat"], type_as=type_as)
-        GeneDistMat = nx.from_numpy(init_Param["GeneDistMat"], type_as=type_as)
-    else:
-
-        alpha = nx.ones((N), type_as=type_as)
-        Vn = nx.zeros(coords_model.shape, type_as=type_as)
-        SpatialDistMat = cal_dist(coords_model, neighbor_coords_compact)
-        sigma2 = 100 * nx.sum(SpatialDistMat) / (D * N * N_neighbor_sum)
-        GeneDistMat = calc_exp_dissimilarity(X_A=genes_model, X_B=neighbor_genes_cpmpact, dissimilarity=dissimilarity)
-        minGeneDistMat = nx.maximum(nx.min(GeneDistMat, 1), _data(nx, 0.05, type_as))
-        if beta2 is None:
-            # beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0]*0.1)]] / 5
-            beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.1)]] / 2
-        beta2_end = _data(nx, beta2, type_as)
-        beta2_init = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 10
-        beta2_decrease = _power(nx)(beta2_end / beta2_init, max_iter / 2)
-        GeneDistMatMinus = GeneDistMat - nx.min(GeneDistMat, axis=1, keepdims=True)
-        # GeneDistMat = GeneDistMat - nx.min(GeneDistMat, axis=1, keepdims=True)
-        # GeneDistMat = nx.exp(-GeneDistMat / (2 * beta2))
-        gamma = _data(nx, 0.5, type_as)
-        SigmaDiag = nx.zeros((N), type_as=type_as)
-        XnHat, Rn = coords_model, coords_model
-
-        outlier_variance = 1
-        s = _data(nx, 1, type_as)
-        W = nx.concatenate(
-            [neighbor_weight[i] * nx.ones((neighbor_N), type_as=type_as) for i, neighbor_N in enumerate(neighbors_N)]
-        )
-
-    outlier_variance_decrease = _power(nx)(_data(nx, 20, type_as), 1 / (max_iter))
-
-    if iter_key_added is not None:
-        iter_key_added_data = dict()
-        iter_key_added_data[key_added] = {}
-        iter_key_added_data["sigma2"] = {}
-        iter_key_added_data["scale"] = {}
-
-    if vis_optimiation:
-        import matplotlib.animation as animation
-        import matplotlib.pyplot as plt
-
-        plt.ioff()
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.axis("equal")
-        XnHat_list = []
-        s_list = []
-        sigma2_list = []
-        ax.set_xlim(
-            (
-                1.3 * torch.min(neighbor_coords_compact[:, 0]).cpu().numpy(),
-                1.3 * torch.max(neighbor_coords_compact[:, 0]).cpu().numpy(),
-            )
-        )
-        ax.set_ylim(
-            (
-                1.3 * torch.min(neighbor_coords_compact[:, 1]).cpu().numpy(),
-                1.3 * torch.max(neighbor_coords_compact[:, 1]).cpu().numpy(),
-            )
-        )
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-    iteration = (
-        lm.progress_logger(range(max_iter), progress_name="Start morpho alignment") if verbose else range(max_iter)
-    )
-    for iter in iteration:
-        if sigma2_terc < erc and sigma2 < 0.001:
-            break
-
-        if vis_optimiation:
-            XnHat_list.append(XnHat)
-            sigma2_list.append(sigma2)
-            s_list.append(s)
-
-        if (init_Param is None) and (iter < 20):
-            P, spatial_P = get_global_P(
-                XnAHat=XnHat,
-                XnB=neighbor_coords_compact,
-                sigma2=sigma2,
-                beta2=beta2_init,
-                alpha=alpha,
-                W=W,
-                gamma=gamma,
-                Sigma=SigmaDiag,
-                GeneDistMat=GeneDistMatMinus,
-                SpatialDistMat=SpatialDistMat,
-            )
-        else:
-            if init_Param is None:
-                beta2 = nx.minimum(beta2 * beta2_decrease, beta2_end)
-            P, spatial_P = get_global_P(
-                XnAHat=XnHat,
-                XnB=neighbor_coords_compact,
-                sigma2=sigma2,
-                beta2=beta2,
-                alpha=alpha,
-                W=W,
-                gamma=gamma,
-                Sigma=SigmaDiag,
-                GeneDistMat=GeneDistMat,
-                SpatialDistMat=SpatialDistMat,
-                outlier_variance=outlier_variance,
-            )
-            if outlier_robust and (init_Param is None):
-                outlier_variance = outlier_variance * outlier_variance_decrease
-        K_NA = nx.einsum("ij->i", P)
-        K_NB = nx.einsum("ij->j", P)
-        K_NA_spatial = nx.einsum("ij->i", spatial_P)
-        K_NB_spatial = nx.einsum("ij->j", spatial_P)
-        # Update gamma
-        Sp = nx.einsum("ij->", P)
-        Sp_spatial = nx.einsum("ij->", spatial_P)
-        gamma = nx.exp(_psi(nx)(gamma_a + Sp_spatial) - _psi(nx)(gamma_a + gamma_b + N_neighbor_sum))
-        gamma = _data(nx, 0.99, type_as) if gamma > 0.99 else gamma
-        gamma = _data(nx, 0.01, type_as) if gamma < 0.01 else gamma
-
-        # Update W
-        K_NB_part = [K_NB_spatial[neighbors_N_index[i] : neighbors_N_index[i + 1]] for i in range(N_neighbor)]
-        Sp_part = _data(
-            nx,
-            [nx.sum(K_NB_spatial[neighbors_N_index[i] : neighbors_N_index[i + 1]]) for i in range(N_neighbor)],
-            type_as,
-        )
-        W = nx.exp(_psi(nx)(rho + Sp_part) - _psi(nx)(rho * N_neighbor + Sp_spatial))
-        W = nx.concatenate([W[i] * nx.ones((neighbor_N), type_as=type_as) for i, neighbor_N in enumerate(neighbors_N)])
-
-        # Update alpha
-        alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * N + Sp_spatial))
-
-        # Update VnA
-        if mode == "N":
-            term1 = _dot(nx)(
-                _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
-                U.T,
-            )
-            SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
-            VnA = _dot(nx)(
-                U,
-                _dot(nx)(
-                    term1,
-                    (_dot(P, neighbor_coords_compact) - nx.einsum("ij,i->ij", coords_model, K_NA)),
-                ),
-            )
-        elif mode == "SN":
-            if sigma2 < 0.015 and s > 0.95:
-                term1 = _dot(nx)(
-                    _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
-                    U.T,
-                )
-                SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
-                Vn = _dot(nx)(
-                    U,
-                    _dot(nx)(
-                        term1,
-                        (_dot(nx)(P, neighbor_coords_compact) - nx.einsum("ij,i->ij", Rn, K_NA)),
-                    ),
-                )
-
-        # Update R()
-        if mode == "S" or mode == "SN":
-            mu_XnA, mu_VnA, mu_XnB = (
-                _dot(nx)(K_NA, coords_model) / Sp,
-                _dot(nx)(K_NA, Vn) / Sp,
-                _dot(nx)(K_NB, neighbor_coords_compact) / Sp,
-            )
-            XnABar, VnABar, XnBBar = (
-                coords_model - mu_XnA,
-                Vn - mu_VnA,
-                neighbor_coords_compact - mu_XnB,
-            )
-            A = -_dot(nx)(nx.einsum("ij,i->ij", VnABar, K_NA).T - _dot(nx)(P, XnBBar).T, XnABar)
-            svdU, svdS, svdV = _linalg(nx).svd(A)
-            C = _identity(nx, D, type_as)
-            C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
-            R = _dot(nx)(_dot(nx)(svdU, C), svdV)
-            s = (nx.einsum("ii", _dot(nx)(A, R.T)) + 10 / sigma2 + iter**2) / (
-                nx.einsum("ii", _dot(nx)(nx.einsum("ij,i->ij", XnABar, K_NA).T, XnABar)) + 10 / sigma2 + iter**2
-            )
-            t = mu_XnB - mu_VnA - s * _dot(nx)(mu_XnA, R.T)
-            Rn = s * _dot(nx)(coords_model, R.T) + t
-
-        XnHat = Rn + Vn
-
-        # Update sigma2 and beta2
-        SpatialDistMat = cal_dist(XnHat, neighbor_coords_compact)
-        sigma2_old = sigma2
-        if init_Param is None:
-            sigma2 = nx.maximum(_data(nx, 30 / (iter + 1), type_as), _data(nx, 1, type_as)) * (
-                nx.einsum("ij,ij", P, SpatialDistMat) / (D * Sp) + nx.einsum("i,i", K_NA, SigmaDiag) / Sp
-            )
-        else:
-            sigma2 = nx.einsum("ij,ij", P, SpatialDistMat) / (D * Sp) + nx.einsum("i,i", K_NA, SigmaDiag) / Sp
-        sigma2_terc = nx.abs((sigma2 - sigma2_old) / sigma2)
-
-    if vis_optimiation:
-        slice_colors = [
-            "#E41A1C",
-            "#B45F00",
-            "#707E00",
-            "#008D01",
-            "#009466",
-            "#0095B2",
-        ]
-        artists = []
-        for i in range(iter - 1):
-            frame = []
-            for j in range(N_neighbor):
-                frame_j = ax.scatter(
-                    neighbor_coords[j][:, 0].cpu().numpy(),
-                    neighbor_coords[j][:, 1].cpu().numpy(),
-                    marker="o",
-                    s=5,
-                    c=slice_colors[1 + j % (len(slice_colors) - 1)],
-                )
-                frame.append(frame_j)
-            frame1 = ax.scatter(
-                XnHat_list[i][:, 0].cpu().numpy(),
-                XnHat_list[i][:, 1].cpu().numpy(),
-                marker="o",
-                s=5,
-                c=slice_colors[0],
-            )
-            frame.append(frame1)
-            # frame2 = ax.scatter(coordsB[:,0],coordsB[:,1],marker='o',s=5,c='r')
-            title_text = "Iter: {}, sigma2: {:.3f}, s: {:.3f}.".format(
-                i, sigma2_list[i].cpu().numpy(), s_list[i].cpu().numpy()
-            )
-            tit = ax.text(
-                (
-                    np.min(neighbor_coords_compact[:, 0].cpu().numpy())
-                    + np.max(neighbor_coords_compact[:, 0].cpu().numpy())
-                )
-                / 2,
-                1.2 * np.max(neighbor_coords_compact[:, 1].cpu().numpy()),
-                title_text,
-                ha="center",
-                va="bottom",
-                size=16,
-                weight="bold",
-            )
-            frame.append(tit)
-            artists.append(frame)
-        ani = animation.ArtistAnimation(fig=fig, artists=artists, interval=4, blit=False)
-        ani.save(file_name, fps=10)
-        plt.close()
-
-    if verbose:
-        lm.main_info(f"Key Parameters: gamma: {gamma}; beta2: {beta2}; sigma2: {sigma2}")
-
-    param = dict()
-    param["XnHat"] = nx.to_numpy(XnHat)
-    param["P"] = nx.to_numpy(P.T)
-    param["R"] = nx.to_numpy(R)
-    param["t"] = nx.to_numpy(t)
-    param["alpha"] = nx.to_numpy(alpha)
-    param["Vn"] = nx.to_numpy(Vn)
-    param["sigma2"] = nx.to_numpy(sigma2)
-    param["beta2"] = nx.to_numpy(beta2)
-    param["outlier_variance"] = nx.to_numpy(outlier_variance)
-    param["gamma"] = nx.to_numpy(gamma)
-    param["SigmaDiag"] = nx.to_numpy(SigmaDiag)
-    param["Rn"] = nx.to_numpy(Rn)
-    param["s"] = nx.to_numpy(s)
-    param["W"] = nx.to_numpy(W)
-    param["SpatialDistMat"] = nx.to_numpy(SpatialDistMat)
-    param["GeneDistMat"] = nx.to_numpy(GeneDistMat)
-    return param

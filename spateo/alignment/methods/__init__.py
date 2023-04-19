@@ -1,10 +1,9 @@
-from .BioAlign import BA_align, BA_align_multi, shape_align
+from .BioAlign import BA_align
 from .paste import (
     generalized_procrustes_analysis,
     paste_center_align,
     paste_pairwise_align,
 )
-from .RANSAC import RANSAC_align
 from .utils import (
     PCA_project,
     PCA_recover,
@@ -16,4 +15,5 @@ from .utils import (
     cal_dot,
     calc_exp_dissimilarity,
     coarse_rigid_alignment,
+    empty_cache,
 )
