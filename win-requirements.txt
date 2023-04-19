@@ -4,7 +4,6 @@ cvxopt>=1.2.3
 csbdeep>=0.6.3
 descartes
 dynamo-release>=1.0.9
-fbgbp>=0.2.0
 folium>=0.12.1
 geopandas>=0.10.2
 ipywidgets>=7.7.1
@@ -18,7 +17,6 @@ mapclassify>=2.4.2
 matplotlib<=3.5.3
 nbconvert
 networkx>=2.6.3
-# ngs_tools>=1.6.0
 nudged>=0.3.1
 numba>=0.46.0
 numpy>=1.18.1
@@ -28,7 +26,6 @@ pandas>=0.25.1
 plotly>=5.1.0
 POT>=0.8.1
 pynndescent>=0.4.8
-pysal>=1.14.4
 pyro-ppl
 python-igraph>=0.7.1
 pyvista>=0.38.0

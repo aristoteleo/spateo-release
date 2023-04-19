@@ -6,8 +6,6 @@ from typing import List, Optional, Tuple, Union
 import anndata
 import numpy as np
 import scipy
-import spreg
-from libpysal import weights
 
 from ...configuration import SKM
 from ...logging import logger_manager as lm
@@ -67,6 +65,9 @@ def smooth_and_downsample(
         (optional) adata_rex:
         (optional) adata: AnnData subsetted down to downsampled buckets.
     """
+    import spreg
+    from libpysal import weights
+
     logger = lm.get_main_logger()
     if n_ds is None and not imputation:
         logger.error(

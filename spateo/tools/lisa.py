@@ -12,13 +12,7 @@ with warnings.catch_warnings():
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
-from pysal import explore
-from pysal.lib import weights
-from pysal.model import spreg
-from tqdm import tqdm
-
 from ..configuration import SKM
-from ..utils import copy_adata
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
@@ -45,6 +39,9 @@ def lisa_geo_df(
         expression (`w_exp` column), z-score (`exp_zscore`, `w_exp_zscore`) and the LISA (`Is` column).
         score.
     """
+    from pysal import explore
+    from pysal.lib import weights
+
     coords = adata.obsm[spatial_key]
 
     # Generate W from the GeoDataFrame
@@ -134,6 +131,9 @@ def local_moran_i(
     >>>         dyn.pl.space(adata, color=group, highlights=[i], pointsize=0.1, alpha=1, figsize=(12, 8))
     >>>         st.pl.space(adata, color=markers_df[i].index, pointsize=0.1, alpha=1, figsize=(12, 8))
     """
+    from pysal import explore
+    from pysal.lib import weights
+
     group_num = adata.obs[group].value_counts()
     group_name = adata.obs[group]
     uniq_g, group_name = group_name.unique(), group_name.to_list()
@@ -365,6 +365,9 @@ def GM_lag_model(
     >>>         st.pl.space(adata.copy(), basis='spatial', color=['simpleanno'],
     >>>             highlights=[i.split('_GM_lag_coeff')[0]], pointsize=0.1, alpha=1, show_legend='on data')
     """
+    from pysal.lib import weights
+    from pysal.model import spreg
+
     group_num = adata.obs[group].value_counts()
     max_group, min_group, min_group_ncells = (
         group_num.index[0],
