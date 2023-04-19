@@ -34,10 +34,8 @@ from .utils import (
     cal_dist,
     calc_exp_dissimilarity,
     coarse_rigid_alignment,
-    coarse_rigid_alignment_debug,
     empty_cache,
     get_optimal_R,
-    shape_align_preprocess,
 )
 
 
@@ -317,11 +315,6 @@ def BA_align(
     del spatial_coords, exp_matrices
 
     NA, NB, D, G = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1], X_A.shape[1]
-    # if NA*NB > 1e8:
-    #     use_numpy = True
-    #     GeneDistMat = calc_exp_dissimilarity(
-    #         X_A=X_A, X_B=X_B, dissimilarity=dissimilarity
-    #     )
     sub_sample = False
     if SVI_mode and (NA > 20000 or NB > 20000):
         if NA > 15000:
@@ -350,24 +343,25 @@ def BA_align(
 
     if nn_init:
         # perform coarse rigid alignment
-        print("Performing coarse rigid alignment...")
         if sub_sample:
-            # coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(sub_coordsA, sub_coordsB, GeneDistMat, nx, -1, top_K=10, transformed_points=coordsA)
-            coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(
-                sub_coordsA,
-                sub_coordsB,
-                sub_X_A,
-                sub_X_B,
-                dissimilarity=dissimilarity,
-                sub_sample_num=-1,
-                top_K=10,
+            _cra_kwargs = dict(
+                coordsA=sub_coordsA,
+                coordsB=sub_coordsB,
+                X_A=sub_X_A,
+                X_B=sub_X_B,
                 transformed_points=coordsA,
             )
         else:
-            coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(
-                coordsA, coordsB, X_A, X_B, dissimilarity=dissimilarity, sub_sample_num=-1, top_K=10
+            _cra_kwargs = dict(
+                coordsA=coordsA,
+                coordsB=coordsB,
+                X_A=X_A,
+                X_B=X_B,
+                transformed_points=None,
             )
-        print("Coarse rigid alignment done.")
+        coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(
+            dissimilarity=dissimilarity, top_K=10, verbose=verbose, **_cra_kwargs
+        )
         empty_cache(device=device)
         coordsA = _data(nx, coordsA, type_as)
         inlier_A = _data(nx, inlier_A, type_as)

@@ -734,11 +734,13 @@ def coarse_rigid_alignment(
     coordsB: Union[np.ndarray, torch.Tensor],
     X_A: Union[np.ndarray, torch.Tensor],
     X_B: Union[np.ndarray, torch.Tensor],
+    transformed_points: Optional[Union[np.ndarray, torch.Tensor]] = None,
     dissimilarity: str = "kl",
     top_K: int = 10,
-    transformed_points: Optional[Union[np.ndarray, torch.Tensor]] = None,
+    verbose: bool = True,
 ) -> Tuple[Any, Any, Any, Any, Union[ndarray, Any], Union[ndarray, Any]]:
-
+    if verbose:
+        lm.main_info("Performing coarse rigid alignment...")
     nx = ot.backend.get_backend(coordsA, coordsB)
     if transformed_points is None:
         transformed_points = coordsA
@@ -793,7 +795,6 @@ def coarse_rigid_alignment(
         t = t2
         sigma2 = sigma2_2
         R = np.dot(R, R_flip)
-        print("flip")
     inlier_threshold = min(P[np.argsort(-P[:, 0])[20], 0], 0.5)
     inlier_set = np.where(P[:, 0] > inlier_threshold)[0]
     inlier_x, inlier_y = train_x[inlier_set, :], train_y[inlier_set, :]
@@ -801,6 +802,8 @@ def coarse_rigid_alignment(
 
     transformed_points = np.dot(transformed_points, R.T) + t
     inlier_x = np.dot(inlier_x, R.T) + t
+    if verbose:
+        lm.main_info("Coarse rigid alignment done.")
     return transformed_points, inlier_x, inlier_y, inlier_P, R, t
 
 
@@ -1121,7 +1124,6 @@ _chunk = (
     if nx_torch(nx)
     else np.array_split(x, chunk_num, axis=dim)
 )
-_unsqueeze = lambda nx: torch.unsqueeze if nx_torch(nx) else np.expand_dims
 _randperm = lambda nx: torch.randperm if nx_torch(nx) else np.random.permutation
 _roll = lambda nx: torch.roll if nx_torch(nx) else np.roll
 _choice = (
@@ -1135,11 +1137,3 @@ _topk = (
 _dstack = lambda nx: torch.dstack if nx_torch(nx) else np.dstack
 _vstack = lambda nx: torch.vstack if nx_torch(nx) else np.vstack
 _hstack = lambda nx: torch.hstack if nx_torch(nx) else np.hstack
-
-# _svd = (
-#     lambda nx, x, full_matrices=True, compute_uv=True: torch.svd(
-#         x, some=full_matrices, compute_uv=compute_uv
-#     )
-#     if nx_torch(nx)
-#     else np.linalg.svd(x, full_matrices=full_matrices, compute_uv=compute_uv)
-# )
