@@ -100,7 +100,7 @@ def pairwise_mapping(
     distance: Optional[Union[int, float]] = 300,
     direction: Optional[Literal["x", "y", "z"]] = "z",
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     cpo: Optional[Union[str, list]] = "iso",
     window_size: Optional[tuple] = (1024, 1024),
@@ -116,6 +116,7 @@ def pairwise_mapping(
     line_opacity: float = 0.03,
     model_size: Union[float, list] = 6.0,
     line_size: Union[float, list] = 2.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     text: Union[bool, str] = True,
@@ -149,10 +150,8 @@ def pairwise_mapping(
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         cpo: Camera position of the active render window. Available ``cpo`` are:
 
@@ -176,6 +175,7 @@ def pairwise_mapping(
         line_opacity: Opacity of the lines.
         model_size: The point size of any nodes in the dataset plotted.
         line_size: The line size of lines in the dataset plotted.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
 
@@ -334,6 +334,7 @@ def pairwise_mapping(
         colormap=None if plot_cmaps[0] is None else [plot_cmapL, plot_cmaps[0]],
         model_style=["wireframe", "points"],
         model_size=[line_size, model_size],
+        show_axes=show_axes,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
         text=f"\nModels id: {idA} & {idB}" if text is True else text,
@@ -543,7 +544,7 @@ def pairwise_iteration(
     iter_key: str = "iter_spatial",
     id_key: str = "slices",
     filename: str = "animate.mp4",
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     cpo: Optional[Union[str, list]] = None,
     window_size: Optional[tuple] = None,
@@ -554,6 +555,7 @@ def pairwise_iteration(
     modelA_opacity: Union[int, float] = 0.8,
     modelB_opacity: Union[int, float] = 1.0,
     model_size: Union[float, list] = 6.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     text: Union[bool, str] = True,
@@ -579,10 +581,8 @@ def pairwise_iteration(
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         cpo: Camera position of the active render window. Available ``cpo`` are:
 
@@ -601,6 +601,7 @@ def pairwise_iteration(
         modelA_opacity: Opacity of the modelA.
         modelB_opacity: Opacity of the modelB.
         model_size: The point size of any nodes in the dataset plotted.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
 
@@ -691,6 +692,7 @@ def pairwise_iteration(
         opacity=modelB_opacity,
         model_style="points",
         model_size=model_size,
+        show_axes=show_axes,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
         text=f"\nModels id: {idA} & {idB}" if text is True else text,

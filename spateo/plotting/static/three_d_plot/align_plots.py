@@ -52,7 +52,7 @@ def multi_models(
     mode: Literal["single", "overlap", "both"] = "single",
     center_zero: bool = False,
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     cpo: Union[str, list] = "xy",
     shape: Union[str, list, tuple] = None,
@@ -65,6 +65,7 @@ def multi_models(
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_size: Union[float, list] = 3.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     text: Union[bool, str] = True,
@@ -94,10 +95,8 @@ def multi_models(
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         cpo: Camera position of the active render window. Available ``cpo`` are:
 
@@ -131,6 +130,7 @@ def multi_models(
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
         model_size: The point size of any nodes in the dataset plotted.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
 
@@ -198,6 +198,7 @@ def multi_models(
             cpo=[cpo],
             model_style=["points"],
             model_size=[model_size],
+            show_axes=show_axes,
             show_legend=show_legend,
             legend_kwargs=legend_kwargs,
             text=[f"\nModel id: {id}" for id in ids] if text is True else text,
@@ -291,6 +292,7 @@ def multi_models(
             cpo=[cpo],
             model_style=["points"],
             model_size=[model_size],
+            show_axes=show_axes,
             show_legend=show_legend,
             legend_kwargs=legend_kwargs,
             text=[f"\nModel id: {id}" for id in overlap_ids] if text is True else text,
@@ -310,7 +312,7 @@ def deformation(
     center_zero: bool = False,
     show_model: bool = True,
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     cpo: Union[str, list] = "xy",
     shape: Union[str, list, tuple] = None,
@@ -324,6 +326,7 @@ def deformation(
     opacity: Union[float, np.ndarray, list] = 1.0,
     grid_size: Union[float, list] = 2.0,
     model_size: Union[float, list] = 3.0,
+    show_axes: bool = True,
     show_legend: bool = False,
     legend_kwargs: Optional[dict] = None,
     text: Union[bool, str] = True,
@@ -409,6 +412,7 @@ def deformation(
         cpo=[cpo],
         model_style=[["points", "wireframe"]] if show_model else ["wireframe"],
         model_size=[[model_size, grid_size]] if show_model else [grid_size],
+        show_axes=show_axes,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
         text=[f"\nModel id: {id}" for id in ids] if text is True else text,
