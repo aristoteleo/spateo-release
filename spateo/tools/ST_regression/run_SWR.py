@@ -35,11 +35,23 @@ def main():
     "'mod_type' is 'niche' or 'slice'.",
 )
 @click.option(
+    "group_subset",
+    required=False,
+    multiple=True,
+    help="If provided, only cells with labels that correspond to these group(s) will be used as prediction targets.",
+)
+@click.option(
     "csv_path",
     required=False,
     help="Can be used to provide a .csv file, containing gene expression data or any other kind of data. "
     "Assumes the first three columns contain x- and y-coordinates and then dependent variable "
     "values, in that order.",
+)
+@click.option(
+    "subsample",
+    default=False,
+    is_flag=True,
+    help="Recommended for large datasets (>5000 samples), " "otherwise model fitting is quite slow.",
 )
 @click.option("multiscale", default=False, is_flag=True)
 @click.option(

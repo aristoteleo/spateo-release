@@ -2,9 +2,9 @@ import argparse
 
 import numpy as np
 import pandas as pd
-from GWRGRN import GWRGRN
 from mpi4py import MPI
 from regression_utils import multicollinearity_check
+from SWGRN import GWRGRN
 from SWR import SWR, MuSIC
 
 if __name__ == "__main__":
@@ -23,6 +23,11 @@ if __name__ == "__main__":
         help="Can be used to provide a .csv file, containing gene expression data or any other kind of data. "
         "Assumes the first three columns contain x- and y-coordinates and then dependent variable "
         "values, in that order.",
+    )
+    parser.add_argument(
+        "-subsample",
+        action="store_true",
+        help="Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
     )
     parser.add_argument("-multiscale", action="store_true")
     # Flag to run a GRN model- if not given, will run STGWR CCI model, taking inputs such as mod_type and cci_dir
@@ -81,6 +86,12 @@ if __name__ == "__main__":
         help="Key to entry in .obs containing cell type "
         "or other category labels. Required if "
         "'mod_type' is 'niche' or 'slice'.",
+    )
+    parser.add_argument(
+        "-group_subset",
+        nargs="+",
+        type=str,
+        help="If provided, only cells with labels that correspond to these group(s) will be used as prediction targets.",
     )
     parser.add_argument(
         "-covariate_keys",

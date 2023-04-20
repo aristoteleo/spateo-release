@@ -579,12 +579,14 @@ def smooth(X, W, normalize_W=True, return_discrete=False) -> Tuple[scipy.sparse.
         W = scipy.sparse.diags(1 / d) @ W if scipy.sparse.issparse(W) else np.diag(1 / d) @ W
         x_new = scipy.sparse.csr_matrix(W @ X)
         if return_discrete:
-            x_new = scipy.sparse.csr_matrix.round(x_new).astype(int)
+            x_new = x_new.todense()
+            x_new = scipy.sparse.csr_matrix(np.round(x_new)).astype(int)
         return x_new, d
     else:
         x_new = W @ X
         if return_discrete:
-            x_new = scipy.sparse.csr_matrix.round(x_new).astype(int)
+            x_new = x_new.todense()
+            x_new = scipy.sparse.csr_matrix(np.round(x_new)).astype(int)
         return x_new
 
 
