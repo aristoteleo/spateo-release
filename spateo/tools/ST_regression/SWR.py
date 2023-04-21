@@ -1230,6 +1230,7 @@ class SWR:
         bw: Union[float, int],
         final: bool = False,
         multiscale: bool = False,
+        fit_predictor: bool = False,
     ) -> Union[np.ndarray, List[float]]:
         """Fit a local regression model for each sample.
 
@@ -1242,8 +1243,9 @@ class SWR:
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
             multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
-            over
-                different spatial scales
+                over different spatial scales
+            fit_predictor: Set True to indicate that dependent variable to fit is a linear predictor rather than a
+                true response variable
 
         Returns:
             A single output will be given for each case, and can contain either `betas` or a list w/ combinations of
@@ -1292,11 +1294,12 @@ class SWR:
             hat_i = np.dot(X[i], pseudoinverse[:, i])
 
         elif self.distr == "poisson" or self.distr == "nb":
-            # init_betas (initial coefficients) to be incorporated at runtime:
+            # For multiscale model, the y provided is the linear predictor, not the response:
+            distr = self.distr if not fit_predictor else "gaussian"
             betas, y_hat, _, final_irls_weights, _, _, pseudoinverse = iwls(
                 y,
                 X,
-                distr=self.distr,
+                distr=distr,
                 init_betas=self.init_betas,
                 tol=self.tolerance,
                 max_iter=self.max_iter,
@@ -1305,13 +1308,17 @@ class SWR:
                 alpha=self.alpha,
                 tau=None,
             )
-            # if (i + 1) % 1000 == 0 or i == self.n_samples - 1:
-            #     self.logger.info(f"Completed IWLS fitting for sample {i+1} / {self.n_samples}.")
 
             # Reshape coefficients if necessary:
             betas = betas.flatten()
+            # For multiscale GLM models, this is the predicted linear predictor:
             pred_y = y_hat[i]
             diagnostic = pred_y
+            # For multiscale models, keep track of the residual as well- in this case,
+            # the given y is assumed to also be the linear predictor:
+            if multiscale:
+                residual = y[i] - pred_y
+
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
             hat_i = np.dot(X[i], pseudoinverse[:, i]) * final_irls_weights[i][0]
 
@@ -1327,10 +1334,10 @@ class SWR:
             return np.concatenate(([sample_name, diagnostic, hat_i], betas, lvg))
         else:
             # For bandwidth optimization:
-            if self.distr == "gaussian":
+            if self.distr == "gaussian" or multiscale:
                 bw_diagnostic = residual * residual
+                return [bw_diagnostic, hat_i]
             elif self.distr == "poisson" or self.distr == "nb":
-                # Else just return fitted value for diagnostic purposes:
                 bw_diagnostic = pred_y
             return [bw_diagnostic, hat_i]
 
@@ -1420,6 +1427,7 @@ class SWR:
         bw: Union[float, int],
         final: bool = False,
         multiscale: bool = False,
+        fit_predictor: bool = False,
     ) -> Union[None, np.ndarray]:
         """Fit local regression model for each sample in parallel, given a specified bandwidth.
 
@@ -1434,6 +1442,8 @@ class SWR:
                 be fit and more stats can be returned.
             multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
                 over different spatial scales
+            fit_predictor: Set True to indicate that dependent variable to fit is a linear predictor rather than a
+                true response variable
         """
         # If model to be run is a "niche", "lr" or "slice" model, update the spatial weights and then update X given
         # the current value of the bandwidth:
@@ -1483,7 +1493,7 @@ class SWR:
             pos = 0
             for i in self.x_chunk:
                 local_fit_outputs[pos] = self.local_fit(
-                    i, y, X, y_label=y_label, bw=bw, final=final, multiscale=multiscale
+                    i, y, X, y_label=y_label, bw=bw, final=final, multiscale=multiscale, fit_predictor=fit_predictor
                 )
                 pos += 1
 
@@ -1500,7 +1510,7 @@ class SWR:
 
             # If multiscale, do not need to fit using fixed bandwidth:
             if multiscale:
-                # For MGWR, this function is only needed to initialize parameters:
+                # At final iteration, for MGWR, this function is only needed to get parameters:
                 all_fit_outputs = self.comm.bcast(all_fit_outputs, root=0)
                 all_fit_outputs = np.vstack(all_fit_outputs)
                 return all_fit_outputs
@@ -1534,15 +1544,15 @@ class SWR:
                 if self.distr == "poisson" or self.distr == "nb":
                     # Deviance:
                     deviance = self.distr_obj.deviance(y, all_fit_outputs[:, 1])
-                    # Residual deviance:
-                    residual_deviance = self.distr_obj.deviance_residuals(y, all_fit_outputs[:, 1])
+                    # Log-likelihood:
+                    ll = self.distr_obj.log_likelihood(y, all_fit_outputs[:, 1])
                     # Reshape if necessary:
                     if self.n_features > 1:
-                        residual_deviance = residual_deviance.reshape(-1, 1)
+                        ll = ll.reshape(-1, 1)
                     # ENP:
                     ENP = np.sum(all_fit_outputs[:, 2])
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_glm(residual_deviance, ENP, n_samples=n_samples)
+                    aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
                     # To obtain standard errors for each coefficient, take the square root of the diagonal elements
                     # of the covariance matrix:
                     # Compute the covariance matrix using the Hessian- first compute the estimate for dispersion of
@@ -1584,7 +1594,7 @@ class SWR:
             return
 
         # If not the final run:
-        if self.distr == "gaussian":
+        if self.distr == "gaussian" or fit_predictor:
             # Compute AICc using the sum of squared residuals:
             RSS = 0
             trace_hat = 0
@@ -1604,11 +1614,12 @@ class SWR:
                 trace_hat = np.sum(trace_hat_list)
                 aicc = self.compute_aicc_linear(RSS, trace_hat, n_samples=n_samples)
                 if not multiscale:
-                    self.logger.info(f"Bandwidth: {bw}, Linear AICc: {aicc}")
+                    self.logger.info(f"Bandwidth: {bw:.3f}, Linear AICc: {aicc:.3f}")
                 return aicc
 
         elif self.distr == "poisson" or self.distr == "nb":
-            # Compute AICc using the fitted and observed values:
+            # Compute AICc using the fitted and observed values, using the linear predictor for multiscale models and
+            # the predicted response otherwise:
             trace_hat = 0
             pos = 0
             y_pred = np.empty(self.x_chunk.shape[0], dtype=np.float64)
@@ -1625,12 +1636,11 @@ class SWR:
             trace_hat_list = self.comm.gather(trace_hat, root=0)
 
             if self.comm.rank == 0:
-                # CHANGE TO LOG-LIKELIHOOD
-                deviance_residuals = self.distr_obj.deviance_residuals(y, all_y_pred)
+                ll = self.distr_obj.log_likelihood(y, all_y_pred)
                 trace_hat = np.sum(trace_hat_list)
-                aicc = self.compute_aicc_glm(deviance_residuals, trace_hat, n_samples=n_samples)
-                if not multiscale:
-                    self.logger.info(f"Bandwidth: {bw}, GLM AICc: {aicc}")
+                aicc = self.compute_aicc_glm(ll, trace_hat, n_samples=n_samples)
+                self.logger.info(f"Bandwidth: {bw:.3f}, GLM AICc: {aicc:.3f}")
+
                 return aicc
 
         return
@@ -1641,6 +1651,7 @@ class SWR:
         X: Optional[np.ndarray] = None,
         init_betas: Optional[Dict[str, np.ndarray]] = None,
         multiscale: bool = False,
+        fit_predictor: bool = False,
         signaling_type: Optional[str] = None,
         verbose: bool = True,
     ) -> Optional[Tuple[Union[None, Dict[str, np.ndarray]], Dict[str, float]]]:
@@ -1658,6 +1669,8 @@ class SWR:
             init_betas: Optional dictionary containing arrays with initial values for the coefficients. Keys should
                 correspond to target genes and values should be arrays of shape [n_features, 1].
             multiscale: Set True to indicate that a multiscale model should be fitted
+            fit_predictor: Set True to indicate that dependent variable to fit is a linear predictor rather than a
+                true response variable
             signaling_type: Optional category for the interaction, one of "Cell-Cell Contact", "Diffusive Signaling"
                 (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor".
             verbose: Set True to print out information about the bandwidth selection and/or fitting process. Will be
@@ -1727,13 +1740,18 @@ class SWR:
 
             # Searching for optimal bandwidth- set final=False to return AICc for each run of the optimization
             # function:
-            fit_function = lambda bw: self.mpi_fit(y, X, y_label=target, bw=bw, final=False, multiscale=multiscale)
+            fit_function = lambda bw: self.mpi_fit(
+                y, X, y_label=target, bw=bw, final=False, multiscale=multiscale, fit_predictor=fit_predictor
+            )
             optimal_bw = self.find_optimal_bw(self.minbw, self.maxbw, fit_function)
-            self.logger.info(f"Discovered optimal bandwidth for {target}: {optimal_bw}")
+            if not multiscale:
+                self.logger.info(f"Discovered optimal bandwidth for {target}: {optimal_bw}")
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)
 
-            data = self.mpi_fit(y, X, y_label=target, bw=optimal_bw, final=True, multiscale=multiscale)
+            data = self.mpi_fit(
+                y, X, y_label=target, bw=optimal_bw, final=True, multiscale=multiscale, fit_predictor=fit_predictor
+            )
             if data is not None:
                 all_data[target] = data
             all_bws[target] = optimal_bw
@@ -1795,11 +1813,26 @@ class SWR:
 
         return aicc
 
-    # NOTE TO SELF: CHANGE AICC COMPUTATION FOR GENERALIZED LM: AICc = -2*log-likelihood + 2k + (2k(k+1))/(
-    # n_eff-k-1), where n_eff = n - trace(H)
-    def compute_aicc_glm(self, trace_hat: float, n_samples: Optional[int] = None) -> float:
-        """Compute the corrected Akaike Information Criterion (AICc) for the generalized linear GWR models."""
-        "filler"
+    def compute_aicc_glm(self, ll: float, trace_hat: float, n_samples: Optional[int] = None) -> float:
+        """Compute the corrected Akaike Information Criterion (AICc) for the generalized linear GWR models. Given by:
+        :math AICc = -2*log-likelihood + 2k + (2k(k+1))/(n_eff-k-1).
+
+        Arguments:
+            ll: Model log-likelihood
+            trace_hat: Trace of the hat matrix
+            n_samples: Number of samples model was fitted to
+        """
+        if n_samples is None:
+            n_samples = self.n_samples
+        n_eff = n_samples - trace_hat
+
+        aicc = (
+            -2 * ll
+            + 2 * self.n_features
+            + (2 * self.n_features * (self.n_features + 1)) / (n_eff - self.n_features - 1)
+        )
+
+        return aicc
 
     def output_diagnostics(
         self,
@@ -2058,7 +2091,7 @@ class MuSIC(SWR):
 
         # For GLM models:
         self.all_deviances = {}
-        self.all_residual_deviances = {}
+        self.all_log_likelihoods = {}
 
         # Optional, to save the dispersion parameter for negative binomial fitted to each target:
         self.nb_disp_dict = {}
@@ -2088,17 +2121,14 @@ class MuSIC(SWR):
                 n_samples = self.n_samples
                 sample_names = self.sample_names
 
-            # Initialize parameters, with a uniform initial bandwidth for all features:
-            all_betas, all_bws = self.fit(y, X, multiscale=True, init_betas=init_betas)
+            # Initialize parameters, with a uniform initial bandwidth for all features- set fit_predictor False to
+            # fit model under the assumption that y is a Poisson-distributed dependent variable:
+            all_betas, all_bws = self.fit(y, X, multiscale=True, fit_predictor=False, init_betas=init_betas)
             self.all_bws_init[target] = all_bws
 
-            # Initial values- multiply input by the array corresponding to the correct target:
-            linear_predictors = X * all_betas[target]
-            # Array of shape [n_samples, n_features] containing initial spatially-weighted regression predictions:
-            if self.distr != "gaussian":
-                y_pred_init = self.distr_obj.predict(linear_predictors)
-            else:
-                y_pred_init = linear_predictors
+            # Initial values- multiply input by the array corresponding to the correct target- note that this is
+            # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
+            y_pred_init = X * all_betas[target]
             all_pred_y = y_pred_init.sum(axis=1)
 
             error = y.values.reshape(-1) - all_pred_y
@@ -2109,8 +2139,8 @@ class MuSIC(SWR):
             n_iters = max(200, self.max_iter)
             for iter in range(1, n_iters + 1):
                 if self.subsampled:
-                    new_ys = np.empty(linear_predictors.shape, dtype=np.float64)
-                    new_betas = np.empty(linear_predictors.shape, dtype=np.float64)
+                    new_ys = np.empty(y_pred_init.shape, dtype=np.float64)
+                    new_betas = np.empty(y_pred_init.shape, dtype=np.float64)
 
                 for n_feat in range(self.n_features):
                     if self.adata_path is not None:
@@ -2127,25 +2157,31 @@ class MuSIC(SWR):
                         # Use the bandwidths from the previous iteration before plateau was determined to have been
                         # reached:
                         bw = bws[n_feat]
-                        betas = self.mpi_fit(temp_y.values, temp_X, y_label=target, bw=bw, final=True, multiscale=True)
+                        betas = self.mpi_fit(
+                            temp_y.values,
+                            temp_X,
+                            y_label=target,
+                            bw=bw,
+                            final=True,
+                            fit_predictor=True,
+                            multiscale=True,
+                        )
                     else:
                         betas, bw_dict = self.fit(
                             temp_y,
                             temp_X,
                             init_betas=init_betas,
                             multiscale=True,
+                            fit_predictor=True,
                             signaling_type=signaling_type,
                             verbose=False,
                         )
                         # Get coefficients for this particular target:
                         betas = betas[target]
 
-                    # Update the linear predictor and betas:
-                    new_v = (temp_X * betas).reshape(-1)
-                    if self.distr != "gaussian":
-                        new_y = self.distr_obj.predict(new_v)
-                    else:
-                        new_y = new_v
+                    # Update the dependent prediction (again not for GLMs, this quantity is instead the linear
+                    # predictor) and betas:
+                    new_y = (temp_X * betas).reshape(-1)
                     error = temp_y.values.reshape(-1) - new_y
                     new_ys[:, n_feat] = new_y
                     new_betas[:, n_feat] = betas.reshape(-1)
@@ -2176,16 +2212,6 @@ class MuSIC(SWR):
 
             # Final estimated values:
             y_pred = new_ys
-            # Set dispersion for negative binomial:
-            if self.distr == "nb":
-                theta = 1 / self.distr_obj.variance(y_pred)
-                weights = self.distr_obj.weights(y_pred)
-                deviance = 2 * np.sum(
-                    weights
-                    * (y.values * np.log(y.values / y_pred) + (theta - 1) * np.log(1 + y_pred[:, 1] / (theta - 1)))
-                )
-                dof = len(y.values) - X.shape[1]
-                self.nb_disp_dict[target] = deviance / dof
 
             bw_history = np.array(bw_history)
             self.all_bws_history[target] = bw_history
@@ -2205,14 +2231,28 @@ class MuSIC(SWR):
                 r_squared = None
 
             if self.distr == "poisson" or self.distr == "nb":
+                # Map linear predictors to the response variable:
+                y_pred = self.distr_obj.predict(y_pred)
+
+                # Set dispersion for negative binomial:
+                if self.distr == "nb":
+                    theta = 1 / self.distr_obj.variance(y_pred)
+                    weights = self.distr_obj.weights(y_pred)
+                    deviance = 2 * np.sum(
+                        weights
+                        * (y.values * np.log(y.values / y_pred) + (theta - 1) * np.log(1 + y_pred[:, 1] / (theta - 1)))
+                    )
+                    dof = len(y.values) - X.shape[1]
+                    self.nb_disp_dict[target] = deviance / dof
+
                 # Deviance:
                 deviance = self.distr_obj.deviance(y.values, y_pred)
                 self.all_deviances[target] = deviance
-                residual_deviance = self.distr_obj.deviance_residuals(y.values, y_pred)
+                ll = self.distr_obj.log_likelihood(y.values, y_pred)
                 # Reshape if necessary:
                 if self.n_features > 1:
-                    residual_deviance = residual_deviance.reshape(-1, 1)
-                self.all_residual_deviances[target] = residual_deviance
+                    ll = ll.reshape(-1, 1)
+                self.all_log_likelihoods[target] = ll
 
                 # For saving outputs:
                 header = "name,deviance,"
@@ -2445,10 +2485,10 @@ class MuSIC(SWR):
                 if self.distr == "poisson" or self.distr == "nb":
                     # Get deviances corresponding to this feature:
                     deviance = self.all_deviances[target_label]
-                    residual_deviance = self.all_residual_deviances[target_label]
+                    ll = self.all_log_likelihood[target_label]
 
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_glm(residual_deviance, ENP, n_samples=n_samples)
+                    aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
                     # Compute standard errors using the covariance:
                     self.distr_obj.variance.disp = self.nb_disp_dict[target_label]
                     hessian = self.hessian(predictions)

@@ -798,6 +798,7 @@ class Poisson(Distribution):
         fitted = self.clip(fitted)
 
         ll = np.sum(freq_weights * (endog * np.log(fitted) - fitted - special.gammaln(endog + 1)))
+        print("LL: ", ll)
         ll = scale * ll
         return ll
 

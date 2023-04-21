@@ -124,7 +124,7 @@ if __name__ == "__main__":
 
     parser.add_argument("-distr", default="gaussian", type=str)
     parser.add_argument("-fit_intercept", action="store_true")
-    parser.add_argument("-tolerance", default=1e-5, type=float)
+    parser.add_argument("-tolerance", default=1e-3, type=float)
     parser.add_argument("-max_iter", default=500, type=int)
     parser.add_argument("-patience", default=5, type=int)
     parser.add_argument("-alpha", type=float)
