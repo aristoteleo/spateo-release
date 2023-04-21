@@ -191,6 +191,7 @@ class SWR:
                     )
                     self.logger.info(f"Extracting target from column labeled '{custom_data.columns[2]}'.")
                     independent_variables = custom_data.iloc[:, 3:]
+                    self.X_df = independent_variables
                     self.X = independent_variables.values
                     self.feature_names = list(independent_variables.columns)
 
@@ -202,10 +203,6 @@ class SWR:
                     self.n_samples = self.X.shape[0]
                     self.n_features = self.X.shape[1]
                     self.sample_names = custom_data.index
-
-                    # Subsample if applicable:
-                    if self.subsample:
-                        self.run_subsample()
 
         # Broadcast data to other processes- gene expression variables:
         if self.adata_path is not None:
@@ -221,6 +218,7 @@ class SWR:
 
         # Broadcast data to other processes:
         self.X = self.comm.bcast(self.X, root=0)
+        self.X_df = self.comm.bcast(self.X_df, root=0)
         self.bw = self.comm.bcast(self.bw, root=0)
         self.coords = self.comm.bcast(self.coords, root=0)
         self.tolerance = self.comm.bcast(self.tolerance, root=0)
@@ -239,6 +237,7 @@ class SWR:
 
         # Indicate model has now been set up:
         self.set_up = True
+        self.set_up = self.comm.bcast(self.set_up, root=0)
 
     def parse_stgwr_args(self):
         """
@@ -772,7 +771,12 @@ class SWR:
         # `indices`) of subsampled points, :attr `n_samples_fitted` (for setting :attr `x_chunk` later on, and
         # :attr `neighboring_unsampled` to establish a mapping between each not-sampled point and the closest sampled
         # point:
-        self.indices, self.n_samples_fitted, self.subsampled_sample_names, self.neighboring_unsampled = {}, {}, {}, {}
+        self.subsampled_indices, self.n_samples_fitted, self.subsampled_sample_names, self.neighboring_unsampled = (
+            {},
+            {},
+            {},
+            {},
+        )
 
         if y is None:
             y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
@@ -800,7 +804,9 @@ class SWR:
                 axis=1,
             )
             temp_df = pd.DataFrame(
-                data, columns=["x", "y", "spatial_cluster", target], index=self.sample_names,
+                data,
+                columns=["x", "y", "spatial_cluster", target],
+                index=self.sample_names,
             )
 
             temp_df[f"{target}_density"] = temp_df.groupby("spatial_cluster")[target].transform(
@@ -871,19 +877,20 @@ class SWR:
                 if self.sample_names[i] not in sampled_df.index:
                     closest_dict[key].append(self.sample_names[i])
 
-            self.indices[target] = [self.sample_names.get_loc(name) for name in sampled_df.index]
+            self.subsampled_indices[target] = [self.sample_names.get_loc(name) for name in sampled_df.index]
             self.n_samples_fitted[target] = len(sampled_df)
             self.subsampled_sample_names[target] = sampled_df.index
             self.neighboring_unsampled[target] = closest_dict
 
         # Cast each of these dictionaries to all processes:
-        self.indices = self.comm.bcast(self.indices, root=0)
+        self.subsampled_indices = self.comm.bcast(self.subsampled_indices, root=0)
         self.n_samples_fitted = self.comm.bcast(self.n_samples_fitted, root=0)
         self.subsampled_sample_names = self.comm.bcast(self.subsampled_sample_names, root=0)
         self.neighboring_unsampled = self.comm.bcast(self.neighboring_unsampled, root=0)
 
         # Set subsampled flag:
         self.subsampled = True
+        self.subsampled = self.comm.bcast(self.subsampled, root=0)
 
     def _set_search_range(self, signaling_type: Optional[str] = None):
         """Set the search range for the bandwidth selection procedure.
@@ -1179,6 +1186,7 @@ class SWR:
                 else:
                     self.signaling_types = "Cell-Cell Contact"
             self.signaling_types = self.comm.bcast(self.signaling_types, root=0)
+        self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
 
     def _adjust_x_nbhd_convolve(self, y: np.ndarray, X: np.ndarray):
         """Adjust the independent and dependent variable arrays based on the defined bandwidth. Used specifically to
@@ -1214,7 +1222,14 @@ class SWR:
         return hessian
 
     def local_fit(
-        self, i: int, y: np.ndarray, X: np.ndarray, bw: Union[float, int], final: bool = False, multiscale: bool = False
+        self,
+        i: int,
+        y: np.ndarray,
+        X: np.ndarray,
+        y_label: str,
+        bw: Union[float, int],
+        final: bool = False,
+        multiscale: bool = False,
     ) -> Union[np.ndarray, List[float]]:
         """Fit a local regression model for each sample.
 
@@ -1222,6 +1237,7 @@ class SWR:
             i: Index of sample for which local regression model is to be fitted
             y: Response variable
             X: Independent variable array
+            y_label:
             bw: Bandwidth for the spatial kernel
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
@@ -1250,12 +1266,19 @@ class SWR:
         if self.n_features > 1:
             y = y.reshape(-1, 1)
 
-        # Name of this sample:
-        sample_name = self.sample_names[i]
+        if self.subsampled:
+            sample_name = self.subsampled_sample_names[y_label][i]
+            n_samples = self.n_samples_fitted[y_label]
+            indices = self.subsampled_indices[y_label]
+            coords = self.coords[indices]
+        else:
+            sample_name = self.sample_names[i]
+            n_samples = self.n_samples
+            coords = self.coords
 
-        wi = get_wi(
-            i, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
-        ).reshape(-1, 1)
+        wi = get_wi(i, n_samples=n_samples, coords=coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw).reshape(
+            -1, 1
+        )
 
         if self.distr == "gaussian":
             betas, pseudoinverse = compute_betas_local(y, X, wi)
@@ -1380,8 +1403,6 @@ class SWR:
                 difference = lb_score - ub_score
                 # Update new value for score:
                 score = optimum_score
-            # self.logger.info(f"Iteration {iterations}- optimum bandwidth: {optimum_bw}, difference: "
-            #                  f"{np.abs(difference)}.")
 
             new_lb = self.comm.bcast(new_lb, root=0)
             new_ub = self.comm.bcast(new_ub, root=0)
@@ -1395,10 +1416,10 @@ class SWR:
         self,
         y: Optional[np.ndarray],
         X: Optional[np.ndarray],
+        y_label: str,
         bw: Union[float, int],
         final: bool = False,
         multiscale: bool = False,
-        y_label: Optional[str] = None,
     ) -> Union[None, np.ndarray]:
         """Fit local regression model for each sample in parallel, given a specified bandwidth.
 
@@ -1406,26 +1427,26 @@ class SWR:
             y: Response variable
             X: Independent variable array- if not given, will default to :attr `X`. Note that if object was initialized
                 using an AnnData object, this will be overridden with :attr `X` even if a different array is given.
+            y_label: Used to provide a unique ID for the dependent variable for saving purposes and to query keys
+                from various dictionaries
             bw: Bandwidth for the spatial kernel
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
             multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
-            over
-                different spatial scales
-            y_label: Optional, can be used to provide a unique ID for the dependent variable for saving purposes
+                over different spatial scales
         """
         # If model to be run is a "niche", "lr" or "slice" model, update the spatial weights and then update X given
         # the current value of the bandwidth:
-        if X is None:
-            if hasattr(self, "adata"):
-                self.all_spatial_weights = self._compute_all_wi(bw)
-                self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
-                self.logger.info(f"Adjusting X for new bandwidth: {bw}")
-                self._adjust_x()
-                self.X = self.comm.bcast(self.X, root=0)
-                X = self.X
-            else:
-                X = self.X
+        if hasattr(self, "adata"):
+            self.all_spatial_weights = self._compute_all_wi(bw)
+            self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
+            self.logger.info(f"Adjusting X for new bandwidth: {bw}")
+            self._adjust_x()
+            self.X = self.comm.bcast(self.X, root=0)
+            self.X_df = self.comm.bcast(self.X_df, root=0)
+            self.logger(f"Using adjusted X array for {self.mod_type} model.")
+            X = self.X
+
         if X.shape[1] != self.n_features:
             n_features = X.shape[1]
             n_features = self.comm.bcast(n_features, root=0)
@@ -1441,6 +1462,17 @@ class SWR:
             y = self.comm.bcast(y, root=0)
             X = self.comm.bcast(X, root=0)
 
+        # If subsampled, take the subsampled portion of the X array- if :attr `multiscale` is True, this subsampling
+        # will be performed before calling :func `mpi_fit`:
+        if self.subsampled:
+            indices = self.subsampled_indices[y_label]
+            n_samples = self.n_samples_fitted[y_label]
+            if not multiscale:
+                X = X[indices, :]
+                y = y[indices]
+        else:
+            n_samples = self.n_samples
+
         if final:
             if multiscale:
                 local_fit_outputs = np.empty((self.x_chunk.shape[0], n_features), dtype=np.float64)
@@ -1450,7 +1482,9 @@ class SWR:
             # Fitting for each location, or each location that is among the subsampled points:
             pos = 0
             for i in self.x_chunk:
-                local_fit_outputs[pos] = self.local_fit(i, y, X, bw, final=final, multiscale=multiscale)
+                local_fit_outputs[pos] = self.local_fit(
+                    i, y, X, y_label=y_label, bw=bw, final=final, multiscale=multiscale
+                )
                 pos += 1
 
             # Gather data to the central process such that an array is formed where each sample has its own
@@ -1479,16 +1513,16 @@ class SWR:
                 if self.distr == "gaussian":
                     RSS = np.sum(all_fit_outputs[:, 1] ** 2)
                     # Total sum of squares:
-                    TSS = np.sum((y[self.target_indices] - np.mean(y[self.target_indices])) ** 2)
+                    TSS = np.sum((y - np.mean(y)) ** 2)
                     r_squared = 1 - RSS / TSS
 
                     # Note: trace of the hat matrix and effective number of parameters (ENP) will be used
                     # interchangeably:
                     ENP = np.sum(all_fit_outputs[:, 2])
                     # Residual variance:
-                    sigma_squared = RSS / (self.n_samples_fitted - ENP)
+                    sigma_squared = RSS / (n_samples - ENP)
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_linear(RSS, ENP)
+                    aicc = self.compute_aicc_linear(RSS, ENP, n_samples=X.shape[0])
                     # Scale the leverages by their variance to compute standard errors of the predictor:
                     all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * sigma_squared)
 
@@ -1499,16 +1533,16 @@ class SWR:
 
                 if self.distr == "poisson" or self.distr == "nb":
                     # Deviance:
-                    deviance = self.distr_obj.deviance(y[self.target_indices], all_fit_outputs[:, 1])
+                    deviance = self.distr_obj.deviance(y, all_fit_outputs[:, 1])
                     # Residual deviance:
-                    residual_deviance = self.distr_obj.deviance_residuals(y[self.target_indices], all_fit_outputs[:, 1])
+                    residual_deviance = self.distr_obj.deviance_residuals(y, all_fit_outputs[:, 1])
                     # Reshape if necessary:
                     if self.n_features > 1:
                         residual_deviance = residual_deviance.reshape(-1, 1)
                     # ENP:
                     ENP = np.sum(all_fit_outputs[:, 2])
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_glm(residual_deviance, ENP)
+                    aicc = self.compute_aicc_glm(residual_deviance, ENP, n_samples=n_samples)
                     # To obtain standard errors for each coefficient, take the square root of the diagonal elements
                     # of the covariance matrix:
                     # Compute the covariance matrix using the Hessian- first compute the estimate for dispersion of
@@ -1519,11 +1553,11 @@ class SWR:
                         deviance = 2 * np.sum(
                             weights
                             * (
-                                y[self.target_indices] * np.log(y[self.target_indices] / all_fit_outputs[:, 1])
+                                y * np.log(y / all_fit_outputs[:, 1])
                                 + (theta - 1) * np.log(1 + all_fit_outputs[:, 1] / (theta - 1))
                             )
                         )
-                        dof = len(y[self.target_indices]) - self.X.shape[1]
+                        dof = len(y) - self.X.shape[1]
                         self.distr_obj.variance.disp = deviance / dof
 
                     hessian = self.hessian(all_fit_outputs[:, 1])
@@ -1556,7 +1590,7 @@ class SWR:
             trace_hat = 0
 
             for i in self.x_chunk:
-                fit_outputs = self.local_fit(i, y, X, bw, final=False)
+                fit_outputs = self.local_fit(i, y, X, y_label=y_label, bw=bw, final=False)
                 err_sq, hat_i = fit_outputs[0], fit_outputs[1]
                 RSS += err_sq
                 trace_hat += hat_i
@@ -1568,7 +1602,7 @@ class SWR:
             if self.comm.rank == 0:
                 RSS = np.sum(RSS_list)
                 trace_hat = np.sum(trace_hat_list)
-                aicc = self.compute_aicc_linear(RSS, trace_hat)
+                aicc = self.compute_aicc_linear(RSS, trace_hat, n_samples=n_samples)
                 if not multiscale:
                     self.logger.info(f"Bandwidth: {bw}, Linear AICc: {aicc}")
                 return aicc
@@ -1580,7 +1614,7 @@ class SWR:
             y_pred = np.empty(self.x_chunk.shape[0], dtype=np.float64)
 
             for i in self.x_chunk:
-                fit_outputs = self.local_fit(i, y, X, bw, final=False)
+                fit_outputs = self.local_fit(i, y, X, y_label=y_label, bw=bw, final=False)
                 y_pred_i, hat_i = fit_outputs[0], fit_outputs[1]
                 y_pred[pos] = y_pred_i
                 trace_hat += hat_i
@@ -1591,9 +1625,10 @@ class SWR:
             trace_hat_list = self.comm.gather(trace_hat, root=0)
 
             if self.comm.rank == 0:
-                deviance_residuals = self.distr_obj.deviance_residuals(y[self.target_indices], all_y_pred)
+                # CHANGE TO LOG-LIKELIHOOD
+                deviance_residuals = self.distr_obj.deviance_residuals(y, all_y_pred)
                 trace_hat = np.sum(trace_hat_list)
-                aicc = self.compute_aicc_glm(deviance_residuals, trace_hat)
+                aicc = self.compute_aicc_glm(deviance_residuals, trace_hat, n_samples=n_samples)
                 if not multiscale:
                     self.logger.info(f"Bandwidth: {bw}, GLM AICc: {aicc}")
                 return aicc
@@ -1663,11 +1698,10 @@ class SWR:
 
             # If subsampled, define the appropriate chunk of the right subsampled array for this process:
             if self.subsampled:
-                self.target_indices = np.array(self.indices[target])
-                n_samples_fitted_target = self.n_samples_fitted[target]
-                chunk_size = int(math.ceil(float(n_samples_fitted_target) / self.comm.size))
+                n_samples = self.n_samples_fitted[target]
+                chunk_size = int(math.ceil(float(n_samples) / self.comm.size))
                 # Assign chunks to each process:
-                self.x_chunk = self.target_indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+                self.x_chunk = np.arange(n_samples)[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
 
             # Check for initial weights:
             if init_betas is not None:
@@ -1677,7 +1711,7 @@ class SWR:
                 if verbose:
                     self.logger.info(f"Starting fitting process for target {target}. Initial bandwidth: {self.bw}.")
                 # If bandwidth is already known, run the main fit function:
-                self.mpi_fit(y, X, self.bw, final=True)
+                self.mpi_fit(y, X, y_label=target, bw=self.bw, final=True)
                 return
 
             if self.comm.rank == 0:
@@ -1693,12 +1727,13 @@ class SWR:
 
             # Searching for optimal bandwidth- set final=False to return AICc for each run of the optimization
             # function:
-            fit_function = lambda bw: self.mpi_fit(y, X, bw, final=False, multiscale=multiscale)
+            fit_function = lambda bw: self.mpi_fit(y, X, y_label=target, bw=bw, final=False, multiscale=multiscale)
             optimal_bw = self.find_optimal_bw(self.minbw, self.maxbw, fit_function)
+            self.logger.info(f"Discovered optimal bandwidth for {target}: {optimal_bw}")
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)
 
-            data = self.mpi_fit(y, X, optimal_bw, final=True, multiscale=multiscale, y_label=target)
+            data = self.mpi_fit(y, X, y_label=target, bw=optimal_bw, final=True, multiscale=multiscale)
             if data is not None:
                 all_data[target] = data
             all_bws[target] = optimal_bw
@@ -1760,18 +1795,11 @@ class SWR:
 
         return aicc
 
-    def compute_aicc_glm(self, resid_dev: np.ndarray, trace_hat: float, n_samples: Optional[int] = None) -> float:
+    # NOTE TO SELF: CHANGE AICC COMPUTATION FOR GENERALIZED LM: AICc = -2*log-likelihood + 2k + (2k(k+1))/(
+    # n_eff-k-1), where n_eff = n - trace(H)
+    def compute_aicc_glm(self, trace_hat: float, n_samples: Optional[int] = None) -> float:
         """Compute the corrected Akaike Information Criterion (AICc) for the generalized linear GWR models."""
-        if n_samples is None:
-            n_samples = self.n_samples
-
-        aicc = (
-            np.sum(resid_dev**2)
-            + 2.0 * trace_hat
-            + 2.0 * trace_hat * (trace_hat + 1.0) / (n_samples - trace_hat - 1.0)
-        )
-
-        return aicc
+        "filler"
 
     def output_diagnostics(
         self,
@@ -1871,7 +1899,7 @@ class SWR:
             # If subsampling was performed, extend coefficients to non-sampled neighboring points:
             if self.subsampled:
                 sampled_to_nonsampled_map = self.neighboring_unsampled[target]
-                betas = betas.reindex(self.X, columns=betas.columns, fill_value=0)
+                betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
                 for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
                     for nonsampled_idx in nonsampled_idxs:
                         betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
@@ -2012,14 +2040,14 @@ class MuSIC(SWR):
             self.logger.info("Multiscale Backfitting...")
             self.logger.info("Finding uniform initial bandwidth for all features...")
 
-        # Initialize parameters, with a uniform initial bandwidth for all features:
-        all_betas, all_bws = self.fit(multiscale=True, init_betas=init_betas)
-
-        self.all_bws_init = all_bws
+        if not self.set_up:
+            self.logger.info("Model has not yet been set up to run, running :func `SWR._set_up_model()` now...")
+            self._set_up_model()
 
         if self.comm.rank == 0:
             self.logger.info("Initialization complete.")
 
+        self.all_bws_init = {}
         self.all_bws_history = {}
         self.params_all_targets = {}
         self.errors_all_targets = {}
@@ -2047,17 +2075,25 @@ class MuSIC(SWR):
             X = self.comm.bcast(X, root=0)
 
         for target in y_arr.columns:
-            y = y_arr[target].values
-            y_label = target + "_multiscale_backfitting"
+            y = y_arr[target]
+            y_label = target
 
-            # If subsampled, only fit on the subsampled indices:
             if self.subsampled:
-                indices = self.indices[target]
+                n_samples = self.n_samples_fitted[y_label]
+                sample_names = self.subsampled_sample_names[y_label]
+                indices = self.subsampled_indices[y_label]
+                X = X[indices, :]
+                y = y.loc[sample_names].to_frame()
             else:
-                indices = np.arange(self.n_samples)
+                n_samples = self.n_samples
+                sample_names = self.sample_names
+
+            # Initialize parameters, with a uniform initial bandwidth for all features:
+            all_betas, all_bws = self.fit(y, X, multiscale=True, init_betas=init_betas)
+            self.all_bws_init[target] = all_bws
 
             # Initial values- multiply input by the array corresponding to the correct target:
-            linear_predictors = X[indices, :] * all_betas[target]
+            linear_predictors = X * all_betas[target]
             # Array of shape [n_samples, n_features] containing initial spatially-weighted regression predictions:
             if self.distr != "gaussian":
                 y_pred_init = self.distr_obj.predict(linear_predictors)
@@ -2065,18 +2101,18 @@ class MuSIC(SWR):
                 y_pred_init = linear_predictors
             all_pred_y = y_pred_init.sum(axis=1)
 
-            error = y[indices].reshape(-1) - all_pred_y
+            error = y.values.reshape(-1) - all_pred_y
             bws = [None] * self.n_features
             bw_plateau_counter = 0
             bw_history = []
 
             n_iters = max(200, self.max_iter)
             for iter in range(1, n_iters + 1):
-                new_ys = np.empty(linear_predictors.shape, dtype=np.float64)
-                new_betas = np.empty(linear_predictors.shape, dtype=np.float64)
+                if self.subsampled:
+                    new_ys = np.empty(linear_predictors.shape, dtype=np.float64)
+                    new_betas = np.empty(linear_predictors.shape, dtype=np.float64)
 
                 for n_feat in range(self.n_features):
-                    self.logger.info(f"Backfitting for independent feature {self.feature_names[n_feat]}")
                     if self.adata_path is not None:
                         signaling_type = self.signaling_types[n_feat]
                     else:
@@ -2091,7 +2127,7 @@ class MuSIC(SWR):
                         # Use the bandwidths from the previous iteration before plateau was determined to have been
                         # reached:
                         bw = bws[n_feat]
-                        betas = self.mpi_fit(temp_y.values, temp_X, bw, final=True, multiscale=True)
+                        betas = self.mpi_fit(temp_y.values, temp_X, y_label=target, bw=bw, final=True, multiscale=True)
                     else:
                         betas, bw_dict = self.fit(
                             temp_y,
@@ -2105,12 +2141,12 @@ class MuSIC(SWR):
                         betas = betas[target]
 
                     # Update the linear predictor and betas:
-                    new_v = (temp_X[indices, :] * betas).reshape(-1)
+                    new_v = (temp_X * betas).reshape(-1)
                     if self.distr != "gaussian":
                         new_y = self.distr_obj.predict(new_v)
                     else:
                         new_y = new_v
-                    error = temp_y.values[indices].reshape(-1) - new_y
+                    error = temp_y.values.reshape(-1) - new_y
                     new_ys[:, n_feat] = new_y
                     new_betas[:, n_feat] = betas.reshape(-1)
                     # Update running list of bandwidths for this feature:
@@ -2124,7 +2160,7 @@ class MuSIC(SWR):
 
                 # Compute normalized sum-of-squared-errors-of-prediction using the updated predicted values:
                 bw_history.append(deepcopy(bws))
-                numerator = np.sum((new_ys - y_pred_init) ** 2) / self.n_samples_fitted
+                numerator = np.sum((new_ys - y_pred_init) ** 2) / n_samples
                 denominator = np.sum(np.sum(new_ys, axis=1) ** 2)
                 score = (numerator / denominator) ** 0.5
                 # Use the new predicted values as the initial values for the next iteration:
@@ -2146,12 +2182,9 @@ class MuSIC(SWR):
                 weights = self.distr_obj.weights(y_pred)
                 deviance = 2 * np.sum(
                     weights
-                    * (
-                        y.values[indices] * np.log(y.values[indices] / y_pred)
-                        + (theta - 1) * np.log(1 + y_pred[:, 1] / (theta - 1))
-                    )
+                    * (y.values * np.log(y.values / y_pred) + (theta - 1) * np.log(1 + y_pred[:, 1] / (theta - 1)))
                 )
-                dof = len(y.values[indices]) - X.shape[1]
+                dof = len(y.values) - X.shape[1]
                 self.nb_disp_dict[target] = deviance / dof
 
             bw_history = np.array(bw_history)
@@ -2162,7 +2195,7 @@ class MuSIC(SWR):
                 RSS = np.sum(error**2)
                 self.all_RSS[target] = RSS
                 # Total sum of squares:
-                TSS = np.sum((y.values[indices] - np.mean(y.values[indices])) ** 2)
+                TSS = np.sum((y.values - np.mean(y.values)) ** 2)
                 self.all_TSS[target] = TSS
                 r_squared = 1 - RSS / TSS
 
@@ -2173,9 +2206,9 @@ class MuSIC(SWR):
 
             if self.distr == "poisson" or self.distr == "nb":
                 # Deviance:
-                deviance = self.distr_obj.deviance(y.values[indices], y_pred)
+                deviance = self.distr_obj.deviance(y.values, y_pred)
                 self.all_deviances[target] = deviance
-                residual_deviance = self.distr_obj.deviance_residuals(y.values[indices], y_pred)
+                residual_deviance = self.distr_obj.deviance_residuals(y.values, y_pred)
                 # Reshape if necessary:
                 if self.n_features > 1:
                     residual_deviance = residual_deviance.reshape(-1, 1)
@@ -2199,7 +2232,7 @@ class MuSIC(SWR):
 
                 # Return output diagnostics and save result:
                 self.output_diagnostics(None, None, r_squared, deviance)
-                output = np.hstack([self.sample_names, error.reshape(-1, 1), self.params_all_targets[target]])
+                output = np.hstack([sample_names, error.reshape(-1, 1), self.params_all_targets[target]])
                 self.save_results(header, output, label=y_label)
 
     def chunk_compute_metrics(
@@ -2229,32 +2262,37 @@ class MuSIC(SWR):
 
         # If subsampling was run, use the subsampled indices:
         if self.subsampled:
-            indices = self.indices[target_label]
+            indices = self.subsampled_indices[target_label]
+            n_samples = self.n_samples_fitted[target_label]
+            coords = self.coords[indices]
+            X = X[indices, :]
         else:
             indices = np.arange(self.n_samples)
+            n_samples = self.n_samples
+            coords = self.coords
 
         bw = self.all_bws_init[target_label]
         bw_history = self.all_bws_history[target_label]
 
-        chunk_size = int(np.ceil(float(self.n_fitted_target / self.n_chunks)))
+        chunk_size = int(np.ceil(float(n_samples / self.n_chunks)))
         # Vector storing ENP for each predictor:
         ENP_chunk = np.zeros(self.n_features)
         # Array storing leverages for each predictor if the model is Gaussian (for each sample because of the
         # spatially-weighted nature of the regression):
         if self.distr == "gaussian":
-            lvg_chunk = np.zeros((self.n_fitted_target, self.n_features))
+            lvg_chunk = np.zeros((n_samples, self.n_features))
 
-        chunk_index = np.arange(self.n_fitted_target)[chunk_id * chunk_size : (chunk_id + 1) * chunk_size]
+        chunk_index = np.arange(n_samples)[chunk_id * chunk_size : (chunk_id + 1) * chunk_size]
 
         # Partial hat matrix:
-        init_partial_hat = np.zeros((self.n_fitted_target, len(chunk_index)))
+        init_partial_hat = np.zeros((n_samples, len(chunk_index)))
         init_partial_hat[chunk_index, :] = np.eye(len(chunk_index))
-        partial_hat = np.zeros((self.n_fitted_target, len(chunk_index), self.n_features))
+        partial_hat = np.zeros((n_samples, len(chunk_index), self.n_features))
 
         # Compute coefficients for each chunk:
         for i in indices:
             wi = get_wi(
-                i, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
+                i, n_samples=n_samples, coords=coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
             ).reshape(-1, 1)
             xT = (X * wi).T
             # Reconstitute the response-input mapping, but only for the current chunk:
@@ -2270,19 +2308,18 @@ class MuSIC(SWR):
             for j in range(self.n_features):
                 proj_j_old = partial_hat[:, :, j] + error
                 X_j = X[:, j]
-                chunk_size_j = int(np.ceil(float(self.n_fitted_target / self.n_chunks)))
+                chunk_size_j = int(np.ceil(float(n_samples / self.n_chunks)))
                 for n in range(self.n_chunks):
-                    chunk_index_temp = np.arange(self.n_fitted_target)[n * chunk_size_j : (n + 1) * chunk_size_j]
+                    chunk_index_temp = np.arange(n_samples)[n * chunk_size_j : (n + 1) * chunk_size_j]
                     # Initialize response-input mapping:
-                    proj_j = np.empty((len(chunk_index_temp), self.n_fitted_target))
+                    proj_j = np.empty((len(chunk_index_temp), n_samples))
                     # Compute the hat matrix for the current chunk:
                     for k in range(len(chunk_index_temp)):
-                        # index = chunk_index_temp[k]
-                        index = self.indices[chunk_index_temp[k]]
+                        index = chunk_index_temp[k]
                         wi = get_wi(
                             index,
-                            n_samples=self.n_samples,
-                            coords=self.coords,
+                            n_samples=n_samples,
+                            coords=coords,
                             fixed_bw=self.bw_fixed,
                             kernel=self.kernel,
                             # Use the bandwidth from the ith iteration for the jth independent variable:
@@ -2356,7 +2393,11 @@ class MuSIC(SWR):
 
             # If subsampling was done, check for the number of fitted samples for the right target:
             if self.subsampled:
-                self.n_fitted_target = self.n_samples_fitted[target_label]
+                n_samples = self.n_samples_fitted[target_label]
+                indices = self.subsampled_indices[target_label]
+                X = X[indices, :]
+            else:
+                n_samples = self.n_samples
 
             # Lists to store the results of each chunk for this variable (lvg list only used if Gaussian):
             ENP_list = []
@@ -2389,11 +2430,11 @@ class MuSIC(SWR):
                     RSS = self.all_RSS[target_label]
                     TSS = self.all_TSS[target_label]
                     # Residual variance:
-                    sigma_squared = RSS / (self.n_fitted_target - ENP)
+                    sigma_squared = RSS / (n_samples - ENP)
                     # R-squared:
                     r_squared = 1 - RSS / TSS
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_linear(RSS, ENP, n_samples=self.n_fitted_target)
+                    aicc = self.compute_aicc_linear(RSS, ENP, n_samples=n_samples)
                     # Scale leverages by the residual variance to compute standard errors:
                     standard_error = np.sqrt(lvg * sigma_squared)
                     self.output_diagnostics(aicc, ENP, r_squared=r_squared, deviance=None, y_label=y_label)
@@ -2407,7 +2448,7 @@ class MuSIC(SWR):
                     residual_deviance = self.all_residual_deviances[target_label]
 
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_glm(residual_deviance, ENP, n_samples=self.n_fitted_target)
+                    aicc = self.compute_aicc_glm(residual_deviance, ENP, n_samples=n_samples)
                     # Compute standard errors using the covariance:
                     self.distr_obj.variance.disp = self.nb_disp_dict[target_label]
                     hessian = self.hessian(predictions)
