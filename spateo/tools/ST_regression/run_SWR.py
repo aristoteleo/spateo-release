@@ -224,7 +224,6 @@ def run_STGWR(
         alpha: Alpha value to use for MGWR model
         chunks: Number of chunks for multiscale computation (default: 1). Increase the number if run out of memory
             but should keep it as low as possible.
-        params_only:
     """
 
     mpi_path = os.path.dirname(fast_stgwr.__file__) + "/SWR_mpi.py"

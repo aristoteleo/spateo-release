@@ -21,6 +21,7 @@ from .logging import logger_manager as lm
 
 # Global tolerance value:
 EPS = np.finfo(float).eps
+MAX = np.finfo(np.float32).max
 
 
 class SpateoConfig:

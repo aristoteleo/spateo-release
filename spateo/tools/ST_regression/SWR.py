@@ -1386,7 +1386,7 @@ class SWR:
 
             if self.comm.rank == 0:
                 # Follow direction of increasing score until score stops increasing:
-                if lb_score <= ub_score:
+                if lb_score <= ub_score or np.isnan(ub_score):
                     # Set new optimum score and bandwidth:
                     optimum_score = lb_score
                     optimum_bw = new_lb
@@ -1397,7 +1397,7 @@ class SWR:
                     new_lb = range_lowest + delta * np.abs(range_highest - range_lowest)
 
                 # Else follow direction of decreasing score until score stops decreasing:
-                else:
+                elif ub_score < lb_score or np.isnan(lb_score):
                     # Set new optimum score and bandwidth:
                     optimum_score = ub_score
                     optimum_bw = new_ub
@@ -1407,7 +1407,11 @@ class SWR:
                     new_lb = new_ub
                     new_ub = range_highest - delta * np.abs(range_highest - range_lowest)
 
+                # Exit once difference is smaller than threshold, or once NaN returns from one of the models:
                 difference = lb_score - ub_score
+                if np.isnan(lb_score) or np.isnan(ub_score):
+                    self.logger.info("NaN returned from one of the models. Using the last bandwidth and exiting "
+                                     "optimization.")
                 # Update new value for score:
                 score = optimum_score
 
@@ -2071,7 +2075,6 @@ class MuSIC(SWR):
         """
         if self.comm.rank == 0:
             self.logger.info("Multiscale Backfitting...")
-            self.logger.info("Finding uniform initial bandwidth for all features...")
 
         if not self.set_up:
             self.logger.info("Model has not yet been set up to run, running :func `SWR._set_up_model()` now...")
@@ -2080,7 +2083,6 @@ class MuSIC(SWR):
         if self.comm.rank == 0:
             self.logger.info("Initialization complete.")
 
-        self.all_bws_init = {}
         self.all_bws_history = {}
         self.params_all_targets = {}
         self.errors_all_targets = {}
@@ -2123,8 +2125,11 @@ class MuSIC(SWR):
 
             # Initialize parameters, with a uniform initial bandwidth for all features- set fit_predictor False to
             # fit model under the assumption that y is a Poisson-distributed dependent variable:
-            all_betas, all_bws = self.fit(y, X, multiscale=True, fit_predictor=False, init_betas=init_betas)
-            self.all_bws_init[target] = all_bws
+            self.logger.info(f"Finding uniform initial bandwidth for all features for target {target}...")
+            all_betas, self.all_bws_init = self.fit(
+                y, X, multiscale=True, fit_predictor=False, init_betas=init_betas, verbose=False
+            )
+            print(self.all_bws_init)
 
             # Initial values- multiply input by the array corresponding to the correct target- note that this is
             # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
@@ -2196,17 +2201,17 @@ class MuSIC(SWR):
 
                 # Compute normalized sum-of-squared-errors-of-prediction using the updated predicted values:
                 bw_history.append(deepcopy(bws))
-                numerator = np.sum((new_ys - y_pred_init) ** 2) / n_samples
-                denominator = np.sum(np.sum(new_ys, axis=1) ** 2)
-                score = (numerator / denominator) ** 0.5
+                SSE = np.sum((new_ys - y_pred_init) ** 2) / n_samples
+                TSS = np.sum(np.sum(new_ys, axis=1) ** 2)
+                rmse = (SSE / TSS) ** 0.5
                 # Use the new predicted values as the initial values for the next iteration:
                 y_pred_init = new_ys
 
                 if self.comm.rank == 0:
-                    self.logger.info(f"Target: {target}, Iteration: {iter}, Score: {score}")
+                    self.logger.info(f"Target: {target}, Iteration: {iter}, Score: {rmse:.5f}")
                     self.logger.info(f"Bandwidths: {bws}")
 
-                if score < self.tolerance:
+                if rmse < self.tolerance:
                     self.logger.info(f"For target {target}, multiscale optimization converged after {iter} iterations.")
                     break
 
@@ -2300,39 +2305,30 @@ class MuSIC(SWR):
         if X is None:
             X = self.X
 
-        # If subsampling was run, use the subsampled indices:
-        if self.subsampled:
-            indices = self.subsampled_indices[target_label]
-            n_samples = self.n_samples_fitted[target_label]
-            coords = self.coords[indices]
-            X = X[indices, :]
-        else:
-            indices = np.arange(self.n_samples)
-            n_samples = self.n_samples
-            coords = self.coords
-
+        # Start from the initial bandwidth, constant across features:
         bw = self.all_bws_init[target_label]
+        print(bw)
         bw_history = self.all_bws_history[target_label]
 
-        chunk_size = int(np.ceil(float(n_samples / self.n_chunks)))
+        chunk_size = int(np.ceil(float(self.n_samples / self.n_chunks)))
         # Vector storing ENP for each predictor:
         ENP_chunk = np.zeros(self.n_features)
         # Array storing leverages for each predictor if the model is Gaussian (for each sample because of the
         # spatially-weighted nature of the regression):
         if self.distr == "gaussian":
-            lvg_chunk = np.zeros((n_samples, self.n_features))
+            lvg_chunk = np.zeros((self.n_samples, self.n_features))
 
-        chunk_index = np.arange(n_samples)[chunk_id * chunk_size : (chunk_id + 1) * chunk_size]
+        chunk_index = np.arange(self.n_samples)[chunk_id * chunk_size : (chunk_id + 1) * chunk_size]
 
         # Partial hat matrix:
-        init_partial_hat = np.zeros((n_samples, len(chunk_index)))
+        init_partial_hat = np.zeros((self.n_samples, len(chunk_index)))
         init_partial_hat[chunk_index, :] = np.eye(len(chunk_index))
-        partial_hat = np.zeros((n_samples, len(chunk_index), self.n_features))
+        partial_hat = np.zeros((self.n_samples, len(chunk_index), self.n_features))
 
         # Compute coefficients for each chunk:
-        for i in indices:
+        for i in range(self.n_samples):
             wi = get_wi(
-                i, n_samples=n_samples, coords=coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
+                i, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
             ).reshape(-1, 1)
             xT = (X * wi).T
             # Reconstitute the response-input mapping, but only for the current chunk:
@@ -2348,18 +2344,18 @@ class MuSIC(SWR):
             for j in range(self.n_features):
                 proj_j_old = partial_hat[:, :, j] + error
                 X_j = X[:, j]
-                chunk_size_j = int(np.ceil(float(n_samples / self.n_chunks)))
+                chunk_size_j = int(np.ceil(float(self.n_samples / self.n_chunks)))
                 for n in range(self.n_chunks):
-                    chunk_index_temp = np.arange(n_samples)[n * chunk_size_j : (n + 1) * chunk_size_j]
+                    chunk_index_temp = np.arange(self.n_samples)[n * chunk_size_j : (n + 1) * chunk_size_j]
                     # Initialize response-input mapping:
-                    proj_j = np.empty((len(chunk_index_temp), n_samples))
+                    proj_j = np.empty((len(chunk_index_temp), self.n_samples))
                     # Compute the hat matrix for the current chunk:
                     for k in range(len(chunk_index_temp)):
                         index = chunk_index_temp[k]
                         wi = get_wi(
                             index,
-                            n_samples=n_samples,
-                            coords=coords,
+                            n_samples=self.n_samples,
+                            coords=self.coords,
                             fixed_bw=self.bw_fixed,
                             kernel=self.kernel,
                             # Use the bandwidth from the ith iteration for the jth independent variable:
@@ -2429,15 +2425,16 @@ class MuSIC(SWR):
             parameters = self.params_all_targets[target_label]
             errors = self.errors_all_targets[target_label]
             predictions = self.predictions_all_targets[target_label]
-            y_label = target_label + "_multiscale_backfitting"
+            y_label = target_label
 
             # If subsampling was done, check for the number of fitted samples for the right target:
             if self.subsampled:
-                n_samples = self.n_samples_fitted[target_label]
-                indices = self.subsampled_indices[target_label]
-                X = X[indices, :]
+                self.n_samples = self.n_samples_fitted[target_label]
+                self.indices = self.subsampled_indices[target_label]
+                self.coords = self.coords[self.indices, :]
+                X = X[self.indices, :]
             else:
-                n_samples = self.n_samples
+                self.indices = np.arange(self.n_samples)
 
             # Lists to store the results of each chunk for this variable (lvg list only used if Gaussian):
             ENP_list = []
@@ -2470,25 +2467,25 @@ class MuSIC(SWR):
                     RSS = self.all_RSS[target_label]
                     TSS = self.all_TSS[target_label]
                     # Residual variance:
-                    sigma_squared = RSS / (n_samples - ENP)
+                    sigma_squared = RSS / (self.n_samples - ENP)
                     # R-squared:
                     r_squared = 1 - RSS / TSS
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_linear(RSS, ENP, n_samples=n_samples)
+                    aicc = self.compute_aicc_linear(RSS, ENP, n_samples=self.n_samples)
                     # Scale leverages by the residual variance to compute standard errors:
                     standard_error = np.sqrt(lvg * sigma_squared)
                     self.output_diagnostics(aicc, ENP, r_squared=r_squared, deviance=None, y_label=y_label)
 
-                    header = "index,residual,"
+                    header = "name,residual,"
                     outputs = np.hstack([indices, errors.reshape(-1, 1), parameters, standard_error])
 
                 if self.distr == "poisson" or self.distr == "nb":
                     # Get deviances corresponding to this feature:
                     deviance = self.all_deviances[target_label]
-                    ll = self.all_log_likelihood[target_label]
+                    ll = self.all_log_likelihoods[target_label]
 
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
+                    aicc = self.compute_aicc_glm(ll, ENP, n_samples=self.n_samples)
                     # Compute standard errors using the covariance:
                     self.distr_obj.variance.disp = self.nb_disp_dict[target_label]
                     hessian = self.hessian(predictions)
@@ -2496,7 +2493,7 @@ class MuSIC(SWR):
                     standard_error = np.sqrt(np.diag(cov_matrix))
                     self.output_diagnostics(aicc, ENP, r_squared=None, deviance=deviance, y_label=y_label)
 
-                    header = "index,prediction,"
+                    header = "name,prediction,"
                     outputs = np.hstack(
                         [indices, predictions.reshape(-1, 1), parameters.reshape(-1, 1), standard_error]
                     )

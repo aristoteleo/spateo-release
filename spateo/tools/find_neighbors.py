@@ -216,20 +216,18 @@ def get_wi(
         wi = np.ones(n_samples)
         return wi
 
-    try:
-        wi = Kernel(
-            i,
-            coords,
-            bw,
-            fixed=fixed_bw,
-            exclude_self=exclude_self,
-            function=kernel,
-            threshold=threshold,
-            sparse_array=sparse_array,
-            subset_idxs=None,
-        ).kernel
-    except:
-        raise RuntimeError(f"Error in getting weights for sample {i}")
+    wi = Kernel(
+        i,
+        coords,
+        bw,
+        fixed=fixed_bw,
+        exclude_self=exclude_self,
+        function=kernel,
+        threshold=threshold,
+        sparse_array=sparse_array,
+        subset_idxs=None,
+    ).kernel
+
     return wi
 
 

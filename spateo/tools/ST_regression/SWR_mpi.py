@@ -1,11 +1,13 @@
 import argparse
+import random
 
 import numpy as np
-import pandas as pd
 from mpi4py import MPI
-from regression_utils import multicollinearity_check
 from SWGRN import GWRGRN
 from SWR import SWR, MuSIC
+
+np.random.seed(888)
+random.seed(888)
 
 if __name__ == "__main__":
     # From the command line, run spatial GWR

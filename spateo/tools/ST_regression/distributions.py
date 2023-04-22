@@ -6,7 +6,7 @@ from typing import Optional
 import numpy as np
 from scipy import special
 
-from ...configuration import EPS
+from ...configuration import EPS, MAX
 from ...logging import logger_manager as lm
 
 
@@ -300,7 +300,7 @@ class Log(Link):
         Returns:
             vals: The clipped values
         """
-        vals = np.clip(vals, EPS, np.inf)
+        vals = np.clip(vals, EPS, MAX)
         return vals
 
     def __call__(self, p: np.ndarray):
@@ -344,7 +344,7 @@ class Log(Link):
         return inv_deriv
 
     def deriv(self, fitted: np.ndarray) -> np.ndarray:
-        """Derivative of the logit transformation evaluated at the fitted mean response variable and with respect to the
+        """Derivative of the log transformation evaluated at the fitted mean response variable and with respect to the
         linear predictor.
 
         Args:
@@ -435,7 +435,7 @@ class Power_Variance(object):
         Returns:
             var: Variance
         """
-        # Variance fittedst be positive:
+        # Variance fitted must be positive:
         fitted_abs = np.fabs(fitted)
         var = fitted_abs**self.power
         return var
@@ -500,7 +500,7 @@ class Negative_Binomial_Variance(object):
         Returns:
             vals: The clipped values
         """
-        vals = np.clip(vals, EPS, np.inf)
+        vals = np.clip(vals, EPS, MAX)
         return vals
 
     def __call__(self, fitted: np.ndarray):
@@ -721,7 +721,7 @@ class Poisson(Distribution):
         Returns:
             vals: The clipped values
         """
-        vals = np.clip(vals, EPS, np.inf)
+        vals = np.clip(vals, EPS, MAX)
         return vals
 
     def deviance(
@@ -796,9 +796,9 @@ class Poisson(Distribution):
             freq_weights = 1.0
 
         fitted = self.clip(fitted)
+        is_na = np.isnan(fitted).any()
 
         ll = np.sum(freq_weights * (endog * np.log(fitted) - fitted - special.gammaln(endog + 1)))
-        print("LL: ", ll)
         ll = scale * ll
         return ll
 
@@ -937,7 +937,7 @@ class Gamma(Distribution):
         Returns:
             vals: The clipped values
         """
-        vals = np.clip(vals, EPS, np.inf)
+        vals = np.clip(vals, EPS, MAX)
         return vals
 
     def deviance(
@@ -1073,7 +1073,7 @@ class NegativeBinomial(Distribution):
         Returns:
             vals: The clipped values
         """
-        vals = np.clip(vals, EPS, np.inf)
+        vals = np.clip(vals, EPS, MAX)
         return vals
 
     def deviance(
