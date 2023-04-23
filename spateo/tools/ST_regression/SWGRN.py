@@ -125,6 +125,9 @@ class GWRGRN(MuSIC):
         # Placeholder- this will change at time of fitting:
         self.n_features = self.adata.n_vars
 
+        # Only used for multiscale- number of parallel processes:
+        self.multiscale_chunks = self.arg_retrieve.chunks
+
         # Check if path to init betas is given- if not given will use the prior network to determine suitable initial
         # parameters:
         if self.init_betas_path is not None:
@@ -451,3 +454,7 @@ class GWRGRN(MuSIC):
             X = self.X
 
         self.multiscale_backfitting(y_arr, X, init_betas=self.all_betas)
+
+    def test(self):
+        """Use as a testing space to print out attributes, etc."""
+        "filler"

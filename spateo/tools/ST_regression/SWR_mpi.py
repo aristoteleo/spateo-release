@@ -135,8 +135,8 @@ if __name__ == "__main__":
         "-chunks",
         default=1,
         type=int,
-        help="For use if `multiscale` is True- increase the number of"
-        "memory runs out, otherwise keep as low as possible.",
+        help="For use if `multiscale` is True- increase the number of parallel processes. Can be used to help prevent"
+        "memory from running out, otherwise keep as low as possible.",
     )
 
     t1 = MPI.Wtime()

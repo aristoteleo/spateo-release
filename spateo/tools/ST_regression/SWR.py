@@ -1203,22 +1203,26 @@ class SWR:
 
         return y, X
 
-    def hessian(self, fitted: np.ndarray) -> np.ndarray:
+    def hessian(self, fitted: np.ndarray, X: Optional[np.ndarray] = None) -> np.ndarray:
         """Compute the Hessian matrix for the given model, representing the confidence in the parameter estimates.
 
         Args:
             fitted: Array of shape [n_samples,]; fitted mean response variable (link function evaluated
                 at the linear predicted values)
+            X: Independent variable array
 
         Returns:
             hessian: Hessian matrix
         """
+        if X is None:
+            X = self.X
+
         if self.distr == "gaussian":
-            hessian = np.dot(self.X.T, self.X)
+            hessian = np.dot(X.T, X)
         elif self.distr == "poisson":
-            hessian = np.dot(self.X.T, np.dot(np.diag(fitted), self.X))
+            hessian = np.dot(X.T, np.dot(np.diag(fitted), X))
         elif self.distr == "nb":
-            hessian = np.dot(self.X.T, np.dot(np.diag(fitted * (1 + fitted / self.distr_obj.variance.disp)), self.X))
+            hessian = np.dot(X.T, np.dot(np.diag(fitted * (1 + fitted / self.distr_obj.variance.disp)), X))
         return hessian
 
     def local_fit(
@@ -1282,7 +1286,7 @@ class SWR:
             -1, 1
         )
 
-        if self.distr == "gaussian":
+        if self.distr == "gaussian" or fit_predictor:
             betas, pseudoinverse = compute_betas_local(y, X, wi)
             pred_y = np.dot(X[i], betas)
             residual = y[i] - pred_y
@@ -1295,11 +1299,10 @@ class SWR:
 
         elif self.distr == "poisson" or self.distr == "nb":
             # For multiscale model, the y provided is the linear predictor, not the response:
-            distr = self.distr if not fit_predictor else "gaussian"
             betas, y_hat, _, final_irls_weights, _, _, pseudoinverse = iwls(
                 y,
                 X,
-                distr=distr,
+                distr=self.distr,
                 init_betas=self.init_betas,
                 tol=self.tolerance,
                 max_iter=self.max_iter,
@@ -1360,9 +1363,11 @@ class SWR:
         optimum_bw = None
         difference = 1.0e9
         iterations = 0
+        patience = 0
+        optimum_score_history = []
         results_dict = {}
 
-        while np.abs(difference) > self.tolerance and iterations < self.max_iter:
+        while np.abs(difference) > self.tolerance and iterations < self.max_iter and patience < 3:
             iterations += 1
 
             # Bandwidth needs to be discrete:
@@ -1407,13 +1412,24 @@ class SWR:
                     new_lb = new_ub
                     new_ub = range_highest - delta * np.abs(range_highest - range_lowest)
 
-                # Exit once difference is smaller than threshold, or once NaN returns from one of the models:
+                # Exit once difference is smaller than threshold, once NaN returns from one of the models or once a
+                # threshold number of iterations (default to 3) have passed without improvement:
                 difference = lb_score - ub_score
                 if np.isnan(lb_score) or np.isnan(ub_score):
-                    self.logger.info("NaN returned from one of the models. Using the last bandwidth and exiting "
-                                     "optimization.")
+                    self.logger.info(
+                        "NaN returned from one of the models. Using the last bandwidth and exiting " "optimization."
+                    )
+                    return optimum_bw
+
                 # Update new value for score:
                 score = optimum_score
+                optimum_score_history.append(optimum_score)
+                most_optimum_score = np.min(optimum_score_history)
+                if iterations >= 2:
+                    if optimum_score_history[-2] == most_optimum_score:
+                        patience += 1
+                    else:
+                        patience = 0
 
             new_lb = self.comm.bcast(new_lb, root=0)
             new_ub = self.comm.bcast(new_ub, root=0)
@@ -1574,7 +1590,7 @@ class SWR:
                         dof = len(y) - self.X.shape[1]
                         self.distr_obj.variance.disp = deviance / dof
 
-                    hessian = self.hessian(all_fit_outputs[:, 1])
+                    hessian = self.hessian(all_fit_outputs[:, 1], X=X)
                     cov_matrix = np.linalg.inv(hessian)
                     all_fit_outputs[:, -n_features:] = np.sqrt(np.diag(cov_matrix))
 
@@ -1604,7 +1620,7 @@ class SWR:
             trace_hat = 0
 
             for i in self.x_chunk:
-                fit_outputs = self.local_fit(i, y, X, y_label=y_label, bw=bw, final=False)
+                fit_outputs = self.local_fit(i, y, X, y_label=y_label, bw=bw, fit_predictor=fit_predictor, final=False)
                 err_sq, hat_i = fit_outputs[0], fit_outputs[1]
                 RSS += err_sq
                 trace_hat += hat_i
@@ -1629,7 +1645,7 @@ class SWR:
             y_pred = np.empty(self.x_chunk.shape[0], dtype=np.float64)
 
             for i in self.x_chunk:
-                fit_outputs = self.local_fit(i, y, X, y_label=y_label, bw=bw, final=False)
+                fit_outputs = self.local_fit(i, y, X, y_label=y_label, bw=bw, fit_predictor=fit_predictor, final=False)
                 y_pred_i, hat_i = fit_outputs[0], fit_outputs[1]
                 y_pred[pos] = y_pred_i
                 trace_hat += hat_i
@@ -1674,7 +1690,7 @@ class SWR:
                 correspond to target genes and values should be arrays of shape [n_features, 1].
             multiscale: Set True to indicate that a multiscale model should be fitted
             fit_predictor: Set True to indicate that dependent variable to fit is a linear predictor rather than a
-                true response variable
+                response variable
             signaling_type: Optional category for the interaction, one of "Cell-Cell Contact", "Diffusive Signaling"
                 (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor".
             verbose: Set True to print out information about the bandwidth selection and/or fitting process. Will be
@@ -2129,14 +2145,16 @@ class MuSIC(SWR):
             all_betas, self.all_bws_init = self.fit(
                 y, X, multiscale=True, fit_predictor=False, init_betas=init_betas, verbose=False
             )
-            print(self.all_bws_init)
 
             # Initial values- multiply input by the array corresponding to the correct target- note that this is
             # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
             y_pred_init = X * all_betas[target]
             all_pred_y = y_pred_init.sum(axis=1)
+            if self.distr != "gaussian":
+                all_pred_y = np.exp(all_pred_y)
 
             error = y.values.reshape(-1) - all_pred_y
+            self.logger.info(f"Initial RSS: {np.sum(error ** 2):.3f}")
             bws = [None] * self.n_features
             bw_plateau_counter = 0
             bw_history = []
@@ -2217,6 +2235,7 @@ class MuSIC(SWR):
 
             # Final estimated values:
             y_pred = new_ys
+            y_pred = y_pred.sum(axis=1)
 
             bw_history = np.array(bw_history)
             self.all_bws_history[target] = bw_history
@@ -2238,6 +2257,9 @@ class MuSIC(SWR):
             if self.distr == "poisson" or self.distr == "nb":
                 # Map linear predictors to the response variable:
                 y_pred = self.distr_obj.predict(y_pred)
+
+                error = y.values.reshape(-1) - y_pred
+                self.logger.info(f"Final RSS: {np.sum(error ** 2):.3f}")
 
                 # Set dispersion for negative binomial:
                 if self.distr == "nb":
@@ -2307,7 +2329,6 @@ class MuSIC(SWR):
 
         # Start from the initial bandwidth, constant across features:
         bw = self.all_bws_init[target_label]
-        print(bw)
         bw_history = self.all_bws_history[target_label]
 
         chunk_size = int(np.ceil(float(self.n_samples / self.n_chunks)))
@@ -2487,8 +2508,9 @@ class MuSIC(SWR):
                     # Corrected Akaike Information Criterion:
                     aicc = self.compute_aicc_glm(ll, ENP, n_samples=self.n_samples)
                     # Compute standard errors using the covariance:
-                    self.distr_obj.variance.disp = self.nb_disp_dict[target_label]
-                    hessian = self.hessian(predictions)
+                    if self.distr == "nb":
+                        self.distr_obj.variance.disp = self.nb_disp_dict[target_label]
+                    hessian = self.hessian(predictions, X=X)
                     cov_matrix = np.linalg.inv(hessian)
                     standard_error = np.sqrt(np.diag(cov_matrix))
                     self.output_diagnostics(aicc, ENP, r_squared=None, deviance=deviance, y_label=y_label)
