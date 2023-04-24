@@ -230,14 +230,18 @@ class SWR:
         # Split data into chunks for each process:
         if self.subsample:
             self.run_subsample()
+            # Indicate model has been subsampled:
+            self.subsampled = True
         else:
-            chunk_size = int(math.ceil(float(len(self.n_samples)) / self.comm.size))
+            chunk_size = int(math.ceil(float(len(range(self.n_samples))) / self.comm.size))
             # Assign chunks to each process:
-            self.x_chunk = self.n_samples[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+            self.x_chunk = np.arange(self.n_samples)[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+            self.subsampled = False
 
         # Indicate model has now been set up:
         self.set_up = True
         self.set_up = self.comm.bcast(self.set_up, root=0)
+        self.subsampled = self.comm.bcast(self.subsampled, root=0)
 
     def parse_stgwr_args(self):
         """
@@ -887,10 +891,6 @@ class SWR:
         self.n_samples_fitted = self.comm.bcast(self.n_samples_fitted, root=0)
         self.subsampled_sample_names = self.comm.bcast(self.subsampled_sample_names, root=0)
         self.neighboring_unsampled = self.comm.bcast(self.neighboring_unsampled, root=0)
-
-        # Set subsampled flag:
-        self.subsampled = True
-        self.subsampled = self.comm.bcast(self.subsampled, root=0)
 
     def _set_search_range(self, signaling_type: Optional[str] = None):
         """Set the search range for the bandwidth selection procedure.
@@ -2126,7 +2126,7 @@ class MuSIC(SWR):
             X = self.comm.bcast(X, root=0)
 
         for target in y_arr.columns:
-            y = y_arr[target]
+            y = y_arr[target].to_frame()
             y_label = target
 
             if self.subsampled:
@@ -2134,7 +2134,7 @@ class MuSIC(SWR):
                 sample_names = self.subsampled_sample_names[y_label]
                 indices = self.subsampled_indices[y_label]
                 X = X[indices, :]
-                y = y.loc[sample_names].to_frame()
+                y = y.loc[sample_names]
             else:
                 n_samples = self.n_samples
                 sample_names = self.sample_names
@@ -2147,11 +2147,17 @@ class MuSIC(SWR):
             )
             print("Betas test: ", np.min(all_betas[target]))
             print("Betas test: ", np.max(all_betas[target]))
+            print("Betas test init: ", all_betas[target])
 
             # Initial values- multiply input by the array corresponding to the correct target- note that this is
             # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
             y_pred_init = X * all_betas[target]
+            print(X[:, 0])
+            print(all_betas[target][:, 0])
+            print(y_pred_init[:, 0])
             all_y_pred = np.sum(y_pred_init, axis=1)
+
+            print("Initial predicted y test: ", np.max(y_pred_init[:, 0]))
 
             if self.distr != "gaussian":
                 all_y_pred = self.distr_obj.predict(all_y_pred)
@@ -2159,6 +2165,11 @@ class MuSIC(SWR):
             print("Initial y test: ", np.max(y.values))
 
             error = y.values.reshape(-1) - all_y_pred.reshape(-1)
+            print("Error test: ", np.max(error))
+            print("Error test: ", np.median(error))
+            # error = np.zeros(y.values.shape[0])
+
+            print("Initial predicted y test: ", np.max(y_pred_init[:, 0] + error))
 
             bws = [None] * self.n_features
             bw_plateau_counter = 0
@@ -2169,9 +2180,8 @@ class MuSIC(SWR):
 
             n_iters = max(200, self.max_iter)
             for iter in range(1, n_iters + 1):
-                if self.subsampled:
-                    new_ys = np.empty(y_pred_init.shape, dtype=np.float64)
-                    new_betas = np.empty(y_pred_init.shape, dtype=np.float64)
+                new_ys = np.empty(y_pred_init.shape, dtype=np.float64)
+                new_betas = np.empty(y_pred_init.shape, dtype=np.float64)
 
                 for n_feat in range(self.n_features):
                     if self.adata_path is not None:
@@ -2216,6 +2226,7 @@ class MuSIC(SWR):
                         # Get coefficients for this particular target:
                         betas = betas[target]
 
+                    print("Betas test after 1 init: ", betas)
                     print("Betas test: ", np.min(betas))
                     print("Betas test: ", np.max(betas))
 
