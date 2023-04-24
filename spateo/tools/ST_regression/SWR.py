@@ -1337,7 +1337,7 @@ class SWR:
             return np.concatenate(([sample_name, diagnostic, hat_i], betas, lvg))
         else:
             # For bandwidth optimization:
-            if self.distr == "gaussian" or multiscale:
+            if self.distr == "gaussian" or fit_predictor:
                 bw_diagnostic = residual * residual
                 return [bw_diagnostic, hat_i]
             elif self.distr == "poisson" or self.distr == "nb":
@@ -2145,19 +2145,27 @@ class MuSIC(SWR):
             all_betas, self.all_bws_init = self.fit(
                 y, X, multiscale=True, fit_predictor=False, init_betas=init_betas, verbose=False
             )
+            print("Betas test: ", np.min(all_betas[target]))
+            print("Betas test: ", np.max(all_betas[target]))
 
             # Initial values- multiply input by the array corresponding to the correct target- note that this is
             # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
             y_pred_init = X * all_betas[target]
-            all_pred_y = y_pred_init.sum(axis=1)
-            if self.distr != "gaussian":
-                all_pred_y = np.exp(all_pred_y)
+            all_y_pred = np.sum(y_pred_init, axis=1)
 
-            error = y.values.reshape(-1) - all_pred_y
-            self.logger.info(f"Initial RSS: {np.sum(error ** 2):.3f}")
+            if self.distr != "gaussian":
+                all_y_pred = self.distr_obj.predict(all_y_pred)
+            print("Initial predicted y test: ", np.max(all_y_pred))
+            print("Initial y test: ", np.max(y.values))
+
+            error = y.values.reshape(-1) - all_y_pred.reshape(-1)
+
             bws = [None] * self.n_features
             bw_plateau_counter = 0
             bw_history = []
+            error_history = []
+            y_pred_history = []
+            score_history = []
 
             n_iters = max(200, self.max_iter)
             for iter in range(1, n_iters + 1):
@@ -2172,7 +2180,13 @@ class MuSIC(SWR):
                         signaling_type = None
                     # Use each individual feature to predict the response- note y is set up as a DataFrame because in
                     # other cases column names/target names are taken from y:
-                    temp_y = pd.DataFrame((y_pred_init[:, n_feat] + error).reshape(-1, 1), columns=[target])
+                    if self.distr != "gaussian":
+                        y_mod = y_pred_init[:, n_feat] + error
+                        y_mod = self.distr_obj.get_predictors(y_mod)
+                        print("y_mod test: ", np.max(y_mod))
+                    else:
+                        y_mod = y_pred_init[:, n_feat] + error
+                    temp_y = pd.DataFrame(y_mod.reshape(-1, 1), columns=[target])
                     temp_X = (X[:, n_feat]).reshape(-1, 1)
 
                     # Check if the bandwidth has plateaued for all features in this iteration:
@@ -2202,10 +2216,16 @@ class MuSIC(SWR):
                         # Get coefficients for this particular target:
                         betas = betas[target]
 
+                    print("Betas test: ", np.min(betas))
+                    print("Betas test: ", np.max(betas))
+
                     # Update the dependent prediction (again not for GLMs, this quantity is instead the linear
                     # predictor) and betas:
                     new_y = (temp_X * betas).reshape(-1)
-                    error = temp_y.values.reshape(-1) - new_y
+                    if self.distr != "gaussian":
+                        new_y = self.distr_obj.predict(new_y)
+                    print("new_y_pred test: ", np.max(new_y))
+                    error = y_mod - new_y
                     new_ys[:, n_feat] = new_y
                     new_betas[:, n_feat] = betas.reshape(-1)
                     # Update running list of bandwidths for this feature:
@@ -2219,11 +2239,12 @@ class MuSIC(SWR):
 
                 # Compute normalized sum-of-squared-errors-of-prediction using the updated predicted values:
                 bw_history.append(deepcopy(bws))
+                error_history.append(deepcopy(error))
+                y_pred_history.append(deepcopy(new_ys))
                 SSE = np.sum((new_ys - y_pred_init) ** 2) / n_samples
                 TSS = np.sum(np.sum(new_ys, axis=1) ** 2)
                 rmse = (SSE / TSS) ** 0.5
-                # Use the new predicted values as the initial values for the next iteration:
-                y_pred_init = new_ys
+                score_history.append(rmse)
 
                 if self.comm.rank == 0:
                     self.logger.info(f"Target: {target}, Iteration: {iter}, Score: {rmse:.5f}")
@@ -2232,6 +2253,20 @@ class MuSIC(SWR):
                 if rmse < self.tolerance:
                     self.logger.info(f"For target {target}, multiscale optimization converged after {iter} iterations.")
                     break
+
+                # Check for local minimum:
+                if iter > 2:
+                    if score_history[-3] >= score_history[-2] and score_history[-1] >= score_history[-2]:
+                        self.logger.info(f"Local minimum reached for target {target} after {iter} iterations.")
+                        new_ys = y_pred_history[-2]
+                        error = error_history[-2]
+                        bw_history = bw_history[:-1]
+                        rmse = score_history[-2]
+                        self.logger.info(f"Target: {target}, Iteration: {iter-1}, Score: {rmse:.5f}")
+                        break
+
+                # Use the new predicted values as the initial values for the next iteration:
+                y_pred_init = new_ys
 
             # Final estimated values:
             y_pred = new_ys
@@ -2257,7 +2292,6 @@ class MuSIC(SWR):
             if self.distr == "poisson" or self.distr == "nb":
                 # Map linear predictors to the response variable:
                 y_pred = self.distr_obj.predict(y_pred)
-
                 error = y.values.reshape(-1) - y_pred
                 self.logger.info(f"Final RSS: {np.sum(error ** 2):.3f}")
 
