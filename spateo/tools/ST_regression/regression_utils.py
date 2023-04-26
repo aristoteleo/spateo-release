@@ -15,6 +15,7 @@ import scipy
 import statsmodels.stats.multitest
 from anndata import AnnData
 from numpy import linalg
+from sklearn.preprocessing import MinMaxScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
@@ -102,6 +103,18 @@ def sparse_element_by_element(
     else:
         raise Exception("Invalid format for 'spdot' argument: %s and %s" % (type(a).__name__, type(b).__name__))
     return prod
+
+
+def sparse_minmax_scale(a: Union[scipy.sparse.csr_matrix, scipy.sparse.csc_matrix]):
+    """Column-wise minmax scaling of a sparse matrix."""
+    if type(a).__name__ == "csr_matrix" or type(a).__name__ == "csc_matrix":
+        scaler = MinMaxScaler()
+        a_scaled = scaler.fit_transform(a)
+        a_scaled = scipy.sparse.csr_matrix(a_scaled)
+    else:
+        raise Exception("Invalid format for 'a' argument: %s" % (type(a).__name__))
+
+    return a_scaled
 
 
 # ---------------------------------------------------------------------------------------------------

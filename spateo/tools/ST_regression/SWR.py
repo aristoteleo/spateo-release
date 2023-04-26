@@ -9,7 +9,6 @@ import re
 import sys
 from copy import deepcopy
 from functools import partial
-from itertools import product
 from multiprocessing import Pool
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
@@ -18,7 +17,6 @@ import numpy as np
 import pandas as pd
 import scipy
 from mpi4py import MPI
-from scipy import special
 from scipy.spatial.distance import cdist
 from sklearn.cluster import KMeans
 
@@ -36,9 +34,8 @@ from spateo.tools.ST_regression.regression_utils import (
     iwls,
     multicollinearity_check,
     smooth,
+    sparse_minmax_scale
 )
-
-# NOTE: set lower bound AND upper bound bandwidth much lower for membrane-bound ligands/receptors pairs
 
 # ---------------------------------------------------------------------------------------------------
 # GWR for cell-cell communication
@@ -1153,6 +1150,9 @@ class SWR:
             concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
             self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
             self.feature_names += cov_names
+
+        # Columnwise min-max scaling:
+        self.X = sparse_minmax_scale(self.X)
 
         # Add intercept if applicable:
         if self.fit_intercept:

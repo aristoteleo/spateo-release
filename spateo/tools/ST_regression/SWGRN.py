@@ -108,9 +108,15 @@ class GWRGRN(MuSIC):
         self.n_runs_all = self.comm.bcast(self.n_runs_all, root=0)
 
         # Split data into chunks for each process:
-        chunk_size = int(math.ceil(float(len(self.n_runs_all)) / self.comm.size))
-        # Assign chunks to each process:
-        self.x_chunk = self.n_runs_all[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+        if self.subsample:
+            self.run_subsample()
+            # Indicate model has been subsampled:
+            self.subsampled = True
+        else:
+            chunk_size = int(math.ceil(float(len(range(self.n_samples))) / self.comm.size))
+            # Assign chunks to each process:
+            self.x_chunk = np.arange(self.n_samples)[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+            self.subsampled = False
 
     def grn_load_and_process(self):
         """
