@@ -746,22 +746,16 @@ def coarse_rigid_alignment(
         transformed_points = coordsA
     N, M, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
 
-    if N > 1000:
-        coordsA, X_A = voxel_data(
-            coords=coordsA,
-            gene_exp=X_A,
-            voxel_num=1000,
-        )
-    else:
-        coordsA, X_A = nx.to_numpy(coordsA), nx.to_numpy(X_A)
-    if M > 1000:
-        coordsB, X_B = voxel_data(
-            coords=coordsB,
-            gene_exp=X_B,
-            voxel_num=1000,
-        )
-    else:
-        coordsB, X_B = nx.to_numpy(coordsB), nx.to_numpy(X_B)
+    coordsA, X_A = voxel_data(
+        coords=coordsA,
+        gene_exp=X_A,
+        voxel_num=max(min(int(N / 20), 1000), 100),
+    )
+    coordsB, X_B = voxel_data(
+        coords=coordsB,
+        gene_exp=X_B,
+        voxel_num=max(min(int(M / 20), 1000), 100),
+    )
     DistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B, dissimilarity=dissimilarity)
 
     transformed_points = nx.to_numpy(transformed_points)

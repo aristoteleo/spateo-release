@@ -412,16 +412,19 @@ def BA_align(
     R = _identity(nx, D, type_as)
     minGeneDistMat = nx.min(GeneDistMat, 1)
     # Automatically determine the value of beta2
-    if beta2 is None:
-        if partial_alignment:
-            beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] * 2
-            beta2_end = nx.maximum(
-                minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.1)]] / 40,
-                _data(nx, 0.01, type_as),
-            )
-        else:
-            beta2_end = nx.max(minGeneDistMat) / 5
-            beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 5
+    if partial_alignment:
+        beta2 = (
+            minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] * 2 if beta2 is None else beta2
+        )
+        beta2_end = nx.maximum(
+            minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.1)]] / 40,
+            _data(nx, 0.01, type_as),
+        )
+    else:
+        beta2 = (
+            minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 5 if beta2 is None else beta2
+        )
+        beta2_end = nx.max(minGeneDistMat) / 5
     del minGeneDistMat
     if sub_sample:
         del sub_X_A, sub_X_B, GeneDistMat
