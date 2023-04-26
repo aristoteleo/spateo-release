@@ -3,55 +3,20 @@ package:
   version: "1.0.2"
 
 source:
-  git_rev: v1.0.2
-  git_url: https://github.com/aristoteleo/spateo-release.git
+  path: ../
+#  git_url: https://github.com/aristoteleo/spateo-release.git
+#  git_depth: 1
 
 requirements:
   host:
     - python
-    - pip
-    - numpy 1.23.*
-  run:
-    - anndata
-    - colorcet>=2.0.1
-    - cvxopt>=1.2.3
-    - csbdeep>=0.6.3
-    - descartes
-    - folium>=0.12.1
-    - geopandas>=0.10.2
-    - ipywidgets>=7.7.1
-    - kneed>=0.7.0
-    - kornia>=0.6.4
-    - loompy>=3.0.5
-    - mapclassify>=2.4.2
-    - matplotlib>=3.1.0
-    - nbconvert
-    - networkx>=2.6.3
-    # ngs_tools>=1.6.0
-    - numba>=0.46.0
-    - numpy 1.23.*
-    - pandana
-    - pandas>=0.25.1
-    - plotly>=5.1.0
-    - POT>=0.8.1
-    - pynndescent>=0.4.8
-    - pysal>=1.14.4
-    - pyro-ppl
-    - python-igraph>=0.7.1
-    - pyvista>=0.37.0
-    - scipy>=1.0
-    - scikit-image>=0.18.0
-    - scikit-learn>=0.19.1
-    - seaborn>=0.9.0
-    - setuptools>=58.0.4
-    - Shapely>=1.8.0
-    - statsmodels>=0.9.0
-    - tensorflow
-    - tqdm>=4.62.3
-    - typing_extensions>=4.0.1
-    - umap-learn>=0.5.1
+    - setuptools
     - vtk==9.2.2
-
+    - numpy==1.23.*
+    - cython
+    - wrapt==1.14.*
+  run:
+    - anndata==0.7.5
 
 about:
   home: https://github.com/aristoteleo/spateo-release
