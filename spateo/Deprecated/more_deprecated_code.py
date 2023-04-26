@@ -739,3 +739,678 @@ else:
             hessian_chunk = np.sum(partial_hat[:, :, j] * X_j * X_k * y_pred * psi_deriv)
 
     return ENP_chunk, hessian_chunk
+
+if self.distr == "gaussian":
+    hessian = np.dot(X.T, X)
+elif self.distr == "poisson":
+    hessian = np.dot(X.T, np.dot(np.diag(fitted), X))
+elif self.distr == "nb":
+    hessian = np.dot(X.T, np.dot(np.diag(fitted * (1 + fitted / self.distr_obj.variance.disp)), X))
+return hessian
+
+
+def mpi_fit(
+        self,
+        y: Optional[np.ndarray],
+        X: Optional[np.ndarray],
+        y_label: str,
+        bw: Union[float, int],
+        final: bool = False,
+        multiscale: bool = False,
+        fit_predictor: bool = False,
+) -> Union[None, np.ndarray]:
+    """Fit local regression model for each sample in parallel, given a specified bandwidth.
+
+    Args:
+        y: Response variable
+        X: Independent variable array- if not given, will default to :attr `X`. Note that if object was initialized
+            using an AnnData object, this will be overridden with :attr `X` even if a different array is given.
+        y_label: Used to provide a unique ID for the dependent variable for saving purposes and to query keys
+            from various dictionaries
+        bw: Bandwidth for the spatial kernel
+        final: Set True to indicate that no additional parameter selection needs to be performed; the model can
+            be fit and more stats can be returned.
+        multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
+            over different spatial scales
+        fit_predictor: Set True to indicate that dependent variable to fit is a linear predictor rather than a
+            true response variable
+    """
+    # If model to be run is a "niche", "lr" or "slice" model, update the spatial weights and then update X given
+    # the current value of the bandwidth:
+    if hasattr(self, "adata"):
+        self.all_spatial_weights = self._compute_all_wi(bw)
+        self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
+        self.logger.info(f"Adjusting X for new bandwidth: {bw}")
+        self._adjust_x()
+        self.X = self.comm.bcast(self.X, root=0)
+        self.X_df = self.comm.bcast(self.X_df, root=0)
+        self.logger(f"Using adjusted X array for {self.mod_type} model.")
+        X = self.X
+
+    if X.shape[1] != self.n_features:
+        n_features = X.shape[1]
+        n_features = self.comm.bcast(n_features, root=0)
+    else:
+        n_features = self.n_features
+
+    if self.grn:
+        self.all_spatial_weights = self._compute_all_wi(bw)
+        # Row standardize spatial weights so as to ensure results aren't biased by the number of neighbors of
+        # each cell:
+        self.all_spatial_weights = self.all_spatial_weights / self.all_spatial_weights.sum(axis=1)[:, None]
+        y, X = self._adjust_x_nbhd_convolve(y, X)
+        y = self.comm.bcast(y, root=0)
+        X = self.comm.bcast(X, root=0)
+
+    # If subsampled, take the subsampled portion of the X array- if :attr `multiscale` is True, this subsampling
+    # will be performed before calling :func `mpi_fit`:
+    if self.subsampled:
+        indices = self.subsampled_indices[y_label]
+        n_samples = self.n_samples_fitted[y_label]
+        X = X[indices, :]
+        y = y[indices]
+    else:
+        n_samples = self.n_samples
+
+    if final:
+        if multiscale:
+            local_fit_outputs = np.empty((self.x_chunk.shape[0], n_features), dtype=np.float64)
+        else:
+            local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * n_features + 3), dtype=np.float64)
+
+        # Fitting for each location, or each location that is among the subsampled points:
+        pos = 0
+        for i in self.x_chunk:
+            local_fit_outputs[pos] = self.local_fit(
+                i, y, X, y_label=y_label, bw=bw, final=final, multiscale=multiscale, fit_predictor=fit_predictor
+            )
+            pos += 1
+
+        # Gather data to the central process such that an array is formed where each sample has its own
+        # measurements:
+        all_fit_outputs = self.comm.gather(local_fit_outputs, root=0)
+        # For non-MGWR:
+        # Column 0: Index of the sample
+        # Column 1: Diagnostic (residual for Gaussian, fitted response value for Poisson/NB)
+        # Column 2: Contribution of each sample to its own value
+        # Columns 3-n_feats+3: Estimated coefficients
+        # Columns n_feats+3-end: Canonical correlations
+        # All columns are betas for MGWR
+
+        # If multiscale, do not need to fit using fixed bandwidth:
+        if multiscale:
+            # At final iteration, for MGWR, this function is only needed to get parameters:
+            all_fit_outputs = self.comm.bcast(all_fit_outputs, root=0)
+            all_fit_outputs = np.vstack(all_fit_outputs)
+            return all_fit_outputs
+
+        if self.comm.rank == 0:
+            all_fit_outputs = np.vstack(all_fit_outputs)
+            self.logger.info(f"Computing metrics for GWR using bandwidth: {bw}")
+
+            # Residual sum of squares for Gaussian model:
+            if self.distr == "gaussian":
+                RSS = np.sum(all_fit_outputs[:, 1] ** 2)
+                # Total sum of squares:
+                TSS = np.sum((y - np.mean(y)) ** 2)
+                r_squared = 1 - RSS / TSS
+
+                # Note: trace of the hat matrix and effective number of parameters (ENP) will be used
+                # interchangeably:
+                ENP = np.sum(all_fit_outputs[:, 2])
+                # Residual variance:
+                sigma_squared = RSS / (n_samples - ENP)
+                # Corrected Akaike Information Criterion:
+                aicc = self.compute_aicc_linear(RSS, ENP, n_samples=X.shape[0])
+                # Scale the leverages by their variance to compute standard errors of the predictor:
+                all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * sigma_squared)
+
+                # For saving outputs:
+                header = "index,residual,influence,"
+            else:
+                r_squared = None
+
+            if self.distr == "poisson" or self.distr == "nb":
+                # Deviance:
+                deviance = self.distr_obj.deviance(y, all_fit_outputs[:, 1])
+                # Log-likelihood:
+                ll = self.distr_obj.log_likelihood(y, all_fit_outputs[:, 1])
+                # Reshape if necessary:
+                if self.n_features > 1:
+                    ll = ll.reshape(-1, 1)
+                # ENP:
+                ENP = np.sum(all_fit_outputs[:, 2])
+                # Corrected Akaike Information Criterion:
+                aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
+                # To obtain standard errors for each coefficient, take the square root of the diagonal elements
+                # of the covariance matrix:
+                # Compute the covariance matrix using the Hessian- first compute the estimate for dispersion of
+                # the NB distribution:
+                if self.distr == "nb":
+                    theta = 1 / self.distr_obj.variance(all_fit_outputs[:, 1])
+                    weights = self.distr_obj.weights(all_fit_outputs[:, 1])
+                    deviance = 2 * np.sum(
+                        weights
+                        * (
+                                y * np.log(y / all_fit_outputs[:, 1])
+                                + (theta - 1) * np.log(1 + all_fit_outputs[:, 1] / (theta - 1))
+                        )
+                    )
+                    dof = len(y) - self.X.shape[1]
+                    self.distr_obj.variance.disp = deviance / dof
+
+                hessian = self.hessian(all_fit_outputs[:, 1], X=X)
+                cov_matrix = np.linalg.inv(hessian)
+                all_fit_outputs[:, -n_features:] = np.sqrt(np.diag(cov_matrix))
+
+                # For saving outputs:
+                header = "index,prediction,influence,"
+            else:
+                deviance = None
+
+            # Save results:
+            varNames = self.feature_names
+            # Columns for the possible intercept, coefficients and squared canonical coefficients:
+            for x in varNames:
+                header += "b_" + x + ","
+            for x in varNames:
+                header += "se_" + x + ","
+
+            # Return output diagnostics and save result:
+            self.output_diagnostics(aicc, ENP, r_squared, deviance)
+            self.save_results(all_fit_outputs, header, label=y_label)
+
+        return
+
+    # If not the final run:
+    if self.distr == "gaussian" or fit_predictor:
+        # Compute AICc using the sum of squared residuals:
+        RSS = 0
+        trace_hat = 0
+
+        for i in self.x_chunk:
+            fit_outputs = self.local_fit(i, y, X, y_label=y_label, bw=bw, fit_predictor=fit_predictor, final=False)
+            err_sq, hat_i = fit_outputs[0], fit_outputs[1]
+            RSS += err_sq
+            trace_hat += hat_i
+
+        # Send data to the central process:
+        RSS_list = self.comm.gather(RSS, root=0)
+        trace_hat_list = self.comm.gather(trace_hat, root=0)
+
+        if self.comm.rank == 0:
+            RSS = np.sum(RSS_list)
+            trace_hat = np.sum(trace_hat_list)
+            aicc = self.compute_aicc_linear(RSS, trace_hat, n_samples=n_samples)
+            if not multiscale:
+                self.logger.info(f"Bandwidth: {bw:.3f}, Linear AICc: {aicc:.3f}")
+            return aicc
+
+    elif self.distr == "poisson" or self.distr == "nb":
+        # Compute AICc using the fitted and observed values, using the linear predictor for multiscale models and
+        # the predicted response otherwise:
+        trace_hat = 0
+        pos = 0
+        y_pred = np.empty(self.x_chunk.shape[0], dtype=np.float64)
+
+        for i in self.x_chunk:
+            fit_outputs = self.local_fit(i, y, X, y_label=y_label, bw=bw, fit_predictor=fit_predictor, final=False)
+            y_pred_i, hat_i = fit_outputs[0], fit_outputs[1]
+            y_pred[pos] = y_pred_i
+            trace_hat += hat_i
+            pos += 1
+
+        # Send data to the central process:
+        all_y_pred = self.comm.gather(y_pred, root=0)
+        trace_hat_list = self.comm.gather(trace_hat, root=0)
+
+        if self.comm.rank == 0:
+            ll = self.distr_obj.log_likelihood(y, all_y_pred)
+            trace_hat = np.sum(trace_hat_list)
+            aicc = self.compute_aicc_glm(ll, trace_hat, n_samples=n_samples)
+            self.logger.info(f"Bandwidth: {bw:.3f}, GLM AICc: {aicc:.3f}")
+
+            return aicc
+
+    return
+
+
+def hessian(self, fitted: np.ndarray, X: Optional[np.ndarray] = None) -> np.ndarray:
+    """Compute the Hessian matrix for the given spatially-weighted model, representing the confidence in the
+    parameter estimates. Note that this is formed such that the Hessian matrix is computed for each cell.
+
+    Args:
+        fitted: Array of shape [n_samples,]; fitted mean response variable (link function evaluated
+            at the linear predicted values)
+        X: Independent variable array of shape [n_samples, n_features]
+
+    Returns:
+        hessian: Hessian matrix
+    """
+    if X is None:
+        X = self.X
+
+    hessian = np.zeros((self.n_samples, self.n_features, self.n_features))
+
+    for i in range(self.n_samples):
+        if self.distr == "gaussian":
+            hessian[i] = np.outer(X[i], X[i])
+        elif self.distr == "poisson":
+            hessian[i] = np.outer(X[i], X[i] * fitted[i])
+        elif self.distr == "nb":
+            hessian[i] = np.outer(X[i], X[i] * fitted[i] * (1 + fitted[i] / self.distr_obj.variance.disp))
+
+    return hessian
+
+
+def multiscale_backfitting(
+    self,
+    y: Optional[pd.DataFrame] = None,
+    X: Optional[np.ndarray] = None,
+    init_betas: Optional[Dict[str, np.ndarray]] = None
+):
+    """
+    Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths by iterating one
+    predictor while holding all others constant. Run before :func `fit` to obtain initial covariate-specific
+    bandwidths.
+
+    Reference: Fotheringham et al. 2017. Annals of AAG.
+
+    Args:
+        y: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
+            None, will use :attr `targets_expr` computed using the given AnnData object to create this (each
+            individual column will serve as an independent variable). Needed to be given as a dataframe so that
+            column(s) are labeled, so each result can be associated with a labeled dependent variable.
+        X: Optional array, can be used to provide dependent variable array directly to the fit function. If
+            None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
+        init_betas: Optional dictionary containing arrays with initial values for the coefficients. Keys should
+            correspond to target genes and values should be arrays of shape [n_features, 1].
+    """
+    if self.comm.rank == 0:
+        self.logger.info("Multiscale Backfitting...")
+
+    if not self.set_up:
+        self.logger.info("Model has not yet been set up to run, running :func `SWR._set_up_model()` now...")
+        self._set_up_model()
+
+    if self.comm.rank == 0:
+        self.logger.info("Initialization complete.")
+
+    self.all_bws_history = {}
+    self.params_all_targets = {}
+    self.errors_all_targets = {}
+    self.predictions_all_targets = {}
+    # For linear models:
+    self.all_RSS = {}
+    self.all_TSS = {}
+
+    # For GLM models:
+    self.all_deviances = {}
+    self.all_log_likelihoods = {}
+
+    # Optional, to save the dispersion parameter for negative binomial fitted to each target:
+    self.nb_disp_dict = {}
+
+    if y is None:
+        y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
+    else:
+        y_arr = y
+        y_arr = self.comm.bcast(y_arr, root=0)
+
+    for target in y_arr.columns:
+        y = y_arr[target].to_frame()
+        y_label = target
+
+        if self.subsampled:
+            n_samples = self.n_samples_fitted[y_label]
+            indices = self.subsampled_indices[y_label]
+        else:
+            n_samples = self.n_samples
+            indices = np.arange(self.n_samples)
+
+        # Initialize parameters, with a uniform initial bandwidth for all features- set fit_predictor False to
+        # fit model under the assumption that y is a Poisson-distributed dependent variable:
+        self.logger.info(f"Finding uniform initial bandwidth for all features for target {target}...")
+        all_betas, self.all_bws_init = self.fit(
+            y, X, multiscale=True, fit_predictor=False, init_betas=init_betas, verbose=False
+        )
+        # If applicable, i.e. if model if one of the signaling models for which the X array varies with
+        # bandwidth, update X with the up-to-date version that leverages the most recent bandwidth estimations:
+        if X is None:
+            X = self.X
+        X = self.comm.bcast(X, root=0)
+
+        # Initial values- multiply input by the array corresponding to the correct target- note that this is
+        # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
+        y_pred_init = X * all_betas[target]
+        all_y_pred = np.sum(y_pred_init, axis=1)
+
+        if self.distr != "gaussian":
+            y_true = self.distr_obj.get_predictors(y.values).reshape(-1)
+        else:
+            y_true = y.values.reshape(-1)
+
+        error = y_true - all_y_pred.reshape(-1)
+        self.logger.info(f"Initial RSS: {np.sum(error ** 2):.3f}")
+        if self.distr != "gaussian":
+            # Small errors <-> large negatives in log space, but in reality these are negligible- set these to 0:
+            error[error < 0] = 0
+            error = self.distr_obj.get_predictors(error)
+            error[error < -1] = 0
+        # error = np.zeros(y.values.shape[0])
+
+        bws = [None] * self.n_features
+        bw_plateau_counter = 0
+        bw_history = []
+        error_history = []
+        y_pred_history = []
+        score_history = []
+
+        n_iters = max(200, self.max_iter)
+        for iter in range(1, n_iters + 1):
+            new_ys = np.empty(y_pred_init.shape, dtype=np.float64)
+            new_betas = np.empty(y_pred_init.shape, dtype=np.float64)
+
+            for n_feat in range(self.n_features):
+                if self.adata_path is not None:
+                    signaling_type = self.signaling_types[n_feat]
+                else:
+                    signaling_type = None
+                # Use each individual feature to predict the response- note y is set up as a DataFrame because in
+                # other cases column names/target names are taken from y:
+                y_mod = y_pred_init[:, n_feat] + error
+                temp_y = pd.DataFrame(y_mod.reshape(-1, 1), columns=[target])
+
+                # Check if the bandwidth has plateaued for all features in this iteration:
+                if bw_plateau_counter > self.patience:
+                    # If applicable, i.e. if model if one of the signaling models for which the X array varies with
+                    # bandwidth, update X with the up-to-date version that leverages the most recent bandwidth
+                    # estimations:
+                    if X is None:
+                        temp_X = (self.X[:, n_feat]).reshape(-1, 1)
+                    else:
+                        temp_X = X[:, n_feat].reshape(-1, 1)
+                    # Use the bandwidths from the previous iteration before plateau was determined to have been
+                    # reached:
+                    bw = bws[n_feat]
+                    betas = self.mpi_fit(
+                        temp_y.values,
+                        temp_X,
+                        y_label=target,
+                        bw=bw,
+                        final=True,
+                        fit_predictor=True,
+                        multiscale=True,
+                    )
+                else:
+                    betas, bw_dict = self.fit(
+                        temp_y,
+                        X,
+                        n_feat=n_feat,
+                        init_betas=init_betas,
+                        multiscale=True,
+                        fit_predictor=True,
+                        signaling_type=signaling_type,
+                        verbose=False,
+                    )
+                    # Get coefficients for this particular target:
+                    betas = betas[target]
+
+                # If applicable, i.e. if model if one of the signaling models for which the X array varies with
+                # bandwidth, update X with the up-to-date version that leverages the most recent bandwidth
+                # estimations:
+                if X is None:
+                    temp_X = (self.X[:, n_feat]).reshape(-1, 1)
+                else:
+                    temp_X = X[:, n_feat].reshape(-1, 1)
+                # Update the dependent prediction (again not for GLMs, this quantity is instead the linear
+                # predictor) and betas:
+                new_y = (temp_X * betas).reshape(-1)
+                error = y_mod - new_y
+                new_ys[:, n_feat] = new_y
+                new_betas[:, n_feat] = betas.reshape(-1)
+                # Update running list of bandwidths for this feature:
+                bws[n_feat] = bw_dict[target]
+
+            # Check if ALL bandwidths remain the same between iterations:
+            if (iter > 1) and np.all(bw_history[-1] == bws):
+                bw_plateau_counter += 1
+            else:
+                bw_plateau_counter = 0
+
+            # Compute normalized sum-of-squared-errors-of-prediction using the updated predicted values:
+            bw_history.append(deepcopy(bws))
+            error_history.append(deepcopy(error))
+            y_pred_history.append(deepcopy(new_ys))
+            SSE = np.sum((new_ys - y_pred_init) ** 2) / n_samples
+            TSS = np.sum(np.sum(new_ys, axis=1) ** 2)
+            rmse = (SSE / TSS) ** 0.5
+            score_history.append(rmse)
+
+            if self.comm.rank == 0:
+                self.logger.info(f"Target: {target}, Iteration: {iter}, Score: {rmse:.5f}")
+                self.logger.info(f"Bandwidths: {bws}")
+
+            if rmse < self.tolerance:
+                self.logger.info(f"For target {target}, multiscale optimization converged after {iter} iterations.")
+                break
+
+            # Check for local minimum:
+            if iter > 2:
+                if score_history[-3] >= score_history[-2] and score_history[-1] >= score_history[-2]:
+                    self.logger.info(f"Local minimum reached for target {target} after {iter} iterations.")
+                    new_ys = y_pred_history[-2]
+                    error = error_history[-2]
+                    bw_history = bw_history[:-1]
+                    rmse = score_history[-2]
+                    self.logger.info(f"Target: {target}, Iteration: {iter-1}, Score: {rmse:.5f}")
+                    break
+
+            # Use the new predicted values as the initial values for the next iteration:
+            y_pred_init = new_ys
+
+        # Final estimated values:
+        y_pred = new_ys
+        y_pred = y_pred.sum(axis=1)
+
+        bw_history = np.array(bw_history)
+        self.all_bws_history[target] = bw_history
+
+        # Compute diagnostics for current target using the final errors:
+        if self.distr == "gaussian":
+            RSS = np.sum(error**2)
+            self.all_RSS[target] = RSS
+            # Total sum of squares:
+            TSS = np.sum((y.values - np.mean(y.values)) ** 2)
+            self.all_TSS[target] = TSS
+            r_squared = 1 - RSS / TSS
+
+            # For saving outputs:
+            header = "index,residual,"
+        else:
+            r_squared = None
+
+        if self.distr == "poisson" or self.distr == "nb":
+            # Map linear predictors to the response variable:
+            y_pred = self.distr_obj.predict(y_pred)
+            error = y.values.reshape(-1) - y_pred
+            self.logger.info(f"Final RSS: {np.sum(error ** 2):.3f}")
+
+            # Set dispersion for negative binomial:
+            if self.distr == "nb":
+                theta = 1 / self.distr_obj.variance(y_pred)
+                weights = self.distr_obj.weights(y_pred)
+                deviance = 2 * np.sum(
+                    weights
+                    * (y.values * np.log(y.values / y_pred) + (theta - 1) * np.log(1 + y_pred[:, 1] / (theta - 1)))
+                )
+                dof = len(y.values) - X.shape[1]
+                self.nb_disp_dict[target] = deviance / dof
+
+            # Deviance:
+            deviance = self.distr_obj.deviance(y.values.reshape(-1), y_pred)
+            self.all_deviances[target] = deviance
+            ll = self.distr_obj.log_likelihood(y.values.reshape(-1), y_pred)
+            # Reshape if necessary:
+            if self.n_features > 1:
+                ll = ll.reshape(-1, 1)
+            self.all_log_likelihoods[target] = ll
+
+            # For saving outputs:
+            header = "index,deviance,"
+        else:
+            deviance = None
+        # Store some of the final values of interest:
+        self.params_all_targets[target] = new_betas
+        self.errors_all_targets[target] = error
+        self.predictions_all_targets[target] = y_pred
+
+        # Save results without standard errors or influence measures:
+        if self.comm.rank == 0 and self.multiscale_params_only:
+            varNames = self.feature_names
+            # Save intercept and parameter estimates:
+            for x in varNames:
+                header += "b_" + x + ","
+
+            # Return output diagnostics and save result:
+            self.output_diagnostics(None, None, r_squared, deviance)
+            output = np.hstack([indices.reshape(-1, 1), error.reshape(-1, 1), self.params_all_targets[target]])
+            self.save_results(header, output, label=y_label)
+
+
+def multiscale_compute_metrics(self, X: Optional[np.ndarray] = None, n_chunks: int = 2):
+    """Compute multiscale inference and output results.
+
+    Args:
+        X: Optional array, can be used to provide dependent variable array directly to the fit function. If
+            None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
+            Must be the same X array as was used to fit the model (i.e. the same X given to :func
+            `multiscale_backfitting`).
+        n_chunks: Number of partitions comprising each covariate-specific hat matrix.
+    """
+    if X is None:
+        X = self.X
+
+    if self.multiscale_params_only:
+        self.logger.warning(
+            "Chunked computations will not be performed because `multiscale_params_only` is set to True, "
+            "so only parameter values (and no other metrics) will be saved."
+        )
+        return
+
+    # Check that initial bandwidths and bandwidth history are present (e.g. that :func `multiscale_backfitting` has
+    # been called):
+    if not hasattr(self, "all_bws_history"):
+        raise ValueError(
+            "Initial bandwidths must be computed before calling `multiscale_fit`. Run :func "
+            "`multiscale_backfitting` first."
+        )
+
+    if self.comm.rank == 0:
+        self.logger.info(f"Computing model metrics, using {n_chunks} chunks...")
+
+    self.n_chunks = self.comm.size * n_chunks
+    self.chunks = np.arange(self.comm.rank * n_chunks, (self.comm.rank + 1) * n_chunks)
+
+    y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
+    for target_label in y_arr.columns:
+        #sample_names = self.sample_names if not self.subsampled else self.subsampled_sample_names[target_label]
+        # Fitted coefficients, errors and predictions:
+        parameters = self.params_all_targets[target_label]
+        predictions = self.predictions_all_targets[target_label]
+        print(predictions.shape)
+        errors = self.errors_all_targets[target_label]
+        y_label = target_label
+
+        # If subsampling was done, check for the number of fitted samples for the right target:
+        if self.subsampled:
+            self.n_samples = self.n_samples_fitted[target_label]
+            self.indices = self.subsampled_indices[target_label]
+            self.coords = self.coords[self.indices, :]
+            X = X[self.indices, :]
+        else:
+            self.indices = np.arange(self.n_samples)
+
+        # Lists to store the results of each chunk for this variable (lvg list only used if Gaussian,
+        # Hessian list only used if non-Gaussian):
+        ENP_list = []
+        lvg_list = []
+
+        for chunk in self.chunks:
+            if self.distr == "gaussian":
+                ENP_chunk, lvg_chunk = self.chunk_compute_metrics(X, chunk_id=chunk, target_label=target_label)
+                ENP_list.append(ENP_chunk)
+                lvg_list.append(lvg_chunk)
+            else:
+                ENP_chunk = self.chunk_compute_metrics(X, chunk_id=chunk, target_label=target_label)
+                ENP_list.append(ENP_chunk)
+
+        # Gather results from all chunks:
+        ENP_list = np.array(self.comm.gather(ENP_list, root=0))
+        if self.distr == "gaussian":
+            lvg_list = np.array(self.comm.gather(lvg_list, root=0))
+
+        if self.comm.rank == 0:
+            # Compile results from all chunks to get the estimated number of parameters for this response variable:
+            ENP = np.sum(np.vstack(ENP_list), axis=0)
+            # Total estimated parameters:
+            ENP_total = np.sum(ENP)
+
+            if self.distr == "gaussian":
+                # Compile results from all chunks to get the leverage matrix for this response variable:
+                lvg = np.sum(np.vstack(lvg_list), axis=0)
+
+                # Get sums-of-squares corresponding to this feature:
+                RSS = self.all_RSS[target_label]
+                TSS = self.all_TSS[target_label]
+                # Residual variance:
+                sigma_squared = RSS / (self.n_samples - ENP)
+                # R-squared:
+                r_squared = 1 - RSS / TSS
+                # Corrected Akaike Information Criterion:
+                aicc = self.compute_aicc_linear(RSS, ENP_total, n_samples=self.n_samples)
+                # Scale leverages by the residual variance to compute standard errors:
+                standard_error = np.sqrt(lvg * sigma_squared)
+                self.output_diagnostics(aicc, ENP_total, r_squared=r_squared, deviance=None, y_label=y_label)
+
+                header = "index,residual,"
+                outputs = np.hstack([self.indices, errors.reshape(-1, 1), parameters, standard_error])
+
+            if self.distr == "poisson" or self.distr == "nb":
+                # Get deviances corresponding to this feature:
+                deviance = self.all_deviances[target_label]
+                ll = self.all_log_likelihoods[target_label]
+
+                # Corrected Akaike Information Criterion:
+                aicc = self.compute_aicc_glm(ll, ENP_total, n_samples=self.n_samples)
+                # Compute standard errors using the covariance:
+                if self.distr == "nb":
+                    self.distr_obj.variance.disp = self.nb_disp_dict[target_label]
+
+                # Standard errors using the Hessian:
+                all_standard_errors= []
+                hessian = self.hessian(predictions, X=X)
+                print(hessian.shape)
+                for i in range(self.n_samples):
+                    try:
+                        cov_matrix = np.linalg.inv(hessian[i])
+                        standard_error = np.sqrt(np.diag(cov_matrix))
+                    except:
+                        standard_error = np.full((self.n_features,), np.nan)
+                    all_standard_errors.append(standard_error)
+                standard_error = np.vstack(all_standard_errors)
+                self.output_diagnostics(aicc, ENP_total, r_squared=None, deviance=deviance, y_label=y_label)
+
+                header = "index,prediction,"
+                outputs = np.hstack(
+                    [self.indices.reshape(-1, 1), predictions.reshape(-1, 1), parameters, standard_error]
+                )
+
+            varNames = self.feature_names
+            # Save intercept and parameter estimates:
+            for x in varNames:
+                header += "b_" + x + ","
+            for x in varNames:
+                header += "se_" + x + ","
+
+            self.save_results(outputs, header, label=y_label)

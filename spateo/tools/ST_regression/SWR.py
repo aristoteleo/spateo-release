@@ -1203,28 +1203,6 @@ class SWR:
 
         return y, X
 
-    def hessian(self, fitted: np.ndarray, X: Optional[np.ndarray] = None) -> np.ndarray:
-        """Compute the Hessian matrix for the given model, representing the confidence in the parameter estimates.
-
-        Args:
-            fitted: Array of shape [n_samples,]; fitted mean response variable (link function evaluated
-                at the linear predicted values)
-            X: Independent variable array
-
-        Returns:
-            hessian: Hessian matrix
-        """
-        if X is None:
-            X = self.X
-
-        if self.distr == "gaussian":
-            hessian = np.dot(X.T, X)
-        elif self.distr == "poisson":
-            hessian = np.dot(X.T, np.dot(np.diag(fitted), X))
-        elif self.distr == "nb":
-            hessian = np.dot(X.T, np.dot(np.diag(fitted * (1 + fitted / self.distr_obj.variance.disp)), X))
-        return hessian
-
     def local_fit(
         self,
         i: int,
@@ -1315,7 +1293,8 @@ class SWR:
             # Reshape coefficients if necessary:
             betas = betas.flatten()
             # For multiscale GLM models, this is the predicted linear predictor:
-            pred_y = y_hat[i]
+            pred_lin_pred = y_hat[i]
+            pred_y = self.distr_obj.predict(pred_lin_pred)
             diagnostic = pred_y
             # For multiscale models, keep track of the residual as well- in this case,
             # the given y is assumed to also be the linear predictor:
@@ -1329,12 +1308,16 @@ class SWR:
             raise ValueError("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
 
         # Squared singular values:
-        lvg = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
+        if self.distr == "gaussian":
+            lvg = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
 
         if final:
             if multiscale:
                 return betas
-            return np.concatenate(([sample_name, diagnostic, hat_i], betas, lvg))
+            if self.distr == "gaussian":
+                return np.concatenate(([sample_name, diagnostic, hat_i], betas, lvg))
+            else:
+                return np.concatenate(([sample_name, diagnostic, hat_i], betas))
         else:
             # For bandwidth optimization:
             if self.distr == "gaussian" or fit_predictor:
@@ -1497,9 +1480,8 @@ class SWR:
         if self.subsampled:
             indices = self.subsampled_indices[y_label]
             n_samples = self.n_samples_fitted[y_label]
-            if not multiscale:
-                X = X[indices, :]
-                y = y[indices]
+            X = X[indices, :]
+            y = y[indices]
         else:
             n_samples = self.n_samples
 
@@ -1507,7 +1489,10 @@ class SWR:
             if multiscale:
                 local_fit_outputs = np.empty((self.x_chunk.shape[0], n_features), dtype=np.float64)
             else:
-                local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * n_features + 3), dtype=np.float64)
+                if self.distr == "gaussian":
+                    local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * n_features + 3), dtype=np.float64)
+                else:
+                    local_fit_outputs = np.empty((self.x_chunk.shape[0], n_features + 3), dtype=np.float64)
 
             # Fitting for each location, or each location that is among the subsampled points:
             pos = 0
@@ -1556,10 +1541,20 @@ class SWR:
                     # Scale the leverages by their variance to compute standard errors of the predictor:
                     all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * sigma_squared)
 
-                    # For saving outputs:
-                    header = "name,residual,influence,"
-                else:
-                    r_squared = None
+                    # For saving/showing outputs:
+                    header = "index,residual,influence,"
+                    deviance = None
+
+                    varNames = self.feature_names
+                    # Columns for the possible intercept, coefficients and squared canonical coefficients:
+                    for x in varNames:
+                        header += "b_" + x + ","
+                    for x in varNames:
+                        header += "se_" + x + ","
+
+                    # Return output diagnostics and save result:
+                    self.output_diagnostics(aicc, ENP, r_squared, deviance)
+                    self.save_results(all_fit_outputs, header, label=y_label)
 
                 if self.distr == "poisson" or self.distr == "nb":
                     # Deviance:
@@ -1590,26 +1585,18 @@ class SWR:
                         dof = len(y) - self.X.shape[1]
                         self.distr_obj.variance.disp = deviance / dof
 
-                    hessian = self.hessian(all_fit_outputs[:, 1], X=X)
-                    cov_matrix = np.linalg.inv(hessian)
-                    all_fit_outputs[:, -n_features:] = np.sqrt(np.diag(cov_matrix))
+                    # For saving/showing outputs:
+                    header = "index,prediction,influence,"
+                    r_squared = None
 
-                    # For saving outputs:
-                    header = "name,prediction,influence,"
-                else:
-                    deviance = None
+                    varNames = self.feature_names
+                    # Columns for the possible intercept, coefficients and squared canonical coefficients:
+                    for x in varNames:
+                        header += "b_" + x + ","
 
-                # Save results:
-                varNames = self.feature_names
-                # Columns for the possible intercept, coefficients and squared canonical coefficients:
-                for x in varNames:
-                    header += "b_" + x + ","
-                for x in varNames:
-                    header += "se_" + x + ","
-
-                # Return output diagnostics and save result:
-                self.output_diagnostics(aicc, ENP, r_squared, deviance)
-                self.save_results(all_fit_outputs, header, label=y_label)
+                    # Return output diagnostics and save result:
+                    self.output_diagnostics(aicc, ENP, r_squared, deviance)
+                    self.save_results(all_fit_outputs, header, label=y_label)
 
             return
 
@@ -1669,6 +1656,7 @@ class SWR:
         self,
         y: Optional[pd.DataFrame] = None,
         X: Optional[np.ndarray] = None,
+        n_feat: Optional[int] = None,
         init_betas: Optional[Dict[str, np.ndarray]] = None,
         multiscale: bool = False,
         fit_predictor: bool = False,
@@ -1686,6 +1674,7 @@ class SWR:
                 column(s) are labeled, so each result can be associated with a labeled dependent variable.
             X: Optional array, can be used to provide dependent variable array directly to the fit function. If
                 None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
+            n_feat: Optional int, can be used to specify one column of the X array to fit to.
             init_betas: Optional dictionary containing arrays with initial values for the coefficients. Keys should
                 correspond to target genes and values should be arrays of shape [n_features, 1].
             multiscale: Set True to indicate that a multiscale model should be fitted
@@ -1717,8 +1706,9 @@ class SWR:
 
         if X is None:
             X = self.X
-        else:
-            X = self.comm.bcast(X, root=0)
+        if n_feat is not None:
+            X = X[:, n_feat].reshape(-1, 1)
+        X = self.comm.bcast(X, root=0)
 
         # Compute fit for each column of the dependent variable array individually- store each output array (if
         # applicable, i.e. if :param `multiscale` is True) and optimal bandwidth (also if applicable, i.e. if :param
@@ -1795,7 +1785,7 @@ class SWR:
             coeffs = self.return_outputs()
             # If dictionary, compute outputs for the multiple dependent variables and concatenate together:
             if isinstance(coeffs, Dict):
-                all_y_pred = pd.DataFrame(index=self.sample_names, columns=coeffs.keys())
+                all_y_pred = pd.DataFrame(index=self.sample_names)
                 for target in coeffs:
                     if input.shape[0] != coeffs[target].shape[0]:
                         raise ValueError(
@@ -1805,6 +1795,7 @@ class SWR:
                     y_pred = np.sum(input * coeffs[target], axis=1)
                     if self.distr != "gaussian":
                         y_pred = self.distr_obj.predict(y_pred)
+                    y_pred = pd.DataFrame(y_pred, index=self.sample_names, columns=[target])
                     all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
                 return all_y_pred
 
@@ -2070,7 +2061,7 @@ class MuSIC(SWR):
         self,
         y: Optional[pd.DataFrame] = None,
         X: Optional[np.ndarray] = None,
-        init_betas: Optional[Dict[str, np.ndarray]] = None,
+        init_betas: Optional[Dict[str, np.ndarray]] = None
     ):
         """
         Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths by iterating one
@@ -2111,19 +2102,11 @@ class MuSIC(SWR):
         self.all_deviances = {}
         self.all_log_likelihoods = {}
 
-        # Optional, to save the dispersion parameter for negative binomial fitted to each target:
-        self.nb_disp_dict = {}
-
         if y is None:
             y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
         else:
             y_arr = y
             y_arr = self.comm.bcast(y_arr, root=0)
-
-        if X is None:
-            X = self.X
-        else:
-            X = self.comm.bcast(X, root=0)
 
         for target in y_arr.columns:
             y = y_arr[target].to_frame()
@@ -2131,13 +2114,10 @@ class MuSIC(SWR):
 
             if self.subsampled:
                 n_samples = self.n_samples_fitted[y_label]
-                sample_names = self.subsampled_sample_names[y_label]
                 indices = self.subsampled_indices[y_label]
-                X = X[indices, :]
-                y = y.loc[sample_names]
             else:
                 n_samples = self.n_samples
-                sample_names = self.sample_names
+                indices = np.arange(self.n_samples)
 
             # Initialize parameters, with a uniform initial bandwidth for all features- set fit_predictor False to
             # fit model under the assumption that y is a Poisson-distributed dependent variable:
@@ -2145,31 +2125,30 @@ class MuSIC(SWR):
             all_betas, self.all_bws_init = self.fit(
                 y, X, multiscale=True, fit_predictor=False, init_betas=init_betas, verbose=False
             )
-            print("Betas test: ", np.min(all_betas[target]))
-            print("Betas test: ", np.max(all_betas[target]))
-            print("Betas test init: ", all_betas[target])
+            # If applicable, i.e. if model if one of the signaling models for which the X array varies with
+            # bandwidth, update X with the up-to-date version that leverages the most recent bandwidth estimations:
+            if X is None:
+                X = self.X
+            X = self.comm.bcast(X, root=0)
 
             # Initial values- multiply input by the array corresponding to the correct target- note that this is
             # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
             y_pred_init = X * all_betas[target]
-            print(X[:, 0])
-            print(all_betas[target][:, 0])
-            print(y_pred_init[:, 0])
             all_y_pred = np.sum(y_pred_init, axis=1)
 
-            print("Initial predicted y test: ", np.max(y_pred_init[:, 0]))
-
             if self.distr != "gaussian":
-                all_y_pred = self.distr_obj.predict(all_y_pred)
-            print("Initial predicted y test: ", np.max(all_y_pred))
-            print("Initial y test: ", np.max(y.values))
+                y_true = self.distr_obj.get_predictors(y.values).reshape(-1)
+            else:
+                y_true = y.values.reshape(-1)
 
-            error = y.values.reshape(-1) - all_y_pred.reshape(-1)
-            print("Error test: ", np.max(error))
-            print("Error test: ", np.median(error))
+            error = y_true - all_y_pred.reshape(-1)
+            self.logger.info(f"Initial RSS: {np.sum(error ** 2):.3f}")
+            if self.distr != "gaussian":
+                # Small errors <-> large negatives in log space, but in reality these are negligible- set these to 0:
+                error[error < 0] = 0
+                error = self.distr_obj.get_predictors(error)
+                error[error < -1] = 0
             # error = np.zeros(y.values.shape[0])
-
-            print("Initial predicted y test: ", np.max(y_pred_init[:, 0] + error))
 
             bws = [None] * self.n_features
             bw_plateau_counter = 0
@@ -2190,17 +2169,18 @@ class MuSIC(SWR):
                         signaling_type = None
                     # Use each individual feature to predict the response- note y is set up as a DataFrame because in
                     # other cases column names/target names are taken from y:
-                    if self.distr != "gaussian":
-                        y_mod = y_pred_init[:, n_feat] + error
-                        y_mod = self.distr_obj.get_predictors(y_mod)
-                        print("y_mod test: ", np.max(y_mod))
-                    else:
-                        y_mod = y_pred_init[:, n_feat] + error
+                    y_mod = y_pred_init[:, n_feat] + error
                     temp_y = pd.DataFrame(y_mod.reshape(-1, 1), columns=[target])
-                    temp_X = (X[:, n_feat]).reshape(-1, 1)
 
                     # Check if the bandwidth has plateaued for all features in this iteration:
                     if bw_plateau_counter > self.patience:
+                        # If applicable, i.e. if model if one of the signaling models for which the X array varies with
+                        # bandwidth, update X with the up-to-date version that leverages the most recent bandwidth
+                        # estimations:
+                        if X is None:
+                            temp_X = (self.X[:, n_feat]).reshape(-1, 1)
+                        else:
+                            temp_X = X[:, n_feat].reshape(-1, 1)
                         # Use the bandwidths from the previous iteration before plateau was determined to have been
                         # reached:
                         bw = bws[n_feat]
@@ -2216,7 +2196,8 @@ class MuSIC(SWR):
                     else:
                         betas, bw_dict = self.fit(
                             temp_y,
-                            temp_X,
+                            X,
+                            n_feat=n_feat,
                             init_betas=init_betas,
                             multiscale=True,
                             fit_predictor=True,
@@ -2226,16 +2207,16 @@ class MuSIC(SWR):
                         # Get coefficients for this particular target:
                         betas = betas[target]
 
-                    print("Betas test after 1 init: ", betas)
-                    print("Betas test: ", np.min(betas))
-                    print("Betas test: ", np.max(betas))
-
+                    # If applicable, i.e. if model if one of the signaling models for which the X array varies with
+                    # bandwidth, update X with the up-to-date version that leverages the most recent bandwidth
+                    # estimations:
+                    if X is None:
+                        temp_X = (self.X[:, n_feat]).reshape(-1, 1)
+                    else:
+                        temp_X = X[:, n_feat].reshape(-1, 1)
                     # Update the dependent prediction (again not for GLMs, this quantity is instead the linear
                     # predictor) and betas:
                     new_y = (temp_X * betas).reshape(-1)
-                    if self.distr != "gaussian":
-                        new_y = self.distr_obj.predict(new_y)
-                    print("new_y_pred test: ", np.max(new_y))
                     error = y_mod - new_y
                     new_ys[:, n_feat] = new_y
                     new_betas[:, n_feat] = betas.reshape(-1)
@@ -2296,7 +2277,7 @@ class MuSIC(SWR):
                 r_squared = 1 - RSS / TSS
 
                 # For saving outputs:
-                header = "name,residual,"
+                header = "index,residual,"
             else:
                 r_squared = None
 
@@ -2306,28 +2287,17 @@ class MuSIC(SWR):
                 error = y.values.reshape(-1) - y_pred
                 self.logger.info(f"Final RSS: {np.sum(error ** 2):.3f}")
 
-                # Set dispersion for negative binomial:
-                if self.distr == "nb":
-                    theta = 1 / self.distr_obj.variance(y_pred)
-                    weights = self.distr_obj.weights(y_pred)
-                    deviance = 2 * np.sum(
-                        weights
-                        * (y.values * np.log(y.values / y_pred) + (theta - 1) * np.log(1 + y_pred[:, 1] / (theta - 1)))
-                    )
-                    dof = len(y.values) - X.shape[1]
-                    self.nb_disp_dict[target] = deviance / dof
-
                 # Deviance:
-                deviance = self.distr_obj.deviance(y.values, y_pred)
+                deviance = self.distr_obj.deviance(y.values.reshape(-1), y_pred)
                 self.all_deviances[target] = deviance
-                ll = self.distr_obj.log_likelihood(y.values, y_pred)
+                ll = self.distr_obj.log_likelihood(y.values.reshape(-1), y_pred)
                 # Reshape if necessary:
                 if self.n_features > 1:
                     ll = ll.reshape(-1, 1)
                 self.all_log_likelihoods[target] = ll
 
                 # For saving outputs:
-                header = "name,deviance,"
+                header = "index,deviance,"
             else:
                 deviance = None
             # Store some of the final values of interest:
@@ -2344,7 +2314,7 @@ class MuSIC(SWR):
 
                 # Return output diagnostics and save result:
                 self.output_diagnostics(None, None, r_squared, deviance)
-                output = np.hstack([sample_names, error.reshape(-1, 1), self.params_all_targets[target]])
+                output = np.hstack([indices.reshape(-1, 1), error.reshape(-1, 1), self.params_all_targets[target]])
                 self.save_results(header, output, label=y_label)
 
     def chunk_compute_metrics(
@@ -2460,8 +2430,6 @@ class MuSIC(SWR):
         """
         if X is None:
             X = self.X
-        else:
-            X = self.comm.bcast(X, root=0)
 
         if self.multiscale_params_only:
             self.logger.warning(
@@ -2486,11 +2454,11 @@ class MuSIC(SWR):
 
         y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
         for target_label in y_arr.columns:
-            sample_names = self.sample_names if not self.subsampled else self.subsampled_sample_names[target_label]
+            #sample_names = self.sample_names if not self.subsampled else self.subsampled_sample_names[target_label]
             # Fitted coefficients, errors and predictions:
             parameters = self.params_all_targets[target_label]
-            errors = self.errors_all_targets[target_label]
             predictions = self.predictions_all_targets[target_label]
+            errors = self.errors_all_targets[target_label]
             y_label = target_label
 
             # If subsampling was done, check for the number of fitted samples for the right target:
@@ -2502,7 +2470,8 @@ class MuSIC(SWR):
             else:
                 self.indices = np.arange(self.n_samples)
 
-            # Lists to store the results of each chunk for this variable (lvg list only used if Gaussian):
+            # Lists to store the results of each chunk for this variable (lvg list only used if Gaussian,
+            # Hessian list only used if non-Gaussian):
             ENP_list = []
             lvg_list = []
 
@@ -2521,9 +2490,10 @@ class MuSIC(SWR):
                 lvg_list = np.array(self.comm.gather(lvg_list, root=0))
 
             if self.comm.rank == 0:
-                indices = np.array(sample_names).reshape(-1, 1)
                 # Compile results from all chunks to get the estimated number of parameters for this response variable:
                 ENP = np.sum(np.vstack(ENP_list), axis=0)
+                # Total estimated parameters:
+                ENP_total = np.sum(ENP)
 
                 if self.distr == "gaussian":
                     # Compile results from all chunks to get the leverage matrix for this response variable:
@@ -2537,13 +2507,22 @@ class MuSIC(SWR):
                     # R-squared:
                     r_squared = 1 - RSS / TSS
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_linear(RSS, ENP, n_samples=self.n_samples)
+                    aicc = self.compute_aicc_linear(RSS, ENP_total, n_samples=self.n_samples)
                     # Scale leverages by the residual variance to compute standard errors:
                     standard_error = np.sqrt(lvg * sigma_squared)
-                    self.output_diagnostics(aicc, ENP, r_squared=r_squared, deviance=None, y_label=y_label)
+                    self.output_diagnostics(aicc, ENP_total, r_squared=r_squared, deviance=None, y_label=y_label)
 
-                    header = "name,residual,"
-                    outputs = np.hstack([indices, errors.reshape(-1, 1), parameters, standard_error])
+                    header = "index,residual,"
+                    outputs = np.hstack([self.indices, errors.reshape(-1, 1), parameters, standard_error])
+
+                    varNames = self.feature_names
+                    # Save intercept and parameter estimates:
+                    for x in varNames:
+                        header += "b_" + x + ","
+                    for x in varNames:
+                        header += "se_" + x + ","
+
+                    self.save_results(outputs, header, label=y_label)
 
                 if self.distr == "poisson" or self.distr == "nb":
                     # Get deviances corresponding to this feature:
@@ -2551,25 +2530,15 @@ class MuSIC(SWR):
                     ll = self.all_log_likelihoods[target_label]
 
                     # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_glm(ll, ENP, n_samples=self.n_samples)
-                    # Compute standard errors using the covariance:
-                    if self.distr == "nb":
-                        self.distr_obj.variance.disp = self.nb_disp_dict[target_label]
-                    hessian = self.hessian(predictions, X=X)
-                    cov_matrix = np.linalg.inv(hessian)
-                    standard_error = np.sqrt(np.diag(cov_matrix))
-                    self.output_diagnostics(aicc, ENP, r_squared=None, deviance=deviance, y_label=y_label)
+                    aicc = self.compute_aicc_glm(ll, ENP_total, n_samples=self.n_samples)
+                    self.output_diagnostics(aicc, ENP_total, r_squared=None, deviance=deviance, y_label=y_label)
 
-                    header = "name,prediction,"
-                    outputs = np.hstack(
-                        [indices, predictions.reshape(-1, 1), parameters.reshape(-1, 1), standard_error]
-                    )
+                    header = "index,prediction,"
+                    outputs = np.hstack([self.indices.reshape(-1, 1), predictions.reshape(-1, 1), parameters])
 
-                varNames = self.feature_names
-                # Save intercept and parameter estimates:
-                for x in varNames:
-                    header += "b_" + x + ","
-                for x in varNames:
-                    header += "se_" + x + ","
+                    varNames = self.feature_names
+                    # Save intercept and parameter estimates:
+                    for x in varNames:
+                        header += "b_" + x + ","
 
-                self.save_results(outputs, header, label=y_label)
+                    self.save_results(outputs, header, label=y_label)

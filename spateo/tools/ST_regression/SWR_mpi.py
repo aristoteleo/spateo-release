@@ -140,6 +140,11 @@ if __name__ == "__main__":
     )
 
     t1 = MPI.Wtime()
+
+    # Testing time!
+    #swr_model = SWR(comm, parser)
+    #swr_model.fit()
+
     # For use only with MuSIC:
     n_multiscale_chunks = parser.parse_args().chunks
 
