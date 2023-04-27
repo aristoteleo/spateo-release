@@ -7,16 +7,23 @@ source:
 #  git_url: https://github.com/aristoteleo/spateo-release.git
 #  git_depth: 1
 
+build:
+  preserve_egg_dir: True
+
 requirements:
   host:
     - python
-    - setuptools
     - vtk==9.2.2
     - numpy==1.23.*
     - cython
     - wrapt==1.14.*
-  run:
+    - pyyaml
+    - cffi
+    - rvlib
+    - fiona<1.9
     - anndata==0.7.5
+    - markdown==3.3.*
+  run:
 
 about:
   home: https://github.com/aristoteleo/spateo-release
