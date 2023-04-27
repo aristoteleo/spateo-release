@@ -1,47 +1,17 @@
-from typing import Any, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
-import pandas as pd
 from anndata import AnnData
-from numpy import ndarray
 
 from spateo.configuration import SKM
-from spateo.logging import logger_manager as lm
 
-from .methods import generalized_procrustes_analysis, pairwise_align
+from .methods import generalized_procrustes_analysis, paste_pairwise_align
 from .transform import paste_transform
-
-
-def _iteration(n: int, progress_name: str, verbose: bool = True):
-    iteration = lm.progress_logger(range(n), progress_name=progress_name) if verbose else range(n)
-    return iteration
-
-
-def _downsampling(
-    models: Union[List[AnnData], AnnData],
-    n_sampling: Optional[int] = 2000,
-    sampling_method: str = "trn",
-    spatial_key: str = "spatial",
-) -> Union[List[AnnData], AnnData]:
-    from dynamo.tools.sampling import sample
-
-    models = models if isinstance(models, list) else [models]
-    sampling_models = []
-    for m in models:
-        sampling_model = m.copy()
-        sampling = sample(
-            arr=np.asarray(sampling_model.obs_names),
-            n=n_sampling,
-            method=sampling_method,
-            X=sampling_model.obsm[spatial_key],
-        )
-        sampling_model = sampling_model[sampling, :]
-        sampling_models.append(sampling_model)
-    return sampling_models
+from .utils import _iteration, downsampling
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models")
-def models_align(
+def paste_align(
     models: List[AnnData],
     layer: str = "X",
     genes: Optional[Union[list, np.ndarray]] = None,
@@ -55,7 +25,7 @@ def models_align(
     device: str = "cpu",
     verbose: bool = True,
     **kwargs,
-) -> Tuple[List[AnnData], List[Union[ndarray, ndarray]]]:
+) -> Tuple[List[AnnData], List[Union[np.ndarray, np.ndarray]]]:
     """
     Align spatial coordinates of models.
 
@@ -91,7 +61,7 @@ def models_align(
         modelB = align_models[i + 1]
 
         # Calculate and returns optimal alignment of two models.
-        pi, _ = pairwise_align(
+        pi, _ = paste_pairwise_align(
             sampleA=modelA.copy(),
             sampleB=modelB.copy(),
             layer=layer,
@@ -121,7 +91,7 @@ def models_align(
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models")
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "models_ref", optional=True)
-def models_align_ref(
+def paste_align_ref(
     models: List[AnnData],
     models_ref: Optional[List[AnnData]] = None,
     n_sampling: Optional[int] = 2000,
@@ -138,7 +108,7 @@ def models_align_ref(
     device: str = "cpu",
     verbose: bool = True,
     **kwargs,
-) -> Tuple[List[AnnData], List[AnnData], List[Union[ndarray, ndarray]]]:
+) -> Tuple[List[AnnData], List[AnnData], List[Union[np.ndarray, np.ndarray]]]:
     """
     Align the spatial coordinates of one model list through the affine transformation matrix obtained from another model list.
 
@@ -172,12 +142,12 @@ def models_align_ref(
     # Downsampling
     if models_ref is None:
         models_sampling = [model.copy() for model in models]
-        models_ref = _downsampling(
+        models_ref = downsampling(
             models=models_sampling, n_sampling=n_sampling, sampling_method=sampling_method, spatial_key=spatial_key
         )
 
     # Align spatial coordinates of slices with a small number of coordinates.
-    align_models_ref, pis = models_align(
+    align_models_ref, pis = paste_align(
         models=models_ref,
         layer=layer,
         genes=genes,
@@ -211,25 +181,3 @@ def models_align_ref(
         align_models.append(align_model)
 
     return align_models, align_models_ref, pis
-
-
-def get_align_labels(
-    model: AnnData,
-    align_X: np.ndarray,
-    key: Union[str, List[str]],
-    spatial_key: str = "align_spatial",
-) -> pd.DataFrame:
-    """Obtain the label information in anndata.obs[key] corresponding to the align_X coordinate."""
-
-    key = [key] if isinstance(key, str) else key
-
-    cols = ["x", "y", "z"] if align_X.shape[1] == 3 else ["x", "y"]
-    X_data = pd.DataFrame(model.obsm[spatial_key], columns=cols)
-    X_data[key] = model.obs[key].values
-    X_data.drop_duplicates(inplace=True, keep="first")
-
-    Y_data = pd.DataFrame(align_X.copy(), columns=cols)
-    Y_data["map_index"] = Y_data.index
-    merge_data = pd.merge(Y_data, X_data, on=cols, how="inner")
-
-    return merge_data

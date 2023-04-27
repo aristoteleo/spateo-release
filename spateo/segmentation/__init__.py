@@ -11,6 +11,7 @@ from . import (
     label,
     moran,
     simulation,
+    simulation_evaluation,
     utils,
     vi,
 )

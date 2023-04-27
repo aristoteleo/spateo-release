@@ -29,8 +29,6 @@ from anndata import AnnData
 from joblib import Parallel, delayed
 from matplotlib import rcParams
 from patsy import dmatrix
-from pysal.lib import weights
-from pysal.model import spreg
 from scipy.sparse import diags, issparse
 from tqdm import tqdm
 
@@ -685,6 +683,8 @@ class Base_Model:
                 if niche_lr_r_lag:
                     if not hasattr(self, "w"):
                         self.compute_spatial_weights()
+                    from pysal.model import spreg
+
                     rec_lag = spreg.utils.lag_spatial(self.w, rec_expr_values)
                     expr.obs[f"{rec}_lag"] = rec_lag
                 # Multiply one-hot category array by the expression of select receptor within that cell:
@@ -767,6 +767,8 @@ class Base_Model:
     def compute_spatial_weights(self):
         """Generates matrix of pairwise spatial distances, used in spatially-lagged models"""
         # Choose how weights are computed:
+        from pysal.lib import weights
+
         if self.weights_mode == "knn":
             self.w = weights.distance.KNN.from_array(self.adata.obsm[self.spatial_key], k=self.sp_kwargs["n_neighbors"])
         elif self.weights_mode == "kernel":
@@ -1922,6 +1924,8 @@ class Lagged_Model(Base_Model):
             X["log_expr"] = adata[:, cur_g].layers[layer].A
 
         try:
+            from pysal.model import spreg
+
             model = spreg.GM_Lag(
                 X[["log_expr"]].values,
                 X[X_variable_names].values,

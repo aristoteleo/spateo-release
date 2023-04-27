@@ -544,6 +544,7 @@ def top_n_degs(
         )
 
     for i in range(len(adata.obs[group].unique())):
+        # cur_table = adata.uns["cluster_markers"]["deg_tables"][i][i]
         cur_table = adata.uns["cluster_markers"]["deg_tables"][i]
 
         if custom_score_func is not None:

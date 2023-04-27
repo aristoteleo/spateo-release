@@ -1,4 +1,4 @@
-anndata>=0.7.4
+anndata>=0.7.5
 colorcet>=2.0.1
 #cvxopt>=1.2.3
 csbdeep>=0.6.3
@@ -11,10 +11,11 @@ ipywidgets>=7.7.1
 #KDEpy>=1.1.0
 kneed>=0.7.0
 kornia>=0.6.4
+loess>=2.1.2
 #loompy>=3.0.5
 #logging-release>=0.0.4
 #mapclassify>=2.4.2
-matplotlib>=3.1.0
+matplotlib<=3.5.3
 #nbconvert
 networkx>=2.6.3
 # ngs_tools>=1.6.0
@@ -30,7 +31,7 @@ plotly>=5.1.0
 pysal>=1.14.4
 #pyro-ppl
 #python-igraph>=0.7.1
-pyvista>=0.37.0
+pyvista>=0.38.0
 scipy>=1.0
 #scikit-image>=0.18.0
 #scikit-learn>=0.19.1

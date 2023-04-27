@@ -9,13 +9,15 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
-from ...logging import logger_manager as lm
-from ...tools.alignment import get_optimal_mapping_connections, pairwise_align
-from .interpolations import get_X_Y_grid
+from spateo.alignment import get_optimal_mapping_relationship
+from spateo.alignment.methods import paste_pairwise_align
+from spateo.logging import logger_manager as lm
+from spateo.tdr.widgets.interpolations import get_X_Y_grid
 
 
 def cell_directions(
-    adatas: List[AnnData],
+    adataA: AnnData,
+    adataB: AnnData,
     layer: str = "X",
     genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "align_spatial",
@@ -28,12 +30,13 @@ def cell_directions(
     keep_all: bool = False,
     inplace: bool = True,
     **kwargs,
-) -> Optional[List[AnnData]]:
+) -> Tuple[Optional[AnnData], np.ndarray]:
     """
     Obtain the optimal mapping relationship and developmental direction between cells for samples between continuous developmental stages.
 
     Args:
-        adatas: AnnData object of samples from continuous developmental stages.
+        adataA: AnnData object of sample A from continuous developmental stages.
+        adataB: AnnData object of sample B from continuous developmental stages.
         layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
         genes: Genes used for calculation. If None, use all common genes for calculation.
         spatial_key: The key in ``.obsm`` that corresponds to the spatial coordinate of each cell.
@@ -56,50 +59,45 @@ def cell_directions(
         **kwargs: Additional parameters that will be passed to ``pairwise_align`` function.
 
     Returns:
-        An ``AnnData`` object is updated/copied with the ``X_{key_added}`` and ``V_{key_added}`` in the ``.obsm`` attribute.
+        An ``AnnData`` object of sample A is updated/copied with the ``X_{key_added}`` and ``V_{key_added}`` in the ``.obsm`` attribute.
+        A pi metrix.
     """
-    mapping_adatas = adatas if inplace else [adata.copy() for adata in adatas]
-    for i in lm.progress_logger(range(len(mapping_adatas) - 1), progress_name="Cell Directions"):
+    # Calculate and returns optimal alignment of two models.
+    pi, _ = paste_pairwise_align(
+        sampleA=adataA.copy(),
+        sampleB=adataB.copy(),
+        spatial_key=spatial_key,
+        layer=layer,
+        genes=genes,
+        alpha=alpha,
+        numItermax=numItermax,
+        numItermaxEmd=numItermaxEmd,
+        dtype=dtype,
+        device=device,
+        **kwargs,
+    )
 
-        adataA = mapping_adatas[i]
-        adataB = mapping_adatas[i + 1]
+    max_index, pi_value, _, _ = get_optimal_mapping_relationship(
+        X=adataA.obsm[spatial_key].copy(), Y=adataB.obsm[spatial_key].copy(), pi=pi, keep_all=keep_all
+    )
 
-        # Calculate and returns optimal alignment of two models.
-        pi, _ = pairwise_align(
-            sampleA=adataA.copy(),
-            sampleB=adataB.copy(),
-            spatial_key=spatial_key,
-            layer=layer,
-            genes=genes,
-            alpha=alpha,
-            numItermax=numItermax,
-            numItermaxEmd=numItermaxEmd,
-            dtype=dtype,
-            device=device,
-            **kwargs,
-        )
+    mapping_data = pd.DataFrame(
+        np.concatenate([max_index, pi_value], axis=1),
+        columns=["index_x", "index_y", "pi_value"],
+    ).astype(
+        dtype={
+            "index_x": np.int32,
+            "index_y": np.int32,
+            "pi_value": np.float64,
+        }
+    )
+    mapping_data.sort_values(by=["index_x", "pi_value"], ascending=[True, False], inplace=True)
+    mapping_data.drop_duplicates(subset=["index_x"], keep="first", inplace=True)
 
-        max_index, pi_value, _, _ = get_optimal_mapping_connections(
-            X=adataA.obsm[spatial_key].copy(), Y=adataB.obsm[spatial_key].copy(), pi=pi, keep_all=keep_all
-        )
+    adataA.obsm[f"X_{key_added}"] = adataB.obsm[spatial_key][mapping_data["index_y"].values]
+    adataA.obsm[f"V_{key_added}"] = adataA.obsm[f"X_{key_added}"] - adataA.obsm[spatial_key]
 
-        mapping_data = pd.DataFrame(
-            np.concatenate([max_index, pi_value], axis=1),
-            columns=["index_x", "index_y", "pi_value"],
-        ).astype(
-            dtype={
-                "index_x": np.int32,
-                "index_y": np.int32,
-                "pi_value": np.float64,
-            }
-        )
-        mapping_data.sort_values(by=["index_x", "pi_value"], ascending=[True, False], inplace=True)
-        mapping_data.drop_duplicates(subset=["index_x"], keep="first", inplace=True)
-
-        adataA.obsm[f"X_{key_added}"] = adataB.obsm[spatial_key][mapping_data["index_y"].values]
-        adataA.obsm[f"V_{key_added}"] = adataA.obsm[f"X_{key_added}"] - adataA.obsm[spatial_key]
-
-    return None if inplace else mapping_adatas
+    return None if inplace else adataA, pi
 
 
 def morphofield_X(

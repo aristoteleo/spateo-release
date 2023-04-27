@@ -64,6 +64,8 @@ def _create_labels(
             # Compute shifted locations for each of the overlapping labels.
             for ov_label in overlapping:
                 ov_idx = ov_label - 1
+                if ov_idx not in indices_to_add:
+                    indices_to_add.append(int(ov_idx))
                 ov_x, ov_y = xs[ov_idx], ys[ov_idx]
                 diff_x = ov_x - x
                 diff_y = ov_y - y
@@ -121,7 +123,7 @@ def simulate_cells(
     f_do, f_mu, f_var = foreground_params
     b_do, b_mu, b_var = background_params
     if f_var < f_mu or b_var < b_mu:
-        raise SegmentationError("Variance must be less than mean.")
+        raise SegmentationError("Variance must be larger than mean.")
     f_n, f_p = muvar_to_np(f_mu, f_var)
     b_n, b_p = muvar_to_np(b_mu, b_var)
 

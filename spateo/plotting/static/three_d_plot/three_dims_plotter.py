@@ -17,6 +17,7 @@ def create_plotter(
     window_size: tuple = (512, 512),
     background: str = "white",
     shape: Union[str, list, tuple] = (1, 1),
+    show_axes: bool = True,
 ) -> Plotter:
     """
     Create a plotting object to display pyvista/vtk model.
@@ -33,6 +34,7 @@ def create_plotter(
 
                     ``E.g.: shape="3|1" means 3 plots on the left and 1 on the right,``
                     ``E.g.: shape="4/2" means 4 plots on top and 2 at the bottom.``
+        show_axes: Whether to add a camera orientation widget to the active renderer.
     Returns:
         plotter: The plotting object to display pyvista/vtk model.
     """
@@ -41,7 +43,7 @@ def create_plotter(
     plotter = pv.Plotter(
         off_screen=off_screen,
         window_size=window_size,
-        notebook=jupyter,
+        notebook=False if jupyter is False else True,
         lighting="light_kit",
         shape=shape,
     )
@@ -50,16 +52,18 @@ def create_plotter(
     plotter.background_color = background
 
     # Add a camera orientation widget to the active renderer (This Widget cannot be used in jupyter notebook).
-    if shape == (1, 1):
-        plotter.add_camera_orientation_widget()
-    else:
-        plotter.add_axes()
+    if jupyter != "trame":
+        if show_axes:
+            if shape == (1, 1):
+                plotter.add_camera_orientation_widget()
+            else:
+                plotter.add_axes()
 
     return plotter
 
 
 def _set_jupyter(
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["trame", "none", "static"]] = False,
     off_screen: bool = False,
 ):
     if jupyter is False:
@@ -68,13 +72,13 @@ def _set_jupyter(
     elif jupyter is True:
         off_screen1, off_screen2 = True, off_screen
         jupyter_backend = "static"
-    elif jupyter in ["panel", "none", "pythreejs", "static", "ipygany"]:
+    elif jupyter in ["trame", "none", "static"]:
         off_screen1, off_screen2 = True, off_screen
         jupyter_backend = jupyter
     else:
         raise ValueError(
             "`jupyter` value is wrong."
-            "\nAvailable `jupyter` value are: `True`, `False`, `'panel'`, `'none'`, `'pythreejs'`, `'static'`, `'ipygany'`."
+            "\nAvailable `jupyter` value are: `True`, `False`, `'trame'`, `'none'`, `'static'`."
         )
 
     return off_screen1, off_screen2, jupyter_backend
@@ -521,7 +525,7 @@ def output_plotter(
     filename: Optional[str] = None,
     view_up: tuple = (0.5, 0.5, 1),
     framerate: int = 15,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["trame", "none", "static"]] = False,
 ):
     """
     Output plotter as image, gif file or mp4 file.
@@ -532,6 +536,7 @@ def output_plotter(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         view_up: The normal to the orbital plane. Only available when filename ending with ``.mp4`` or ``.gif``.
@@ -539,10 +544,8 @@ def output_plotter(
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
 
     Returns:
         cpo: List of camera position, focal point, and view up.
@@ -555,13 +558,16 @@ def output_plotter(
 
     def _to_graph(_screenshot, _jupyter_backend):
         if jupyter is False or jupyter is "none":
-            cpo, img = plotter.show(
-                screenshot=_screenshot,
-                return_img=True,
-                return_cpos=True,
-                jupyter_backend=_jupyter_backend,
-            )
-            return cpo, img
+            if plotter.shape == (1, 1):
+                cpo, img = plotter.show(
+                    screenshot=_screenshot,
+                    return_img=True,
+                    return_cpos=True,
+                    jupyter_backend=_jupyter_backend,
+                )
+                return cpo, img
+            else:
+                plotter.show(screenshot=_screenshot, jupyter_backend=_jupyter_backend)
         else:
             plotter.show(screenshot=_screenshot, jupyter_backend=_jupyter_backend)
 
@@ -585,8 +591,11 @@ def output_plotter(
     if filename is None:
         # p.show(jupyter_backend=jupyter_backend)
         if jupyter is False or jupyter is "none":
-            cpo, img = plotter.show(return_img=True, return_cpos=True, jupyter_backend=jupyter_backend)
-            return cpo, img
+            if plotter.shape == (1, 1):
+                cpo, img = plotter.show(return_img=True, return_cpos=True, jupyter_backend=jupyter_backend)
+                return cpo, img
+            else:
+                plotter.show(jupyter_backend=jupyter_backend)
         else:
             plotter.show(jupyter_backend=jupyter_backend)
     else:

@@ -10,9 +10,17 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from anndata import AnnData
+from pyvista import PolyData
+from scipy.sparse import issparse
 
-from ....tdr import collect_models, construct_align_lines, construct_pc
-from ....tools.alignment import get_optimal_mapping_connections
+from ....alignment import get_optimal_mapping_relationship
+from ....tdr import (
+    add_model_labels,
+    collect_models,
+    construct_align_lines,
+    construct_pc,
+    merge_models,
+)
 from .three_dims_plots import three_d_animate, three_d_plot
 
 
@@ -21,7 +29,7 @@ def pi_heatmap(
     model1_name: str = "model1",
     model2_name: str = "model2",
     colormap: str = "hot_r",
-    fig_height: Union[int, float] = 5,
+    fig_height: Union[int, float] = 3,
     robust: bool = False,
     vmin: Optional[Union[int, float]] = None,
     vmax: Optional[Union[int, float]] = None,
@@ -45,12 +53,15 @@ def pi_heatmap(
         filename:  Filename of output file.
         **kwargs: Additional parameters that will be passed to ``sns.heatmap`` function.
     """
-    pi_shape = pi.shape
+
+    sort_pi = pi.T[np.lexsort(pi[::-1, :])].T
+    sort_pi = sort_pi[np.lexsort(sort_pi[:, ::-1].T)]
+    pi_shape = sort_pi.shape
     aspect_ratio = pi_shape[1] / pi_shape[0]
     figsize = (fig_height * aspect_ratio, fig_height)
     fig, ax = plt.subplots(figsize=figsize)
 
-    sns.heatmap(data=pi, cmap=colormap, vmin=vmin, vmax=vmax, robust=robust, ax=ax, **kwargs)
+    sns.heatmap(data=sort_pi, cmap=colormap, vmin=vmin, vmax=vmax, robust=robust, ax=ax, **kwargs)
     ax.set_xticks([]), ax.set_yticks([])
     ax.set_xlabel(
         xlabel=model2_name,
@@ -67,35 +78,45 @@ def pi_heatmap(
         fontweight="regular",
     )
     sns.despine(ax=ax, top=False, right=False, left=False, bottom=False)
-    fig.savefig(filename, dpi=300, bbox_inches="tight", format=filename.split(".")[-1])
+    if not (filename is None):
+        fig.savefig(filename, dpi=300, bbox_inches="tight")
+    else:
+        return fig
 
 
-def pairwise_connections(
-    adataA: AnnData,
-    adataB: AnnData,
-    pi: np.ndarray,
+def pairwise_mapping(
+    idA: str = "sampleA",
+    idB: str = "sampleB",
+    adataA: Optional[AnnData] = None,
+    adataB: Optional[AnnData] = None,
+    pi: Optional[np.ndarray] = None,
+    modelA: Optional[PolyData] = None,
+    modelB: Optional[PolyData] = None,
+    model_lines: Optional[PolyData] = None,
     layer: str = "X",
     group_key: Union[str, list] = None,
     spatial_key: str = "align_spatial",
-    id_key: str = "slices",
     keep_all: bool = False,
-    distance: Optional[Union[int, float]] = None,
-    direction: Optional[Literal["x", "y", "z"]] = None,
+    distance: Optional[Union[int, float]] = 300,
+    direction: Optional[Literal["x", "y", "z"]] = "z",
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
-    cpo: Optional[Union[str, list]] = None,
-    window_size: Optional[tuple] = None,
+    cpo: Optional[Union[str, list]] = "iso",
+    window_size: Optional[tuple] = (1024, 1024),
     background: str = "black",
     modelA_cmap: str = "dodgerblue",
+    modelA_amap: Union[float, list] = 1.0,
     modelB_cmap: str = "red",
-    alphamap: Union[float, list] = 1.0,
+    modelB_amap: Union[float, list] = 1.0,
     line_color: str = "gainsboro",
+    line_alpha: Union[float, list] = 1.0,
     ambient: float = 0.3,
     model_opacity: float = 1,
     line_opacity: float = 0.03,
     model_size: Union[float, list] = 6.0,
     line_size: Union[float, list] = 2.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     text: Union[bool, str] = True,
@@ -106,13 +127,17 @@ def pairwise_connections(
     Visualize the pairing of cells between two models.
 
     Args:
+        idA: ID of modelA.
+        idB: ID of modelB.
         adataA: Anndata object of modelA.
         adataB: Anndata object of modelB.
         pi: The pi matrix obtained by alignment.
+        modelA: The point cloud model of adataA.
+        modelB: The point cloud model of adataB.
+        model_lines: Cell connection lines between modelA and modelB
         layer: If ``'X'``, uses ``.X``, otherwise uses the representation given by ``.layers[layer]``.
         group_key: The key that stores clustering or annotation information in ``.obs``, a gene name or a list of gene names in ``.var``.
         spatial_key: The key in ``.obsm`` that corresponds to the spatial coordinate of each bucket.
-        id_key: The key in ``.obs`` that corresponds to the model id of each bucket.
         keep_all: Whether to retain all the optimal relationships obtained only based on the pi matrix, If ``keep_all``
                   is False, the optimal relationships obtained based on the pi matrix and the nearest coordinates.
         distance: Distance between modelA and modelB when visualizing.
@@ -121,13 +146,12 @@ def pairwise_connections(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         cpo: Camera position of the active render window. Available ``cpo`` are:
 
@@ -137,18 +161,21 @@ def pairwise_connections(
                     ``E.g.: [-1.0, 2.0, -5.0].``
                 * A string containing the plane orthogonal to the view direction.
                     ``E.g.: 'xy', 'xz', 'yz', 'yx', 'zx', 'zy', 'iso'.``
-        window_size: Window size in pixels. The default window_size is ``[512, 512]``.
+        window_size: Window size in pixels. The default window_size is ``(1024, 1024)``.
         background: The background color of the window.
         modelA_cmap: Colors to use for plotting modelA. The default colormap is ``'dodgerblue'``.
+        modelA_amap: The opacity of the colors to use for plotting modelA. The default alphamap is ``1.0``.
         modelB_cmap: Colors to use for plotting modelB. The default colormap is ``'red'``.
-        alphamap: The opacity of the colors to use for plotting modelA&modelB. The default alphamap is ``1.0``.
+        modelB_amap: The opacity of the colors to use for plotting modelB. The default alphamap is ``1.0``.
         line_color: Colors to use for plotting lines. The default colormap is ``'gainsboro'``.
+        line_alpha: Alpha to use for plotting lines. The default colormap is ``'gainsboro'``.
         ambient: When lighting is enabled, this is the amount of light in the range of 0 to 1 (default 0.0) that reaches
                  the actor when not directed at the light source emitted from the viewer.
         model_opacity: Opacity of the modelA and modelB.
         line_opacity: Opacity of the lines.
         model_size: The point size of any nodes in the dataset plotted.
         line_size: The line size of lines in the dataset plotted.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
 
@@ -169,94 +196,133 @@ def pairwise_connections(
     Returns:
         pcA: The point cloud models of adataA.
         pcB: The point cloud models of adataB.
-        connection_lines: Cell connection lines between modelA and modelB
+        model_lines: Cell mapping lines between modelA and modelB.
     """
-    adataA, adataB = adataA.copy(), adataB.copy()
-
     # Check the spatial coordinates
-    if adataA.obsm[spatial_key].shape[1] == 2:
-        cpo = "xy" if cpo is None else cpo
-        direction = "y" if direction is None else direction
-        distance = 500 if distance is None else distance
-
+    if adataA is not None and adataA.obsm[spatial_key].shape[1] == 2:
         z = np.zeros(shape=(adataA.obsm[spatial_key].shape[0], 1))
         adataA.obsm[spatial_key] = np.c_[adataA.obsm[spatial_key], z]
-    else:
-        cpo = "iso" if cpo is None else cpo
-        direction = "z" if direction is None else direction
-        distance = 300 if distance is None else distance
-    if adataB.obsm[spatial_key].shape[1] == 2:
+    if adataB is not None and adataB.obsm[spatial_key].shape[1] == 2:
         z = np.zeros(shape=(adataB.obsm[spatial_key].shape[0], 1))
         adataB.obsm[spatial_key] = np.c_[adataB.obsm[spatial_key], z]
 
-    # Obtain the optimal mapping connections between two samples
-    max_index, pi_value, _, _ = get_optimal_mapping_connections(
-        X=adataA.obsm[spatial_key].copy(),
-        Y=adataB.obsm[spatial_key].copy(),
-        pi=pi,
-        keep_all=keep_all,
-    )
-
-    mapping_data = pd.DataFrame(
-        np.concatenate([max_index, pi_value], axis=1),
-        columns=["index_x", "index_y", "pi_value"],
-    ).astype(
-        dtype={
-            "index_x": np.int64,
-            "index_y": np.int64,
-            "pi_value": np.float64,
-        }
-    )
-    mapping_data.sort_values(by=["index_x", "pi_value"], ascending=[True, False], inplace=True)
-    mapping_data.drop_duplicates(subset=["index_x"], keep="first", inplace=True)
-
-    coordsA = adataA.obsm[spatial_key].copy()
-    coordsB = adataB.obsm[spatial_key][mapping_data["index_y"].values]
-
-    # Construct connection lines
     if direction is "x":
         models_distance = np.asarray([-distance, 0, 0])
     elif direction is "y":
         models_distance = np.asarray([0, -distance, 0])
     else:
         models_distance = np.asarray([0, 0, -distance])
-    connection_lines, plot_cmapL = construct_align_lines(
-        model1_points=coordsA,
-        model2_points=coordsB + models_distance,
-        key_added="connections",
-        label="lines",
-        color=line_color,
-    )
+
+    # Construct lines
+    if model_lines is None:
+        assert adataA is not None, "If ``model_lines`` is None, ``adataA`` cannot be None."
+        assert adataB is not None, "If ``model_lines`` is None, ``adataB`` cannot be None."
+        assert pi is not None, "If ``model_lines`` is None, ``pi`` cannot be None."
+
+        # Obtain the optimal mapping connections between two samples
+        max_index, pi_value, _, _ = get_optimal_mapping_relationship(
+            X=adataA.obsm[spatial_key].copy(),
+            Y=adataB.obsm[spatial_key].copy(),
+            pi=pi,
+            keep_all=keep_all,
+        )
+
+        mapping_data = pd.DataFrame(
+            np.concatenate([max_index, pi_value], axis=1),
+            columns=["index_x", "index_y", "pi_value"],
+        ).astype(
+            dtype={
+                "index_x": np.int64,
+                "index_y": np.int64,
+                "pi_value": np.float64,
+            }
+        )
+        mapping_data.sort_values(by=["index_x", "pi_value"], ascending=[True, False], inplace=True)
+        mapping_data.drop_duplicates(subset=["index_x"], keep="first", inplace=True)
+        model_lines, plot_cmapL = construct_align_lines(
+            model1_points=adataA.obsm[spatial_key].copy(),
+            model2_points=adataB.obsm[spatial_key][mapping_data["index_y"].values] + models_distance,
+            key_added="mapping",
+            label="lines",
+            color=line_color,
+            alpha=line_alpha,
+        )
+    else:
+        model_lines, plot_cmapL = add_model_labels(
+            model=model_lines,
+            labels=np.asarray(["lines"] * model_lines.n_points),
+            key_added="mapping",
+            where="point_data",
+            colormap=line_color,
+            alphamap=line_alpha,
+            inplace=False,
+        )
 
     # Construct point cloud models
-    group_key = id_key if group_key is None else group_key
-    idA = str(adataA.obs[id_key].unique().tolist()[0])
-    idB = str(adataB.obs[id_key].unique().tolist()[0])
+    pc_models, plot_cmaps = [], []
+    for _adata, _model, _cmap, _amap, _id, _name in zip(
+        [adataA, adataB],
+        [modelA, modelB],
+        [modelA_cmap, modelB_cmap],
+        [modelA_amap, modelB_amap],
+        [idA, idB],
+        ["A", "B"],
+    ):
+        if _adata is None:
+            assert _model != None, f"If ``adata{_name}`` is None, ``model{_name}`` cannot be None."
+            pc_model, plot_cmapPC = add_model_labels(
+                model=_model,
+                labels=np.asarray([_id] * _model.n_points),
+                key_added="mapping",
+                where="point_data",
+                colormap=_cmap,
+                alphamap=_amap,
+                inplace=False,
+            )
+        else:
+            _adata.obs["id"] = _id
+            group_key = "id" if group_key is None else group_key
 
-    pcA, plot_cmapA = construct_pc(
-        adata=adataA.copy(),
-        layer=layer,
-        spatial_key=spatial_key,
-        groupby=group_key,
-        key_added="connections",
-        colormap=modelA_cmap,
-        alphamap=alphamap,
-    )
-    pcB, plot_cmapB = construct_pc(
-        adata=adataB.copy(),
-        layer=layer,
-        spatial_key=spatial_key,
-        groupby=group_key,
-        key_added="connections",
-        colormap=modelB_cmap,
-        alphamap=alphamap,
-    )
-    pcB.points = pcB.points + models_distance
+            if _model is None:
+                pc_model, plot_cmapPC = construct_pc(
+                    adata=_adata.copy(),
+                    layer=layer,
+                    spatial_key=spatial_key,
+                    groupby=group_key,
+                    key_added="mapping",
+                    colormap=_cmap,
+                    alphamap=_amap,
+                )
+            else:
+                if group_key in _adata.obs_keys():
+                    labels_arr = _adata.obs[group_key]
+                elif group_key in _adata.var_names:
+                    _adata.X = _adata.X if layer == "X" else _adata.layers[layer]
+                    labels_arr = (
+                        _adata[:, group_key].X.todense().flatten()
+                        if issparse(_adata.X)
+                        else _adata[:, group_key].X.flatten()
+                    )
+                else:
+                    raise ValueError("`group_key` value is wrong.")
+                pc_model, plot_cmapPC = add_model_labels(
+                    model=_model,
+                    labels=labels_arr,
+                    key_added="mapping",
+                    where="point_data",
+                    colormap=_cmap,
+                    alphamap=_amap,
+                    inplace=False,
+                )
+        if _name == "B":
+            pc_model.points = pc_model.points + models_distance
+        pc_models.append(pc_model)
+        plot_cmaps.append(plot_cmapPC)
 
     # Visualization
-    three_d_plot(
-        model=collect_models([connection_lines, pcA, pcB]),
-        key="connections",
+    return three_d_plot(
+        model=collect_models([model_lines, merge_models(pc_models)]),
+        key="mapping",
         filename=filename,
         jupyter=jupyter,
         off_screen=off_screen,
@@ -264,18 +330,17 @@ def pairwise_connections(
         background=background,
         window_size=window_size,
         ambient=ambient,
-        opacity=[line_opacity, model_opacity, model_opacity],
-        colormap=None,
-        model_style=["wireframe", "points", "points"],
-        model_size=[line_size, model_size, model_size],
+        opacity=[line_opacity, model_opacity],
+        colormap=None if plot_cmaps[0] is None else [plot_cmapL, plot_cmaps[0]],
+        model_style=["wireframe", "points"],
+        model_size=[line_size, model_size],
+        show_axes=show_axes,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
         text=f"\nModels id: {idA} & {idB}" if text is True else text,
         text_kwargs=text_kwargs,
         **kwargs,
     )
-
-    return pcA, pcB, connection_lines
 
 
 """
@@ -479,7 +544,7 @@ def pairwise_iteration(
     iter_key: str = "iter_spatial",
     id_key: str = "slices",
     filename: str = "animate.mp4",
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     cpo: Optional[Union[str, list]] = None,
     window_size: Optional[tuple] = None,
@@ -490,6 +555,7 @@ def pairwise_iteration(
     modelA_opacity: Union[int, float] = 0.8,
     modelB_opacity: Union[int, float] = 1.0,
     model_size: Union[float, list] = 6.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     text: Union[bool, str] = True,
@@ -515,10 +581,8 @@ def pairwise_iteration(
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         cpo: Camera position of the active render window. Available ``cpo`` are:
 
@@ -537,6 +601,7 @@ def pairwise_iteration(
         modelA_opacity: Opacity of the modelA.
         modelB_opacity: Opacity of the modelB.
         model_size: The point size of any nodes in the dataset plotted.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
 
@@ -627,6 +692,7 @@ def pairwise_iteration(
         opacity=modelB_opacity,
         model_style="points",
         model_size=model_size,
+        show_axes=show_axes,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
         text=f"\nModels id: {idA} & {idB}" if text is True else text,

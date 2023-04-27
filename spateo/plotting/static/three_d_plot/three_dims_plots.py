@@ -179,7 +179,7 @@ def three_d_plot(
     model: Union[PolyData, UnstructuredGrid, MultiBlock],
     key: Union[str, list] = None,
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     window_size: tuple = (512, 512),
     background: str = "white",
@@ -189,6 +189,7 @@ def three_d_plot(
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     model_size: Union[float, list] = 3.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     show_outline: bool = False,
@@ -209,15 +210,14 @@ def three_d_plot(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         window_size: Window size in pixels. The default window_size is ``[512, 512]``.
         background: The background color of the window.
@@ -250,6 +250,7 @@ def three_d_plot(
         model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
 
                     If ``model_style = 'wireframe'``, thickness of lines.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
@@ -291,11 +292,7 @@ def three_d_plot(
              Returned only if filename is None or filename ending with
              ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
     """
-    plotter_kws = dict(
-        jupyter=False if jupyter is False else True,
-        window_size=window_size,
-        background=background,
-    )
+    plotter_kws = dict(window_size=window_size, background=background, show_axes=show_axes)
     model_kwargs = dict(
         background=background,
         colormap=colormap,
@@ -315,12 +312,12 @@ def three_d_plot(
     off_screen1, off_screen2, jupyter_backend = _set_jupyter(jupyter=jupyter, off_screen=off_screen)
 
     # Create a plotting object to display pyvista/vtk model.
-    p = create_plotter(off_screen=off_screen1, **plotter_kws)
+    p = create_plotter(off_screen=off_screen1, jupyter=jupyter, **plotter_kws)
     wrap_to_plotter(plotter=p, model=model, key=key, cpo=cpo, **model_kwargs)
     cpo = p.show(return_cpos=True, jupyter_backend="none", cpos=cpo)
 
     # Create another plotting object to save pyvista/vtk model.
-    p = create_plotter(off_screen=off_screen2, **plotter_kws)
+    p = create_plotter(off_screen=off_screen2, jupyter=jupyter, **plotter_kws)
     wrap_to_plotter(plotter=p, model=model, key=key, cpo=cpo, **model_kwargs)
 
     # Save the plotting object.
@@ -341,7 +338,7 @@ def three_d_multi_plot(
     model: Union[PolyData, UnstructuredGrid, MultiBlock],
     key: Union[str, list] = None,
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     shape: Union[str, list, tuple] = None,
     window_size: Optional[tuple] = None,
@@ -352,6 +349,7 @@ def three_d_multi_plot(
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     model_size: Union[float, list] = 3.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     show_outline: bool = False,
@@ -373,15 +371,14 @@ def three_d_multi_plot(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         shape: Number of sub-render windows inside the main window. By default, there is only one render window.
 
@@ -421,6 +418,7 @@ def three_d_multi_plot(
         model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
 
                     If ``model_style = 'wireframe'``, thickness of lines.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
@@ -502,12 +500,7 @@ def three_d_multi_plot(
         (512 * win_x, 512 * win_y) if window_size is None else (window_size[0] * win_x, window_size[1] * win_y)
     )
 
-    plotter_kws = dict(
-        jupyter=False if jupyter is False else True,
-        window_size=window_size,
-        background=background,
-        shape=shape,
-    )
+    plotter_kws = dict(window_size=window_size, background=background, shape=shape, show_axes=show_axes)
 
     model_kwargs = dict(
         background=background,
@@ -522,7 +515,7 @@ def three_d_multi_plot(
     off_screen1, off_screen2, jupyter_backend = _set_jupyter(jupyter=jupyter, off_screen=off_screen)
 
     # Create a plotting object to display pyvista/vtk model.
-    p = create_plotter(off_screen=off_screen1, **plotter_kws)
+    p = create_plotter(off_screen=off_screen1, jupyter=jupyter, **plotter_kws)
     for (
         sub_model,
         sub_key,
@@ -571,7 +564,7 @@ def three_d_animate(
     stable_kwargs: Optional[dict] = None,
     key: Optional[str] = None,
     filename: str = "animate.mp4",
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     window_size: tuple = (512, 512),
     background: str = "white",
@@ -581,6 +574,7 @@ def three_d_animate(
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "surface",
     model_size: Union[float, list] = 3.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     show_outline: bool = False,
@@ -618,10 +612,8 @@ def three_d_animate(
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         window_size: Window size in pixels. The default window_size is ``[512, 512]``.
         background: The background color of the window.
@@ -654,6 +646,7 @@ def three_d_animate(
         model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
 
                     If ``model_style = 'wireframe'``, thickness of lines.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
@@ -685,11 +678,7 @@ def three_d_animate(
                 * Output a vtkjs file, please enter a filename without format.
     """
 
-    plotter_kws = dict(
-        jupyter=False if jupyter is False else True,
-        window_size=window_size,
-        background=background,
-    )
+    plotter_kws = dict(window_size=window_size, background=background, show_axes=show_axes)
     model_kwargs = dict(
         background=background,
         colormap=colormap,
@@ -719,7 +708,7 @@ def three_d_animate(
 
     # Create a plotting object to display the end model of blocks.
     end_block = blocks[blocks_name[-1]].copy()
-    p = create_plotter(off_screen=off_screen1, **plotter_kws)
+    p = create_plotter(off_screen=off_screen1, jupyter=jupyter, **plotter_kws)
     if not (stable_model is None):
         wrap_to_plotter(plotter=p, model=stable_model, cpo=cpo, **stable_kwargs)
     wrap_to_plotter(plotter=p, model=end_block, key=key, cpo=cpo, **model_kwargs)
@@ -727,7 +716,7 @@ def three_d_animate(
 
     # Create another plotting object to save pyvista/vtk model.
     start_block = blocks[blocks_name[0]].copy()
-    p = create_plotter(off_screen=off_screen2, **plotter_kws)
+    p = create_plotter(off_screen=off_screen2, jupyter=jupyter, **plotter_kws)
     if not (stable_model is None):
         wrap_to_plotter(plotter=p, model=stable_model, cpo=cpo, **stable_kwargs)
     wrap_to_plotter(plotter=p, model=start_block, key=key, cpo=cpo, **model_kwargs)

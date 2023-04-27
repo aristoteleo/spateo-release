@@ -3,9 +3,13 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from anndata import AnnData
 from pyvista import PolyData
 from scipy.sparse import csr_matrix, diags, issparse, lil_matrix, spmatrix
 from scipy.spatial import ConvexHull, Delaunay, cKDTree
+
+from ..configuration import SKM
+from ..logging import logger_manager as lm
 
 
 def rescaling(mat: Union[np.ndarray, spmatrix], new_shape: Union[List, Tuple]) -> Union[np.ndarray, spmatrix]:
@@ -111,7 +115,7 @@ def compute_smallest_distance(
     if len(coords.shape) != 2:
         raise ValueError("Coordinates should be a NxM array.")
     if use_unique_coords:
-        # main_info("using unique coordinates for computing smallest distance")
+        # lm.main_info("using unique coordinates for computing smallest distance")
         coords = [tuple(coord) for coord in coords]
         coords = np.array(list(set(coords)))
     # use cKDTree which is implmented in C++ and is much faster than KDTree
@@ -166,3 +170,34 @@ def in_hull(p: np.ndarray, hull: Tuple[Delaunay, np.ndarray]) -> np.ndarray:
 
     res = hull.find_simplex(p) >= 0
     return res
+
+
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE, "adata")
+@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE, "selection_adata")
+def cellbin_select(
+    adata: AnnData, selection_adata: AnnData, selection_key: str, spatial_key: str = "spatial", inplace: bool = False
+) -> Optional[AnnData]:
+    """Select cells from adata based on the cell binning of selection_adata.
+
+    Args:
+        adata: AnnData object whose cells of interests will be selected based on mask from selection_adata.
+        selection_adata: AnnData object whose spatial mask will be used to select cells from adata.
+        inplace: Whether to update adata or return a new AnnData object.
+
+    Returns:
+        When inplace is set to be True, the adata object will be subset with only the selected cells, otherwise a new
+        AnnData object will be returned.
+    """
+    within_inds = np.vstack(np.where(selection_adata.layers[selection_key])).T.tolist()
+
+    binsize = selection_adata.uns[spatial_key]["binsize"]
+    selection_area = [list((x - int(binsize)) // binsize) in within_inds for x in adata.obsm[spatial_key].astype("int")]
+
+    lm.main_info(f"Selecting {sum(selection_area)} cells from {adata.shape[0]} cells.")
+
+    if inplace:
+        adata = adata[selection_area]
+        return adata
+    else:
+        subset = adata[selection_area, :]
+        return subset
