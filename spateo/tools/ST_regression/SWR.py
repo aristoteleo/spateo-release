@@ -34,8 +34,9 @@ from spateo.tools.ST_regression.regression_utils import (
     iwls,
     multicollinearity_check,
     smooth,
-    sparse_minmax_scale
+    sparse_minmax_scale,
 )
+
 
 # ---------------------------------------------------------------------------------------------------
 # GWR for cell-cell communication
@@ -2061,7 +2062,7 @@ class MuSIC(SWR):
         self,
         y: Optional[pd.DataFrame] = None,
         X: Optional[np.ndarray] = None,
-        init_betas: Optional[Dict[str, np.ndarray]] = None
+        init_betas: Optional[Dict[str, np.ndarray]] = None,
     ):
         """
         Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths by iterating one
@@ -2454,7 +2455,7 @@ class MuSIC(SWR):
 
         y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
         for target_label in y_arr.columns:
-            #sample_names = self.sample_names if not self.subsampled else self.subsampled_sample_names[target_label]
+            # sample_names = self.sample_names if not self.subsampled else self.subsampled_sample_names[target_label]
             # Fitted coefficients, errors and predictions:
             parameters = self.params_all_targets[target_label]
             predictions = self.predictions_all_targets[target_label]

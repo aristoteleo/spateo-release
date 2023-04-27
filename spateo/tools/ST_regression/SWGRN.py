@@ -31,7 +31,7 @@ from spateo.tools.ST_regression.SWR import MuSIC
 # ---------------------------------------------------------------------------------------------------
 # GWR for inferring gene regulatory networks
 # ---------------------------------------------------------------------------------------------------
-class GWRGRN(MuSIC):
+class SWGRN(MuSIC):
     """
     Construct regulatory networks, taking prior knowledge network and spatial expression patterns into account.
 
@@ -94,6 +94,14 @@ class GWRGRN(MuSIC):
 
         self.regulators = None
         self.custom_regulators_path = self.arg_retrieve.custom_regulators_path
+        self.add_ligands_to_grn = self.arg_retrieve.fit_ligands_grn
+        self.add_receptors_to_grn = self.arg_retrieve.fit_receptors_grn
+        if not self.add_ligands_to_grn and not self.add_receptors_to_grn and self.targets_path is None:
+            raise ValueError(
+                "Must specify either --fit_ligands_grn or --fit_receptors_grn or provide a path to .txt "
+                "file containing list of targets. If none of these is provided, model will have no "
+                "target variables."
+            )
 
         self.grn_load_and_process()
 
@@ -210,115 +218,123 @@ class GWRGRN(MuSIC):
         database_tfs = grn.columns
 
         # Ligand array:
-        if self.custom_ligands_path is not None:
-            with open(self.custom_ligands_path, "r") as f:
-                ligands = f.read().splitlines()
-                ligands = [l for l in ligands if l in database_ligands]
-                # Get individual components if any complexes are included in this list:
-                ligands = [l for item in ligands for l in item.split("_")]
-        else:
-            # List of possible complexes to search through:
-            l_complexes = [elem for elem in database_ligands if "_" in elem]
-            # All possible ligand molecules:
-            all_ligands = [l for item in database_ligands for l in item.split("_")]
+        if self.add_ligands_to_grn:
+            if self.custom_ligands_path is not None:
+                with open(self.custom_ligands_path, "r") as f:
+                    ligands = f.read().splitlines()
+                    ligands = [l for l in ligands if l in database_ligands]
+                    # Get individual components if any complexes are included in this list:
+                    ligands = [l for item in ligands for l in item.split("_")]
+            else:
+                # List of possible complexes to search through:
+                l_complexes = [elem for elem in database_ligands if "_" in elem]
+                # All possible ligand molecules:
+                all_ligands = [l for item in database_ligands for l in item.split("_")]
 
-            # Get list of ligands from among the most highly spatially-variable genes, indicative of potentially
-            # interesting spatially-enriched signal:
-            self.logger.info(
-                "Preparing data: getting list of ligands from among the most highly " "spatially-variable genes."
-            )
-            m_degs = moran_i(self.adata)
-            m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
-            ligands = [g for g in m_filter_genes if g in all_ligands]
-
-            # If no significant spatially-variable ligands are found, use the top 10 most spatially-variable
-            # ligands:
-            if len(ligands) == 0:
+                # Get list of ligands from among the most highly spatially-variable genes, indicative of potentially
+                # interesting spatially-enriched signal:
                 self.logger.info(
-                    "No significant spatially-variable ligands found. Using top 10 most " "spatially-variable ligands."
+                    "Preparing data: getting list of ligands from among the most highly " "spatially-variable genes."
                 )
-                m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
-                ligands = [g for g in m_filter_genes if g in all_ligands][:10]
+                m_degs = moran_i(self.adata)
+                m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
+                ligands = [g for g in m_filter_genes if g in all_ligands]
 
-            # If any ligands are part of complexes, add all complex components to this list:
-            for element in l_complexes:
-                if "_" in element:
-                    complex_members = element.split("_")
-                    for member in complex_members:
-                        if member in ligands:
-                            other_members = [m for m in complex_members if m != member]
-                            for member in other_members:
-                                ligands.append(member)
-            ligands = list(set(ligands))
+                # If no significant spatially-variable ligands are found, use the top 10 most spatially-variable
+                # ligands:
+                if len(ligands) == 0:
+                    self.logger.info(
+                        "No significant spatially-variable ligands found. Using top 10 most "
+                        "spatially-variable ligands."
+                    )
+                    m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
+                    ligands = [g for g in m_filter_genes if g in all_ligands][:10]
 
-            self.logger.info(
-                f"Found {len(ligands)} among significantly spatially-variable genes and associated " f"complex members."
-            )
+                # If any ligands are part of complexes, add all complex components to this list:
+                for element in l_complexes:
+                    if "_" in element:
+                        complex_members = element.split("_")
+                        for member in complex_members:
+                            if member in ligands:
+                                other_members = [m for m in complex_members if m != member]
+                                for member in other_members:
+                                    ligands.append(member)
+                ligands = list(set(ligands))
 
-        ligands = [l for l in ligands if l in self.adata.var_names]
+                self.logger.info(
+                    f"Found {len(ligands)} among significantly spatially-variable genes and associated "
+                    f"complex members."
+                )
+
+            ligands = [l for l in ligands if l in self.adata.var_names]
+        else:
+            ligands = []
 
         # Receptor array:
-        if self.custom_receptors_path is not None:
-            with open(self.custom_receptors_path, "r") as f:
-                receptors = f.read().splitlines()
-                receptors = [r for r in receptors if r in database_receptors]
+        if self.add_receptors_to_grn:
+            if self.custom_receptors_path is not None:
+                with open(self.custom_receptors_path, "r") as f:
+                    receptors = f.read().splitlines()
+                    receptors = [r for r in receptors if r in database_receptors]
+                    # Get individual components if any complexes are included in this list:
+                    receptors = [r for item in receptors for r in item.split("_")]
+
+            elif self.custom_pathways_path is not None:
+                with open(self.custom_pathways_path, "r") as f:
+                    pathways = f.read().splitlines()
+                    pathways = [p for p in pathways if p in database_pathways]
+                # Get all receptors associated with these pathway(s):
+                r_tf_db_subset = r_tf_db[r_tf_db["pathway"].isin(pathways)]
+                receptors = set(r_tf_db_subset["receptor"])
                 # Get individual components if any complexes are included in this list:
                 receptors = [r for item in receptors for r in item.split("_")]
+                receptors = list(set(receptors))
 
-        elif self.custom_pathways_path is not None:
-            with open(self.custom_pathways_path, "r") as f:
-                pathways = f.read().splitlines()
-                pathways = [p for p in pathways if p in database_pathways]
-            # Get all receptors associated with these pathway(s):
-            r_tf_db_subset = r_tf_db[r_tf_db["pathway"].isin(pathways)]
-            receptors = set(r_tf_db_subset["receptor"])
-            # Get individual components if any complexes are included in this list:
-            receptors = [r for item in receptors for r in item.split("_")]
-            receptors = list(set(receptors))
+            else:
+                # List of possible complexes to search through:
+                r_complexes = [elem for elem in database_receptors if "_" in elem]
+                # And all possible receptor molecules:
+                all_receptors = [r for item in database_receptors for r in item.split("_")]
 
-        else:
-            # List of possible complexes to search through:
-            r_complexes = [elem for elem in database_receptors if "_" in elem]
-            # And all possible receptor molecules:
-            all_receptors = [r for item in database_receptors for r in item.split("_")]
-
-            # Get list of receptors from among the most highly spatially-variable genes, indicative of
-            # potentially interesting spatially-enriched signal:
-            self.logger.info(
-                "Preparing data: getting list of receptors from among the most highly spatially-variable genes."
-            )
-            if "m_degs" not in locals():
-                m_degs = moran_i(self.adata)
-            m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
-            receptors = [g for g in m_filter_genes if g in all_receptors]
-
-            # If no significant spatially-variable receptors are found, use the top 10 most spatially-variable
-            # receptors:
-            if len(receptors) == 0:
+                # Get list of receptors from among the most highly spatially-variable genes, indicative of
+                # potentially interesting spatially-enriched signal:
                 self.logger.info(
-                    "No significant spatially-variable receptors found. Using top 10 most "
-                    "spatially-variable receptors."
+                    "Preparing data: getting list of receptors from among the most highly spatially-variable genes."
                 )
-                m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
-                receptors = [g for g in m_filter_genes if g in all_receptors][:10]
+                if "m_degs" not in locals():
+                    m_degs = moran_i(self.adata)
+                m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
+                receptors = [g for g in m_filter_genes if g in all_receptors]
 
-            # If any receptors are part of complexes, add all complex components to this list:
-            for element in r_complexes:
-                if "_" in element:
-                    complex_members = element.split("_")
-                    for member in complex_members:
-                        if member in receptors:
-                            other_members = [m for m in complex_members if m != member]
-                            for member in other_members:
-                                receptors.append(member)
-            receptors = list(set(receptors))
+                # If no significant spatially-variable receptors are found, use the top 10 most spatially-variable
+                # receptors:
+                if len(receptors) == 0:
+                    self.logger.info(
+                        "No significant spatially-variable receptors found. Using top 10 most "
+                        "spatially-variable receptors."
+                    )
+                    m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
+                    receptors = [g for g in m_filter_genes if g in all_receptors][:10]
 
-            self.logger.info(
-                f"Found {len(receptors)} among significantly spatially-variable genes and associated "
-                f"complex members."
-            )
+                # If any receptors are part of complexes, add all complex components to this list:
+                for element in r_complexes:
+                    if "_" in element:
+                        complex_members = element.split("_")
+                        for member in complex_members:
+                            if member in receptors:
+                                other_members = [m for m in complex_members if m != member]
+                                for member in other_members:
+                                    receptors.append(member)
+                receptors = list(set(receptors))
 
-        receptors = [r for r in receptors if r in self.adata.var_names]
+                self.logger.info(
+                    f"Found {len(receptors)} among significantly spatially-variable genes and associated "
+                    f"complex members."
+                )
+
+            receptors = [r for r in receptors if r in self.adata.var_names]
+        else:
+            receptors = []
 
         if self.targets_path is not None:
             with open(self.targets_path, "r") as f:
@@ -460,6 +476,8 @@ class GWRGRN(MuSIC):
             X = self.X
 
         self.multiscale_backfitting(y_arr, X, init_betas=self.all_betas)
+        self.multiscale_compute_metrics(X, n_chunks=int(self.multiscale_chunks))
+        self.predict_and_save()
 
     def test(self):
         """Use as a testing space to print out attributes, etc."""

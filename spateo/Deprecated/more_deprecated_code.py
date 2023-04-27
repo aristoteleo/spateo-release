@@ -750,14 +750,14 @@ return hessian
 
 
 def mpi_fit(
-        self,
-        y: Optional[np.ndarray],
-        X: Optional[np.ndarray],
-        y_label: str,
-        bw: Union[float, int],
-        final: bool = False,
-        multiscale: bool = False,
-        fit_predictor: bool = False,
+    self,
+    y: Optional[np.ndarray],
+    X: Optional[np.ndarray],
+    y_label: str,
+    bw: Union[float, int],
+    final: bool = False,
+    multiscale: bool = False,
+    fit_predictor: bool = False,
 ) -> Union[None, np.ndarray]:
     """Fit local regression model for each sample in parallel, given a specified bandwidth.
 
@@ -892,8 +892,8 @@ def mpi_fit(
                     deviance = 2 * np.sum(
                         weights
                         * (
-                                y * np.log(y / all_fit_outputs[:, 1])
-                                + (theta - 1) * np.log(1 + all_fit_outputs[:, 1] / (theta - 1))
+                            y * np.log(y / all_fit_outputs[:, 1])
+                            + (theta - 1) * np.log(1 + all_fit_outputs[:, 1] / (theta - 1))
                         )
                     )
                     dof = len(y) - self.X.shape[1]
@@ -1007,7 +1007,7 @@ def multiscale_backfitting(
     self,
     y: Optional[pd.DataFrame] = None,
     X: Optional[np.ndarray] = None,
-    init_betas: Optional[Dict[str, np.ndarray]] = None
+    init_betas: Optional[Dict[str, np.ndarray]] = None,
 ):
     """
     Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths by iterating one
@@ -1314,7 +1314,7 @@ def multiscale_compute_metrics(self, X: Optional[np.ndarray] = None, n_chunks: i
 
     y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
     for target_label in y_arr.columns:
-        #sample_names = self.sample_names if not self.subsampled else self.subsampled_sample_names[target_label]
+        # sample_names = self.sample_names if not self.subsampled else self.subsampled_sample_names[target_label]
         # Fitted coefficients, errors and predictions:
         parameters = self.params_all_targets[target_label]
         predictions = self.predictions_all_targets[target_label]
@@ -1388,7 +1388,7 @@ def multiscale_compute_metrics(self, X: Optional[np.ndarray] = None, n_chunks: i
                     self.distr_obj.variance.disp = self.nb_disp_dict[target_label]
 
                 # Standard errors using the Hessian:
-                all_standard_errors= []
+                all_standard_errors = []
                 hessian = self.hessian(predictions, X=X)
                 print(hessian.shape)
                 for i in range(self.n_samples):

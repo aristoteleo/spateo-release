@@ -3,7 +3,7 @@ import random
 
 import numpy as np
 from mpi4py import MPI
-from SWGRN import GWRGRN
+from SWGRN import SWGRN
 from SWR import SWR, MuSIC
 
 np.random.seed(888)
@@ -51,7 +51,23 @@ if __name__ == "__main__":
         help="Path to output file. Make sure the parent " "directory is empty- any existing files will " "be deleted.",
     )
     parser.add_argument("-custom_lig_path", type=str)
+    parser.add_argument(
+        "-fit_ligands_grn",
+        action="store_true",
+        help="Set True to indicate that ligands should be "
+        "included in the GRN model. If True and path to"
+        "custom ligands list is not given, will"
+        "automatically find ligands from the data.",
+    )
     parser.add_argument("-custom_rec_path", type=str)
+    parser.add_argument(
+        "-fit_receptors_grn",
+        action="store_true",
+        help="Set True to indicate that receptors should be "
+        "included in the GRN model. If True and path to"
+        "custom receptors list is not given, will"
+        "automatically find receptors from the data.",
+    )
     parser.add_argument(
         "-custom_regulators_path",
         type=str,
@@ -142,26 +158,35 @@ if __name__ == "__main__":
     t1 = MPI.Wtime()
 
     # Testing time!
-    #swr_model = SWR(comm, parser)
-    #swr_model.fit()
+    # swr_model = SWR(comm, parser)
+    # swr_model.fit()
 
-    # For use only with MuSIC:
-    n_multiscale_chunks = parser.parse_args().chunks
-
-    if parser.parse_args().multiscale:
-        print(
-            "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
-            "case, it is advisable to reduce the number of parameters."
-        )
-        multiscale_model = MuSIC(comm, parser)
-        multiscale_model.multiscale_backfitting()
-        multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
-        multiscale_model.predict_and_save()
+    # Check if GRN model is specified:
+    if parser.parse_args().grn:
+        grn_model = SWGRN(comm, parser)
+        if parser.parse_args().multiscale:
+            grn_model.grn_fit_multiscale()
+        else:
+            grn_model.grn_fit()
 
     else:
-        swr_model = SWR(comm, parser)
-        swr_model.fit()
-        swr_model.predict_and_save()
+        # For use only with MuSIC:
+        n_multiscale_chunks = parser.parse_args().chunks
+
+        if parser.parse_args().multiscale:
+            print(
+                "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
+                "case, it is advisable to reduce the number of parameters."
+            )
+            multiscale_model = MuSIC(comm, parser)
+            multiscale_model.multiscale_backfitting()
+            multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
+            multiscale_model.predict_and_save()
+
+        else:
+            swr_model = SWR(comm, parser)
+            swr_model.fit()
+            swr_model.predict_and_save()
 
     t_last = MPI.Wtime()
 
