@@ -13,7 +13,7 @@ ipywidgets>=7.7.1
 #KDEpy>=1.1.0
 kneed>=0.7.0
 kornia>=0.6.4
-#loess>=2.1.2
+loess>=2.1.2
 #loompy>=3.0.5
 #mapclassify>=2.4.2
 markdown==3.3.*
