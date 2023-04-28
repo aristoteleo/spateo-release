@@ -1,4 +1,6 @@
-anndata>=0.7.5
+anndata==0.7.5
+attrs>=22.2.0
+black
 colorcet>=2.0.1
 #cvxopt>=1.2.3
 csbdeep>=0.6.3
@@ -6,22 +8,25 @@ descartes
 dynamo-release>=1.0.9
 #fbgbp>=0.2.0
 #folium>=0.12.1
+fiona<1.9
 geopandas>=0.10.2
 ipywidgets>=7.7.1
 #KDEpy>=1.1.0
 kneed>=0.7.0
 kornia>=0.6.4
+lack
 loess>=2.1.2
 #loompy>=3.0.5
 #logging-release>=0.0.4
 #mapclassify>=2.4.2
+markdown==3.3.*
 matplotlib<=3.5.3
 #nbconvert
 networkx>=2.6.3
 # ngs_tools>=1.6.0
 #nudged>=0.3.1
 numba>=0.46.0
-numpy>=1.18.1
+numpy==1.23.*
 #opencv-python>=4.5.4.60
 #pandana
 pandas>=0.25.1
@@ -31,6 +36,7 @@ POT>=0.8.1
 pysal>=1.14.4
 #pyro-ppl
 #python-igraph>=0.7.1
+platformdirs>=3.2
 pyvista>=0.38.0
 scipy>=1.0
 #scikit-image>=0.18.0
