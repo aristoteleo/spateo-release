@@ -1,7 +1,7 @@
 import functools
 import logging
-import time
 import sys
+import time
 from contextlib import contextmanager
 
 
@@ -222,6 +222,7 @@ class Logger:
         if rs * bn >= ts:
             self.report_hook_percent_state = None
             self.finish_progress(progress_name="download")
+
 
 class LoggerManager:
     DEBUG = logging.DEBUG
