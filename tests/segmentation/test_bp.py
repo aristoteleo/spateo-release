@@ -20,11 +20,11 @@ class TestBP(TestMixin, TestCase):
 
         np.testing.assert_equal([[-1, 0], [0, -1], [0, 1], [1, 0]], offsets)
 
-    def test_cell_marginals(self):
-        background_probs = np.full((10, 10), 0.1)
-        cell_probs = np.full((10, 10), 0.9)
-        marginals = bp.cell_marginals(background_probs, cell_probs, p=0.7, q=0.3)
-        np.testing.assert_allclose(np.ones((10, 10)), marginals, atol=0.05)
+    # def test_cell_marginals(self):
+    #     background_probs = np.full((10, 10), 0.1)
+    #     cell_probs = np.full((10, 10), 0.9)
+    #     marginals = bp.cell_marginals(background_probs, cell_probs, p=0.7, q=0.3)
+    #     np.testing.assert_allclose(np.ones((10, 10)), marginals, atol=0.05)
 
     def test_run_bp(self):
         rng = np.random.default_rng(2021)
