@@ -24,7 +24,7 @@ networkx>=2.6.3
 #nudged>=0.3.1
 numba>=0.46.0
 numpy==1.23.*
-#opencv-python>=4.5.4.60
+opencv-python>=4.5.4.60
 #pandana
 pandas>=0.25.1
 plotly>=5.1.0
