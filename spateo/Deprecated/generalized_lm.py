@@ -128,7 +128,7 @@ def batch_grad(
     eta: float = 2.0,
     theta: float = 1.0,
     fit_intercept: bool = True,
-    w: Optional[np.ndarray, scipy.sparse.spmatrix] = None,
+    w: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
 ) -> np.ndarray:
     """Computes the gradient (for parameter updating) via batch gradient descent
 
@@ -252,7 +252,7 @@ def log_likelihood(
     y: np.ndarray,
     y_hat: Union[np.ndarray, float],
     theta: float = 1.0,
-    w: Optional[np.ndarray, scipy.sparse.spmatrix] = None,
+    w: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
 ) -> float:
     """Computes negative log-likelihood of an observation, based on true values and predictions from the regression.
 
@@ -330,7 +330,7 @@ def _loss(
     eta: float = 2.0,
     theta: float = 1.0,
     fit_intercept: bool = True,
-    w: Optional[np.ndarray, scipy.sparse.spmatrix] = None,
+    w: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
 ) -> float:
     """Objective function, comprised of a combination of the log-likelihood and regularization losses.
 

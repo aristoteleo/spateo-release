@@ -53,11 +53,11 @@ class SWR:
     Attributes:
         mod_type: The type of model that will be employed- this dictates how the data will be processed and
             prepared. Options:
-                - "niche": Spatially-aware, uses spatial connections between samples as independent variables
-                - "lr": Spatially-aware, uses the combination of receptor expression in the "target" cell and spatially
-                    lagged ligand expression in the neighboring cells as independent variables.
-                - "slice": Spatially-aware, uses a coupling of spatial category connections, ligand expression
-                    and receptor expression to perform regression on select receptor-downstream genes.
+                - "niche": Spatially-aware, uses categorical cell type labels as independent variables.
+                - "lr": Spatially-aware, essentially uses the combination of receptor expression in the "target" cell
+                    and spatially lagged ligand expression in the neighboring cells as independent variables.
+                - "ligand": Spatially-aware, essentially uses ligand expression in the neighboring cells as
+                    independent variables.
 
 
         adata_path: Path to the AnnData object from which to extract data for modeling
@@ -71,22 +71,22 @@ class SWR:
             expression. It is advisable not to do this if performing Poisson or negative binomial regression.
         log_transform: Set True if log-transformation should be applied to expression. It is advisable not to do
             this if performing Poisson or negative binomial regression.
-        target_expr_threshold: Only used if :param `mod_type` is "lr" or "slice" and :param `targets_path` is not
+        target_expr_threshold: Only used if :param `mod_type` is "lr" or "ligand" and :param `targets_path` is not
             given. When manually selecting targets, expression above a threshold percentage of cells will be used to
             filter to a smaller subset of interesting genes. Defaults to 0.2.
 
 
         custom_lig_path: Optional path to a .txt file containing a list of ligands for the model, separated by
-            newlines. Only used if :attr `mod_type` is "lr" or "slice" (and thus uses ligand/receptor expression
-            directly in the inference). If not provided, will select ligands using a threshold based on expression
+            newlines. Only used if :attr `mod_type` is "lr" or "ligand" (and thus uses ligand expression directly in
+            the inference). If not provided, will select ligands using a threshold based on expression
             levels in the data.
         custom_rec_path: Optional path to a .txt file containing a list of receptors for the model, separated by
-            newlines. Only used if :attr `mod_type` is "lr" or "slice" (and thus uses ligand/receptor expression
-            directly in the inference). If not provided, will select receptors using a threshold based on expression
+            newlines. Only used if :attr `mod_type` is "lr" (and thus uses receptor expression directly in the
+            inference). If not provided, will select receptors using a threshold based on expression
             levels in the data.
         custom_pathways_path: Rather than  providing a list of receptors, can provide a list of signaling pathways-
             all receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
-            is "lr" or "slice".
+            is "lr".
         targets_path: Optional path to a .txt file containing a list of prediction target genes for the model,
             separated by newlines. If not provided, targets will be strategically selected from the given receptors.
         init_betas_path: Optional path to a .npy file containing initial coefficient values for the model. Initial
@@ -161,7 +161,7 @@ class SWR:
     def _set_up_model(self):
         if self.mod_type is None and self.adata_path is not None:
             raise ValueError(
-                "No model type provided; need to provide a model type to fit. Options: 'niche', 'lr', " "'slice'."
+                "No model type provided; need to provide a model type to fit. Options: 'niche', 'lr', " "'ligand'."
             )
 
         # Check if the program is currently in the master process:
@@ -181,6 +181,9 @@ class SWR:
                         "No AnnData path or .csv path provided; need to provide at least one of these "
                         "to provide a default dataset to fit."
                     )
+                elif self.grn:
+                    # Model set up will be taken care of by the child class.
+                    self.set_up = True
                 else:
                     custom_data = pd.read_csv(self.csv_path, index_col=0)
                     self.coords = custom_data.iloc[:, :2].values
@@ -204,10 +207,11 @@ class SWR:
 
         # Broadcast data to other processes- gene expression variables:
         if self.adata_path is not None:
-            if self.mod_type == "niche" or self.mod_type == "slice":
+            if self.mod_type == "niche":
                 self.cell_categories = self.comm.bcast(self.cell_categories, root=0)
-            if self.mod_type == "lr" or self.mod_type == "slice":
+            if self.mod_type == "lr" or self.mod_type == "ligand":
                 self.ligands_expr = self.comm.bcast(self.ligands_expr, root=0)
+            if self.mod_type == "lr":
                 self.receptors_expr = self.comm.bcast(self.receptors_expr, root=0)
             if hasattr(self, "targets_expr"):
                 self.targets_expr = self.comm.bcast(self.targets_expr, root=0)
@@ -434,7 +438,7 @@ class SWR:
             adata = self.adata.copy()
 
         # One-hot cell type array (or other category):
-        if self.mod_type == "niche" or self.mod_type == "slice":
+        if self.mod_type == "niche" or self.mod_type == "ligand":
             group_name = adata.obs[self.group_key]
             db = pd.DataFrame({"group": group_name})
             categories = np.array(group_name.unique().tolist())
@@ -451,7 +455,7 @@ class SWR:
             ]
 
         # Ligand-receptor expression array
-        if self.mod_type == "lr" or self.mod_type == "slice":
+        if self.mod_type == "lr" or self.mod_type == "ligand":
             if self.species == "human":
                 self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
                 r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
@@ -692,15 +696,15 @@ class SWR:
             self.logger.info(f"Set of ligand-receptor pairs: {self.lr_pairs}")
 
         else:
-            raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'slice', or 'lr'.")
+            raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', or 'ligand'.")
 
         # Get gene targets:
         self.logger.info("Preparing data: getting gene targets.")
         # For niche model, targets must be manually provided:
-        if self.targets_path is None and self.mod_type == "niche":
+        if self.targets_path is None and self.mod_type.isin(["niche", "ligand"]):
             raise ValueError(
-                "For niche model, `targets_path` must be provided. For slice and L:R models, targets can be "
-                "automatically inferred, but ligand/receptor information does not exist for the niche model."
+                "For niche model and ligand model, `targets_path` must be provided. For L:R models, targets can be "
+                "automatically inferred, but receptor information does not exist for the other models."
             )
 
         if self.targets_path is not None:
@@ -737,6 +741,89 @@ class SWR:
             columns=targets,
         )
 
+        # Set dependent variable array based on input given as "mod_type":
+        if self.mod_type == "niche":
+            self.X = self.cell_categories.values
+            self.feature_names = self.cell_categories.columns
+
+        elif self.mod_type == "lr":
+            # Use the ligand expression array and receptor expression array to compute the ligand-receptor pairing
+            # array across all cells in the sample:
+            X_df = pd.DataFrame(
+                np.zeros((self.n_samples, len(self.lr_pairs))), columns=self.feature_names, index=self.adata.obs_names
+            )
+
+            for lr_pair in self.lr_pairs:
+                lig, rec = lr_pair[0], lr_pair[1]
+                lig_expr_values = scipy.sparse.csr_matrix(self.ligands_expr[lig].values.reshape(-1, 1))
+                rec_expr_values = scipy.sparse.csr_matrix(self.receptors_expr[rec].values.reshape(-1, 1))
+
+                # Communication signature b/w receptor in target and ligand in neighbors:
+                X_df[f"{lig}-{rec}"] = np.dot(rec_expr_values, lig_expr_values.T)
+
+            # If applicable, drop all-zero columns:
+            X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
+            self.logger.info(
+                f"Dropped all-zero columns from cell type-specific signaling array, from "
+                f"{len(self.lr_pairs)} to {X_df.shape[1]}."
+            )
+            # If applicable, check for multicollinearity:
+            if self.multicollinear_threshold is not None:
+                X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+
+            self.X = X_df.values
+            self.feature_names = [pair[0] + "-" + pair[1] for pair in X_df.columns]
+
+            # Make a note of whether ligands are secreted or membrane-bound:
+            self.signaling_types = self.lr_db.loc[
+                self.lr_db["from"].isin([x[0] for x in self.lr_pairs]), "type"
+            ].tolist()
+
+        elif self.mod_type == "ligand":
+            X_df = self.ligands_expr
+            # If applicable, drop all-zero columns:
+            X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
+            self.logger.info(
+                f"Dropped all-zero columns from cell type-specific signaling array, from "
+                f"{self.ligands_expr.shape[1]} to {X_df.shape[1]}."
+            )
+            # If applicable, check for multicollinearity:
+            if self.multicollinear_threshold is not None:
+                X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+
+            self.X = X_df.values
+            self.feature_names = X_df.columns
+            self.signaling_types = self.lr_db.loc[self.lr_db["from"].isin(self.feature_names), "type"].tolist()
+
+        else:
+            raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', or 'ligand'.")
+
+        # If applicable, add covariates:
+        if self.covariate_keys is not None:
+            matched_obs = []
+            matched_var_names = []
+            for key in self.covariate_keys:
+                if key in self.adata.obs:
+                    matched_obs.append(key)
+                elif key in self.adata.var_names:
+                    matched_var_names.append(key)
+                else:
+                    self.logger.info(
+                        f"Specified covariate key '{key}' not found in adata.obs. Not adding this "
+                        f"covariate to the X matrix."
+                    )
+            matched_obs_matrix = self.adata.obs[matched_obs].to_numpy()
+            matched_var_matrix = self.adata[:, matched_var_names].X.toarray()
+            cov_names = matched_obs + matched_var_names
+            concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
+            self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
+            self.feature_names += cov_names
+
+        # Add intercept if applicable:
+        if self.fit_intercept:
+            self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
+            self.feature_names = ["intercept"] + self.feature_names
+
         # Compute initial spatial weights for all samples- use twice the min distance as initial bandwidth if not
         # provided (for fixed bw) or 10 nearest neighbors (for adaptive bw):
         if self.bw is None:
@@ -755,6 +842,41 @@ class SWR:
             init_bw = self.bw
         self.all_spatial_weights = self._compute_all_wi(init_bw)
         self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
+
+        # Broadcast independent variables and feature names:
+        self.X = self.comm.bcast(self.X, root=0)
+        self.feature_names = self.comm.bcast(self.feature_names, root=0)
+        self.n_features = self.X.shape[1]
+        self.n_features = self.comm.bcast(self.n_features, root=0)
+
+        # If model is not multiscale model, ensure all signaling type labels are the same in terms of the assumed
+        # length scale:
+        if hasattr(self, "self.signaling_types"):
+            # If all features are assumed to operate on the same length scale, there should not be a mix of secreted
+            # and membrane-bound-mediated signaling:
+            if not self.multiscale_flag:
+                # Secreted + ECM-receptor can diffuse across larger distances, but membrane-bound interactions are
+                # limited by non-diffusivity. Therefore, it is not advisable to include a mixture of membrane-bound with
+                # either of the other two categories in the same model.
+                if (
+                    "Cell-Cell Contact" in set(self.signaling_types)
+                    and "Secreted Signaling" in set(self.signaling_types)
+                ) or ("Cell-Cell Contact" in set(self.signaling_types) and "ECM-Receptor" in set(self.signaling_types)):
+                    raise ValueError(
+                        "It is not advisable to include a mixture of membrane-bound with either secreted or "
+                        "ECM-receptor in the same model because the valid distance scales over which they operate "
+                        "is different. If you wish to include both, please run the model twice, once for each category."
+                    )
+
+                self.signaling_types = set(self.signaling_types)
+                if "Secred Signaling" in self.signaling_types or "ECM-Receptor" in self.signaling_types:
+                    self.signaling_types = "Diffusive Signaling"
+                else:
+                    self.signaling_types = "Cell-Cell Contact"
+            self.signaling_types = self.comm.bcast(self.signaling_types, root=0)
+
+        self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
+        self.X_df = self.comm.bcast(self.X_df, root=0)
 
     def run_subsample(self, y: Optional[pd.DataFrame] = None):
         """To combat computational intensiveness of this regressive protocol, subsampling will be performed in cases
@@ -1025,185 +1147,6 @@ class SWR:
         w = scipy.sparse.vstack(weights)
         return w
 
-    def _compute_niche_mat(self) -> np.ndarray:
-        """Compute the niche matrix for the dataset."""
-        # Compute "presence" of each cell type in the neighborhood of each sample:
-        dmat_neighbors = self.all_spatial_weights.dot(self.cell_categories.values)
-        return dmat_neighbors
-
-    def _adjust_x(self):
-        """Adjust the independent variable array based on the defined bandwidth."""
-
-        # If applicable, use the cell type category array to encode the niche of each sample:
-        if self.mod_type == "niche":
-            self.X = self._compute_niche_mat()
-            # If feature names doesn't already exist, create it:
-            if not hasattr(self, "feature_names"):
-                self.feature_names = self.cell_categories.columns
-
-        # If applicable, use the ligand expression array, the receptor expression array and the spatial weights array
-        # to compute the ligand-receptor expression signature of each spatial neighborhood:
-        elif self.mod_type == "lr":
-            X_df = pd.DataFrame(
-                np.zeros((self.n_samples, len(self.lr_pairs))), columns=self.feature_names, index=self.adata.obs_names
-            )
-
-            for lr_pair in self.lr_pairs:
-                lig, rec = lr_pair[0], lr_pair[1]
-                lig_expr_values = scipy.sparse.csr_matrix(self.ligands_expr[lig].values.reshape(-1, 1))
-                rec_expr_values = scipy.sparse.csr_matrix(self.receptors_expr[rec].values.reshape(-1, 1))
-
-                # Communication signature b/w receptor in target and ligand in neighbors:
-                lr_product = np.dot(rec_expr_values, lig_expr_values.T)
-                # Neighborhood mask:
-                X_df[f"{lig}-{rec}"] = scipy.sparse.csr_matrix.sum(
-                    scipy.sparse.csr_matrix.multiply(self.all_spatial_weights, lr_product), axis=1
-                ).A.flatten()
-
-            self.X = X_df.values
-            # If feature names doesn't already exist, create it:
-            if not hasattr(self, "feature_names"):
-                self.feature_names = [pair[0] + "-" + pair[1] for pair in self.lr_pairs]
-            # If list of L:R labels (secreted vs. membrane-bound vs. ECM) doesn't already exist, create it:
-            if not hasattr(self, "self.signaling_types"):
-                self.signaling_types = self.lr_db.loc[
-                    (self.lr_db["from"].isin([x[0] for x in self.lr_pairs]))
-                    & (self.lr_db["to"].isin([x[1] for x in self.lr_pairs])),
-                    "type",
-                ].tolist()
-
-        # If applicable, combine the ideas of the above two models:
-        elif self.mod_type == "slice":
-            # Each ligand-receptor pair will have an associated niche matrix:
-            niche_mats = {}
-
-            for lr_pair in self.lr_pairs:
-                lig, rec = lr_pair[0], lr_pair[1]
-                lig_expr_values = scipy.sparse.csr_matrix(self.ligands_expr[lig].values.reshape(-1, 1))
-                rec_expr_values = scipy.sparse.csr_matrix(self.receptors_expr[rec].values.reshape(-1, 1))
-                # Multiply one-hot category array by the expression of select ligand to get a cell type-specific
-                # ligand expression matrix:
-                lig_expr = np.multiply(
-                    self.cell_categories, np.tile(lig_expr_values.toarray(), self.cell_categories.shape[1])
-                )
-                # Tile receptor expression (for elementwise multiplication with the ligand expression matrix):
-                rec_expr = np.tile(rec_expr_values.toarray(), self.cell_categories.shape[1])
-
-                # Multiply adjacency matrix by the cell-specific expression of select ligand:
-                nbhd_lig_expr = self.all_spatial_weights.dot(lig_expr)
-                # Multiply by receptor expression to get a description of the ligand-receptor presence in each
-                # neighborhood:
-                niche_lr = np.multiply(nbhd_lig_expr, rec_expr)
-                # Indicate which cell type ligand expression comes from:
-                lr_connections_cols = [f"{i}-{lig}:{rec}" for i in self.cell_categories.columns]
-                # Add to dictionary of niche matrices:
-                niche_mats[f"{lig}-{rec}"] = pd.DataFrame(niche_lr, columns=lr_connections_cols)
-
-            # Combine the niche matrices for each ligand-receptor pair:
-            self.X = pd.concat(niche_mats.values(), axis=1)
-            self.X.index = self.adata.obs_names
-            n_cols = self.X.shape[1]
-
-            # Drop all-zero columns (represent cell type pairs with no spatial coupled L/R expression):
-            self.X = self.X.loc[:, (self.X != 0).any(axis=0)]
-            self.feature_names = self.X.columns.tolist()
-            self.logger.info(
-                f"Dropped all-zero columns from cell type-specific signaling array, from {n_cols} to "
-                f"{self.X.shape[1]}."
-            )
-
-            # If :attr `multicollinear_threshold` is given, drop multicollinear features:
-            if self.multicollinear_threshold is not None:
-                self.X = multicollinearity_check(self.X, self.multicollinear_threshold, logger=self.logger)
-
-            self.X = self.X.values
-
-            # If list of L:R labels (secreted vs. membrane-bound vs. ECM) doesn't already exist, create it:
-            if not hasattr(self, "self.signaling_types"):
-                self.signaling_types = []
-                for col in self.feature_names:
-                    match = re.search(r"(\w+)-(\w+):(\w+)", col)
-                    ligrec = f"{match.group(2)}-{match.group(3)}"
-                    result = self.lr_db.loc[
-                        (self.lr_db["from"] == ligrec.split("-")[0]) & (self.lr_db["to"] == ligrec.split("-")[1]),
-                        "type",
-                    ].iloc[0]
-
-                    self.signaling_types.append(result)
-
-        # Optionally, add continuous covariate value for each cell:
-        if self.covariate_keys is not None:
-            matched_obs = []
-            matched_var_names = []
-            for key in self.covariate_keys:
-                if key in self.adata.obs:
-                    matched_obs.append(key)
-                elif key in self.adata.var_names:
-                    matched_var_names.append(key)
-                else:
-                    self.logger.info(
-                        f"Specified covariate key '{key}' not found in adata.obs. Not adding this "
-                        f"covariate to the X matrix."
-                    )
-            matched_obs_matrix = self.adata.obs[matched_obs].to_numpy()
-            matched_var_matrix = self.adata[:, matched_var_names].X.toarray()
-            cov_names = matched_obs + matched_var_names
-            concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
-            self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
-            self.feature_names += cov_names
-
-        # Columnwise min-max scaling:
-        self.X = sparse_minmax_scale(self.X)
-
-        # Add intercept if applicable:
-        if self.fit_intercept:
-            self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
-            self.feature_names = ["intercept"] + self.feature_names
-
-        self.n_features = self.X.shape[1]
-        # Rebroadcast the number of features to fit:
-        self.n_features = self.comm.bcast(self.n_features, root=0)
-        # Broadcast secreted vs. membrane-bound reference:
-        if hasattr(self, "self.signaling_types"):
-            # If all features are assumed to operate on the same length scale, there should not be a mix of secreted
-            # and membrane-bound-mediated signaling:
-            if not self.multiscale_flag:
-                # Secreted + ECM-receptor can diffuse across larger distances, but membrane-bound interactions are
-                # limited by non-diffusivity. Therefore, it is not advisable to include a mixture of membrane-bound with
-                # either of the other two categories in the same model.
-                if (
-                    "Cell-Cell Contact" in set(self.signaling_types)
-                    and "Secreted Signaling" in set(self.signaling_types)
-                ) or ("Cell-Cell Contact" in set(self.signaling_types) and "ECM-Receptor" in set(self.signaling_types)):
-                    raise ValueError(
-                        "It is not advisable to include a mixture of membrane-bound with either secreted or "
-                        "ECM-receptor in the same model because the valid distance scales over which they operate "
-                        "is different. If you wish to include both, please run the model twice, once for each category."
-                    )
-
-                self.signaling_types = set(self.signaling_types)
-                if "Secred Signaling" in self.signaling_types or "ECM-Receptor" in self.signaling_types:
-                    self.signaling_types = "Diffusive Signaling"
-                else:
-                    self.signaling_types = "Cell-Cell Contact"
-            self.signaling_types = self.comm.bcast(self.signaling_types, root=0)
-        self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
-
-    def _adjust_x_nbhd_convolve(self, y: np.ndarray, X: np.ndarray):
-        """Adjust the independent and dependent variable arrays based on the defined bandwidth. Used specifically to
-        incorporate the neighborhood values of X and y for cell-intrinsic models. As models that use this inherit
-        from this class, y and X need to be manually provided.
-
-        Returns:
-            y: Adjusted dependent variable array
-            X: Adjusted independent variable array
-        """
-        y = self.all_spatial_weights.dot(y)
-        for i in range(X.shape[1]):
-            X[:, i] = self.all_spatial_weights.dot(X[:, i])
-
-        return y, X
-
     def local_fit(
         self,
         i: int,
@@ -1449,32 +1392,11 @@ class SWR:
             fit_predictor: Set True to indicate that dependent variable to fit is a linear predictor rather than a
                 true response variable
         """
-        # If model to be run is a "niche", "lr" or "slice" model, update the spatial weights and then update X given
-        # the current value of the bandwidth:
-        if hasattr(self, "adata"):
-            self.all_spatial_weights = self._compute_all_wi(bw)
-            self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
-            self.logger.info(f"Adjusting X for new bandwidth: {bw}")
-            self._adjust_x()
-            self.X = self.comm.bcast(self.X, root=0)
-            self.X_df = self.comm.bcast(self.X_df, root=0)
-            self.logger(f"Using adjusted X array for {self.mod_type} model.")
-            X = self.X
-
         if X.shape[1] != self.n_features:
             n_features = X.shape[1]
             n_features = self.comm.bcast(n_features, root=0)
         else:
             n_features = self.n_features
-
-        if self.grn:
-            self.all_spatial_weights = self._compute_all_wi(bw)
-            # Row standardize spatial weights so as to ensure results aren't biased by the number of neighbors of
-            # each cell:
-            self.all_spatial_weights = self.all_spatial_weights / self.all_spatial_weights.sum(axis=1)[:, None]
-            y, X = self._adjust_x_nbhd_convolve(y, X)
-            y = self.comm.bcast(y, root=0)
-            X = self.comm.bcast(X, root=0)
 
         # If subsampled, take the subsampled portion of the X array- if :attr `multiscale` is True, this subsampling
         # will be performed before calling :func `mpi_fit`:
@@ -1657,7 +1579,6 @@ class SWR:
         self,
         y: Optional[pd.DataFrame] = None,
         X: Optional[np.ndarray] = None,
-        n_feat: Optional[int] = None,
         init_betas: Optional[Dict[str, np.ndarray]] = None,
         multiscale: bool = False,
         fit_predictor: bool = False,
@@ -1707,8 +1628,6 @@ class SWR:
 
         if X is None:
             X = self.X
-        if n_feat is not None:
-            X = X[:, n_feat].reshape(-1, 1)
         X = self.comm.bcast(X, root=0)
 
         # Compute fit for each column of the dependent variable array individually- store each output array (if
@@ -2109,6 +2028,11 @@ class MuSIC(SWR):
             y_arr = y
             y_arr = self.comm.bcast(y_arr, root=0)
 
+        if X is None:
+            X = self.X
+        else:
+            X = self.comm.bcast(X, root=0)
+
         for target in y_arr.columns:
             y = y_arr[target].to_frame()
             y_label = target
@@ -2126,11 +2050,6 @@ class MuSIC(SWR):
             all_betas, self.all_bws_init = self.fit(
                 y, X, multiscale=True, fit_predictor=False, init_betas=init_betas, verbose=False
             )
-            # If applicable, i.e. if model if one of the signaling models for which the X array varies with
-            # bandwidth, update X with the up-to-date version that leverages the most recent bandwidth estimations:
-            if X is None:
-                X = self.X
-            X = self.comm.bcast(X, root=0)
 
             # Initial values- multiply input by the array corresponding to the correct target- note that this is
             # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
@@ -2165,13 +2084,17 @@ class MuSIC(SWR):
 
                 for n_feat in range(self.n_features):
                     if self.adata_path is not None:
-                        signaling_type = self.signaling_types[n_feat]
+                        if n_feat < len(self.signaling_types):
+                            signaling_type = self.signaling_types[n_feat]
+                        else:
+                            signaling_type = None
                     else:
                         signaling_type = None
                     # Use each individual feature to predict the response- note y is set up as a DataFrame because in
                     # other cases column names/target names are taken from y:
                     y_mod = y_pred_init[:, n_feat] + error
                     temp_y = pd.DataFrame(y_mod.reshape(-1, 1), columns=[target])
+                    temp_X = (X[:, n_feat]).reshape(-1, 1)
 
                     # Check if the bandwidth has plateaued for all features in this iteration:
                     if bw_plateau_counter > self.patience:
@@ -2198,7 +2121,6 @@ class MuSIC(SWR):
                         betas, bw_dict = self.fit(
                             temp_y,
                             X,
-                            n_feat=n_feat,
                             init_betas=init_betas,
                             multiscale=True,
                             fit_predictor=True,
@@ -2208,13 +2130,6 @@ class MuSIC(SWR):
                         # Get coefficients for this particular target:
                         betas = betas[target]
 
-                    # If applicable, i.e. if model if one of the signaling models for which the X array varies with
-                    # bandwidth, update X with the up-to-date version that leverages the most recent bandwidth
-                    # estimations:
-                    if X is None:
-                        temp_X = (self.X[:, n_feat]).reshape(-1, 1)
-                    else:
-                        temp_X = X[:, n_feat].reshape(-1, 1)
                     # Update the dependent prediction (again not for GLMs, this quantity is instead the linear
                     # predictor) and betas:
                     new_y = (temp_X * betas).reshape(-1)

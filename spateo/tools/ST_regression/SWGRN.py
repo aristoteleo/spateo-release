@@ -427,6 +427,9 @@ class SWGRN(MuSIC):
             self.all_betas[row] = grn.loc[row, :].values
         self.all_betas = self.comm.bcast(self.all_betas, root=0)
 
+        # Indicate thet model has been set up:
+        self.set_up = True
+
     def grn_fit(
         self,
         y: Optional[pd.DataFrame] = None,
@@ -456,9 +459,11 @@ class SWGRN(MuSIC):
             y_arr = self.molecule_expr
         else:
             y_arr = y
+
         if X is None:
             X = self.X
 
+        # X and y will be automatically broadcast during the fitting process:
         all_data, all_bws = self.fit(y_arr, X, init_betas=self.all_betas, multiscale=False)
 
         return all_data, all_bws
@@ -472,9 +477,11 @@ class SWGRN(MuSIC):
             y_arr = self.molecule_expr
         else:
             y_arr = y
+
         if X is None:
             X = self.X
 
+        # X and y will be automatically broadcast during the fitting process:
         self.multiscale_backfitting(y_arr, X, init_betas=self.all_betas)
         self.multiscale_compute_metrics(X, n_chunks=int(self.multiscale_chunks))
         self.predict_and_save()
