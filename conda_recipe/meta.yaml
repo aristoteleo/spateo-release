@@ -3,9 +3,9 @@ package:
   version: "1.0.2"
 
 source:
-  path: ../
-#  git_url: https://github.com/aristoteleo/spateo-release.git
-#  git_depth: 1
+#  path: ../
+  git_url: https://github.com/aristoteleo/spateo-release.git
+  git_depth: 1
 
 build:
   preserve_egg_dir: True
@@ -28,7 +28,7 @@ requirements:
 about:
   home: https://github.com/aristoteleo/spateo-release
   license: MIT
-  license_familY: MIT
+  license_family: MIT
   license_file: LICENSE
   summary: "Spateo: multidimensional spatiotemporal modeling of single-cell spatial transcriptomics"
 

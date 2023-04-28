@@ -26,7 +26,7 @@ numpy>=1.18.1
 #pandana
 pandas>=0.25.1
 plotly>=5.1.0
-#POT>=0.8.1
+POT>=0.8.1
 #pynndescent>=0.4.8
 pysal>=1.14.4
 #pyro-ppl
