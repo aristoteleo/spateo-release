@@ -34,7 +34,6 @@ from spateo.tools.ST_regression.regression_utils import (
     iwls,
     multicollinearity_check,
     smooth,
-    sparse_minmax_scale,
 )
 
 
@@ -840,7 +839,8 @@ class SWR:
                 init_bw = 10
         else:
             init_bw = self.bw
-        self.all_spatial_weights = self._compute_all_wi(init_bw)
+        if not hasattr(self, "all_spatial_weights"):
+            self.all_spatial_weights = self._compute_all_wi(init_bw)
         self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
 
         # Broadcast independent variables and feature names:
@@ -891,125 +891,163 @@ class SWR:
             sample_names: Dictionary containing lists of names of the subsampled cells for each dependent variable
             n_runs_all: Dictionary containing the number of runs for each dependent variable
         """
+        # For subsampling by point selection:
         # Dictionary to store both cell labels (:attr `subsampled_sample_names`) and numerical indices (:attr
         # `indices`) of subsampled points, :attr `n_samples_fitted` (for setting :attr `x_chunk` later on, and
         # :attr `neighboring_unsampled` to establish a mapping between each not-sampled point and the closest sampled
         # point:
-        self.subsampled_indices, self.n_samples_fitted, self.subsampled_sample_names, self.neighboring_unsampled = (
-            {},
-            {},
-            {},
-            {},
-        )
+        if self.group_subset is None:
+            self.subsampled_indices, self.n_samples_subset, self.fitted_sample_names, self.neighboring_unsampled = (
+                {},
+                {},
+                {},
+                {},
+            )
 
         if y is None:
             y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
         else:
             y_arr = y
 
-        # Also include option to subsample particular cell types of interest:
-
-        for target in y_arr.columns:
-            # Spatial clustering:
-            n_clust = int(0.05 * self.n_samples)
-            kmeans = KMeans(n_clusters=n_clust, random_state=0).fit(self.coords)
-            if hasattr(self, "adata"):
-                self.adata.obs["spatial_cluster"] = kmeans.predict(self.coords).astype(int)
-                spatial_clusters = self.adata.obs["spatial_cluster"].values.reshape(-1, 1)
-            else:
-                spatial_clusters = kmeans.predict(self.coords).astype(int).reshape(-1, 1)
-
-            data = np.concatenate(
-                (
-                    self.coords,
-                    spatial_clusters,
-                    y_arr[target].values.reshape(-1, 1),
-                ),
-                axis=1,
-            )
-            temp_df = pd.DataFrame(
-                data,
-                columns=["x", "y", "spatial_cluster", target],
-                index=self.sample_names,
+        # Optionally, subsample particular cell types of interest:
+        if self.group_subset is not None:
+            subset = self.adata.obs[self.group_key].isin(self.group_subset)
+            self.fitted_indices = [self.sample_names.get_loc(name) for name in subset.index]
+            self.fitted_sample_names = subset.index
+            self.n_samples_fitted = len(subset)
+            # Add cells that are neighboring cells of the chosen type, but which are not of the chosen type:
+            get_wi_partial = partial(
+                get_wi,
+                n_samples=self.n_samples,
+                coords=self.coords,
+                fixed_bw=False,
+                exclude_self=True,
+                kernel=self.kernel,
+                bw=10,
+                threshold=0.01,
+                sparse_array=True,
             )
 
-            temp_df[f"{target}_density"] = temp_df.groupby("spatial_cluster")[target].transform(
-                lambda x: np.count_nonzero(x) / len(x)
-            )
+            with Pool() as pool:
+                weights = pool.map(get_wi_partial, self.fitted_indices)
+            w_subset = scipy.sparse.vstack(weights)
+            rows, cols = w_subset.nonzero()
+            unique_indices = set(rows)
+            names_all_neighbors = self.sample_names[unique_indices]
+            subset = self.adata[self.adata.obs[self.group_key].isin(names_all_neighbors)]
+            self.subsampled_indices = [self.sample_names.get_loc(name) for name in subset.obs_names]
+            self.n_samples_subset = len(subset)
 
-            # Stratified subsampling:
-            sampled_df = pd.DataFrame()
-            for stratum in temp_df["spatial_cluster"].unique():
-                if len(set(temp_df[f"{target}_density"])) == 2:
-                    stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
-                    # Density of node feature in this stratum
-                    node_feature_density = stratum_df[f"{target}_density"].iloc[0]
+            self.neighboring_unsampled = None
 
-                    # Set total number of cells to subsample- sample at least 2x the number of zero cells as nonzeros:
-                    # Sample size proportional to stratum size and node feature density:
-                    n_sample_nonzeros = int(np.ceil((len(stratum_df) // 2) * (1 + (node_feature_density - 1))))
-                    n_sample_zeros = 2 * n_sample_nonzeros
-                    sample_size = n_sample_zeros + n_sample_nonzeros
-                    sampled_stratum_df = stratum_df.sample(n=sample_size)
-                    sampled_df = pd.concat([sampled_df, sampled_stratum_df])
-
+        else:
+            for target in y_arr.columns:
+                # Spatial clustering:
+                n_clust = int(0.05 * self.n_samples)
+                kmeans = KMeans(n_clusters=n_clust, random_state=0).fit(self.coords)
+                if hasattr(self, "adata"):
+                    self.adata.obs["spatial_cluster"] = kmeans.predict(self.coords).astype(int)
+                    spatial_clusters = self.adata.obs["spatial_cluster"].values.reshape(-1, 1)
                 else:
-                    stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
-                    # Density of node feature in this stratum
-                    node_feature_density = stratum_df[f"{target}_density"].iloc[0]
+                    spatial_clusters = kmeans.predict(self.coords).astype(int).reshape(-1, 1)
 
-                    # Proportional sample size based on number of nonzeros- or three zero cells, depending on which
-                    # is larger:
-                    num_nonzeros = len(stratum_df[stratum_df[f"{target}_density"] > 0])
-                    n_sample_nonzeros = int(np.ceil((num_nonzeros // 2) * (1 + (node_feature_density - 1))))
-                    n_sample_zeros = np.maximum(2 * n_sample_nonzeros, 3)
-                    sample_size = n_sample_zeros + n_sample_nonzeros
+                data = np.concatenate(
+                    (
+                        self.coords,
+                        spatial_clusters,
+                        y_arr[target].values.reshape(-1, 1),
+                    ),
+                    axis=1,
+                )
+                temp_df = pd.DataFrame(
+                    data,
+                    columns=["x", "y", "spatial_cluster", target],
+                    index=self.sample_names,
+                )
 
-                    # Sample at least n_sample_zeros zeros if possible:
-                    zero_sub = stratum_df[stratum_df[target] == 0]
-                    n_zeros_sample = np.minimum(n_sample_zeros, len(zero_sub))
-                    sampled_zero_stratum_df = zero_sub.sample(n=n_zeros_sample)
+                temp_df[f"{target}_density"] = temp_df.groupby("spatial_cluster")[target].transform(
+                    lambda x: np.count_nonzero(x) / len(x)
+                )
 
-                    # Check if any nonzeros exist
-                    stratum_nonzero_df = stratum_df[stratum_df[target] > 0]
-                    if not stratum_nonzero_df.empty:
-                        # Sample from nonzeros first
-                        num_nonzeros_sampled = min(len(stratum_nonzero_df), sample_size - n_sample_zeros)
-                        sampled_nonzero_stratum_df = stratum_nonzero_df.sample(n=num_nonzeros_sampled)
+                # Stratified subsampling:
+                sampled_df = pd.DataFrame()
+                for stratum in temp_df["spatial_cluster"].unique():
+                    if len(set(temp_df[f"{target}_density"])) == 2:
+                        stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
+                        # Density of node feature in this stratum
+                        node_feature_density = stratum_df[f"{target}_density"].iloc[0]
 
-                        # Concatenate zeros and nonzeros:
-                        sampled_stratum_df = pd.concat([sampled_nonzero_stratum_df, sampled_zero_stratum_df])
+                        # Set total number of cells to subsample- sample at least 2x the number of zero cells as nonzeros:
+                        # Sample size proportional to stratum size and node feature density:
+                        n_sample_nonzeros = int(np.ceil((len(stratum_df) // 2) * (1 + (node_feature_density - 1))))
+                        n_sample_zeros = 2 * n_sample_nonzeros
+                        sample_size = n_sample_zeros + n_sample_nonzeros
+                        sampled_stratum_df = stratum_df.sample(n=sample_size)
+                        sampled_df = pd.concat([sampled_df, sampled_stratum_df])
+
                     else:
-                        sampled_stratum_df = sampled_zero_stratum_df
+                        stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
+                        # Density of node feature in this stratum
+                        node_feature_density = stratum_df[f"{target}_density"].iloc[0]
 
-                    sampled_df = pd.concat([sampled_df, sampled_stratum_df])
+                        # Proportional sample size based on number of nonzeros- or three zero cells, depending on which
+                        # is larger:
+                        num_nonzeros = len(stratum_df[stratum_df[f"{target}_density"] > 0])
+                        n_sample_nonzeros = int(np.ceil((num_nonzeros // 2) * (1 + (node_feature_density - 1))))
+                        n_sample_zeros = np.maximum(2 * n_sample_nonzeros, 3)
+                        sample_size = n_sample_zeros + n_sample_nonzeros
 
-            if self.comm.rank == 0:
-                self.logger.info(f"For target {target} subsampled from {self.n_samples} to {len(sampled_df)} cells.")
+                        # Sample at least n_sample_zeros zeros if possible:
+                        zero_sub = stratum_df[stratum_df[target] == 0]
+                        n_zeros_sample = np.minimum(n_sample_zeros, len(zero_sub))
+                        sampled_zero_stratum_df = zero_sub.sample(n=n_zeros_sample)
 
-            # Map each non-sampled point to its closest sampled point:
-            distances = cdist(self.coords.astype(float), sampled_df[["x", "y"]].values.astype(float), "euclidean")
-            closest_indices = np.argmin(distances, axis=1)
+                        # Check if any nonzeros exist
+                        stratum_nonzero_df = stratum_df[stratum_df[target] > 0]
+                        if not stratum_nonzero_df.empty:
+                            # Sample from nonzeros first
+                            num_nonzeros_sampled = min(len(stratum_nonzero_df), sample_size - n_sample_zeros)
+                            sampled_nonzero_stratum_df = stratum_nonzero_df.sample(n=num_nonzeros_sampled)
 
-            # Dictionary where keys are indices of subsampled points and values are lists of indices of the original
-            # points closest to them:
-            closest_dict = {}
-            for i, idx in enumerate(closest_indices):
-                key = sampled_df.index[idx]
-                if key not in closest_dict:
-                    closest_dict[key] = []
-                if self.sample_names[i] not in sampled_df.index:
-                    closest_dict[key].append(self.sample_names[i])
+                            # Concatenate zeros and nonzeros:
+                            sampled_stratum_df = pd.concat([sampled_nonzero_stratum_df, sampled_zero_stratum_df])
+                        else:
+                            sampled_stratum_df = sampled_zero_stratum_df
 
-            self.subsampled_indices[target] = [self.sample_names.get_loc(name) for name in sampled_df.index]
-            self.n_samples_fitted[target] = len(sampled_df)
-            self.subsampled_sample_names[target] = sampled_df.index
-            self.neighboring_unsampled[target] = closest_dict
+                        sampled_df = pd.concat([sampled_df, sampled_stratum_df])
+
+                if self.comm.rank == 0:
+                    self.logger.info(
+                        f"For target {target} subsampled from {self.n_samples} to {len(sampled_df)} cells."
+                    )
+
+                # Map each non-sampled point to its closest sampled point:
+                distances = cdist(self.coords.astype(float), sampled_df[["x", "y"]].values.astype(float), "euclidean")
+                closest_indices = np.argmin(distances, axis=1)
+
+                # Dictionary where keys are indices of subsampled points and values are lists of indices of the original
+                # points closest to them:
+                closest_dict = {}
+                for i, idx in enumerate(closest_indices):
+                    key = sampled_df.index[idx]
+                    if key not in closest_dict:
+                        closest_dict[key] = []
+                    if self.sample_names[i] not in sampled_df.index:
+                        closest_dict[key].append(self.sample_names[i])
+
+                self.subsampled_indices[target] = [self.sample_names.get_loc(name) for name in sampled_df.index]
+                self.n_samples_subset[target] = len(sampled_df)
+                self.fitted_sample_names[target] = sampled_df.index
+                self.neighboring_unsampled[target] = closest_dict
+            self.fitted_indices = None
+            self.n_samples_fitted = None
 
         # Cast each of these dictionaries to all processes:
         self.subsampled_indices = self.comm.bcast(self.subsampled_indices, root=0)
+        self.n_samples_subset = self.comm.bcast(self.n_samples_subset, root=0)
+        self.fitted_sample_names = self.comm.bcast(self.fitted_sample_names, root=0)
+        self.fitted_indices = self.comm.bcast(self.fitted_indices, root=0)
         self.n_samples_fitted = self.comm.bcast(self.n_samples_fitted, root=0)
-        self.subsampled_sample_names = self.comm.bcast(self.subsampled_sample_names, root=0)
         self.neighboring_unsampled = self.comm.bcast(self.neighboring_unsampled, root=0)
 
     def _set_search_range(self, signaling_type: Optional[str] = None):
@@ -1195,10 +1233,16 @@ class SWR:
             y = y.reshape(-1, 1)
 
         if self.subsampled:
-            sample_name = self.subsampled_sample_names[y_label][i]
-            n_samples = self.n_samples_fitted[y_label]
-            indices = self.subsampled_indices[y_label]
-            coords = self.coords[indices]
+            if self.group_subset is None:
+                sample_name = self.fitted_sample_names[y_label][i]
+                n_samples = self.n_samples_subset[y_label]
+                indices = self.subsampled_indices[y_label]
+                coords = self.coords[indices]
+            else:
+                sample_name = self.fitted_sample_names[i]
+                n_samples = self.n_samples
+                indices = self.subsampled_indices
+                coords = self.coords[indices]
         else:
             sample_name = self.sample_names[i]
             n_samples = self.n_samples
@@ -1398,13 +1442,14 @@ class SWR:
         else:
             n_features = self.n_features
 
-        # If subsampled, take the subsampled portion of the X array- if :attr `multiscale` is True, this subsampling
-        # will be performed before calling :func `mpi_fit`:
+        # If subsampled, take the subsampled portion of the X array:
         if self.subsampled:
-            indices = self.subsampled_indices[y_label]
-            n_samples = self.n_samples_fitted[y_label]
-            X = X[indices, :]
-            y = y[indices]
+            indices = self.subsampled_indices[y_label] if self.group_subset is None else self.subsampled_indices
+            n_samples = self.n_samples_subset[y_label] if self.group_subset is None else self.n_samples_fitted
+
+            if len(indices) != X.shape[0]:
+                X = X[indices, :]
+                y = y[indices]
         else:
             n_samples = self.n_samples
 
@@ -1641,10 +1686,17 @@ class SWR:
 
             # If subsampled, define the appropriate chunk of the right subsampled array for this process:
             if self.subsampled:
-                n_samples = self.n_samples_fitted[target]
-                chunk_size = int(math.ceil(float(n_samples) / self.comm.size))
-                # Assign chunks to each process:
-                self.x_chunk = np.arange(n_samples)[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+                if self.group_subset is None:
+                    n_samples = self.n_samples_subset[target]
+                    chunk_size = int(math.ceil(float(n_samples) / self.comm.size))
+                    # Assign chunks to each process:
+                    self.x_chunk = np.arange(n_samples)[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+                else:
+                    n_samples = self.n_samples_fitted
+                    fitted_indices = self.fitted_indices
+                    chunk_size = int(math.ceil(float(n_samples) / self.comm.size))
+                    # Assign chunks to each process:
+                    self.x_chunk = fitted_indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
 
             # Check for initial weights:
             if init_betas is not None:
@@ -1699,7 +1751,9 @@ class SWR:
                 in the fitting process from file.
         """
         if input is None:
-            input = self.X
+            input_all = self.X
+        else:
+            input_all = input
 
         if coeffs is None:
             coeffs = self.return_outputs()
@@ -1707,6 +1761,14 @@ class SWR:
             if isinstance(coeffs, Dict):
                 all_y_pred = pd.DataFrame(index=self.sample_names)
                 for target in coeffs:
+                    # Adjust input if subsampled:
+                    if self.subsampled:
+                        indices = (
+                            self.subsampled_indices[target] if self.group_subset is None else self.subsampled_indices
+                        )
+
+                        input = input_all[indices, :]
+
                     if input.shape[0] != coeffs[target].shape[0]:
                         raise ValueError(
                             f"Input data has {input.shape[0]} samples but coefficients for target {target} have "
@@ -1860,8 +1922,9 @@ class SWR:
             all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
             betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
 
-            # If subsampling was performed, extend coefficients to non-sampled neighboring points:
-            if self.subsampled:
+            # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
+            # subsampling is not done by cell type group):
+            if self.subsampled and self.group_subset is None:
                 sampled_to_nonsampled_map = self.neighboring_unsampled[target]
                 betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
                 for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
@@ -2038,8 +2101,13 @@ class MuSIC(SWR):
             y_label = target
 
             if self.subsampled:
-                n_samples = self.n_samples_fitted[y_label]
-                indices = self.subsampled_indices[y_label]
+                if self.group_subset is None:
+                    n_samples = self.n_samples_subset[y_label]
+                    indices = self.subsampled_indices[y_label]
+                else:
+                    n_samples = self.n_samples_fitted
+                    indices = self.fitted_indices
+
             else:
                 n_samples = self.n_samples
                 indices = np.arange(self.n_samples)
@@ -2053,6 +2121,10 @@ class MuSIC(SWR):
 
             # Initial values- multiply input by the array corresponding to the correct target- note that this is
             # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
+            if self.subsampled:
+                X = X[indices, :]
+                y = y.loc[indices, :]
+
             y_pred_init = X * all_betas[target]
             all_y_pred = np.sum(y_pred_init, axis=1)
 
@@ -2279,8 +2351,12 @@ class MuSIC(SWR):
 
         # Compute coefficients for each chunk:
         for i in range(self.n_samples):
+            if self.group_subset is not None:
+                index = self.fitted_indices[i]
+            else:
+                index = i
             wi = get_wi(
-                i, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
+                index, n_samples=self.n_samples, coords=self.coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
             ).reshape(-1, 1)
             xT = (X * wi).T
             # Reconstitute the response-input mapping, but only for the current chunk:
@@ -2370,7 +2446,7 @@ class MuSIC(SWR):
 
         y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
         for target_label in y_arr.columns:
-            # sample_names = self.sample_names if not self.subsampled else self.subsampled_sample_names[target_label]
+            # sample_names = self.sample_names if not self.subsampled else self.fitted_sample_names[target_label]
             # Fitted coefficients, errors and predictions:
             parameters = self.params_all_targets[target_label]
             predictions = self.predictions_all_targets[target_label]
@@ -2379,10 +2455,17 @@ class MuSIC(SWR):
 
             # If subsampling was done, check for the number of fitted samples for the right target:
             if self.subsampled:
-                self.n_samples = self.n_samples_fitted[target_label]
-                self.indices = self.subsampled_indices[target_label]
-                self.coords = self.coords[self.indices, :]
-                X = X[self.indices, :]
+                if self.group_subset is None:
+                    self.n_samples = self.n_samples_subset[target_label]
+                    self.indices = self.subsampled_indices[target_label]
+                    self.coords = self.coords[self.indices, :]
+                    X = X[self.indices, :]
+                else:
+                    self.n_samples = self.n_samples_fitted
+                    self.indices = self.subsampled_indices
+                    self.fitted_indices = self.fitted_indices
+                    self.coords = self.coords[self.indices, :]
+                    X = X[self.fitted_indices, :]
             else:
                 self.indices = np.arange(self.n_samples)
 

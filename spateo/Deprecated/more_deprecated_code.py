@@ -806,7 +806,7 @@ def mpi_fit(
     # will be performed before calling :func `mpi_fit`:
     if self.subsampled:
         indices = self.subsampled_indices[y_label]
-        n_samples = self.n_samples_fitted[y_label]
+        n_samples = self.n_samples_subset[y_label]
         X = X[indices, :]
         y = y[indices]
     else:
@@ -1062,7 +1062,7 @@ def multiscale_backfitting(
         y_label = target
 
         if self.subsampled:
-            n_samples = self.n_samples_fitted[y_label]
+            n_samples = self.n_samples_subset[y_label]
             indices = self.subsampled_indices[y_label]
         else:
             n_samples = self.n_samples
@@ -1324,7 +1324,7 @@ def multiscale_compute_metrics(self, X: Optional[np.ndarray] = None, n_chunks: i
 
         # If subsampling was done, check for the number of fitted samples for the right target:
         if self.subsampled:
-            self.n_samples = self.n_samples_fitted[target_label]
+            self.n_samples = self.n_samples_subset[target_label]
             self.indices = self.subsampled_indices[target_label]
             self.coords = self.coords[self.indices, :]
             X = X[self.indices, :]

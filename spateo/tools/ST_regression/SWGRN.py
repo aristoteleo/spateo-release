@@ -220,6 +220,7 @@ class SWGRN(MuSIC):
         # Ligand array:
         if self.add_ligands_to_grn:
             if self.custom_ligands_path is not None:
+                self.logger.info(f"Loading custom list of ligands from {self.custom_regulators_path}...")
                 with open(self.custom_ligands_path, "r") as f:
                     ligands = f.read().splitlines()
                     ligands = [l for l in ligands if l in database_ligands]
@@ -273,6 +274,7 @@ class SWGRN(MuSIC):
         # Receptor array:
         if self.add_receptors_to_grn:
             if self.custom_receptors_path is not None:
+                self.logger.info(f"Loading custom list of receptors from {self.custom_regulators_path}...")
                 with open(self.custom_receptors_path, "r") as f:
                     receptors = f.read().splitlines()
                     receptors = [r for r in receptors if r in database_receptors]
@@ -419,13 +421,15 @@ class SWGRN(MuSIC):
                 self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
                 self.feature_names = ["intercept"] + self.feature_names
 
+        # Check that there is reasonable evidence that selected molecules can act as transcriptional regulators:
+
         # To initialize coefficients, filter the GRN rows and columns to only include the regulators and targets-
         # note that initial betas will only be used in Poisson / negative binomial regressions:
-        self.all_betas = {}
+        self.init_betas = {}
         grn = grn.loc[all_molecule_targets, regulators]
         for row in grn.index:
-            self.all_betas[row] = grn.loc[row, :].values
-        self.all_betas = self.comm.bcast(self.all_betas, root=0)
+            self.init_betas[row] = grn.loc[row, :].values
+        self.init_betas = self.comm.bcast(self.init_betas, root=0)
 
         # Indicate thet model has been set up:
         self.set_up = True
@@ -464,7 +468,7 @@ class SWGRN(MuSIC):
             X = self.X
 
         # X and y will be automatically broadcast during the fitting process:
-        all_data, all_bws = self.fit(y_arr, X, init_betas=self.all_betas, multiscale=False)
+        all_data, all_bws = self.fit(y_arr, X, init_betas=self.init_betas, multiscale=False)
 
         return all_data, all_bws
 
@@ -482,7 +486,7 @@ class SWGRN(MuSIC):
             X = self.X
 
         # X and y will be automatically broadcast during the fitting process:
-        self.multiscale_backfitting(y_arr, X, init_betas=self.all_betas)
+        self.multiscale_backfitting(y_arr, X, init_betas=self.init_betas)
         self.multiscale_compute_metrics(X, n_chunks=int(self.multiscale_chunks))
         self.predict_and_save()
 

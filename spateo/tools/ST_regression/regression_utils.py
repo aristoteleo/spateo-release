@@ -19,7 +19,7 @@ from sklearn.preprocessing import MinMaxScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
-sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
+sys.path.insert(1, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
 from spateo.configuration import SKM
 from spateo.logging import logger_manager as lm

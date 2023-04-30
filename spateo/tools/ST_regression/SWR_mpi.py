@@ -109,7 +109,8 @@ if __name__ == "__main__":
         "-group_subset",
         nargs="+",
         type=str,
-        help="If provided, only cells with labels that correspond to these group(s) will be used as prediction targets.",
+        help="If provided, only cells with labels that correspond to these group(s) will be used as prediction "
+        "targets. Will search in key corresponding to the input to arg 'cell_type' if given.",
     )
     parser.add_argument(
         "-covariate_keys",
