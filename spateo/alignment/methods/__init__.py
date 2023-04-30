@@ -1,4 +1,4 @@
-from .BioAlign import BA_align
+from .mropho import BA_align
 from .paste import (
     generalized_procrustes_analysis,
     paste_center_align,

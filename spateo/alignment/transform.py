@@ -5,7 +5,7 @@ import torch
 from anndata import AnnData
 
 from .methods import cal_dist, cal_dot
-from .methods.BioAlign import con_K
+from .methods.mropho import con_K
 from .methods.utils import (
     _data,
     _dot,
