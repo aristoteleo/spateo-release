@@ -782,8 +782,9 @@ def coarse_rigid_alignment(
     R_flip[-1, -1] = -1
 
     P, R, t, init_weight, sigma2, gamma = inlier_from_NN(train_x, train_y, distance[:, None])
-    P2, R2, t2, init_weight, sigma2_2, gamma_2 = inlier_from_NN(train_x, np.dot(train_y, R_flip), distance[:, None])
-    if sigma2_2 < sigma2 and gamma_2 > gamma:
+    # P2, R2, t2, init_weight, sigma2_2, gamma_2 = inlier_from_NN(train_x, np.dot(train_y, R_flip), distance[:, None])
+    P2, R2, t2, init_weight, sigma2_2, gamma_2 = inlier_from_NN(np.dot(train_x, R_flip), train_y, distance[:, None])
+    if gamma_2 > gamma:
         P = P2
         R = R2
         t = t2
@@ -809,17 +810,13 @@ def inlier_from_NN(
     N, D = train_x.shape[0], train_x.shape[1]
     alpha = 1
     distance = np.maximum(0, distance)
-    # normalize = np.sort(distance,0)[10]
     normalize = np.max(distance) / (np.log(10) * 2)
-    # distance = distance / (np.maximum(normalize,1e-2))
     distance = distance / (normalize)
     R = np.eye(D)
     t = np.ones((D, 1))
     y_hat = train_x
     sigma2 = np.sum((y_hat - train_y) ** 2) / (D * N)
     weight = np.exp(-distance * alpha)
-    # weight = weight / np.max(weight)
-    # weight = np.ones((N,1))
     init_weight = weight
     P = np.multiply(np.ones((N, 1)), weight)
     max_iter = 100
@@ -849,20 +846,22 @@ def inlier_from_NN(
         outlier_part = np.max(weight) * (1 - gamma) * np.power((2 * np.pi * sigma2), D / 2) / (gamma * a)
         P = term1 / (term1 + outlier_part)
         Sp = np.sum(P)
-        # num_ind = np.where(P > 0.5)[0].shape[0]
-        # gamma = np.minimum(np.maximum(num_ind / N, 0.05),0.95)
         gamma = np.minimum(np.maximum(Sp / N, 0.01), 0.99)
         P = np.maximum(P, 1e-6)
 
         # update sigma2
         sigma2 = np.sum(np.multiply((y_hat - train_y) ** 2, P)) / (D * Sp)
-        # print(sigma2)
         if iter > 20:
             alpha = alpha * alpha_decrease
             weight = np.exp(-distance * alpha)
             weight = weight / np.max(weight)
-    # print("sigma2: ", sigma2)
-    # print("gamma: ", gamma)
+
+    fix_sigma2 = 1e-2
+    fix_gamma = 0.1
+    term1 = np.multiply(np.exp(-(np.sum((train_y - y_hat) ** 2, 1, keepdims=True)) / (2 * fix_sigma2)), weight)
+    outlier_part = np.max(weight) * (1 - fix_gamma) * np.power((2 * np.pi * fix_sigma2), D / 2) / (fix_gamma * a)
+    P = term1 / (term1 + outlier_part)
+    gamma = np.minimum(np.maximum(np.sum(P) / N, 0.01), 0.99)
     return P, R, t, init_weight, sigma2, gamma
 
 
