@@ -24,7 +24,11 @@ from spateo.preprocessing.transform import log1p
 from spateo.tools.find_neighbors import transcriptomic_connectivity
 from spateo.tools.spatial_degs import moran_i
 from spateo.tools.ST_regression.distributions import NegativeBinomial, Poisson
-from spateo.tools.ST_regression.regression_utils import multicollinearity_check, smooth
+from spateo.tools.ST_regression.regression_utils import (
+    iwls,
+    multicollinearity_check,
+    smooth,
+)
 from spateo.tools.ST_regression.SWR import MuSIC
 
 
@@ -54,14 +58,26 @@ class SWGRN(MuSIC):
         custom_lig_path: Optional path to a .txt file containing a list of ligands for the model, separated by
             newlines. If not provided, will select ligands using a threshold based on expression
             levels in the data.
+        custom_ligands: Optional list of ligands for the model, can be used as an alternative to :attr
+            `custom_lig_path`. Only used if :attr `mod_type` is "lr" or "ligand".
         custom_rec_path: Optional path to a .txt file containing a list of receptors for the model, separated by
             newlines. If not provided, will select receptors using a threshold based on expression
             levels in the data.
+        custom_receptors: Optional list of receptors for the model, can be used as an alternative to :attr
+            `custom_rec_path`. Only used if :attr `mod_type` is "lr".
         custom_pathways_path: Rather than  providing a list of receptors, can provide a list of signaling pathways-
             all receptors with annotations in this pathway will be included in the model.
+        custom_pathways: Optional list of signaling pathways for the model, can be used as an alternative to :attr
+            `custom_pathways_path`. Only used if :attr `mod_type` is "lr".
         custom_regulators_path: Optional path to a .txt file containing a list of regulatory factors (e.g.
             transcription factors) for the model. If not provided, will select transcription factors using a
-            threshold based on expression levels in the data.
+            threshold based on expression levels in the data. Only used if :attr `mod_type` is "grn".
+        custom_regulators: Optional list of regulatory factors for the model, can be used as an alternative to :attr
+            `custom_regulators_path`. Only used if :attr `mod_type` is "grn".
+        targets_path: Optional path to a .txt file containing a list of prediction target genes for the model,
+            separated by newlines. If not provided, targets will be strategically selected from the given receptors.
+        custom_targets: Optional list of prediction target genes for the model, can be used as an alternative to
+            :attr `targets_path`.
 
 
         cci_dir: Full path to the directory containing cell-cell communication databases
@@ -94,6 +110,7 @@ class SWGRN(MuSIC):
 
         self.regulators = None
         self.custom_regulators_path = self.arg_retrieve.custom_regulators_path
+        self.custom_regulators = self.arg_retrieve.tf
         self.add_ligands_to_grn = self.arg_retrieve.fit_ligands_grn
         self.add_receptors_to_grn = self.arg_retrieve.fit_receptors_grn
         if not self.add_ligands_to_grn and not self.add_receptors_to_grn and self.targets_path is None:
@@ -219,13 +236,16 @@ class SWGRN(MuSIC):
 
         # Ligand array:
         if self.add_ligands_to_grn:
-            if self.custom_ligands_path is not None:
-                self.logger.info(f"Loading custom list of ligands from {self.custom_regulators_path}...")
-                with open(self.custom_ligands_path, "r") as f:
-                    ligands = f.read().splitlines()
-                    ligands = [l for l in ligands if l in database_ligands]
-                    # Get individual components if any complexes are included in this list:
-                    ligands = [l for item in ligands for l in item.split("_")]
+            if self.custom_ligands_path is not None or self.custom_ligands is not None:
+                if self.custom_ligands_path is not None:
+                    self.logger.info(f"Loading custom list of ligands from {self.custom_ligands_path}...")
+                    with open(self.custom_ligands_path, "r") as f:
+                        ligands = f.read().splitlines()
+                else:
+                    ligands = self.custom_ligands
+                ligands = [l for l in ligands if l in database_ligands]
+                # Get individual components if any complexes are included in this list:
+                ligands = [l for item in ligands for l in item.split("_")]
             else:
                 # List of possible complexes to search through:
                 l_complexes = [elem for elem in database_ligands if "_" in elem]
@@ -273,18 +293,24 @@ class SWGRN(MuSIC):
 
         # Receptor array:
         if self.add_receptors_to_grn:
-            if self.custom_receptors_path is not None:
-                self.logger.info(f"Loading custom list of receptors from {self.custom_regulators_path}...")
-                with open(self.custom_receptors_path, "r") as f:
-                    receptors = f.read().splitlines()
-                    receptors = [r for r in receptors if r in database_receptors]
-                    # Get individual components if any complexes are included in this list:
-                    receptors = [r for item in receptors for r in item.split("_")]
+            if self.custom_receptors_path is not None or self.custom_receptors is not None:
+                if self.custom_receptors_path is not None:
+                    self.logger.info(f"Loading custom list of receptors from {self.custom_receptors_path}...")
+                    with open(self.custom_receptors_path, "r") as f:
+                        receptors = f.read().splitlines()
+                else:
+                    receptors = self.custom_receptors
+                receptors = [r for r in receptors if r in database_receptors]
+                # Get individual components if any complexes are included in this list:
+                receptors = [r for item in receptors for r in item.split("_")]
 
-            elif self.custom_pathways_path is not None:
-                with open(self.custom_pathways_path, "r") as f:
-                    pathways = f.read().splitlines()
-                    pathways = [p for p in pathways if p in database_pathways]
+            elif self.custom_pathways_path is not None or self.custom_pathways is not None:
+                if self.custom_pathways_path is not None:
+                    with open(self.custom_pathways_path, "r") as f:
+                        pathways = f.read().splitlines()
+                else:
+                    pathways = self.custom_pathways
+                pathways = [p for p in pathways if p in database_pathways]
                 # Get all receptors associated with these pathway(s):
                 r_tf_db_subset = r_tf_db[r_tf_db["pathway"].isin(pathways)]
                 receptors = set(r_tf_db_subset["receptor"])
@@ -338,10 +364,13 @@ class SWGRN(MuSIC):
         else:
             receptors = []
 
-        if self.targets_path is not None:
-            with open(self.targets_path, "r") as f:
-                targets = f.read().splitlines()
-                targets = [t for t in targets if t in self.adata.var_names]
+        if self.targets_path is not None or self.custom_targets is not None:
+            if self.targets_path is not None:
+                with open(self.targets_path, "r") as f:
+                    targets = f.read().splitlines()
+            else:
+                targets = self.custom_targets
+            targets = [t for t in targets if t in self.adata.var_names]
             all_molecule_targets = ligands + receptors + targets
         else:
             all_molecule_targets = ligands + receptors
@@ -355,10 +384,13 @@ class SWGRN(MuSIC):
         )
 
         # Define array of potential regulators:
-        if self.custom_regulators_path is not None:
-            with open(self.custom_regulators_path, "r") as f:
-                regulators = f.read().splitlines()
-                regulators = [r for r in regulators if r in self.adata.var_names]
+        if self.custom_regulators_path is not None or self.custom_regulators is not None:
+            if self.custom_regulators_path is not None:
+                with open(self.custom_regulators_path, "r") as f:
+                    regulators = f.read().splitlines()
+            else:
+                regulators = self.custom_regulators
+            regulators = [r for r in regulators if r in self.adata.var_names]
         else:
             # Get list of regulatory factors from among the most highly spatially-variable genes, indicative of
             # potentially interesting spatially-enriched signal:
@@ -434,14 +466,36 @@ class SWGRN(MuSIC):
         # Indicate thet model has been set up:
         self.set_up = True
 
+    def hessian(self, fitted: np.ndarray, X: np.ndarray) -> np.ndarray:
+        """Compute the Hessian matrix for the given spatially-weighted model, representing the confidence in the
+        parameter estimates. Note that this is formed such that the Hessian matrix is computed for each cell.
+
+        Args:
+            fitted: Array of shape [n_samples,]; fitted mean response variable (link function evaluated
+                at the linear predicted values)
+            X: Independent variable array of shape [n_samples, n_features]
+
+        Returns:
+            hessian: Hessian matrix
+        """
+        if X is None:
+            X = self.X
+
+        if self.distr == "gaussian":
+            hessian = np.dot(X.T, X)
+        elif self.distr == "poisson":
+            hessian = np.dot(X.T, np.dot(np.diag(fitted), X))
+        elif self.distr == "nb":
+            hessian = np.dot(X.T, np.dot(np.diag(fitted * (1 + fitted / self.distr_obj.variance.disp)), X))
+        return hessian
+
     def grn_fit(
         self,
         y: Optional[pd.DataFrame] = None,
         X: Optional[np.ndarray] = None,
     ):
         """For each column of the dependent variable array (in this specific case, for each gene expression vector
-        for ligands/receptors/other targets), fit model. If given bandwidth, run :func `SWR.mpi_fit()` with the
-        given bandwidth. Otherwise, compute optimal bandwidth using :func `SWR.select_optimal_bw()`, minimizing AICc.
+        for ligands/receptors/other targets), fit a nonspatial model.
 
         Args:
             y: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
@@ -449,7 +503,149 @@ class SWGRN(MuSIC):
                 individual column will serve as an independent variable).
             X: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
                 None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
-            multiscale: Set True to indicate that a multiscale model should be fitted
+        """
+        if y is None:
+            y_arr = self.molecule_expr
+        else:
+            y_arr = y
+
+        if X is None:
+            X = self.X
+
+        # Array to store fit outputs:
+        fit_outputs = np.empty((y_arr.shape[1], self.n_features * 2), dtype=np.float64)
+
+        # Fit for each target:
+        for target in y_arr.columns:
+            y = y_arr[target].values
+            y = self.comm.bcast(y, root=0)
+
+            # Subsample if necessary:
+            if self.subsampled:
+                indices = self.subsampled_indices[target] if self.group_subset is None else self.subsampled_indices
+                n_samples = self.n_samples_subset[target] if self.group_subset is None else self.n_samples_fitted
+                sample_names = (
+                    self.fitted_sample_names[target] if self.group_subset is None else self.fitted_sample_names
+                )
+
+                if len(indices) != X.shape[0]:
+                    X = X[indices, :]
+                    y = y[indices]
+
+                self.init_betas = self.init_betas[indices, :]
+            else:
+                n_samples = self.n_samples
+                sample_names = self.sample_names
+
+            betas, y_hat, _, final_irls_weights, _, _, pseudoinverse = iwls(
+                y,
+                X,
+                distr=self.distr,
+                init_betas=self.init_betas,
+                tol=self.tolerance,
+                max_iter=self.max_iter,
+                spatial_weights=None,
+                link=None,
+                alpha=self.alpha,
+                tau=None,
+            )
+
+            # Reshape coefficients to add to dataframe:
+            betas = betas.reshape(1, -1)
+            # For GLM models, this is the predicted linear predictor:
+            if self.distr != "gaussian":
+                pred_lin_pred = y_hat
+                y_hat = self.distr_obj.predict(pred_lin_pred)
+            residual = y - y_hat
+
+            # For computing standard errors:
+            # Degrees of freedom:
+            if self.fit_intercept:
+                ENP = self.n_features + 1
+            else:
+                ENP = self.n_features
+
+            # Diagnostics:
+            if self.distr == "gaussian":
+                RSS = np.sum(residual**2)
+                # Total sum of squares:
+                TSS = np.sum((y - np.mean(y)) ** 2)
+                r_squared = 1 - RSS / TSS
+
+                # Residual variance:
+                sigma_squared = RSS / (n_samples - ENP)
+                # Corrected Akaike Information Criterion:
+                aicc = self.compute_aicc_linear(RSS, ENP, n_samples=n_samples)
+
+                # For saving/showing outputs:
+                header = "index,residual,"
+                deviance = None
+
+                # Return output diagnostics and save result:
+                save_outputs = np.concatenate((sample_names.reshape(-1, 1), residual.reshape(-1, 1)), axis=1)
+                self.save_results(save_outputs, header, label=target)
+                self.output_diagnostics(aicc, ENP, r_squared, deviance)
+
+            elif self.distr == "poisson" or self.distr == "nb":
+                # For negative binomial, first compute the dispersion:
+                if self.distr == "nb":
+                    dev_resid = self.distr_obj.deviance_residuals(y, y_hat)
+                    residual_deviance = np.sum(dev_resid**2)
+                    df = n_samples - ENP
+                    self.distr_obj.variance.disp = residual_deviance / df
+                # Deviance:
+                deviance = self.distr_obj.deviance(y, y_hat)
+                # Log-likelihood:
+                ll = self.distr_obj.log_likelihood(y, y_hat)
+                # Corrected Akaike Information Criterion:
+                aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
+                # Variance of the error term (for computing standard errors):
+                sigma_squared = deviance / (n_samples - ENP)
+
+                # For saving/showing outputs:
+                header = "index,prediction,"
+                r_squared = None
+
+                # Return output diagnostics and save result:
+                save_outputs = np.concatenate((sample_names.reshape(-1, 1), y_hat.reshape(-1, 1)), axis=1)
+                self.save_results(save_outputs, header, label=target)
+                self.output_diagnostics(aicc, ENP, r_squared, deviance)
+
+            # To obtain standard errors for each coefficient, take the square root of the diagonal elements of
+            # the covariance matrix:
+            hessian = self.hessian(y_hat, X)
+            cov = np.linalg.inv(hessian) * sigma_squared
+            se = np.sqrt(np.diag(cov)).reshape(1, -1)
+            # Store coefficients and standard errors:
+            coeff_info = np.concatenate((betas, se), axis=1)
+            fit_outputs[target, :] = coeff_info
+
+        # Convert coefficient & standard error array to dataframe:
+        varNames = self.feature_names
+        # Columns for the possible intercept, coefficients and squared canonical coefficients:
+        b_cols = ["b_" + x for x in varNames]
+        se_cols = ["se_" + x for x in varNames]
+        coeff_cols = b_cols + se_cols
+        fit_outputs = pd.DataFrame(fit_outputs, columns=coeff_cols, index=y_arr.columns)
+
+        path = os.path.splitext(self.output_path)[0] + "_grn" + os.path.splitext(self.output_path)[1]
+        fit_outputs.to_csv(path)
+
+    def grn_fit_swr(
+        self,
+        y: Optional[pd.DataFrame] = None,
+        X: Optional[np.ndarray] = None,
+    ):
+        """For each column of the dependent variable array (in this specific case, for each gene expression vector
+        for ligands/receptors/other targets), fit model. If given bandwidth, run :func `SWR.mpi_fit()` with the
+        given bandwidth. Otherwise, compute optimal bandwidth using :func `SWR.find_optimal_bw()`, minimizing AICc.
+
+        Args:
+            y: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
+                None, will use :attr `targets_expr` computed using the given AnnData object to create this (each
+                individual column will serve as an independent variable).
+            X: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
+                None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
 
         Returns:
             all_data: Dictionary containing outputs of :func `SWR.mpi_fit()` with the chosen or determined bandwidth-

@@ -79,15 +79,23 @@ class SWR:
             newlines. Only used if :attr `mod_type` is "lr" or "ligand" (and thus uses ligand expression directly in
             the inference). If not provided, will select ligands using a threshold based on expression
             levels in the data.
+        custom_ligands: Optional list of ligands for the model, can be used as an alternative to :attr
+            `custom_lig_path`. Only used if :attr `mod_type` is "lr" or "ligand".
         custom_rec_path: Optional path to a .txt file containing a list of receptors for the model, separated by
             newlines. Only used if :attr `mod_type` is "lr" (and thus uses receptor expression directly in the
             inference). If not provided, will select receptors using a threshold based on expression
             levels in the data.
-        custom_pathways_path: Rather than  providing a list of receptors, can provide a list of signaling pathways-
+        custom_receptors: Optional list of receptors for the model, can be used as an alternative to :attr
+            `custom_rec_path`. Only used if :attr `mod_type` is "lr".
+        custom_pathways_path: Rather than providing a list of receptors, can provide a list of signaling pathways-
             all receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
             is "lr".
+        custom_pathways: Optional list of signaling pathways for the model, can be used as an alternative to :attr
+            `custom_pathways_path`. Only used if :attr `mod_type` is "lr".
         targets_path: Optional path to a .txt file containing a list of prediction target genes for the model,
             separated by newlines. If not provided, targets will be strategically selected from the given receptors.
+        custom_targets: Optional list of prediction target genes for the model, can be used as an alternative to
+            :attr `targets_path`.
         init_betas_path: Optional path to a .npy file containing initial coefficient values for the model. Initial
             coefficients should have shape [n_features, ].
 
@@ -262,9 +270,13 @@ class SWR:
         self.species = self.arg_retrieve.species
         self.output_path = self.arg_retrieve.output_path
         self.custom_ligands_path = self.arg_retrieve.custom_lig_path
+        self.custom_ligands = self.arg_retrieve.ligand
         self.custom_receptors_path = self.arg_retrieve.custom_rec_path
+        self.custom_receptors = self.arg_retrieve.receptor
         self.custom_pathways_path = self.arg_retrieve.custom_pathways_path
+        self.custom_pathways = self.arg_retrieve.pathway
         self.targets_path = self.arg_retrieve.targets_path
+        self.custom_targets = self.arg_retrieve.target
         self.init_betas_path = self.arg_retrieve.init_betas_path
         # Check if path to init betas is given:
         if self.init_betas_path is not None:
@@ -349,13 +361,19 @@ class SWR:
                 self.logger.info(f"Loading CSV file from: {self.csv_path}")
             if self.mod_type is not None:
                 self.logger.info(f"Model type: {self.mod_type}")
-                self.logger.info(f"Loading cell-cell interaction databases from the following folder: {self.cci_dir}")
+                self.logger.info(f"Loading cell-cell interaction databases from the following folder: {self.cci_dir}.")
                 if self.custom_ligands_path is not None:
-                    self.logger.info(f"Using list of custom ligands from: {self.custom_ligands_path}")
+                    self.logger.info(f"Using list of custom ligands from: {self.custom_ligands_path}.")
+                if self.custom_ligands is not None:
+                    self.logger.info(f"Using the provided list of ligands: {self.custom_ligands}.")
                 if self.custom_receptors_path is not None:
-                    self.logger.info(f"Using list of custom receptors from: {self.custom_receptors_path}")
+                    self.logger.info(f"Using list of custom receptors from: {self.custom_receptors_path}.")
+                if self.custom_receptors is not None:
+                    self.logger.info(f"Using the provided list of receptors: {self.custom_receptors}.")
                 if self.targets_path is not None:
-                    self.logger.info(f"Using list of target genes from: {self.targets_path}")
+                    self.logger.info(f"Using list of target genes from: {self.targets_path}.")
+                if self.custom_targets is not None:
+                    self.logger.info(f"Using provided list of target genes: {self.custom_targets}.")
                 self.logger.info(
                     f"Saving results to: {self.output_path}. Note that running `fit` or "
                     f"`predict_and_save` will clear the contents of this folder- copy any essential "
@@ -469,13 +487,16 @@ class SWR:
             database_receptors = set(self.lr_db["to"])
             database_pathways = set(r_tf_db["pathway"])
 
-            if self.custom_ligands_path is not None:
-                with open(self.custom_ligands_path, "r") as f:
-                    ligands = f.read().splitlines()
-                    ligands = [l for l in ligands if l in database_ligands]
-                    l_complexes = [elem for elem in ligands if "_" in elem]
-                    # Get individual components if any complexes are included in this list:
-                    ligands = [l for item in ligands for l in item.split("_")]
+            if self.custom_ligands_path is not None or self.custom_ligands is not None:
+                if self.custom_ligands_path is not None:
+                    with open(self.custom_ligands_path, "r") as f:
+                        ligands = f.read().splitlines()
+                else:
+                    ligands = self.custom_ligands
+                ligands = [l for l in ligands if l in database_ligands]
+                l_complexes = [elem for elem in ligands if "_" in elem]
+                # Get individual components if any complexes are included in this list:
+                ligands = [l for item in ligands for l in item.split("_")]
             else:
                 # List of possible complexes to search through:
                 l_complexes = [elem for elem in database_ligands if "_" in elem]
@@ -553,18 +574,24 @@ class SWR:
             first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
             self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
 
-            if self.custom_receptors_path is not None:
-                with open(self.custom_receptors_path, "r") as f:
-                    receptors = f.read().splitlines()
-                    receptors = [r for r in receptors if r in database_receptors]
-                    r_complexes = [elem for elem in receptors if "_" in elem]
-                    # Get individual components if any complexes are included in this list:
-                    receptors = [r for item in receptors for r in item.split("_")]
+            if self.custom_receptors_path is not None or self.custom_receptors is not None:
+                if self.custom_receptors_path is not None:
+                    with open(self.custom_receptors_path, "r") as f:
+                        receptors = f.read().splitlines()
+                else:
+                    receptors = self.custom_receptors
+                receptors = [r for r in receptors if r in database_receptors]
+                r_complexes = [elem for elem in receptors if "_" in elem]
+                # Get individual components if any complexes are included in this list:
+                receptors = [r for item in receptors for r in item.split("_")]
 
-            elif self.custom_pathways_path is not None:
-                with open(self.custom_pathways_path, "r") as f:
-                    pathways = f.read().splitlines()
-                    pathways = [p for p in pathways if p in database_pathways]
+            elif self.custom_pathways_path is not None or self.custom_pathways is not None:
+                if self.custom_pathways_path is not None:
+                    with open(self.custom_pathways_path, "r") as f:
+                        pathways = f.read().splitlines()
+                else:
+                    pathways = self.custom_pathways
+                pathways = [p for p in pathways if p in database_pathways]
                 # Get all receptors associated with these pathway(s):
                 r_tf_db_subset = r_tf_db[r_tf_db["pathway"].isin(pathways)]
                 receptors = set(r_tf_db_subset["receptor"])
@@ -706,10 +733,13 @@ class SWR:
                 "automatically inferred, but receptor information does not exist for the other models."
             )
 
-        if self.targets_path is not None:
-            with open(self.targets_path, "r") as f:
-                targets = f.read().splitlines()
-                targets = [t for t in targets if t in adata.var_names]
+        if self.targets_path is not None or self.custom_targets is not None:
+            if self.targets_path is not None:
+                with open(self.targets_path, "r") as f:
+                    targets = f.read().splitlines()
+            else:
+                targets = self.custom_targets
+            targets = [t for t in targets if t in adata.var_names]
 
         # Else get targets by connecting to the targets of the L:R-downstream transcription factors:
         else:
@@ -1240,7 +1270,7 @@ class SWR:
                 coords = self.coords[indices]
             else:
                 sample_name = self.fitted_sample_names[i]
-                n_samples = self.n_samples
+                n_samples = self.n_samples_fitted[i]
                 indices = self.subsampled_indices
                 coords = self.coords[indices]
         else:
@@ -1309,7 +1339,8 @@ class SWR:
         else:
             # For bandwidth optimization:
             if self.distr == "gaussian" or fit_predictor:
-                bw_diagnostic = residual * residual
+                # bw_diagnostic = residual * residual
+                bw_diagnostic = residual
                 return [bw_diagnostic, hat_i]
             elif self.distr == "poisson" or self.distr == "nb":
                 bw_diagnostic = pred_y
@@ -1450,6 +1481,7 @@ class SWR:
             if len(indices) != X.shape[0]:
                 X = X[indices, :]
                 y = y[indices]
+            self.init_betas = self.init_betas[indices, :]
         else:
             n_samples = self.n_samples
 
@@ -1525,6 +1557,12 @@ class SWR:
                     self.save_results(all_fit_outputs, header, label=y_label)
 
                 if self.distr == "poisson" or self.distr == "nb":
+                    # For negative binomial, first compute the dispersion:
+                    if self.distr == "nb":
+                        dev_resid = self.distr_obj.deviance_residuals(y, all_fit_outputs[:, 1])
+                        residual_deviance = np.sum(dev_resid**2)
+                        df = n_samples - ENP
+                        self.distr_obj.variance.disp = residual_deviance / df
                     # Deviance:
                     deviance = self.distr_obj.deviance(y, all_fit_outputs[:, 1])
                     # Log-likelihood:
@@ -1536,22 +1574,6 @@ class SWR:
                     ENP = np.sum(all_fit_outputs[:, 2])
                     # Corrected Akaike Information Criterion:
                     aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
-                    # To obtain standard errors for each coefficient, take the square root of the diagonal elements
-                    # of the covariance matrix:
-                    # Compute the covariance matrix using the Hessian- first compute the estimate for dispersion of
-                    # the NB distribution:
-                    if self.distr == "nb":
-                        theta = 1 / self.distr_obj.variance(all_fit_outputs[:, 1])
-                        weights = self.distr_obj.weights(all_fit_outputs[:, 1])
-                        deviance = 2 * np.sum(
-                            weights
-                            * (
-                                y * np.log(y / all_fit_outputs[:, 1])
-                                + (theta - 1) * np.log(1 + all_fit_outputs[:, 1] / (theta - 1))
-                            )
-                        )
-                        dof = len(y) - self.X.shape[1]
-                        self.distr_obj.variance.disp = deviance / dof
 
                     # For saving/showing outputs:
                     header = "index,prediction,influence,"
@@ -1632,7 +1654,7 @@ class SWR:
     ) -> Optional[Tuple[Union[None, Dict[str, np.ndarray]], Dict[str, float]]]:
         """For each column of the dependent variable array, fit model. If given bandwidth, run :func
         `SWR.mpi_fit()` with the given bandwidth. Otherwise, compute optimal bandwidth using :func
-        `SWR.select_optimal_bw()`, minimizing AICc.
+        `SWR.find_optimal_bw()`, minimizing AICc.
 
         Args:
             y: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
@@ -1878,13 +1900,13 @@ class SWR:
                 os.makedirs("./output")
 
         # If output path already has files in it, clear them:
-        output_dir = os.path.dirname(self.output_path)
-        if os.listdir(output_dir):
-            # If there are files, delete them
-            for file_name in os.listdir(output_dir):
-                file_path = os.path.join(output_dir, file_name)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
+        # output_dir = os.path.dirname(self.output_path)
+        # if os.listdir(output_dir):
+        #     # If there are files, delete them
+        #     for file_name in os.listdir(output_dir):
+        #         file_path = os.path.join(output_dir, file_name)
+        #         if os.path.isfile(file_path):
+        #             os.remove(file_path)
 
         if label is not None:
             path = os.path.splitext(self.output_path)[0] + f"_{label}" + os.path.splitext(self.output_path)[1]

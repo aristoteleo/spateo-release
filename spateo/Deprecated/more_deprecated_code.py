@@ -1414,3 +1414,12 @@ def multiscale_compute_metrics(self, X: Optional[np.ndarray] = None, n_chunks: i
                 header += "se_" + x + ","
 
             self.save_results(outputs, header, label=y_label)
+
+
+theta = 1 / self.distr_obj.variance(all_fit_outputs[:, 1])
+weights = self.distr_obj.weights(all_fit_outputs[:, 1])
+deviance = 2 * np.sum(
+    weights * (y * np.log(y / all_fit_outputs[:, 1]) + (theta - 1) * np.log(1 + all_fit_outputs[:, 1] / (theta - 1)))
+)
+dof = len(y) - self.X.shape[1]
+self.distr_obj.variance.disp = deviance / dof

@@ -284,8 +284,6 @@ def construct_nn_graph(
         neighbors_df = pd.DataFrame(interaction, index=list(adata.obs_names), columns=list(adata.obs_names))
         neighbors_df.to_csv(os.path.join(os.getcwd(), f"./neighbors/{save_id}_neighbors.csv"))
 
-    adata.obsp["graph_neigh"] = interaction
-
     # transform adj to symmetrical adj
     adj = interaction
 
@@ -296,7 +294,7 @@ def construct_nn_graph(
     if exclude_self:
         np.fill_diagonal(adj, 0)
 
-    adata.obsp["adj"] = adj
+    adata.obsp["adj"] = scipy.sparse.csr_matrix(adj)
 
 
 def transcriptomic_connectivity(

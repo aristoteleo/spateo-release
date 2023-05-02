@@ -68,7 +68,11 @@ def main():
     help="Path to output file. Make sure the parent " "directory is empty- any existing files will " "be deleted.",
 )
 @click.option("custom_lig_path", required=False)
+@click.option("ligand", required=False, multiple=True)
 @click.option("custom_rec_path", required=False)
+@click.option("receptor", required=False, multiple=True)
+@click.option("custom_pathways_path", required=False)
+@click.option("pathway", required=False, multiple=True)
 @click.option(
     "custom_regulators_path",
     required=False,
@@ -76,7 +80,16 @@ def main():
     "of TFs (or other regulatory molecules)"
     "to constitute the independent variable block.",
 )
+@click.option(
+    "tf",
+    required=False,
+    multiple=True,
+    help="Only used for GRN models. Each input specified using this "
+    "is a TF (or other regulatory molecule) to constitute the "
+    "independent variable block.",
+)
 @click.option("custom_targets_path", required=False)
+@click.option("target", required=False, multiple=True)
 @click.option(
     "target_expr_threshold",
     default=0.2,
@@ -137,11 +150,12 @@ def main():
     "stabilized. Only used if `multiscale` is True.",
 )
 @click.option("alpha", required=False)
-def run_STGWR(
+def run(
     np,
     adata_path,
     coords_key,
     group_key,
+    group_subset,
     csv_path,
     multiscale,
     multiscale_params_only,
@@ -151,9 +165,15 @@ def run_STGWR(
     species,
     output_path,
     custom_lig_path,
+    ligand,
     custom_rec_path,
+    receptor,
+    custom_pathways_path,
+    pathway,
     custom_regulators_path,
+    tf,
     custom_targets_path,
+    target,
     target_expr_threshold,
     init_betas_path,
     normalize,
@@ -188,18 +208,32 @@ def run_STGWR(
         multiscale: If True, the MGWR model will be used
         multiscale_params_only: If True, will only fit parameters for MGWR model and no other metrics. Otherwise,
             the effective number of parameters and leverages will be returned.
-        mod_type: If adata_path is provided, one of the STGWR models will be used. Options: 'niche', 'lr', 'slice'.
+        mod_type: If adata_path is provided, one of the SWR models will be used. Options: 'niche', 'lr', 'ligand'.
         grn: If True, the GRN model will be used
+
+
         cci_dir: Path to directory containing CCI files
         species: Species for which CCI files were generated. Options: 'human', 'mouse'.
         output_path: Path to output file
         custom_lig_path: Path to file containing a list of ligands to be used in the GRN model
+        ligand: Can be used as an alternative to `custom_lig_path`. Can be used to provide a custom list of ligands.
         custom_rec_path: Path to file containing a list of receptors to be used in the GRN model
+        receptor: Can be used as an alternative to `custom_rec_path`. Can be used to provide a custom list of
+            receptors.
+        custom_pathways_path: Rather than providing a list of receptors, can provide a list of signaling pathways-
+            all receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
+            is "lr".
         custom_regulators_path: Only used for GRN models. This file contains a list of TFs (or other regulatory
             molecules) to constitute the independent variable block.
+        tf: Can be used as an alternative to `custom_regulators_path`. Can be used to provide a custom list of
+            regulatory factors.
         custom_targets_path: Path to file containing a list of targets to be used in the GRN model
+        target: Can be used as an alternative to `custom_targets_path`. Can be used to provide a custom list of
+            targets.
         target_expr_threshold: For automated selection, the threshold proportion of cells for which transcript needs
             to be expressed in to be selected as a target of interest.
+
+
         init_betas_path: Path to file containing initial values for beta coefficients
         normalize: If True, the data will be normalized
         smooth: If True, the data will be smoothed
@@ -263,6 +297,11 @@ def run_STGWR(
     elif csv_path is not None:
         command += " -csv_path " + csv_path
 
+    if group_subset is not None:
+        command += " -group_subset "
+        for key in group_subset:
+            command += key + " "
+
     if multiscale:
         command += " -multiscale "
     if multiscale_params_only:
@@ -271,14 +310,42 @@ def run_STGWR(
         command += " -grn "
     if cci_dir is not None:
         command += " -cci_dir " + cci_dir
+
     if custom_lig_path is not None:
         command += " -custom_lig_path " + custom_lig_path
+    if ligand is not None:
+        command += " -ligand "
+        for lig in ligand:
+            command += lig + " "
+
     if custom_rec_path is not None:
         command += " -custom_rec_path " + custom_rec_path
+    if receptor is not None:
+        command += " -receptor "
+        for rec in receptor:
+            command += rec + " "
+
+    if custom_pathways_path is not None:
+        command += " -custom_pathways_path " + custom_pathways_path
+    if pathway is not None:
+        command += " -pathway "
+        for path in pathway:
+            command += path + " "
+
     if custom_regulators_path is not None:
         command += " -custom_regulators_path " + custom_regulators_path
+    if tf is not None:
+        command += " -tf "
+        for t in tf:
+            command += t + " "
+
     if custom_targets_path is not None:
         command += " -custom_targets_path " + custom_targets_path
+    if target is not None:
+        command += " -target "
+        for tar in target:
+            command += tar + " "
+
     if init_betas_path is not None:
         command += " -init_betas_path " + init_betas_path
     if normalize:
@@ -311,5 +378,8 @@ def run_STGWR(
     os.system(command)
     pass
 
+
+if __name__ == "__main__":
+    main()
 
 # ADD SOME DEFAULT OPTIONS LATER

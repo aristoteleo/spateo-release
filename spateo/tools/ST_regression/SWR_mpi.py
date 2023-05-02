@@ -52,21 +52,35 @@ if __name__ == "__main__":
     )
     parser.add_argument("-custom_lig_path", type=str)
     parser.add_argument(
+        "-ligand",
+        nargs="+",
+        type=str,
+        help="Alternative to the custom ligand path, can be used to provide a custom list of ligands.",
+    )
+    parser.add_argument(
         "-fit_ligands_grn",
         action="store_true",
         help="Set True to indicate that ligands should be "
         "included in the GRN model. If True and path to"
         "custom ligands list is not given, will"
-        "automatically find ligands from the data.",
+        "automatically find ligands from the data. If False,"
+        "will not include ligands in the GRN model.",
     )
     parser.add_argument("-custom_rec_path", type=str)
+    parser.add_argument(
+        "-receptor",
+        nargs="+",
+        type=str,
+        help="Alternative to the custom receptor path, can be used to provide a custom list of receptors.",
+    )
     parser.add_argument(
         "-fit_receptors_grn",
         action="store_true",
         help="Set True to indicate that receptors should be "
         "included in the GRN model. If True and path to"
         "custom receptors list is not given, will"
-        "automatically find receptors from the data.",
+        "automatically find receptors from the data. If False, "
+        "will not include receptors in the GRN model.",
     )
     parser.add_argument(
         "-custom_regulators_path",
@@ -74,8 +88,27 @@ if __name__ == "__main__":
         help="Only used for GRN models. This file contains a list of TFs (or other regulatory molecules)"
         "to constitute the independent variable block.",
     )
+    parser.add_argument(
+        "-tf",
+        nargs="+",
+        type=str,
+        help="Alternative to the custom receptor path, can be used to provide a custom list of transcription factors "
+        "or other regulatory molecules.",
+    )
     parser.add_argument("-custom_pathways_path", type=str)
+    parser.add_argument(
+        "-pathway",
+        nargs="+",
+        type=str,
+        help="Alternative to the custom pathway path, can be used to provide a custom list of pathways.",
+    )
     parser.add_argument("-targets_path", type=str)
+    parser.add_argument(
+        "-target",
+        nargs="+",
+        type=str,
+        help="Alternative to the custom target path, can be used to provide a custom list of target molecules.",
+    )
     parser.add_argument("-init_betas_path", type=str)
 
     parser.add_argument("-normalize", action="store_true")
@@ -165,10 +198,7 @@ if __name__ == "__main__":
     # Check if GRN model is specified:
     if parser.parse_args().grn:
         grn_model = SWGRN(comm, parser)
-        if parser.parse_args().multiscale:
-            grn_model.grn_fit_multiscale()
-        else:
-            grn_model.grn_fit()
+        grn_model.grn_fit()
 
     else:
         # For use only with MuSIC:
