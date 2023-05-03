@@ -41,7 +41,7 @@ from spateo.plotting.static.utils import save_return_show_fig_utils
 from spateo.preprocessing.normalize import normalize_total
 from spateo.preprocessing.transform import log1p
 from spateo.tools.find_neighbors import construct_nn_graph, transcriptomic_connectivity
-from spateo.tools.ST_regression.regression_utils import (
+from spateo.tools.ST_modeling.regression_utils import (
     compute_wald_test,
     get_fisher_inverse,
 )

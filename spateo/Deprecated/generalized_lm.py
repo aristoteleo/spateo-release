@@ -28,7 +28,7 @@ from spateo.logging import logger_manager as lm
 from spateo.preprocessing.normalize import normalize_total
 from spateo.preprocessing.transform import log1p
 from spateo.tools.find_neighbors import Kernel, transcriptomic_connectivity
-from spateo.tools.ST_regression.regression_utils import L1_L2_penalty, softplus
+from spateo.tools.ST_modeling.regression_utils import L1_L2_penalty, softplus
 
 
 # ---------------------------------------------------------------------------------------------------

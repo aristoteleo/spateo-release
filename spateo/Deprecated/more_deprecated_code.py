@@ -1423,3 +1423,20 @@ deviance = 2 * np.sum(
 )
 dof = len(y) - self.X.shape[1]
 self.distr_obj.variance.disp = deviance / dof
+
+
+# Get list of regulatory factors from among the most highly spatially-variable genes, indicative of
+# potentially interesting spatially-enriched signal:
+self.logger.info("Preparing data: getting list of regulators from among the most highly spatially-variable genes.")
+if "m_degs" not in locals():
+    m_degs = moran_i(self.adata)
+m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
+regulators = [g for g in m_filter_genes if g in database_tfs]
+
+# If no significant spatially-variable receptors are found, use the top 100 most spatially-variable TFs:
+if len(regulators) == 0:
+    self.logger.info(
+        "No significant spatially-variable regulatory factors found. Using top 100 most " "spatially-variable TFs."
+    )
+    m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
+    regulators = [g for g in m_filter_genes if g in database_tfs][:100]
