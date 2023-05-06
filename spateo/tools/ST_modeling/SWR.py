@@ -773,7 +773,8 @@ class SWR:
 
         # Set dependent variable array based on input given as "mod_type":
         if self.mod_type == "niche":
-            # NOTE TO SELF: MODIFY TO INCORPORATE CELL TYPES OF NEIGHBORS
+            # NOTE TO SELF: MODIFY TO INCORPORATE CELL TYPES OF NEIGHBORS- TRANSFORM ALSO INTO A CONTINUOUS ARRAY BY
+            # FINDING THE DISTANCE TO THE NEAREST CELL OF EACH TYPE
             # Compute adjacency matrix- use n_neighbors and exclude_self from the argparse (defaults to 10).
             try:
                 "filler"
@@ -820,6 +821,7 @@ class SWR:
             X_df = self.ligands_expr
             # If applicable, drop all-zero columns:
             X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
+            # NOTE TO SELF: COMPUTE SPATIAL LAG FOR EACH LIGAND AND USE THIS AS THE FEATURES
             self.logger.info(
                 f"Dropped all-zero columns from cell type-specific signaling array, from "
                 f"{self.ligands_expr.shape[1]} to {X_df.shape[1]}."
@@ -861,8 +863,8 @@ class SWR:
             self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
             self.feature_names = ["intercept"] + self.feature_names
 
-        # Compute initial spatial weights for all samples- use twice the min distance as initial bandwidth if not
-        # provided (for fixed bw) or 10 nearest neighbors (for adaptive bw):
+        # Compute initial spatial weights for all samples- use the arbitrarily defined five times the min distance as
+        # initial bandwidth if not provided (for fixed bw) or 10 nearest neighbors (for adaptive bw):
         if self.bw is None:
             if self.bw_fixed:
                 init_bw = (
@@ -871,7 +873,7 @@ class SWR:
                             [np.min(np.delete(cdist([self.coords[i]], self.coords), 0)) for i in range(self.n_samples)]
                         )
                     )
-                    * 2
+                    * 5
                 )
             else:
                 init_bw = 10
@@ -1136,13 +1138,14 @@ class SWR:
                 # Set max bandwidth higher than the max distance between any two given samples:
                 self.maxbw = max_dist * 2
 
+                # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
                 if self.minbw is None:
                     min_dist = np.min(
                         np.array(
                             [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
                         )
                     )
-                    self.minbw = min_dist / 2
+                    self.minbw = min_dist * 3
 
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
@@ -1291,7 +1294,7 @@ class SWR:
         )
 
         if self.distr == "gaussian" or fit_predictor:
-            betas, pseudoinverse = compute_betas_local(y, X, wi)
+            betas, pseudoinverse = compute_betas_local(y, X, wi, clip=self.clip)
             pred_y = np.dot(X[i], betas)
             residual = y[i] - pred_y
             diagnostic = residual
@@ -1309,6 +1312,7 @@ class SWR:
                 distr=self.distr,
                 init_betas=self.init_betas,
                 tol=self.tolerance,
+                clip=self.clip,
                 max_iter=self.max_iter,
                 spatial_weights=wi,
                 link=None,
@@ -1426,9 +1430,14 @@ class SWR:
                 difference = lb_score - ub_score
                 if np.isnan(lb_score) or np.isnan(ub_score):
                     self.logger.info(
-                        "NaN returned from one of the models. Using the last bandwidth and exiting " "optimization."
+                        "NaN returned from one of the models. Returning last non-NaN bandwidth, and if not "
+                        "found, exiting "
+                        "optimization."
                     )
-                    return optimum_bw
+                    if any(not np.isnan(x) for x in optimum_score_history):
+                        return optimum_bw
+                    else:
+                        sys.exit()
 
                 # Update new value for score:
                 score = optimum_score
@@ -1612,8 +1621,8 @@ class SWR:
 
             for i in self.x_chunk:
                 fit_outputs = self.local_fit(i, y, X, y_label=y_label, bw=bw, fit_predictor=fit_predictor, final=False)
-                err_sq, hat_i = fit_outputs[0], fit_outputs[1]
-                RSS += err_sq
+                err, hat_i = fit_outputs[0], fit_outputs[1]
+                RSS += err**2
                 trace_hat += hat_i
 
             # Send data to the central process:
@@ -1720,6 +1729,15 @@ class SWR:
             y = y_arr[target].values
             y = self.comm.bcast(y, root=0)
 
+            # Use y to find the appropriate upper and lower bounds for coefficients:
+            if self.distr != "gaussian":
+                lim = np.log(np.abs(y + 1e-6))
+                # To avoid the influence of outliers:
+                self.clip = np.percentile(lim, 95)
+            else:
+                self.clip = np.percentile(y, 95)
+            self.clip = self.comm.bcast(self.clip, root=0)
+
             # If subsampled, define the appropriate chunk of the right subsampled array for this process:
             if self.subsampled:
                 if self.group_subset is None:
@@ -1804,6 +1822,8 @@ class SWR:
                         )
 
                         input = input_all[indices, :]
+                    else:
+                        input = input_all
 
                     if input.shape[0] != coeffs[target].shape[0]:
                         raise ValueError(
@@ -1954,21 +1974,22 @@ class SWR:
 
         file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
         for file in file_list:
-            target = file.split("_")[-1][:-4]
-            all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
-            betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
+            if not "predictions" in file:
+                target = file.split("_")[-1][:-4]
+                all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
+                betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
 
-            # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
-            # subsampling is not done by cell type group):
-            if self.subsampled and self.group_subset is None:
-                sampled_to_nonsampled_map = self.neighboring_unsampled[target]
-                betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
-                for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
-                    for nonsampled_idx in nonsampled_idxs:
-                        betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
+                # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
+                # subsampling is not done by cell type group):
+                if self.subsampled and self.group_subset is None:
+                    sampled_to_nonsampled_map = self.neighboring_unsampled[target]
+                    betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
+                    for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
+                        for nonsampled_idx in nonsampled_idxs:
+                            betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
 
-            # Save coefficients to dictionary:
-            all_coeffs[target] = betas
+                # Save coefficients to dictionary:
+                all_coeffs[target] = betas
 
         return all_coeffs
 
@@ -2228,7 +2249,7 @@ class MuSIC(SWR):
                     else:
                         betas, bw_dict = self.fit(
                             temp_y,
-                            X,
+                            temp_X,
                             init_betas=init_betas,
                             multiscale=True,
                             fit_predictor=True,

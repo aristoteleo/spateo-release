@@ -177,7 +177,7 @@ if __name__ == "__main__":
         default=10,
         type=int,
         help="Only used if `mod_type` is 'niche', to define the number of neighbors "
-             "to consider for each cell when defining the independent variable array."
+        "to consider for each cell when defining the independent variable array.",
     )
 
     parser.add_argument("-distr", default="gaussian", type=str)

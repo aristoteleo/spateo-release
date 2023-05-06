@@ -123,6 +123,7 @@ def sparse_minmax_scale(a: Union[scipy.sparse.csr_matrix, scipy.sparse.csc_matri
 def compute_betas(
     y: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
     x: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
+    clip: float = 5.0,
 ):
     """Maximum likelihood estimation procedure, to be used in iteratively weighted least squares to compute the
     regression coefficients for a given set of dependent and independent variables. Can be combined with either Lasso
@@ -134,6 +135,7 @@ def compute_betas(
     Args:
         y: Array of shape [n_samples,]; dependent variable
         x: Array of shape [n_samples, n_features]; independent variables
+        clip: Float; upper and lower bound to constrain betas and prevent numerical overflow
 
     Returns:
         betas: Array of shape [n_features,]; regression coefficients
@@ -144,10 +146,12 @@ def compute_betas(
     xtx_inv = scipy.sparse.csr_matrix(xtx_inv)
     xTy = sparse_dot(xT, y, return_array=False)
     betas = sparse_dot(xtx_inv, xTy)
+    # Upper and lower bound to constrain betas and prevent numerical overflow:
+    betas = np.clip(betas, -clip, clip)
     return betas
 
 
-def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray):
+def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, clip: float = 5.0):
     """Maximum likelihood estimation procedure, to be used in iteratively weighted least squares to compute the
     regression coefficients for a given set of dependent and independent variables while accounting for spatial
     heterogeneity in the dependent variable.
@@ -159,6 +163,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray):
         y: Array of shape [n_samples,]; dependent variable
         x: Array of shape [n_samples, n_features]; independent variables
         w: Array of shape [n_samples, n_samples]; spatial weights matrix
+        clip: Float; upper and lower bound to constrain betas and prevent numerical overflow
 
     Returns:
         betas: Array of shape [n_features,]; regression coefficients
@@ -172,6 +177,8 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray):
     except:
         xtx_inv_xt = np.dot(linalg.pinv(xtx), xT)
     betas = np.dot(xtx_inv_xt, y)
+    # Upper and lower bound to constrain betas and prevent numerical overflow:
+    betas = np.clip(betas, -clip, clip)
 
     pseudoinverse = xtx_inv_xt
 
@@ -184,6 +191,7 @@ def iwls(
     distr: Literal["gaussian", "poisson", "nb"] = "gaussian",
     init_betas: Optional[np.ndarray] = None,
     tol: float = 1e-8,
+    clip: float = 5.0,
     max_iter: int = 200,
     spatial_weights: Optional[np.ndarray] = None,
     link: Optional[Link] = None,
@@ -202,6 +210,7 @@ def iwls(
         distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb"
         init_betas: Array of shape [n_features,]; initial regression coefficients
         tol: Convergence tolerance
+        clip: Sets magnitude of the upper and lower bound to constrain betas and prevent numerical overflow
         max_iter: Maximum number of iterations if convergence is not reached
         spatial_weights: Array of shape [n_samples, 1]; weights to transform observations from location i for a
             geographically-weighted regression
@@ -255,9 +264,11 @@ def iwls(
     while difference > tol and n_iter < max_iter:
         n_iter += 1
         weights = distr.weights(linear_predictor)
+
         # Compute adjusted predictor from the difference between the predicted mean response variable and observed y:
         adjusted_predictor = linear_predictor + (distr.link.deriv(y_hat) * (y - y_hat))
         weights = np.sqrt(weights)
+
         if not isinstance(x, np.ndarray):
             weights = scipy.sparse.csr_matrix(weights)
             adjusted_predictor = scipy.sparse.csr_matrix(adjusted_predictor)
@@ -265,9 +276,9 @@ def iwls(
         w_adjusted_predictor = sparse_element_by_element(adjusted_predictor, weights, return_array=False)
 
         if spatial_weights is None:
-            new_betas = compute_betas(w_adjusted_predictor, wx)
+            new_betas = compute_betas(w_adjusted_predictor, wx, clip=clip)
         else:
-            new_betas, pseudoinverse = compute_betas_local(w_adjusted_predictor, wx, spatial_weights)
+            new_betas, pseudoinverse = compute_betas_local(w_adjusted_predictor, wx, spatial_weights, clip=clip)
 
         # Update coefficients with the elastic net penalty, if applicable:
         if alpha is not None:
@@ -283,6 +294,7 @@ def iwls(
             )
 
         linear_predictor = sparse_dot(x, new_betas)
+
         y_hat = distr.predict(linear_predictor)
 
         difference = min(abs(new_betas - betas))
