@@ -171,6 +171,13 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, clip: float
     """
     xT = (x * w).T
     xtx = np.dot(xT, x)
+    # Diagonals of the Gram matrix- used as additional diagnostic- for each feature, this is the sum of squared
+    # values- if this is sufficiently low, the coefficient should be zero- theoretically it can take on nearly any
+    # value with little impact on the residuals, but it is most likely to be zero:
+    diag = np.diag(xtx)
+    below_limit = diag < 1e-3
+    to_zero = np.where(below_limit)[0]
+
     try:
         xtx_inv_xt = np.dot(linalg.inv(xtx), xT)
         # xtx_inv_xt = linalg.solve(xtx, xT)
@@ -179,6 +186,9 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, clip: float
     betas = np.dot(xtx_inv_xt, y)
     # Upper and lower bound to constrain betas and prevent numerical overflow:
     betas = np.clip(betas, -clip, clip)
+    # And set to zero with small offset for numerical overflow if the diagonal of the Gram matrix is below a certain
+    # threshold:
+    betas[to_zero] = 1e-5
 
     pseudoinverse = xtx_inv_xt
 

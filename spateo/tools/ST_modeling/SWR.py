@@ -1090,10 +1090,11 @@ class SWR:
         self.n_samples_fitted = self.comm.bcast(self.n_samples_fitted, root=0)
         self.neighboring_unsampled = self.comm.bcast(self.neighboring_unsampled, root=0)
 
-    def _set_search_range(self, signaling_type: Optional[str] = None):
+    def _set_search_range(self, y: np.ndarray, signaling_type: Optional[str] = None):
         """Set the search range for the bandwidth selection procedure.
 
         Args:
+            y: Array of dependent variable values, used to determine the search range for the bandwidth selection
             signaling_type: Optional category for the interaction, one of "Cell-Cell Contact", "Diffusive Signaling"
                 (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor"
         """
@@ -1138,14 +1139,30 @@ class SWR:
                 # Set max bandwidth higher than the max distance between any two given samples:
                 self.maxbw = max_dist * 2
 
-                # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
+                # Set minimum bandwidth to ensure at least one "negative" example is included in spatially-weighted
+                # calculation for each cell:
                 if self.minbw is None:
-                    min_dist = np.min(
-                        np.array(
-                            [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
+                    zero_y = np.where(y == 0)[0]
+                    if np.any(zero_y):
+                        # Find the max distance between any given point and its closest neighbor with nonzero y:
+                        self.minbw = np.max(
+                            [
+                                np.min(cdist(self.coords[[i]], self.coords[zero_y]))
+                                for i in range(self.n_samples)
+                                if y[i] != 0
+                            ]
                         )
-                    )
-                    self.minbw = min_dist * 3
+                    else:
+                        # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
+                        min_dist = np.min(
+                            np.array(
+                                [
+                                    np.min(np.delete(cdist(self.coords[[i]], self.coords), i))
+                                    for i in range(self.n_samples)
+                                ]
+                            )
+                        )
+                        self.minbw = min_dist * 3
 
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
@@ -1170,13 +1187,30 @@ class SWR:
                 # Set max bandwidth higher than the max distance between any two given samples:
                 self.maxbw = max_dist * 2
 
+                # Set minimum bandwidth to ensure at least one "negative" example is included in spatially-weighted
+                # calculation for each cell:
                 if self.minbw is None:
-                    min_dist = np.min(
-                        np.array(
-                            [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
+                    zero_y = np.where(y == 0)[0]
+                    if np.any(zero_y):
+                        # Find the max distance between any given point and its closest neighbor with nonzero y:
+                        self.minbw = np.max(
+                            [
+                                np.min(cdist(self.coords[[i]], self.coords[zero_y]))
+                                for i in range(self.n_samples)
+                                if y[i] != 0
+                            ]
                         )
-                    )
-                    self.minbw = min_dist / 2
+                    else:
+                        # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
+                        min_dist = np.min(
+                            np.array(
+                                [
+                                    np.min(np.delete(cdist(self.coords[[i]], self.coords), i))
+                                    for i in range(self.n_samples)
+                                ]
+                            )
+                        )
+                        self.minbw = min_dist * 3
 
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
@@ -1322,6 +1356,15 @@ class SWR:
 
             # Reshape coefficients if necessary:
             betas = betas.flatten()
+            # If predictors are negligibly small at the selected sample, betas can theoretically be anything,
+            # so estimates may be skewed by the presence of a single nearby sample with a nonzero value. A
+            # coefficient value of zero is most likely in this case, especially for negative coefficients- in the
+            # context of gene expression, downregulation is much more difficult to predict from static transcriptomic
+            # measurements.
+            below_limit = (X[i] < 1e-3) & (betas < 0)
+            to_zero = np.where(below_limit)[0]
+            betas[to_zero] = 0.0
+
             # For multiscale GLM models, this is the predicted linear predictor:
             pred_y = y_hat[i]
             diagnostic = pred_y
@@ -1768,7 +1811,7 @@ class SWR:
                     self.logger.info(
                         f"Starting fitting process for target {target}. First finding optimal " f"bandwidth..."
                     )
-                self._set_search_range(signaling_type=signaling_type)
+                self._set_search_range(y, signaling_type=signaling_type)
                 if not multiscale:
                     self.logger.info(f"Calculated bandwidth range over which to search: {self.minbw}-{self.maxbw}.")
             self.minbw = self.comm.bcast(self.minbw, root=0)
@@ -1832,7 +1875,10 @@ class SWR:
                         )
                     y_pred = np.sum(input * coeffs[target], axis=1)
                     if self.distr != "gaussian":
+                        # Subtract 1 because in the case that all coefficients are zero, np.exp(linear predictor)
+                        # will be 1 at minimum, though it should be zero.
                         y_pred = self.distr_obj.predict(y_pred)
+                        y_pred[y_pred == 1] = 0.0
                     y_pred = pd.DataFrame(y_pred, index=self.sample_names, columns=[target])
                     all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
                 return all_y_pred
