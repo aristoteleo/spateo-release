@@ -88,6 +88,11 @@ def sparse_element_by_element(
     Returns:
         prod: Element-wise multiplied product of a and b
     """
+    if a.ndim == 1:
+        a = a[:, np.newaxis]
+    if b.ndim == 1:
+        b = b[:, np.newaxis]
+
     if type(a).__name__ == "ndarray" and type(b).__name__ == "ndarray":
         prod = a * b
     elif (
@@ -162,7 +167,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, clip: float
     Args:
         y: Array of shape [n_samples,]; dependent variable
         x: Array of shape [n_samples, n_features]; independent variables
-        w: Array of shape [n_samples, n_samples]; spatial weights matrix
+        w: Array of shape [n_samples, 1]; spatial weights matrix
         clip: Float; upper and lower bound to constrain betas and prevent numerical overflow
 
     Returns:
@@ -233,14 +238,14 @@ def iwls(
             provided, Tau will default to the identity matrix.
 
     Returns:
-        betas: Array of shape [n_features,]; regression coefficients
-        y_hat: Array of shape [n_samples,]; predicted values of the dependent variable
-        wx: Array of shape [n_samples,]; weighted independent variables
+        betas: Array of shape [n_features, 1]; regression coefficients
+        y_hat: Array of shape [n_samples, 1]; predicted values of the dependent variable
+        wx: Array of shape [n_samples, 1]; weighted independent variables
         n_iter: Number of iterations completed upon convergence
-        w_final: Array of shape [n_samples,]; final spatial weights used for IWLS.
-        linear_predictor_final: Array of shape [n_samples,]; final unadjusted linear predictor used for IWLS. Only
+        w_final: Array of shape [n_samples, 1]; final spatial weights used for IWLS.
+        linear_predictor_final: Array of shape [n_samples, 1]; final unadjusted linear predictor used for IWLS. Only
             returned if "spatial_weights" is not None.
-        adjusted_predictor_final: Array of shape [n_samples,]; final adjusted linear predictor used for IWLS. Only
+        adjusted_predictor_final: Array of shape [n_samples, 1]; final adjusted linear predictor used for IWLS. Only
             returned if "spatial_weights" is not None.
         pseudoinverse: Array of shape [n_samples, n_samples]; optional influence matrix that is only returned if
             "spatial_weights" is not None. The pseudoinverse is the Moore-Penrose pseudoinverse of the X matrix.

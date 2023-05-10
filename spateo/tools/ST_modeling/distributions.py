@@ -604,16 +604,34 @@ class Distribution(object):
         y_hat_0 = (y + y.mean()) / 2
         return y_hat_0
 
-    def weights(self, y_pred: np.ndarray) -> np.ndarray:
+    def weights(self, fitted: np.ndarray) -> np.ndarray:
         """Weights for the IRLS algorithm.
 
         Args:
-            y_pred: Transformed mean response variable
+            fitted: Array of shape [n_samples,]; transformed mean response variable
 
         Returns:
             w: Weights for the IRLS steps
         """
-        w = 1.0 / (self.link.deriv(y_pred) ** 2 * self.variance(y_pred))
+        w = 1.0 / (self.link.deriv(fitted) ** 2 * self.variance(fitted))
+        return w
+
+    def huber_weights(self, fitted: np.ndarray, residuals: np.ndarray, threshold: float = None):
+        """Compute Huber weights for the IWLS algorithm.
+
+        Args:
+            fitted: Array of shape [n_samples,]; transformed mean response variable
+            residuals: Array of shape [n_samples,]; residuals between observed and predicted values
+            threshold: Float; the threshold for switching between squared loss and linear loss
+
+        Returns:
+            w: Array of shape [n_samples,]; computed Huber weights for the IWLS algorithm
+        """
+        huber_w = np.ones_like(residuals)
+        mask = np.abs(residuals) > threshold
+        huber_w[mask] = threshold / np.abs(residuals[mask])
+
+        w = huber_w / (self.link.deriv(fitted) ** 2 * self.variance(fitted))
         return w
 
     def predict(self, fitted: np.ndarray) -> np.ndarray:

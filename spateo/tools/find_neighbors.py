@@ -110,8 +110,6 @@ class Kernel(object):
         threshold: Threshold for the kernel density estimation. If the density is below this threshold, the density
             will be set to zero.
         eps: Error-correcting factor to avoid division by zero
-        subset_idxs: Optional list of indices that can be used to subset data. If `points` is None, the density is
-            estimated for each point in `data`.
         sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
     """
 
@@ -125,12 +123,8 @@ class Kernel(object):
         function: str = "triangular",
         threshold: float = 1e-5,
         eps: float = 1.0000001,
-        subset_idxs: Optional[Iterable[int]] = None,
         sparse_array: bool = False,
     ):
-
-        if subset_idxs is not None:
-            data = data[subset_idxs, :]
 
         self.dist_vector = local_dist(data[i], data).reshape(-1)
         self.function = function.lower()
@@ -225,7 +219,6 @@ def get_wi(
         function=kernel,
         threshold=threshold,
         sparse_array=sparse_array,
-        subset_idxs=None,
     ).kernel
 
     return wi

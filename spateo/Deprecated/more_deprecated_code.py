@@ -1440,3 +1440,47 @@ if len(regulators) == 0:
     )
     m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
     regulators = [g for g in m_filter_genes if g in database_tfs][:100]
+
+
+zero_y = np.where(y == 0)[0]
+if np.any(zero_y):
+    # Find the max distance between any given point and its closest neighbor with nonzero y:
+    self.minbw = np.max(
+        [
+            np.min(cdist(self.coords[[i]], self.coords[zero_y]))
+            for i in range(self.n_samples)
+            if y[i] != 0
+        ]
+    )
+else:
+
+# Optionally, subsample particular cell types of interest:
+if self.group_subset is not None:
+    subset = self.adata.obs[self.group_key].isin(self.group_subset)
+    self.fitted_indices = [self.sample_names.get_loc(name) for name in subset.index]
+    self.fitted_sample_names = subset.index
+    self.n_samples_fitted = len(subset)
+    # Add cells that are neighboring cells of the chosen type, but which are not of the chosen type:
+    get_wi_partial = partial(
+        get_wi,
+        n_samples=self.n_samples,
+        coords=self.coords,
+        fixed_bw=False,
+        exclude_self=True,
+        kernel=self.kernel,
+        bw=10,
+        threshold=0.01,
+        sparse_array=True,
+    )
+
+    with Pool() as pool:
+        weights = pool.map(get_wi_partial, self.fitted_indices)
+    w_subset = scipy.sparse.vstack(weights)
+    rows, cols = w_subset.nonzero()
+    unique_indices = set(rows)
+    names_all_neighbors = self.sample_names[unique_indices]
+    subset = self.adata[self.adata.obs[self.group_key].isin(names_all_neighbors)]
+    self.subsampled_indices = [self.sample_names.get_loc(name) for name in subset.obs_names]
+    self.n_samples_subset = len(subset)
+
+    self.neighboring_unsampled = None
