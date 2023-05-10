@@ -1373,14 +1373,6 @@ class SWR:
 
             # Reshape coefficients if necessary:
             betas = betas.flatten()
-            # If predictors are negligibly small at the selected sample, betas can theoretically be anything,
-            # so estimates may be skewed by the presence of a single nearby sample with a nonzero value. A
-            # coefficient value of zero is most likely in this case, especially for negative coefficients- in the
-            # context of gene expression, downregulation is much more difficult to predict from static transcriptomic
-            # measurements.
-            to_zero = (X[i] < 1e-3) & (betas < 0)
-            to_zero = np.where(to_zero)[0]
-            betas[to_zero] = 0.0
 
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
             hat_i = np.dot(X[i], pseudoinverse[:, i]) * final_irls_weights[i][0]
@@ -1588,7 +1580,7 @@ class SWR:
                         )
                     else:
                         # Fitted mean response 1 = predicted 0
-                        local_fit_outputs[pos] = np.concatenate(([sample_index, 1.0, 0.0], zero_placeholder))
+                        local_fit_outputs[pos] = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder))
                 pos += 1
 
             # Gather data to the central process such that an array is formed where each sample has its own
@@ -1704,17 +1696,8 @@ class SWR:
                         fit_predictor=fit_predictor,
                     )
                 else:
-                    if self.subsampled:
-                        sample_index = (
-                            self.subsampled_indices[y_label][i] if not self.subset else self.subsampled_indices[i]
-                        )
-                    elif self.subset:
-                        sample_index = self.subset_indices[i]
-                    else:
-                        sample_index = i
-
-                    zero_placeholder = np.zeros((n_features,))
-                    fit_outputs = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder))
+                    fit_outputs = np.array([0.0, 0.0])
+                    #fit_outputs = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder))
                 err, hat_i = fit_outputs[0], fit_outputs[1]
                 RSS += err**2
                 trace_hat += hat_i
@@ -1753,17 +1736,7 @@ class SWR:
                         fit_predictor=fit_predictor,
                     )
                 else:
-                    if self.subsampled:
-                        sample_index = (
-                            self.subsampled_indices[y_label][i] if not self.subset else self.subsampled_indices[i]
-                        )
-                    elif self.subset:
-                        sample_index = self.subset_indices[i]
-                    else:
-                        sample_index = i
-
-                    zero_placeholder = np.zeros((n_features,))
-                    fit_outputs = np.concatenate(([sample_index, 1.0, 0.0], zero_placeholder))
+                    fit_outputs = np.array([0.0, 0.0])
                 y_pred_i, hat_i = fit_outputs[0], fit_outputs[1]
                 y_pred[pos] = y_pred_i
                 trace_hat += hat_i

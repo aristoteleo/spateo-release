@@ -1484,3 +1484,13 @@ if self.group_subset is not None:
     self.n_samples_subset = len(subset)
 
     self.neighboring_unsampled = None
+
+
+#     if self.subsampled:
+#         sample_index = (
+#             self.subsampled_indices[y_label][i] if not self.subset else self.subsampled_indices[i]
+#         )
+#     elif self.subset:
+#         sample_index = self.subset_indices[i]
+#     else:
+#         sample_index = i

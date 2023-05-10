@@ -180,8 +180,10 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, clip: float
     # values- if this is sufficiently low, the coefficient should be zero- theoretically it can take on nearly any
     # value with little impact on the residuals, but it is most likely to be zero:
     diag = np.diag(xtx)
-    below_limit = diag < 1e-3
-    to_zero = np.where(below_limit)[0]
+    below_limit = np.abs(diag) < 1e-3
+    # Robustness to outlier points:
+    n_nonzeros = np.count_nonzero(xT, axis=1)
+    to_zero = np.concatenate((np.where(below_limit)[0], np.where(n_nonzeros <= 2)[0]))
 
     try:
         xtx_inv_xt = np.dot(linalg.inv(xtx), xT)
