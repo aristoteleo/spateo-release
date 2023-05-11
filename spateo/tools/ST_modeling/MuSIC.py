@@ -39,9 +39,9 @@ from spateo.tools.ST_modeling.regression_utils import (
 
 
 # ---------------------------------------------------------------------------------------------------
-# GWR for cell-cell communication
+# Multiscale Spatially-weighted Inference of Cell-cell communication (MuSIC)
 # ---------------------------------------------------------------------------------------------------
-class SWR:
+class MuSIC:
     """Spatially weighted regression on spatial omics data with parallel processing. Runs after being called
     from the command line.
 
@@ -191,9 +191,6 @@ class SWR:
                         "No AnnData path or .csv path provided; need to provide at least one of these "
                         "to provide a default dataset to fit."
                     )
-                elif self.grn:
-                    # Model set up will be taken care of by the child class.
-                    self.set_up = True
                 else:
                     custom_data = pd.read_csv(self.csv_path, index_col=0)
                     self.coords = custom_data.iloc[:, :2].values
@@ -1575,12 +1572,17 @@ class SWR:
 
                     zero_placeholder = np.zeros((n_features,))
                     if self.distr == "gaussian":
-                        local_fit_outputs[pos] = np.concatenate(
-                            ([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder)
-                        )
+                        if multiscale:
+                            local_fit_outputs[pos] = zero_placeholder
+                        else:
+                            local_fit_outputs[pos] = np.concatenate(
+                                ([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder)
+                            )
                     else:
-                        # Fitted mean response 1 = predicted 0
-                        local_fit_outputs[pos] = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder))
+                        if multiscale:
+                            local_fit_outputs[pos] = zero_placeholder
+                        else:
+                            local_fit_outputs[pos] = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder))
                 pos += 1
 
             # Gather data to the central process such that an array is formed where each sample has its own
@@ -1697,7 +1699,7 @@ class SWR:
                     )
                 else:
                     fit_outputs = np.array([0.0, 0.0])
-                    #fit_outputs = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder))
+                    # fit_outputs = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder))
                 err, hat_i = fit_outputs[0], fit_outputs[1]
                 RSS += err**2
                 trace_hat += hat_i
@@ -1902,6 +1904,8 @@ class SWR:
             if data is not None:
                 all_data[target] = data
             all_bws[target] = optimal_bw
+            self.optimal_bw = optimal_bw
+            self.optimal_bw = self.comm.bcast(self.optimal_bw, root=0)
 
         return all_data, all_bws
 
@@ -1916,9 +1920,9 @@ class SWR:
                 in the fitting process from file.
         """
         if input is None:
-            input_all = self.X
-        else:
-            input_all = input
+            input = self.X
+        # else:
+        #     input_all = input
 
         if coeffs is None:
             coeffs = self.return_outputs()
@@ -1926,18 +1930,18 @@ class SWR:
             if isinstance(coeffs, Dict):
                 all_y_pred = pd.DataFrame(index=self.sample_names)
                 for target in coeffs:
-                    # Adjust input if subsampled:
-                    if self.subsampled:
-                        indices = (
-                            self.subsampled_indices[target] if self.group_subset is None else self.subsampled_indices
-                        )
-
-                        input = input_all[indices, :]
-                    elif self.subset:
-                        indices = self.subset_indices[target]
-                        input = input_all[indices, :]
-                    else:
-                        input = input_all
+                    # # Adjust input if subsampled:
+                    # if self.subsampled:
+                    #     indices = (
+                    #         self.subsampled_indices[target] if self.group_subset is None else self.subsampled_indices
+                    #     )
+                    #
+                    #     input = input_all[indices, :]
+                    # elif self.subset:
+                    #     indices = self.subset_indices[target]
+                    #     input = input_all[indices, :]
+                    # else:
+                    #     input = input_all
 
                     if input.shape[0] != coeffs[target].shape[0]:
                         raise ValueError(
@@ -2098,7 +2102,7 @@ class SWR:
 
                 # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
                 # subsampling is not done by cell type group):
-                if self.subsampled and self.group_subset is None:
+                if self.subsampled and not self.subset:
                     sampled_to_nonsampled_map = self.neighboring_unsampled[target]
                     betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
                     for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
@@ -2131,11 +2135,11 @@ class SWR:
         return all_intercepts
 
 
-# Multiscale Spatially-weighted Inference of Cell-cell communication:
-class MuSIC(SWR):
+# Variable-scale MuSIC:
+class VMuSIC(MuSIC):
     """Modified version of the spatially weighted regression on spatial omics data with parallel processing,
-    enabling each feature to have its own distinct spatial scale parameter. Runs after being called from the command
-    line.
+    enabling each feature to have its own distinct spatial scale (hence "Variable MuSIC"). Runs after being called from
+    the command line. NOTE: it is currently recommended to use this for Gaussian modeling only.
 
     Args:
         comm: MPI communicator object initialized with mpi4py, to control parallel processing operations
@@ -2145,11 +2149,11 @@ class MuSIC(SWR):
     Attributes:
         mod_type: The type of model that will be employed- this dictates how the data will be processed and
             prepared. Options:
-                - "niche": Spatially-aware, uses spatial connections between samples as independent variables
-                - "lr": Spatially-aware, uses the combination of receptor expression in the "target" cell and spatially
-                    lagged ligand expression in the neighboring cells as independent variables.
-                - "slice": Spatially-aware, uses a coupling of spatial category connections, ligand expression
-                    and receptor expression to perform regression on select receptor-downstream genes.
+                - "niche": Spatially-aware, uses categorical cell type labels as independent variables.
+                - "lr": Spatially-aware, essentially uses the combination of receptor expression in the "target" cell
+                    and spatially lagged ligand expression in the neighboring cells as independent variables.
+                - "ligand": Spatially-aware, essentially uses ligand expression in the neighboring cells as
+                    independent variables.
 
 
         adata_path: Path to the AnnData object from which to extract data for modeling
@@ -2163,25 +2167,35 @@ class MuSIC(SWR):
             expression. It is advisable not to do this if performing Poisson or negative binomial regression.
         log_transform: Set True if log-transformation should be applied to expression. It is advisable not to do
             this if performing Poisson or negative binomial regression.
-        target_expr_threshold: Only used if :param `mod_type` is "lr" or "slice" and :param `targets_path` is not
+        target_expr_threshold: Only used if :param `mod_type` is "lr" or "ligand" and :param `targets_path` is not
             given. When manually selecting targets, expression above a threshold percentage of cells will be used to
             filter to a smaller subset of interesting genes. Defaults to 0.2.
 
 
         custom_lig_path: Optional path to a .txt file containing a list of ligands for the model, separated by
-            newlines. Only used if :attr `mod_type` is "lr" or "slice" (and thus uses ligand/receptor expression
-            directly in the inference). If not provided, will select ligands using a threshold based on expression
+            newlines. Only used if :attr `mod_type` is "lr" or "ligand" (and thus uses ligand expression directly in
+            the inference). If not provided, will select ligands using a threshold based on expression
             levels in the data.
+        custom_ligands: Optional list of ligands for the model, can be used as an alternative to :attr
+            `custom_lig_path`. Only used if :attr `mod_type` is "lr" or "ligand".
         custom_rec_path: Optional path to a .txt file containing a list of receptors for the model, separated by
-            newlines. Only used if :attr `mod_type` is "lr" or "slice" (and thus uses ligand/receptor expression
-            directly in the inference). If not provided, will select receptors using a threshold based on expression
+            newlines. Only used if :attr `mod_type` is "lr" (and thus uses receptor expression directly in the
+            inference). If not provided, will select receptors using a threshold based on expression
             levels in the data.
-        custom_pathways_path: Rather than  providing a list of receptors, can provide a list of signaling pathways-
+        custom_receptors: Optional list of receptors for the model, can be used as an alternative to :attr
+            `custom_rec_path`. Only used if :attr `mod_type` is "lr".
+        custom_pathways_path: Rather than providing a list of receptors, can provide a list of signaling pathways-
             all receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
-            is "lr" or "slice".
+            is "lr".
+        custom_pathways: Optional list of signaling pathways for the model, can be used as an alternative to :attr
+            `custom_pathways_path`. Only used if :attr `mod_type` is "lr".
         targets_path: Optional path to a .txt file containing a list of prediction target genes for the model,
             separated by newlines. If not provided, targets will be strategically selected from the given receptors.
-        init_betas_path: Optional path to a .npy file containing initial coefficient values for the model. Initial
+        custom_targets: Optional list of prediction target genes for the model, can be used as an alternative to
+            :attr `targets_path`.
+        init_betas_path: Optional path to a .json file or .csv file containing initial coefficient values for the model
+            for each target variable. If encoded in .json, keys should be target gene names, values should be numpy
+            arrays containing coefficients. If encoded in .csv, columns should be target gene names. Initial
             coefficients should have shape [n_features, ].
 
 
@@ -2197,6 +2211,10 @@ class MuSIC(SWR):
             covariate (e.g. expression of a particular TF, avg. distance from a perturbed cell, etc.)
 
 
+        bw: Used to provide previously obtained bandwidth for the spatial kernel. Consists of either a distance
+            value or N for the number of nearest neighbors. Can be obtained using BW_Selector or some other
+            user-defined method. Pass "np.inf" if all other points should have the same spatial weight. Defaults to
+            1000 if not provided.
         minbw: For use in automated bandwidth selection- the lower-bound bandwidth to test.
         maxbw: For use in automated bandwidth selection- the upper-bound bandwidth to test.
 
@@ -2281,7 +2299,7 @@ class MuSIC(SWR):
                 indices = np.arange(self.n_samples)
 
             X = X[indices, :]
-            y = y.loc[indices, :]
+            y = y.iloc[indices, :]
             coords = self.coords[indices, :]
 
             # Initialize parameters, with a uniform initial bandwidth for all features- set fit_predictor False to
@@ -2503,6 +2521,7 @@ class MuSIC(SWR):
                 and the response variable for the desired chunk
             cov_chunk: Only returned if model is a GLM- covariance matrix for the desired chunk
         """
+
         if X is None:
             X = self.X
 
@@ -2646,7 +2665,7 @@ class MuSIC(SWR):
 
             X = X[self.indices, :]
             mask_indices = np.where(
-                (y_arr[target_label][self.indices, :].values == 0) & np.all(np.abs(X) > 1e-3, axis=1)
+                (y_arr[target_label].iloc[self.indices].values == 0) & np.all(np.abs(X) > 1e-3, axis=1)
             )[0]
 
             # Lists to store the results of each chunk for this variable (lvg list only used if Gaussian,
@@ -2662,7 +2681,9 @@ class MuSIC(SWR):
                     ENP_list.append(ENP_chunk)
                     lvg_list.append(lvg_chunk)
                 else:
-                    ENP_chunk = self.chunk_compute_metrics(X, chunk_id=chunk, target_label=target_label)
+                    ENP_chunk = self.chunk_compute_metrics(
+                        X, chunk_id=chunk, target_label=target_label, coords=coords, mask_indices=mask_indices
+                    )
                     ENP_list.append(ENP_chunk)
 
             # Gather results from all chunks:

@@ -3,7 +3,7 @@ import random
 
 import numpy as np
 from mpi4py import MPI
-from SWR import SWR, MuSIC
+from MuSIC import MuSIC, VMuSIC
 
 np.random.seed(888)
 random.seed(888)
@@ -30,7 +30,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
     )
-    parser.add_argument("-multiscale", action="store_true")
+    parser.add_argument(
+        "-multiscale",
+        action="store_true",
+        help="Currently, it is recommended to only create " "multiscale models for Gaussian regression models.",
+    )
     # Flag to run a GRN model- if not given, will run STGWR CCI model, taking inputs such as mod_type and cci_dir
     # into consideration.
     parser.add_argument("-multiscale_params_only", action="store_true")
@@ -214,13 +218,13 @@ if __name__ == "__main__":
                 "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
                 "case, it is advisable to reduce the number of parameters."
             )
-            multiscale_model = MuSIC(comm, parser)
+            multiscale_model = VMuSIC(comm, parser)
             multiscale_model.multiscale_backfitting()
             multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
             multiscale_model.predict_and_save()
 
         else:
-            swr_model = SWR(comm, parser)
+            swr_model = MuSIC(comm, parser)
             swr_model.fit()
             swr_model.predict_and_save()
 
