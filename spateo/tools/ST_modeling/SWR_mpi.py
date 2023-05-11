@@ -35,15 +35,8 @@ if __name__ == "__main__":
         action="store_true",
         help="Currently, it is recommended to only create " "multiscale models for Gaussian regression models.",
     )
-    # Flag to run a GRN model- if not given, will run STGWR CCI model, taking inputs such as mod_type and cci_dir
-    # into consideration.
-    parser.add_argument("-multiscale_params_only", action="store_true")
     # Flag to return additional metrics along with the coefficients for multiscale models.
-    parser.add_argument(
-        "-grn",
-        action="store_true",
-        help="Indicates that a GRN model should be run. If this argument " "is provided, 'mod_type' will not be used.",
-    )
+    parser.add_argument("-multiscale_params_only", action="store_true")
     parser.add_argument("-mod_type", type=str)
     parser.add_argument("-cci_dir", type=str)
     parser.add_argument("-species", type=str, default="human")
@@ -51,7 +44,10 @@ if __name__ == "__main__":
         "-output_path",
         default="./output/stgwr_results.csv",
         type=str,
-        help="Path to output file. Make sure the parent " "directory is empty- any existing files will " "be deleted.",
+        help="Path to output file. Make sure the parent "
+        "directory is empty- any existing files will "
+        "be deleted."
+        "It is recommended to create a new folder to serve as the output directory.",
     )
     parser.add_argument("-custom_lig_path", type=str)
     parser.add_argument(
@@ -189,7 +185,7 @@ if __name__ == "__main__":
     parser.add_argument("-tolerance", default=1e-3, type=float)
     parser.add_argument("-max_iter", default=500, type=int)
     parser.add_argument("-patience", default=5, type=int)
-    parser.add_argument("-alpha", type=float)
+    parser.add_argument("-ridge_lambda", type=float)
 
     parser.add_argument(
         "-chunks",
@@ -201,7 +197,8 @@ if __name__ == "__main__":
 
     t1 = MPI.Wtime()
 
-    # Testing time!
+    # Testing time! Uncomment this (and then comment anything below) to test the capabilities of any of the constituent
+    # functions:
     # swr_model = SWR(comm, parser)
     # swr_model.fit()
 

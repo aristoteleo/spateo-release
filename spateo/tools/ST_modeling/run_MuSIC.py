@@ -150,7 +150,7 @@ def main():
     help="Number of iterations to wait before stopping if parameters have "
     "stabilized. Only used if `multiscale` is True.",
 )
-@click.option("alpha", required=False)
+@click.option("ridge_lambda", required=False)
 def run(
     np,
     adata_path,
@@ -193,7 +193,7 @@ def run(
     tolerance,
     max_iter,
     patience,
-    alpha,
+    ridge_lambda,
     chunks,
 ):
     """Command line shortcut to run any STGWR models.
@@ -259,7 +259,7 @@ def run(
         max_iter: Maximum number of iterations for model
         patience: Number of iterations to wait before stopping if parameters have stabilized. Only used if
             `multiscale` is True.
-        alpha: Alpha value to use for MGWR model
+        ridge_lambda: Ridge lambda value to use for L2 regularization
         chunks: Number of chunks for multiscale computation (default: 1). Increase the number if run out of memory
             but should keep it as low as possible.
     """
@@ -378,8 +378,8 @@ def run(
         command += " -fit_intercept "
     if chunks is not None:
         command += " -chunks " + str(chunks)
-    if alpha is not None:
-        command += " -alpha " + str(alpha)
+    if ridge_lambda is not None:
+        command += " -ridge_lambda " + str(ridge_lambda)
 
     os.system(command)
     pass
@@ -387,5 +387,8 @@ def run(
 
 if __name__ == "__main__":
     main()
+
+# ADD UPSTREAM PROCESSING COMMANDS BELOW:
+
 
 # ADD INTERPRETATION COMMANDS BELOW:

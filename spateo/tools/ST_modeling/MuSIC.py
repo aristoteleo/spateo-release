@@ -232,7 +232,7 @@ class MuSIC:
         self.coords = self.comm.bcast(self.coords, root=0)
         self.tolerance = self.comm.bcast(self.tolerance, root=0)
         self.max_iter = self.comm.bcast(self.max_iter, root=0)
-        self.alpha = self.comm.bcast(self.alpha, root=0)
+        self.ridge_lambda = self.comm.bcast(self.ridge_lambda, root=0)
         self.n_samples = self.comm.bcast(self.n_samples, root=0)
         self.n_features = self.comm.bcast(self.n_features, root=0)
 
@@ -348,7 +348,7 @@ class MuSIC:
         self.tolerance = self.arg_retrieve.tolerance
         self.max_iter = self.arg_retrieve.max_iter
         self.patience = self.arg_retrieve.patience
-        self.alpha = self.arg_retrieve.alpha
+        self.ridge_lambda = self.arg_retrieve.ridge_lambda
         self.multiscale_chunks = self.arg_retrieve.chunks
 
         if self.arg_retrieve.bw:
@@ -519,8 +519,8 @@ class MuSIC:
                 for s in self.cell_categories.columns
             ]
 
-        # Ligand-receptor expression array
-        if self.mod_type == "lr" or self.mod_type == "ligand":
+        # Ligand-receptor expression arrays:
+        elif self.mod_type.isin(["lr", "ligand", "receptor"]):
             if self.species == "human":
                 self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
                 r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
@@ -531,9 +531,9 @@ class MuSIC:
                 tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_target_db.csv"), index_col=0)
             else:
                 raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
+
+        if self.mod_type == "lr" or self.mod_type == "ligand":
             database_ligands = set(self.lr_db["from"])
-            database_receptors = set(self.lr_db["to"])
-            database_pathways = set(r_tf_db["pathway"])
 
             if self.custom_ligands_path is not None or self.custom_ligands is not None:
                 if self.custom_ligands_path is not None:
@@ -621,6 +621,10 @@ class MuSIC:
             self.ligands_expr.drop(to_drop, axis=1, inplace=True)
             first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
             self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
+
+        elif self.mod_type == "lr" or self.mod_type == "receptor":
+            database_receptors = set(self.lr_db["to"])
+            database_pathways = set(r_tf_db["pathway"])
 
             if self.custom_receptors_path is not None or self.custom_receptors is not None:
                 if self.custom_receptors_path is not None:
@@ -729,52 +733,54 @@ class MuSIC:
             first_occurrences = self.receptors_expr.columns.duplicated(keep="first")
             self.receptors_expr = self.receptors_expr.loc[:, ~first_occurrences]
 
-            # Ensure there is some degree of compatibility between the selected ligands and receptors:
-            self.logger.info("Preparing data: finding matched pairs between the selected ligands and receptors.")
-            starting_n_ligands = len(self.ligands_expr.columns)
-            starting_n_receptors = len(self.receptors_expr.columns)
+            # Ensure there is some degree of compatibility between the selected ligands and receptors if model uses
+            # both ligands and receptors:
+            if self.mod_type == "lr":
+                self.logger.info("Preparing data: finding matched pairs between the selected ligands and receptors.")
+                starting_n_ligands = len(self.ligands_expr.columns)
+                starting_n_receptors = len(self.receptors_expr.columns)
 
-            lr_ref = self.lr_db[["from", "to"]]
-            # Don't need entire dataframe, just take the first two rows of each:
-            lig_melt = self.ligands_expr.iloc[[0, 1], :].melt(var_name="from", value_name="value_ligand")
-            rec_melt = self.receptors_expr.iloc[[0, 1], :].melt(var_name="to", value_name="value_receptor")
+                lr_ref = self.lr_db[["from", "to"]]
+                # Don't need entire dataframe, just take the first two rows of each:
+                lig_melt = self.ligands_expr.iloc[[0, 1], :].melt(var_name="from", value_name="value_ligand")
+                rec_melt = self.receptors_expr.iloc[[0, 1], :].melt(var_name="to", value_name="value_receptor")
 
-            merged_df = pd.merge(lr_ref, rec_melt, on="to")
-            merged_df = pd.merge(merged_df, lig_melt, on="from")
-            pairs = merged_df[["from", "to"]].drop_duplicates(keep="first")
-            self.lr_pairs = [tuple(x) for x in zip(pairs["from"], pairs["to"])]
-            if len(self.lr_pairs) == 0:
-                raise RuntimeError(
-                    "No matched pairs between the selected ligands and receptors were found. If path to custom list of "
-                    "ligands and/or receptors was provided, ensure ligand-receptor pairings exist among these lists, "
-                    "or check data to make sure these ligands and/or receptors were measured and were not filtered out."
+                merged_df = pd.merge(lr_ref, rec_melt, on="to")
+                merged_df = pd.merge(merged_df, lig_melt, on="from")
+                pairs = merged_df[["from", "to"]].drop_duplicates(keep="first")
+                self.lr_pairs = [tuple(x) for x in zip(pairs["from"], pairs["to"])]
+                if len(self.lr_pairs) == 0:
+                    raise RuntimeError(
+                        "No matched pairs between the selected ligands and receptors were found. If path to custom list of "
+                        "ligands and/or receptors was provided, ensure ligand-receptor pairings exist among these lists, "
+                        "or check data to make sure these ligands and/or receptors were measured and were not filtered out."
+                    )
+
+                pivoted_df = merged_df.pivot_table(values=["value_ligand", "value_receptor"], index=["from", "to"])
+                filtered_df = pivoted_df[pivoted_df.notna().all(axis=1)]
+                # Filter ligand and receptor expression to those that have a matched pair:
+                self.ligands_expr = self.ligands_expr[filtered_df.index.get_level_values("from").unique()]
+                self.receptors_expr = self.receptors_expr[filtered_df.index.get_level_values("to").unique()]
+                final_n_ligands = len(self.ligands_expr.columns)
+                final_n_receptors = len(self.receptors_expr.columns)
+
+                self.logger.info(
+                    f"Found {final_n_ligands} ligands and {final_n_receptors} receptors that have matched pairs. "
+                    f"{starting_n_ligands - final_n_ligands} ligands removed from the list and "
+                    f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the list due to not "
+                    f"having matched pairs among the corresponding set of receptors/ligands, respectively."
+                    f"Remaining ligands: {self.ligands_expr.columns.tolist()}."
+                    f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
                 )
 
-            pivoted_df = merged_df.pivot_table(values=["value_ligand", "value_receptor"], index=["from", "to"])
-            filtered_df = pivoted_df[pivoted_df.notna().all(axis=1)]
-            # Filter ligand and receptor expression to those that have a matched pair:
-            self.ligands_expr = self.ligands_expr[filtered_df.index.get_level_values("from").unique()]
-            self.receptors_expr = self.receptors_expr[filtered_df.index.get_level_values("to").unique()]
-            final_n_ligands = len(self.ligands_expr.columns)
-            final_n_receptors = len(self.receptors_expr.columns)
-
-            self.logger.info(
-                f"Found {final_n_ligands} ligands and {final_n_receptors} receptors that have matched pairs. "
-                f"{starting_n_ligands - final_n_ligands} ligands removed from the list and "
-                f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the list due to not "
-                f"having matched pairs among the corresponding set of receptors/ligands, respectively."
-                f"Remaining ligands: {self.ligands_expr.columns.tolist()}."
-                f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
-            )
-
-            self.logger.info(f"Set of ligand-receptor pairs: {self.lr_pairs}")
+                self.logger.info(f"Set of ligand-receptor pairs: {self.lr_pairs}")
 
         else:
-            raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', or 'ligand'.")
+            raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
 
         # Get gene targets:
         self.logger.info("Preparing data: getting gene targets.")
-        # For niche model, targets must be manually provided:
+        # For niche model and ligand model, targets must be manually provided:
         if self.targets_path is None and self.mod_type.isin(["niche", "ligand"]):
             raise ValueError(
                 "For niche model and ligand model, `targets_path` must be provided. For L:R models, targets can be "
@@ -822,9 +828,13 @@ class MuSIC:
         if self.mod_type == "niche":
             # NOTE TO SELF: MODIFY TO INCORPORATE CELL TYPES OF NEIGHBORS- TRANSFORM ALSO INTO A CONTINUOUS ARRAY BY
             # FINDING THE DISTANCE TO THE NEAREST CELL OF EACH TYPE
-            # Compute adjacency matrix- use n_neighbors and exclude_self from the argparse (defaults to 10).
+            # Compute spatial weights matrix- use n_neighbors and exclude_self from the argparse (defaults to 10).
+            self.logger.info(f"Checking for pre-computed adjacency matrix in directory {self.output_path}.")
             try:
-                "filler"
+                self.adata.obsp["spatial_weights"] = pd.read_csv(
+                    os.path.join(self.output_path, "spatial_weights.csv"), index_col=0
+                ).values
+
             except:
                 "filler"
 
@@ -1356,8 +1366,7 @@ class MuSIC:
                 max_iter=self.max_iter,
                 spatial_weights=wi,
                 link=None,
-                alpha=self.alpha,
-                tau=None,
+                ridge_lambda=self.ridge_lambda,
             )
 
             # For multiscale GLM models, this is the predicted dependent variable value:
@@ -1472,8 +1481,7 @@ class MuSIC:
                 if np.isnan(lb_score) or np.isnan(ub_score):
                     self.logger.info(
                         "NaN returned from one of the models. Returning last non-NaN bandwidth, and if not "
-                        "found, exiting "
-                        "optimization."
+                        "found, exiting optimization."
                     )
                     if any(not np.isnan(x) for x in optimum_score_history):
                         return optimum_bw
@@ -1489,6 +1497,11 @@ class MuSIC:
                         patience += 1
                     else:
                         patience = 0
+                    if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 1.0:
+                        self.logger.info(
+                            "Plateau detected- exiting optimization and returning optimum score up to this " "point."
+                        )
+                        patience = 3
 
             new_lb = self.comm.bcast(new_lb, root=0)
             new_ub = self.comm.bcast(new_ub, root=0)
@@ -1828,18 +1841,18 @@ class MuSIC:
                 indices = self.subsampled_indices[target]
                 chunk_size = int(math.ceil(float(n_samples) / self.comm.size))
                 # Assign chunks to each process:
-                self.x_chunk = np.arange(n_samples)[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+                self.x_chunk = indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
             elif self.subset:
                 indices = self.subset_indices[target]
             else:
                 indices = range(self.n_samples)
 
-            X = X[indices, :]
-            y = y[indices, :]
-            coords = self.coords[indices, :]
-            X = self.comm.bcast(X, root=0)
-            y = self.comm.bcast(y, root=0)
-            coords = self.comm.bcast(coords, root=0)
+            # X = X[indices, :]
+            # y = y[indices, :]
+            # coords = self.coords[indices, :]
+            # X = self.comm.bcast(X, root=0)
+            # y = self.comm.bcast(y, root=0)
+            # coords = self.comm.bcast(coords, root=0)
 
             # Find indices where y is zero but x is nonzero:
             mask_indices = np.where((y == 0).reshape(-1, 1) & (np.all(np.abs(X) > 1e-3, axis=1)).reshape(-1, 1))[0]
@@ -1857,7 +1870,9 @@ class MuSIC:
                 if verbose:
                     self.logger.info(f"Starting fitting process for target {target}. Initial bandwidth: {self.bw}.")
                 # If bandwidth is already known, run the main fit function:
-                self.mpi_fit(y, X, y_label=target, bw=self.bw, coords=coords, mask_indices=mask_indices, final=True)
+                self.mpi_fit(
+                    y, X, y_label=target, bw=self.bw, coords=self.coords, mask_indices=mask_indices, final=True
+                )
                 return
 
             if self.comm.rank == 0:
@@ -1878,7 +1893,7 @@ class MuSIC:
                 X,
                 y_label=target,
                 bw=bw,
-                coords=coords,
+                coords=self.coords,
                 mask_indices=mask_indices,
                 final=False,
                 multiscale=multiscale,
@@ -1895,7 +1910,7 @@ class MuSIC:
                 X,
                 y_label=target,
                 bw=optimal_bw,
-                coords=coords,
+                coords=self.coords,
                 mask_indices=mask_indices,
                 final=True,
                 multiscale=multiscale,

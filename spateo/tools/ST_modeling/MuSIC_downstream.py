@@ -11,6 +11,7 @@ These include:
 """
 import argparse
 import os
+import sys
 from typing import Tuple
 
 import numpy as np
@@ -18,7 +19,15 @@ import pandas as pd
 from mpi4py import MPI
 from MuSIC import MuSIC
 
+# For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
+sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
+from spateo.logging import logger_manager as lm
+
+
+# ---------------------------------------------------------------------------------------------------
+# Statistical testing, correlated differential expression analysis
+# ---------------------------------------------------------------------------------------------------
 class MuSIC_Interpreter(MuSIC):
     """
     Interpretation and downstream analysis of spatially weighted regression models.

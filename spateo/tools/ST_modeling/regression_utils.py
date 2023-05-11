@@ -128,6 +128,7 @@ def sparse_minmax_scale(a: Union[scipy.sparse.csr_matrix, scipy.sparse.csc_matri
 def compute_betas(
     y: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
     x: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
+    ridge_lambda: float = 0.0,
     clip: float = 5.0,
 ):
     """Maximum likelihood estimation procedure, to be used in iteratively weighted least squares to compute the
@@ -140,6 +141,8 @@ def compute_betas(
     Args:
         y: Array of shape [n_samples,]; dependent variable
         x: Array of shape [n_samples, n_features]; independent variables
+        ridge_lambda: Regularization parameter for Ridge regression. Higher values will tend to shrink coefficients
+            further towards zero.
         clip: Float; upper and lower bound to constrain betas and prevent numerical overflow
 
     Returns:
@@ -147,6 +150,11 @@ def compute_betas(
     """
     xT = x.T
     xtx = sparse_dot(xT, x)
+
+    # Ridge regularization:
+    identity = np.eye(xtx.shape[0])
+    xtx += ridge_lambda * identity
+
     xtx_inv = linalg.inv(xtx)
     xtx_inv = scipy.sparse.csr_matrix(xtx_inv)
     xTy = sparse_dot(xT, y, return_array=False)
@@ -156,7 +164,7 @@ def compute_betas(
     return betas
 
 
-def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, clip: float = 5.0):
+def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambda: float = 0.0, clip: float = 5.0):
     """Maximum likelihood estimation procedure, to be used in iteratively weighted least squares to compute the
     regression coefficients for a given set of dependent and independent variables while accounting for spatial
     heterogeneity in the dependent variable.
@@ -167,6 +175,8 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, clip: float
     Args:
         y: Array of shape [n_samples,]; dependent variable
         x: Array of shape [n_samples, n_features]; independent variables
+        ridge_lambda: Regularization parameter for Ridge regression. Higher values will tend to shrink coefficients
+            further towards zero.
         w: Array of shape [n_samples, 1]; spatial weights matrix
         clip: Float; upper and lower bound to constrain betas and prevent numerical overflow
 
@@ -176,6 +186,11 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, clip: float
     """
     xT = (x * w).T
     xtx = np.dot(xT, x)
+
+    # Ridge regularization:
+    identity = np.eye(xtx.shape[0])
+    xtx += ridge_lambda * identity
+
     # Diagonals of the Gram matrix- used as additional diagnostic- for each feature, this is the sum of squared
     # values- if this is sufficiently low, the coefficient should be zero- theoretically it can take on nearly any
     # value with little impact on the residuals, but it is most likely to be zero:
@@ -212,8 +227,7 @@ def iwls(
     max_iter: int = 200,
     spatial_weights: Optional[np.ndarray] = None,
     link: Optional[Link] = None,
-    alpha: Optional[float] = None,
-    tau: Optional[float] = None,
+    ridge_lambda: Optional[float] = None,
 ):
     """Iteratively weighted least squares (IWLS) algorithm to compute the regression coefficients for a given set of
     dependent and independent variables.
@@ -235,9 +249,7 @@ def iwls(
             distribution family.
         variance: Variance function for the distribution family. If None, will default to the default value for the
             specified distribution family.
-        alpha: L1 regularization strength; must be between 0 and 1. The L2 regularization strength is 1 - alpha.
-        tau: Optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
-            provided, Tau will default to the identity matrix.
+        ridge_lambda: Ridge regularization parameter.
 
     Returns:
         betas: Array of shape [n_features, 1]; regression coefficients
@@ -293,21 +305,10 @@ def iwls(
         w_adjusted_predictor = sparse_element_by_element(adjusted_predictor, weights, return_array=False)
 
         if spatial_weights is None:
-            new_betas = compute_betas(w_adjusted_predictor, wx, clip=clip)
+            new_betas = compute_betas(w_adjusted_predictor, wx, ridge_lambda=ridge_lambda, clip=clip)
         else:
-            new_betas, pseudoinverse = compute_betas_local(w_adjusted_predictor, wx, spatial_weights, clip=clip)
-
-        # Update coefficients with the elastic net penalty, if applicable:
-        if alpha is not None:
-            if not (alpha is None or (0 <= alpha <= 1)):
-                logger.error("alpha must be between 0 and 1.")
-
-            l1_penalty = alpha * L1_penalty(new_betas)
-            l2_penalty = (1 - alpha) * L2_penalty(new_betas, tau)
-            new_betas = (
-                np.sign(new_betas)
-                * np.maximum(np.abs(new_betas) - l1_penalty, 0)
-                / (1 + l2_penalty / (2 * (1 - alpha)))
+            new_betas, pseudoinverse = compute_betas_local(
+                w_adjusted_predictor, wx, spatial_weights, ridge_lambda=ridge_lambda, clip=clip
             )
 
         linear_predictor = sparse_dot(x, new_betas)
@@ -381,60 +382,6 @@ def multicollinearity_check(X: pd.DataFrame, thresh: float = 5.0, logger: Option
 
         logger.info(f"\n\nRemaining variables:\n {X.columns[variables]}")
         return X
-
-
-# ---------------------------------------------------------------------------------------------------
-# Regularization
-# ---------------------------------------------------------------------------------------------------
-def L1_penalty(beta: np.ndarray) -> float:
-    """
-    Implementation of the L1 penalty that penalizes based on absolute value of coefficient magnitude.
-
-    Args:
-        beta: Array of shape [n_features,]; learned model coefficients
-
-    Returns:
-        L1penalty: float, value for the regularization parameter (typically stylized by lambda)
-    """
-    # Lasso-like penalty- max(sum(abs(beta), axis=0))
-    L1penalty = np.linalg.norm(beta, 1)
-    return L1penalty
-
-
-def L2_penalty(beta: np.ndarray, Tau: Union[None, np.ndarray] = None) -> float:
-    """Implementation of the L2 penalty that penalizes based on the square of coefficient magnitudes.
-
-    Args:
-        beta: Array of shape [n_features,]; learned model coefficients
-        Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
-        provided, Tau will default to the identity matrix.
-    """
-    if Tau is None:
-        # Ridge=like penalty
-        L2penalty = np.linalg.norm(beta, 2) ** 2
-    else:
-        # Tikhonov penalty
-        if Tau.shape[0] != beta.shape[0] or Tau.shape[1] != beta.shape[0]:
-            raise ValueError("Tau should be (n_features x n_features)")
-        else:
-            L2penalty = np.linalg.norm(np.dot(Tau, beta), 2) ** 2
-
-    return L2penalty
-
-
-def L1_L2_penalty(alpha: float, beta: np.ndarray, Tau: Union[None, np.ndarray] = None) -> float:
-    """
-    Combination of the L1 and L2 penalties.
-    Args:
-        alpha: The weighting between L1 penalty (alpha=1.) and L2 penalty (alpha=0.) term of the loss function.
-        beta: Array of shape [n_features,]; learned model coefficients
-        Tau: optional array of shape [n_features, n_features]; the Tikhonov matrix for ridge regression. If not
-        provided, Tau will default to the identity matrix.
-    Returns:
-        P: Value for the regularization parameter
-    """
-    P = 0.5 * (1 - alpha) * L2_penalty(beta, Tau) + alpha * L1_penalty(beta)
-    return P
 
 
 # ---------------------------------------------------------------------------------------------------
