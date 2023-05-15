@@ -115,7 +115,7 @@ if __name__ == "__main__":
     parser.add_argument("-log_transform", action="store_true")
     parser.add_argument(
         "-target_expr_threshold",
-        default=0.2,
+        default=0.05,
         type=float,
         help="For automated selection, the threshold proportion of cells for which transcript "
         "needs to be expressed in to be selected as a target of interest. Not used if 'targets_path' is not None.",

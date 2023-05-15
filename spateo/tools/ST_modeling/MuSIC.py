@@ -58,6 +58,7 @@ class MuSIC:
                     and spatially lagged ligand expression in the neighboring cells as independent variables.
                 - "ligand": Spatially-aware, essentially uses ligand expression in the neighboring cells as
                     independent variables.
+                - "receptor": Uses receptor expression in the "target" cell as independent variables.
 
 
         adata_path: Path to the AnnData object from which to extract data for modeling
@@ -171,7 +172,8 @@ class MuSIC:
     def _set_up_model(self):
         if self.mod_type is None and self.adata_path is not None:
             raise ValueError(
-                "No model type provided; need to provide a model type to fit. Options: 'niche', 'lr', " "'ligand'."
+                "No model type provided; need to provide a model type to fit. Options: 'niche', 'lr', "
+                "'receptor', 'ligand'."
             )
 
         # Check if the program is currently in the master process:
@@ -275,9 +277,6 @@ class MuSIC:
         """
         self.arg_retrieve = self.parser.parse_args()
         self.mod_type = self.arg_retrieve.mod_type
-        # GRN inherits from this class and has slightly different preprocessing options that can be accessed using
-        # its own flag:
-        self.grn = self.arg_retrieve.grn
         # Set flag to evenly subsample spatial data:
         self.subsample = self.arg_retrieve.subsample
 
@@ -323,7 +322,7 @@ class MuSIC:
         self.n_neighbors = self.arg_retrieve.n_neighbors
         self.exclude_self = self.arg_retrieve.exclude_self
         self.distr = self.arg_retrieve.distr
-        # Get appropriate distribution family based on specified:
+        # Get appropriate distribution family based on specified distribution:
         if self.distr == "gaussian":
             link = Gaussian.__init__.__defaults__[0]
             self.distr_obj = Gaussian(link)
@@ -421,7 +420,7 @@ class MuSIC:
                 fixed_bw=False,
                 exclude_self=True,
                 kernel="bisquare",
-                bw=10,
+                bw=self.n_neighbors,
                 threshold=0.01,
                 sparse_array=True,
             )
@@ -444,7 +443,7 @@ class MuSIC:
             if self.normalize or self.smooth or self.log_transform:
                 self.logger.info(
                     f"With a {self.distr} assumption, discrete counts are required for the response variable. "
-                    f"Computing normalizations and transforms if applicable, but rounding nonintegers up to nearest "
+                    f"Computing normalizations and transforms if applicable, but rounding nonintegers to nearest "
                     f"integer; original counts can be round in .layers['raw']. Log-transform should not be applied."
                 )
                 self.adata.layers["raw"] = self.adata.X
@@ -622,7 +621,7 @@ class MuSIC:
             first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
             self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
 
-        elif self.mod_type == "lr" or self.mod_type == "receptor":
+        if self.mod_type == "lr" or self.mod_type == "receptor":
             database_receptors = set(self.lr_db["to"])
             database_pathways = set(r_tf_db["pathway"])
 
@@ -874,13 +873,14 @@ class MuSIC:
                 self.lr_db["from"].isin([x[0] for x in self.lr_pairs]), "type"
             ].tolist()
 
+        # NOTE TO SELF: CHANGE THIS TO COMPUTE SPATIAL LAG FOR EACH LIGAND AND USE THIS AS THE FEATURES
         elif self.mod_type == "ligand":
             X_df = self.ligands_expr
             # If applicable, drop all-zero columns:
             X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
             # NOTE TO SELF: COMPUTE SPATIAL LAG FOR EACH LIGAND AND USE THIS AS THE FEATURES
             self.logger.info(
-                f"Dropped all-zero columns from cell type-specific signaling array, from "
+                f"Dropped all-zero columns from ligand expression array, from "
                 f"{self.ligands_expr.shape[1]} to {X_df.shape[1]}."
             )
             # If applicable, check for multicollinearity:
@@ -889,10 +889,25 @@ class MuSIC:
 
             self.X = X_df.values
             self.feature_names = X_df.columns
-            self.signaling_types = self.lr_db.loc[self.lr_db["from"].isin(self.feature_names), "type"].tolist()
+            #self.signaling_types = self.lr_db.loc[self.lr_db["from"].isin(self.feature_names), "type"].tolist()
+
+        elif self.mod_type == "receptor":
+            X_df = self.receptors_expr
+            # If applicable, drop all-zero columns:
+            X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
+            self.logger.info(
+                f"Dropped all-zero columns from receptor expression array, from "
+                f"{self.receptors_expr.shape[1]} to {X_df.shape[1]}."
+            )
+            # If applicable, check for multicollinearity:
+            if self.multicollinear_threshold is not None:
+                X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+
+            self.X = X_df.values
+            self.feature_names = X_df.columns
 
         else:
-            raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', or 'ligand'.")
+            raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
 
         # If applicable, add covariates:
         if self.covariate_keys is not None:
@@ -945,32 +960,6 @@ class MuSIC:
         self.feature_names = self.comm.bcast(self.feature_names, root=0)
         self.n_features = self.X.shape[1]
         self.n_features = self.comm.bcast(self.n_features, root=0)
-
-        # If model is not multiscale model, ensure all signaling type labels are the same in terms of the assumed
-        # length scale:
-        if hasattr(self, "self.signaling_types"):
-            # If all features are assumed to operate on the same length scale, there should not be a mix of secreted
-            # and membrane-bound-mediated signaling:
-            if not self.multiscale_flag:
-                # Secreted + ECM-receptor can diffuse across larger distances, but membrane-bound interactions are
-                # limited by non-diffusivity. Therefore, it is not advisable to include a mixture of membrane-bound with
-                # either of the other two categories in the same model.
-                if (
-                    "Cell-Cell Contact" in set(self.signaling_types)
-                    and "Secreted Signaling" in set(self.signaling_types)
-                ) or ("Cell-Cell Contact" in set(self.signaling_types) and "ECM-Receptor" in set(self.signaling_types)):
-                    raise ValueError(
-                        "It is not advisable to include a mixture of membrane-bound with either secreted or "
-                        "ECM-receptor in the same model because the valid distance scales over which they operate "
-                        "is different. If you wish to include both, please run the model twice, once for each category."
-                    )
-
-                self.signaling_types = set(self.signaling_types)
-                if "Secred Signaling" in self.signaling_types or "ECM-Receptor" in self.signaling_types:
-                    self.signaling_types = "Diffusive Signaling"
-                else:
-                    self.signaling_types = "Cell-Cell Contact"
-            self.signaling_types = self.comm.bcast(self.signaling_types, root=0)
 
         self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
         self.X_df = self.comm.bcast(self.X_df, root=0)
@@ -1130,7 +1119,7 @@ class MuSIC:
         self.subsampled_sample_names = self.comm.bcast(self.subsampled_sample_names, root=0)
         self.neighboring_unsampled = self.comm.bcast(self.neighboring_unsampled, root=0)
 
-    def _set_search_range(self, signaling_type: Optional[str] = None):
+    def _set_search_range(self):
         """Set the search range for the bandwidth selection procedure.
 
         Args:
@@ -1139,104 +1128,37 @@ class MuSIC:
                 (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor"
         """
 
-        if self.adata_path is not None:
-            if signaling_type is None:
-                signaling_type = self.signaling_types
+        if self.bw_fixed:
+            max_dist = np.max(
+                np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)])
+            )
+            # Set max bandwidth to twice the max distance between any two given samples:
+            self.maxbw = max_dist * 2
 
-            # Check whether the signaling types defined are membrane-bound or are composed of soluble molecules:
-            if signaling_type == "Cell-Cell Contact":
-                # Signaling is limited to occurring between only the nearest neighbors of each cell:
-                if self.bw_fixed:
-                    distances = cdist(self.coords, self.coords)
-                    # Set max bandwidth to the average distance to the 20 nearest neighbors:
-                    nearest_idxs_all = np.argpartition(distances, 21, axis=1)[:, 1:21]
-                    nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
-                    self.maxbw = np.mean(nearest_distances, axis=1)
-
-                    if self.minbw is None:
-                        # Set min bandwidth to the average distance to the 5 nearest neighbors:
-                        nearest_idxs_all = np.argpartition(distances, 6, axis=1)[:, 1:6]
-                        nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
-                        self.minbw = np.mean(nearest_distances, axis=1)
-                else:
-                    self.maxbw = 20
-
-                    if self.minbw is None:
-                        self.minbw = 5
-
-                if self.minbw >= self.maxbw:
-                    raise ValueError(
-                        "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
-                        "parameter accordingly."
+            # Set minimum bandwidth to ensure at least one "negative" example is included in spatially-weighted
+            # calculation for each cell:
+            if self.minbw is None:
+                # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
+                min_dist = np.min(
+                    np.array(
+                        [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
                     )
-                return
-
-            # If the bandwidth is defined by a fixed spatial distance:
-            if self.bw_fixed:
-                max_dist = np.max(
-                    np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)])
                 )
-                # Set max bandwidth higher to twice the max distance between any two given samples:
-                self.maxbw = max_dist * 2
+                self.minbw = min_dist * 3
 
-                # Set minimum bandwidth to ensure at least one "negative" example is included in spatially-weighted
-                # calculation for each cell:
-                if self.minbw is None:
-                    # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
-                    min_dist = np.min(
-                        np.array(
-                            [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
-                        )
-                    )
-                    self.minbw = min_dist * 3
-
-            # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
-            else:
-                if self.maxbw is None:
-                    self.maxbw = 100
-
-                if self.minbw is None:
-                    self.minbw = 5
-
-            if self.minbw >= self.maxbw:
-                raise ValueError(
-                    "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
-                    "parameter accordingly."
-                )
-
+        # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
         else:
-            # For regression on non-AnnData objects, repeat the above conditional bandwidth definition:
-            if self.bw_fixed:
-                max_dist = np.max(
-                    np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)])
-                )
-                # Set max bandwidth to twice the max distance between any two given samples:
-                self.maxbw = max_dist * 2
+            if self.maxbw is None:
+                self.maxbw = 100
 
-                # Set minimum bandwidth to ensure at least one "negative" example is included in spatially-weighted
-                # calculation for each cell:
-                if self.minbw is None:
-                    # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
-                    min_dist = np.min(
-                        np.array(
-                            [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
-                        )
-                    )
-                    self.minbw = min_dist * 3
+            if self.minbw is None:
+                self.minbw = 5
 
-            # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
-            else:
-                if self.maxbw is None:
-                    self.maxbw = 100
-
-                if self.minbw is None:
-                    self.minbw = 5
-
-            if self.minbw >= self.maxbw:
-                raise ValueError(
-                    "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
-                    "parameter accordingly."
-                )
+        if self.minbw >= self.maxbw:
+            raise ValueError(
+                "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
+                "parameter accordingly."
+            )
 
     def _compute_all_wi(self, bw: Union[float, int]) -> scipy.sparse.spmatrix:
         """Compute spatial weights for all samples in the dataset given a specified bandwidth.
@@ -2354,13 +2276,6 @@ class VMuSIC(MuSIC):
                 new_betas = np.empty(y_pred_init.shape, dtype=np.float64)
 
                 for n_feat in range(self.n_features):
-                    if self.adata_path is not None:
-                        if n_feat < len(self.signaling_types):
-                            signaling_type = self.signaling_types[n_feat]
-                        else:
-                            signaling_type = None
-                    else:
-                        signaling_type = None
                     # Use each individual feature to predict the response- note y is set up as a DataFrame because in
                     # other cases column names/target names are taken from y:
                     y_mod = y_pred_init[:, n_feat] + error

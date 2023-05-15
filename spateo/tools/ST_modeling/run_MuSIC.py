@@ -9,7 +9,7 @@ import click
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
-import spateo.tools.ST_modeling as fast_stgwr
+import spateo.tools.ST_modeling as fast_swr
 
 
 @click.group()
@@ -264,7 +264,7 @@ def run(
             but should keep it as low as possible.
     """
 
-    mpi_path = os.path.dirname(fast_stgwr.__file__) + "/SWR_mpi.py"
+    mpi_path = os.path.dirname(fast_swr.__file__) + "/SWR_mpi.py"
 
     command = (
         "mpiexec "
