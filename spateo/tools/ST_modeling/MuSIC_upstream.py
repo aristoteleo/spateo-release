@@ -15,13 +15,14 @@ import pandas as pd
 import scipy
 from mpi4py import MPI
 from MuSIC import MuSIC
+
 from spateo.tools import moran_i
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
 from spateo.logging import logger_manager as lm
-from spateo.preprocessing import normalize_total, log1p
+from spateo.preprocessing import log1p, normalize_total
 from spateo.tools.find_neighbors import get_wi, transcriptomic_connectivity
 from spateo.tools.ST_modeling.regression_utils import smooth
 
@@ -96,6 +97,7 @@ class MuSIC_target_selector:
         n_neighbors: Number of nearest neighbors to use in the case that ligands are provided or in the case that
             ligands of interest should be found
     """
+
     def __init__(self, parser: argparse.ArgumentParser):
         self.logger = lm.get_main_logger()
 
@@ -147,19 +149,39 @@ class MuSIC_target_selector:
 
         self.n_neighbors = self.arg_retrieve.n_neighbors
 
-        any_predictors_given = any(x is not None for x in [self.custom_ligands_path, self.custom_ligands,
-                                                           self.custom_receptors_path, self.custom_receptors,
-                                                           self.custom_pathways_path, self.custom_pathways])
-        if any_predictors_given and self.targets_path is not None \
-                or any_predictors_given and self.custom_targets is not None:
-            self.logger.info("Targets were provided, but so were predictors (ligands and/or receptors). Automated "
-                             "selection of targets/predictors is not needed and modeling can proceed with the given "
-                             "targets and predictors.")
+        any_predictors_given = any(
+            x is not None
+            for x in [
+                self.custom_ligands_path,
+                self.custom_ligands,
+                self.custom_receptors_path,
+                self.custom_receptors,
+                self.custom_pathways_path,
+                self.custom_pathways,
+            ]
+        )
+        if (
+            any_predictors_given
+            and self.targets_path is not None
+            or any_predictors_given
+            and self.custom_targets is not None
+        ):
+            self.logger.info(
+                "Targets were provided, but so were predictors (ligands and/or receptors). Automated "
+                "selection of targets/predictors is not needed and modeling can proceed with the given "
+                "targets and predictors."
+            )
             sys.exit()
-        elif not any_predictors_given and self.targets_path is None \
-                or not any_predictors_given and self.custom_targets is not None:
-            self.logger.info("Targets were not provided, and neither were predictors (ligands and/or receptors). "
-                             "Automated selection of targets/predictors is not possible.")
+        elif (
+            not any_predictors_given
+            and self.targets_path is None
+            or not any_predictors_given
+            and self.custom_targets is not None
+        ):
+            self.logger.info(
+                "Targets were not provided, and neither were predictors (ligands and/or receptors). "
+                "Automated selection of targets/predictors is not possible."
+            )
 
     def load_and_process(self):
         """
@@ -292,11 +314,11 @@ class MuSIC_target_selector:
         ligands = [l for l in ligands if l in self.adata.var_names]
         # Subset ligands based on expression in sufficient numbers of cells:
         if scipy.sparse.issparse(self.adata.X):
-            ligands = [l for l in ligands if (self.adata[:, l].X > 0).sum() >= self.n_samples *
-                       self.target_expr_threshold]
+            ligands = [
+                l for l in ligands if (self.adata[:, l].X > 0).sum() >= self.n_samples * self.target_expr_threshold
+            ]
         else:
-            ligands = [l for l in ligands if self.adata[:, l].X.getnnz() >= self.n_samples *
-                       self.target_expr_threshold]
+            ligands = [l for l in ligands if self.adata[:, l].X.getnnz() >= self.n_samples * self.target_expr_threshold]
 
         self.ligands_expr = pd.DataFrame(
             self.adata[:, ligands].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, ligands].X,
@@ -333,8 +355,12 @@ class MuSIC_target_selector:
         first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
         self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
 
-        if self.custom_receptors_path is not None or self.custom_receptors is not None or self.custom_pathways_path \
-                is not None or self.custom_pathways is not None:
+        if (
+            self.custom_receptors_path is not None
+            or self.custom_receptors is not None
+            or self.custom_pathways_path is not None
+            or self.custom_pathways is not None
+        ):
             if self.custom_receptors_path is not None:
                 with open(self.custom_receptors_path, "r") as f:
                     receptors = f.read().splitlines()
@@ -366,15 +392,16 @@ class MuSIC_target_selector:
         receptors = [r for r in receptors if r in self.adata.var_names]
         # Subset receptors based on expression in sufficient numbers of cells:
         if scipy.sparse.issparse(self.adata.X):
-            receptors = [r for r in receptors if (self.adata[:, r].X > 0).sum() >= self.n_samples *
-                       self.target_expr_threshold]
+            receptors = [
+                r for r in receptors if (self.adata[:, r].X > 0).sum() >= self.n_samples * self.target_expr_threshold
+            ]
         else:
-            receptors = [r for r in receptors if self.adata[:, r].X.getnnz() >= self.n_samples *
-                       self.target_expr_threshold]
+            receptors = [
+                r for r in receptors if self.adata[:, r].X.getnnz() >= self.n_samples * self.target_expr_threshold
+            ]
 
         self.receptors_expr = pd.DataFrame(
-            self.adata[:, receptors].X.toarray() if scipy.sparse.issparse(self.adata.X)
-                else self.adata[:, receptors].X,
+            self.adata[:, receptors].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, receptors].X,
             index=self.sample_names,
             columns=receptors,
         )
@@ -463,11 +490,13 @@ class MuSIC_target_selector:
 
             # Subset targets based on expression in sufficient numbers of cells:
             if scipy.sparse.issparse(self.adata.X):
-                targets = [t for t in targets if (self.adata[:, t].X > 0).sum() >= self.n_samples *
-                           self.target_expr_threshold]
+                targets = [
+                    t for t in targets if (self.adata[:, t].X > 0).sum() >= self.n_samples * self.target_expr_threshold
+                ]
             else:
-                targets = [t for t in targets if self.adata[:, t].X.getnnz() >= self.n_samples *
-                           self.target_expr_threshold]
+                targets = [
+                    t for t in targets if self.adata[:, t].X.getnnz() >= self.n_samples * self.target_expr_threshold
+                ]
 
             self.targets_expr = pd.DataFrame(
                 self.adata[:, targets].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
@@ -480,7 +509,6 @@ class MuSIC_target_selector:
         if self.mod_type == "ligand":
             # Ligand expression in cellular neighborhoods:
             "filler"
-
 
     # Depending on the model type, define predictors or targets- if targets are given and model is "ligand" or "lr",
     # will identify a good set of ligands by using ligand expression in the 10 nearest neighbors of each cell. If

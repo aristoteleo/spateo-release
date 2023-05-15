@@ -621,6 +621,18 @@ class MuSIC:
             first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
             self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
 
+            # Compute spatial lag of ligand expression- exclude self because there are many ligands for which
+            # autocrine signaling is not possible:
+            if "spatial_weights" not in locals():
+                spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=False, exclude_self=True)
+            lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
+            for i, ligand in enumerate(self.ligands_expr.columns):
+                expr = self.ligands_expr[ligand]
+                expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
+                lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
+                lagged_expr_mat[:, i] = lagged_expr
+            self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=adata.obs_names, columns=ligands)
+
         if self.mod_type == "lr" or self.mod_type == "receptor":
             database_receptors = set(self.lr_db["to"])
             database_pathways = set(r_tf_db["pathway"])
@@ -825,19 +837,17 @@ class MuSIC:
 
         # Set dependent variable array based on input given as "mod_type":
         if self.mod_type == "niche":
-            # NOTE TO SELF: MODIFY TO INCORPORATE CELL TYPES OF NEIGHBORS- TRANSFORM ALSO INTO A CONTINUOUS ARRAY BY
-            # FINDING THE DISTANCE TO THE NEAREST CELL OF EACH TYPE
             # Compute spatial weights matrix- use n_neighbors and exclude_self from the argparse (defaults to 10).
-            self.logger.info(f"Checking for pre-computed adjacency matrix in directory {self.output_path}.")
-            try:
-                self.adata.obsp["spatial_weights"] = pd.read_csv(
-                    os.path.join(self.output_path, "spatial_weights.csv"), index_col=0
-                ).values
+            if "spatial_weights" not in locals():
+                spatial_weights = self._compute_all_wi(
+                    bw=self.n_neighbors, bw_fixed=False, exclude_self=True, kernel="bisquare"
+                )
+            # Construct category adjacency matrix (n_samples x n_categories array that records how many neighbors of
+            # each category are present within the neighborhood of each sample):
+            dmat_neighbors = (spatial_weights > 0).astype("int").dot(self.cell_categories.values)
+            dmat_neighbors[dmat_neighbors > 1] = 1
 
-            except:
-                "filler"
-
-            self.X = self.cell_categories.values
+            self.X = dmat_neighbors
             self.feature_names = self.cell_categories.columns
 
         elif self.mod_type == "lr":
@@ -873,32 +883,26 @@ class MuSIC:
                 self.lr_db["from"].isin([x[0] for x in self.lr_pairs]), "type"
             ].tolist()
 
-        # NOTE TO SELF: CHANGE THIS TO COMPUTE SPATIAL LAG FOR EACH LIGAND AND USE THIS AS THE FEATURES
-        elif self.mod_type == "ligand":
-            X_df = self.ligands_expr
+        elif self.mod_type == "ligand" or self.mod_type == "receptor":
+            if self.mod_type == "ligand":
+                X_df = self.ligands_expr
+            elif self.mod_type == "receptor":
+                X_df = self.receptors_expr
+
             # If applicable, drop all-zero columns:
             X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
-            # NOTE TO SELF: COMPUTE SPATIAL LAG FOR EACH LIGAND AND USE THIS AS THE FEATURES
-            self.logger.info(
-                f"Dropped all-zero columns from ligand expression array, from "
-                f"{self.ligands_expr.shape[1]} to {X_df.shape[1]}."
-            )
-            # If applicable, check for multicollinearity:
-            if self.multicollinear_threshold is not None:
-                X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
-            self.X = X_df.values
-            self.feature_names = X_df.columns
-            #self.signaling_types = self.lr_db.loc[self.lr_db["from"].isin(self.feature_names), "type"].tolist()
+            if self.mod_type == "ligand":
+                self.logger.info(
+                    f"Dropped all-zero columns from ligand expression array, from "
+                    f"{self.ligands_expr.shape[1]} to {X_df.shape[1]}."
+                )
+            elif self.mod_type == "receptor":
+                self.logger.info(
+                    f"Dropped all-zero columns from receptor expression array, from "
+                    f"{self.receptors_expr.shape[1]} to {X_df.shape[1]}."
+                )
 
-        elif self.mod_type == "receptor":
-            X_df = self.receptors_expr
-            # If applicable, drop all-zero columns:
-            X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
-            self.logger.info(
-                f"Dropped all-zero columns from receptor expression array, from "
-                f"{self.receptors_expr.shape[1]} to {X_df.shape[1]}."
-            )
             # If applicable, check for multicollinearity:
             if self.multicollinear_threshold is not None:
                 X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
@@ -934,26 +938,6 @@ class MuSIC:
         if self.fit_intercept:
             self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
             self.feature_names = ["intercept"] + self.feature_names
-
-        # Compute initial spatial weights for all samples- use the arbitrarily defined five times the min distance as
-        # initial bandwidth if not provided (for fixed bw) or 10 nearest neighbors (for adaptive bw):
-        if self.bw is None:
-            if self.bw_fixed:
-                init_bw = (
-                    np.min(
-                        np.array(
-                            [np.min(np.delete(cdist([self.coords[i]], self.coords), 0)) for i in range(self.n_samples)]
-                        )
-                    )
-                    * 5
-                )
-            else:
-                init_bw = 10
-        else:
-            init_bw = self.bw
-        if not hasattr(self, "all_spatial_weights"):
-            self.all_spatial_weights = self._compute_all_wi(init_bw)
-        self.all_spatial_weights = self.comm.bcast(self.all_spatial_weights, root=0)
 
         # Broadcast independent variables and feature names:
         self.X = self.comm.bcast(self.X, root=0)
@@ -1129,9 +1113,7 @@ class MuSIC:
         """
 
         if self.bw_fixed:
-            max_dist = np.max(
-                np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)])
-            )
+            max_dist = np.max(np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)]))
             # Set max bandwidth to twice the max distance between any two given samples:
             self.maxbw = max_dist * 2
 
@@ -1160,11 +1142,23 @@ class MuSIC:
                 "parameter accordingly."
             )
 
-    def _compute_all_wi(self, bw: Union[float, int]) -> scipy.sparse.spmatrix:
+    def _compute_all_wi(
+        self,
+        bw: Union[float, int],
+        bw_fixed: Optional[bool] = None,
+        exclude_self: Optional[bool] = None,
+        kernel: Optional[str] = None,
+    ) -> scipy.sparse.spmatrix:
         """Compute spatial weights for all samples in the dataset given a specified bandwidth.
 
         Args:
             bw: Bandwidth for the spatial kernel
+            fixed_bw: Whether the bandwidth considers a uniform distance for each sample (True) or a nonconstant
+                distance for each sample that depends on the number of neighbors (False). If not given, will default
+                to self.fixed_bw.
+            exclude_self: Whether to include each sample itself as one of its nearest neighbors. If not given,
+                will default to self.exclude_self.
+            kernel: Kernel to use for the spatial weights. If not given, will default to self.kernel.
 
         Returns:
             wi: Array of weights for all samples in the dataset
@@ -1177,13 +1171,20 @@ class MuSIC:
                 "taken to be the number of nearest neighbors to use in the bandwidth estimation."
             )
 
+        if bw_fixed is None:
+            bw_fixed = self.bw_fixed
+        if exclude_self is None:
+            exclude_self = self.exclude_self
+        if kernel is None:
+            kernel = self.kernel
+
         get_wi_partial = partial(
             get_wi,
             n_samples=self.n_samples,
             coords=self.coords,
-            fixed_bw=self.bw_fixed,
-            exclude_self=self.exclude_self,
-            kernel=self.kernel,
+            fixed_bw=bw_fixed,
+            exclude_self=exclude_self,
+            kernel=kernel,
             bw=bw,
             threshold=0.01,
             sparse_array=True,

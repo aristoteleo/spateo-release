@@ -1446,13 +1446,10 @@ zero_y = np.where(y == 0)[0]
 if np.any(zero_y):
     # Find the max distance between any given point and its closest neighbor with nonzero y:
     self.minbw = np.max(
-        [
-            np.min(cdist(self.coords[[i]], self.coords[zero_y]))
-            for i in range(self.n_samples)
-            if y[i] != 0
-        ]
+        [np.min(cdist(self.coords[[i]], self.coords[zero_y])) for i in range(self.n_samples) if y[i] != 0]
     )
 else:
+    "filler"
 
 # Optionally, subsample particular cell types of interest:
 if self.group_subset is not None:
@@ -1485,6 +1482,116 @@ if self.group_subset is not None:
 
     self.neighboring_unsampled = None
 
+
+# If model is not multiscale model, ensure all signaling type labels are the same in terms of the assumed
+# length scale:
+if hasattr(self, "self.signaling_types"):
+    # If all features are assumed to operate on the same length scale, there should not be a mix of secreted
+    # and membrane-bound-mediated signaling:
+    if not self.multiscale_flag:
+        # Secreted + ECM-receptor can diffuse across larger distances, but membrane-bound interactions are
+        # limited by non-diffusivity. Therefore, it is not advisable to include a mixture of membrane-bound with
+        # either of the other two categories in the same model.
+        if ("Cell-Cell Contact" in set(self.signaling_types) and "Secreted Signaling" in set(self.signaling_types)) or (
+            "Cell-Cell Contact" in set(self.signaling_types) and "ECM-Receptor" in set(self.signaling_types)
+        ):
+            raise ValueError(
+                "It is not advisable to include a mixture of membrane-bound with either secreted or "
+                "ECM-receptor in the same model because the valid distance scales over which they operate "
+                "is different."
+            )
+
+        self.signaling_types = set(self.signaling_types)
+        if "Secred Signaling" in self.signaling_types or "ECM-Receptor" in self.signaling_types:
+            self.signaling_types = "Diffusive Signaling"
+        else:
+            self.signaling_types = "Cell-Cell Contact"
+    self.signaling_types = self.comm.bcast(self.signaling_types, root=0)
+
+if self.adata_path is not None:
+    if signaling_type is None:
+        signaling_type = self.signaling_types
+
+    # Check whether the signaling types defined are membrane-bound or are composed of soluble molecules:
+    if signaling_type == "Cell-Cell Contact":
+        # Signaling is limited to occurring between only the nearest neighbors of each cell:
+        if self.bw_fixed:
+            distances = cdist(self.coords, self.coords)
+            # Set max bandwidth to the average distance to the 20 nearest neighbors:
+            nearest_idxs_all = np.argpartition(distances, 21, axis=1)[:, 1:21]
+            nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
+            self.maxbw = np.mean(nearest_distances, axis=1)
+
+            if self.minbw is None:
+                # Set min bandwidth to the average distance to the 5 nearest neighbors:
+                nearest_idxs_all = np.argpartition(distances, 6, axis=1)[:, 1:6]
+                nearest_distances = np.take_along_axis(distances, nearest_idxs_all, axis=1)
+                self.minbw = np.mean(nearest_distances, axis=1)
+        else:
+            self.maxbw = 20
+
+            if self.minbw is None:
+                self.minbw = 5
+
+        if self.minbw >= self.maxbw:
+            raise ValueError(
+                "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
+                "parameter accordingly."
+            )
+        return
+
+    # If the bandwidth is defined by a fixed spatial distance:
+    if self.bw_fixed:
+        max_dist = np.max(np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)]))
+        # Set max bandwidth higher to twice the max distance between any two given samples:
+        self.maxbw = max_dist * 2
+
+        # Set minimum bandwidth to ensure at least one "negative" example is included in spatially-weighted
+        # calculation for each cell:
+        if self.minbw is None:
+            # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
+            min_dist = np.min(
+                np.array([np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)])
+            )
+            self.minbw = min_dist * 3
+
+    # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
+    else:
+        if self.maxbw is None:
+            self.maxbw = 100
+
+        if self.minbw is None:
+            self.minbw = 5
+
+    if self.minbw >= self.maxbw:
+        raise ValueError(
+            "The minimum bandwidth must be less than the maximum bandwidth. Please adjust the `minbw` "
+            "parameter accordingly."
+        )
+
+if self.adata_path is not None:
+    if n_feat < len(self.signaling_types):
+        signaling_type = self.signaling_types[n_feat]
+    else:
+        signaling_type = None
+else:
+    signaling_type = None
+
+
+# Compute initial spatial weights for all samples- use the arbitrarily defined five times the min distance as
+# initial bandwidth if not provided (for fixed bw) or 10 nearest neighbors (for adaptive bw):
+if self.bw is None:
+    if self.bw_fixed:
+        init_bw = (
+            np.min(
+                np.array([np.min(np.delete(cdist([self.coords[i]], self.coords), 0)) for i in range(self.n_samples)])
+            )
+            * 5
+        )
+    else:
+        init_bw = 10
+else:
+    init_bw = self.bw
 
 #     if self.subsampled:
 #         sample_index = (
