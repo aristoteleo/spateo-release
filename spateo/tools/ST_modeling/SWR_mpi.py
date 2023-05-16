@@ -203,27 +203,27 @@ if __name__ == "__main__":
     # swr_model.fit()
 
     # Check if GRN model is specified:
-    if parser.parse_args().grn:
-        "filler"
+    # if parser.parse_args().grn:
+    #     "filler"
+
+    # else:
+    # For use only with MuSIC:
+    n_multiscale_chunks = parser.parse_args().chunks
+
+    if parser.parse_args().multiscale:
+        print(
+            "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
+            "case, it is advisable to reduce the number of parameters."
+        )
+        multiscale_model = VMuSIC(comm, parser)
+        multiscale_model.multiscale_backfitting()
+        multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
+        multiscale_model.predict_and_save()
 
     else:
-        # For use only with MuSIC:
-        n_multiscale_chunks = parser.parse_args().chunks
-
-        if parser.parse_args().multiscale:
-            print(
-                "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
-                "case, it is advisable to reduce the number of parameters."
-            )
-            multiscale_model = VMuSIC(comm, parser)
-            multiscale_model.multiscale_backfitting()
-            multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
-            multiscale_model.predict_and_save()
-
-        else:
-            swr_model = MuSIC(comm, parser)
-            swr_model.fit()
-            swr_model.predict_and_save()
+        swr_model = MuSIC(comm, parser)
+        swr_model.fit()
+        swr_model.predict_and_save()
 
     t_last = MPI.Wtime()
 

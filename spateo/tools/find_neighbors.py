@@ -17,7 +17,6 @@ from sklearn.neighbors import NearestNeighbors
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-from ..tools.labels import row_normalize
 
 
 # ---------------------------------------------------------------------------------------------------

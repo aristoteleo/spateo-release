@@ -3,20 +3,23 @@ Functionalities to aid in feature selection to characterize signaling patterns f
 list of signaling molecules (ligands or receptors) and
 """
 import argparse
+import multiprocessing
 import os
 import sys
 from functools import partial
 from multiprocessing import Pool
-from typing import Tuple
+from typing import Optional, Tuple, Union
 
 import anndata
 import numpy as np
 import pandas as pd
 import scipy
+import tensorflow as tf
 from mpi4py import MPI
 from MuSIC import MuSIC
-
-from spateo.tools import moran_i
+from sklearn.inspection import permutation_importance
+from sklearn.metrics import r2_score
+from sklearn.utils import check_random_state
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
@@ -24,14 +27,15 @@ sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main
 from spateo.logging import logger_manager as lm
 from spateo.preprocessing import log1p, normalize_total
 from spateo.tools.find_neighbors import get_wi, transcriptomic_connectivity
-from spateo.tools.ST_modeling.regression_utils import smooth
+from spateo.tools.gene_expression_variance import get_highvar_genes_sparse
+from spateo.tools.ST_modeling.regression_utils import multitesting_correction, smooth
 
 
 # ---------------------------------------------------------------------------------------------------
 # Selection of targets and signaling regulators
 # ---------------------------------------------------------------------------------------------------
 class MuSIC_target_selector:
-    """Various methods to select initial targets for intercellular analyses.
+    """Various methods to select initial targets or predictors for intercellular analyses.
 
     Args:
         parser: ArgumentParser object initialized with argparse, to parse command line arguments for arguments
@@ -123,6 +127,8 @@ class MuSIC_target_selector:
         """
         self.arg_retrieve = self.parser.parse_args()
         self.mod_type = self.arg_retrieve.mod_type
+        if self.mod_type not in ["niche", "lr", "ligand", "receptor"]:
+            raise ValueError("Invalid model type provided. Must be one of 'niche', 'lr', 'ligand', or 'receptor'.")
         self.distr = self.arg_retrieve.distr
 
         self.adata_path = self.arg_retrieve.adata_path
@@ -160,11 +166,8 @@ class MuSIC_target_selector:
                 self.custom_pathways,
             ]
         )
-        if (
-            any_predictors_given
-            and self.targets_path is not None
-            or any_predictors_given
-            and self.custom_targets is not None
+        if (any_predictors_given and self.targets_path is not None) or (
+            any_predictors_given and self.custom_targets is not None
         ):
             self.logger.info(
                 "Targets were provided, but so were predictors (ligands and/or receptors). Automated "
@@ -172,11 +175,8 @@ class MuSIC_target_selector:
                 "targets and predictors."
             )
             sys.exit()
-        elif (
-            not any_predictors_given
-            and self.targets_path is None
-            or not any_predictors_given
-            and self.custom_targets is not None
+        elif (not any_predictors_given and self.targets_path is None) or (
+            not any_predictors_given and self.custom_targets is not None
         ):
             self.logger.info(
                 "Targets were not provided, and neither were predictors (ligands and/or receptors). "
@@ -325,6 +325,7 @@ class MuSIC_target_selector:
             index=self.sample_names,
             columns=ligands,
         )
+
         # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
         # but store them in a temporary list to do so later because some may contribute to multiple complexes:
         to_drop = []
@@ -354,6 +355,16 @@ class MuSIC_target_selector:
         self.ligands_expr.drop(to_drop, axis=1, inplace=True)
         first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
         self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
+
+        # Compute spatial lag of ligand expression:
+        spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=False, exclude_self=True)
+        lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
+        for i, ligand in enumerate(self.ligands_expr.columns):
+            expr = self.ligands_expr[ligand]
+            expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
+            lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
+            lagged_expr_mat[:, i] = lagged_expr
+        self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=self.sample_names, columns=ligands)
 
         if (
             self.custom_receptors_path is not None
@@ -497,18 +508,161 @@ class MuSIC_target_selector:
                 targets = [
                     t for t in targets if self.adata[:, t].X.getnnz() >= self.n_samples * self.target_expr_threshold
                 ]
+        else:
+            # If targets are not provided, check through all genes expressed in above a threshold proportion of cells:
+            targets = [
+                t
+                for t in self.adata.var_names
+                if (self.adata[:, t].X > 0).sum() >= self.n_samples * self.target_expr_threshold
+            ]
 
-            self.targets_expr = pd.DataFrame(
-                self.adata[:, targets].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
-                index=self.sample_names,
-                columns=targets,
-            )
+        self.targets_expr = pd.DataFrame(
+            self.adata[:, targets].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
+            index=self.sample_names,
+            columns=targets,
+        )
 
-    def set_up_model(self):
-        # Set up potential predictors to screen depending on input to "mod_type":
+    def _compute_all_wi(
+        self,
+        bw: Union[float, int],
+        bw_fixed: bool = False,
+        exclude_self: bool = True,
+        kernel: str = "bisquare",
+    ) -> scipy.sparse.spmatrix:
+        """Compute spatial weights for all samples in the dataset given a specified bandwidth.
+
+        Args:
+            bw: Bandwidth for the spatial kernel
+            fixed_bw: Whether the bandwidth considers a uniform distance for each sample (True) or a nonconstant
+                distance for each sample that depends on the number of neighbors (False). If not given, will default
+                to self.fixed_bw.
+            exclude_self: Whether to include each sample itself as one of its nearest neighbors. If not given,
+                will default to self.exclude_self.
+            kernel: Kernel to use for the spatial weights. If not given, will default to self.kernel.
+
+        Returns:
+            wi: Array of weights for all samples in the dataset
+        """
+
+        # Parallelized computation of spatial weights for all samples:
+        get_wi_partial = partial(
+            get_wi,
+            n_samples=self.n_samples,
+            coords=self.coords,
+            fixed_bw=bw_fixed,
+            exclude_self=exclude_self,
+            kernel=kernel,
+            bw=bw,
+            threshold=0.01,
+            sparse_array=True,
+        )
+
+        with Pool() as pool:
+            weights = pool.map(get_wi_partial, range(self.n_samples))
+        w = scipy.sparse.vstack(weights)
+        return w
+
+    def select_features(self):
+        """Feature selection using neural network importance metrics."""
         if self.mod_type == "ligand":
-            # Ligand expression in cellular neighborhoods:
+            X = self.ligands_expr.values
+            self.feature_names = self.ligands_expr.columns.tolist()
+        elif self.mod_type == "receptor":
+            X = self.receptors_expr.values
+            self.feature_names = self.receptors_expr.columns.tolist()
+        elif self.mod_type == "lr":
+            # Construct L:R products array:
+            X = np.zeros((self.n_samples, len(self.lr_pairs)))
+
+            for idx, lr_pair in enumerate(self.lr_pairs):
+                lig, rec = lr_pair[0], lr_pair[1]
+                lig_expr_values = self.ligands_expr[lig].values.reshape(-1, 1)
+                rec_expr_values = self.receptors_expr[rec].values.reshape(-1, 1)
+
+                # Communication signature b/w receptor in target and ligand in neighbors
+                X[:, idx] = (lig_expr_values * rec_expr_values).flatten()
+            self.feature_names = [f"{lr_pair[0]}:{lr_pair[1]}" for lr_pair in self.lr_pairs]
+
+        pool = Pool(multiprocessing.cpu_count())
+        results = pool.map(self.process_column, [(X, col_name) for col_name in self.targets_expr.columns])
+        pool.close()
+        pool.join()
+
+        # Dictionary to store significant features for each target:
+        sig_features_dict = {}
+        for column in enumerate(self.targets_expr.columns):
+            sig_features_dict[column] = results[0]
+
+        # Series to store R-squared values:
+        r_squared_series = pd.Series([result[1] for result in results])
+
+        # Dictionary to store significant features:
+
+        # Based on the given inputs (the combination of links to ligand/receptor lists and target list),
+        # return either the list of selected features or the list of filtered targets.
+        if self.targets_path is not None or self.custom_targets is not None:
+            # Minimal filtering based on reconstruction capability:
             "filler"
+        else:
+            "filler"
+
+    def process_column(self, X: np.ndarray, col_name: str):
+        y = self.targets_expr[col_name].values
+
+        sorted_indices, r_squared = self.run_selection_model(X, y)
+        return sorted_indices, r_squared
+
+    def run_selection_model(self, X: np.ndarray, y: np.ndarray):
+        # Network architecture:
+        model = tf.keras.Sequential()
+        layer_dims = []
+        if X.shape[1] >= 128:
+            layer_dims.append(128)
+        else:
+            layer_dims.append(X.shape[1] / 4)
+        while layer_dims[-1] / 4 > 8:
+            layer_dims.append(layer_dims / 4)
+        layer_dims.append(8)
+        layer_dims.append(1)
+
+        model.add(tf.keras.layers.Dense(layer_dims[0], activation="linear", input_shape=(X.shape[1],)))
+        for layer_dim in layer_dims[1:-1]:
+            model.add(tf.keras.layers.Dense(layer_dim, activation="linear"))
+        model.add(tf.keras.layers.Dense(layer_dims[-1], activation="relu"))
+
+        model.compile(optimizer="adam", loss="poisson")
+
+        num_epochs = 100
+        batch_size = 32
+        model.fit(X, y, epochs=num_epochs, batch_size=batch_size, verbose=0)
+
+        y_pred = model.predict(X)
+        # Do not compute feature importances if prediction accuracy is low:
+        r_squared = r2_score(y, y_pred)
+
+        res = permutation_importance(model, X, y, n_repeats=10, n_jobs=1, random_state=42)
+        importance_scores = res.importances_mean
+        # sorted_indices = np.argsort(importance_scores)[::-1]
+        # sorted_names = [self.feature_names[idx] for idx in sorted_indices]
+
+        # Null distribution of permutation importance:
+        random_state = check_random_state(888)
+        null_importances = []
+        for _ in range(100):  # number of iterations for null distribution
+            y_permuted = random_state.permutation(y)
+            res_null = permutation_importance(model, X, y_permuted, n_repeats=10, n_jobs=1)
+            null_importances.append(res_null.importances_mean)
+
+        # Compute p-values and significance:
+        null_importances = np.array(null_importances)
+        p_values = (np.sum(null_importances >= importance_scores, axis=0) + 1) / (null_importances.shape[0] + 1)
+        # Multiple testing correction:
+        p_values_corrected = multitesting_correction(p_values, method="fdr_bh", alpha=0.05)
+        significant_scores = p_values_corrected < 0.05
+        significant_indices = np.where(significant_scores)
+        significant_names = [self.feature_names[idx] for idx in significant_indices[0]]
+
+        return significant_names, r_squared
 
     # Depending on the model type, define predictors or targets- if targets are given and model is "ligand" or "lr",
     # will identify a good set of ligands by using ligand expression in the 10 nearest neighbors of each cell. If

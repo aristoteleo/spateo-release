@@ -188,8 +188,9 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     xtx = np.dot(xT, x)
 
     # Ridge regularization:
-    identity = np.eye(xtx.shape[0])
-    xtx += ridge_lambda * identity
+    if ridge_lambda is not None:
+        identity = np.eye(xtx.shape[0])
+        xtx += ridge_lambda * identity
 
     # Diagonals of the Gram matrix- used as additional diagnostic- for each feature, this is the sum of squared
     # values- if this is sufficiently low, the coefficient should be zero- theoretically it can take on nearly any
@@ -198,6 +199,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     below_limit = np.abs(diag) < 1e-3
     # Robustness to outlier points:
     n_nonzeros = np.count_nonzero(xT, axis=1)
+
     to_zero = np.concatenate((np.where(below_limit)[0], np.where(n_nonzeros <= 2)[0]))
 
     try:

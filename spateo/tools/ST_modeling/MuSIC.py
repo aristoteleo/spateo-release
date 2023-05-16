@@ -19,6 +19,7 @@ import pandas as pd
 import scipy
 from mpi4py import MPI
 from scipy.spatial.distance import cdist
+from scipy.stats import pearsonr
 from sklearn.cluster import KMeans
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
@@ -859,11 +860,11 @@ class MuSIC:
 
             for lr_pair in self.lr_pairs:
                 lig, rec = lr_pair[0], lr_pair[1]
-                lig_expr_values = scipy.sparse.csr_matrix(self.ligands_expr[lig].values.reshape(-1, 1))
-                rec_expr_values = scipy.sparse.csr_matrix(self.receptors_expr[rec].values.reshape(-1, 1))
+                lig_expr_values = self.ligands_expr[lig].values.reshape(-1, 1)
+                rec_expr_values = self.receptors_expr[rec].values.reshape(-1, 1)
 
                 # Communication signature b/w receptor in target and ligand in neighbors:
-                X_df[f"{lig}-{rec}"] = np.dot(rec_expr_values, lig_expr_values.T)
+                X_df[f"{lig}-{rec}"] = lig_expr_values * rec_expr_values
 
             # If applicable, drop all-zero columns:
             X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
@@ -877,11 +878,6 @@ class MuSIC:
 
             self.X = X_df.values
             self.feature_names = [pair[0] + "-" + pair[1] for pair in X_df.columns]
-
-            # Make a note of whether ligands are secreted or membrane-bound:
-            self.signaling_types = self.lr_db.loc[
-                self.lr_db["from"].isin([x[0] for x in self.lr_pairs]), "type"
-            ].tolist()
 
         elif self.mod_type == "ligand" or self.mod_type == "receptor":
             if self.mod_type == "ligand":
@@ -1309,6 +1305,29 @@ class MuSIC:
         else:
             raise ValueError("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
 
+        # Global mean regularization:
+        correlations = []
+        for i in range(X.shape[1]):
+            # Create a boolean mask where both the current X column and y are nonzero
+            mask = (X[:, i] != 0) & (y != 0)
+
+            # Create a subset of the data using the mask
+            X_subset = X[mask, i]
+            y_subset = y[mask]
+
+            # Compute the Pearson correlation coefficient for the subset
+            if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
+                correlation = pearsonr(X_subset, y_subset)[0]
+            else:
+                correlation = np.nan  # Not enough data points to compute correlation
+
+            # Append the correlation to the correlations list
+            correlations.append(correlation)
+        correlations = np.array(correlations)
+
+        mask = np.abs(correlations) < 0.1
+        betas[mask] = 0.0
+
         # Squared singular values:
         if self.distr == "gaussian":
             lvg = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
@@ -1701,7 +1720,6 @@ class MuSIC:
         X: Optional[np.ndarray] = None,
         multiscale: bool = False,
         fit_predictor: bool = False,
-        signaling_type: Optional[str] = None,
         verbose: bool = True,
     ) -> Optional[Tuple[Union[None, Dict[str, np.ndarray]], Dict[str, float]]]:
         """For each column of the dependent variable array, fit model. If given bandwidth, run :func
@@ -1721,8 +1739,6 @@ class MuSIC:
             multiscale: Set True to indicate that a multiscale model should be fitted
             fit_predictor: Set True to indicate that dependent variable to fit is a linear predictor rather than a
                 response variable
-            signaling_type: Optional category for the interaction, one of "Cell-Cell Contact", "Diffusive Signaling"
-                (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor".
             verbose: Set True to print out information about the bandwidth selection and/or fitting process. Will be
                 False for most multiscale runs, but defaults to True.
 
@@ -1803,7 +1819,7 @@ class MuSIC:
                     self.logger.info(
                         f"Starting fitting process for target {target}. First finding optimal " f"bandwidth..."
                     )
-                self._set_search_range(signaling_type=signaling_type)
+                self._set_search_range()
                 if not multiscale:
                     self.logger.info(f"Calculated bandwidth range over which to search: {self.minbw}-{self.maxbw}.")
             self.minbw = self.comm.bcast(self.minbw, root=0)

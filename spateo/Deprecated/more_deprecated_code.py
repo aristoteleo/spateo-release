@@ -1593,6 +1593,20 @@ if self.bw is None:
 else:
     init_bw = self.bw
 
+
+(gene_counts_stats, gene_fano_params) = get_highvar_genes_sparse(self.adata.X, numgenes=2000)
+high_variance_genes_filter = list(self.adata.var.index[gene_counts_stats.high_var.values])
+self.targets_expr = pd.DataFrame(
+    self.adata[:, high_variance_genes_filter].X.toarray()
+    if scipy.sparse.issparse(self.adata.X)
+    else self.adata[:, high_variance_genes_filter].X,
+    index=self.sample_names,
+    columns=high_variance_genes_filter,
+)
+
+# Make a note of whether ligands are secreted or membrane-bound:
+self.signaling_types = self.lr_db.loc[self.lr_db["from"].isin([x[0] for x in self.lr_pairs]), "type"].tolist()
+
 #     if self.subsampled:
 #         sample_index = (
 #             self.subsampled_indices[y_label][i] if not self.subset else self.subsampled_indices[i]
