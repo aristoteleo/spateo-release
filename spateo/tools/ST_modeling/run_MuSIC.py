@@ -80,15 +80,15 @@ def main():
     "of TFs (or other regulatory molecules)"
     "to constitute the independent variable block.",
 )
-@click.option(
-    "tf",
-    required=False,
-    multiple=True,
-    help="Only used for GRN models. Each input specified using this "
-    "is a TF (or other regulatory molecule) to constitute the "
-    "independent variable block.",
-)
-@click.option("custom_targets_path", required=False)
+# @click.option(
+#     "tf",
+#     required=False,
+#     multiple=True,
+#     help="Only used for GRN models. Each input specified using this "
+#     "is a TF (or other regulatory molecule) to constitute the "
+#     "independent variable block.",
+# )
+# @click.option("custom_targets_path", required=False)
 @click.option("target", required=False, multiple=True)
 @click.option(
     "target_expr_threshold",
@@ -97,6 +97,11 @@ def main():
     "proportion of cells for which transcript "
     "needs to be expressed in to be selected as a target of interest. "
     "Not used if 'targets_path' is not None.",
+)
+@click.option(
+    "r_squared_threshold",
+    default=0.5,
+    help="For automated selection, the threshold " "r-squared value for a gene to be selected.",
 )
 @click.option(
     "multicollinear_threshold",
@@ -171,11 +176,10 @@ def run(
     receptor,
     custom_pathways_path,
     pathway,
-    custom_regulators_path,
-    tf,
     custom_targets_path,
     target,
     target_expr_threshold,
+    r_squared_threshold,
     init_betas_path,
     normalize,
     smooth,
@@ -210,8 +214,8 @@ def run(
         multiscale: If True, the MGWR model will be used
         multiscale_params_only: If True, will only fit parameters for MGWR model and no other metrics. Otherwise,
             the effective number of parameters and leverages will be returned.
-        mod_type: If adata_path is provided, one of the SWR models will be used. Options: 'niche', 'lr', 'ligand'.
-        grn: If True, the GRN model will be used
+        mod_type: If adata_path is provided, one of the SWR models will be used. Options: 'niche', 'lr', 'ligand',
+            'receptor'.
 
 
         cci_dir: Path to directory containing CCI files
@@ -225,15 +229,12 @@ def run(
         custom_pathways_path: Rather than providing a list of receptors, can provide a list of signaling pathways-
             all receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
             is "lr".
-        custom_regulators_path: Only used for GRN models. This file contains a list of TFs (or other regulatory
-            molecules) to constitute the independent variable block.
-        tf: Can be used as an alternative to `custom_regulators_path`. Can be used to provide a custom list of
-            regulatory factors.
         custom_targets_path: Path to file containing a list of targets to be used in the GRN model
         target: Can be used as an alternative to `custom_targets_path`. Can be used to provide a custom list of
             targets.
         target_expr_threshold: For automated selection, the threshold proportion of cells for which transcript needs
             to be expressed in to be selected as a target of interest.
+        r_squared_threshold: For automated selection, the threshold R^2 value for a gene to be selected as a target
 
 
         init_betas_path: Path to file containing initial values for beta coefficients
@@ -280,6 +281,8 @@ def run(
         + output_path
         + " -target_expr_threshold "
         + str(target_expr_threshold)
+        + " -r_squared_threshold "
+        + str(r_squared_threshold)
         + " -coords_key "
         + coords_key
         + " -group_key "
@@ -336,12 +339,12 @@ def run(
         for path in pathway:
             command += path + " "
 
-    if custom_regulators_path is not None:
-        command += " -custom_regulators_path " + custom_regulators_path
-    if tf is not None:
-        command += " -tf "
-        for t in tf:
-            command += t + " "
+    # if custom_regulators_path is not None:
+    #     command += " -custom_regulators_path " + custom_regulators_path
+    # if tf is not None:
+    #     command += " -tf "
+    #     for t in tf:
+    #         command += t + " "
 
     if custom_targets_path is not None:
         command += " -custom_targets_path " + custom_targets_path

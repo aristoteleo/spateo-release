@@ -4,6 +4,8 @@ Auxiliary functions to aid in the interpretation functions for the spatial and s
 import sys
 from typing import Optional, Tuple, Union
 
+from scipy.stats import pearsonr
+
 try:
     from typing import Literal
 except ImportError:
@@ -161,6 +163,7 @@ def compute_betas(
     betas = sparse_dot(xtx_inv, xTy)
     # Upper and lower bound to constrain betas and prevent numerical overflow:
     betas = np.clip(betas, -clip, clip)
+
     return betas
 
 
@@ -230,6 +233,7 @@ def iwls(
     spatial_weights: Optional[np.ndarray] = None,
     link: Optional[Link] = None,
     ridge_lambda: Optional[float] = None,
+    mask: Optional[np.ndarray] = None,
 ):
     """Iteratively weighted least squares (IWLS) algorithm to compute the regression coefficients for a given set of
     dependent and independent variables.
@@ -252,6 +256,7 @@ def iwls(
         variance: Variance function for the distribution family. If None, will default to the default value for the
             specified distribution family.
         ridge_lambda: Ridge regularization parameter.
+        mask: Optionally used to set coefficients to zero.
 
     Returns:
         betas: Array of shape [n_features, 1]; regression coefficients
@@ -312,6 +317,9 @@ def iwls(
             new_betas, pseudoinverse = compute_betas_local(
                 w_adjusted_predictor, wx, spatial_weights, ridge_lambda=ridge_lambda, clip=clip
             )
+
+        if mask is not None:
+            new_betas[mask] = 0.0
 
         linear_predictor = sparse_dot(x, new_betas)
 

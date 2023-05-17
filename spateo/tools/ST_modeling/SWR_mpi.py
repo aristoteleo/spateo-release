@@ -121,6 +121,12 @@ if __name__ == "__main__":
         "needs to be expressed in to be selected as a target of interest. Not used if 'targets_path' is not None.",
     )
     parser.add_argument(
+        "-r_squared_threshold",
+        default=0.5,
+        type=float,
+        help="For automated selection, the threshold R^2 value for a gene to be kept as a target gene.",
+    )
+    parser.add_argument(
         "-multicollinear_threshold",
         type=float,
         help="Used only if `mod_type` is 'slice'. If this argument is provided, independent variables that are highly "

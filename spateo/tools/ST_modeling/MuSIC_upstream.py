@@ -61,6 +61,7 @@ class MuSIC_target_selector:
         log_transform: Set True if log-transformation should be applied to expression.
         target_expr_threshold: When selecting targets, expression above a threshold percentage of cells will be used to
             filter to a smaller subset of interesting genes. Defaults to 0.1.
+        r_squared_threshold: When selecting targets, only genes with an R^2 above this threshold will be used as targets
 
 
         custom_lig_path: Optional path to a .txt file containing a list of ligands for the model, separated by
@@ -148,6 +149,7 @@ class MuSIC_target_selector:
         self.smooth = self.arg_retrieve.smooth
         self.log_transform = self.arg_retrieve.log_transform
         self.target_expr_threshold = self.arg_retrieve.target_expr_threshold
+        self.r_squared_threshold = self.arg_retrieve.r_squared_threshold
 
         self.coords_key = self.arg_retrieve.coords_key
         self.group_key = self.arg_retrieve.group_key
@@ -178,9 +180,10 @@ class MuSIC_target_selector:
         elif (not any_predictors_given and self.targets_path is None) or (
             not any_predictors_given and self.custom_targets is not None
         ):
+            self.auto_select_targets = True
             self.logger.info(
                 "Targets were not provided, and neither were predictors (ligands and/or receptors). "
-                "Automated selection of targets/predictors is not possible."
+                "First, automatically selecting spatially-interesting targets."
             )
 
     def load_and_process(self):
@@ -282,6 +285,11 @@ class MuSIC_target_selector:
     def define_predictors_and_targets(self):
         """Define ligand expression array, receptor expression array and target expression array, depending on the
         provided inputs."""
+
+        # # First, define targets if need be:
+        # if hasattr(self, "auto_select_targets"):
+        #
+
         if self.species == "human":
             self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
             r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
@@ -522,6 +530,8 @@ class MuSIC_target_selector:
             columns=targets,
         )
 
+        self.target_list = targets
+
     def _compute_all_wi(
         self,
         bw: Union[float, int],
@@ -564,6 +574,9 @@ class MuSIC_target_selector:
 
     def select_features(self):
         """Feature selection using neural network importance metrics."""
+        if not os.path.exists(os.path.join(self.output_path, "predictors_and_targets")):
+            os.makedirs(os.path.join(self.output_path, "predictors_and_targets"))
+
         if self.mod_type == "ligand":
             X = self.ligands_expr.values
             self.feature_names = self.ligands_expr.columns.tolist()
@@ -590,21 +603,26 @@ class MuSIC_target_selector:
 
         # Dictionary to store significant features for each target:
         sig_features_dict = {}
-        for column in enumerate(self.targets_expr.columns):
+        for column in self.targets_expr.columns:
             sig_features_dict[column] = results[0]
 
         # Series to store R-squared values:
         r_squared_series = pd.Series([result[1] for result in results])
 
-        # Dictionary to store significant features:
-
         # Based on the given inputs (the combination of links to ligand/receptor lists and target list),
         # return either the list of selected features or the list of filtered targets.
         if self.targets_path is not None or self.custom_targets is not None:
             # Minimal filtering based on reconstruction capability:
-            "filler"
+            filtered_feats = r_squared_series[r_squared_series >= self.r_squared_threshold].index.tolist()
+            self.logger.info(
+                f"Of the original {len(self.target_list)}, {len(filtered_feats)} features remain " f"post-filtering."
+            )
+            with open(os.path.join(self.output_path, "predictors_and_targets/targets.txt"), "w") as file:
+                file.write("\n".join(filtered_feats))
         else:
-            "filler"
+            all_sig_features = set(sig_features_dict.values())
+            with open(os.path.join(self.output_path, "predictors_and_targets/predictors.txt"), "w") as file:
+                file.write("\n".join(all_sig_features))
 
     def process_column(self, X: np.ndarray, col_name: str):
         y = self.targets_expr[col_name].values

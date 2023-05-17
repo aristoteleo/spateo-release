@@ -1262,6 +1262,28 @@ class MuSIC:
         if mask_indices is not None:
             wi[mask_indices] = 0.0
 
+        # Global mean regularization:
+        correlations = []
+        for i in range(X.shape[1]):
+            # Create a boolean mask where both the current X column and y are nonzero
+            mask = (X[:, i].ravel() != 0) & (y.ravel() != 0)
+
+            # Create a subset of the data using the mask
+            X_subset = X[mask, i]
+            y_subset = y[mask]
+
+            # Compute the Pearson correlation coefficient for the subset
+            if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
+                correlation = pearsonr(X_subset, y_subset)[0]
+            else:
+                correlation = np.nan  # Not enough data points to compute correlation
+
+            # Append the correlation to the correlations list
+            correlations.append(correlation)
+        correlations = np.array(correlations)
+
+        mask = (np.abs(correlations) < 0.05).ravel()
+
         if self.distr == "gaussian" or fit_predictor:
             betas, pseudoinverse = compute_betas_local(y, X, wi, clip=self.clip)
             pred_y = np.dot(X[i], betas)
@@ -1286,6 +1308,7 @@ class MuSIC:
                 spatial_weights=wi,
                 link=None,
                 ridge_lambda=self.ridge_lambda,
+                mask=mask,
             )
 
             # For multiscale GLM models, this is the predicted dependent variable value:
@@ -1304,29 +1327,6 @@ class MuSIC:
 
         else:
             raise ValueError("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
-
-        # Global mean regularization:
-        correlations = []
-        for i in range(X.shape[1]):
-            # Create a boolean mask where both the current X column and y are nonzero
-            mask = (X[:, i] != 0) & (y != 0)
-
-            # Create a subset of the data using the mask
-            X_subset = X[mask, i]
-            y_subset = y[mask]
-
-            # Compute the Pearson correlation coefficient for the subset
-            if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
-                correlation = pearsonr(X_subset, y_subset)[0]
-            else:
-                correlation = np.nan  # Not enough data points to compute correlation
-
-            # Append the correlation to the correlations list
-            correlations.append(correlation)
-        correlations = np.array(correlations)
-
-        mask = np.abs(correlations) < 0.1
-        betas[mask] = 0.0
 
         # Squared singular values:
         if self.distr == "gaussian":
