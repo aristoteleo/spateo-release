@@ -35,7 +35,7 @@ from spateo.tools.ST_modeling.regression_utils import (
     compute_betas_local,
     iwls,
     multicollinearity_check,
-    smooth, golden_section_search, objective_iwls_logistic,
+    smooth,
 )
 
 
@@ -344,8 +344,6 @@ class MuSIC:
             )
 
         self.fit_intercept = self.arg_retrieve.fit_intercept
-        self.no_hurdle = self.arg_retrieve.no_hurdle
-
         # Parameters related to the fitting process (tolerance, number of iterations, etc.)
         self.tolerance = self.arg_retrieve.tolerance
         self.max_iter = self.arg_retrieve.max_iter
@@ -1262,6 +1260,9 @@ class MuSIC:
             -1, 1
         )
 
+        if mask_indices is not None:
+            wi[mask_indices] = 0.0
+
         # Global relationship regularization:
         correlations = []
         for i in range(X.shape[1]):
@@ -1298,38 +1299,6 @@ class MuSIC:
 
         elif self.distr == "poisson" or self.distr == "nb":
             # Zero-inflated local logistic model:
-            if not self.no_hurdle:
-                y_binary = np.where(y > 0, 1, 0).reshape(-1, 1).astype(np.float32)
-                betas, y_hat, _, _ = iwls(
-                    y_binary,
-                    X,
-                    distr="binomial",
-                    tol=self.tolerance,
-                    clip=self.clip,
-                    max_iter=self.max_iter,
-                    spatial_weights=wi,
-                    link=None,
-                    ridge_lambda=self.ridge_lambda,
-                )
-
-                # Search for optimal threshold based on correct classification of zero/nonzero dependent values:
-                weighted_y_true = y * wi
-                if not all(element == 0.0 for element in weighted_y_true):
-                    obj_function = lambda threshold: objective_iwls_logistic(
-                        threshold=threshold, proba=y_hat, y_true=weighted_y_true
-                    )
-
-                    optimal_threshold = golden_section_search(obj_function, a=0.0, b=1.0, tol=self.tolerance)
-                    predictions = (y_hat >= optimal_threshold).astype(int)
-
-                    # Mask indices where variable is predicted to be zero:
-                    wi[predictions == 0] = 0.0
-                    if wi[i] == 0.0:
-                        "filler"
-            else:
-                if mask_indices is not None:
-                    wi[mask_indices] = 0.0
-
             # NOTE TO SELF: mask_indices set by where y_hat is predicted to be 0 (our high confidence predicted "true"
             # zeros). After fitting the logistic model, set wi to 0 using this mask for the GLM regression (remember
             # to delete the wi masking code above)- do this if "use_hurdle" is set to True, otherwise just use the

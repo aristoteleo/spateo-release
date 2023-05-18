@@ -1117,6 +1117,7 @@ class Binomial(Distribution):
 
     valid_links = [Logit, Log]
     variance = binom_variance
+    suggested_link = Logit
 
     def __init__(self, link=Logit):
         self.logger = lm.get_main_logger()

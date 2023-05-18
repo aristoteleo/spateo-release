@@ -2,9 +2,10 @@
 Auxiliary functions to aid in the interpretation functions for the spatial and spatially-lagged regression models.
 """
 import sys
-from typing import Optional, Tuple, Union
+from typing import Callable, Optional, Tuple, Union
 
 from scipy.stats import pearsonr
+from sklearn.metrics import confusion_matrix, recall_score
 
 try:
     from typing import Literal
@@ -155,8 +156,9 @@ def compute_betas(
     xtx = sparse_dot(xT, x)
 
     # Ridge regularization:
-    identity = np.eye(xtx.shape[0])
-    xtx += ridge_lambda * identity
+    if ridge_lambda is not None:
+        identity = np.eye(xtx.shape[0])
+        xtx += ridge_lambda * identity
 
     xtx_inv = linalg.inv(xtx)
     xtx_inv = scipy.sparse.csr_matrix(xtx_inv)
@@ -339,8 +341,65 @@ def iwls(
 
 
 # ---------------------------------------------------------------------------------------------------
-# Objective function for logistic models
+# Objective function and golden search for logistic models
 # ---------------------------------------------------------------------------------------------------
+def objective_iwls_logistic(threshold: float, proba: np.ndarray, y_true: np.ndarray):
+    """For binomial regression models with IWLS, the objective function is the weighted sum of recall and specificity.
+
+    Args:
+        threshold: Threshold for converting predicted probabilities to binary predictions
+        proba: Predicted probabilities from logistic model
+        y_true: True binary labels
+
+    Returns:
+        score: Weighted sum of recall and specificity
+    """
+    predictions = (proba >= threshold).astype(int)
+
+    # Compute true positive rate
+    recall = recall_score(y_true, predictions, pos_label=1)
+
+    # Compute true negative rate
+    tn, fp, fn, tp = confusion_matrix(y_true, predictions).ravel()
+    specificity = tn / (tn + fp)
+
+    # Define weights for the two metrics
+    w1 = 0.5
+    w2 = 0.5
+
+    # Return weighted sum of recall and true negative rate
+    # Golden search aims to minimize, so negative sign to get the maximum recall + TNR
+    score = -(w1 * recall + w2 * specificity)
+
+
+def golden_section_search(func: Callable, a: float, b: float, tol: float = 1e-5):
+    """Find the extremum of a function within a specified range using Golden Section Search.
+
+    Args:
+        func: The function to find the extremum of.
+        a: Lower bound of the range.
+        b: Upper bound of the range.
+        tol: Tolerance for stopping criterion.
+
+    Returns:
+        The x-value of the function's extremum.
+    """
+    phi = (np.sqrt(5) - 1) / 2  # golden ratio
+
+    c = b - phi * (b - a)
+    d = a + phi * (b - a)
+
+    while abs(c - d) > tol:
+        if func(c) < func(d):
+            b = d
+        else:
+            a = c
+
+        # Compute new bounds
+        c = b - phi * (b - a)
+        d = a + phi * (b - a)
+
+    return (b + a) / 2
 
 
 # ---------------------------------------------------------------------------------------------------

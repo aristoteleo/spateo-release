@@ -147,6 +147,7 @@ def main():
 @click.option("distr", default="gaussian")
 @click.option("n_neighbors", default=10)
 @click.option("fit_intercept", default=False, is_flag=True)
+@click.option("no_hurdle", default=False, is_flag=True)
 @click.option("tolerance", default=1e-3)
 @click.option("max_iter", default=1000)
 @click.option(
@@ -194,6 +195,7 @@ def run(
     n_neighbors,
     distr,
     fit_intercept,
+    no_hurdle,
     tolerance,
     max_iter,
     patience,
@@ -256,6 +258,7 @@ def run(
             cell when defining the independent variable array
         distr: Distribution to use for spatial weights. Options: 'gaussian', 'poisson', 'nb'.
         fit_intercept: If True, will include intercept in model
+        no_hurdle: If True, will implement spatially-weighted hurdle model to attempt to account for biological zeros.
         tolerance: Tolerance for convergence of model
         max_iter: Maximum number of iterations for model
         patience: Number of iterations to wait before stopping if parameters have stabilized. Only used if
@@ -379,6 +382,8 @@ def run(
         command += " -exclude_self "
     if fit_intercept:
         command += " -fit_intercept "
+    if no_hurdle:
+        command += " -no_hurdle "
     if chunks is not None:
         command += " -chunks " + str(chunks)
     if ridge_lambda is not None:

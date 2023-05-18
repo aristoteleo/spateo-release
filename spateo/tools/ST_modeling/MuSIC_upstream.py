@@ -615,7 +615,7 @@ class MuSIC_target_selector:
             # Minimal filtering based on reconstruction capability:
             filtered_feats = r_squared_series[r_squared_series >= self.r_squared_threshold].index.tolist()
             self.logger.info(
-                f"Of the original {len(self.target_list)}, {len(filtered_feats)} features remain " f"post-filtering."
+                f"Of the original {len(self.target_list)}, {len(filtered_feats)} features remain post-filtering."
             )
             with open(os.path.join(self.output_path, "predictors_and_targets/targets.txt"), "w") as file:
                 file.write("\n".join(filtered_feats))
