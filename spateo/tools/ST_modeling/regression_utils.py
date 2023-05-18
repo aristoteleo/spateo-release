@@ -27,6 +27,7 @@ from spateo.configuration import SKM
 from spateo.logging import logger_manager as lm
 from spateo.preprocessing.transform import log1p
 from spateo.tools.ST_modeling.distributions import (
+    Binomial,
     Gaussian,
     Link,
     NegativeBinomial,
@@ -225,7 +226,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
 def iwls(
     y: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
     x: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
-    distr: Literal["gaussian", "poisson", "nb"] = "gaussian",
+    distr: Literal["gaussian", "poisson", "nb", "binomial"] = "gaussian",
     init_betas: Optional[np.ndarray] = None,
     tol: float = 1e-8,
     clip: float = 5.0,
@@ -244,7 +245,7 @@ def iwls(
     Args:
         y: Array of shape [n_samples, 1]; dependent variable
         x: Array of shape [n_samples, n_features]; independent variables
-        distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb"
+        distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb", "binomial"
         init_betas: Array of shape [n_features,]; initial regression coefficients
         tol: Convergence tolerance
         clip: Sets magnitude of the upper and lower bound to constrain betas and prevent numerical overflow
@@ -256,7 +257,7 @@ def iwls(
         variance: Variance function for the distribution family. If None, will default to the default value for the
             specified distribution family.
         ridge_lambda: Ridge regularization parameter.
-        mask: Optionally used to set coefficients to zero.
+        mask: Optional array of shape [n_features,]; if provided, final coefficients will be multiplied by mask values
 
     Returns:
         betas: Array of shape [n_features, 1]; regression coefficients
@@ -287,6 +288,9 @@ def iwls(
     elif distr == "nb":
         link = link or NegativeBinomial.__init__.__defaults__[0]
         distr = NegativeBinomial(link)
+    elif distr == "binomial":
+        link = link or Binomial.__init__.__defaults__[0]
+        distr = Binomial(link)
 
     if init_betas is None:
         betas = np.zeros((x.shape[1], 1))
@@ -319,10 +323,9 @@ def iwls(
             )
 
         if mask is not None:
-            new_betas[mask] = 0.0
+            new_betas = np.multiply(new_betas, mask).astype(np.float32)
 
         linear_predictor = sparse_dot(x, new_betas)
-
         y_hat = distr.predict(linear_predictor)
 
         difference = min(abs(new_betas - betas))
@@ -333,6 +336,11 @@ def iwls(
     else:
         w_final = weights
         return betas, y_hat, n_iter, w_final, linear_predictor, adjusted_predictor, pseudoinverse
+
+
+# ---------------------------------------------------------------------------------------------------
+# Objective function for logistic models
+# ---------------------------------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------------------------------

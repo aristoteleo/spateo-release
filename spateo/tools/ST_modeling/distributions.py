@@ -477,6 +477,69 @@ This is an alias of Power_Variance() for which the variance is equal in magnitud
 """
 
 
+class Binomial_Variance(object):
+    """
+    Variance function for binomial distribution.
+
+    Equations:
+        V(fitted) = p * (1 - p) * n, where p = mu / n
+
+    Args:
+        n: The number of trials. The default is 1, under which the assumption is that each observation is an
+            independent trial with a binary outcome.
+    """
+
+    def __init__(self, n=1):
+        self.n = n
+
+    def clip(self, vals: np.ndarray) -> np.ndarray:
+        """Clips values to avoid numerical issues.
+
+        Args:
+            vals: Values to clip
+
+        Returns:
+            vals: The clipped values
+        """
+        vals = np.clip(vals, EPS, 1 - EPS)
+        return vals
+
+    def __call__(self, fitted: np.ndarray):
+        """Computes variance for the mean parameters by modeling the output probabilities as a binomial distribution.
+
+        Args:
+            fitted: Mean parameter values
+
+        Returns:
+            var: Variance
+        """
+        fitted = self.clip(fitted / self.n)
+        var = fitted * (1 - fitted) * self.n
+        return var
+
+    def deriv(self, fitted: np.ndarray) -> np.ndarray:
+        """Returns the derivative of the variance function.
+
+        Args:
+            fitted: Mean parameter values
+
+        Returns:
+            deriv: Derivative of the variance function
+        """
+        from statsmodels.tools.numdiff import approx_fprime, approx_fprime_cs
+
+        deriv = np.diag(approx_fprime_cs(fitted, self))
+        return deriv
+
+
+binom_variance = Binomial_Variance()
+binom_variance.__doc__ = """
+Binomial distribution variance function.
+
+This is an alias of Binomial(n=1)
+"""
+
+
 class Negative_Binomial_Variance(object):
     """
     Variance function for the negative binomial distribution.
@@ -614,24 +677,6 @@ class Distribution(object):
             w: Weights for the IRLS steps
         """
         w = 1.0 / (self.link.deriv(fitted) ** 2 * self.variance(fitted))
-        return w
-
-    def huber_weights(self, fitted: np.ndarray, residuals: np.ndarray, threshold: float = None):
-        """Compute Huber weights for the IWLS algorithm.
-
-        Args:
-            fitted: Array of shape [n_samples,]; transformed mean response variable
-            residuals: Array of shape [n_samples,]; residuals between observed and predicted values
-            threshold: Float; the threshold for switching between squared loss and linear loss
-
-        Returns:
-            w: Array of shape [n_samples,]; computed Huber weights for the IWLS algorithm
-        """
-        huber_w = np.ones_like(residuals)
-        mask = np.abs(residuals) > threshold
-        huber_w[mask] = threshold / np.abs(residuals[mask])
-
-        w = huber_w / (self.link.deriv(fitted) ** 2 * self.variance(fitted))
         return w
 
     def predict(self, fitted: np.ndarray) -> np.ndarray:
@@ -1059,6 +1104,147 @@ class Gamma(Distribution):
             )
         )
         return ll
+
+
+class Binomial(Distribution):
+    """
+    Binomial distribution for modeling binary data.
+
+    Args:
+        link: The link function to use for the distribution, for performing transformation of the linear outputs. The
+            default link is the logit link, but available links are "logit" and "log".
+    """
+
+    valid_links = [Logit, Log]
+    variance = binom_variance
+
+    def __init__(self, link=Logit):
+        self.logger = lm.get_main_logger()
+
+        if link not in Binomial.valid_links:
+            raise ValueError("Invalid link for Binomial distribution. Valid links are: %s" % Binomial.valid_links)
+
+        if link != Binomial.suggested_link:
+            self.logger.warning(
+                "The suggested link function for Binomial is the logit link, but %s is currently chosen." % link
+            )
+
+        self.n = 1
+        self.variance = Binomial.variance
+        self.link = link()
+
+    def initial_predictions(self, y: np.ndarray) -> np.ndarray:
+        """Initial predictions for the IRLS algorithm.
+
+        Args:
+            y: Array of shape [n_samples, ]; untransformed dependent variable
+
+        Returns:
+            y_hat_0 : Array of shape [n_samples,]; the initial linear predictors.
+        """
+        y_hat_0 = (y + 0.5) / 2
+        return y_hat_0
+
+    def deviance(
+        self,
+        endog: np.ndarray,
+        fitted: np.ndarray,
+        freq_weights: Optional[np.ndarray] = None,
+        scale: np.float = 1.0,
+        axis: Optional[int] = None,
+    ) -> float:
+        """Binomial deviance function.
+
+        Args:
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            fitted: Array of shape [n_samples, ]; fitted mean response variable (link function evaluated
+                at the linear predicted values)
+            freq_weights: Array of shape [n_samples, ]; 1D array of frequency weights, used to e.g. adjust for unequal
+                sampling frequencies
+            scale: Optional scale of the response variable
+            axis: Axis along which the deviance is calculated
+
+        Returns:
+            dev: The value of the deviance function
+        """
+        if np.shape(self.n) == () and self.n == 1:
+            one = np.equal(endog, 1)
+            return -2 * np.sum(
+                (one * np.log(fitted + 1e-88) + (1 - one) * np.log(1 - fitted + 1e-88)) * freq_weights, axis=axis
+            )
+        else:
+            return 2 * np.sum(
+                self.n
+                * freq_weights
+                * (endog * np.log(endog / fitted + 1e-88) + (1 - endog) * np.log((1 - endog) / (1 - fitted) + 1e-88)),
+                axis=axis,
+            )
+
+    def deviance_residuals(self, endog: np.ndarray, fitted: np.ndarray, scale: np.float = 1.0) -> np.ndarray:
+        """
+        Binomial deviance residuals.
+
+        Args:
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            fitted: Array of shape [n_samples, ]; fitted mean response variable (link function evaluated
+                at the linear predicted values)
+            scale: Optional scale of the response variable- residuals will be divided by the scale
+
+        Returns:
+            dev_resid: The deviance residuals
+        """
+        fitted = self.clip(fitted)
+        if np.shape(self.n) == () and self.n == 1:
+            one = np.equal(endog, 1)
+            dev_resid = np.sign(endog - fitted) * np.sqrt(-2 * np.log(one * fitted + (1 - one) * (1 - fitted))) / scale
+            return dev_resid
+        else:
+            dev_resid = (
+                np.sign(endog - fitted)
+                * np.sqrt(
+                    2
+                    * self.n
+                    * (
+                        endog * np.log(endog / fitted + 1e-88)
+                        + (1 - endog) * np.log((1 - endog) / (1 - fitted) + 1e-88)
+                    )
+                )
+                / scale
+            )
+            return dev_resid
+
+    def log_likelihood(
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+    ) -> np.ndarray:
+        """Binomial log likelihood of the fitted mean response.
+
+        Args:
+            endog: Array of shape [n_samples, ]; untransformed dependent variable
+            fitted: Array of shape [n_samples, ]; fitted mean response variable (link function evaluated
+            at the linear predicted values)
+            freq_weights: Array of shape [n_samples, ]; optional 1D array of frequency weights, used to e.g. adjust for
+                unequal sampling frequencies
+            scale: Optional scale of the response variable
+
+        Returns:
+            ll: The value of the log-likelihood function
+        """
+        if np.shape(self.n) == () and self.n == 1:
+            ll = scale * np.sum((endog * np.log(fitted / (1 - fitted) + 1e-88) + np.log(1 - fitted)) * freq_weights)
+            return ll
+        else:
+            y = endog * self.n
+            ll = scale * np.sum(
+                (
+                    special.gammaln(self.n + 1)
+                    - special.gammaln(y + 1)
+                    - special.gammaln(self.n - y + 1)
+                    + y * np.log(fitted / (1 - fitted))
+                    + self.n * np.log(1 - fitted)
+                )
+                * freq_weights
+            )
+            return ll
 
 
 class NegativeBinomial(Distribution):

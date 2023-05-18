@@ -1607,6 +1607,26 @@ self.targets_expr = pd.DataFrame(
 # Make a note of whether ligands are secreted or membrane-bound:
 self.signaling_types = self.lr_db.loc[self.lr_db["from"].isin([x[0] for x in self.lr_pairs]), "type"].tolist()
 
+
+def huber_weights(self, fitted: np.ndarray, residuals: np.ndarray, threshold: float = None):
+    """Compute Huber weights for the IWLS algorithm.
+
+    Args:
+        fitted: Array of shape [n_samples,]; transformed mean response variable
+        residuals: Array of shape [n_samples,]; residuals between observed and predicted values
+        threshold: Float; the threshold for switching between squared loss and linear loss
+
+    Returns:
+        w: Array of shape [n_samples,]; computed Huber weights for the IWLS algorithm
+    """
+    huber_w = np.ones_like(residuals)
+    mask = np.abs(residuals) > threshold
+    huber_w[mask] = threshold / np.abs(residuals[mask])
+
+    w = huber_w / (self.link.deriv(fitted) ** 2 * self.variance(fitted))
+    return w
+
+
 #     if self.subsampled:
 #         sample_index = (
 #             self.subsampled_indices[y_label][i] if not self.subset else self.subsampled_indices[i]

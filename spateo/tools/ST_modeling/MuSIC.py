@@ -1110,8 +1110,8 @@ class MuSIC:
 
         if self.bw_fixed:
             max_dist = np.max(np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)]))
-            # Set max bandwidth to twice the max distance between any two given samples:
-            self.maxbw = max_dist * 2
+            # Set max bandwidth to the max distance between any two given samples:
+            self.maxbw = max_dist
 
             # Set minimum bandwidth to ensure at least one "negative" example is included in spatially-weighted
             # calculation for each cell:
@@ -1214,6 +1214,7 @@ class MuSIC:
             y_label: Name of the response variable
             coords: Can be optionally used to provide coordinates for samples- used if subsampling was performed to
                 maintain all original sample coordinates (to take original neighborhoods into account)
+            mask_indices: Can be optionally used to provide indices of samples to mask out of the dataset
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
             multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
@@ -1262,7 +1263,7 @@ class MuSIC:
         if mask_indices is not None:
             wi[mask_indices] = 0.0
 
-        # Global mean regularization:
+        # Global relationship regularization:
         correlations = []
         for i in range(X.shape[1]):
             # Create a boolean mask where both the current X column and y are nonzero
@@ -1282,7 +1283,8 @@ class MuSIC:
             correlations.append(correlation)
         correlations = np.array(correlations)
 
-        mask = (np.abs(correlations) < 0.05).ravel()
+        threshold = np.abs(correlations) < 0.1
+        mask = np.where(threshold, np.abs(correlations), 1.0)
 
         if self.distr == "gaussian" or fit_predictor:
             betas, pseudoinverse = compute_betas_local(y, X, wi, clip=self.clip)
@@ -1296,7 +1298,12 @@ class MuSIC:
             hat_i = np.dot(X[i], pseudoinverse[:, i])
 
         elif self.distr == "poisson" or self.distr == "nb":
-            # For multiscale model, the y provided is the linear predictor, not the response:
+            # Zero-inflated local logistic model:
+            # NOTE TO SELF: mask_indices set by where y_hat is predicted to be 0 (our high confidence predicted "true"
+            # zeros). After fitting the logistic model, set wi to 0 using this mask for the GLM regression (remember
+            # to delete the wi masking code above)- do this if "use_hurdle" is set to True, otherwise just use the
+            # provided mask indices:
+
             betas, y_hat, _, final_irls_weights, _, _, pseudoinverse = iwls(
                 y,
                 X,
@@ -1311,7 +1318,8 @@ class MuSIC:
                 mask=mask,
             )
 
-            # For multiscale GLM models, this is the predicted dependent variable value:
+            # For multiscale GLM models, this is the predicted dependent variable value- if i is in the mask,
+            # set betas to 0 and y_hat to 0:
             pred_y = y_hat[i]
             diagnostic = pred_y
             # For multiscale models, keep track of the residual as well- in this case,
@@ -1434,12 +1442,14 @@ class MuSIC:
                 score = optimum_score
                 optimum_score_history.append(optimum_score)
                 most_optimum_score = np.min(optimum_score_history)
-                if iterations >= 2:
+                if iterations >= 3:
                     if optimum_score_history[-2] == most_optimum_score:
                         patience += 1
                     else:
                         patience = 0
-                    if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 1.0:
+                    if (np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 1.0) & (
+                        optimum_score_history[-3] < optimum_score_history[-2]
+                    ):
                         self.logger.info(
                             "Plateau detected- exiting optimization and returning optimum score up to this " "point."
                         )
@@ -1475,7 +1485,7 @@ class MuSIC:
                 from various dictionaries
             bw: Bandwidth for the spatial kernel
             coords: Coordinates of each point in the X array
-            mask_indices: Optional array used to specify indices to ignore in the fitting process
+            mask_indices: Optional array used to mask out indices in the fitting process
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
             multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
@@ -1502,42 +1512,18 @@ class MuSIC:
             # Fitting for each location, or each location that is among the subsampled points:
             pos = 0
             for i in self.x_chunk:
-                if i not in mask_indices:
-                    local_fit_outputs[pos] = self.local_fit(
-                        i,
-                        y,
-                        X,
-                        y_label=y_label,
-                        coords=coords,
-                        mask_indices=mask_indices,
-                        bw=bw,
-                        final=final,
-                        multiscale=multiscale,
-                        fit_predictor=fit_predictor,
-                    )
-                else:
-                    if self.subsampled:
-                        sample_index = (
-                            self.subsampled_indices[y_label][i] if not self.subset else self.subsampled_indices[i]
-                        )
-                    elif self.subset:
-                        sample_index = self.subset_indices[i]
-                    else:
-                        sample_index = i
-
-                    zero_placeholder = np.zeros((n_features,))
-                    if self.distr == "gaussian":
-                        if multiscale:
-                            local_fit_outputs[pos] = zero_placeholder
-                        else:
-                            local_fit_outputs[pos] = np.concatenate(
-                                ([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder)
-                            )
-                    else:
-                        if multiscale:
-                            local_fit_outputs[pos] = zero_placeholder
-                        else:
-                            local_fit_outputs[pos] = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder))
+                local_fit_outputs[pos] = self.local_fit(
+                    i,
+                    y,
+                    X,
+                    y_label=y_label,
+                    coords=coords,
+                    mask_indices=mask_indices,
+                    bw=bw,
+                    final=final,
+                    multiscale=multiscale,
+                    fit_predictor=fit_predictor,
+                )
                 pos += 1
 
             # Gather data to the central process such that an array is formed where each sample has its own
@@ -1639,22 +1625,19 @@ class MuSIC:
             trace_hat = 0
 
             for i in self.x_chunk:
-                if i not in mask_indices:
-                    fit_outputs = self.local_fit(
-                        i,
-                        y,
-                        X,
-                        y_label=y_label,
-                        coords=coords,
-                        mask_indices=mask_indices,
-                        bw=bw,
-                        final=False,
-                        multiscale=multiscale,
-                        fit_predictor=fit_predictor,
-                    )
-                else:
-                    fit_outputs = np.array([0.0, 0.0])
-                    # fit_outputs = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder))
+                fit_outputs = self.local_fit(
+                    i,
+                    y,
+                    X,
+                    y_label=y_label,
+                    coords=coords,
+                    mask_indices=mask_indices,
+                    bw=bw,
+                    final=False,
+                    multiscale=multiscale,
+                    fit_predictor=fit_predictor,
+                )
+                # fit_outputs = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder))
                 err, hat_i = fit_outputs[0], fit_outputs[1]
                 RSS += err**2
                 trace_hat += hat_i
@@ -1679,21 +1662,18 @@ class MuSIC:
             y_pred = np.empty(self.x_chunk.shape[0], dtype=np.float64)
 
             for i in self.x_chunk:
-                if i not in mask_indices:
-                    fit_outputs = self.local_fit(
-                        i,
-                        y,
-                        X,
-                        y_label=y_label,
-                        coords=coords,
-                        mask_indices=mask_indices,
-                        bw=bw,
-                        final=False,
-                        multiscale=multiscale,
-                        fit_predictor=fit_predictor,
-                    )
-                else:
-                    fit_outputs = np.array([0.0, 0.0])
+                fit_outputs = self.local_fit(
+                    i,
+                    y,
+                    X,
+                    y_label=y_label,
+                    coords=coords,
+                    mask_indices=mask_indices,
+                    bw=bw,
+                    final=False,
+                    multiscale=multiscale,
+                    fit_predictor=fit_predictor,
+                )
                 y_pred_i, hat_i = fit_outputs[0], fit_outputs[1]
                 y_pred[pos] = y_pred_i
                 trace_hat += hat_i
@@ -1781,17 +1761,6 @@ class MuSIC:
                 chunk_size = int(math.ceil(float(n_samples) / self.comm.size))
                 # Assign chunks to each process:
                 self.x_chunk = indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
-            elif self.subset:
-                indices = self.subset_indices[target]
-            else:
-                indices = range(self.n_samples)
-
-            # X = X[indices, :]
-            # y = y[indices, :]
-            # coords = self.coords[indices, :]
-            # X = self.comm.bcast(X, root=0)
-            # y = self.comm.bcast(y, root=0)
-            # coords = self.comm.bcast(coords, root=0)
 
             # Find indices where y is zero but x is nonzero:
             mask_indices = np.where((y == 0).reshape(-1, 1) & (np.all(np.abs(X) > 1e-3, axis=1)).reshape(-1, 1))[0]
@@ -2329,7 +2298,6 @@ class VMuSIC(MuSIC):
                             temp_X,
                             multiscale=True,
                             fit_predictor=True,
-                            signaling_type=signaling_type,
                             verbose=False,
                         )
                         # Get coefficients for this particular target:
