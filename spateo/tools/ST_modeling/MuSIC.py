@@ -33,9 +33,11 @@ from spateo.tools.spatial_degs import moran_i
 from spateo.tools.ST_modeling.distributions import Gaussian, NegativeBinomial, Poisson
 from spateo.tools.ST_modeling.regression_utils import (
     compute_betas_local,
+    golden_section_search,
     iwls,
+    logistic_objective,
     multicollinearity_check,
-    smooth, golden_section_search, objective_iwls_logistic,
+    smooth,
 )
 
 
@@ -1111,9 +1113,7 @@ class MuSIC:
         """
 
         if self.bw_fixed:
-            max_dist = np.max(np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)]))
-            # Set max bandwidth to the max distance between any two given samples:
-            self.maxbw = max_dist
+            # max_dist = np.max(np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)]))
 
             # Set minimum bandwidth to ensure at least one "negative" example is included in spatially-weighted
             # calculation for each cell:
@@ -1125,6 +1125,11 @@ class MuSIC:
                     )
                 )
                 self.minbw = min_dist * 3
+
+                # Set max bandwidth to 10x the max distance between neighboring points:
+                self.maxbw = min_dist * 10
+            else:
+                self.maxbw = self.minbw * 2.5
 
         # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
         else:
@@ -1264,12 +1269,12 @@ class MuSIC:
 
         # Global relationship regularization:
         correlations = []
-        for i in range(X.shape[1]):
+        for idx in range(X.shape[1]):
             # Create a boolean mask where both the current X column and y are nonzero
-            mask = (X[:, i].ravel() != 0) & (y.ravel() != 0)
+            mask = (X[:, idx].ravel() != 0) & (y.ravel() != 0)
 
             # Create a subset of the data using the mask
-            X_subset = X[mask, i]
+            X_subset = X[mask, idx]
             y_subset = y[mask]
 
             # Compute the Pearson correlation coefficient for the subset
@@ -1285,56 +1290,27 @@ class MuSIC:
         threshold = np.abs(correlations) < 0.1
         mask = np.where(threshold, np.abs(correlations), 1.0)
 
+        if mask_indices is not None:
+            wi[mask_indices] = 0.0
+        else:
+            mask_indices = []
+
         if self.distr == "gaussian" or fit_predictor:
             betas, pseudoinverse = compute_betas_local(y, X, wi, clip=self.clip)
-            pred_y = np.dot(X[i], betas)
+            if i in mask_indices:
+                betas = np.zeros_like(betas)
+                pred_y = 0.0
+            else:
+                pred_y = np.dot(X[i], betas)
+
             residual = y[i] - pred_y
             diagnostic = residual
-
             # Reshape coefficients if necessary:
             betas = betas.flatten()
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
             hat_i = np.dot(X[i], pseudoinverse[:, i])
 
         elif self.distr == "poisson" or self.distr == "nb":
-            # Zero-inflated local logistic model:
-            if not self.no_hurdle:
-                y_binary = np.where(y > 0, 1, 0).reshape(-1, 1).astype(np.float32)
-                betas, y_hat, _, _ = iwls(
-                    y_binary,
-                    X,
-                    distr="binomial",
-                    tol=self.tolerance,
-                    clip=self.clip,
-                    max_iter=self.max_iter,
-                    spatial_weights=wi,
-                    link=None,
-                    ridge_lambda=self.ridge_lambda,
-                )
-
-                # Search for optimal threshold based on correct classification of zero/nonzero dependent values:
-                weighted_y_true = y * wi
-                if not all(element == 0.0 for element in weighted_y_true):
-                    obj_function = lambda threshold: objective_iwls_logistic(
-                        threshold=threshold, proba=y_hat, y_true=weighted_y_true
-                    )
-
-                    optimal_threshold = golden_section_search(obj_function, a=0.0, b=1.0, tol=self.tolerance)
-                    predictions = (y_hat >= optimal_threshold).astype(int)
-
-                    # Mask indices where variable is predicted to be zero:
-                    wi[predictions == 0] = 0.0
-                    if wi[i] == 0.0:
-                        "filler"
-            else:
-                if mask_indices is not None:
-                    wi[mask_indices] = 0.0
-
-            # NOTE TO SELF: mask_indices set by where y_hat is predicted to be 0 (our high confidence predicted "true"
-            # zeros). After fitting the logistic model, set wi to 0 using this mask for the GLM regression (remember
-            # to delete the wi masking code above)- do this if "use_hurdle" is set to True, otherwise just use the
-            # provided mask indices:
-
             betas, y_hat, _, final_irls_weights, _, _, pseudoinverse = iwls(
                 y,
                 X,
@@ -1351,7 +1327,12 @@ class MuSIC:
 
             # For multiscale GLM models, this is the predicted dependent variable value- if i is in the mask,
             # set betas to 0 and y_hat to 0:
-            pred_y = y_hat[i]
+            if i in mask_indices:
+                betas = np.zeros_like(betas)
+                pred_y = 0.0
+            else:
+                pred_y = y_hat[i]
+
             diagnostic = pred_y
             # For multiscale models, keep track of the residual as well- in this case,
             # the given y is assumed to also be the linear predictor:
@@ -1793,8 +1774,55 @@ class MuSIC:
                 # Assign chunks to each process:
                 self.x_chunk = indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
 
-            # Find indices where y is zero but x is nonzero:
-            mask_indices = np.where((y == 0).reshape(-1, 1) & (np.all(np.abs(X) > 1e-3, axis=1)).reshape(-1, 1))[0]
+            # Zero-inflated local logistic model:
+            if not self.no_hurdle:
+                y_binary = np.where(y > 0, 1, 0).reshape(-1, 1).astype(np.float32)
+                betas, y_hat, _, _ = iwls(
+                    y_binary,
+                    X,
+                    distr="binomial",
+                    tol=self.tolerance,
+                    max_iter=self.max_iter,
+                    link=None,
+                    ridge_lambda=self.ridge_lambda,
+                )
+
+                # Search for optimal threshold based on correct classification of zero/nonzero dependent values:
+                if not all(element == 0.0 for element in y_binary):
+                    obj_function = lambda threshold: logistic_objective(
+                        threshold=threshold, proba=y_hat, y_true=y_binary
+                    )
+
+                    optimal_threshold = golden_section_search(obj_function, a=0.0, b=1.0, tol=self.tolerance)
+                    predictions = (y_hat >= optimal_threshold).astype(int)
+                    tp = np.sum((predictions == 1) & (y_binary == 1))
+                    tn = np.sum((predictions == 0) & (y_binary == 0))
+                    fp = np.sum((predictions == 1) & (y_binary == 0))
+                    precision = tp / (tp + fp)
+                    specificity = tn / (tn + fp)
+                    self.logger.info(f"For target {target}, precision: {precision:.3f}, specificity: {specificity:.3f}")
+
+                    if precision >= 0.5 and specificity >= 0.5:
+                        if not os.path.exists(os.path.join(self.output_path, "logistic_predictions")):
+                            os.makedirs(os.path.join(self.output_path, "logistic_predictions"))
+                        to_save = np.hstack((y_binary, predictions, X))
+                        cols = ["true y", "predictions"] + self.feature_names
+                        predictions_df = pd.DataFrame(to_save, columns=cols, index=self.sample_names[self.x_chunk])
+                        predictions_df.to_csv(f"logistic_predictions_{target}.csv")
+
+                        # Mask indices where variable is predicted to be nonzero but is actually zero (based on inferences,
+                        # these will result in likely underestimation of the effect)- we infer that the effect of the
+                        # independent variables is similar for these observations (and the zero is either technical or due to
+                        # an external factor):
+                        mask_indices = np.where((predictions != 0) & (y == 0))[0]
+                    else:
+                        # Find indices where y is zero but x is nonzero:
+                        mask_indices = np.where(
+                            (y == 0).reshape(-1, 1) & (np.all(np.abs(X) > 1e-3, axis=1)).reshape(-1, 1)
+                        )[0]
+            else:
+                # Find indices where y is zero but x is nonzero:
+                mask_indices = np.where((y == 0).reshape(-1, 1) & (np.all(np.abs(X) > 1e-3, axis=1)).reshape(-1, 1))[0]
 
             # Use y to find the appropriate upper and lower bounds for coefficients:
             if self.distr != "gaussian":

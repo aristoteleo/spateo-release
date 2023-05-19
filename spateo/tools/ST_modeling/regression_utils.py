@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import scipy
 import statsmodels.stats.multitest
+import tensorflow as tf
 from anndata import AnnData
 from numpy import linalg
 from sklearn.preprocessing import MinMaxScaler
@@ -213,14 +214,21 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
         # xtx_inv_xt = linalg.solve(xtx, xT)
     except:
         xtx_inv_xt = np.dot(linalg.pinv(xtx), xT)
+    pseudoinverse = xtx_inv_xt
+
+    # Avoid issues with all zero dependent variable values in spatial regions:
+    yw = (y * w).reshape(-1, 1)
+    all_zeros = np.all(yw == 0)
+    if all_zeros:
+        betas = np.full((x.shape[1], 1), 1e-5)
+        return betas, pseudoinverse
+
     betas = np.dot(xtx_inv_xt, y)
     # Upper and lower bound to constrain betas and prevent numerical overflow:
     betas = np.clip(betas, -clip, clip)
     # And set to zero with small offset for numerical overflow if the diagonal of the Gram matrix is below a certain
     # threshold:
     betas[to_zero] = 1e-5
-
-    pseudoinverse = xtx_inv_xt
 
     return betas, pseudoinverse
 
@@ -281,6 +289,8 @@ def iwls(
     difference = 1.0e6
 
     # Get appropriate distribution family based on specified:
+    mod_distr = distr  # string specifying distribution assumption of the model
+
     if distr == "gaussian":
         link = link or Gaussian.__init__.__defaults__[0]
         distr = Gaussian(link)
@@ -305,7 +315,10 @@ def iwls(
 
     while difference > tol and n_iter < max_iter:
         n_iter += 1
-        weights = distr.weights(linear_predictor)
+        if mod_distr == "binomial":
+            weights = distr.weights(y_hat)
+        else:
+            weights = distr.weights(linear_predictor)
 
         # Compute adjusted predictor from the difference between the predicted mean response variable and observed y:
         adjusted_predictor = linear_predictor + (distr.link.deriv(y_hat) * (y - y_hat))
@@ -325,12 +338,12 @@ def iwls(
             )
 
         if mask is not None:
-            new_betas = np.multiply(new_betas, mask).astype(np.float32)
+            new_betas = np.multiply(new_betas, mask.reshape(-1, 1)).astype(np.float32)
 
         linear_predictor = sparse_dot(x, new_betas)
         y_hat = distr.predict(linear_predictor)
 
-        difference = min(abs(new_betas - betas))
+        difference = np.min(abs(new_betas - betas))
         betas = new_betas
 
     if spatial_weights is None:
@@ -341,9 +354,36 @@ def iwls(
 
 
 # ---------------------------------------------------------------------------------------------------
-# Objective function and golden search for logistic models
+# Objective functions for logistic models
 # ---------------------------------------------------------------------------------------------------
-def objective_iwls_logistic(threshold: float, proba: np.ndarray, y_true: np.ndarray):
+def weighted_binary_crossentropy(y_true: np.ndarray, y_pred: np.ndarray, weight_0: float = 1.0, weight_1: float = 1.0):
+    """
+    Custom binary cross-entropy loss function with class weights.
+
+    Args:
+        y_true: True binary labels
+        y_pred: Predicted probabilities
+        weight_0: Weight for class 0 (negative class)
+        weight_1: Weight for class 1 (positive class)
+
+    Returns:
+        Weighted binary cross-entropy loss
+    """
+    # Small constant to avoid division by zero
+    epsilon = tf.keras.backend.epsilon()
+
+    # Apply class weights
+    weights = y_true * weight_1 + (1 - y_true) * weight_0
+
+    # Clip predicted probabilities to avoid log(0) and log(1)
+    y_pred = tf.clip_by_value(y_pred, epsilon, 1 - epsilon)
+
+    # Compute weighted binary cross-entropy loss
+    loss = -tf.reduce_mean(weights * y_true * tf.math.log(y_pred) + (1 - y_true) * tf.math.log(1 - y_pred))
+    return loss
+
+
+def logistic_objective(threshold: float, proba: np.ndarray, y_true: np.ndarray):
     """For binomial regression models with IWLS, the objective function is the weighted sum of recall and specificity.
 
     Args:
@@ -364,12 +404,16 @@ def objective_iwls_logistic(threshold: float, proba: np.ndarray, y_true: np.ndar
     specificity = tn / (tn + fp)
 
     # Define weights for the two metrics
-    w1 = 0.5
-    w2 = 0.5
+    # Calculate weights based on the ratio of the number of 0s to 1s in y_true to buffer against class imbalances
+    zero_ratio = (y_true == 0).sum() / len(y_true)
+    one_ratio = (y_true == 1).sum() / len(y_true)
+    w1 = 1.0 * zero_ratio
+    w2 = 1.0 * one_ratio
 
     # Return weighted sum of recall and true negative rate
     # Golden search aims to minimize, so negative sign to get the maximum recall + TNR
     score = -(w1 * recall + w2 * specificity)
+    return score
 
 
 def golden_section_search(func: Callable, a: float, b: float, tol: float = 1e-5):

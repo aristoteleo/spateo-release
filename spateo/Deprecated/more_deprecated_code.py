@@ -1627,6 +1627,78 @@ def huber_weights(self, fitted: np.ndarray, residuals: np.ndarray, threshold: fl
     return w
 
 
+betas, y_hat, _, _ = iwls(
+    y_binary,
+    X,
+    distr="binomial",
+    tol=self.tolerance,
+    max_iter=self.max_iter,
+    link=None,
+    ridge_lambda=self.ridge_lambda,
+)
+
+# Zero-inflated local logistic model:
+if not self.no_hurdle:
+    tf.random.set_seed(888)
+    y_binary = np.where(y > 0, 1, 0).reshape(-1, 1).astype(np.float32)
+    # Network architecture:
+    model = tf.keras.Sequential()
+    layer_dims = []
+    if X.shape[1] >= 8:
+        layer_dims.append(np.ceil(X.shape[1] / 4))
+        while layer_dims[-1] / 4 > 8:
+            layer_dims.append(layer_dims[-1] / 4)
+        layer_dims.append(1)
+    else:
+        layer_dims.append(1)
+
+    if len(layer_dims) > 1:
+        model.add(tf.keras.layers.Dense(layer_dims[0], activation="relu", input_shape=(X.shape[1],)))
+        for layer_dim in layer_dims[1:-1]:
+            model.add(tf.keras.layers.Dense(layer_dim, activation="relu"))
+        model.add(tf.keras.layers.Dense(layer_dims[-1], activation="sigmoid"))
+    else:
+        model.add(tf.keras.layers.Dense(layer_dims[0], activation="sigmoid", input_shape=(X.shape[1],)))
+
+    # Compile model:
+    proportion_true_pos = tf.reduce_mean(y_binary)
+    proportion_true_neg = 1 - proportion_true_pos
+    model.compile(
+        optimizer="adam",
+        loss=lambda y_binary, y_pred: weighted_binary_crossentropy(
+            y_binary, y_pred, weight_0=proportion_true_pos, weight_1=proportion_true_neg
+        ),
+        metrics=["accuracy"],
+    )
+
+    model.fit(X, y, epochs=100, batch_size=8, verbose=0)
+    predictions = model.predict(X)
+    obj_function = lambda threshold: logistic_objective(threshold=threshold, proba=predictions, y_true=y_binary)
+    optimal_threshold = golden_section_search(obj_function, a=0.0, b=1.0, tol=self.tolerance)
+    pred_binary = (predictions >= optimal_threshold).astype(int)
+
+    log_pred_v_true = np.hstack((predictions, pred_binary, y_binary, y))
+
+    if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "logistic_predictions")):
+        os.makedirs(os.path.join(os.path.dirname(self.output_path), "logistic_predictions"))
+    predictions_df = pd.DataFrame(
+        log_pred_v_true,
+        columns=["predictions", "predicted_binary_value", "true binary value", "true expression"],
+        index=self.sample_names[self.x_chunk],
+    )
+    predictions_df.to_csv(
+        os.path.join(os.path.dirname(self.output_path), f"logistic_predictions/logistic_predictions_{target}.csv")
+    )
+
+    # Mask indices where variable is predicted to be nonzero but is actually zero (based on inferences,
+    # these will result in likely underestimation of the effect)- we infer that the effect of the
+    # independent variables is similar for these observations (and the zero is either technical or due to
+    # an external factor):
+    mask_indices = np.where((pred_binary != 0) & (y == 0))[0]
+else:
+    "filler"
+
+
 #     if self.subsampled:
 #         sample_index = (
 #             self.subsampled_indices[y_label][i] if not self.subset else self.subsampled_indices[i]

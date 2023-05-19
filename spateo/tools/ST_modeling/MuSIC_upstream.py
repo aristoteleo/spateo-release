@@ -634,19 +634,21 @@ class MuSIC_target_selector:
         # Network architecture:
         model = tf.keras.Sequential()
         layer_dims = []
-        if X.shape[1] >= 128:
-            layer_dims.append(128)
+        if X.shape[1] >= 8:
+            layer_dims.append(np.ceil(X.shape[1] / 4))
+            while layer_dims[-1] / 4 > 8:
+                layer_dims.append(layer_dims[-1] / 4)
+            layer_dims.append(1)
         else:
-            layer_dims.append(X.shape[1] / 4)
-        while layer_dims[-1] / 4 > 8:
-            layer_dims.append(layer_dims / 4)
-        layer_dims.append(8)
-        layer_dims.append(1)
+            layer_dims.append(1)
 
-        model.add(tf.keras.layers.Dense(layer_dims[0], activation="linear", input_shape=(X.shape[1],)))
-        for layer_dim in layer_dims[1:-1]:
-            model.add(tf.keras.layers.Dense(layer_dim, activation="linear"))
-        model.add(tf.keras.layers.Dense(layer_dims[-1], activation="relu"))
+        if len(layer_dims) > 1:
+            model.add(tf.keras.layers.Dense(layer_dims[0], activation="relu", input_shape=(X.shape[1],)))
+            for layer_dim in layer_dims[1:-1]:
+                model.add(tf.keras.layers.Dense(layer_dim, activation="relu"))
+            model.add(tf.keras.layers.Dense(layer_dims[-1], activation="sigmoid"))
+        else:
+            model.add(tf.keras.layers.Dense(layer_dims[0], activation="sigmoid", input_shape=(X.shape[1],)))
 
         model.compile(optimizer="adam", loss="poisson")
 
@@ -681,77 +683,3 @@ class MuSIC_target_selector:
         significant_names = [self.feature_names[idx] for idx in significant_indices[0]]
 
         return significant_names, r_squared
-
-    # Depending on the model type, define predictors or targets- if targets are given and model is "ligand" or "lr",
-    # will identify a good set of ligands by using ligand expression in the 10 nearest neighbors of each cell. If
-    # targets are given and model is "receptor", will identify a good set of receptors- if model is "lr",
-    # will additionally filter these receptors for
-    # For given ligands,
-
-    # If none of the ligands list, receptor list, or target list are given, it is assumed that a niche model will be
-    # defined. The targets will be identified by spatial autocorrelation using Geary's C.
-
-
-### ----------------------------------- Dimensionality reduction ----------------------------------- ###
-# def compute_pca(
-#     adata: AnnData,
-#     subset: Optional[List[str]] = None,
-#     n_pca_components: int = 30,
-#     pca_key: str = "X_pca",
-#     layer: Optional[str] = None,
-# ):
-#     """Compute PCA decomposition for gene expression data (or any biological data stored in AnnData object).
-#
-#     Args:
-#         adata: AnnData object containing data for which to perform PCA
-#         subset: Can be used to optionally subset to only genes of interest for PCA
-#         n_pca_components: Number of principal components
-#         pca_key: Key in adata.obsm in which to store the representation after dimensionality reduction
-#         layer: Can optionally provide a layer to use for dimensionality reduction (stored in .layers). If not given,
-#         will use .X.
-#
-#     Returns:
-#         adata_copy: AnnData object post-transformation (will return a copy of AnnData in case the original is
-#             subsetted).
-#     """
-#     logger = lm.get_main_logger()
-#
-#     adata_copy = adata.copy()
-#
-#     if layer is None:
-#         if subset is not None:
-#             adata = adata[:, subset]
-#         expr = adata.X
-#     else:
-#         if "X" in layer:
-#             expr = adata.X
-#         elif layer in adata.layers.keys():
-#             expr = adata.layers[layer]
-#         elif layer in adata.obsm.keys():
-#             expr = adata.obsm[layer]
-#         else:
-#             logger.error("Input to 'layer' could not be found among valid AnnData keys.")
-#
-#     cm_genesums = expr.sum(axis=0)
-#     valid_ind = np.logical_and(np.isfinite(cm_genesums), cm_genesums != 0)
-#     valid_ind = np.array(valid_ind).flatten()
-#
-#     expr = expr[:, valid_ind]
-#
-#     pca = PCA(
-#         n_components=min(n_pca_components, expr.shape[1] - 1),
-#         svd_solver="arpack",
-#         random_state=0,
-#     )
-#     fit = pca.fit(expr.toarray()) if scipy.sparse.issparse(expr) else pca.fit(expr)
-#     X_pca = fit.transform(expr.toarray()) if scipy.sparse.issparse(expr) else fit.transform(expr)
-#     adata_copy.obsm[pca_key] = X_pca
-#
-#     # Loadings:
-#     loadings = pca.components_
-#     adata_copy.uns["loadings"] = loadings
-#
-#     adata_copy.uns["explained_variance_ratio_"] = fit.explained_variance_ratio_
-#     adata_copy.uns["explained_variance_ratio_"] = fit.explained_variance_ratio_[1:]
-#
-#     return adata_copy

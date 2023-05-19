@@ -526,9 +526,8 @@ class Binomial_Variance(object):
         Returns:
             deriv: Derivative of the variance function
         """
-        from statsmodels.tools.numdiff import approx_fprime, approx_fprime_cs
-
-        deriv = np.diag(approx_fprime_cs(fitted, self))
+        fitted = self.clip(fitted)
+        deriv = 1 - 2 * fitted / self.n
         return deriv
 
 
