@@ -415,7 +415,7 @@ class MuSIC:
         # If group_subset is given, subset the AnnData object to contain the specified groups as well as neighboring
         # cells:
         if self.group_subset is not None:
-            subset = self.adata.obs[self.group_key].isin(self.group_subset)
+            subset = self.adata[self.adata.obs[self.group_key].isin(self.group_subset)]
             fitted_indices = [self.sample_names.get_loc(name) for name in subset.index]
             # Add cells that are neighboring cells of the chosen type, but which are not of the chosen type:
             get_wi_partial = partial(
@@ -436,7 +436,7 @@ class MuSIC:
             rows, cols = w_subset.nonzero()
             unique_indices = set(rows)
             names_all_neighbors = self.sample_names[unique_indices]
-            self.adata = self.adata[self.adata.obs[self.group_key].isin(names_all_neighbors)]
+            self.adata = self.adata[self.adata.obs_names.isin(names_all_neighbors)]
 
         self.sample_names = self.adata.obs_names
         self.coords = self.adata.obsm[self.coords_key]
