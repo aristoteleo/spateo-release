@@ -5,6 +5,8 @@ import numpy as np
 from mpi4py import MPI
 from MuSIC import MuSIC, VMuSIC
 
+from spateo.tools.ST_modeling.MuSIC_upstream import MuSIC_target_selector
+
 np.random.seed(888)
 random.seed(888)
 
@@ -17,6 +19,10 @@ if __name__ == "__main__":
     size = comm.Get_size()
 
     parser = argparse.ArgumentParser(description="Spatial GWR")
+
+    # Temporary- for selection of targets/predictors:
+    parser.add_argument("-run_upstream", action="store_true")
+
     parser.add_argument("-adata_path", type=str)
     parser.add_argument(
         "-csv_path",
@@ -219,8 +225,12 @@ if __name__ == "__main__":
     #     "filler"
 
     # else:
-    # For use only with MuSIC:
+    # For use only with VMuSIC:
     n_multiscale_chunks = parser.parse_args().chunks
+
+    if parser.parse_args().run_upstream:
+        swr_selector = MuSIC_target_selector(parser)
+        swr_selector.select_features()
 
     if parser.parse_args().multiscale:
         print(

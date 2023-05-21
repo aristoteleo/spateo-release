@@ -273,6 +273,7 @@ class MuSIC:
         self.set_up = self.comm.bcast(self.set_up, root=0)
         self.subsampled = self.comm.bcast(self.subsampled, root=0)
         self.subset = self.comm.bcast(self.subset, root=0)
+        self.x_chunk = self.comm.bcast(self.x_chunk, root=0)
 
     def parse_stgwr_args(self):
         """
@@ -1348,17 +1349,14 @@ class MuSIC:
         else:
             raise ValueError("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
 
-        # Squared singular values:
-        if self.distr == "gaussian":
-            lvg = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
+        # Scaled variance-covariance matrix:
+        CCT = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
 
         if final:
             if multiscale:
                 return betas
-            if self.distr == "gaussian":
-                return np.concatenate(([sample_index, diagnostic, hat_i], betas, lvg))
             else:
-                return np.concatenate(([sample_index, diagnostic, hat_i], betas))
+                return np.concatenate(([sample_index, diagnostic, hat_i], betas, CCT))
         else:
             # For bandwidth optimization:
             if self.distr == "gaussian" or fit_predictor:
@@ -1516,10 +1514,7 @@ class MuSIC:
             if multiscale:
                 local_fit_outputs = np.empty((self.x_chunk.shape[0], n_features), dtype=np.float64)
             else:
-                if self.distr == "gaussian":
-                    local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * n_features + 3), dtype=np.float64)
-                else:
-                    local_fit_outputs = np.empty((self.x_chunk.shape[0], n_features + 3), dtype=np.float64)
+                local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * n_features + 3), dtype=np.float64)
 
             # Fitting for each location, or each location that is among the subsampled points:
             pos = 0
@@ -1560,6 +1555,10 @@ class MuSIC:
                 all_fit_outputs = np.vstack(all_fit_outputs)
                 self.logger.info(f"Computing metrics for GWR using bandwidth: {bw}")
 
+                # Note: trace of the hat matrix and effective number of parameters (ENP) will be used
+                # interchangeably:
+                ENP = np.sum(all_fit_outputs[:, 2])
+
                 # Residual sum of squares for Gaussian model:
                 if self.distr == "gaussian":
                     RSS = np.sum(all_fit_outputs[:, 1] ** 2)
@@ -1567,14 +1566,11 @@ class MuSIC:
                     TSS = np.sum((y - np.mean(y)) ** 2)
                     r_squared = 1 - RSS / TSS
 
-                    # Note: trace of the hat matrix and effective number of parameters (ENP) will be used
-                    # interchangeably:
-                    ENP = np.sum(all_fit_outputs[:, 2])
                     # Residual variance:
                     sigma_squared = RSS / (n_samples - ENP)
                     # Corrected Akaike Information Criterion:
                     aicc = self.compute_aicc_linear(RSS, ENP, n_samples=X.shape[0])
-                    # Scale the leverages by their variance to compute standard errors of the predictor:
+                    # Scale CCT array by their variances to compute standard errors of the predictor:
                     all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * sigma_squared)
 
                     # For saving/showing outputs:
@@ -1612,8 +1608,12 @@ class MuSIC:
                         ENP = self.n_features + 1
                     else:
                         ENP = self.n_features
+                    pseudovar = deviance / (n_samples - ENP)
+
                     # Corrected Akaike Information Criterion:
                     aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
+                    # Scale CCT array by their variances to compute standard errors of the predictor:
+                    all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * pseudovar)
 
                     # For saving/showing outputs:
                     header = "index,prediction,influence,"
@@ -1623,6 +1623,8 @@ class MuSIC:
                     # Columns for the possible intercept, coefficients and squared canonical coefficients:
                     for x in varNames:
                         header += "b_" + x + ","
+                    for x in varNames:
+                        header += "se_" + x + ","
 
                     # Return output diagnostics and save result:
                     self.output_diagnostics(aicc, ENP, r_squared, deviance)
@@ -1773,6 +1775,7 @@ class MuSIC:
                 chunk_size = int(math.ceil(float(n_samples) / self.comm.size))
                 # Assign chunks to each process:
                 self.x_chunk = indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+                self.x_chunk = self.comm.bcast(self.x_chunk, root=0)
 
             # Zero-inflated local logistic model:
             if not self.no_hurdle:
@@ -1912,19 +1915,6 @@ class MuSIC:
             if isinstance(coeffs, Dict):
                 all_y_pred = pd.DataFrame(index=self.sample_names)
                 for target in coeffs:
-                    # # Adjust input if subsampled:
-                    # if self.subsampled:
-                    #     indices = (
-                    #         self.subsampled_indices[target] if self.group_subset is None else self.subsampled_indices
-                    #     )
-                    #
-                    #     input = input_all[indices, :]
-                    # elif self.subset:
-                    #     indices = self.subset_indices[target]
-                    #     input = input_all[indices, :]
-                    # else:
-                    #     input = input_all
-
                     if input.shape[0] != coeffs[target].shape[0]:
                         raise ValueError(
                             f"Input data has {input.shape[0]} samples but coefficients for target {target} have "
@@ -2070,10 +2060,11 @@ class MuSIC:
         pred_path = os.path.join(parent_dir, "predictions.csv")
         y_pred.to_csv(pred_path)
 
-    def return_outputs(self) -> Union[pd.DataFrame, Dict[str, pd.DataFrame]]:
+    def return_outputs(self) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
         """Return final coefficients for all fitted models."""
         parent_dir = os.path.dirname(self.output_path)
         all_coeffs = {}
+        all_se = {}
 
         file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
         for file in file_list:
@@ -2081,20 +2072,26 @@ class MuSIC:
                 target = file.split("_")[-1][:-4]
                 all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
                 betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
+                standard_errors = all_outputs[[col for col in all_outputs.columns if col.startswith("se_")]]
 
                 # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
                 # subsampling is not done by cell type group):
                 if self.subsampled and not self.subset:
                     sampled_to_nonsampled_map = self.neighboring_unsampled[target]
                     betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
+                    standard_errors = standard_errors.reindex(
+                        self.X_df.index, columns=standard_errors.columns, fill_value=0
+                    )
                     for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
                         for nonsampled_idx in nonsampled_idxs:
                             betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
+                            standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
 
-                # Save coefficients to dictionary:
+                # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas
+                all_se[target] = standard_errors
 
-        return all_coeffs
+        return all_coeffs, all_se
 
     def return_intercepts(self) -> Union[None, np.ndarray, Dict[str, np.ndarray]]:
         """Return final intercepts for all fitted models."""
