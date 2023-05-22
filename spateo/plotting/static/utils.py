@@ -169,6 +169,23 @@ def _scatter_projection(ax, points, projection, **kwargs):
         ax.scatter(points[:, 0], points[:, 1], **kwargs)
 
 
+def _vector_projection(ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", **kwargs):
+    """Plot a 2D field of arrows over spatial transcriptomics data
+
+    Args:
+        ax: Matplotlib axis object
+        points: Point coordinates of shape [n_samples, 2], either grid coordinates (for grid or streamlines plots) or
+            coordinates of the cells themselves (for cell plots)
+        vectors: Array of shape [n_samples, 2] or [n_samples, 3] containing the vector field
+        projection: Either '2d' or '3d' to indicate if plot is 2D or 3D
+        **kwargs: Additional keyword arguments provided to :func `ax.quiver()`
+    """
+    if projection == "3d":
+        ax.quiver(points[:, 0], points[:, 1], points[:, 2], vectors[:, 0], vectors[:, 1], vectors[:, 2], **kwargs)
+    else:
+        ax.quiver(points[:, 0], points[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
+
+
 def _geo_projection(ax, points, **kwargs):
     linecolor = kwargs.pop("linecolor")
     if "values" in kwargs:
@@ -215,6 +232,8 @@ def _matplotlib_points(
     geo=False,
     **kwargs,
 ):
+    # NOTE TO SELF: GOING TO ISOLATE THE VECTOR_PROJECTIONS KWARGS
+
     import matplotlib.pyplot as plt
     from matplotlib.ticker import MaxNLocator
 
@@ -353,37 +372,6 @@ def _matplotlib_points(
                 **kwargs,
             )
         elif contour:
-            # main_debug("drawing contour")
-            # try:
-            #     from shapely.geometry import Polygon, MultiPoint, Point
-            # except ImportError:
-            #     raise ImportError(
-            #         "If you want to use the tricontourf in plotting function, you need to install `shapely` "
-            #         "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
-            #     )
-            #
-            # x, y = points[:, :2].T
-            # triang = tri.Triangulation(x, y)
-            # concave_hull, edge_points = alpha_shape(x, y, alpha=calpha)
-            # ax = plot_polygon(concave_hull, ax=ax)
-            #
-            # # Use the mean distance between the triangulated x & y poitns
-            # x2 = x[triang.triangles].mean(axis=1)
-            # y2 = y[triang.triangles].mean(axis=1)
-            # ##note the very obscure mean command, which, if not present causes an error.
-            # ##now we need some masking condition.
-            #
-            # # Create an empty set to fill with zeros and ones
-            # cond = np.empty(len(x2))
-            # # iterate through points checking if the point lies within the polygon
-            # for i in range(len(x2)):
-            #     cond[i] = concave_hull.contains(Point(x2[i], y2[i]))
-            #
-            # mask = np.where(cond, 0, 1)
-            # # apply masking
-            # triang.set_mask(mask)
-            #
-            # # ax.tricontourf(triang, values, cmap=ccmap)
             import seaborn as sns
 
             ccmap = "viridis" if ccmap is None else ccmap
@@ -520,36 +508,6 @@ def _matplotlib_points(
                 **kwargs,
             )
         elif contour:
-            # main_debug("drawing contour")
-            # try:
-            #     from shapely.geometry import Polygon, MultiPoint, Point
-            # except ImportError:
-            #     raise ImportError(
-            #         "If you want to use the tricontourf in plotting function, you need to install `shapely` "
-            #         "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
-            #     )
-            #
-            # x, y = points[:, :2].T
-            # triang = tri.Triangulation(x, y)
-            # concave_hull, edge_points = alpha_shape(x, y, alpha=calpha)
-            # ax = plot_polygon(concave_hull, ax=ax)
-            #
-            # # Use the mean distance between the triangulated x & y poitns
-            # x2 = x[triang.triangles].mean(axis=1)
-            # y2 = y[triang.triangles].mean(axis=1)
-            # ##note the very obscure mean command, which, if not present causes an error.
-            # ##now we need some masking condition.
-            #
-            # # Create an empty set to fill with zeros and ones
-            # cond = np.empty(len(x2))
-            # # iterate through points checking if the point lies within the polygon
-            # for i in range(len(x2)):
-            #     cond[i] = concave_hull.contains(Point(x2[i], y2[i]))
-            #
-            # mask = np.where(cond, 0, 1)
-            # # apply masking
-            # triang.set_mask(mask)
-
             ccmap = "viridis" if ccmap is None else ccmap
             # # ax.tricontourf(triang, values, cmap=ccmap)
             # _scatter_projection(x, y,

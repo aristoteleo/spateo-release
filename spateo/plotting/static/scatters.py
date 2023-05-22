@@ -551,14 +551,6 @@ def scatters(
         else:
             prefix = "X_"
 
-        # if prefix + cur_b in adata.obsm.keys():
-        #     if type(x) != str and type(y) != str:
-        #         x_, y_ = (
-        #             adata.obsm[prefix + cur_b][:, int(x)],
-        #             adata.obsm[prefix + cur_b][:, int(y)],
-        #         )
-        # else:
-        #     continue
         if stack_colors:
             _stack_background_adata_indices = np.ones(len(adata), dtype=bool)
 

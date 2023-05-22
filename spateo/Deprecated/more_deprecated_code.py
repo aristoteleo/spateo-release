@@ -1880,6 +1880,80 @@ for i in self.x_chunk:
     # Multiple testing correction for the p-values of each feature:
     qvals = multitesting_correction(p_values_all[i], method="fdr_bh")
 
+
+# main_debug("drawing contour")
+# try:
+#     from shapely.geometry import Polygon, MultiPoint, Point
+# except ImportError:
+#     raise ImportError(
+#         "If you want to use the tricontourf in plotting function, you need to install `shapely` "
+#         "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
+#     )
+#
+# x, y = points[:, :2].T
+# triang = tri.Triangulation(x, y)
+# concave_hull, edge_points = alpha_shape(x, y, alpha=calpha)
+# ax = plot_polygon(concave_hull, ax=ax)
+#
+# # Use the mean distance between the triangulated x & y poitns
+# x2 = x[triang.triangles].mean(axis=1)
+# y2 = y[triang.triangles].mean(axis=1)
+# ##note the very obscure mean command, which, if not present causes an error.
+# ##now we need some masking condition.
+#
+# # Create an empty set to fill with zeros and ones
+# cond = np.empty(len(x2))
+# # iterate through points checking if the point lies within the polygon
+# for i in range(len(x2)):
+#     cond[i] = concave_hull.contains(Point(x2[i], y2[i]))
+#
+# mask = np.where(cond, 0, 1)
+# # apply masking
+# triang.set_mask(mask)
+#
+# # ax.tricontourf(triang, values, cmap=ccmap)
+
+
+# main_debug("drawing contour")
+# try:
+#     from shapely.geometry import Polygon, MultiPoint, Point
+# except ImportError:
+#     raise ImportError(
+#         "If you want to use the tricontourf in plotting function, you need to install `shapely` "
+#         "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
+#     )
+#
+# x, y = points[:, :2].T
+# triang = tri.Triangulation(x, y)
+# concave_hull, edge_points = alpha_shape(x, y, alpha=calpha)
+# ax = plot_polygon(concave_hull, ax=ax)
+#
+# # Use the mean distance between the triangulated x & y poitns
+# x2 = x[triang.triangles].mean(axis=1)
+# y2 = y[triang.triangles].mean(axis=1)
+# ##note the very obscure mean command, which, if not present causes an error.
+# ##now we need some masking condition.
+#
+# # Create an empty set to fill with zeros and ones
+# cond = np.empty(len(x2))
+# # iterate through points checking if the point lies within the polygon
+# for i in range(len(x2)):
+#     cond[i] = concave_hull.contains(Point(x2[i], y2[i]))
+#
+# mask = np.where(cond, 0, 1)
+# # apply masking
+# triang.set_mask(mask)
+
+
+# if prefix + cur_b in adata.obsm.keys():
+#     if type(x) != str and type(y) != str:
+#         x_, y_ = (
+#             adata.obsm[prefix + cur_b][:, int(x)],
+#             adata.obsm[prefix + cur_b][:, int(y)],
+#         )
+# else:
+#     continue
+
 #     if self.subsampled:
 #         sample_index = (
 #             self.subsampled_indices[y_label][i] if not self.subset else self.subsampled_indices[i]
