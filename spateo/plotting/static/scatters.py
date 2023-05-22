@@ -52,6 +52,8 @@ from .utils import (
 def scatters(
     adata: AnnData,
     basis: Union[str, list] = "umap",
+    X_grid: Optional[np.ndarray] = None,
+    V: Optional[np.ndarray] = None,
     x: int = 0,
     y: int = 1,
     z: int = 2,
@@ -125,6 +127,8 @@ def scatters(
             an Anndata object
         basis: `str`
             The reduced dimension.
+        X_grid: Optional, array containing grid points for vector field plots
+        V: Optional, array containing vector fields
         x: `int` (default: `0`)
             The column index of the low dimensional embedding for the x-axis.
         y: `int` (default: `1`)
@@ -325,7 +329,7 @@ def scatters(
         img_layers: The index to the (staining) image of a tissue slice, will be used in
             adata.uns["spatial"][slices]["images"].
         kwargs:
-            Additional arguments passed to plt.scatters.
+            Additional arguments passed to plt functions (plt.scatters, plt.quiver, plt.streamplot).
 
     Returns:
         result:
@@ -544,7 +548,7 @@ def scatters(
                 if cur_l.startswith("velocity"):
                     cmap, sym_c = "bwr", True
 
-        if cur_b == "spatial":  # space plot don't need "X_spatial"
+        if cur_b == "spatial":
             prefix = ""
         elif any([key == cur_l + "_" + cur_b for key in adata.obsm.keys()]):
             prefix = cur_l + "_"
@@ -827,6 +831,8 @@ def scatters(
                         sym_c=sym_c,
                         inset_dict=inset_dict,
                         geo=True,
+                        X_grid=X_grid,
+                        V=V,
                         **geo_kwargs,
                     )
                     if labels is not None:

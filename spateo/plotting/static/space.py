@@ -39,7 +39,7 @@ def space(
     stack_colors_legend_size: int = 10,
     figsize=None,
     *args,
-    **kwargs
+    **kwargs,
 ):
     """\
     Scatter plot for physical coordinates of each cell.
@@ -155,6 +155,7 @@ def plot_cell_signaling(
     adata: anndata.AnnData,
     vf_key: str,
     color: Optional[Union[List[str], str, None]] = None,
+    arrow_color: str = "tab:blue",
     genes: List[str] = [],
     gene_cmaps=None,
     space: str = "spatial",
@@ -176,7 +177,7 @@ def plot_cell_signaling(
     stream_cutoff_percentile: float = 5,
     figsize: Optional[Tuple[float, float]] = None,
     *args,
-    **kwargs
+    **kwargs,
 ):
     """After inferring directionality of effects for models that consider ligand expression (:attr `mod_type` is
     'ligand' or 'lr', this can be used to visualize the inferred directionality in the form of a vector field plot.
@@ -189,6 +190,7 @@ def plot_cell_signaling(
         color: `string` (default: `ntr`)
             Any or any list of column names or gene name, etc. that will be used for coloring cells. If `color` is not
             None, stack_genes will be disabled automatically because `color` can contain non numerical values.
+        arrow_color: Sets color of vector field arrows
         genes: The gene list that will be used to plot the gene expression on the same scatter plot. Each gene will
             have a different color.
         genes_cmaps: Optional color map for each gene.
@@ -282,6 +284,7 @@ def plot_cell_signaling(
         vf_cell = vf.copy()
         vf_cell_sum = np.sum(vf_cell, axis=1)
         vf_cell[np.where(vf_cell_sum == 0)[0], :] = np.nan
+        X_grid = X
 
     elif plot_method == "grid" or plot_method == "stream":
         # Define rectangular grid to serve as stopping and starting points for vectors
@@ -313,9 +316,11 @@ def plot_cell_signaling(
         if plot_method == "grid":
             grid_threshold *= np.percentile(w_sum, 99) / 100
             grid_pts, vf_grid = grid_pts[w_sum > grid_threshold], vf_grid[w_sum > grid_threshold]
+            X_grid = grid_pts
         elif plot_method == "stream":
             x_grid = np.linspace(xl, xr, ngrid_x)
             y_grid = np.linspace(yl, yr, ngrid_y)
+            X_grid = np.vstack((x_grid.reshape(-1, 1), y_grid.reshape(-1, 1)))
             vf_grid = vf_grid.T.reshape(2, ngrid_y, ngrid_x)
             vlen = np.sqrt((vf_grid**2).sum(0))
             grid_thresh = 10 ** (grid_threshold - 6)
@@ -327,13 +332,39 @@ def plot_cell_signaling(
 
             vf_grid[0][cutoff] = np.nan
 
+            lengths = np.sqrt((vf_grid**2).sum(0))
+            stream_linewidth *= 2 * lengths / lengths[~np.isnan(lengths)].max()
+
+    else:
+        raise ValueError(f"plot_method must be one of 'cell', 'grid', or 'stream'. Got {plot_method}.")
+
+    # scatters call with vector field kwargs
+    vf_kwargs = {
+        "scale": scale,
+        "scale_units": "x",
+        "width": grid_width,
+        "color": arrow_color,
+        "density": stream_density,
+        "linewidth": stream_linewidth,
+    }
+    kwargs.update(vf_kwargs)
+
+    V = vf_cell if plot_method == "cell" else vf_grid
+
     res = scatters(
         adata,
+        X_grid=X_grid,
+        V=V,
+        marker=marker,
+        basis=space_key,
+        color=genes,
+        figsize=figsize,
+        pointsize=pointsize,
+        dpi=dpi,
+        alpha=alpha,
+        stack_colors_cmaps=gene_cmaps,
+        *args,
+        **kwargs,
     )
-    "Note to self- remember to finish!"
 
-    # Note that for now, this only handles 2D vector field plots
-
-    # NOTE TO SELF: remember to pass 'X_{space}' to scatters and through to _matplotlib_points. Also if plot_method
-    # is "cells", for _matplotlib_points vectors=vf_cells and points=X, if "grid", vectors=vf_grid and
-    # points=grid_pts, etc.
+    return res
