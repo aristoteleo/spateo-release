@@ -1871,6 +1871,15 @@ def compute_wald_test(
     return significance, pvalues, qvalues
 
 
+# Calculate p-values using Wald test:
+p_values_all = np.zeros_like(coef)
+for i in self.x_chunk:
+    for j in range(self.n_features):
+        p_values_all[i, j] = wald_test(coef[i, j], se[i, j])
+
+    # Multiple testing correction for the p-values of each feature:
+    qvals = multitesting_correction(p_values_all[i], method="fdr_bh")
+
 #     if self.subsampled:
 #         sample_index = (
 #             self.subsampled_indices[y_label][i] if not self.subset else self.subsampled_indices[i]

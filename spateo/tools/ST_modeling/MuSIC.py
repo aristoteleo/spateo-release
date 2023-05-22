@@ -1109,15 +1109,10 @@ class MuSIC:
 
         Args:
             y: Array of dependent variable values, used to determine the search range for the bandwidth selection
-            signaling_type: Optional category for the interaction, one of "Cell-Cell Contact", "Diffusive Signaling"
-                (umbrella term for Secreted Signaling + ECM-Receptor), "Secreted Signaling" or "ECM-Receptor"
         """
 
         if self.bw_fixed:
             # max_dist = np.max(np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)]))
-
-            # Set minimum bandwidth to ensure at least one "negative" example is included in spatially-weighted
-            # calculation for each cell:
             if self.minbw is None:
                 # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
                 min_dist = np.min(
@@ -2036,7 +2031,11 @@ class MuSIC:
         #             os.remove(file_path)
 
         if label is not None:
-            path = os.path.splitext(self.output_path)[0] + f"_{label}" + os.path.splitext(self.output_path)[1]
+            path = (
+                os.path.splitext(self.output_path)[0]
+                + f"_{label}_bw{'{:.2f}'.format(self.optimal_bw)}"
+                + os.path.splitext(self.output_path)[1]
+            )
         else:
             path = self.output_path
 
