@@ -525,7 +525,7 @@ class MuSIC:
             ]
 
         # Ligand-receptor expression arrays:
-        elif self.mod_type.isin(["lr", "ligand", "receptor"]):
+        elif self.mod_type in ["lr", "ligand", "receptor"]:
             if self.species == "human":
                 self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
                 r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
@@ -792,13 +792,10 @@ class MuSIC:
 
                 self.logger.info(f"Set of ligand-receptor pairs: {self.lr_pairs}")
 
-        else:
-            raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
-
         # Get gene targets:
         self.logger.info("Preparing data: getting gene targets.")
         # For niche model and ligand model, targets must be manually provided:
-        if self.targets_path is None and self.mod_type.isin(["niche", "ligand"]):
+        if (self.targets_path is None and self.custom_targets is None) and self.mod_type in ["niche", "ligand"]:
             raise ValueError(
                 "For niche model and ligand model, `targets_path` must be provided. For L:R models, targets can be "
                 "automatically inferred, but receptor information does not exist for the other models."
@@ -939,6 +936,11 @@ class MuSIC:
         if self.fit_intercept:
             self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
             self.feature_names = ["intercept"] + self.feature_names
+
+        # Add small amount to expression to prevent issues during regression:
+        zero_rows = np.where(np.all(self.X == 0, axis=1))[0]
+        for row in zero_rows:
+            self.X[row, 0] += 1e-6
 
         # Broadcast independent variables and feature names:
         self.X = self.comm.bcast(self.X, root=0)
@@ -1292,7 +1294,7 @@ class MuSIC:
             mask_indices = []
 
         if self.distr == "gaussian" or fit_predictor:
-            betas, pseudoinverse = compute_betas_local(y, X, wi, clip=self.clip)
+            betas, pseudoinverse, inv_cov = compute_betas_local(y, X, wi, clip=self.clip)
             if i in mask_indices:
                 betas = np.zeros_like(betas)
                 pred_y = 0.0
@@ -1305,9 +1307,11 @@ class MuSIC:
             betas = betas.flatten()
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
             hat_i = np.dot(X[i], pseudoinverse[:, i])
+            # Diagonals of the inverse covariance matrix (used to compute standard errors):
+            inv_diag = np.diag(inv_cov)
 
         elif self.distr == "poisson" or self.distr == "nb":
-            betas, y_hat, _, final_irls_weights, _, _, pseudoinverse = iwls(
+            betas, y_hat, _, final_irls_weights, _, _, pseudoinverse, fisher_inv = iwls(
                 y,
                 X,
                 distr=self.distr,
@@ -1319,6 +1323,7 @@ class MuSIC:
                 link=None,
                 ridge_lambda=self.ridge_lambda,
                 mask=mask,
+                final=final,
             )
 
             # For multiscale GLM models, this is the predicted dependent variable value- if i is in the mask,
@@ -1337,21 +1342,22 @@ class MuSIC:
 
             # Reshape coefficients if necessary:
             betas = betas.flatten()
-
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
             hat_i = np.dot(X[i], pseudoinverse[:, i]) * final_irls_weights[i][0]
+            # Diagonals of the inverse Fisher matrix (used to compute standard errors):
+            inv_diag = np.diag(fisher_inv).reshape(-1)
 
         else:
             raise ValueError("Invalid `distr` specified. Must be one of 'gaussian', 'poisson', or 'nb'.")
 
-        # Scaled variance-covariance matrix:
-        CCT = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
+        # Leverages (used to compute standard errors of prediction):
+        # CCT = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
 
         if final:
             if multiscale:
                 return betas
             else:
-                return np.concatenate(([sample_index, diagnostic, hat_i], betas, CCT))
+                return np.concatenate(([sample_index, diagnostic, hat_i], betas, inv_diag))
         else:
             # For bandwidth optimization:
             if self.distr == "gaussian" or fit_predictor:
@@ -1452,9 +1458,7 @@ class MuSIC:
                         patience += 1
                     else:
                         patience = 0
-                    if (np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 1.0) & (
-                        optimum_score_history[-3] < optimum_score_history[-2]
-                    ):
+                    if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.5:
                         self.logger.info(
                             "Plateau detected- exiting optimization and returning optimum score up to this " "point."
                         )
@@ -1536,7 +1540,7 @@ class MuSIC:
             # Column 1: Diagnostic (residual for Gaussian, fitted response value for Poisson/NB)
             # Column 2: Contribution of each sample to its own value
             # Columns 3-n_feats+3: Estimated coefficients
-            # Columns n_feats+3-end: Canonical correlations
+            # Columns n_feats+3-end: Placeholder for standard errors
             # All columns are betas for MGWR
 
             # If multiscale, do not need to fit using fixed bandwidth:
@@ -1565,7 +1569,7 @@ class MuSIC:
                     sigma_squared = RSS / (n_samples - ENP)
                     # Corrected Akaike Information Criterion:
                     aicc = self.compute_aicc_linear(RSS, ENP, n_samples=X.shape[0])
-                    # Scale CCT array by their variances to compute standard errors of the predictor:
+                    # Standard errors of the predictor:
                     all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * sigma_squared)
 
                     # For saving/showing outputs:
@@ -1603,12 +1607,11 @@ class MuSIC:
                         ENP = self.n_features + 1
                     else:
                         ENP = self.n_features
-                    pseudovar = deviance / (n_samples - ENP)
 
                     # Corrected Akaike Information Criterion:
                     aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
-                    # Scale CCT array by their variances to compute standard errors of the predictor:
-                    all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * pseudovar)
+                    # Standard errors of the predictor:
+                    all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:])
 
                     # For saving/showing outputs:
                     header = "index,prediction,influence,"
@@ -1865,8 +1868,10 @@ class MuSIC:
                 fit_predictor=fit_predictor,
             )
             optimal_bw = self.find_optimal_bw(self.minbw, self.maxbw, fit_function)
+            self.optimal_bw = optimal_bw
+            self.optimal_bw = self.comm.bcast(self.optimal_bw, root=0)
             if not multiscale:
-                self.logger.info(f"Discovered optimal bandwidth for {target}: {optimal_bw}")
+                self.logger.info(f"Discovered optimal bandwidth for {target}: {self.optimal_bw}")
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)
 
@@ -1884,8 +1889,6 @@ class MuSIC:
             if data is not None:
                 all_data[target] = data
             all_bws[target] = optimal_bw
-            self.optimal_bw = optimal_bw
-            self.optimal_bw = self.comm.bcast(self.optimal_bw, root=0)
 
         return all_data, all_bws
 
@@ -1905,7 +1908,7 @@ class MuSIC:
         #     input_all = input
 
         if coeffs is None:
-            coeffs = self.return_outputs()
+            coeffs, _ = self.return_outputs()
             # If dictionary, compute outputs for the multiple dependent variables and concatenate together:
             if isinstance(coeffs, Dict):
                 all_y_pred = pd.DataFrame(index=self.sample_names)
@@ -1920,7 +1923,7 @@ class MuSIC:
                         # Subtract 1 because in the case that all coefficients are zero, np.exp(linear predictor)
                         # will be 1 at minimum, though it should be zero.
                         y_pred = self.distr_obj.predict(y_pred)
-                        y_pred[y_pred >= 1] -= 1.0
+                        y_pred[y_pred == 1] -= 1.0
                     y_pred = pd.DataFrame(y_pred, index=self.sample_names, columns=[target])
                     all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
                 return all_y_pred
@@ -2031,11 +2034,7 @@ class MuSIC:
         #             os.remove(file_path)
 
         if label is not None:
-            path = (
-                os.path.splitext(self.output_path)[0]
-                + f"_{label}_bw{'{:.2f}'.format(self.optimal_bw)}"
-                + os.path.splitext(self.output_path)[1]
-            )
+            path = os.path.splitext(self.output_path)[0] + f"_{label}" + os.path.splitext(self.output_path)[1]
         else:
             path = self.output_path
 
@@ -2132,6 +2131,8 @@ class VMuSIC(MuSIC):
                     and spatially lagged ligand expression in the neighboring cells as independent variables.
                 - "ligand": Spatially-aware, essentially uses ligand expression in the neighboring cells as
                     independent variables.
+                - "receptor": Non-spatially-aware, uses receptor expression in the "target" cell as independent
+                    variables
 
 
         adata_path: Path to the AnnData object from which to extract data for modeling

@@ -144,7 +144,9 @@ class MuSIC_Interpreter(MuSIC):
 
         Args:
             bw: Bandwidth used for model fitting. Defines the search area around each observation to consider when
-                computing effect directions.
+                computing effect directions. For models that include both secreted and membrane-bound signaling,
+                it is recommended to set this higher than the optimal bandwidth found in fitting to be able to cover
+                the larger search area in which secreted signals can have effects.
             k: Top k receivers to consider when computing effect directions
             target: Optional string or list of strings to select targets from among the genes used to fit the model.
                 If not given, will use all targets.

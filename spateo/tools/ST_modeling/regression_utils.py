@@ -190,6 +190,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     Returns:
         betas: Array of shape [n_features,]; regression coefficients
         pseudoinverse: Array of shape [n_samples, n_samples]; Moore-Penrose pseudoinverse of the X matrix
+        cov_inverse: Array of shape [n_samples, n_samples]; inverse of the covariance matrix
     """
     xT = (x * w).T
     xtx = np.dot(xT, x)
@@ -198,6 +199,11 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     if ridge_lambda is not None:
         identity = np.eye(xtx.shape[0])
         xtx += ridge_lambda * identity
+
+    try:
+        cov_inverse = linalg.inv(xtx)
+    except:
+        cov_inverse = linalg.pinv(xtx)
 
     # Diagonals of the Gram matrix- used as additional diagnostic- for each feature, this is the sum of squared
     # values- if this is sufficiently low, the coefficient should be zero- theoretically it can take on nearly any
@@ -230,7 +236,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     # threshold:
     betas[to_zero] = 1e-5
 
-    return betas, pseudoinverse
+    return betas, pseudoinverse, cov_inverse
 
 
 def iwls(
@@ -281,6 +287,8 @@ def iwls(
             returned if "spatial_weights" is not None.
         pseudoinverse: Array of shape [n_samples, n_samples]; optional influence matrix that is only returned if
             "spatial_weights" is not None. The pseudoinverse is the Moore-Penrose pseudoinverse of the X matrix.
+        inv: Array of shape [n_samples, n_samples]; the inverse covariance matrix (for Gaussian modeling) or the
+            inverse Fisher matrix (for GLM models).
     """
     logger = lm.get_main_logger()
 
@@ -333,7 +341,7 @@ def iwls(
         if spatial_weights is None:
             new_betas = compute_betas(w_adjusted_predictor, wx, ridge_lambda=ridge_lambda, clip=clip)
         else:
-            new_betas, pseudoinverse = compute_betas_local(
+            new_betas, pseudoinverse, inverse_cov = compute_betas_local(
                 w_adjusted_predictor, wx, spatial_weights, ridge_lambda=ridge_lambda, clip=clip
             )
 
@@ -346,11 +354,31 @@ def iwls(
         difference = np.min(abs(new_betas - betas))
         betas = new_betas
 
+    if mod_distr == "gaussian":
+        if spatial_weights is not None:
+            xT = (x * spatial_weights).T
+            xtx = np.dot(xT, x)
+            try:
+                inv = linalg.inv(xtx)
+            except:
+                inv = linalg.pinv(xtx)
+        else:
+            xtx = np.dot(x.T, x)
+            try:
+                inv = linalg.inv(xtx)
+            except:
+                inv = linalg.pinv(xtx)
+
+    elif mod_distr == "poisson" or mod_distr == "nb":
+        inv = get_fisher_inverse(x, linear_predictor)
+    else:
+        inv = None
+
     if spatial_weights is None:
         return betas, y_hat, wx, n_iter
     else:
         w_final = weights
-        return betas, y_hat, n_iter, w_final, linear_predictor, adjusted_predictor, pseudoinverse
+        return betas, y_hat, n_iter, w_final, linear_predictor, adjusted_predictor, pseudoinverse, inv
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -494,6 +522,7 @@ def multicollinearity_check(X: pd.DataFrame, thresh: float = 5.0, logger: Option
         while dropped:
             dropped = False
             vif = [variance_inflation_factor(X.iloc[:, variables].values, ix) for ix in variables]
+            print(vif)
             maxloc = vif.index(max(vif))
             if max(vif) > thresh:
                 logger.info("Dropping '" + X.iloc[:, variables].columns[maxloc] + "' at index: " + str(maxloc))
@@ -501,7 +530,7 @@ def multicollinearity_check(X: pd.DataFrame, thresh: float = 5.0, logger: Option
                 variables = list(range(X.shape[1]))
                 dropped = True
 
-        logger.info(f"\n\nRemaining variables:\n {X.columns[variables]}")
+        logger.info(f"\n\nRemaining variables:\n {list(X.columns[variables])}")
         return X
 
 
@@ -574,6 +603,39 @@ def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: fl
     )[1]
 
     return qval
+
+
+def get_fisher_inverse(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Computes the Fisher matrix that measures the amount of information each feature in x provides about y- that is,
+    whether the log-likelihood is sensitive to change in the parameter x.
+
+    Function derived from diffxpy: https://github.com/theislab/diffxpy
+
+    Args:
+        x: Array of shape [n_samples, n_features]; independent variable array
+        fitted: Array of shape [n_samples, 1] or [n_samples, n_variables]; estimated dependent variable
+
+    Returns:
+        inverse_fisher : np.ndarray
+    """
+    if len(y.shape) > 1 and y.shape[1] > 1:
+        var = np.var(y, axis=0)
+        fisher = np.expand_dims(np.matmul(x.T, x), axis=0) / np.expand_dims(var, axis=[1, 2])
+        fisher = np.nan_to_num(fisher)
+        try:
+            inverse_fisher = np.array([np.linalg.inv(fisher[i, :, :]) for i in range(fisher.shape[0])])
+        except:
+            inverse_fisher = np.array([np.linalg.pinv(fisher[i, :, :]) for i in range(fisher.shape[0])])
+    else:
+        var = np.var(y)
+        fisher = np.matmul(x.T, x) / var
+        fisher = np.nan_to_num(fisher)
+        try:
+            inverse_fisher = np.linalg.inv(fisher)
+        except:
+            inverse_fisher = np.linalg.pinv(fisher)
+
+    return inverse_fisher
 
 
 # ---------------------------------------------------------------------------------------------------

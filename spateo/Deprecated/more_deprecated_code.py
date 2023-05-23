@@ -1740,6 +1740,13 @@ def get_fisher_inverse(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     fisher = np.nan_to_num(fisher)
 
     inverse_fisher = np.array([np.linalg.pinv(fisher[i, :, :]) for i in range(fisher.shape[0])])
+
+    var = np.var(y, axis=0)
+    test = np.expand_dims(np.matmul(x.T, x), axis=0) / np.expand_dims(var, axis=[1, 2])
+
+    test = np.nan_to_num(test)
+
+    test = np.array([np.linalg.pinv(test[i, :, :]) for i in range(test.shape[0])])
     return inverse_fisher
 
 
@@ -1943,6 +1950,174 @@ for i in self.x_chunk:
 # mask = np.where(cond, 0, 1)
 # # apply masking
 # triang.set_mask(mask)
+
+
+class MuSIC_setup(MuSIC):
+    """Only perform the model set up portion of MuSIC- allows for e.g. visualization of the independent variable
+    array before model fitting for manual adjustment.
+
+    Args:
+        comm: MPI communicator object initialized with mpi4py, to control parallel processing operations
+        parser: ArgumentParser object initialized with argparse, to parse command line arguments for arguments
+            pertinent to modeling.
+
+    Attributes:
+        mod_type: The type of model that will be employed for eventual downstream modeling. Will dictate how
+            predictors will be found (if applicable). Options:
+                - "niche": Spatially-aware, uses categorical cell type labels as independent variables.
+                - "lr": Spatially-aware, essentially uses the combination of receptor expression in the "target" cell
+                    and spatially lagged ligand expression in the neighboring cells as independent variables.
+                - "ligand": Spatially-aware, essentially uses ligand expression in the neighboring cells as
+                    independent variables.
+                - "receptor": Uses receptor expression in the "target" cell as independent variables.
+        distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb"
+
+
+        adata_path: Path to the AnnData object from which to extract data for modeling
+        normalize: Set True to Perform library size normalization, to set total counts in each cell to the same
+            number (adjust for cell size).
+        smooth: Set True to correct for dropout effects by leveraging gene expression neighborhoods to smooth
+            expression.
+        log_transform: Set True if log-transformation should be applied to expression.
+        target_expr_threshold: When selecting targets, expression above a threshold percentage of cells will be used to
+            filter to a smaller subset of interesting genes. Defaults to 0.1.
+        r_squared_threshold: When selecting targets, only genes with an R^2 above this threshold will be used as targets
+
+
+        custom_lig_path: Optional path to a .txt file containing a list of ligands for the model, separated by
+            newlines. If provided, will find targets for which this set of ligands collectively explains the most
+            variance for (on a gene-by-gene basis) when taking neighborhood expression into account
+        custom_ligands: Optional list of ligands for the model, can be used as an alternative to :attr
+            `custom_lig_path`. If provided, will find targets for which this set of ligands collectively explains the
+            most variance for (on a gene-by-gene basis) when taking neighborhood expression into account
+        custom_rec_path: Optional path to a .txt file containing a list of receptors for the model, separated by
+            newlines. If provided, will find targets for which this set of receptors collectively explains the most
+            variance for
+        custom_receptors: Optional list of receptors for the model, can be used as an alternative to :attr
+            `custom_rec_path`. If provided, will find targets for which this set of receptors collectively explains the
+            most variance for
+        custom_pathways_path: Rather than providing a list of receptors, can provide a list of signaling pathways-
+            all receptors with annotations in this pathway will be included in the model. If provided,
+            will find targets for which receptors in these pathways collectively explain the most variance for
+        custom_pathways: Optional list of signaling pathways for the model, can be used as an alternative to :attr
+            `custom_pathways_path`. If provided, will find targets for which receptors in these pathways collectively
+            explain the most variance for
+        targets_path: Optional path to a .txt file containing a list of prediction target genes for the model,
+            separated by newlines. If not provided, targets will be strategically selected from the given receptors.
+        custom_targets: Optional list of prediction target genes for the model, can be used as an alternative to
+            :attr `targets_path`.
+
+
+        cci_dir: Full path to the directory containing cell-cell communication databases
+        species: Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
+                "human", "mouse".
+
+
+        group_key: Key in .obs of the AnnData object that contains the cell type labels, used if targeting molecules
+            that have cell type-specific activity
+        coords_key: Key in .obsm of the AnnData object that contains the coordinates of the cells
+
+
+        n_neighbors: Number of nearest neighbors to use in the case that ligands are provided or in the case that
+            ligands of interest should be found
+    """
+
+    def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser):
+        super().__init__(comm, parser)
+
+        # Coefficients:
+        if not self.set_up:
+            self.logger.info("Model has not yet been set up to run, running :func `SWR._set_up_model()` now...")
+            self._set_up_model()
+
+    def multicollinearity_filter(self):
+        """Visualize independent variable array after filtering features for multicollinearity. Only for :attr
+        `mod_type` 'ligand', 'receptor' or 'lr'."""
+        if self.mod_type not in ["ligand", "receptor", "lr"]:
+            raise ValueError(
+                f"Multicollinearity filtering is only applicable for mod_type 'ligand', 'receptor' or " f"'lr'."
+            )
+
+        if self.multicollinear_threshold is None:
+            self.logger.info("No multicollinearity threshold provided; multicollinear filtering cannot be done...")
+            return
+        else:
+            if self.mod_type == "lr":
+                X_df = pd.DataFrame(
+                    np.zeros((self.n_samples, len(self.lr_pairs))),
+                    columns=self.feature_names,
+                    index=self.adata.obs_names,
+                )
+
+                for lr_pair in self.lr_pairs:
+                    lig, rec = lr_pair[0], lr_pair[1]
+                    lig_expr_values = self.ligands_expr[lig].values.reshape(-1, 1)
+                    rec_expr_values = self.receptors_expr[rec].values.reshape(-1, 1)
+
+                    # Communication signature b/w receptor in target and ligand in neighbors:
+                    X_df[f"{lig}-{rec}"] = lig_expr_values * rec_expr_values
+
+                # If applicable, drop all-zero columns:
+                X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
+                self.logger.info(
+                    f"Dropped all-zero columns from cell type-specific signaling array, from "
+                    f"{len(self.lr_pairs)} to {X_df.shape[1]}."
+                )
+                # If applicable, check for multicollinearity:
+                if self.multicollinear_threshold is not None:
+                    X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+
+            elif self.mod_type == "ligand" or self.mod_type == "receptor":
+                if self.mod_type == "ligand":
+                    X_df = self.ligands_expr
+                elif self.mod_type == "receptor":
+                    X_df = self.receptors_expr
+
+                # If applicable, drop all-zero columns:
+                X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
+
+                if self.mod_type == "ligand":
+                    self.logger.info(
+                        f"Dropped all-zero columns from ligand expression array, from "
+                        f"{self.ligands_expr.shape[1]} to {X_df.shape[1]}."
+                    )
+                elif self.mod_type == "receptor":
+                    self.logger.info(
+                        f"Dropped all-zero columns from receptor expression array, from "
+                        f"{self.receptors_expr.shape[1]} to {X_df.shape[1]}."
+                    )
+
+                # If applicable, check for multicollinearity:
+                if self.multicollinear_threshold is not None:
+                    X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+
+            self.X_df = X_df
+
+
+# if spatial_weights is not None:
+#     if final:
+#         print("Betas: ", betas)
+#         if all(np.abs(betas) > 1e-10):
+#             x = pd.DataFrame(x)
+#             y = pd.DataFrame(y)
+#             y_hat = pd.DataFrame(y_hat)
+#             spatial_weights = pd.DataFrame(spatial_weights)
+#             x.to_csv("/mnt/d/Downloads/test_x.csv")
+#             y.to_csv("/mnt/d/Downloads/test_y.csv")
+#             y_hat.to_csv("/mnt/d/Downloads/test_y_hat.csv")
+#             spatial_weights.to_csv("/mnt/d/Downloads/test_spatial_weights.csv")
+#         else:
+#             x = pd.DataFrame(x)
+#             y = pd.DataFrame(y)
+#             y_hat = pd.DataFrame(y_hat)
+#             spatial_weights = pd.DataFrame(spatial_weights)
+#             x.to_csv("/mnt/d/Downloads/test_x_neg.csv")
+#             y.to_csv("/mnt/d/Downloads/test_y_neg.csv")
+#             y_hat.to_csv("/mnt/d/Downloads/test_y_hat_neg.csv")
+#             spatial_weights.to_csv("/mnt/d/Downloads/test_spatial_weights_neg.csv")
+#     nonzero_mask = (spatial_weights > 0).flatten()
+#     x_w = x[nonzero_mask, :]
+#     y_hat_w = y_hat[nonzero_mask]
 
 
 # if prefix + cur_b in adata.obsm.keys():
