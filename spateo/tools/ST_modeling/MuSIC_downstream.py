@@ -45,6 +45,9 @@ class MuSIC_Interpreter(MuSIC):
     def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser):
         super().__init__(comm, parser)
 
+        self.search_bw = self.arg_retrieve.search_bw
+        self.k = self.arg_retrieve.top_k_receivers
+
         # Coefficients:
         if not self.set_up:
             self.logger.info("Model has not yet been set up to run, running :func `SWR._set_up_model()` now...")
@@ -111,7 +114,7 @@ class MuSIC_Interpreter(MuSIC):
             # Compute p-values for local observations and features
             for i, obs_index in enumerate(self.x_chunk):
                 for j in range(self.n_features):
-                    local_p_values_all[i, j] = wald_test(coef[obs_index, j], se[obs_index, j])
+                    local_p_values_all[i, j] = wald_test(coef.iloc[obs_index, j], se.iloc[obs_index, j])
 
             # Collate p-values from all processes:
             p_values_all = self.comm.gather(local_p_values_all, root=0)
@@ -131,11 +134,12 @@ class MuSIC_Interpreter(MuSIC):
                 is_significant_df = q_values_df < significance_threshold
 
                 # Save dataframes:
-                p_values_df.to_csv(os.path.join(self.output_path, "significance", f"{target}_p_values.csv"))
-                q_values_df.to_csv(os.path.join(self.output_path, "significance", f"{target}_q_values.csv"))
-                is_significant_df.to_csv(os.path.join(self.output_path, "significance", f"{target}_is_significant.csv"))
+                parent_dir = os.path.dirname(self.output_path)
+                p_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_p_values.csv"))
+                q_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_q_values.csv"))
+                is_significant_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"))
 
-    def inferred_effect_direction(self, bw: float, k: int = 10, targets: Optional[Union[str, List[str]]] = None):
+    def inferred_effect_direction(self, targets: Optional[Union[str, List[str]]] = None):
         """For visualization purposes, used for models that consider ligand expression (:attr `mod_type` is 'ligand' or
         'lr'. Construct spatial vector fields to infer the directionality of observed effects (the "sources" of the
         downstream expression).
@@ -156,8 +160,8 @@ class MuSIC_Interpreter(MuSIC):
                 "Direction of effect can only be inferred if ligand expression is used as part of the " "model."
             )
 
-        # Get spatial weights given bandwidth value:
-        spatial_weights = self._compute_all_wi(bw, exclude_self=True)
+        # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
+        spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True).toarray()
         # Columns consist of the spatial weights of each observation- convolve with expression of each ligand to
         # get proxy of ligand signal "sent", weight by the local coefficient value to get a proxy of the "signal
         # functionally received" in generating the downstream effect and store in .obsp.
@@ -168,84 +172,67 @@ class MuSIC_Interpreter(MuSIC):
 
         for target in targets:
             coeffs = self.coeffs[target]
+            target_expr = self.targets_expr[target].values.reshape(1, -1)
+            target_indicator = np.where(target_expr != 0, 1, 0)
 
             for j, col in enumerate(self.ligands_expr.columns):
                 ligand_expr = self.ligands_expr[col].values.reshape(-1, 1)
                 # Referred to as "sent potential"
                 sent_potential = spatial_weights * ligand_expr
-                coeff = coeffs.iloc[:, j].reshape(1, -1)
-                # Weight each column by the coefficient magnitude and store as sparse array:
-                sig_potential = scipy.sparse.csc_matrix(sent_potential * coeff)
+                coeff = coeffs.iloc[:, j].values.reshape(1, -1)
+                # Weight each column by the coefficient magnitude and finally by the indicator for expression/no
+                # expression of the target and store as sparse array:
+                sig_potential = sent_potential * coeff * target_indicator
                 self.adata.obsp[f"spatial_effect_{col}_{target}"] = sig_potential
 
-                sum_sent_potential = np.array(sig_potential.sum(axis=1)).reshape(-1)
-                sum_received_potential = np.array(sig_potential.sum(axis=0)).reshape(-1)
-
-                # Arrays to store vector field components:
-                sending_vf = np.zeros_like(self.coords)
-                receiving_vf = np.zeros_like(self.coords)
-
                 # Vector field for sent signal:
-                sig_potential_lil = sig_potential.tolil()
-                # Find the most notable senders for each observation and create the vector field from these senders
-                # to the observation in question:
-                for i in range(self.n_samples):
-                    # Check if the number of nonzero indices in the given row is less than or equal to k- if so,
-                    # take only the nonzero rows:
-                    if len(sig_potential_lil.rows[i]) <= k:
-                        top_idx = np.array(sig_potential_lil.rows[i], dtype="int")
-                        top_data = np.array(sig_potential_lil.data[i], dtype="float")
-                    else:
-                        all_indices = np.array(sig_potential_lil.rows[i], dtype="int")
-                        all_data = np.array(sig_potential_lil.data[i], dtype="float")
-                        # Sort by descending order of data:
-                        sort_idx = np.argsort(-all_data)[:k]
-                        top_idx = all_indices[sort_idx]
-                        top_data = all_data[sort_idx]
-
-                    # Compute the vector field components:
-                    # Check if there are no nonzero senders, or only one nonzero sender:
-                    if len(top_idx) == 0:
-                        continue
-                    elif len(top_idx) == 1:
-                        v_i = -self.coords[top_idx[0], :] + self.coords[i, :]
-                    else:
-                        v_i = -self.coords[top_idx, :] + self.coords[i, :]
-                        v_i = normalize(v_i, norm="l2")
-                        v_i = np.sum(v_i * top_data.reshape(-1, 1), axis=0)
-                    v_i = normalize(v_i.reshape(1, -1))
-                    sending_vf[i, :] = v_i[0, :] * sum_sent_potential[i]
+                top_senders_each_receiver = np.argsort(-sig_potential, axis=1)[:, : self.k]
+                avg_v = np.zeros_like(self.coords)
+                for ik in range(self.k):
+                    tmp_v = (
+                        self.coords[top_senders_each_receiver[:, ik]]
+                        - self.coords[np.arange(self.n_samples, dtype=int)]
+                    )
+                    tmp_v = normalize(tmp_v, norm="l2")
+                    avg_v = avg_v + tmp_v * sig_potential[
+                        np.arange(self.n_samples, dtype=int), top_senders_each_receiver[:, ik]
+                    ].reshape(-1, 1)
+                avg_v = normalize(avg_v)
+                # factor = normalize(np.sum(sig_potential, axis=1).reshape(-1, 1))
+                sum_values = np.sum(sig_potential, axis=1).reshape(-1, 1)
+                # Normalize to range [0, 1]:
+                normalized_sum_values = (sum_values - np.min(sum_values)) / (np.max(sum_values) - np.min(sum_values))
+                # factor = np.where(sum_values > 1, np.log10(sum_values), sum_values / 4)
+                sending_vf = avg_v * normalized_sum_values
+                sending_vf = np.clip(sending_vf, -0.05, 0.05)
 
                 # Vector field for received signal:
-                sig_potential_lil = sig_potential.transpose().tolil()
-                # Find the most notable receivers for each observation and create the vector field from the
-                # observation to these receivers:
-                for i in range(self.n_samples):
-                    # Check if the number of nonzero indices in the given row is less than or equal to k- if so,
-                    # take only the nonzero rows:
-                    if len(sig_potential_lil.rows[i]) <= k:
-                        top_idx = np.array(sig_potential_lil.rows[i], dtype="int")
-                        top_data = np.array(sig_potential_lil.data[i], dtype="float")
-                    else:
-                        all_indices = np.array(sig_potential_lil.rows[i], dtype="int")
-                        all_data = np.array(sig_potential_lil.data[i], dtype="float")
-                        # Sort by descending order of data:
-                        sort_idx = np.argsort(-all_data)[:k]
-                        top_idx = all_indices[sort_idx]
-                        top_data = all_data[sort_idx]
+                received_potential = sig_potential.T
+                top_receivers_each_sender = np.argsort(-received_potential, axis=1)[:, : self.k]
+                avg_v = np.zeros_like(self.coords)
+                for ik in range(self.k):
+                    tmp_v = (
+                        -self.coords[top_receivers_each_sender[:, ik]]
+                        + self.coords[np.arange(self.n_samples, dtype=int)]
+                    )
+                    tmp_v = normalize(tmp_v, norm="l2")
+                    avg_v = avg_v + tmp_v * received_potential[
+                        np.arange(self.n_samples, dtype=int), top_receivers_each_sender[:, ik]
+                    ].reshape(-1, 1)
+                avg_v = normalize(avg_v)
+                # factor = normalize(np.sum(received_potential, axis=1).reshape(-1, 1))
+                sum_values = np.sum(received_potential, axis=1).reshape(-1, 1)
+                # Normalize to range [0, 1]:
+                normalized_sum_values = (sum_values - np.min(sum_values)) / (np.max(sum_values) - np.min(sum_values))
+                # factor = np.where(sum_values > 1, np.log10(sum_values), sum_values / 4)
+                receiving_vf = avg_v * normalized_sum_values
+                receiving_vf = np.clip(receiving_vf, -0.05, 0.05)
 
-                    # Compute the vector field components:
-                    # Check if there are no nonzero senders, or only one nonzero sender:
-                    if len(top_idx) == 0:
-                        continue
-                    elif len(top_idx) == 1:
-                        v_i = -self.coords[top_idx, :] + self.coords[i, :]
-                    else:
-                        v_i = -self.coords[top_idx, :] + self.coords[i, :]
-                        v_i = normalize(v_i, norm="l2")
-                        v_i = np.sum(v_i * top_data.reshape(-1, 1), axis=0)
-                    v_i = normalize(v_i.reshape(1, -1))
-                    receiving_vf[i, :] = v_i[0, :] * sum_received_potential[i]
+                del sig_potential, received_potential
 
                 self.adata.obsm[f"spatial_effect_sender_vf_{col}_{target}"] = sending_vf
                 self.adata.obsm[f"spatial_effect_receiver_vf_{col}_{target}"] = receiving_vf
+
+        # Save AnnData object with effect direction information:
+        adata_name = os.path.splitext(self.adata_path)[0]
+        self.adata.write(f"{adata_name}_effect_directions.h5ad")

@@ -870,10 +870,11 @@ class MuSIC:
 
             # If applicable, drop all-zero columns:
             X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
-            self.logger.info(
-                f"Dropped all-zero columns from cell type-specific signaling array, from "
-                f"{len(self.lr_pairs)} to {X_df.shape[1]}."
-            )
+            if len(self.lr_pairs) != X_df.shape[1]:
+                self.logger.info(
+                    f"Dropped all-zero columns from cell type-specific signaling array, from "
+                    f"{len(self.lr_pairs)} to {X_df.shape[1]}."
+                )
             # If applicable, check for multicollinearity:
             if self.multicollinear_threshold is not None:
                 X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
@@ -1323,7 +1324,6 @@ class MuSIC:
                 link=None,
                 ridge_lambda=self.ridge_lambda,
                 mask=mask,
-                final=final,
             )
 
             # For multiscale GLM models, this is the predicted dependent variable value- if i is in the mask,

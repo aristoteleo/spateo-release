@@ -1,6 +1,6 @@
 # code adapted from https://github.com/aristoteleo/dynamo-release/blob/master/dynamo/plot/scatters.py
 # and https://github.com/lmcinnes/umap/blob/7e051d8f3c4adca90ca81eb45f6a9d1372c076cf/umap/plot.py
-
+import re
 import warnings
 from numbers import Number
 from typing import Dict, List, Optional, Union
@@ -52,6 +52,7 @@ from .utils import (
 def scatters(
     adata: AnnData,
     basis: Union[str, list] = "umap",
+    vf_key: Optional[str] = None,
     X_grid: Optional[np.ndarray] = None,
     V: Optional[np.ndarray] = None,
     x: int = 0,
@@ -110,6 +111,7 @@ def scatters(
     aspect: str = "auto",
     slices: Optional[int] = None,
     img_layers: Optional[int] = None,
+    vf_kwargs: Optional[Dict[str, Union[str, int, float]]] = None,
     **kwargs,
 ) -> Union[None, Axes]:
     """Plot an embedding as points. Currently, this only works
@@ -127,6 +129,7 @@ def scatters(
             an Anndata object
         basis: `str`
             The reduced dimension.
+        vf_key: Optional, key in .obsm containing vector field information
         X_grid: Optional, array containing grid points for vector field plots
         V: Optional, array containing vector fields
         x: `int` (default: `0`)
@@ -328,6 +331,7 @@ def scatters(
         slices: The index to the tissue slice, will used in adata.uns["spatial"][slices].
         img_layers: The index to the (staining) image of a tissue slice, will be used in
             adata.uns["spatial"][slices]["images"].
+        vf_kwargs: Optional dictionary containing parameters for vector field plotting
         kwargs:
             Additional arguments passed to plt functions (plt.scatters, plt.quiver, plt.streamplot).
 
@@ -560,7 +564,11 @@ def scatters(
 
         for cur_c in color:
             # main_debug("coloring scatter of cur_c: %s" % str(cur_c))
-            if not stack_colors:
+            if vf_key is not None:
+                effector = re.search(r"_([A-Z0-9]+)_", vf_key).group(1)
+                target = re.search(r"_[A-Z0-9]+_([A-Z0-9]+)", vf_key).group(1)
+                cur_title = f"Effect {effector}-{target}, overlaid on {cur_c}"
+            elif not stack_colors:
                 cur_title = cur_c
             else:
                 cur_title = stack_colors_title
@@ -833,6 +841,7 @@ def scatters(
                         geo=True,
                         X_grid=X_grid,
                         V=V,
+                        vf_kwargs=vf_kwargs,
                         **geo_kwargs,
                     )
                     if labels is not None:
@@ -867,6 +876,9 @@ def scatters(
                         sym_c=sym_c,
                         inset_dict=inset_dict,
                         projection=projection,
+                        X_grid=X_grid,
+                        V=V,
+                        vf_kwargs=vf_kwargs,
                         **scatter_kwargs,
                     )
                     if labels is not None:
@@ -910,7 +922,10 @@ def scatters(
                     if deaxis:
                         deaxis_all(ax)
 
-                ax.set_title(cur_title)
+                if vf_key is not None:
+                    ax.set_title(cur_title, fontsize=8)
+                else:
+                    ax.set_title(cur_title)
                 ax.set_aspect(aspect)
 
                 axes_list.append(ax)

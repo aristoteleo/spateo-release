@@ -353,6 +353,8 @@ def iwls(
 
         difference = np.min(abs(new_betas - betas))
         betas = new_betas
+    # Set zero coefficients to zero:
+    betas[betas == 1e-5] = 0.0
 
     if mod_distr == "gaussian":
         if spatial_weights is not None:
@@ -563,7 +565,13 @@ def wald_test(
     if np.size(theta0) > 1 and np.shape(theta_mle) != np.shape(theta0):
         raise ValueError("stats.wald_test(): theta_mle and theta0 have to contain the same number of entries")
 
-    theta_sd = np.nextafter(0, np.inf, out=theta_sd, where=theta_sd < np.nextafter(0, np.inf))
+    # If sd is zero, instead set deviation equal to a small floating point
+    if isinstance(theta_sd, (float, np.floating)):
+        if theta_sd < np.nextafter(0, np.inf):
+            theta_sd = np.nextafter(0, np.inf)
+
+    elif isinstance(theta_sd, np.ndarray):
+        theta_sd = np.nextafter(0, np.inf, out=theta_sd, where=theta_sd < np.nextafter(0, np.inf))
     wald_statistic = np.abs(np.divide(theta_mle - theta0, theta_sd))
     pvals = 2 * (1 - scipy.stats.norm.cdf(np.abs(wald_statistic)))  # two-sided
     return pvals

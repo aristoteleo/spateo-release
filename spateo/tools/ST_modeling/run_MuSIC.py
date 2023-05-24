@@ -157,6 +157,8 @@ def main():
     "stabilized. Only used if `multiscale` is True.",
 )
 @click.option("ridge_lambda", required=False)
+@click.option("search_bw", default=10)
+@click.option("top_k_receivers", default=10)
 def run(
     np,
     adata_path,
@@ -200,6 +202,8 @@ def run(
     max_iter,
     patience,
     ridge_lambda,
+    search_bw,
+    top_k_receivers,
     chunks,
 ):
     """Command line shortcut to run any STGWR models.
@@ -266,6 +270,12 @@ def run(
         ridge_lambda: Ridge lambda value to use for L2 regularization
         chunks: Number of chunks for multiscale computation (default: 1). Increase the number if run out of memory
             but should keep it as low as possible.
+
+
+        search_bw: Used for downstream analyses; specifies the bandwidth to search for senders/receivers.
+            Recommended to set equal to the `n_neighbors` argument given during model fitting.
+        top_k_receivers: Used for downstream analyses; specifies the number of top senders/receivers to consider
+            for each cell.
     """
 
     mpi_path = os.path.dirname(fast_swr.__file__) + "/SWR_mpi.py"
@@ -388,6 +398,11 @@ def run(
         command += " -chunks " + str(chunks)
     if ridge_lambda is not None:
         command += " -ridge_lambda " + str(ridge_lambda)
+
+    if search_bw is not None:
+        command += " -search_bw " + str(search_bw)
+    if top_k_receivers is not None:
+        command += " -top_k_receivers " + str(top_k_receivers)
 
     os.system(command)
     pass

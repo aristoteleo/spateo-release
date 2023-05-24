@@ -181,6 +181,7 @@ def plot_cell_signaling(
 ):
     """After inferring directionality of effects for models that consider ligand expression (:attr `mod_type` is
     'ligand' or 'lr', this can be used to visualize the inferred directionality in the form of a vector field plot.
+    Note: currently incompatible with datashader.
 
     Parts of this function are inspired by 'plot_cell_signaling' from COMMOT: https://github.com/zcang/COMMOT
 
@@ -239,6 +240,7 @@ def plot_cell_signaling(
             used to determine if/which vectors are plotted or not. Defaults to 5, meaning that vectors shorter than the
             5% quantile will not be plotted.
     """
+
     genes = [genes] if type(genes) is str else list(genes)
     # concatenate genes and colors for scatters plot
     if color is not None and genes is not None:
@@ -277,8 +279,8 @@ def plot_cell_signaling(
         pointsize = pointsize**2 * np.sqrt(adata.shape[0]) / 16000.0
 
     # Configure vector field and define additional variables for vector field plotting:
-    vf = adata[vf_key]
-    X = adata[space]
+    vf = adata.obsm[vf_key]
+    X = adata.obsm[space]
 
     if plot_method == "cell":
         vf_cell = vf.copy()
@@ -347,12 +349,12 @@ def plot_cell_signaling(
         "density": stream_density,
         "linewidth": stream_linewidth,
     }
-    kwargs.update(vf_kwargs)
 
     V = vf_cell if plot_method == "cell" else vf_grid
 
     res = scatters(
         adata,
+        vf_key=vf_key,
         X_grid=X_grid,
         V=V,
         marker=marker,
@@ -363,6 +365,7 @@ def plot_cell_signaling(
         dpi=dpi,
         alpha=alpha,
         stack_colors_cmaps=gene_cmaps,
+        vf_kwargs=vf_kwargs,
         *args,
         **kwargs,
     )

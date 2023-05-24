@@ -2094,6 +2094,78 @@ class MuSIC_setup(MuSIC):
             self.X_df = X_df
 
 
+sig_potential_lil = sig_potential.tolil()
+# Find the most notable senders for each observation and create the vector field from these senders
+# to the observation in question:
+for i in range(self.n_samples):
+    # Check if the number of nonzero indices in the given row is less than or equal to k- if so,
+    # take only the nonzero rows:
+    if len(sig_potential_lil.rows[i]) <= self.k:
+        top_idx = np.array(sig_potential_lil.rows[i], dtype="int")
+        top_data = np.array(sig_potential_lil.data[i], dtype="float")
+    else:
+        all_indices = np.array(sig_potential_lil.rows[i], dtype="int")
+        all_data = np.array(sig_potential_lil.data[i], dtype="float")
+        # Sort by descending order of data:
+        sort_idx = np.argsort(-all_data)[: self.k]
+        top_idx = all_indices[sort_idx]
+        top_data = all_data[sort_idx]
+
+    # Compute the vector field components:
+    # Check if there are no nonzero senders, or only one nonzero sender:
+    if len(top_idx) == 0:
+        continue
+    elif len(top_idx) == 1:
+        v_i = -self.coords[top_idx[0], :] + self.coords[i, :]
+    else:
+        v_i = -self.coords[top_idx, :] + self.coords[i, :]
+        v_i = normalize(v_i, norm="l2")
+        v_i = np.sum(v_i * top_data.reshape(-1, 1), axis=0)
+    v_i = normalize(v_i.reshape(1, -1))
+    sending_vf[i, :] = v_i[0, :] * sum_sent_potential[i]
+
+# Vector field for received signal:
+sig_potential_lil = sig_potential.transpose().tolil()
+# Find the most notable receivers for each observation and create the vector field from the
+# observation to these receivers:
+for i in range(self.n_samples):
+    # Check if the number of nonzero indices in the given row is less than or equal to k- if so,
+    # take only the nonzero rows:
+    if len(sig_potential_lil.rows[i]) <= self.k:
+        top_idx = np.array(sig_potential_lil.rows[i], dtype="int")
+        top_data = np.array(sig_potential_lil.data[i], dtype="float")
+    else:
+        all_indices = np.array(sig_potential_lil.rows[i], dtype="int")
+        all_data = np.array(sig_potential_lil.data[i], dtype="float")
+        # Sort by descending order of data:
+        sort_idx = np.argsort(-all_data)[: self.k]
+        top_idx = all_indices[sort_idx]
+        top_data = all_data[sort_idx]
+
+    # Compute the vector field components:
+    # Check if there are no nonzero senders, or only one nonzero sender:
+    if len(top_idx) == 0:
+        continue
+    elif len(top_idx) == 1:
+        v_i = -self.coords[top_idx, :] + self.coords[i, :]
+    else:
+        v_i = -self.coords[top_idx, :] + self.coords[i, :]
+        v_i = normalize(v_i, norm="l2")
+        v_i = np.sum(v_i * top_data.reshape(-1, 1), axis=0)
+    v_i = normalize(v_i.reshape(1, -1))
+    receiving_vf[i, :] = v_i[0, :] * sum_received_potential[i]
+
+self.adata.obsm[f"spatial_effect_sender_vf_{col}_{target}"] = sending_vf
+self.adata.obsm[f"spatial_effect_receiver_vf_{col}_{target}"] = receiving_vf
+
+sum_sent_potential = np.array(sig_potential.sum(axis=1)).reshape(-1)
+sum_received_potential = np.array(sig_potential.sum(axis=0)).reshape(-1)
+
+# Arrays to store vector field components:
+sending_vf = np.zeros_like(self.coords)
+receiving_vf = np.zeros_like(self.coords)
+
+
 # if spatial_weights is not None:
 #     if final:
 #         print("Betas: ", betas)

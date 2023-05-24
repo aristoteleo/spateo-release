@@ -181,6 +181,7 @@ def _vector_projection(ax, points: np.ndarray, vectors: np.ndarray, projection: 
         projection: Either '2d' or '3d' to indicate if plot is 2D or 3D
         **kwargs: Additional keyword arguments provided to :func `ax.quiver()`
     """
+
     if projection == "3d":
         ax.quiver(points[:, 0], points[:, 1], points[:, 2], vectors[:, 0], vectors[:, 1], vectors[:, 2], **kwargs)
     else:
@@ -229,7 +230,7 @@ def plot_vectors(
     V: np.ndarray,
     vf_plot_method: str = "cell",
     projection: str = "2d",
-    kwargs: Optional[Dict] = None,
+    **kwargs,
 ):
     """Wrapper for plotting vector fields.
 
@@ -290,6 +291,7 @@ def _matplotlib_points(
     X_grid: Optional[np.ndarray] = None,
     V: Optional[np.ndarray] = None,
     vf_plot_method: str = "cell",
+    vf_kwargs: Optional[Dict] = None,
     **kwargs,
 ):
 
@@ -321,27 +323,20 @@ def _matplotlib_points(
             quiver_params = quiver_signature.parameters
 
             quiver_kwargs = {}
-            scatter_kwargs = {}
 
-            for key, value in kwargs.items():
+            for key, value in vf_kwargs.items():
                 if key in quiver_params:
                     quiver_kwargs[key] = value
-                else:
-                    scatter_kwargs[key] = value
+
         elif vf_plot_method == "stream":
             streamplot_signature = signature(plt.streamplot)
             streamplot_params = streamplot_signature.parameters
 
             streamplot_kwargs = {}
-            scatter_kwargs = {}
 
-            for key, value in kwargs.items():
+            for key, value in vf_kwargs.items():
                 if key in streamplot_params:
                     streamplot_kwargs[key] = value
-                else:
-                    scatter_kwargs[key] = value
-    else:
-        scatter_kwargs = kwargs
 
     if labels is not None:
         # main_debug("labels are not None, drawing by labels")
@@ -378,6 +373,12 @@ def _matplotlib_points(
                     points["label"] != "other",
                     points["label"] == "other",
                 )
+
+                if V is not None and vf_plot_method == "cell":
+                    # Get the indices that would sort the DataFrame in ascending order
+                    sorted_indices = np.argsort(np.concatenate((background_ids.values, highlight_ids.values)))
+                    V = V[sorted_indices, :]
+
                 # reorder_data = points.copy(deep=True)
                 # (
                 #     reorder_data.loc[:(sum(background_ids) - 1), :],
@@ -437,7 +438,7 @@ def _matplotlib_points(
                 ax,
                 points,
                 projection,
-                s=scatter_kwargs["s"] * 2,
+                s=kwargs["s"] * 2,
                 c="0.0",
                 lw=2,
                 rasterized=rasterized,
@@ -446,7 +447,7 @@ def _matplotlib_points(
                 ax,
                 points,
                 projection,
-                s=scatter_kwargs["s"] * 2,
+                s=kwargs["s"] * 2,
                 c="1.0",
                 lw=0,
                 rasterized=rasterized,
@@ -457,12 +458,16 @@ def _matplotlib_points(
                 projection,
                 c=colors,
                 plotnonfinite=True,
-                **scatter_kwargs,
+                **kwargs,
             )
 
             if V is not None:
-                kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
-                plot_vectors(ax, points, V, vf_plot_method=vf_plot_method, **kwargs)
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
         elif contour:
             import seaborn as sns
@@ -488,12 +493,16 @@ def _matplotlib_points(
                 c=colors,
                 plotnonfinite=True,
                 zorder=21,
-                **scatter_kwargs,
+                **kwargs,
             )
 
             if V is not None:
-                kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
-                plot_vectors(ax, points, V, vf_plot_method=vf_plot_method, **kwargs)
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
         else:
             # main_debug("drawing without frontiers and contour")
@@ -502,12 +511,16 @@ def _matplotlib_points(
                     ax,
                     points,
                     color=colors,
-                    **scatter_kwargs,
+                    **kwargs,
                 )
 
                 if V is not None:
-                    kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
-                    plot_vectors(ax, points, V, vf_plot_method=vf_plot_method, **kwargs)
+                    vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                    vec_points = points if vf_plot_method == "cell" else X_grid
+                    if len(vf_kwargs) == 0:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                    else:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
             else:
                 _scatter_projection(
                     ax,
@@ -515,12 +528,16 @@ def _matplotlib_points(
                     projection,
                     c=colors,
                     plotnonfinite=True,
-                    **scatter_kwargs,
+                    **kwargs,
                 )
 
                 if V is not None:
-                    kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
-                    plot_vectors(ax, points, V, vf_plot_method=vf_plot_method, **kwargs)
+                    vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                    vec_points = points if vf_plot_method == "cell" else X_grid
+                    if len(vf_kwargs) == 0:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                    else:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
     # Color by values
     elif values is not None:
@@ -542,6 +559,8 @@ def _matplotlib_points(
             np.argsort(abs(values)) if sort == "abs" else np.argsort(-values) if sort == "neg" else np.argsort(values)
         )
         values, points = values[sorted_id], points[sorted_id]
+        if V is not None and vf_plot_method == "cell":
+            V = V[sorted_id]
 
         # if there are very few cells have expression, set the vmin/vmax only based on positive values to
         # get rid of outliers
@@ -588,7 +607,7 @@ def _matplotlib_points(
                 ax,
                 points,
                 projection,
-                s=scatter_kwargs["s"] * 2,
+                s=kwargs["s"] * 2,
                 c="0.0",
                 lw=2,
                 rasterized=rasterized,
@@ -597,7 +616,7 @@ def _matplotlib_points(
                 ax,
                 points,
                 projection,
-                s=scatter_kwargs["s"] * 2,
+                s=kwargs["s"] * 2,
                 c="1.0",
                 lw=0,
                 rasterized=rasterized,
@@ -611,12 +630,16 @@ def _matplotlib_points(
                 vmin=_vmin,
                 vmax=_vmax,
                 plotnonfinite=True,
-                **scatter_kwargs,
+                **kwargs,
             )
 
             if V is not None:
-                kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
-                plot_vectors(ax, points, V, vf_plot_method=vf_plot_method, **kwargs)
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
         elif contour:
             ccmap = "viridis" if ccmap is None else ccmap
@@ -649,12 +672,16 @@ def _matplotlib_points(
                 vmin=_vmin,
                 vmax=_vmax,
                 plotnonfinite=True,
-                **scatter_kwargs,
+                **kwargs,
             )
 
             if V is not None:
-                kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
-                plot_vectors(ax, points, V, vf_plot_method=vf_plot_method, **kwargs)
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
         else:
             # main_debug("drawing without frontiers and contour")
@@ -667,12 +694,16 @@ def _matplotlib_points(
                     cmap=cmap,
                     vmin=_vmin,
                     vmax=_vmax,
-                    **scatter_kwargs,
+                    **kwargs,
                 )
 
                 if V is not None:
-                    kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
-                    plot_vectors(ax, points, V, vf_plot_method=vf_plot_method, **kwargs)
+                    vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                    vec_points = points if vf_plot_method == "cell" else X_grid
+                    if len(vf_kwargs) == 0:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                    else:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
             else:
                 _scatter_projection(
@@ -683,12 +714,16 @@ def _matplotlib_points(
                     cmap=cmap,
                     vmin=_vmin,
                     vmax=_vmax,
-                    **scatter_kwargs,
+                    **kwargs,
                 )
 
                 if V is not None:
-                    kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
-                    plot_vectors(ax, points, V, vf_plot_method=vf_plot_method, **kwargs)
+                    vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                    vec_points = points if vf_plot_method == "cell" else X_grid
+                    if len(vf_kwargs) == 0:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                    else:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
         if "norm" in kwargs:
             norm = kwargs["norm"]
@@ -711,9 +746,25 @@ def _matplotlib_points(
         # main_debug("drawing points without color passed in args, using midpoint of the cmap")
         colors = plt.get_cmap(cmap)(0.5)
         if geo:
-            _geo_projection(ax, points, color=colors, **scatter_kwargs)
+            _geo_projection(ax, points, color=colors, **kwargs)
+
+            if V is not None:
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
         else:
-            _scatter_projection(ax, points, projection, c=colors, **scatter_kwargs)
+            _scatter_projection(ax, points, projection, c=colors, **kwargs)
+
+            if V is not None:
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
     if show_legend and legend_elements is not None:
         if len(unique_labels) == 1 and show_legend == "on data":
@@ -1238,26 +1289,26 @@ def set_spine_linewidth(ax, lw):
 # scatter plot utilities
 
 
-def scatter_with_colorbar(fig, ax, x, y, c, cmap, **scatter_kwargs):
+def scatter_with_colorbar(fig, ax, x, y, c, cmap, **kwargs):
     # https://stackoverflow.com/questions/32462881/add-colorbar-to-existing-axis
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
-    g = ax.scatter(x, y, c=c, cmap=cmap, **scatter_kwargs)
+    g = ax.scatter(x, y, c=c, cmap=cmap, **kwargs)
     fig.colorbar(g, cax=cax, orientation="vertical")
 
     return fig, ax
 
 
-def scatter_with_legend(fig, ax, df, font_color, x, y, c, cmap, legend, **scatter_kwargs):
+def scatter_with_legend(fig, ax, df, font_color, x, y, c, cmap, legend, **kwargs):
     import matplotlib.patheffects as PathEffects
     import seaborn as sns
 
     unique_labels = np.unique(c)
 
     if legend == "on data":
-        _ = sns.scatterplot(x, y, hue=c, palette=cmap, ax=ax, legend=False, **scatter_kwargs)
+        _ = sns.scatterplot(x, y, hue=c, palette=cmap, ax=ax, legend=False, **kwargs)
 
         for i in unique_labels:
             color_cnt = np.nanmedian(df.iloc[np.where(c == i)[0], :2], 0)
@@ -1278,7 +1329,7 @@ def scatter_with_legend(fig, ax, df, font_color, x, y, c, cmap, legend, **scatte
                 ]  # 'w'
             )
     else:
-        _ = sns.scatterplot(x, y, hue=c, palette=cmap, ax=ax, legend="full", **scatter_kwargs)
+        _ = sns.scatterplot(x, y, hue=c, palette=cmap, ax=ax, legend="full", **kwargs)
         ax.legend(loc=legend, ncol=unique_labels // 15)
 
     return fig, ax

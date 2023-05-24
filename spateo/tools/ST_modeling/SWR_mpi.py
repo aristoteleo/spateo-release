@@ -5,6 +5,9 @@ import numpy as np
 from mpi4py import MPI
 from MuSIC import MuSIC, VMuSIC
 
+# For testing:
+from spateo.plotting.static.space import plot_cell_signaling
+from spateo.tools.ST_modeling.MuSIC_downstream import MuSIC_Interpreter
 from spateo.tools.ST_modeling.MuSIC_upstream import MuSIC_target_selector
 
 np.random.seed(888)
@@ -213,43 +216,63 @@ if __name__ == "__main__":
         "memory from running out, otherwise keep as low as possible.",
     )
 
+    parser.add_argument(
+        "-search_bw",
+        help="Used for downstream analyses; specifies the bandwidth to search for "
+        "senders/receivers. Recommended to set equal to the bandwidth of a fitted "
+        "model.",
+    )
+    parser.add_argument(
+        "-top_k_receivers",
+        default=10,
+        type=int,
+        help="Used for downstream analyses; specifies the number of top senders/receivers to "
+        "consider for each cell.",
+    )
+
     t1 = MPI.Wtime()
 
-    # Testing time! Uncomment this (and then comment anything below) to test the capabilities of any of the constituent
-    # functions:
-    # swr_model = SWR(comm, parser)
-    # swr_model.fit()
+    # Testing time! Uncomment this (and comment anything below) to test the downstream functions:
+    test_upstream = MuSIC_Interpreter(comm, parser)
+    # test_upstream.compute_coeff_significance()
+    test_upstream.inferred_effect_direction()
 
-    # Check if GRN model is specified:
-    # if parser.parse_args().grn:
-    #     "filler"
-
+    # # Testing time! Uncomment this (and then comment anything above and below) to test the capabilities of any of the
+    # # constituent functions:
+    # # test = MuSIC_setup(comm, parser)
+    # # test.multicollinearity_filter()
+    # # print(test.X_df)
+    #
+    # # Check if GRN model is specified:
+    # # if parser.parse_args().grn:
+    # #     "filler"
+    #
+    # # else:
+    # # For use only with VMuSIC:
+    # n_multiscale_chunks = parser.parse_args().chunks
+    #
+    # if parser.parse_args().run_upstream:
+    #     swr_selector = MuSIC_target_selector(parser)
+    #     swr_selector.select_features()
+    #
+    # if parser.parse_args().multiscale:
+    #     print(
+    #         "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
+    #         "case, it is advisable to reduce the number of parameters."
+    #     )
+    #     multiscale_model = VMuSIC(comm, parser)
+    #     multiscale_model.multiscale_backfitting()
+    #     multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
+    #     multiscale_model.predict_and_save()
+    #
     # else:
-    # For use only with VMuSIC:
-    n_multiscale_chunks = parser.parse_args().chunks
-
-    if parser.parse_args().run_upstream:
-        swr_selector = MuSIC_target_selector(parser)
-        swr_selector.select_features()
-
-    if parser.parse_args().multiscale:
-        print(
-            "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
-            "case, it is advisable to reduce the number of parameters."
-        )
-        multiscale_model = VMuSIC(comm, parser)
-        multiscale_model.multiscale_backfitting()
-        multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
-        multiscale_model.predict_and_save()
-
-    else:
-        swr_model = MuSIC(comm, parser)
-        swr_model.fit()
-        swr_model.predict_and_save()
-
-    t_last = MPI.Wtime()
-
-    wt = comm.gather(t_last - t1, root=0)
-    if rank == 0:
-        print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
-        print("-" * 60)
+    #     swr_model = MuSIC(comm, parser)
+    #     swr_model.fit()
+    #     swr_model.predict_and_save()
+    #
+    # t_last = MPI.Wtime()
+    #
+    # wt = comm.gather(t_last - t1, root=0)
+    # if rank == 0:
+    #     print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
+    #     print("-" * 60)
