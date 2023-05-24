@@ -626,6 +626,8 @@ class MuSIC:
             self.ligands_expr.drop(to_drop, axis=1, inplace=True)
             first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
             self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
+            # Save copy of non-lagged ligand expression array:
+            self.ligands_expr_nonlag = self.ligands_expr.copy()
 
             # Compute spatial lag of ligand expression- exclude self because there are many ligands for which
             # autocrine signaling is not possible:

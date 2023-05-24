@@ -176,7 +176,8 @@ class MuSIC_Interpreter(MuSIC):
             target_indicator = np.where(target_expr != 0, 1, 0)
 
             for j, col in enumerate(self.ligands_expr.columns):
-                ligand_expr = self.ligands_expr[col].values.reshape(-1, 1)
+                # Use the non-lagged ligand expression array:
+                ligand_expr = self.ligands_expr_nonlag[col].values.reshape(-1, 1)
                 # Referred to as "sent potential"
                 sent_potential = spatial_weights * ligand_expr
                 coeff = coeffs.iloc[:, j].values.reshape(1, -1)
