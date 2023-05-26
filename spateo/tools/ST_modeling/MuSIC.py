@@ -435,7 +435,7 @@ class MuSIC:
                 weights = pool.map(get_wi_partial, fitted_indices)
             w_subset = scipy.sparse.vstack(weights)
             rows, cols = w_subset.nonzero()
-            unique_indices = set(rows)
+            unique_indices = list(set(cols))
             names_all_neighbors = self.sample_names[unique_indices]
             self.adata = self.adata[self.adata.obs_names.isin(names_all_neighbors)]
 
@@ -628,18 +628,6 @@ class MuSIC:
             self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
             # Save copy of non-lagged ligand expression array:
             self.ligands_expr_nonlag = self.ligands_expr.copy()
-
-            # Compute spatial lag of ligand expression- exclude self because there are many ligands for which
-            # autocrine signaling is not possible:
-            if "spatial_weights" not in locals():
-                spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=False, exclude_self=True)
-            lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
-            for i, ligand in enumerate(self.ligands_expr.columns):
-                expr = self.ligands_expr[ligand]
-                expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
-                lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
-                lagged_expr_mat[:, i] = lagged_expr
-            self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=adata.obs_names, columns=ligands)
 
         if self.mod_type == "lr" or self.mod_type == "receptor":
             database_receptors = set(self.lr_db["to"])
@@ -839,6 +827,18 @@ class MuSIC:
             index=adata.obs_names,
             columns=targets,
         )
+
+        # Compute spatial lag of ligand expression- exclude self because there are many ligands for which
+        # autocrine signaling is not possible:
+        if "spatial_weights" not in locals():
+            spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=False, exclude_self=True)
+        lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
+        for i, ligand in enumerate(self.ligands_expr.columns):
+            expr = self.ligands_expr[ligand]
+            expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
+            lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
+            lagged_expr_mat[:, i] = lagged_expr
+        self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=adata.obs_names, columns=ligands)
 
         # Set dependent variable array based on input given as "mod_type":
         if self.mod_type == "niche":
@@ -1125,7 +1125,7 @@ class MuSIC:
                         [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
                     )
                 )
-                self.minbw = min_dist * 3
+                self.minbw = min_dist * 5
 
                 # Set max bandwidth to 10x the max distance between neighboring points:
                 self.maxbw = min_dist * 10

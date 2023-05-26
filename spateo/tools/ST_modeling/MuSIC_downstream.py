@@ -152,8 +152,8 @@ class MuSIC_Interpreter(MuSIC):
                 it is recommended to set this higher than the optimal bandwidth found in fitting to be able to cover
                 the larger search area in which secreted signals can have effects.
             k: Top k receivers to consider when computing effect directions
-            target: Optional string or list of strings to select targets from among the genes used to fit the model.
-                If not given, will use all targets.
+            target: Optional string or list of strings to select targets from among the genes used to fit the model
+                to compute signaling effects for. If not given, will use all targets.
         """
         if not self.mod_type == "ligand" or self.mod_type == "lr":
             raise ValueError(
@@ -161,7 +161,8 @@ class MuSIC_Interpreter(MuSIC):
             )
 
         # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
-        spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True).toarray()
+        spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True)
+
         # Columns consist of the spatial weights of each observation- convolve with expression of each ligand to
         # get proxy of ligand signal "sent", weight by the local coefficient value to get a proxy of the "signal
         # functionally received" in generating the downstream effect and store in .obsp.
@@ -171,7 +172,10 @@ class MuSIC_Interpreter(MuSIC):
             targets = [targets]
 
         for target in targets:
+            # Testing: compare both ways:
             coeffs = self.coeffs[target]
+            # Set negligible coefficients to zero:
+            coeffs[coeffs.abs() < 1e-2] = 0
             target_expr = self.targets_expr[target].values.reshape(1, -1)
             target_indicator = np.where(target_expr != 0, 1, 0)
 
@@ -179,57 +183,76 @@ class MuSIC_Interpreter(MuSIC):
                 # Use the non-lagged ligand expression array:
                 ligand_expr = self.ligands_expr_nonlag[col].values.reshape(-1, 1)
                 # Referred to as "sent potential"
-                sent_potential = spatial_weights * ligand_expr
+                sent_potential = spatial_weights.multiply(ligand_expr)
+                sent_potential.eliminate_zeros()
+
                 coeff = coeffs.iloc[:, j].values.reshape(1, -1)
                 # Weight each column by the coefficient magnitude and finally by the indicator for expression/no
                 # expression of the target and store as sparse array:
-                sig_potential = sent_potential * coeff * target_indicator
-                self.adata.obsp[f"spatial_effect_{col}_{target}"] = sig_potential
+                sig_interm = sent_potential.multiply(coeff)
+                sig_interm.eliminate_zeros()
+                sig_potential = sig_interm.multiply(target_indicator)
+                sig_potential.eliminate_zeros()
+                # self.adata.obsp[f"spatial_effect_{col}_{target}"] = sig_potential
+
+                sig_potential_sum_sender = np.array(sig_potential.sum(axis=1)).reshape(-1)
+                normalized_sig_potential_sum_sender = (sig_potential_sum_sender - np.min(sig_potential_sum_sender)) / (
+                    np.max(sig_potential_sum_sender) - np.min(sig_potential_sum_sender)
+                )
+                sig_potential_sum_receiver = np.array(sig_potential.sum(axis=0)).reshape(-1)
+                normalized_sig_potential_sum_receiver = (
+                    sig_potential_sum_receiver - np.min(sig_potential_sum_receiver)
+                ) / (np.max(sig_potential_sum_receiver) - np.min(sig_potential_sum_receiver))
+                sending_vf = np.zeros_like(self.coords)
+                receiving_vf = np.zeros_like(self.coords)
 
                 # Vector field for sent signal:
-                top_senders_each_receiver = np.argsort(-sig_potential, axis=1)[:, : self.k]
-                avg_v = np.zeros_like(self.coords)
-                for ik in range(self.k):
-                    tmp_v = (
-                        self.coords[top_senders_each_receiver[:, ik]]
-                        - self.coords[np.arange(self.n_samples, dtype=int)]
-                    )
-                    tmp_v = normalize(tmp_v, norm="l2")
-                    avg_v = avg_v + tmp_v * sig_potential[
-                        np.arange(self.n_samples, dtype=int), top_senders_each_receiver[:, ik]
-                    ].reshape(-1, 1)
-                avg_v = normalize(avg_v)
-                # factor = normalize(np.sum(sig_potential, axis=1).reshape(-1, 1))
-                sum_values = np.sum(sig_potential, axis=1).reshape(-1, 1)
-                # Normalize to range [0, 1]:
-                normalized_sum_values = (sum_values - np.min(sum_values)) / (np.max(sum_values) - np.min(sum_values))
-                # factor = np.where(sum_values > 1, np.log10(sum_values), sum_values / 4)
-                sending_vf = avg_v * normalized_sum_values
-                sending_vf = np.clip(sending_vf, -0.05, 0.05)
+                sig_potential_lil = sig_potential.tolil()
+                for i in range(self.n_samples):
+                    if len(sig_potential_lil.rows[i]) <= self.k:
+                        temp_idx = np.array(sig_potential_lil.rows[i], dtype=int)
+                        temp_val = np.array(sig_potential_lil.data[i], dtype=float)
+                    else:
+                        row_np = np.array(sig_potential_lil.rows[i], dtype=int)
+                        data_np = np.array(sig_potential_lil.data[i], dtype=float)
+                        temp_idx = row_np[np.argsort(-data_np)[: self.k]]
+                        temp_val = data_np[np.argsort(-data_np)[: self.k]]
+                    if len(temp_idx) == 0:
+                        continue
+                    elif len(temp_idx) == 1:
+                        avg_v = self.coords[temp_idx[0], :] - self.coords[i, :]
+                    else:
+                        temp_v = self.coords[temp_idx, :] - self.coords[i, :]
+                        temp_v = normalize(temp_v, norm="l2")
+                        avg_v = np.sum(temp_v * temp_val.reshape(-1, 1), axis=0)
+                    avg_v = normalize(avg_v.reshape(1, -1))
+                    sending_vf[i, :] = avg_v[0, :] * normalized_sig_potential_sum_sender[i]
+                sending_vf = np.clip(sending_vf, -0.02, 0.02)
 
                 # Vector field for received signal:
-                received_potential = sig_potential.T
-                top_receivers_each_sender = np.argsort(-received_potential, axis=1)[:, : self.k]
-                avg_v = np.zeros_like(self.coords)
-                for ik in range(self.k):
-                    tmp_v = (
-                        -self.coords[top_receivers_each_sender[:, ik]]
-                        + self.coords[np.arange(self.n_samples, dtype=int)]
-                    )
-                    tmp_v = normalize(tmp_v, norm="l2")
-                    avg_v = avg_v + tmp_v * received_potential[
-                        np.arange(self.n_samples, dtype=int), top_receivers_each_sender[:, ik]
-                    ].reshape(-1, 1)
-                avg_v = normalize(avg_v)
-                # factor = normalize(np.sum(received_potential, axis=1).reshape(-1, 1))
-                sum_values = np.sum(received_potential, axis=1).reshape(-1, 1)
-                # Normalize to range [0, 1]:
-                normalized_sum_values = (sum_values - np.min(sum_values)) / (np.max(sum_values) - np.min(sum_values))
-                # factor = np.where(sum_values > 1, np.log10(sum_values), sum_values / 4)
-                receiving_vf = avg_v * normalized_sum_values
-                receiving_vf = np.clip(receiving_vf, -0.05, 0.05)
+                sig_potential_lil = sig_potential.T.tolil()
+                for i in range(self.n_samples):
+                    if len(sig_potential_lil.rows[i]) <= self.k:
+                        temp_idx = np.array(sig_potential_lil.rows[i], dtype=int)
+                        temp_val = np.array(sig_potential_lil.data[i], dtype=float)
+                    else:
+                        row_np = np.array(sig_potential_lil.rows[i], dtype=int)
+                        data_np = np.array(sig_potential_lil.data[i], dtype=float)
+                        temp_idx = row_np[np.argsort(-data_np)[: self.k]]
+                        temp_val = data_np[np.argsort(-data_np)[: self.k]]
+                    if len(temp_idx) == 0:
+                        continue
+                    elif len(temp_idx) == 1:
+                        avg_v = self.coords[temp_idx, :] - self.coords[i, :]
+                    else:
+                        temp_v = self.coords[temp_idx, :] - self.coords[i, :]
+                        temp_v = normalize(temp_v, norm="l2")
+                        avg_v = np.sum(temp_v * temp_val.reshape(-1, 1), axis=0)
+                    avg_v = normalize(avg_v.reshape(1, -1))
+                    receiving_vf[i, :] = avg_v[0, :] * normalized_sig_potential_sum_receiver[i]
+                receiving_vf = np.clip(receiving_vf, -0.02, 0.02)
 
-                del sig_potential, received_potential
+                del sig_potential
 
                 self.adata.obsm[f"spatial_effect_sender_vf_{col}_{target}"] = sending_vf
                 self.adata.obsm[f"spatial_effect_receiver_vf_{col}_{target}"] = receiving_vf
@@ -237,3 +260,19 @@ class MuSIC_Interpreter(MuSIC):
         # Save AnnData object with effect direction information:
         adata_name = os.path.splitext(self.adata_path)[0]
         self.adata.write(f"{adata_name}_effect_directions.h5ad")
+
+    def
+
+    def compute_cell_type_coupling(self):
+        """Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
+        categories- if :attr `mod_type` is "niche", this directly averages the effects for each neighboring cell type
+        for each observation. If :attr `mod_type` is "lr" or "ligand", this correlates cell type prevalence with the
+        size of the predicted effect on downstream expression for each L:R pair.
+        """
+
+        # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
+        spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True).toarray()
+
+        # Sum of each cell type in the neighborhood of the receiving cell:
+
+        #

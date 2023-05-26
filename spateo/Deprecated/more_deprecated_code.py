@@ -2166,6 +2166,76 @@ sending_vf = np.zeros_like(self.coords)
 receiving_vf = np.zeros_like(self.coords)
 
 
+# TEMP storage- keeping this here while I try to get it to work with sparse matrices:
+# Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
+spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True).toarray()
+# Columns consist of the spatial weights of each observation- convolve with expression of each ligand to
+# get proxy of ligand signal "sent", weight by the local coefficient value to get a proxy of the "signal
+# functionally received" in generating the downstream effect and store in .obsp.
+if targets is None:
+    targets = self.coeffs.keys()
+elif isinstance(targets, str):
+    targets = [targets]
+
+for target in targets:
+    coeffs = self.coeffs[target]
+    target_expr = self.targets_expr[target].values.reshape(1, -1)
+    target_indicator = np.where(target_expr != 0, 1, 0)
+
+    for j, col in enumerate(self.ligands_expr.columns):
+        # Use the non-lagged ligand expression array:
+        ligand_expr = self.ligands_expr_nonlag[col].values.reshape(-1, 1)
+        # Referred to as "sent potential"
+        sent_potential = spatial_weights * ligand_expr
+        coeff = coeffs.iloc[:, j].values.reshape(1, -1)
+        # Weight each column by the coefficient magnitude and finally by the indicator for expression/no
+        # expression of the target and store as sparse array:
+        sig_potential = sent_potential * coeff * target_indicator
+        self.adata.obsp[f"spatial_effect_{col}_{target}"] = sig_potential
+
+        # Vector field for sent signal:
+        top_senders_each_receiver = np.argsort(-sig_potential, axis=1)[:, : self.k]
+        avg_v = np.zeros_like(self.coords)
+        for ik in range(self.k):
+            tmp_v = self.coords[top_senders_each_receiver[:, ik]] - self.coords[np.arange(self.n_samples, dtype=int)]
+            tmp_v = normalize(tmp_v, norm="l2")
+            avg_v = avg_v + tmp_v * sig_potential[
+                np.arange(self.n_samples, dtype=int), top_senders_each_receiver[:, ik]
+            ].reshape(-1, 1)
+        avg_v = normalize(avg_v)
+        # factor = normalize(np.sum(sig_potential, axis=1).reshape(-1, 1))
+        sum_values = np.sum(sig_potential, axis=1).reshape(-1, 1)
+        # Normalize to range [0, 1]:
+        normalized_sum_values = (sum_values - np.min(sum_values)) / (np.max(sum_values) - np.min(sum_values))
+        # factor = np.where(sum_values > 1, np.log10(sum_values), sum_values / 4)
+        sending_vf = avg_v * normalized_sum_values
+        sending_vf = np.clip(sending_vf, -0.05, 0.05)
+
+        # Vector field for received signal:
+        received_potential = sig_potential.T
+        top_receivers_each_sender = np.argsort(-received_potential, axis=1)[:, : self.k]
+        avg_v = np.zeros_like(self.coords)
+        for ik in range(self.k):
+            tmp_v = -self.coords[top_receivers_each_sender[:, ik]] + self.coords[np.arange(self.n_samples, dtype=int)]
+            tmp_v = normalize(tmp_v, norm="l2")
+            avg_v = avg_v + tmp_v * received_potential[
+                np.arange(self.n_samples, dtype=int), top_receivers_each_sender[:, ik]
+            ].reshape(-1, 1)
+        avg_v = normalize(avg_v)
+        # factor = normalize(np.sum(received_potential, axis=1).reshape(-1, 1))
+        sum_values = np.sum(received_potential, axis=1).reshape(-1, 1)
+        # Normalize to range [0, 1]:
+        normalized_sum_values = (sum_values - np.min(sum_values)) / (np.max(sum_values) - np.min(sum_values))
+        # factor = np.where(sum_values > 1, np.log10(sum_values), sum_values / 4)
+        receiving_vf = avg_v * normalized_sum_values
+        receiving_vf = np.clip(receiving_vf, -0.05, 0.05)
+
+        del sig_potential, received_potential
+
+        self.adata.obsm[f"spatial_effect_sender_vf_{col}_{target}"] = sending_vf
+        self.adata.obsm[f"spatial_effect_receiver_vf_{col}_{target}"] = receiving_vf
+
+
 # if spatial_weights is not None:
 #     if final:
 #         print("Betas: ", betas)

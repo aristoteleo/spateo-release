@@ -160,6 +160,7 @@ class MuSIC_target_selector:
         self.group_subset = self.arg_retrieve.group_subset
 
         self.n_neighbors = self.arg_retrieve.n_neighbors
+        self.bw_fixed = self.arg_retrieve.bw_fixed
 
         any_predictors_given = any(
             x is not None
@@ -367,16 +368,8 @@ class MuSIC_target_selector:
         self.ligands_expr.drop(to_drop, axis=1, inplace=True)
         first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
         self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
-
-        # Compute spatial lag of ligand expression:
-        spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=False, exclude_self=True)
-        lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
-        for i, ligand in enumerate(self.ligands_expr.columns):
-            expr = self.ligands_expr[ligand]
-            expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
-            lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
-            lagged_expr_mat[:, i] = lagged_expr
-        self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=self.sample_names, columns=ligands)
+        # Save copy of non-lagged ligand expression array:
+        self.ligands_expr_nonlag = self.ligands_expr.copy()
 
         if (
             self.custom_receptors_path is not None
@@ -535,6 +528,17 @@ class MuSIC_target_selector:
         )
 
         self.target_list = targets
+
+        # Compute spatial lag of ligand expression:
+        spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=self.bw_fixed, exclude_self=True)
+        lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
+        for i, ligand in enumerate(self.ligands_expr.columns):
+            expr = self.ligands_expr[ligand]
+            expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
+            lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
+            lagged_expr_mat[:, i] = lagged_expr
+        self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=self.sample_names, columns=ligands)
+
 
     def _compute_all_wi(
         self,
