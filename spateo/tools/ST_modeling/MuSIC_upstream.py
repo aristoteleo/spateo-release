@@ -563,16 +563,12 @@ class MuSIC_target_selector:
 
         # Fit global Poisson models to target expression:
 
-
         # Find average best explanatory bandwidth:
-
-
 
     def _find_best_bw_niche(self):
         """Find the best bandwidth to use when computing cellular niches."""
 
         # Compute
-
 
     def _compute_all_wi(
         self,

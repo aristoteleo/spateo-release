@@ -12,7 +12,6 @@ from copy import deepcopy
 from functools import partial
 from itertools import product
 from multiprocessing import Pool
-from patsy import dmatrix
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import anndata
@@ -20,6 +19,7 @@ import numpy as np
 import pandas as pd
 import scipy
 from mpi4py import MPI
+from patsy import dmatrix
 from scipy.spatial.distance import cdist
 from scipy.stats import pearsonr
 from sklearn.cluster import KMeans
@@ -391,8 +391,9 @@ class MuSIC:
             if self.mod_type is not None:
                 self.logger.info(f"Model type: {self.mod_type}")
                 if self.mod_type in ["lr", "ligand", "receptor"]:
-                    self.logger.info(f"Loading cell-cell interaction databases from the following folder: "
-                                     f" {self.cci_dir}.")
+                    self.logger.info(
+                        f"Loading cell-cell interaction databases from the following folder: " f" {self.cci_dir}."
+                    )
                     if self.custom_ligands_path is not None:
                         self.logger.info(f"Using list of custom ligands from: {self.custom_ligands_path}.")
                     if self.custom_ligands is not None:
@@ -514,10 +515,10 @@ class MuSIC:
         # One-hot cell type array (or other category):
         if self.mod_type == "niche":
             group_name = adata.obs[self.group_key]
-            #db = pd.DataFrame({"group": group_name})
+            # db = pd.DataFrame({"group": group_name})
             db = pd.DataFrame({"group": group_name})
             categories = np.array(group_name.unique().tolist())
-            #db["group"] = pd.Categorical(db["group"], categories=categories)
+            # db["group"] = pd.Categorical(db["group"], categories=categories)
             db["group"] = pd.Categorical(db["group"], categories=categories)
 
             self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
@@ -873,14 +874,14 @@ class MuSIC:
                 self.X = niche_array
                 self.feature_names = list(self.cell_categories.columns) + connections_cols
             else:
-                #row_sums = dmat_neighbors.sum(axis=1)
+                # row_sums = dmat_neighbors.sum(axis=1)
                 # dmat_neighbors = dmat_neighbors / row_sums[:, np.newaxis]
-                #dmat_neighbors[dmat_neighbors > 1] = 1
-                #niche_array = np.hstack((self.cell_categories.values, dmat_neighbors))
+                # dmat_neighbors[dmat_neighbors > 1] = 1
+                # niche_array = np.hstack((self.cell_categories.values, dmat_neighbors))
                 self.X = dmat_neighbors
 
                 neighbors_cols = [col.replace("group", "proxim") for col in self.cell_categories.columns]
-                #self.feature_names = list(self.cell_categories.columns) + neighbors_cols
+                # self.feature_names = list(self.cell_categories.columns) + neighbors_cols
                 self.feature_names = neighbors_cols
 
         elif self.mod_type == "lr":
@@ -1494,9 +1495,23 @@ class MuSIC:
                         patience = 0
                     if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.5:
                         self.logger.info(
-                            "Plateau detected- exiting optimization and returning optimum score up to this " "point."
+                            "Plateau detected- exiting optimization and returning optimum score up to this point."
                         )
                         patience = 3
+
+                if np.abs(new_ub - self.maxbw) < 1.0:
+                    self.logger.info(
+                        "Approaching maximum bandwidth. Exiting optimization and returning optimum score up to this "
+                        "point."
+                    )
+                    patience = 3
+
+                if np.abs(new_lb - self.minbw) < 1.0:
+                    self.logger.info(
+                        "Approaching minimum bandwidth. Exiting optimization and returning optimum score up to this "
+                        "point."
+                    )
+                    patience = 3
 
             new_lb = self.comm.bcast(new_lb, root=0)
             new_ub = self.comm.bcast(new_ub, root=0)

@@ -230,7 +230,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     all_zeros = np.all(yw == 0)
     if all_zeros:
         betas = np.full((x.shape[1], 1), 1e-5)
-        return betas, pseudoinverse
+        return betas, pseudoinverse, cov_inverse
 
     betas = np.dot(xtx_inv_xt, y)
     # Upper and lower bound to constrain betas and prevent numerical overflow:
