@@ -5,6 +5,7 @@ list of signaling molecules (ligands or receptors) and
 import argparse
 import multiprocessing
 import os
+import re
 import sys
 from functools import partial
 from multiprocessing import Pool
@@ -285,7 +286,10 @@ class MuSIC_target_selector:
                 )
                 self.adata.layers["X_log1p"] = log1p(self.adata)
 
-        self.define_predictors_and_targets()
+        if self.mod_type in ["lr", "ligand", "receptor"]:
+            self.define_predictors_and_targets()
+        else:
+            self.define_cell_categories()
 
     def define_predictors_and_targets(self):
         """Define ligand expression array, receptor expression array and target expression array, depending on the
@@ -529,6 +533,24 @@ class MuSIC_target_selector:
 
         self.target_list = targets
 
+    def define_cell_categories(self):
+        group_name = self.adata.obs[self.group_key]
+        db = pd.DataFrame({"group": group_name})
+        categories = np.array(group_name.unique().tolist())
+        db["group"] = pd.Categorical(db["group"], categories=categories)
+
+        self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
+        X = pd.get_dummies(data=db, drop_first=False)
+        # Ensure columns are in order:
+        self.cell_categories = X.reindex(sorted(X.columns), axis=1)
+        # Ensure each category is one word with no spaces or special characters:
+        self.cell_categories.columns = [
+            re.sub(r"\b([a-zA-Z0-9])", lambda match: match.group(1).upper(), re.sub(r"[^a-zA-Z0-9]+", "", s))
+            for s in self.cell_categories.columns
+        ]
+
+    def _find_best_bw_ligand(self):
+        """Find the best bandwidth to use when computing lagged ligand expression."""
         # Compute spatial lag of ligand expression:
         spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=self.bw_fixed, exclude_self=True)
         lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
@@ -537,7 +559,19 @@ class MuSIC_target_selector:
             expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
             lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
             lagged_expr_mat[:, i] = lagged_expr
-        self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=self.sample_names, columns=ligands)
+        ligands_expr = pd.DataFrame(lagged_expr_mat, index=self.sample_names, columns=self.ligands_expr.columns)
+
+        # Fit global Poisson models to target expression:
+
+
+        # Find average best explanatory bandwidth:
+
+
+
+    def _find_best_bw_niche(self):
+        """Find the best bandwidth to use when computing cellular niches."""
+
+        # Compute
 
 
     def _compute_all_wi(

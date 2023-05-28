@@ -161,7 +161,10 @@ def compute_betas(
         identity = np.eye(xtx.shape[0])
         xtx += ridge_lambda * identity
 
-    xtx_inv = linalg.inv(xtx)
+    try:
+        xtx_inv = linalg.inv(xtx)
+    except:
+        xtx_inv = linalg.pinv(xtx)
     xtx_inv = scipy.sparse.csr_matrix(xtx_inv)
     xTy = sparse_dot(xT, y, return_array=False)
     betas = sparse_dot(xtx_inv, xTy)
@@ -446,7 +449,7 @@ def logistic_objective(threshold: float, proba: np.ndarray, y_true: np.ndarray):
     return score
 
 
-def golden_section_search(func: Callable, a: float, b: float, tol: float = 1e-5):
+def golden_section_search(func: Callable, a: float, b: float, tol: float = 1e-5, min_or_max: str = "min"):
     """Find the extremum of a function within a specified range using Golden Section Search.
 
     Args:
@@ -454,6 +457,7 @@ def golden_section_search(func: Callable, a: float, b: float, tol: float = 1e-5)
         a: Lower bound of the range.
         b: Upper bound of the range.
         tol: Tolerance for stopping criterion.
+        min_or_max: Whether to find the minimum or maximum of the function.
 
     Returns:
         The x-value of the function's extremum.
@@ -464,10 +468,16 @@ def golden_section_search(func: Callable, a: float, b: float, tol: float = 1e-5)
     d = a + phi * (b - a)
 
     while abs(c - d) > tol:
-        if func(c) < func(d):
-            b = d
-        else:
-            a = c
+        if min_or_max == "min":
+            if func(c) < func(d):
+                b = d
+            else:
+                a = c
+        elif min_or_max == "max":
+            if func(c) > func(d):
+                b = d
+            else:
+                a = c
 
         # Compute new bounds
         c = b - phi * (b - a)

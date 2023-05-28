@@ -261,8 +261,6 @@ class MuSIC_Interpreter(MuSIC):
         adata_name = os.path.splitext(self.adata_path)[0]
         self.adata.write(f"{adata_name}_effect_directions.h5ad")
 
-    def
-
     def compute_cell_type_coupling(self):
         """Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
         categories- if :attr `mod_type` is "niche", this directly averages the effects for each neighboring cell type

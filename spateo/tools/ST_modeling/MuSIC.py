@@ -10,7 +10,9 @@ import re
 import sys
 from copy import deepcopy
 from functools import partial
+from itertools import product
 from multiprocessing import Pool
+from patsy import dmatrix
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import anndata
@@ -184,7 +186,7 @@ class MuSIC:
             # If AnnData object is given, process it:
             if self.adata_path is not None:
                 # Ensure CCI directory is provided:
-                if self.cci_dir is None:
+                if self.cci_dir is None and self.mod_type in ["lr", "receptor", "ligand"]:
                     raise ValueError(
                         "No CCI directory provided; need to provide a CCI directory to fit a model with "
                         "ligand/receptor expression."
@@ -388,15 +390,17 @@ class MuSIC:
                 self.logger.info(f"Loading CSV file from: {self.csv_path}")
             if self.mod_type is not None:
                 self.logger.info(f"Model type: {self.mod_type}")
-                self.logger.info(f"Loading cell-cell interaction databases from the following folder: {self.cci_dir}.")
-                if self.custom_ligands_path is not None:
-                    self.logger.info(f"Using list of custom ligands from: {self.custom_ligands_path}.")
-                if self.custom_ligands is not None:
-                    self.logger.info(f"Using the provided list of ligands: {self.custom_ligands}.")
-                if self.custom_receptors_path is not None:
-                    self.logger.info(f"Using list of custom receptors from: {self.custom_receptors_path}.")
-                if self.custom_receptors is not None:
-                    self.logger.info(f"Using the provided list of receptors: {self.custom_receptors}.")
+                if self.mod_type in ["lr", "ligand", "receptor"]:
+                    self.logger.info(f"Loading cell-cell interaction databases from the following folder: "
+                                     f" {self.cci_dir}.")
+                    if self.custom_ligands_path is not None:
+                        self.logger.info(f"Using list of custom ligands from: {self.custom_ligands_path}.")
+                    if self.custom_ligands is not None:
+                        self.logger.info(f"Using the provided list of ligands: {self.custom_ligands}.")
+                    if self.custom_receptors_path is not None:
+                        self.logger.info(f"Using list of custom receptors from: {self.custom_receptors_path}.")
+                    if self.custom_receptors is not None:
+                        self.logger.info(f"Using the provided list of receptors: {self.custom_receptors}.")
                 if self.targets_path is not None:
                     self.logger.info(f"Using list of target genes from: {self.targets_path}.")
                 if self.custom_targets is not None:
@@ -510,8 +514,10 @@ class MuSIC:
         # One-hot cell type array (or other category):
         if self.mod_type == "niche":
             group_name = adata.obs[self.group_key]
+            #db = pd.DataFrame({"group": group_name})
             db = pd.DataFrame({"group": group_name})
             categories = np.array(group_name.unique().tolist())
+            #db["group"] = pd.Categorical(db["group"], categories=categories)
             db["group"] = pd.Categorical(db["group"], categories=categories)
 
             self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
@@ -830,15 +836,16 @@ class MuSIC:
 
         # Compute spatial lag of ligand expression- exclude self because there are many ligands for which
         # autocrine signaling is not possible:
-        if "spatial_weights" not in locals():
-            spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=False, exclude_self=True)
-        lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
-        for i, ligand in enumerate(self.ligands_expr.columns):
-            expr = self.ligands_expr[ligand]
-            expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
-            lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
-            lagged_expr_mat[:, i] = lagged_expr
-        self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=adata.obs_names, columns=ligands)
+        if self.mod_type == "lr" or self.mod_type == "ligand":
+            if "spatial_weights" not in locals():
+                spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=False, exclude_self=True)
+            lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
+            for i, ligand in enumerate(self.ligands_expr.columns):
+                expr = self.ligands_expr[ligand]
+                expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
+                lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
+                lagged_expr_mat[:, i] = lagged_expr
+            self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=adata.obs_names, columns=ligands)
 
         # Set dependent variable array based on input given as "mod_type":
         if self.mod_type == "niche":
@@ -847,13 +854,34 @@ class MuSIC:
                 spatial_weights = self._compute_all_wi(
                     bw=self.n_neighbors, bw_fixed=False, exclude_self=True, kernel="bisquare"
                 )
+
             # Construct category adjacency matrix (n_samples x n_categories array that records how many neighbors of
             # each category are present within the neighborhood of each sample):
             dmat_neighbors = (spatial_weights > 0).astype("int").dot(self.cell_categories.values)
-            dmat_neighbors[dmat_neighbors > 1] = 1
+            # If the number of cell types is low enough, incorporate the identity of each cell itself to fully encode
+            # the niche:
+            if len(self.cell_categories.columns) <= 10:
+                connections_data = {"categories": self.cell_categories, "dmat_neighbors": dmat_neighbors}
+                connections = np.asarray(dmatrix("categories:dmat_neighbors-1", connections_data))
+                connections[connections > 1] = 1
+                # Add categorical array indicating the cell type of each cell:
+                niche_array = np.hstack((self.cell_categories.values, connections))
 
-            self.X = dmat_neighbors
-            self.feature_names = self.cell_categories.columns
+                connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
+                connections_cols.sort(key=lambda x: x[1])
+                connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
+                self.X = niche_array
+                self.feature_names = list(self.cell_categories.columns) + connections_cols
+            else:
+                #row_sums = dmat_neighbors.sum(axis=1)
+                # dmat_neighbors = dmat_neighbors / row_sums[:, np.newaxis]
+                #dmat_neighbors[dmat_neighbors > 1] = 1
+                #niche_array = np.hstack((self.cell_categories.values, dmat_neighbors))
+                self.X = dmat_neighbors
+
+                neighbors_cols = [col.replace("group", "proxim") for col in self.cell_categories.columns]
+                #self.feature_names = list(self.cell_categories.columns) + neighbors_cols
+                self.feature_names = neighbors_cols
 
         elif self.mod_type == "lr":
             # Use the ligand expression array and receptor expression array to compute the ligand-receptor pairing
@@ -1125,10 +1153,14 @@ class MuSIC:
                         [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
                     )
                 )
-                self.minbw = min_dist * 5
+                # if self.mod_type == "niche":
+                #     self.minbw = min_dist * 2
+                # else:
+                #     self.minbw = min_dist * 5
+                self.minbw = min_dist * 2.5
 
-                # Set max bandwidth to 10x the max distance between neighboring points:
-                self.maxbw = min_dist * 10
+                # Set max bandwidth to 5x the max distance between neighboring points:
+                self.maxbw = min_dist * 5
             else:
                 self.maxbw = self.minbw * 2.5
 
@@ -1809,7 +1841,7 @@ class MuSIC:
                         if not os.path.exists(os.path.join(self.output_path, "logistic_predictions")):
                             os.makedirs(os.path.join(self.output_path, "logistic_predictions"))
                         to_save = np.hstack((y_binary, predictions, X))
-                        cols = ["true y", "predictions"] + self.feature_names
+                        cols = ["true y", "predictions"] + list(self.feature_names)
                         predictions_df = pd.DataFrame(to_save, columns=cols, index=self.sample_names[self.x_chunk])
                         predictions_df.to_csv(f"logistic_predictions_{target}.csv")
 
@@ -1925,7 +1957,7 @@ class MuSIC:
                         # Subtract 1 because in the case that all coefficients are zero, np.exp(linear predictor)
                         # will be 1 at minimum, though it should be zero.
                         y_pred = self.distr_obj.predict(y_pred)
-                        y_pred[y_pred == 1] -= 1.0
+                        y_pred[y_pred <= 1.01] = 0.0
                     y_pred = pd.DataFrame(y_pred, index=self.sample_names, columns=[target])
                     all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
                 return all_y_pred
