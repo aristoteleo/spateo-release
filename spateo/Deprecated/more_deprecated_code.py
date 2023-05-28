@@ -2235,7 +2235,6 @@ for target in targets:
         self.adata.obsm[f"spatial_effect_sender_vf_{col}_{target}"] = sending_vf
         self.adata.obsm[f"spatial_effect_receiver_vf_{col}_{target}"] = receiving_vf
 
-
 # if spatial_weights is not None:
 #     if final:
 #         print("Betas: ", betas)

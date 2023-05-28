@@ -870,7 +870,6 @@ class Poisson(Distribution):
             freq_weights = 1.0
 
         fitted = self.clip(fitted)
-        is_na = np.isnan(fitted).any()
 
         ll = np.sum(freq_weights * (endog * np.log(fitted) - fitted - special.gammaln(endog + 1)))
         ll = scale * ll

@@ -876,7 +876,8 @@ class MuSIC:
             else:
                 # row_sums = dmat_neighbors.sum(axis=1)
                 # dmat_neighbors = dmat_neighbors / row_sums[:, np.newaxis]
-                # dmat_neighbors[dmat_neighbors > 1] = 1
+                #dmat_neighbors[dmat_neighbors > 1] = np.log(dmat_neighbors[dmat_neighbors > 1])
+                dmat_neighbors[dmat_neighbors > 1] = 1
                 # niche_array = np.hstack((self.cell_categories.values, dmat_neighbors))
                 self.X = dmat_neighbors
 
