@@ -6,6 +6,7 @@ import argparse
 import json
 import math
 import os
+import random
 import re
 import sys
 from copy import deepcopy
@@ -876,12 +877,13 @@ class MuSIC:
             else:
                 # row_sums = dmat_neighbors.sum(axis=1)
                 # dmat_neighbors = dmat_neighbors / row_sums[:, np.newaxis]
-                #dmat_neighbors[dmat_neighbors > 1] = np.log(dmat_neighbors[dmat_neighbors > 1])
+                # dmat_neighbors[dmat_neighbors > 1] = np.log(dmat_neighbors[dmat_neighbors > 1])
                 dmat_neighbors[dmat_neighbors > 1] = 1
                 # niche_array = np.hstack((self.cell_categories.values, dmat_neighbors))
                 self.X = dmat_neighbors
+                # self.X = niche_array
 
-                neighbors_cols = [col.replace("group", "proxim") for col in self.cell_categories.columns]
+                neighbors_cols = [col.replace("Group", "Proxim") for col in self.cell_categories.columns]
                 # self.feature_names = list(self.cell_categories.columns) + neighbors_cols
                 self.feature_names = neighbors_cols
 
@@ -1159,20 +1161,18 @@ class MuSIC:
                 #     self.minbw = min_dist * 2
                 # else:
                 #     self.minbw = min_dist * 5
-                self.minbw = min_dist * 2.5
+                self.minbw = min_dist * 3
 
-                # Set max bandwidth to 5x the max distance between neighboring points:
-                self.maxbw = min_dist * 5
-            else:
-                self.maxbw = self.minbw * 2.5
+                # Set max bandwidth to 6x (arbitrarily chosen) the max distance between neighboring points:
+                self.maxbw = min_dist * 6
 
         # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
         else:
             if self.maxbw is None:
-                self.maxbw = 100
+                self.maxbw = 10
 
             if self.minbw is None:
-                self.minbw = 5
+                self.minbw = 3
 
         if self.minbw >= self.maxbw:
             raise ValueError(
@@ -1302,28 +1302,31 @@ class MuSIC:
             -1, 1
         )
 
-        # Global relationship regularization:
-        correlations = []
-        for idx in range(X.shape[1]):
-            # Create a boolean mask where both the current X column and y are nonzero
-            mask = (X[:, idx].ravel() != 0) & (y.ravel() != 0)
+        # Global relationship regularization (only for non-niche models):
+        if self.mod_type != "niche":
+            correlations = []
+            for idx in range(X.shape[1]):
+                # Create a boolean mask where both the current X column and y are nonzero
+                mask = (X[:, idx].ravel() != 0) & (y.ravel() != 0)
 
-            # Create a subset of the data using the mask
-            X_subset = X[mask, idx]
-            y_subset = y[mask]
+                # Create a subset of the data using the mask
+                X_subset = X[mask, idx]
+                y_subset = y[mask]
 
-            # Compute the Pearson correlation coefficient for the subset
-            if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
-                correlation = pearsonr(X_subset, y_subset)[0]
-            else:
-                correlation = np.nan  # Not enough data points to compute correlation
+                # Compute the Pearson correlation coefficient for the subset
+                if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
+                    correlation = pearsonr(X_subset, y_subset)[0]
+                else:
+                    correlation = np.nan  # Not enough data points to compute correlation
 
-            # Append the correlation to the correlations list
-            correlations.append(correlation)
-        correlations = np.array(correlations)
+                # Append the correlation to the correlations list
+                correlations.append(correlation)
+            correlations = np.array(correlations)
 
-        threshold = np.abs(correlations) < 0.1
-        mask = np.where(threshold, np.abs(correlations), 1.0)
+            threshold = np.abs(correlations) < 0.1
+            mask = np.where(threshold, np.abs(correlations), 1.0)
+        else:
+            mask = None
 
         if mask_indices is not None:
             wi[mask_indices] = 0.0
@@ -1498,16 +1501,18 @@ class MuSIC:
                         self.logger.info(
                             "Plateau detected- exiting optimization and returning optimum score up to this point."
                         )
+                        self.logger.info("Score from last iteration: ", optimum_score_history[-2])
+                        self.logger.info("Score from current iteration: ", optimum_score_history[-1])
                         patience = 3
 
-                if np.abs(new_ub - self.maxbw) < 1.0:
+                if np.abs(new_ub - self.maxbw) < 1.0 and self.bw_fixed:
                     self.logger.info(
                         "Approaching maximum bandwidth. Exiting optimization and returning optimum score up to this "
                         "point."
                     )
                     patience = 3
 
-                if np.abs(new_lb - self.minbw) < 1.0:
+                if np.abs(new_lb - self.minbw) < 1.0 and self.bw_fixed:
                     self.logger.info(
                         "Approaching minimum bandwidth. Exiting optimization and returning optimum score up to this "
                         "point."
@@ -1640,10 +1645,6 @@ class MuSIC:
                 if self.distr == "poisson" or self.distr == "nb":
                     # For negative binomial, first compute the dispersion:
                     if self.distr == "nb":
-                        if self.fit_intercept:
-                            ENP = self.n_features + 1
-                        else:
-                            ENP = self.n_features
                         dev_resid = self.distr_obj.deviance_residuals(y, all_fit_outputs[:, 1].reshape(-1, 1))
                         residual_deviance = np.sum(dev_resid**2)
                         df = n_samples - ENP
@@ -1879,9 +1880,9 @@ class MuSIC:
             if self.distr != "gaussian":
                 lim = np.log(np.abs(y + 1e-6))
                 # To avoid the influence of outliers:
-                self.clip = np.percentile(lim, 95)
+                self.clip = np.percentile(lim, 99.7)
             else:
-                self.clip = np.percentile(y, 95)
+                self.clip = np.percentile(y, 99.7)
             self.clip = self.comm.bcast(self.clip, root=0)
 
             if self.bw is not None:
