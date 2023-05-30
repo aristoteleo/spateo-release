@@ -1,0 +1,37 @@
+package:
+  name: "spateo-release"
+  version: "1.0.2"
+
+source:
+#  path: ../
+  git_url: https://github.com/aristoteleo/spateo-release.git
+  git_depth: 1
+
+build:
+  preserve_egg_dir: True
+
+requirements:
+  host:
+    - python
+    - vtk==9.2.2
+    - numpy==1.23.*
+    - cython
+    - wrapt==1.14.*
+    - pyyaml
+    - cffi
+    - rvlib
+    - fiona<1.9
+    - anndata==0.7.5
+    - markdown==3.3.*
+  run:
+
+about:
+  home: https://github.com/aristoteleo/spateo-release
+  license: MIT
+  license_family: MIT
+  license_file: LICENSE
+  summary: "Spateo: multidimensional spatiotemporal modeling of single-cell spatial transcriptomics"
+
+extra:
+  recipe-maintainers:
+    - Xiaojieqiu
