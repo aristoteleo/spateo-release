@@ -2235,6 +2235,15 @@ for target in targets:
         self.adata.obsm[f"spatial_effect_sender_vf_{col}_{target}"] = sending_vf
         self.adata.obsm[f"spatial_effect_receiver_vf_{col}_{target}"] = receiving_vf
 
+
+r_tf_db_subset = r_tf_db[r_tf_db["pathway"].isin(pathways)]
+receptors = set(r_tf_db_subset["receptor"])
+r_complexes = [elem for elem in receptors if "_" in elem]
+# Get individual components if any complexes are included in this list:
+receptors = [r for item in receptors for r in item.split("_")]
+receptors = list(set(receptors))
+
+
 # if spatial_weights is not None:
 #     if final:
 #         print("Betas: ", betas)

@@ -545,6 +545,8 @@ class MuSIC:
             else:
                 raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
 
+        database_pathways = set(self.lr_db["pathway"])
+
         if self.mod_type == "lr" or self.mod_type == "ligand":
             database_ligands = set(self.lr_db["from"])
 
@@ -558,6 +560,23 @@ class MuSIC:
                 l_complexes = [elem for elem in ligands if "_" in elem]
                 # Get individual components if any complexes are included in this list:
                 ligands = [l for item in ligands for l in item.split("_")]
+
+            elif self.custom_pathways_path is not None or self.custom_pathways is not None:
+                if self.custom_pathways_path is not None:
+                    with open(self.custom_pathways_path, "r") as f:
+                        pathways = f.read().splitlines()
+
+                else:
+                    pathways = self.custom_pathways
+
+                pathways = [p for p in pathways if p in database_pathways]
+                # Get all ligands associated with these pathway(s):
+                lr_db_subset = self.lr_db[self.lr_db["pathway"].isin(pathways)]
+                ligands = list(set(lr_db_subset["from"]))
+                l_complexes = [elem for elem in ligands if "_" in elem]
+                # Get individual components if any complexes are included in this list:
+                ligands = [r for item in ligands for r in item.split("_")]
+
             else:
                 # List of possible complexes to search through:
                 l_complexes = [elem for elem in database_ligands if "_" in elem]
@@ -567,7 +586,8 @@ class MuSIC:
                 # Get list of ligands from among the most highly spatially-variable genes, indicative of potentially
                 # interesting spatially-enriched signal:
                 self.logger.info(
-                    "Preparing data: getting list of ligands from among the most highly " "spatially-variable genes."
+                    "Preparing data: no specific ligands provided- getting list of ligands from among the most highly "
+                    "spatially-variable genes."
                 )
                 m_degs = moran_i(adata)
                 m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
@@ -639,7 +659,6 @@ class MuSIC:
 
         if self.mod_type == "lr" or self.mod_type == "receptor":
             database_receptors = set(self.lr_db["to"])
-            database_pathways = set(r_tf_db["pathway"])
 
             if self.custom_receptors_path is not None or self.custom_receptors is not None:
                 if self.custom_receptors_path is not None:
@@ -660,12 +679,11 @@ class MuSIC:
                     pathways = self.custom_pathways
                 pathways = [p for p in pathways if p in database_pathways]
                 # Get all receptors associated with these pathway(s):
-                r_tf_db_subset = r_tf_db[r_tf_db["pathway"].isin(pathways)]
-                receptors = set(r_tf_db_subset["receptor"])
+                lr_db_subset = self.lr_db[self.lr_db["pathway"].isin(pathways)]
+                receptors = list(set(lr_db_subset["to"]))
                 r_complexes = [elem for elem in receptors if "_" in elem]
-                # Get individual components if any complexes are included in this list:
+                # Get all individual components if any complexes are included in this list:
                 receptors = [r for item in receptors for r in item.split("_")]
-                receptors = list(set(receptors))
 
             else:
                 # List of possible complexes to search through:
@@ -676,7 +694,8 @@ class MuSIC:
                 # Get list of receptors from among the most highly spatially-variable genes, indicative of
                 # potentially interesting spatially-enriched signal:
                 self.logger.info(
-                    "Preparing data: getting list of ligands from among the most highly spatially-variable genes."
+                    "Preparing data: no specific receptors or pathways provided- getting list of receptors from among "
+                    "the most highly spatially-variable genes."
                 )
                 m_degs = moran_i(adata)
                 m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index

@@ -2,10 +2,11 @@
 Auxiliary functions to aid in the interpretation functions for the spatial and spatially-lagged regression models.
 """
 import sys
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 from scipy.stats import pearsonr
 from sklearn.metrics import confusion_matrix, recall_score
+from sklearn.utils import check_array
 
 try:
     from typing import Literal
@@ -487,9 +488,359 @@ def golden_section_search(func: Callable, a: float, b: float, tol: float = 1e-5,
 
 
 # ---------------------------------------------------------------------------------------------------
+# Differential testing functions
+# ---------------------------------------------------------------------------------------------------
+def fit_DE_GAM(
+    counts: Union[np.ndarray, scipy.sparse.spmatrix],
+    var: np.ndarray,
+    genes: List[str],
+    cat_cov: Optional[np.ndarray] = None,
+    weights: Optional[np.ndarray] = None,
+    offset: Optional[np.ndarray] = None,
+    nknots: int = 6,
+    parallel: bool = True,
+    return_aic: bool = False,
+    family: Literal["gaussian", "poisson", "nb"] = "nb",
+):
+    """Fit generalized additive models for the purpose of differential expression testing from spatial
+    transcriptomics data.
+
+    Args:
+        counts: Matrix of gene expression counts, with cells as rows and genes as columns (so shape [n_samples,
+            n_genes])
+        cat_cov: Optional design matrix for fixed effects (i.e. categorical covariates)
+        var: The continuous predictor variable (e.g. pseudotime) of shape [n_samples, ]
+        genes: List of genes present in the counts matrix
+        weights: Optional sample weights of shape [n_samples, ]
+        offset: Optional offset term of shape [n_samples, ]
+        nknots: The number of knots to be used in the smoothing function. Defaults to 6.
+        parallel: Whether to use parallel processing. Defaults to True.
+        return_aic: Whether to return the AIC for each gene. Defaults to False.
+        family: The family of the generalized additive model. Defaults to "nb" for negative binomial, with "gaussian"
+            and "poisson" as other options.
+
+    Returns:
+        gam: List of fitted generalized additive models, one for each gene
+    """
+    if weights is None:
+        weights = np.ones((counts.shape[0], 1))
+
+    # Check non-negativity of counts:
+    if (counts < 0).any().any():
+        raise ValueError("All values of the count matrix should be non-negative")
+
+    # Check that all vectors have the same shape:
+    if var.shape != weights.shape:
+        raise ValueError("var and weights must have identical dimensions.")
+
+    if cat_cov is not None and cat_cov.shape[0] != counts.shape[0]:
+        raise ValueError("The dimensions of cat_cov do not match those of counts.")
+
+    if var.shape[0] != counts.shape[0]:
+        raise ValueError("variable matrix and count matrix must have the same number of cells.")
+    if weights.shape[0] != counts.shape[0]:
+        raise ValueError("weights matrix and count matrix must have the same number of cells.")
+
+    if np.isnan(var).any():
+        raise ValueError("Variable array contains NA values.")
+
+
+def calcFactorRLE(data: np.ndarray) -> np.ndarray:
+    """
+    Calculate scaling factors using the Relative Log Expression (RLE) method. Python implementation of the same-named
+    function from edgeR:
+
+    Robinson, M. D., McCarthy, D. J., & Smyth, G. K. (2010). edgeR: a Bioconductor package for
+    differential expression analysis of digital gene expression data. Bioinformatics, 26(1), 139-140.
+
+    Args:
+        data: An array-like object representing the data matrix.
+
+    Returns:
+        factors: An array of scaling factors for each cell
+    """
+    gm = np.exp(np.mean(np.log(data), axis=1))
+    factors = np.apply_along_axis(lambda u: np.median(u / gm[gm > 0]), axis=0, arr=data)
+    return factors
+
+
+def calcFactorQuantile(data: np.ndarray, lib_size: float, p: float = 0.75) -> np.ndarray:
+    """
+    Calculate scaling factors using the Quantile method. Python implementation of the same-named function from edgeR:
+
+    Robinson, M. D., McCarthy, D. J., & Smyth, G. K. (2010). edgeR: a Bioconductor package for
+    differential expression analysis of digital gene expression data. Bioinformatics, 26(1), 139-140.
+
+    Args:
+        data: An array-like object representing the data matrix.
+        lib_size: The library size or total count to normalize against.
+        p: The quantile value (default: 0.75).
+
+    Returns:
+        factors: An array of scaling factors for each cell
+    """
+    factors = np.percentile(data, p * 100, axis=1)
+    if np.min(factors) == 0:
+        print("One or more quantiles are zero")
+    factors /= lib_size
+    return factors
+
+
+def calcFactorTMM(
+    obs: Union[float, np.ndarray],
+    ref: Union[float, np.ndarray],
+    libsize_obs: Optional[float] = None,
+    libsize_ref: Optional[float] = None,
+    logratioTrim: float = 0.3,
+    sumTrim: float = 0.05,
+    doWeighting: bool = True,
+    Acutoff: float = -1e10,
+) -> np.ndarray:
+    """
+    Calculate scaling factors using the Trimmed Mean of M-values (TMM) method. Python implementation of the
+    same-named function from edgeR:
+
+    Robinson, M. D., McCarthy, D. J., & Smyth, G. K. (2010). edgeR: a Bioconductor package for
+    differential expression analysis of digital gene expression data. Bioinformatics, 26(1), 139-140.
+
+    Args:
+        obs: An array-like object representing the observed library counts.
+        ref: An array-like object representing the reference library counts.
+        libsize_obs: The library size of the observed library (default: sum of observed counts).
+        libsize_ref: The library size of the reference library (default: sum of reference counts).
+        logratioTrim: The fraction of extreme log-ratios to be trimmed (default: 0.3).
+        sumTrim: The fraction of extreme log-ratios to be trimmed based on the absolute expression (default: 0.05).
+        doWeighting: Whether to perform weighted TMM estimation (default: True).
+        Acutoff: The cutoff value for removing infinite values (default: -1e10).
+
+    Returns:
+        Factors: the scaling factors for each cell
+    """
+    obs = np.asarray(obs, dtype=float)
+    ref = np.asarray(ref, dtype=float)
+
+    nO = np.sum(obs) if libsize_obs is None else libsize_obs
+    nR = np.sum(ref) if libsize_ref is None else libsize_ref
+
+    logR = np.log2((obs / nO) / (ref / nR))  # log ratio of expression, accounting for library size
+    absE = (np.log2(obs / nO) + np.log2(ref / nR)) / 2  # absolute expression
+    v = (nO - obs) / nO / obs + (nR - ref) / nR / ref  # estimated asymptotic variance
+
+    # remove infinite values, cutoff based on A
+    fin = np.isfinite(logR) & np.isfinite(absE) & (absE > Acutoff)
+
+    logR = logR[fin]
+    absE = absE[fin]
+    v = v[fin]
+
+    if np.max(np.abs(logR)) < 1e-6:
+        return 1
+
+    n = len(logR)
+    loL = int(n * logratioTrim) + 1
+    loS = int(n * sumTrim) + 1
+
+    keep = (np.argsort(logR).argsort() >= loL) & (np.argsort(absE).argsort() >= loS)
+
+    if doWeighting:
+        f = np.sum(logR[keep] / v[keep], axis=0, keepdims=True) / np.sum(1 / v[keep], axis=0, keepdims=True)
+    else:
+        f = np.mean(logR[keep], axis=0, keepdims=True)
+
+    if np.isnan(f):
+        f = 0
+
+    return 2**f
+
+
+def calcFactorTMMwsp(
+    obs: Union[float, np.ndarray],
+    ref: Union[float, np.ndarray],
+    libsize_obs: Optional[float] = None,
+    libsize_ref: Optional[float] = None,
+    logratioTrim: float = 0.3,
+    sumTrim: float = 0.05,
+    doWeighting: bool = True,
+) -> np.ndarray:
+    """
+    Calculate scaling factors using the Trimmed Mean of M-values with singleton pairing (TMMwsp) method. Python
+    implementation of the same-named function from edgeR:
+
+    Robinson, M. D., McCarthy, D. J., & Smyth, G. K. (2010). edgeR: a Bioconductor package for
+    differential expression analysis of digital gene expression data. Bioinformatics, 26(1), 139-140.
+
+    Args:
+        obs: An array-like object representing the observed library counts.
+        ref: An array-like object representing the reference library counts.
+        libsize_obs: The library size of the observed library (default: sum of observed counts).
+        libsize_ref: The library size of the reference library (default: sum of reference counts).
+        logratioTrim: The fraction of extreme log-ratios to be trimmed (default: 0.3).
+        sumTrim: The fraction of extreme log-ratios to be trimmed based on the absolute expression (default: 0.05).
+        doWeighting: Whether to perform weighted TMM estimation (default: True).
+        Acutoff: The cutoff value for removing infinite values (default: -1e10).
+
+    Returns:
+        Factors: the scaling factors for each cell
+    """
+    obs = np.asarray(obs, dtype=float)
+    ref = np.asarray(ref, dtype=float)
+
+    eps = 1e-14
+
+    pos_obs = obs > eps
+    pos_ref = ref > eps
+    npos = 2 * pos_obs + pos_ref
+
+    i = np.where((npos == 0) | np.isnan(npos))[0]
+    if len(i) > 0:
+        obs = np.delete(obs, i)
+        ref = np.delete(ref, i)
+        npos = np.delete(npos, i)
+
+    if libsize_obs is None:
+        libsize_obs = np.sum(obs)
+    if libsize_ref is None:
+        libsize_ref = np.sum(ref)
+
+    zero_obs = npos == 1
+    zero_ref = npos == 2
+    k = zero_obs | zero_ref
+    n_eligible_singles = min(np.sum(zero_obs), np.sum(zero_ref))
+    if n_eligible_singles > 0:
+        refk = np.sort(ref[k])[::-1][:n_eligible_singles]
+        obsk = np.sort(obs[k])[::-1][:n_eligible_singles]
+        obs = np.concatenate([obs[~k], obsk])
+        ref = np.concatenate([ref[~k], refk])
+    else:
+        obs = obs[~k]
+        ref = ref[~k]
+
+    n = len(obs)
+    if n == 0:
+        return 1
+
+    obs_p = obs / libsize_obs
+    ref_p = ref / libsize_ref
+    M = np.log2(obs_p / ref_p)
+    A = 0.5 * np.log2(obs_p * ref_p)
+
+    if np.max(np.abs(M)) < 1e-6:
+        return 1
+
+    obs_p_shrunk = (obs + 0.5) / (libsize_obs + 0.5)
+    ref_p_shrunk = (ref + 0.5) / (libsize_ref + 0.5)
+    M_shrunk = np.log2(obs_p_shrunk / ref_p_shrunk)
+    o_M = np.lexsort((M_shrunk, M))
+
+    o_A = np.argsort(A)
+
+    loM = int(n * logratioTrim) + 1
+    hiM = n + 1 - loM
+    keep_M = np.zeros(n, dtype=bool)
+    keep_M[o_M[loM:hiM]] = True
+    loA = int(n * sumTrim) + 1
+    hiA = n + 1 - loA
+    keep_A = np.zeros(n, dtype=bool)
+    keep_A[o_A[loA:hiA]] = True
+    keep = keep_M & keep_A
+    M = M[keep]
+
+    if doWeighting:
+        obs_p = obs_p[keep]
+        ref_p = ref_p[keep]
+        v = (1 - obs_p) / obs_p / libsize_obs + (1 - ref_p) / ref_p / libsize_ref
+        w = (1 + 1e-6) / (v + 1e-6)
+        TMM = np.sum(w * M) / np.sum(w)
+    else:
+        TMM = np.mean(M)
+
+    factors = 2**TMM
+    return factors
+
+
+def calcNormFactors(
+    counts: Union[np.ndarray, scipy.sparse.spmatrix],
+    lib_size: Optional[np.ndarray] = None,
+    method: str = "TMM",
+    refColumn: Optional[int] = None,
+    logratioTrim: float = 0.3,
+    sumTrim: float = 0.05,
+    doWeighting: bool = True,
+    Acutoff: float = -1e10,
+    p: float = 0.75,
+) -> np.ndarray:
+    """
+    Function to scale normalize RNA-Seq data for count matrices.
+    This is a Python translation of an R function from edgeR package.
+
+    Args:
+        object: Array or sparse array of shape [n_samples, n_features] containing gene expression data
+        lib_size: The library sizes for each sample.
+        method: The normalization method. Can be:
+                -"TMM": trimmed mean of M-values,
+                -"TMMwsp": trimmed mean of M-values with singleton pairings,
+                -"RLE": relative log expression, or
+                -"upperquartile": using the quantile method
+            Defaults to "TMM".
+        refColumn: Optional reference column for normalization
+        logratioTrim: For TMM normalization, the fraction of extreme log-ratios to be trimmed (default: 0.3).
+        sumTrim: For TMM normalization, the fraction of extreme log-ratios to be trimmed based on the absolute
+            expression (default: 0.05).
+        doWeighting: Whether to perform weighted TMM estimation (default: True).
+        Acutoff: For TMM normalization, the cutoff value for removing infinite values (default: -1e10).
+        p: Parameter for upper quartile normalization. Defaults to 0.75.
+
+    Returns:
+        factors: The normalization factors for each sample.
+    """
+    if isinstance(counts, scipy.sparse.spmatrix):
+        counts = counts.toarray()
+    # Norm factor computation is derived from R functions, which assume array has shape [n_genes, n_cells]; transpose
+    # our arrays to match this convention:
+    counts = counts.T
+
+    if np.any(np.isnan(counts)):
+        raise ValueError("NA counts not permitted")
+    nsamples = counts.shape[1]
+
+    # Check library size
+    if lib_size is None:
+        lib_size = np.sum(counts, axis=0)
+    else:
+        if np.any(np.isnan(lib_size)):
+            raise ValueError("NA lib sizes not permitted")
+        if len(lib_size) != nsamples:
+            if len(lib_size) > 1:
+                print("calcNormFactors: length (lib size) doesn't match number of samples")
+            lib_size = np.repeat(lib_size, nsamples)
+
+    # Remove all zero rows (all-zero genes)
+    allzero = np.sum(counts > 0, axis=1) == 0
+    if np.any(allzero):
+        counts = counts[~allzero]
+
+    # Calculate factors
+    methods = {
+        "TMM": calcFactorTMM,
+        "TMMwsp": calcFactorTMMwsp,
+        "RLE": calcFactorRLE,
+        "upperquartile": calcFactorQuantile,
+    }
+
+    if method == "TMM" or method == "TMMwsp":
+        "filler"
+    elif method == "upperquartile":
+        "filler"
+
+    # Factors should multiple to one
+    # factors = factors / np.exp(np.mean(np.log(factors)))
+    # return factors
+
+
+# ---------------------------------------------------------------------------------------------------
 # Nonlinearity
 # ---------------------------------------------------------------------------------------------------
-def softplus(z):
+def softplus(z: np.ndarray):
     """Numerically stable version of log(1 + exp(z))."""
     nl = z.copy()
     nl[z > 35] = z[z > 35]

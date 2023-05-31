@@ -10,10 +10,11 @@ These include:
     of the predicted influence of the ligand on downstream expression.
 """
 import argparse
+import itertools
 import math
 import os
 import sys
-from typing import List, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -46,6 +47,9 @@ class MuSIC_Interpreter(MuSIC):
         super().__init__(comm, parser)
 
         self.search_bw = self.arg_retrieve.search_bw
+        if self.search_bw is None:
+            self.search_bw = self.n_neighbors
+            self.bw_fixed = False
         self.k = self.arg_retrieve.top_k_receivers
 
         # Coefficients:
@@ -67,11 +71,7 @@ class MuSIC_Interpreter(MuSIC):
         if not os.path.exists(os.path.join(parent_dir, "significance")):
             os.makedirs(os.path.join(parent_dir, "significance"))
 
-    def compute_coeff_significance(
-        self,
-        method: str = "fdr_bh",
-        significance_threshold: float = 0.05,
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    def compute_coeff_significance(self, method: str = "fdr_bh", significance_threshold: float = 0.05):
         """Computes local statistical significance for fitted coefficients.
 
         Args:
@@ -139,20 +139,276 @@ class MuSIC_Interpreter(MuSIC):
                 q_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_q_values.csv"))
                 is_significant_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"))
 
+    def get_effect_potential(
+        self,
+        target: Optional[str] = None,
+        ligand: Optional[str] = None,
+        receptor: Optional[str] = None,
+        sender_cell_type: Optional[str] = None,
+        receiver_cell_type: Optional[str] = None,
+        spatial_weights: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
+        store_summed_potential: bool = True,
+    ) -> Tuple[scipy.sparse.spmatrix, np.ndarray, np.ndarray]:
+        """For each cell, computes the 'signaling effect potential', interpreted as a quantification of the strength of
+        effect of intercellular communication on downstream expression mediated by any given cell with any
+        combination of ligands and/or cognate receptors, as inferred from the model results. Computations are
+        similar to those of :func ~`.inferred_effect_direction`, but stops short of computing vector fields.
+
+        Args:
+            target: Optional string to select target from among the genes used to fit the model to compute signaling
+                effects for. Note that this function takes only one target at a time. If not given, will take the
+                first name from among all targets.
+            ligand: Needed if :attr `mod_type` is 'ligand'; select ligand from among the ligands used to fit the
+                model to compute signaling potential.
+            receptor: Needed if :attr `mod_type` is 'lr'; together with 'ligand', used to select ligand-receptor pair
+                from among the ligand-receptor pairs used to fit the model to compute signaling potential.
+            sender_cell_type: Can optionally be used to select cell type from among the cell types used to fit the model
+                to compute sent potential. Must be given if :attr `mod_type` is 'niche'.
+            receiver_cell_type: Can optionally be used to condition sent potential on receiver cell type.
+            spatial_weights: Optional pairwise spatial weights matrix. If not given, will compute at runtime.
+            store_summed_potential: If True, will store both sent and received signaling potential as entries in
+                .obs of the AnnData object.
+
+        Returns:
+            effect_potential: Array of shape [n_samples, n_samples]; proxy for the "signaling effect potential" with
+                respect to a particular target gene between each sender-receiver pair of cells.
+            normalized_effect_potential_sum_sender: Array of shape [n_samples,]; for each sending cell, the sum of the
+                signaling potential to all receiver cells for a given target gene, normalized between 0 and 1.
+            normalized_effect_potential_sum_receiver: Array of shape [n_samples,]; for each receiving cell, the sum of
+                the signaling potential from all sender cells for a given target gene, normalized between 0 and 1.
+        """
+        if self.mod_type == "receptor":
+            raise ValueError("Sent potential is not defined for receptor models.")
+
+        if target is None:
+            target = list(self.coeffs.keys())[0]
+
+        if spatial_weights is None:
+            # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver.
+            # Note: as the default (if bw is not otherwise provided), the n nearest neighbors will be used for the
+            # bandwidth:
+            spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True)
+
+        # Testing: compare both ways:
+        coeffs = self.coeffs[target]
+        # Set negligible coefficients to zero:
+        coeffs[coeffs.abs() < 1e-2] = 0
+        target_expr = self.targets_expr[target].values.reshape(1, -1)
+        target_indicator = np.where(target_expr != 0, 1, 0)
+
+        # For ligand models, "signaling potential" can only use the ligand information. For lr models, it can further
+        # conditioned on the receptor expression:
+        if self.mod_type == "ligand" or self.mod_type == "lr":
+            if self.mod_type == "ligand" and ligand is None:
+                raise ValueError("Must provide ligand name for ligand model.")
+            elif self.mod_type == "lr" and (ligand is None or receptor is None):
+                raise ValueError("Must provide both ligand name and receptor name for lr model.")
+
+            if self.mod_type == "lr":
+                lr_pair = (ligand, receptor)
+                if lr_pair not in self.lr_pairs:
+                    raise ValueError(
+                        "Invalid ligand-receptor pair given. Check that input to 'lr_pair' is given in "
+                        "the form of a tuple."
+                    )
+
+            idx = self.ligands_expr.columns.index(ligand)
+            # Use the non-lagged ligand expression array:
+            ligand_expr = self.ligands_expr_nonlag[ligand].values.reshape(-1, 1)
+            # Referred to as "sent potential"
+            sent_potential = spatial_weights.multiply(ligand_expr)
+            sent_potential.eliminate_zeros()
+
+            # If "lr", incorporate the receptor expression array:
+            if self.mod_type == "lr":
+                idx = self.receptors_expr.columns.index(receptor)
+                receptor_expr = self.receptors_expr[receptor].values.reshape(1, -1)
+                sent_potential = sent_potential.multiply(receptor_expr)
+                sent_potential.eliminate_zeros()
+
+            coeff = coeffs.iloc[:, idx].values.reshape(1, -1)
+            # Weight each column by the coefficient magnitude and finally by the indicator for expression/no
+            # expression of the target and store as sparse array:
+            sig_interm = sent_potential.multiply(coeff)
+            sig_interm.eliminate_zeros()
+            effect_potential = sig_interm.multiply(target_indicator)
+            effect_potential.eliminate_zeros()
+
+        elif self.mod_type == "niche":
+            if sender_cell_type is None:
+                raise ValueError("Must provide sending cell type name for niche models.")
+
+            idx = self.cell_categories.columns.index(sender_cell_type)
+            sender_cell_type = self.cell_categories[sender_cell_type].values.reshape(-1, 1)
+            sent_potential = spatial_weights.multiply(sender_cell_type)
+            sent_potential.eliminate_zeros()
+
+            # Check whether to condition on receiver cell type:
+            if receiver_cell_type is not None:
+                idx = self.cell_categories.columns.index(receiver_cell_type)
+                receiver_cell_type = self.cell_categories[receiver_cell_type].values.reshape(1, -1)
+                sent_potential = sent_potential.multiply(receiver_cell_type)
+                sent_potential.eliminate_zeros()
+
+            coeff = coeffs.iloc[:, idx].values.reshape(1, -1)
+            # Weight each column by the coefficient magnitude and finally by the indicator for expression/no expression
+            # of the target and store as sparse array:
+            sig_interm = sent_potential.multiply(coeff)
+            sig_interm.eliminate_zeros()
+            effect_potential = sig_interm.multiply(target_indicator)
+            effect_potential.eliminate_zeros()
+
+        effect_potential_sum_sender = np.array(effect_potential.sum(axis=1)).reshape(-1)
+        normalized_effect_potential_sum_sender = (effect_potential_sum_sender - np.min(effect_potential_sum_sender)) / (
+            np.max(effect_potential_sum_sender) - np.min(effect_potential_sum_sender)
+        )
+        effect_potential_sum_receiver = np.array(effect_potential.sum(axis=0)).reshape(-1)
+        normalized_effect_potential_sum_receiver = (
+            effect_potential_sum_receiver - np.min(effect_potential_sum_receiver)
+        ) / (np.max(effect_potential_sum_receiver) - np.min(effect_potential_sum_receiver))
+
+        # Store summed sent/received potential:
+        if store_summed_potential:
+            if self.mod_type == "niche":
+                if receiver_cell_type is None:
+                    self.adata.obs[
+                        f"norm_spatial_effect_sum_sent_effect_potential_{sender_cell_type}_for_{target}"
+                    ] = normalized_effect_potential_sum_sender
+
+                    self.adata.obs[
+                        f"norm_spatial_effect_sum_received_effect_potential_from_{sender_cell_type}_for_{target}"
+                    ] = normalized_effect_potential_sum_receiver
+                else:
+                    self.adata.obs[
+                        f"norm_spatial_effect_sum_sent_effect_potential_{sender_cell_type}_{receiver_cell_type}_for"
+                        f"_{target}"
+                    ] = normalized_effect_potential_sum_sender
+
+                    self.adata.obs[
+                        f"norm_spatial_effect_sum_{receiver_cell_type}_received_effect_potential_from_"
+                        f"{sender_cell_type}_for_{target}"
+                    ] = normalized_effect_potential_sum_receiver
+
+            elif self.mod_type == "ligand":
+                self.adata.obs[
+                    f"norm_spatial_effect_sum_sent_effect_potential_{ligand}_for_{target}"
+                ] = normalized_effect_potential_sum_sender
+
+                self.adata.obs[
+                    f"norm_spatial_effect_sum_received_effect_potential_from_{ligand}_for_{target}"
+                ] = normalized_effect_potential_sum_receiver
+
+            elif self.mod_type == "lr":
+                self.adata.obs[
+                    f"norm_spatial_effect_sum_sent_effect_potential_{ligand}_{receptor}_for_{target}"
+                ] = normalized_effect_potential_sum_sender
+
+                self.adata.obs[
+                    f"norm_spatial_effect_sum_received_effect_potential_from_{ligand}_{receptor}_for_{target}"
+                ] = normalized_effect_potential_sum_receiver
+
+        return effect_potential, normalized_effect_potential_sum_sender, normalized_effect_potential_sum_receiver
+
+    def get_pathway_potential(
+        self,
+        pathway: str,
+        target: Optional[str] = None,
+        spatial_weights: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
+        store_summed_potential: bool = True,
+    ):
+        """For each cell, computes the 'pathway effect potential', which is an aggregation of the effect potentials
+        of all pathway member ligand-receptor pairs.
+
+        Args:
+            pathway: Name of pathway to compute pathway effect potential for.
+            target: Optional string to select target from among the genes used to fit the model to compute signaling
+                effects for. Note that this function takes only one target at a time. If not given, will take the
+                first name from among all targets.
+            spatial_weights: Optional pairwise spatial weights matrix. If not given, will compute at runtime.
+            store_summed_potential: If True, will store both sent and received signaling potential as entries in
+                .obs of the AnnData object.
+
+        Returns:
+            pathway_sum_potential: Array of shape [n_samples, n_samples]; proxy for the combined "signaling effect
+                potential" with respect to a particular target gene for ligand-receptor pairs in a pathway.
+            normalized_pathway_effect_potential_sum_sender: Array of shape [n_samples,]; for each sending cell,
+                the sum of the pathway sum potential to all receiver cells for a given target gene, normalized between
+                0 and 1.
+            normalized_pathway_effect_potential_sum_receiver: Array of shape [n_samples,]; for each receiving cell,
+                the sum of the pathway sum potential from all sender cells for a given target gene, normalized between
+                0 and 1.
+        """
+
+        # Columns consist of the spatial weights of each observation- convolve with expression of each ligand to
+        # get proxy of ligand signal "sent", weight by the local coefficient value to get a proxy of the "signal
+        # functionally received" in generating the downstream effect and store in .obsp.
+        if target is None:
+            target = self.coeffs.keys()[0]
+
+        lr_db_subset = self.lr_db[self.lr_db["pathway"] == pathway]
+        all_senders = list(set(lr_db_subset["from"]))
+        all_receivers = list(set(lr_db_subset["to"]))
+
+        # All possible ligand-receptor combinations:
+        possible_lr_combos = list(itertools.product(all_senders, all_receivers))
+        valid_lr_combos = list(set(possible_lr_combos).intersection(set(self.lr_pairs)))
+
+        all_pathway_member_effects = {}
+        for j, col in enumerate(valid_lr_combos):
+            ligand = col[0]
+            receptor = col[1]
+            effect_potential, _, _ = self.get_effect_potential(
+                target=target,
+                ligand=ligand,
+                receptor=receptor,
+                spatial_weights=spatial_weights,
+                store_summed_potential=False,
+            )
+            all_pathway_member_effects[f"effect_potential_{ligand}_{receptor}_on_{target}"] = effect_potential
+
+        # Combine results for all ligand-receptor pairs in the pathway:
+        pathway_sum_potential = None
+        for key in all_pathway_member_effects.keys():
+            if pathway_sum_potential is None:
+                pathway_sum_potential = self.adata.obsp[key]
+            else:
+                pathway_sum_potential += self.adata.obsp[key]
+        # self.adata.obsp[f"effect_potential_{pathway}_on_{target}"] = pathway_sum_potential
+
+        pathway_effect_potential_sum_sender = np.array(pathway_sum_potential.sum(axis=1)).reshape(-1)
+        normalized_pathway_effect_potential_sum_sender = (
+            pathway_effect_potential_sum_sender - np.min(pathway_effect_potential_sum_sender)
+        ) / (np.max(pathway_effect_potential_sum_sender) - np.min(pathway_effect_potential_sum_sender))
+
+        pathway_effect_potential_sum_receiver = np.array(pathway_sum_potential.sum(axis=0)).reshape(-1)
+        normalized_effect_potential_sum_receiver = (
+            pathway_effect_potential_sum_receiver - np.min(pathway_effect_potential_sum_receiver)
+        ) / (np.max(pathway_effect_potential_sum_receiver) - np.min(pathway_effect_potential_sum_receiver))
+
+        if store_summed_potential:
+            self.adata.obs[
+                f"norm_sum_sent_effect_potential_{pathway}_for_{target}"
+            ] = normalized_pathway_effect_potential_sum_sender
+            self.adata.obs[
+                f"norm_sum_received_effect_potential_from_{pathway}_for_{target}"
+            ] = normalized_effect_potential_sum_receiver
+
+        return (
+            pathway_sum_potential,
+            normalized_pathway_effect_potential_sum_sender,
+            normalized_effect_potential_sum_receiver,
+        )
+
     def inferred_effect_direction(self, targets: Optional[Union[str, List[str]]] = None):
         """For visualization purposes, used for models that consider ligand expression (:attr `mod_type` is 'ligand' or
-        'lr'. Construct spatial vector fields to infer the directionality of observed effects (the "sources" of the
-        downstream expression).
+        'lr' (for receptor models, assigning directionality is impossible and for niche models, it makes much less
+        sense to draw/compute a vector field). Construct spatial vector fields to infer the directionality of
+        observed effects (the "sources" of the downstream expression).
 
         Parts of this function are inspired by 'communication_direction' from COMMOT: https://github.com/zcang/COMMOT
 
         Args:
-            bw: Bandwidth used for model fitting. Defines the search area around each observation to consider when
-                computing effect directions. For models that include both secreted and membrane-bound signaling,
-                it is recommended to set this higher than the optimal bandwidth found in fitting to be able to cover
-                the larger search area in which secreted signals can have effects.
-            k: Top k receivers to consider when computing effect directions
-            target: Optional string or list of strings to select targets from among the genes used to fit the model
+            targets: Optional string or list of strings to select targets from among the genes used to fit the model
                 to compute signaling effects for. If not given, will use all targets.
         """
         if not self.mod_type == "ligand" or self.mod_type == "lr":
@@ -161,6 +417,8 @@ class MuSIC_Interpreter(MuSIC):
             )
 
         # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
+        # Note: as the default (if bw is not otherwise provided), the n nearest neighbors will be used for the
+        # bandwidth:
         spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True)
 
         # Columns consist of the spatial weights of each observation- convolve with expression of each ligand to
@@ -171,50 +429,39 @@ class MuSIC_Interpreter(MuSIC):
         elif isinstance(targets, str):
             targets = [targets]
 
+        cols = self.ligands_expr.columns if self.mod_type == "ligand" else self.lr_pairs
+
         for target in targets:
-            # Testing: compare both ways:
-            coeffs = self.coeffs[target]
-            # Set negligible coefficients to zero:
-            coeffs[coeffs.abs() < 1e-2] = 0
-            target_expr = self.targets_expr[target].values.reshape(1, -1)
-            target_indicator = np.where(target_expr != 0, 1, 0)
+            for j, col in enumerate(cols):
+                if self.mod_type == "lr":
+                    ligand = col[0]
+                    receptor = col[1]
+                    (
+                        effect_potential,
+                        normalized_effect_potential_sum_sender,
+                        normalized_effect_potential_sum_receiver,
+                    ) = self.get_effect_potential(
+                        target=target, ligand=ligand, receptor=receptor, spatial_weights=spatial_weights
+                    )
+                else:
+                    (
+                        effect_potential,
+                        normalized_effect_potential_sum_sender,
+                        normalized_effect_potential_sum_receiver,
+                    ) = self.get_effect_potential(target=target, ligand=col, spatial_weights=spatial_weights)
 
-            for j, col in enumerate(self.ligands_expr.columns):
-                # Use the non-lagged ligand expression array:
-                ligand_expr = self.ligands_expr_nonlag[col].values.reshape(-1, 1)
-                # Referred to as "sent potential"
-                sent_potential = spatial_weights.multiply(ligand_expr)
-                sent_potential.eliminate_zeros()
-
-                coeff = coeffs.iloc[:, j].values.reshape(1, -1)
-                # Weight each column by the coefficient magnitude and finally by the indicator for expression/no
-                # expression of the target and store as sparse array:
-                sig_interm = sent_potential.multiply(coeff)
-                sig_interm.eliminate_zeros()
-                sig_potential = sig_interm.multiply(target_indicator)
-                sig_potential.eliminate_zeros()
-                # self.adata.obsp[f"spatial_effect_{col}_{target}"] = sig_potential
-
-                sig_potential_sum_sender = np.array(sig_potential.sum(axis=1)).reshape(-1)
-                normalized_sig_potential_sum_sender = (sig_potential_sum_sender - np.min(sig_potential_sum_sender)) / (
-                    np.max(sig_potential_sum_sender) - np.min(sig_potential_sum_sender)
-                )
-                sig_potential_sum_receiver = np.array(sig_potential.sum(axis=0)).reshape(-1)
-                normalized_sig_potential_sum_receiver = (
-                    sig_potential_sum_receiver - np.min(sig_potential_sum_receiver)
-                ) / (np.max(sig_potential_sum_receiver) - np.min(sig_potential_sum_receiver))
                 sending_vf = np.zeros_like(self.coords)
                 receiving_vf = np.zeros_like(self.coords)
 
                 # Vector field for sent signal:
-                sig_potential_lil = sig_potential.tolil()
+                effect_potential_lil = effect_potential.tolil()
                 for i in range(self.n_samples):
-                    if len(sig_potential_lil.rows[i]) <= self.k:
-                        temp_idx = np.array(sig_potential_lil.rows[i], dtype=int)
-                        temp_val = np.array(sig_potential_lil.data[i], dtype=float)
+                    if len(effect_potential_lil.rows[i]) <= self.k:
+                        temp_idx = np.array(effect_potential_lil.rows[i], dtype=int)
+                        temp_val = np.array(effect_potential_lil.data[i], dtype=float)
                     else:
-                        row_np = np.array(sig_potential_lil.rows[i], dtype=int)
-                        data_np = np.array(sig_potential_lil.data[i], dtype=float)
+                        row_np = np.array(effect_potential_lil.rows[i], dtype=int)
+                        data_np = np.array(effect_potential_lil.data[i], dtype=float)
                         temp_idx = row_np[np.argsort(-data_np)[: self.k]]
                         temp_val = data_np[np.argsort(-data_np)[: self.k]]
                     if len(temp_idx) == 0:
@@ -226,18 +473,18 @@ class MuSIC_Interpreter(MuSIC):
                         temp_v = normalize(temp_v, norm="l2")
                         avg_v = np.sum(temp_v * temp_val.reshape(-1, 1), axis=0)
                     avg_v = normalize(avg_v.reshape(1, -1))
-                    sending_vf[i, :] = avg_v[0, :] * normalized_sig_potential_sum_sender[i]
+                    sending_vf[i, :] = avg_v[0, :] * normalized_effect_potential_sum_sender[i]
                 sending_vf = np.clip(sending_vf, -0.02, 0.02)
 
                 # Vector field for received signal:
-                sig_potential_lil = sig_potential.T.tolil()
+                effect_potential_lil = effect_potential.T.tolil()
                 for i in range(self.n_samples):
-                    if len(sig_potential_lil.rows[i]) <= self.k:
-                        temp_idx = np.array(sig_potential_lil.rows[i], dtype=int)
-                        temp_val = np.array(sig_potential_lil.data[i], dtype=float)
+                    if len(effect_potential_lil.rows[i]) <= self.k:
+                        temp_idx = np.array(effect_potential_lil.rows[i], dtype=int)
+                        temp_val = np.array(effect_potential_lil.data[i], dtype=float)
                     else:
-                        row_np = np.array(sig_potential_lil.rows[i], dtype=int)
-                        data_np = np.array(sig_potential_lil.data[i], dtype=float)
+                        row_np = np.array(effect_potential_lil.rows[i], dtype=int)
+                        data_np = np.array(effect_potential_lil.data[i], dtype=float)
                         temp_idx = row_np[np.argsort(-data_np)[: self.k]]
                         temp_val = data_np[np.argsort(-data_np)[: self.k]]
                     if len(temp_idx) == 0:
@@ -249,10 +496,10 @@ class MuSIC_Interpreter(MuSIC):
                         temp_v = normalize(temp_v, norm="l2")
                         avg_v = np.sum(temp_v * temp_val.reshape(-1, 1), axis=0)
                     avg_v = normalize(avg_v.reshape(1, -1))
-                    receiving_vf[i, :] = avg_v[0, :] * normalized_sig_potential_sum_receiver[i]
+                    receiving_vf[i, :] = avg_v[0, :] * normalized_effect_potential_sum_receiver[i]
                 receiving_vf = np.clip(receiving_vf, -0.02, 0.02)
 
-                del sig_potential
+                del effect_potential
 
                 self.adata.obsm[f"spatial_effect_sender_vf_{col}_{target}"] = sending_vf
                 self.adata.obsm[f"spatial_effect_receiver_vf_{col}_{target}"] = receiving_vf
@@ -260,6 +507,46 @@ class MuSIC_Interpreter(MuSIC):
         # Save AnnData object with effect direction information:
         adata_name = os.path.splitext(self.adata_path)[0]
         self.adata.write(f"{adata_name}_effect_directions.h5ad")
+
+    def sender_receiver_deg_detection(
+        self,
+        target: Optional[str] = None,
+        diff_sending_or_receiving: Literal["sending", "receiving"] = "sending",
+        ligand: Optional[str] = None,
+        receptor: Optional[str] = None,
+        pathway: Optional[str] = None,
+        sender_cell_type: Optional[str] = None,
+        receiver_cell_type: Optional[str] = None,
+    ):
+        """Computes differential expression of genes in cells with high or low sending potential, or differential
+        expression of genes in cells with high or low receiving potential.
+
+        Args:
+            target: Target to use for differential expression analysis. If None, will use the first listed target.
+            diff_sending_or_receiving: Whether to compute differential expression of genes in cells with high or low
+                sending potential ("sending cells") or high or low receiving potential ("receiving cells"). Can only
+                be used if :attr `mod_type` is 'lr' or 'niche' (not if :attr `mod_type` is 'ligand').
+            ligand: Ligand to use for differential expression analysis.
+            receptor: Optional receptor to use for differential expression analysis. Needed if
+                'diff_sending_or_receiving' is 'receiving'.
+            pathway: Optional pathway to use for differential expression analysis. Will use ligands and receptors in
+                these pathways to collectively compute signaling potential score.
+            sender_cell_type: Sender cell type to use for differential expression analysis.
+            receiver_cell_type: Receiver cell type to use for differential expression analysis.
+        """
+
+        # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
+        # Note: as the default (if bw is not otherwise provided), the n nearest neighbors will be used for the
+        # bandwidth:
+        spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True)
+
+        if pathway is not None:
+            # Check for already computed pathway effect potential:
+            if f"norm_sum_sent_effect_potential_{pathway}_for_{target}" in self.adata.obsm_keys():
+
+
+    # FOR NOW, RESTRICT DIFFERENTIAL ANALYSIS TO TFS FOR SENDING PARADIGM AND TFS AND RECEPTOR-DOWNSTREAM GENES FOR
+    # THE RECEIVING PARADIGM:
 
     def compute_cell_type_coupling(self):
         """Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
