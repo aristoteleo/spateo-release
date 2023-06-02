@@ -543,7 +543,7 @@ class MuSIC_Interpreter(MuSIC):
         if pathway is not None:
             # Check for already computed pathway effect potential:
             if f"norm_sum_sent_effect_potential_{pathway}_for_{target}" in self.adata.obsm_keys():
-
+                "filler"
 
     # FOR NOW, RESTRICT DIFFERENTIAL ANALYSIS TO TFS FOR SENDING PARADIGM AND TFS AND RECEPTOR-DOWNSTREAM GENES FOR
     # THE RECEIVING PARADIGM:

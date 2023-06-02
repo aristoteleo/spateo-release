@@ -147,6 +147,15 @@ def main():
 @click.option("distr", default="gaussian")
 @click.option("n_neighbors", default=10)
 @click.option("fit_intercept", default=False, is_flag=True)
+@click.option(
+    "include_offset",
+    default=False,
+    is_flag=True,
+    help="Set True to include offset to account for "
+    "differences in library size in predictions. If "
+    "True, will compute scaling factor using trimmed "
+    "mean of M-value with singleton pairing (TMMswp).",
+)
 @click.option("no_hurdle", default=False, is_flag=True)
 @click.option("tolerance", default=1e-3)
 @click.option("max_iter", default=1000)
@@ -197,6 +206,7 @@ def run(
     n_neighbors,
     distr,
     fit_intercept,
+    include_offset,
     no_hurdle,
     tolerance,
     max_iter,
@@ -262,6 +272,8 @@ def run(
             cell when defining the independent variable array
         distr: Distribution to use for spatial weights. Options: 'gaussian', 'poisson', 'nb'.
         fit_intercept: If True, will include intercept in model
+        include_offset: If True, include offset to account for differences in library size in predictions. If True,
+            will compute scaling factor using trimmed mean of M-value with singleton pairing (TMMswp).
         no_hurdle: If True, will implement spatially-weighted hurdle model to attempt to account for biological zeros.
         tolerance: Tolerance for convergence of model
         max_iter: Maximum number of iterations for model
@@ -392,6 +404,8 @@ def run(
         command += " -exclude_self "
     if fit_intercept:
         command += " -fit_intercept "
+    if include_offset:
+        command += " -include_offset "
     if no_hurdle:
         command += " -no_hurdle "
     if chunks is not None:

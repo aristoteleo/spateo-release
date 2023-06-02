@@ -2287,3 +2287,342 @@ receptors = list(set(receptors))
 #         sample_index = self.subset_indices[i]
 #     else:
 #         sample_index = i
+
+
+# ---------------------------------------------------------------------------------------------------
+# Testing Model Accuracy
+# ---------------------------------------------------------------------------------------------------
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def plot_prior_vs_data(
+    reconst: pd.DataFrame,
+    adata: AnnData,
+    kind: str = "barplot",
+    target_name: Union[None, str] = None,
+    title: Union[None, str] = None,
+    figsize: Union[None, Tuple[float, float]] = None,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
+    save_kwargs: dict = {},
+):
+    """Plots distribution of observed vs. predicted counts in the form of a comparative density barplot.
+
+    Args:
+        reconst: DataFrame containing values for reconstruction/prediction of targets of a regression model
+        adata: AnnData object containing observed counts
+        kind: Kind of plot to generate. Options: "barplot", "scatterplot". Case sensitive, defaults to "barplot".
+        target_name: Optional, can be:
+                - Column name in DataFrame/AnnData object: name of gene to subset to
+                - "sum": computes sum over all features present in 'reconst' to compare to the corresponding subset of
+                'adata'.
+                - "mean": computes mean over all features present in 'reconst' to compare to the corresponding subset of
+                'adata'.
+            If not given, will subset AnnData to features in 'reconst' and flatten both arrays to compare all values.
+
+            If not given, will compute the sum over all
+            features present in 'reconst' and compare to the corresponding subset of 'adata'.
+        save_show_or_return: Whether to save, show or return the figure.
+            If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+            displayed and the associated axis and other object will be return.
+        save_kwargs: A dictionary that will passed to the save_fig function.
+            By default it is an empty dictionary and the save_fig function will use the
+            {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+            "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+            keys according to your needs.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib import rcParams
+
+    from ...configuration import config_spateo_rcParams
+    from ...plotting.static.utils import save_return_show_fig_utils
+
+    logger = lm.get_main_logger()
+
+    config_spateo_rcParams()
+    if figsize is None:
+        figsize = rcParams.get("figure.figsize")
+
+    if target_name == "sum":
+        predicted = reconst.sum(axis=1).values.reshape(-1, 1)
+        observed = (
+            adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, reconst.columns].X
+        )
+        observed = np.sum(observed, axis=1).reshape(-1, 1)
+    elif target_name == "mean":
+        predicted = reconst.mean(axis=1).values.reshape(-1, 1)
+        observed = (
+            adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, reconst.columns].X
+        )
+        observed = np.mean(observed, axis=1).reshape(-1, 1)
+    elif target_name is not None:
+        observed = adata[:, target_name].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, target_name].X
+        observed = observed.reshape(-1, 1)
+        predicted = reconst[target_name].values.reshape(-1, 1)
+    else:
+        # Flatten arrays:
+        observed = (
+            adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, reconst.columns].X
+        )
+        observed = observed.flatten().reshape(-1, 1)
+        predicted = reconst.values.flatten().reshape(-1, 1)
+
+    obs_pred = np.hstack((observed, predicted))
+    # Upper limit along the x-axis (99th percentile to prevent outliers from affecting scale too badly):
+    xmax = np.percentile(obs_pred, 99)
+    # Lower limit along the x-axis:
+    xmin = np.min(observed)
+    # Divide x-axis into pieces for purposes of setting x labels:
+    xrange, step = np.linspace(xmin, xmax, num=10, retstep=True)
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    if target_name is None:
+        target_name = "Total Counts"
+
+    if kind == "barplot":
+        ax.hist(
+            obs_pred,
+            xrange,
+            alpha=0.7,
+            label=[f"Observed {target_name}", f"Predicted {target_name}"],
+            density=True,
+            color=["#FFA07A", "#20B2AA"],
+        )
+
+        plt.legend(loc="upper right", fontsize=9)
+
+        ax.set_xticks(ticks=[i + 0.5 * step for i in xrange[:-1]], labels=[np.round(l, 3) for l in xrange[:-1]])
+        plt.xlabel("Counts", size=9)
+        plt.ylabel("Normalized Proportion of Cells", size=9)
+        if title is not None:
+            plt.title(title, size=9)
+        plt.tight_layout()
+
+    elif kind == "scatterplot":
+        from scipy.stats import spearmanr
+
+        observed = observed.flatten()
+        predicted = predicted.flatten()
+        slope, intercept = np.polyfit(observed, predicted, 1)
+
+        # Extract residuals:
+        predicted_model = np.polyval([slope, intercept], observed)
+        observed_mean = np.mean(observed)
+        predicted_mean = np.mean(predicted)
+        n = observed.size  # number of samples
+        m = 2  # number of parameters
+        dof = n - m  # degrees of freedom
+        # Students statistic of interval confidence:
+        t = scipy.stats.t.ppf(0.975, dof)
+        residual = observed - predicted_model
+        # Standard deviation of the error:
+        std_error = (np.sum(residual**2) / dof) ** 0.5
+
+        # Calculate spearman correlation and coefficient of determination:
+        s = spearmanr(observed, predicted)[0]
+        numerator = np.sum((observed - observed_mean) * (predicted - predicted_mean))
+        denominator = (np.sum((observed - observed_mean) ** 2) * np.sum((predicted - predicted_mean) ** 2)) ** 0.5
+        correlation_coef = numerator / denominator
+        r2 = correlation_coef**2
+
+        # Plot best fit line:
+        observed_line = np.linspace(np.min(observed), np.max(observed), 100)
+        predicted_line = np.polyval([slope, intercept], observed_line)
+
+        # Confidence interval and prediction interval:
+        ci = (
+            t
+            * std_error
+            * (1 / n + (observed_line - observed_mean) ** 2 / np.sum((observed - observed_mean) ** 2)) ** 0.5
+        )
+        pi = (
+            t
+            * std_error
+            * (1 + 1 / n + (observed_line - observed_mean) ** 2 / np.sum((observed - observed_mean) ** 2)) ** 0.5
+        )
+
+        ax.plot(observed, predicted, "o", ms=3, color="royalblue", alpha=0.7)
+        ax.plot(observed_line, predicted_line, color="royalblue", alpha=0.7)
+        ax.fill_between(
+            observed_line, predicted_line + pi, predicted_line - pi, color="lightcyan", label="95% prediction interval"
+        )
+        ax.fill_between(
+            observed_line, predicted_line + ci, predicted_line - ci, color="skyblue", label="95% confidence interval"
+        )
+        ax.spines["right"].set_visible(False)
+        ax.spines["top"].set_visible(False)
+
+        ax.set_xlabel(f"Observed {target_name}")
+        ax.set_ylabel(f"Predicted {target_name}")
+        title = title if title is not None else "Observed and Predicted {}".format(target_name)
+        ax.set_title(title)
+
+        # Display r^2, Spearman correlation, mean absolute error on plot as well:
+        r2s = str(np.round(r2, 2))
+        spearman = str(np.round(s, 2))
+        ma_err = mae(observed, predicted)
+        mae_s = str(np.round(ma_err, 2))
+
+        # Place text at slightly above the minimum x_line value and maximum y_line value to avoid obscuring the plot:
+        ax.text(
+            1.01 * np.min(observed),
+            1.01 * np.max(predicted),
+            "$r^2$ = " + r2s + ", Spearman $r$ = " + spearman + ", MAE = " + mae_s,
+            fontsize=8,
+        )
+        plt.legend(loc="lower center", bbox_to_anchor=(0.5, -0.4), fontsize=8)
+
+    else:
+        logger.info(
+            ":func `plot_prior_vs_data` error: Invalid input given to 'kind'. Options: 'barplot', " "'scatterplot'."
+        )
+
+    save_return_show_fig_utils(
+        save_show_or_return=save_show_or_return,
+        show_legend=True,
+        background="white",
+        prefix="parameters",
+        save_kwargs=save_kwargs,
+        total_panels=1,
+        fig=fig,
+        axes=ax,
+        return_all=False,
+        return_all_list=None,
+    )
+
+
+# if self.distr == "gaussian":
+#     self.logger.info("Setting total counts in each cell to 1e6 inplace...")
+#     normalize_total(self.adata, target_sum=1e6)
+# else:
+#     self.logger.info("Setting total counts in each cell to 1e6 and rounding nonintegers inplace...")
+#     normalize_total(self.adata, target_sum=1e6)
+#     self.adata.X = (
+#         scipy.sparse.csr_matrix(np.round(self.adata.X))
+#         if scipy.sparse.issparse(self.adata.X)
+#         else np.round(self.adata.X)
+#     )
+
+if self.distr in ["poisson", "nb"]:
+    if self.normalize or self.smooth or self.log_transform:
+        self.logger.info(
+            f"With a {self.distr} assumption, discrete counts are required for the response variable. "
+            f"Computing normalizations and transforms if applicable, but rounding nonintegers to nearest "
+            f"integer; original counts can be round in .layers['raw']. Log-transform should not be applied."
+        )
+        self.adata.layers["raw"] = self.adata.X
+
+    # Create a boolean array marking the duplicates
+    dupId = np.r_[True, knotLocs[1:] == knotLocs[:-1]]
+    # If the last knot is a duplicate
+    if dupId[-1]:
+        # Find all duplicates and replace with the mean of surrounding values
+        for i in np.where(dupId)[0][::-1]:
+            knotLocs[i] = np.mean([knotLocs[i - 1], knotLocs[i + 1 if i + 1 < len(knotLocs) else i]])
+    else:
+        # Find all duplicates (except the last) and replace with the mean of surrounding values
+        for i in np.where(dupId)[0]:
+            knotLocs[i] = np.mean([knotLocs[i - 1], knotLocs[i + 1]])
+
+# If there are still duplicates after all these adjustments
+if len(knotLocs) != len(set(knotLocs)):
+    # Discard previous calculations and spread the knots evenly
+    knotLocs = np.linspace(np.min(pAll), np.max(pAll), num=nknots)
+
+
+bs = []
+for i in range(var.shape[1]):
+    bs.append(BSplines(var[:, i], knots=knotList[f"x{i}"], degree=[3]))
+
+
+def get_knots(nknots: int, var: np.ndarray, weights: np.ndarray):
+    """Find 'knots' (connection points between spline functions). This is a Python translation of an R function that
+    can be found in tradeSeq: https://github.com/statOmics/tradeSeq.
+
+    NOTE: deprecated because Python spline-defining functions don't allow for custom knot list to be defined.
+
+    Args:
+        nknots: The number of knots to be used in the smoothing function. Defaults to 6.
+        var: The continuous predictor variable(s) (e.g. pseudotime) of shape [n_samples, ] (or in the case of
+            pseudotime, this can be [n_samples, n_lineages])
+        weights: Optional sample weights of shape [n_samples, ], assigning weight to each cell for each
+            feature (or again, [n_samples, n_lineages])
+
+    Returns:
+        knots: The knots for the smoothing spline.
+    """
+    if var.ndim == 1:
+        var = var.reshape(-1, 1)
+    if weights.ndim == 1:
+        weights = weights.reshape(-1, 1)
+
+    # Columns of each array:
+    v = {f"v{i}": var[:, i] for i in range(var.shape[1])}
+    w = {f"w{i}": (weights[:, i] == 1) * 1 for i in range(weights.shape[1])}
+
+    # Find points where the continuous variable changes value (knot points):
+    pAll = []
+    for i in range(var.shape[0]):
+        # Append only samples where cell weights are nonzero:
+        nz_weights = np.asarray(weights[i, :], dtype=bool)
+        pAll.append(var[i, np.where(nz_weights)[0]])
+
+    knotLocs = np.quantile(pAll, q=np.arange(nknots) / (nknots - 1))
+
+    # Ensure no duplicate knot locations- if there are duplicate knot locations, replace them with the mean of the
+    # IDs before and after them in the array. If there are still duplicate knots, evenly disperse knots instead:
+    if len(knotLocs) != len(set(knotLocs)):
+        knotLocs = np.quantile(v["v0"][w["w0"] == 1], q=np.arange(nknots) / (nknots - 1))
+        if len(knotLocs) != len(set(knotLocs)):
+            # Get indices of duplicates
+            dupId = pd.Series(knotLocs).duplicated().values
+
+            # If the last knot is a duplicate, get duplicates from end and replace by mean
+            if max(np.where(dupId)[0]) == len(knotLocs):
+                dupId = pd.Series(knotLocs).duplicated(keep="last").values
+                knotLocs[dupId] = np.mean([knotLocs[np.where(dupId)[0] - 1], knotLocs[np.where(dupId)[0] + 1]])
+            else:
+                knotLocs[dupId] = np.mean([knotLocs[np.where(dupId)[0] - 1], knotLocs[np.where(dupId)[0] + 1]])
+
+        # If there are still duplicates, evenly disperse knots instead:
+        if len(knotLocs) != len(set(knotLocs)):
+            knotLocs = np.linspace(min(pAll), max(pAll), nknots)
+
+    # Ensure the max values ("endpoints") are all represented among the knot locations
+    maxv = max(var[:, 0])
+
+    # If continuous covariate has multiple columns (e.g. corresponding to each lineage):
+    if var.shape[1] > 1:
+        maxv = np.empty((var.shape[1] - 1,))
+
+        # Loop through the columns of the continuous covariate, starting from the second column
+        for j in range(1, var.shape[1]):
+            maxv[j - 1] = max(v["v" + str(j)][w["w" + str(j)] == 1])
+
+    # Check if all max values ("endpoints") are in knot locations:
+    if not isinstance(maxv, np.ndarray):
+        maxv = np.array([maxv])
+
+    if all(x in knotLocs for x in maxv):
+        # If so, assign knot locations to knots
+        knots = knotLocs
+    else:
+        # Otherwise, update max array and replace knot locations at those indices with max values
+        maxv = [x for x in maxv if x not in knotLocs]
+        replaceId = [np.argmin(abs(l - knotLocs)) for l in maxv]
+        knotLocs[replaceId] = maxv
+
+        # If not all max values are in knot locations, print a warning
+        if not all(x in knotLocs for x in maxv):
+            print(
+                "Warning: Impossible to place a knot at all endpoints. Increase the number of knots to avoid this issue."
+            )
+
+        # Assign updated knot locations to knots
+        knots = knotLocs
+
+    # Ensure that the first knot is the minimum point and the last knot is the maximum point
+    knots[0] = min(pAll)
+    knots[-1] = max(pAll)
+
+    # Create a dictionary with keys as 'x' values and all values as knots
+    knotList = {f"x{i}": knots for i in range(var.shape[1])}
+
+    return knotList

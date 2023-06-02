@@ -38,6 +38,7 @@ from spateo.tools.ST_modeling.regression_utils import (
     compute_betas_local,
     golden_section_search,
     iwls,
+    library_scaling_factors,
     logistic_objective,
     multicollinearity_check,
     smooth,
@@ -350,6 +351,7 @@ class MuSIC:
             )
 
         self.fit_intercept = self.arg_retrieve.fit_intercept
+        self.include_offset = self.arg_retrieve.include_offset
         self.no_hurdle = self.arg_retrieve.no_hurdle
 
         # Parameters related to the fitting process (tolerance, number of iterations, etc.)
@@ -462,11 +464,11 @@ class MuSIC:
 
         if self.normalize:
             if self.distr == "gaussian":
-                self.logger.info("Setting total counts in each cell to 1e4 inplace...")
-                normalize_total(self.adata)
+                self.logger.info("Setting total counts in each cell to 1e6 inplace...")
+                normalize_total(self.adata, target_sum=1e6)
             else:
-                self.logger.info("Setting total counts in each cell to 1e4 and rounding nonintegers inplace...")
-                normalize_total(self.adata)
+                self.logger.info("Setting total counts in each cell to 1e6 and rounding nonintegers inplace...")
+                normalize_total(self.adata, target_sum=1e6)
                 self.adata.X = (
                     scipy.sparse.csr_matrix(np.round(self.adata.X))
                     if scipy.sparse.issparse(self.adata.X)
@@ -545,7 +547,7 @@ class MuSIC:
             else:
                 raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
 
-        database_pathways = set(self.lr_db["pathway"])
+            database_pathways = set(self.lr_db["pathway"])
 
         if self.mod_type == "lr" or self.mod_type == "ligand":
             database_ligands = set(self.lr_db["from"])
@@ -1379,6 +1381,7 @@ class MuSIC:
                 clip=self.clip,
                 max_iter=self.max_iter,
                 spatial_weights=wi,
+                offset=self.offset,
                 link=None,
                 ridge_lambda=self.ridge_lambda,
                 mask=mask,
@@ -1520,8 +1523,8 @@ class MuSIC:
                         self.logger.info(
                             "Plateau detected- exiting optimization and returning optimum score up to this point."
                         )
-                        self.logger.info("Score from last iteration: ", optimum_score_history[-2])
-                        self.logger.info("Score from current iteration: ", optimum_score_history[-1])
+                        self.logger.info(f"Score from last iteration: {optimum_score_history[-2]}")
+                        self.logger.info(f"Score from current iteration: {optimum_score_history[-1]}")
                         patience = 3
 
                 if np.abs(new_ub - self.maxbw) < 1.0 and self.bw_fixed:
@@ -1826,6 +1829,13 @@ class MuSIC:
         if X is None:
             X = self.X
 
+        # Compute offset if included:
+        if self.include_offset:
+            self.offset = library_scaling_factors(counts=self.adata.X, distr=self.distr)
+        else:
+            self.offset = None
+        self.offset = self.comm.bcast(self.offset, root=0)
+
         # Compute fit for each column of the dependent variable array individually- store each output array (if
         # applicable, i.e. if :param `multiscale` is True) and optimal bandwidth (also if applicable, i.e. if :param
         # `multiscale` is True):
@@ -1854,6 +1864,7 @@ class MuSIC:
                     distr="binomial",
                     tol=self.tolerance,
                     max_iter=self.max_iter,
+                    offset=self.offset,
                     link=None,
                     ridge_lambda=self.ridge_lambda,
                 )

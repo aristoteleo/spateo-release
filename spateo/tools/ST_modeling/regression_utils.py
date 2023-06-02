@@ -1,33 +1,37 @@
 """
 Auxiliary functions to aid in the interpretation functions for the spatial and spatially-lagged regression models.
 """
+import multiprocessing as mp
 import sys
+import warnings
 from typing import Callable, List, Optional, Tuple, Union
-
-from scipy.stats import pearsonr
-from sklearn.metrics import confusion_matrix, recall_score
-from sklearn.utils import check_array
 
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
 
+import anndata
 import numpy as np
 import pandas as pd
 import scipy
+import statsmodels.api as sm
 import statsmodels.stats.multitest
 import tensorflow as tf
-from anndata import AnnData
 from numpy import linalg
+from scipy import stats
+from sklearn.metrics import confusion_matrix, recall_score
 from sklearn.preprocessing import MinMaxScaler
+from statsmodels.gam.api import BSplines, GLMGam
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(1, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
 from spateo.configuration import SKM
 from spateo.logging import logger_manager as lm
+from spateo.preprocessing.normalize import calcNormFactors
 from spateo.preprocessing.transform import log1p
 from spateo.tools.ST_modeling.distributions import (
     Binomial,
@@ -248,6 +252,7 @@ def iwls(
     x: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
     distr: Literal["gaussian", "poisson", "nb", "binomial"] = "gaussian",
     init_betas: Optional[np.ndarray] = None,
+    offset: Optional[np.ndarray] = None,
     tol: float = 1e-8,
     clip: float = 5.0,
     max_iter: int = 200,
@@ -267,6 +272,9 @@ def iwls(
         x: Array of shape [n_samples, n_features]; independent variables
         distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb", "binomial"
         init_betas: Array of shape [n_features,]; initial regression coefficients
+        offset: Optional array of shape [n_samples,]; if provided, will be added to the linear predictor. This is
+            meant to deal with differences in scale that are not caused by the predictor variables,
+            e.g. by differences in library size
         tol: Convergence tolerance
         clip: Sets magnitude of the upper and lower bound to constrain betas and prevent numerical overflow
         max_iter: Maximum number of iterations if convergence is not reached
@@ -333,7 +341,10 @@ def iwls(
             weights = distr.weights(linear_predictor)
 
         # Compute adjusted predictor from the difference between the predicted mean response variable and observed y:
-        adjusted_predictor = linear_predictor + (distr.link.deriv(y_hat) * (y - y_hat))
+        if offset is None:
+            adjusted_predictor = linear_predictor + (distr.link.deriv(y_hat) * (y - y_hat))
+        else:
+            adjusted_predictor = linear_predictor + (distr.link.deriv(y_hat) * (y - y_hat)) + offset
         weights = np.sqrt(weights)
 
         if not isinstance(x, np.ndarray):
@@ -494,13 +505,15 @@ def fit_DE_GAM(
     counts: Union[np.ndarray, scipy.sparse.spmatrix],
     var: np.ndarray,
     genes: List[str],
+    cells: Optional[List[str]] = None,
     cat_cov: Optional[np.ndarray] = None,
     weights: Optional[np.ndarray] = None,
     offset: Optional[np.ndarray] = None,
     nknots: int = 6,
     parallel: bool = True,
-    return_aic: bool = False,
     family: Literal["gaussian", "poisson", "nb"] = "nb",
+    include_offset: bool = False,
+    return_model_idx: Optional[Union[int, List[int]]] = None,
 ):
     """Fit generalized additive models for the purpose of differential expression testing from spatial
     transcriptomics data.
@@ -509,21 +522,33 @@ def fit_DE_GAM(
         counts: Matrix of gene expression counts, with cells as rows and genes as columns (so shape [n_samples,
             n_genes])
         cat_cov: Optional design matrix for fixed effects (i.e. categorical covariates)
-        var: The continuous predictor variable (e.g. pseudotime) of shape [n_samples, ]
+        var: The continuous predictor variable (e.g. pseudotime) of shape [n_samples, ] (or in the case of
+            pseudotime, this can be [n_samples, n_lineages])
         genes: List of genes present in the counts matrix
-        weights: Optional sample weights of shape [n_samples, ]
+        cells: Optional list of cell names
+        weights: Optional sample weights of shape [n_samples, ] (or in the case of pseudotime, this can be [
+            n_samples, n_lineages])
         offset: Optional offset term of shape [n_samples, ]
         nknots: The number of knots to be used in the smoothing function. Defaults to 6.
         parallel: Whether to use parallel processing. Defaults to True.
-        return_aic: Whether to return the AIC for each gene. Defaults to False.
         family: The family of the generalized additive model. Defaults to "nb" for negative binomial, with "gaussian"
             and "poisson" as other options.
+        include_offset: If True, include offset to account for differences in library size in predictions. If True,
+            will compute scaling factor using trimmed mean of M-value with singleton pairing (TMMswp).
+        return_model_idx: If not None, return the GAM model(s) corresponding to the specified index or indices.
+            Defaults to None.
 
     Returns:
-        gam: List of fitted generalized additive models, one for each gene
+        sc_obj: AnnData object containing information gathered from fitting all GAM models
     """
+
     if weights is None:
         weights = np.ones((counts.shape[0], 1))
+
+    if var.ndim == 0:
+        var = var.reshape(-1, 1)
+    if weights.ndim == 0:
+        weights = weights.reshape(-1, 1)
 
     # Check non-negativity of counts:
     if (counts < 0).any().any():
@@ -544,297 +569,228 @@ def fit_DE_GAM(
     if np.isnan(var).any():
         raise ValueError("Variable array contains NA values.")
 
+    # Define separate variable for each lineage (if applicable):
+    for i in range(var.shape[1]):
+        locals()["v" + str(i + 1)] = var[:, i]
 
-def calcFactorRLE(data: np.ndarray) -> np.ndarray:
-    """
-    Calculate scaling factors using the Relative Log Expression (RLE) method. Python implementation of the same-named
-    function from edgeR:
+    # Get indicators for cells to use in smoothers
+    for i in range(var.shape[1]):
+        locals()["w" + str(i + 1)] = weights[:, i] == 1
 
-    Robinson, M. D., McCarthy, D. J., & Smyth, G. K. (2010). edgeR: a Bioconductor package for
-    differential expression analysis of digital gene expression data. Bioinformatics, 26(1), 139-140.
+    if include_offset:
+        # Get library scaling factors
+        offset = library_scaling_factors(counts=counts, distr=family)
 
-    Args:
-        data: An array-like object representing the data matrix.
+    # Fixed effect design matrix:
+    if cat_cov is None:
+        cat_cov = np.ones((var.shape[0], 1))
 
-    Returns:
-        factors: An array of scaling factors for each cell
-    """
-    gm = np.exp(np.mean(np.log(data), axis=1))
-    factors = np.apply_along_axis(lambda u: np.median(u / gm[gm > 0]), axis=0, arr=data)
-    return factors
+    # Fit GAMs
+    # Define function to define formula and fit model:
+    converged = [True] * len(genes)
+    # Define family based on provided input argument:
+    if family == "gaussian":
+        family = sm.families.Gaussian()
+    elif family == "poisson":
+        family = sm.families.Poisson()
+    elif family == "nb":
+        family = sm.families.NegativeBinomial()
 
+    # Parallel processing:
+    if parallel:
+        args_list = [
+            (counts[:, i], genes[i], i, converged, nknots, weights, offset, var, cat_cov, family)
+            for i in range(counts.shape[1])
+        ]
+        with mp.Pool(processes=mp.cpu_count()) as pool:
+            gamList = pool.starmap(counts_to_Gam, args_list)
 
-def calcFactorQuantile(data: np.ndarray, lib_size: float, p: float = 0.75) -> np.ndarray:
-    """
-    Calculate scaling factors using the Quantile method. Python implementation of the same-named function from edgeR:
-
-    Robinson, M. D., McCarthy, D. J., & Smyth, G. K. (2010). edgeR: a Bioconductor package for
-    differential expression analysis of digital gene expression data. Bioinformatics, 26(1), 139-140.
-
-    Args:
-        data: An array-like object representing the data matrix.
-        lib_size: The library size or total count to normalize against.
-        p: The quantile value (default: 0.75).
-
-    Returns:
-        factors: An array of scaling factors for each cell
-    """
-    factors = np.percentile(data, p * 100, axis=1)
-    if np.min(factors) == 0:
-        print("One or more quantiles are zero")
-    factors /= lib_size
-    return factors
-
-
-def calcFactorTMM(
-    obs: Union[float, np.ndarray],
-    ref: Union[float, np.ndarray],
-    libsize_obs: Optional[float] = None,
-    libsize_ref: Optional[float] = None,
-    logratioTrim: float = 0.3,
-    sumTrim: float = 0.05,
-    doWeighting: bool = True,
-    Acutoff: float = -1e10,
-) -> np.ndarray:
-    """
-    Calculate scaling factors using the Trimmed Mean of M-values (TMM) method. Python implementation of the
-    same-named function from edgeR:
-
-    Robinson, M. D., McCarthy, D. J., & Smyth, G. K. (2010). edgeR: a Bioconductor package for
-    differential expression analysis of digital gene expression data. Bioinformatics, 26(1), 139-140.
-
-    Args:
-        obs: An array-like object representing the observed library counts.
-        ref: An array-like object representing the reference library counts.
-        libsize_obs: The library size of the observed library (default: sum of observed counts).
-        libsize_ref: The library size of the reference library (default: sum of reference counts).
-        logratioTrim: The fraction of extreme log-ratios to be trimmed (default: 0.3).
-        sumTrim: The fraction of extreme log-ratios to be trimmed based on the absolute expression (default: 0.05).
-        doWeighting: Whether to perform weighted TMM estimation (default: True).
-        Acutoff: The cutoff value for removing infinite values (default: -1e10).
-
-    Returns:
-        Factors: the scaling factors for each cell
-    """
-    obs = np.asarray(obs, dtype=float)
-    ref = np.asarray(ref, dtype=float)
-
-    nO = np.sum(obs) if libsize_obs is None else libsize_obs
-    nR = np.sum(ref) if libsize_ref is None else libsize_ref
-
-    logR = np.log2((obs / nO) / (ref / nR))  # log ratio of expression, accounting for library size
-    absE = (np.log2(obs / nO) + np.log2(ref / nR)) / 2  # absolute expression
-    v = (nO - obs) / nO / obs + (nR - ref) / nR / ref  # estimated asymptotic variance
-
-    # remove infinite values, cutoff based on A
-    fin = np.isfinite(logR) & np.isfinite(absE) & (absE > Acutoff)
-
-    logR = logR[fin]
-    absE = absE[fin]
-    v = v[fin]
-
-    if np.max(np.abs(logR)) < 1e-6:
-        return 1
-
-    n = len(logR)
-    loL = int(n * logratioTrim) + 1
-    loS = int(n * sumTrim) + 1
-
-    keep = (np.argsort(logR).argsort() >= loL) & (np.argsort(absE).argsort() >= loS)
-
-    if doWeighting:
-        f = np.sum(logR[keep] / v[keep], axis=0, keepdims=True) / np.sum(1 / v[keep], axis=0, keepdims=True)
     else:
-        f = np.mean(logR[keep], axis=0, keepdims=True)
+        gamList = [
+            counts_to_Gam(counts[:, i], genes[i], i, converged, nknots, weights, offset, var, cat_cov, family)
+            for i in range(counts.shape[1])
+        ]
 
-    if np.isnan(f):
-        f = 0
+    # Filter for genes that converged:
+    gamList = [gam for gam in gamList if gam is not None]
+    genelist = [gam.gene for gam in gamList]
 
-    return 2**f
+    # Get fitted coefficients to dataframe:
+    betaAll = [None] * len(gamList)
+    print(betaAll)
+    SigmaAll = [None] * len(gamList)
+
+    for m in gamList:
+        # if isinstance(m, Exception):
+        #     beta = np.nan
+        # else:
+        #     # beta = np.matrix(stats.coef(m)).T
+        #     # beta = pd.DataFrame(beta, columns=[0])
+        beta = pd.DataFrame(m.params, columns=[0])
+        print(beta)
+    if len(betaAll) > 1:
+        betaAll.append(beta)
+        betaAllDf = pd.DataFrame(np.concatenate(betaAll, axis=1))
+    else:
+        betaAllDf = beta
+    betaAllDf.columns = genelist
+
+    for m in gamList:
+        # Variance-covariance matrix:
+        if isinstance(m, Exception):
+            Sigma = None
+        else:
+            Sigma = m.cov_params()
+        # Convert to dataframe:
+        SigmaAll.append(Sigma)
+    print(SigmaAll)
+
+    # Store one design matrix and knot points (so its dimensions, colnames, etc. can be used for later):
+    m = gamList[0]
+    # Exclude the fixed effects from the design matrix:
+    dm = m.model.exog[:, 1:]
+
+    # Store results in AnnData object:
+    sc_obj = anndata.AnnData(X=counts)
+    sc_obj.var_names = genes
+    if cells is not None:
+        sc_obj.obs_names = cells
+    sc_obj.obs["var"] = var
+    sc_obj.obs["weights"] = weights
+    sc_obj.var["converged"] = converged
+    sc_obj.obsm["design_mat"] = dm
+
+    # Store list of variance-covariance matrices:
+    df_list = []
+    for sigma, name in zip(SigmaAll, genelist):
+        df_matrix = pd.DataFrame(sigma)
+        df_matrix["Name"] = name
+        df_list.append(df_matrix)
+    # Concatenate:
+    df = pd.concat(df_list, keys=range(len(SigmaAll)), names=["MatrixIndex"])
+    sc_obj.varm["Sigma"] = df
+
+    sc_obj.varm["beta"] = betaAllDf
+
+    # Return model of choice if specified:
+    if return_model_idx is not None:
+        models = genes[return_model_idx]
+        return_gams = dict(zip(models, gamList[return_model_idx]))
+        return sc_obj, return_gams
+    else:
+        return sc_obj
 
 
-def calcFactorTMMwsp(
-    obs: Union[float, np.ndarray],
-    ref: Union[float, np.ndarray],
-    libsize_obs: Optional[float] = None,
-    libsize_ref: Optional[float] = None,
-    logratioTrim: float = 0.3,
-    sumTrim: float = 0.05,
-    doWeighting: bool = True,
-) -> np.ndarray:
-    """
-    Calculate scaling factors using the Trimmed Mean of M-values with singleton pairing (TMMwsp) method. Python
-    implementation of the same-named function from edgeR:
-
-    Robinson, M. D., McCarthy, D. J., & Smyth, G. K. (2010). edgeR: a Bioconductor package for
-    differential expression analysis of digital gene expression data. Bioinformatics, 26(1), 139-140.
+def counts_to_Gam(
+    y: Union[np.ndarray, scipy.sparse.spmatrix],
+    gene: str,
+    idx: int,
+    converged: List[bool],
+    nknots: int,
+    weights: np.ndarray,
+    offset: Optional[np.ndarray],
+    var: np.ndarray,
+    cat_cov: Optional[np.ndarray],
+    family: sm.families.family.Family,
+):
+    """Fitting function- fits a GAM model to a single gene.
 
     Args:
-        obs: An array-like object representing the observed library counts.
-        ref: An array-like object representing the reference library counts.
-        libsize_obs: The library size of the observed library (default: sum of observed counts).
-        libsize_ref: The library size of the reference library (default: sum of reference counts).
-        logratioTrim: The fraction of extreme log-ratios to be trimmed (default: 0.3).
-        sumTrim: The fraction of extreme log-ratios to be trimmed based on the absolute expression (default: 0.05).
-        doWeighting: Whether to perform weighted TMM estimation (default: True).
-        Acutoff: The cutoff value for removing infinite values (default: -1e10).
+        y: Counts for a single gene
+        gene: Name of gene to fit
+        idx: Index of gene to fit
+        converged: Indicator for whether the fitting converged for this gene
+        parallel: Whether parallel processing is being used
+        nknots: Number of knots to use for the cubic regression spline
+        weights: Weights for each cell
+        offset: Optional offset for each cell
+        var: Explanatory variables
+        cat_cov: Optional categorical covariates
+        family: Family to use for the GLM
 
     Returns:
-        Factors: the scaling factors for each cell
+        gam_fit: Fitted GAM model
+        gene: Name of gene to fit
     """
-    obs = np.asarray(obs, dtype=float)
-    ref = np.asarray(ref, dtype=float)
 
-    eps = 1e-14
+    # Explanatory variables:
+    X = pd.DataFrame(var, columns=[f"x{i}" for i in range(var.shape[1])])
+    # Add fixed effects if necessary:
+    X["cat_cov"] = cat_cov
+    X = X.sort_index(axis=1)
 
-    pos_obs = obs > eps
-    pos_ref = ref > eps
-    npos = 2 * pos_obs + pos_ref
+    # Check if y is sparse:
+    if scipy.sparse.issparse(y):
+        y = y.toarray()
 
-    i = np.where((npos == 0) | np.isnan(npos))[0]
-    if len(i) > 0:
-        obs = np.delete(obs, i)
-        ref = np.delete(ref, i)
-        npos = np.delete(npos, i)
+    # Define cubic regression splines to use for data smoothing:
+    bs = BSplines(var, df=[nknots for _ in range(var.shape[1])], degree=[3 for _ in range(var.shape[1])])
 
-    if libsize_obs is None:
-        libsize_obs = np.sum(obs)
-    if libsize_ref is None:
-        libsize_ref = np.sum(ref)
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", category=ConvergenceWarning)
+            gam_model = GLMGam(y, X, smoother=bs, family=family, weights=weights, offset=offset)
+            gam_fit = gam_model.fit()
+            print(gam_fit.summary())
 
-    zero_obs = npos == 1
-    zero_ref = npos == 2
-    k = zero_obs | zero_ref
-    n_eligible_singles = min(np.sum(zero_obs), np.sum(zero_ref))
-    if n_eligible_singles > 0:
-        refk = np.sort(ref[k])[::-1][:n_eligible_singles]
-        obsk = np.sort(obs[k])[::-1][:n_eligible_singles]
-        obs = np.concatenate([obs[~k], obsk])
-        ref = np.concatenate([ref[~k], refk])
-    else:
-        obs = obs[~k]
-        ref = ref[~k]
+    except Exception:
+        print(f"\nConvergence not achieved for {gene}.")
+        converged[idx] = False
+        return
 
-    n = len(obs)
-    if n == 0:
-        return 1
+    # Make sure correspondence is maintained to the correct gene:
+    gam_fit.gene = gene
 
-    obs_p = obs / libsize_obs
-    ref_p = ref / libsize_ref
-    M = np.log2(obs_p / ref_p)
-    A = 0.5 * np.log2(obs_p * ref_p)
-
-    if np.max(np.abs(M)) < 1e-6:
-        return 1
-
-    obs_p_shrunk = (obs + 0.5) / (libsize_obs + 0.5)
-    ref_p_shrunk = (ref + 0.5) / (libsize_ref + 0.5)
-    M_shrunk = np.log2(obs_p_shrunk / ref_p_shrunk)
-    o_M = np.lexsort((M_shrunk, M))
-
-    o_A = np.argsort(A)
-
-    loM = int(n * logratioTrim) + 1
-    hiM = n + 1 - loM
-    keep_M = np.zeros(n, dtype=bool)
-    keep_M[o_M[loM:hiM]] = True
-    loA = int(n * sumTrim) + 1
-    hiA = n + 1 - loA
-    keep_A = np.zeros(n, dtype=bool)
-    keep_A[o_A[loA:hiA]] = True
-    keep = keep_M & keep_A
-    M = M[keep]
-
-    if doWeighting:
-        obs_p = obs_p[keep]
-        ref_p = ref_p[keep]
-        v = (1 - obs_p) / obs_p / libsize_obs + (1 - ref_p) / ref_p / libsize_ref
-        w = (1 + 1e-6) / (v + 1e-6)
-        TMM = np.sum(w * M) / np.sum(w)
-    else:
-        TMM = np.mean(M)
-
-    factors = 2**TMM
-    return factors
+    return gam_fit
 
 
-def calcNormFactors(
-    counts: Union[np.ndarray, scipy.sparse.spmatrix],
-    lib_size: Optional[np.ndarray] = None,
-    method: str = "TMM",
-    refColumn: Optional[int] = None,
-    logratioTrim: float = 0.3,
-    sumTrim: float = 0.05,
-    doWeighting: bool = True,
-    Acutoff: float = -1e10,
-    p: float = 0.75,
-) -> np.ndarray:
-    """
-    Function to scale normalize RNA-Seq data for count matrices.
-    This is a Python translation of an R function from edgeR package.
+def DE_GAM_test(GAM_adata: anndata.AnnData):
+    "filler"
+
+
+def library_scaling_factors(
+    offset: Optional[np.ndarray] = None,
+    counts: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
+    distr: Literal["gaussian", "poisson", "nb"] = "gaussian",
+):
+    """Get offset values to account for differences in library sizes when comparing expression levels between samples.
+
+    If the offset is not provided, it calculates the offset based on library sizes. The offset is the logarithm of
+    the library sizes.
 
     Args:
-        object: Array or sparse array of shape [n_samples, n_features] containing gene expression data
-        lib_size: The library sizes for each sample.
-        method: The normalization method. Can be:
-                -"TMM": trimmed mean of M-values,
-                -"TMMwsp": trimmed mean of M-values with singleton pairings,
-                -"RLE": relative log expression, or
-                -"upperquartile": using the quantile method
-            Defaults to "TMM".
-        refColumn: Optional reference column for normalization
-        logratioTrim: For TMM normalization, the fraction of extreme log-ratios to be trimmed (default: 0.3).
-        sumTrim: For TMM normalization, the fraction of extreme log-ratios to be trimmed based on the absolute
-            expression (default: 0.05).
-        doWeighting: Whether to perform weighted TMM estimation (default: True).
-        Acutoff: For TMM normalization, the cutoff value for removing infinite values (default: -1e10).
-        p: Parameter for upper quartile normalization. Defaults to 0.75.
+        offset: Offset values. If provided, it is returned as is. If None, the offset is calculated based on library
+            sizes.
+        counts: Gene expression array
+        distr: Distribution of the data. Defaults to "gaussian", but can also be "poisson" or "nb".
 
     Returns:
-        factors: The normalization factors for each sample.
+        offset: Array of shape [n_samples, ] containing offset values.
     """
+    if offset is None and counts is None:
+        raise ValueError("Either offset or counts must be provided.")
+
     if isinstance(counts, scipy.sparse.spmatrix):
         counts = counts.toarray()
-    # Norm factor computation is derived from R functions, which assume array has shape [n_genes, n_cells]; transpose
-    # our arrays to match this convention:
-    counts = counts.T
 
-    if np.any(np.isnan(counts)):
-        raise ValueError("NA counts not permitted")
-    nsamples = counts.shape[1]
+    if offset is None:
+        try:
+            nf = calcNormFactors(counts, method="TMMwsp")
+        except:
+            print("TMMwsp normalization failed. Will use unnormalized library sizes as offset.\n")
+            nf = np.ones(counts.shape[0])
 
-    # Check library size
-    if lib_size is None:
-        lib_size = np.sum(counts, axis=0)
-    else:
-        if np.any(np.isnan(lib_size)):
-            raise ValueError("NA lib sizes not permitted")
-        if len(lib_size) != nsamples:
-            if len(lib_size) > 1:
-                print("calcNormFactors: length (lib size) doesn't match number of samples")
-            lib_size = np.repeat(lib_size, nsamples)
+        libsize = np.sum(counts, axis=1) * nf
+        if distr != "gaussian":
+            offset = np.log(libsize)
+        else:
+            offset = libsize
 
-    # Remove all zero rows (all-zero genes)
-    allzero = np.sum(counts > 0, axis=1) == 0
-    if np.any(allzero):
-        counts = counts[~allzero]
+        if np.any(libsize == 0):
+            print("Some library sizes are zero. Offsetting these to 0.\n")
+            offset[libsize == 0] = 0
 
-    # Calculate factors
-    methods = {
-        "TMM": calcFactorTMM,
-        "TMMwsp": calcFactorTMMwsp,
-        "RLE": calcFactorRLE,
-        "upperquartile": calcFactorQuantile,
-    }
-
-    if method == "TMM" or method == "TMMwsp":
-        "filler"
-    elif method == "upperquartile":
-        "filler"
-
-    # Factors should multiple to one
-    # factors = factors / np.exp(np.mean(np.log(factors)))
-    # return factors
+    return offset
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -1061,202 +1017,3 @@ def smooth(X, W, normalize_W=True, return_discrete=False) -> Tuple[scipy.sparse.
             x_new = x_new.todense()
             x_new = scipy.sparse.csr_matrix(np.round(x_new)).astype(int)
         return x_new
-
-
-# ---------------------------------------------------------------------------------------------------
-# Testing Model Accuracy
-# ---------------------------------------------------------------------------------------------------
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def plot_prior_vs_data(
-    reconst: pd.DataFrame,
-    adata: AnnData,
-    kind: str = "barplot",
-    target_name: Union[None, str] = None,
-    title: Union[None, str] = None,
-    figsize: Union[None, Tuple[float, float]] = None,
-    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "save",
-    save_kwargs: dict = {},
-):
-    """Plots distribution of observed vs. predicted counts in the form of a comparative density barplot.
-
-    Args:
-        reconst: DataFrame containing values for reconstruction/prediction of targets of a regression model
-        adata: AnnData object containing observed counts
-        kind: Kind of plot to generate. Options: "barplot", "scatterplot". Case sensitive, defaults to "barplot".
-        target_name: Optional, can be:
-                - Column name in DataFrame/AnnData object: name of gene to subset to
-                - "sum": computes sum over all features present in 'reconst' to compare to the corresponding subset of
-                'adata'.
-                - "mean": computes mean over all features present in 'reconst' to compare to the corresponding subset of
-                'adata'.
-            If not given, will subset AnnData to features in 'reconst' and flatten both arrays to compare all values.
-
-            If not given, will compute the sum over all
-            features present in 'reconst' and compare to the corresponding subset of 'adata'.
-        save_show_or_return: Whether to save, show or return the figure.
-            If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
-            displayed and the associated axis and other object will be return.
-        save_kwargs: A dictionary that will passed to the save_fig function.
-            By default it is an empty dictionary and the save_fig function will use the
-            {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
-            "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
-            keys according to your needs.
-    """
-    import matplotlib.pyplot as plt
-    from matplotlib import rcParams
-
-    from ...configuration import config_spateo_rcParams
-    from ...plotting.static.utils import save_return_show_fig_utils
-
-    logger = lm.get_main_logger()
-
-    config_spateo_rcParams()
-    if figsize is None:
-        figsize = rcParams.get("figure.figsize")
-
-    if target_name == "sum":
-        predicted = reconst.sum(axis=1).values.reshape(-1, 1)
-        observed = (
-            adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, reconst.columns].X
-        )
-        observed = np.sum(observed, axis=1).reshape(-1, 1)
-    elif target_name == "mean":
-        predicted = reconst.mean(axis=1).values.reshape(-1, 1)
-        observed = (
-            adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, reconst.columns].X
-        )
-        observed = np.mean(observed, axis=1).reshape(-1, 1)
-    elif target_name is not None:
-        observed = adata[:, target_name].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, target_name].X
-        observed = observed.reshape(-1, 1)
-        predicted = reconst[target_name].values.reshape(-1, 1)
-    else:
-        # Flatten arrays:
-        observed = (
-            adata[:, reconst.columns].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, reconst.columns].X
-        )
-        observed = observed.flatten().reshape(-1, 1)
-        predicted = reconst.values.flatten().reshape(-1, 1)
-
-    obs_pred = np.hstack((observed, predicted))
-    # Upper limit along the x-axis (99th percentile to prevent outliers from affecting scale too badly):
-    xmax = np.percentile(obs_pred, 99)
-    # Lower limit along the x-axis:
-    xmin = np.min(observed)
-    # Divide x-axis into pieces for purposes of setting x labels:
-    xrange, step = np.linspace(xmin, xmax, num=10, retstep=True)
-
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
-    if target_name is None:
-        target_name = "Total Counts"
-
-    if kind == "barplot":
-        ax.hist(
-            obs_pred,
-            xrange,
-            alpha=0.7,
-            label=[f"Observed {target_name}", f"Predicted {target_name}"],
-            density=True,
-            color=["#FFA07A", "#20B2AA"],
-        )
-
-        plt.legend(loc="upper right", fontsize=9)
-
-        ax.set_xticks(ticks=[i + 0.5 * step for i in xrange[:-1]], labels=[np.round(l, 3) for l in xrange[:-1]])
-        plt.xlabel("Counts", size=9)
-        plt.ylabel("Normalized Proportion of Cells", size=9)
-        if title is not None:
-            plt.title(title, size=9)
-        plt.tight_layout()
-
-    elif kind == "scatterplot":
-        from scipy.stats import spearmanr
-
-        observed = observed.flatten()
-        predicted = predicted.flatten()
-        slope, intercept = np.polyfit(observed, predicted, 1)
-
-        # Extract residuals:
-        predicted_model = np.polyval([slope, intercept], observed)
-        observed_mean = np.mean(observed)
-        predicted_mean = np.mean(predicted)
-        n = observed.size  # number of samples
-        m = 2  # number of parameters
-        dof = n - m  # degrees of freedom
-        # Students statistic of interval confidence:
-        t = scipy.stats.t.ppf(0.975, dof)
-        residual = observed - predicted_model
-        # Standard deviation of the error:
-        std_error = (np.sum(residual**2) / dof) ** 0.5
-
-        # Calculate spearman correlation and coefficient of determination:
-        s = spearmanr(observed, predicted)[0]
-        numerator = np.sum((observed - observed_mean) * (predicted - predicted_mean))
-        denominator = (np.sum((observed - observed_mean) ** 2) * np.sum((predicted - predicted_mean) ** 2)) ** 0.5
-        correlation_coef = numerator / denominator
-        r2 = correlation_coef**2
-
-        # Plot best fit line:
-        observed_line = np.linspace(np.min(observed), np.max(observed), 100)
-        predicted_line = np.polyval([slope, intercept], observed_line)
-
-        # Confidence interval and prediction interval:
-        ci = (
-            t
-            * std_error
-            * (1 / n + (observed_line - observed_mean) ** 2 / np.sum((observed - observed_mean) ** 2)) ** 0.5
-        )
-        pi = (
-            t
-            * std_error
-            * (1 + 1 / n + (observed_line - observed_mean) ** 2 / np.sum((observed - observed_mean) ** 2)) ** 0.5
-        )
-
-        ax.plot(observed, predicted, "o", ms=3, color="royalblue", alpha=0.7)
-        ax.plot(observed_line, predicted_line, color="royalblue", alpha=0.7)
-        ax.fill_between(
-            observed_line, predicted_line + pi, predicted_line - pi, color="lightcyan", label="95% prediction interval"
-        )
-        ax.fill_between(
-            observed_line, predicted_line + ci, predicted_line - ci, color="skyblue", label="95% confidence interval"
-        )
-        ax.spines["right"].set_visible(False)
-        ax.spines["top"].set_visible(False)
-
-        ax.set_xlabel(f"Observed {target_name}")
-        ax.set_ylabel(f"Predicted {target_name}")
-        title = title if title is not None else "Observed and Predicted {}".format(target_name)
-        ax.set_title(title)
-
-        # Display r^2, Spearman correlation, mean absolute error on plot as well:
-        r2s = str(np.round(r2, 2))
-        spearman = str(np.round(s, 2))
-        ma_err = mae(observed, predicted)
-        mae_s = str(np.round(ma_err, 2))
-
-        # Place text at slightly above the minimum x_line value and maximum y_line value to avoid obscuring the plot:
-        ax.text(
-            1.01 * np.min(observed),
-            1.01 * np.max(predicted),
-            "$r^2$ = " + r2s + ", Spearman $r$ = " + spearman + ", MAE = " + mae_s,
-            fontsize=8,
-        )
-        plt.legend(loc="lower center", bbox_to_anchor=(0.5, -0.4), fontsize=8)
-
-    else:
-        logger.info(
-            ":func `plot_prior_vs_data` error: Invalid input given to 'kind'. Options: 'barplot', " "'scatterplot'."
-        )
-
-    save_return_show_fig_utils(
-        save_show_or_return=save_show_or_return,
-        show_legend=True,
-        background="white",
-        prefix="parameters",
-        save_kwargs=save_kwargs,
-        total_panels=1,
-        fig=fig,
-        axes=ax,
-        return_all=False,
-        return_all_list=None,
-    )
