@@ -4,7 +4,7 @@ Auxiliary functions to aid in the interpretation functions for the spatial and s
 import multiprocessing as mp
 import sys
 import warnings
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 try:
     from typing import Literal
@@ -19,10 +19,11 @@ import statsmodels.api as sm
 import statsmodels.stats.multitest
 import tensorflow as tf
 from numpy import linalg
-from scipy import stats
+from scipy.linalg import cholesky, solve_triangular
 from sklearn.metrics import confusion_matrix, recall_score
 from sklearn.preprocessing import MinMaxScaler
 from statsmodels.gam.api import BSplines, GLMGam
+from statsmodels.gam.smooth_basis import get_knots_bsplines
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
@@ -509,12 +510,12 @@ def fit_DE_GAM(
     cat_cov: Optional[np.ndarray] = None,
     weights: Optional[np.ndarray] = None,
     offset: Optional[np.ndarray] = None,
-    nknots: int = 6,
+    n_df: int = 8,
     parallel: bool = True,
     family: Literal["gaussian", "poisson", "nb"] = "nb",
     include_offset: bool = False,
     return_model_idx: Optional[Union[int, List[int]]] = None,
-):
+) -> Tuple[anndata.AnnData, Dict[str, statsmodels.gam.api.GLMGam]]:
     """Fit generalized additive models for the purpose of differential expression testing from spatial
     transcriptomics data.
 
@@ -522,33 +523,43 @@ def fit_DE_GAM(
         counts: Matrix of gene expression counts, with cells as rows and genes as columns (so shape [n_samples,
             n_genes])
         cat_cov: Optional design matrix for fixed effects (i.e. categorical covariates)
-        var: The continuous predictor variable (e.g. pseudotime) of shape [n_samples, ] (or in the case of
-            pseudotime, this can be [n_samples, n_lineages])
+        var: The continuous predictor variable (e.g. pseudotime) of shape [n_samples, ].
         genes: List of genes present in the counts matrix
         cells: Optional list of cell names
         weights: Optional sample weights of shape [n_samples, ] (or in the case of pseudotime, this can be [
             n_samples, n_lineages])
         offset: Optional offset term of shape [n_samples, ]
-        nknots: The number of knots to be used in the smoothing function. Defaults to 6.
+        n_df: The number of degrees of freedom to be used in the smoothing function. Defaults to 8.
         parallel: Whether to use parallel processing. Defaults to True.
         family: The family of the generalized additive model. Defaults to "nb" for negative binomial, with "gaussian"
             and "poisson" as other options.
         include_offset: If True, include offset to account for differences in library size in predictions. If True,
             will compute scaling factor using trimmed mean of M-value with singleton pairing (TMMswp).
-        return_model_idx: If not None, return the GAM model(s) corresponding to the specified index or indices.
-            Defaults to None.
+        return_model_idx: If not None, return the GAM model(s) corresponding to the specified index or indices. If
+            None, return all models. Defaults to None.
 
     Returns:
         sc_obj: AnnData object containing information gathered from fitting all GAM models
+        return_gams: Dictionary of GAM models, with keys corresponding to the target gene and values corresponding
+            to :class `statsmodels.GLMGam` objects
     """
 
-    if weights is None:
-        weights = np.ones((counts.shape[0], 1))
+    logger = lm.get_main_logger()
+    logger.info(
+        "Note that this function currently does not currently support fitting of multiple independent "
+        "variables, despite it being possible to pass 2D 'var'. To do this, it is recommended to fit to each "
+        "independent variable separately."
+    )
 
-    if var.ndim == 0:
+    if weights is None:
+        weights = np.ones((counts.shape[0], var.shape[1]))
+
+    if var.ndim == 1:
         var = var.reshape(-1, 1)
-    if weights.ndim == 0:
+    if weights.ndim == 1:
         weights = weights.reshape(-1, 1)
+    if counts.ndim == 1:
+        counts = counts.reshape(-1, 1)
 
     # Check non-negativity of counts:
     if (counts < 0).any().any():
@@ -582,8 +593,8 @@ def fit_DE_GAM(
         offset = library_scaling_factors(counts=counts, distr=family)
 
     # Fixed effect design matrix:
-    if cat_cov is None:
-        cat_cov = np.ones((var.shape[0], 1))
+    # if cat_cov is None:
+    #     cat_cov = np.ones((var.shape[0], 1))
 
     # Fit GAMs
     # Define function to define formula and fit model:
@@ -599,7 +610,7 @@ def fit_DE_GAM(
     # Parallel processing:
     if parallel:
         args_list = [
-            (counts[:, i], genes[i], i, converged, nknots, weights, offset, var, cat_cov, family)
+            (counts[:, i], genes[i], i, converged, n_df, weights, offset, var, cat_cov, family)
             for i in range(counts.shape[1])
         ]
         with mp.Pool(processes=mp.cpu_count()) as pool:
@@ -607,7 +618,7 @@ def fit_DE_GAM(
 
     else:
         gamList = [
-            counts_to_Gam(counts[:, i], genes[i], i, converged, nknots, weights, offset, var, cat_cov, family)
+            counts_to_Gam(counts[:, i], genes[i], i, converged, n_df, weights, offset, var, cat_cov, family)
             for i in range(counts.shape[1])
         ]
 
@@ -616,24 +627,18 @@ def fit_DE_GAM(
     genelist = [gam.gene for gam in gamList]
 
     # Get fitted coefficients to dataframe:
-    betaAll = [None] * len(gamList)
-    print(betaAll)
-    SigmaAll = [None] * len(gamList)
+    betaAll = []
+    SigmaAll = []
 
-    for m in gamList:
+    for i, m in enumerate(gamList):
         # if isinstance(m, Exception):
         #     beta = np.nan
         # else:
         #     # beta = np.matrix(stats.coef(m)).T
         #     # beta = pd.DataFrame(beta, columns=[0])
-        beta = pd.DataFrame(m.params, columns=[0])
-        print(beta)
-    if len(betaAll) > 1:
+        beta = pd.DataFrame(m.params.values.reshape(1, -1), index=[genelist[i]], columns=m.params.index)
         betaAll.append(beta)
-        betaAllDf = pd.DataFrame(np.concatenate(betaAll, axis=1))
-    else:
-        betaAllDf = beta
-    betaAllDf.columns = genelist
+    betaAllDf = pd.DataFrame(np.concatenate(betaAll, axis=0), index=genelist, columns=m.params.index)
 
     for m in gamList:
         # Variance-covariance matrix:
@@ -643,42 +648,74 @@ def fit_DE_GAM(
             Sigma = m.cov_params()
         # Convert to dataframe:
         SigmaAll.append(Sigma)
-    print(SigmaAll)
 
-    # Store one design matrix and knot points (so its dimensions, colnames, etc. can be used for later):
-    m = gamList[0]
+    # Store one design matrix (linear predictor) and knot points- these will be identical for all genes because they
+    # are defined based on the values of the predictors:
+    element = SigmaAll.index(next(filter(lambda x: x is not None, SigmaAll)))
+
+    m = gamList[element]
     # Exclude the fixed effects from the design matrix:
-    dm = m.model.exog[:, 1:]
+    lin_pred = m.model.exog
 
     # Store results in AnnData object:
     sc_obj = anndata.AnnData(X=counts)
     sc_obj.var_names = genes
     if cells is not None:
         sc_obj.obs_names = cells
-    sc_obj.obs["var"] = var
-    sc_obj.obs["weights"] = weights
+    sc_obj.obsm["var"] = var
+    sc_obj.obsm["weights"] = weights
     sc_obj.var["converged"] = converged
-    sc_obj.obsm["design_mat"] = dm
+    sc_obj.obsm["lin_pred"] = lin_pred
+    sc_obj.uns["genes_converged"] = genelist
 
     # Store list of variance-covariance matrices:
     df_list = []
-    for sigma, name in zip(SigmaAll, genelist):
+    for sigma in SigmaAll:
         df_matrix = pd.DataFrame(sigma)
-        df_matrix["Name"] = name
         df_list.append(df_matrix)
     # Concatenate:
-    df = pd.concat(df_list, keys=range(len(SigmaAll)), names=["MatrixIndex"])
-    sc_obj.varm["Sigma"] = df
+    df = pd.concat(df_list, keys=genelist, names=["Target gene"])
+    sc_obj.uns["Sigma"] = df
+    sc_obj.uns["beta"] = betaAllDf
 
-    sc_obj.varm["beta"] = betaAllDf
+    # Save knot points (for each column of the independent variable array, if applicable):
+    knotpoints = {}
+    if var.shape[1] == 1:
+        all_points = get_knots_bsplines(
+            var[:, 0],
+            df=n_df,
+            degree=3,
+            spacing="quantile",
+            lower_bound=np.min(var[:, 0]),
+            upper_bound=np.max(var[:, 0]),
+        )
+        knotpoints = list(set(all_points))
+    else:
+        for idx in range(var.shape[1]):
+            all_points = get_knots_bsplines(
+                var[:, idx],
+                df=n_df,
+                degree=3,
+                spacing="quantile",
+                lower_bound=np.min(var[:, idx]),
+                upper_bound=np.max(var[:, idx]),
+            )
+            knotpoints["v" + str(idx + 1)] = list(set(all_points))
+
+    sc_obj.uns["knotpoints"] = knotpoints
 
     # Return model of choice if specified:
     if return_model_idx is not None:
-        models = genes[return_model_idx]
-        return_gams = dict(zip(models, gamList[return_model_idx]))
+        models = genelist[return_model_idx]
+        if isinstance(return_model_idx, list):
+            return_gams = dict(zip(models, gamList[return_model_idx]))
+        else:
+            return_gams = {models: gamList[return_model_idx]}
         return sc_obj, return_gams
+    # Otherwise, return all models:
     else:
-        return sc_obj
+        return_gams = dict(zip(genelist, gamList))
+        return sc_obj, return_gams
 
 
 def counts_to_Gam(
@@ -686,7 +723,7 @@ def counts_to_Gam(
     gene: str,
     idx: int,
     converged: List[bool],
-    nknots: int,
+    n_df: int,
     weights: np.ndarray,
     offset: Optional[np.ndarray],
     var: np.ndarray,
@@ -701,7 +738,7 @@ def counts_to_Gam(
         idx: Index of gene to fit
         converged: Indicator for whether the fitting converged for this gene
         parallel: Whether parallel processing is being used
-        nknots: Number of knots to use for the cubic regression spline
+        n_df: Number of degrees of freedom to use for the cubic regression splines
         weights: Weights for each cell
         offset: Optional offset for each cell
         var: Explanatory variables
@@ -716,7 +753,8 @@ def counts_to_Gam(
     # Explanatory variables:
     X = pd.DataFrame(var, columns=[f"x{i}" for i in range(var.shape[1])])
     # Add fixed effects if necessary:
-    X["cat_cov"] = cat_cov
+    if cat_cov is not None:
+        X["cat_cov"] = cat_cov
     X = X.sort_index(axis=1)
 
     # Check if y is sparse:
@@ -724,14 +762,13 @@ def counts_to_Gam(
         y = y.toarray()
 
     # Define cubic regression splines to use for data smoothing:
-    bs = BSplines(var, df=[nknots for _ in range(var.shape[1])], degree=[3 for _ in range(var.shape[1])])
+    bs = BSplines(var, df=[n_df for _ in range(var.shape[1])], degree=[3 for _ in range(var.shape[1])])
 
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("error", category=ConvergenceWarning)
             gam_model = GLMGam(y, X, smoother=bs, family=family, weights=weights, offset=offset)
             gam_fit = gam_model.fit()
-            print(gam_fit.summary())
 
     except Exception:
         print(f"\nConvergence not achieved for {gene}.")
@@ -744,7 +781,87 @@ def counts_to_Gam(
     return gam_fit
 
 
-def DE_GAM_test(GAM_adata: anndata.AnnData):
+def DE_GAM_test(
+    GAM_adata: anndata.AnnData,
+    bs_obj: BSplines,
+    l2fc_thresh: float = 0.0,
+    contrast_type: Literal["start", "end", "consecutive"] = "start",
+    n_points: Optional[int] = None,
+    inverse: Literal["cholesky", "qr", "generalized"] = "cholesky",
+):
+    """Statistical testing for outputs from GAM model(s).
+
+    Args:
+        GAM_adata: AnnData object containing results of GAM models
+        bs_obj: BSplines object containing information about the basis functions used for the GAM models
+        l2fc_thresh: The threshold for log2 fold change (default is 0)
+        contrast_type: For use when constructing the contrast matrix, in this context to compare expression levels
+            along the continuous predictor. Options:
+                - "start": compares the expression levels at each contrast point with the expression level at the
+                    starting point of the predictor
+                - "end": compares the expression levels at each contrast point with the expression level at the
+                    ending point of the predictor
+                - "consecutive": compares the expression levels between consecutive contrast points. Computes the
+                    difference in expression levels between each point and the immediately preceding point.
+        n_points: The number of contrast points to use. If not given, defaults to 2 * the number of knot points.
+        inverse: The method for inverting the covariance matrix. Options are "cholesky" (for Cholesky decomposition),
+            "qr" (for QR decomposition), or "generalized" (for inverse using the Moore-Penrose pseudoinverse).
+
+    Returns:
+        wald_df: Dataframe containing results of the statistical test and mean log fold changes
+    """
+    logger = lm.get_main_logger()
+
+    design_matrix = GAM_adata.obsm["var"]
+    linear_predictor = GAM_adata.obsm["lin_pred"]
+
+    # Get knot points for each predictor:
+    knotpoints = GAM_adata.uns["knotpoints"]
+    if n_points is None:
+        n_points = 2 * len(knotpoints)
+
+    n_curves = design_matrix.shape[1]
+    # Max value for each predictor:
+    # max_vals = np.max(design_matrix, axis=0)
+    max_val = np.max(design_matrix)
+
+    # Construct individual contrast matrix:
+    if n_curves == 1:
+        contrast_matrix = pd.DataFrame(np.zeros((linear_predictor.shape[1], n_points - 1)))
+        # Set column names for L1 matrix
+        contrast_matrix.columns = ["point" + str(i) for i in range(1, n_points)]
+        # Get predictor matrix
+        contrastPoints = np.linspace(0, max_val, num=n_points)
+        # Compute linear predictor at the contrast points:
+        exog_smooth_interp = bs_obj.transform(contrastPoints)
+        exog_smooth_pred = np.hstack((contrastPoints, exog_smooth_interp))
+
+        # Fill in contrast matrix:
+        if contrast_type == "start":
+            for i in range(1, n_points):
+                contrast_matrix.iloc[:, i - 1] = exog_smooth_pred[i, :] - exog_smooth_pred[0, :]
+
+        elif contrast_type == "end":
+            for i in range(n_points - 1):
+                contrast_matrix.iloc[:, i] = exog_smooth_pred[i, :] - exog_smooth_pred[n_points - 1, :]
+
+        elif contrast_type == "consecutive":
+            for i in range(n_points - 1):
+                contrast_matrix.iloc[:, i] = exog_smooth_pred[i + 1, :] - exog_smooth_pred[i, :]
+
+    else:
+        logger.info("Operability with multiple predictors not yet implemented.")
+
+    # Statistical test for each model:
+    betaAll = GAM_adata.uns["beta"]
+    SigmaAll = GAM_adata.uns["Sigma"]
+
+    # Wald test results for each fitted gene:
+    for gene in GAM_adata.uns["genes_converged"]:
+        Sigma_gene = SigmaAll.loc[gene].values
+
+
+def GAM_predict():
     "filler"
 
 
@@ -892,6 +1009,62 @@ def wald_test(
     wald_statistic = np.abs(np.divide(theta_mle - theta0, theta_sd))
     pvals = 2 * (1 - scipy.stats.norm.cdf(np.abs(wald_statistic)))  # two-sided
     return pvals
+
+
+def wald_test_GAM(beta: np.ndarray, Sigma: np.ndarray, contrast_mat: np.ndarray, lfc: float = 0.0, inverse: str = "QR"):
+    """Variant of the Wald test function for generalized additive models.
+
+    Args:
+        beta: Vector of regression coefficients
+        Sigma: Variance-covariance matrix for beta
+        contrast_mat: Contrast matrix
+        lfc: Natural log fold change threshold. Default is 0.
+        inverse: Method to use for inverting Sigma. Options are "cholesky" (for Cholesky decomposition),
+            "qr" (for QR decomposition), or "generalized" (for inverse using the Moore-Penrose pseudoinverse).
+
+    Returns:
+        wald_array: Array containing the Wald statistic, degrees of freedom and p-value for this feature (i.e. for
+            this beta vector/sigma array).
+    """
+    # Contrast matrix for multivariate Wald test:
+    # R = upper triangular matrix, P = permutation matrix (mapping between the permuted matrix and the original
+    # matrix- needed if pivoting is done for numerical stability)
+    _, R, P = scipy.linalg.qr(contrast_mat, pivoting=True)
+    rank = np.linalg.matrix_rank(R)
+    mod_contrast_matrix = contrast_mat[:, P[:rank]]
+
+    # Invert Sigma
+    if inverse == "cholesky":
+        try:
+            sigmaInv = np.linalg.inv(np.linalg.cholesky(mod_contrast_matrix.T @ Sigma @ mod_contrast_matrix))
+        except np.linalg.LinAlgError:
+            return np.nan, np.nan, np.nan
+
+    elif inverse == "qr":
+        try:
+            sigmaInv = np.linalg.lstsq(
+                mod_contrast_matrix.T @ Sigma @ mod_contrast_matrix, np.eye(mod_contrast_matrix.shape[1]), rcond=None
+            )[0]
+        except np.linalg.LinAlgError:
+            return np.nan, np.nan, np.nan
+
+    elif inverse == "generalized":
+        try:
+            sigmaInv = np.linalg.pinv(mod_contrast_matrix.T @ Sigma @ mod_contrast_matrix)
+        except np.linalg.LinAlgError:
+            return np.nan, np.nan, np.nan
+
+    else:
+        raise ValueError(f"Invalid value for 'inverse' argument: {inverse}. Options: 'cholesky', 'qr', 'generalized'.")
+
+    # Differential testing with a likelihood ratio test:
+    # Estimated log-fold change:
+    est_fc = mod_contrast_matrix.T @ beta
+    # Do not consider features with absolute log-fold change below threshold (will not do anything if lfc is the
+    # default of 0):
+    est = np.sign(est_fc) * np.maximum(0, np.abs(est_fc) - lfc)
+    est = np.reshape(est, (1, est.shape[0]))
+    print(est)
 
 
 def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: float = 0.05) -> np.ndarray:
