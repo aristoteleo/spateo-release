@@ -784,7 +784,7 @@ def counts_to_Gam(
 def DE_GAM_test(
     GAM_adata: anndata.AnnData,
     bs_obj: BSplines,
-    l2fc_thresh: float = 0.0,
+    lfc_thresh: float = 0.0,
     contrast_type: Literal["start", "end", "consecutive"] = "start",
     n_points: Optional[int] = None,
     inverse: Literal["cholesky", "qr", "generalized"] = "cholesky",
@@ -794,7 +794,7 @@ def DE_GAM_test(
     Args:
         GAM_adata: AnnData object containing results of GAM models
         bs_obj: BSplines object containing information about the basis functions used for the GAM models
-        l2fc_thresh: The threshold for log2 fold change (default is 0)
+        l2fc_thresh: The threshold for natural log fold change (default is 0)
         contrast_type: For use when constructing the contrast matrix, in this context to compare expression levels
             along the continuous predictor. Options:
                 - "start": compares the expression levels at each contrast point with the expression level at the
@@ -808,7 +808,7 @@ def DE_GAM_test(
             "qr" (for QR decomposition), or "generalized" (for inverse using the Moore-Penrose pseudoinverse).
 
     Returns:
-        wald_df: Dataframe containing results of the statistical test and mean log fold changes
+        GAM_adata: AnnData object with results of statistical testing added
     """
     logger = lm.get_main_logger()
 
@@ -856,13 +856,20 @@ def DE_GAM_test(
     betaAll = GAM_adata.uns["beta"]
     SigmaAll = GAM_adata.uns["Sigma"]
 
-    # Wald test results for each fitted gene:
-    for gene in GAM_adata.uns["genes_converged"]:
-        Sigma_gene = SigmaAll.loc[gene].values
+    # Wald test results for each fitted gene and store results in DataFrame:
+    all_pvals = []
+    for gene in GAM_adata.var_names:
+        if GAM_adata.var["converged"][gene]:
+            Sigma_gene = SigmaAll.loc[gene].values
+            beta_gene = betaAll.loc[gene].values
+            pval_gene = wald_test_GAM(beta_gene, Sigma_gene, contrast_matrix, lfc=lfc_thresh, inverse=inverse)
+            all_pvals.append(pval_gene)
+        else:
+            all_pvals.append(np.nan)
 
+    GAM_adata.obs["pvals"] = all_pvals
 
-def GAM_predict():
-    "filler"
+    return GAM_adata
 
 
 def library_scaling_factors(
@@ -1011,8 +1018,11 @@ def wald_test(
     return pvals
 
 
-def wald_test_GAM(beta: np.ndarray, Sigma: np.ndarray, contrast_mat: np.ndarray, lfc: float = 0.0, inverse: str = "QR"):
-    """Variant of the Wald test function for generalized additive models.
+def wald_test_GAM(
+    beta: np.ndarray, Sigma: np.ndarray, contrast_mat: np.ndarray, lfc: float = 0.0, inverse: str = "QR"
+) -> float:
+    """Variant of the Wald test function for generalized additive models, computes Wald statistic and p-value
+        considering each independent variable alongside all of its spline bases.
 
     Args:
         beta: Vector of regression coefficients
@@ -1023,7 +1033,7 @@ def wald_test_GAM(beta: np.ndarray, Sigma: np.ndarray, contrast_mat: np.ndarray,
             "qr" (for QR decomposition), or "generalized" (for inverse using the Moore-Penrose pseudoinverse).
 
     Returns:
-        wald_array: Array containing the Wald statistic, degrees of freedom and p-value for this feature (i.e. for
+        pval: Array containing the Wald statistic, degrees of freedom and p-value for this feature (i.e. for
             this beta vector/sigma array).
     """
     # Contrast matrix for multivariate Wald test:
@@ -1064,7 +1074,15 @@ def wald_test_GAM(beta: np.ndarray, Sigma: np.ndarray, contrast_mat: np.ndarray,
     # default of 0):
     est = np.sign(est_fc) * np.maximum(0, np.abs(est_fc) - lfc)
     est = np.reshape(est, (1, est.shape[0]))
-    print(est)
+
+    # Wald statistic and p-value:
+    wald = np.matmul(np.matmul(est, sigmaInv), est.T)
+    if wald < 0:
+        wald = 0
+    df = mod_contrast_matrix.shape[1]
+    pval = 1 - scipy.stats.chi2.cdf(wald, df)
+
+    return pval
 
 
 def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: float = 0.05) -> np.ndarray:
