@@ -515,7 +515,7 @@ def fit_DE_GAM(
     family: Literal["gaussian", "poisson", "nb"] = "nb",
     include_offset: bool = False,
     return_model_idx: Optional[Union[int, List[int]]] = None,
-) -> Tuple[anndata.AnnData, Dict[str, statsmodels.gam.api.GLMGam]]:
+) -> Union[Tuple[anndata.AnnData, Dict[str, statsmodels.gam.api.GLMGam], BSplines], Tuple[anndata.AnnData, BSplines]]:
     """Fit generalized additive models for the purpose of differential expression testing from spatial
     transcriptomics data.
 
@@ -607,10 +607,13 @@ def fit_DE_GAM(
     elif family == "nb":
         family = sm.families.NegativeBinomial()
 
+    # Define cubic regression splines to use for data smoothing:
+    bs = BSplines(var, df=[n_df for _ in range(var.shape[1])], degree=[3 for _ in range(var.shape[1])])
+
     # Parallel processing:
     if parallel:
         args_list = [
-            (counts[:, i], genes[i], i, converged, n_df, weights, offset, var, cat_cov, family)
+            (counts[:, i], genes[i], i, converged, weights, offset, var, bs, cat_cov, family)
             for i in range(counts.shape[1])
         ]
         with mp.Pool(processes=mp.cpu_count()) as pool:
@@ -618,7 +621,7 @@ def fit_DE_GAM(
 
     else:
         gamList = [
-            counts_to_Gam(counts[:, i], genes[i], i, converged, n_df, weights, offset, var, cat_cov, family)
+            counts_to_Gam(counts[:, i], genes[i], i, converged, weights, offset, var, bs, cat_cov, family)
             for i in range(counts.shape[1])
         ]
 
@@ -711,11 +714,11 @@ def fit_DE_GAM(
             return_gams = dict(zip(models, gamList[return_model_idx]))
         else:
             return_gams = {models: gamList[return_model_idx]}
-        return sc_obj, return_gams
-    # Otherwise, return all models:
+        return sc_obj, return_gams, bs
+    # Otherwise, don't return any models, only the object and the basis splines:
     else:
         return_gams = dict(zip(genelist, gamList))
-        return sc_obj, return_gams
+        return sc_obj, bs
 
 
 def counts_to_Gam(
@@ -723,10 +726,10 @@ def counts_to_Gam(
     gene: str,
     idx: int,
     converged: List[bool],
-    n_df: int,
     weights: np.ndarray,
     offset: Optional[np.ndarray],
     var: np.ndarray,
+    bs: BSplines,
     cat_cov: Optional[np.ndarray],
     family: sm.families.family.Family,
 ):
@@ -742,6 +745,7 @@ def counts_to_Gam(
         weights: Weights for each cell
         offset: Optional offset for each cell
         var: Explanatory variables
+        bs: Cubic regression splines corresponding to the independent variable(s)
         cat_cov: Optional categorical covariates
         family: Family to use for the GLM
 
@@ -760,9 +764,6 @@ def counts_to_Gam(
     # Check if y is sparse:
     if scipy.sparse.issparse(y):
         y = y.toarray()
-
-    # Define cubic regression splines to use for data smoothing:
-    bs = BSplines(var, df=[n_df for _ in range(var.shape[1])], degree=[3 for _ in range(var.shape[1])])
 
     try:
         with warnings.catch_warnings():
@@ -1092,22 +1093,22 @@ def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: fl
     Function from diffxpy: https://github.com/theislab/diffxpy
 
     Args:
-    pvals: Uncorrected p-values; must be given as a one-dimensional array
-    method: Method to use for correction. Available methods can be found in the documentation for
-        statsmodels.stats.multitest.multipletests(), and are also listed below (in correct case) for convenience:
-            - Named methods:
-                - bonferroni
-                - sidak
-                - holm-sidak
-                - holm
-                - simes-hochberg
-                - hommel
-            - Abbreviated methods:
-                - fdr_bh: Benjamini-Hochberg correction
-                - fdr_by: Benjamini-Yekutieli correction
-                - fdr_tsbh: Two-stage Benjamini-Hochberg
-                - fdr_tsbky: Two-stage Benjamini-Krieger-Yekutieli method
-    alpha: Family-wise error rate (FWER)
+        pvals: Uncorrected p-values; must be given as a one-dimensional array
+        method: Method to use for correction. Available methods can be found in the documentation for
+            statsmodels.stats.multitest.multipletests(), and are also listed below (in correct case) for convenience:
+                - Named methods:
+                    - bonferroni
+                    - sidak
+                    - holm-sidak
+                    - holm
+                    - simes-hochberg
+                    - hommel
+                - Abbreviated methods:
+                    - fdr_bh: Benjamini-Hochberg correction
+                    - fdr_by: Benjamini-Yekutieli correction
+                    - fdr_tsbh: Two-stage Benjamini-Hochberg
+                    - fdr_tsbky: Two-stage Benjamini-Krieger-Yekutieli method
+        alpha: Family-wise error rate (FWER)
 
     Returns
         qval: p-values post-correction

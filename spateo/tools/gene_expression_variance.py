@@ -4,6 +4,7 @@ Characterizing cell-to-cell variability within spatial domains
 from collections import OrderedDict
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
+import anndata
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -17,7 +18,30 @@ from ..logging import logger_manager as lm
 from ..plotting.static.utils import save_return_show_fig_utils
 
 
-### ----------------------------------- Compute highly variable genes ----------------------------------- ###
+# ---------------------------------------------------------------------------------------------------
+# Comparative statistics for gene expression between groups
+# ---------------------------------------------------------------------------------------------------
+def compute_gene_groups_p_val(gene: str, group1: anndata.AnnData, group2: anndata.AnnData) -> Tuple[str, float]:
+    """Calculate the Mann-Whitney U test p-value for a gene between two groups.
+
+    Args:
+        gene: Name of the gene
+        group1: AnnData object containing cells from the first group to compare
+        group2: AnnData object containing cells from the second group to compare
+
+    Returns:
+        gene: Name of the gene
+        p_val: Mann-Whitney U test p-value
+    """
+    group1_gene = group1[:, gene].X
+    group2_gene = group2[:, gene].X
+    _, p_val = scipy.stats.mannwhitneyu(group1_gene, group2_gene, alternative="two-sided")
+    return (gene, p_val)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Compute highly variable genes
+# ---------------------------------------------------------------------------------------------------
 def get_highvar_genes_sparse(
     expression: Union[
         np.ndarray,
