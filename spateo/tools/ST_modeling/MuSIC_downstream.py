@@ -32,7 +32,11 @@ from spateo.tools.gene_expression_variance import (
     compute_gene_groups_p_val,
     get_highvar_genes_sparse,
 )
-from spateo.tools.ST_modeling.regression_utils import multitesting_correction, wald_test
+from spateo.tools.ST_modeling.regression_utils import (
+    fit_DE_GAM,
+    multitesting_correction,
+    wald_test,
+)
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -683,8 +687,8 @@ class MuSIC_Interpreter(MuSIC):
             else:
                 nnz_counts = np.array(self.adata[:, sender_regulators].X.getnnz(axis=0)).flatten()
 
-            tfs_to_keep = list(np.array(sender_regulators)[nnz_counts >= n_cells_threshold])
-            counts = self.adata[:, tfs_to_keep].X
+            to_keep = list(np.array(sender_regulators)[nnz_counts >= n_cells_threshold])
+            counts = self.adata[:, to_keep].X
 
         else:
             # For receiving analyses, identify gene expression signatures associated with the signaling effects:
@@ -738,7 +742,13 @@ class MuSIC_Interpreter(MuSIC):
             to_keep = list(set(genes_to_keep) - set(significant_markers))
 
             counts = self.adata[:, to_keep].X
-            # NOT FINISHED YET
+
+        GAM_adata, bs = fit_DE_GAM(
+            counts,
+            var=effect_potential,
+            genes=to_keep,
+            cells=self.sample_names,
+        )
 
     def compute_cell_type_coupling(self):
         """Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver

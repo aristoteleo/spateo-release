@@ -1,9 +1,14 @@
 """Plotting functions for spatial geometry plots.
 """
 
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import anndata
+import cv2
+import numpy as np
+import pandas as pd
+from shapely.geometry import Polygon
+from shapely.wkb import dumps
 
 from ...configuration import SKM
 from .scatters import scatters
@@ -29,7 +34,7 @@ def geo(
     slices: Optional[int] = None,
     img_layers: Optional[int] = None,
     *args,
-    **kwargs
+    **kwargs,
 ):
     """
     Geometry plot for physical coordinates of each cell.
@@ -126,3 +131,125 @@ def geo(
 
     # main_finish_progress("space plot")
     return res
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def space_polygons(
+    polygons_path: str,
+    adata: anndata.AnnData,
+    color: Optional[Union[List[str], str]] = None,
+    fov: Optional[Union[int, str]] = None,
+    **kwargs,
+):
+    """
+    Plot polygons on spatial coordinates.
+
+    Args:
+        polygons_path: The path to the file containing polygon coordinates
+        adata: The AnnData object that contains the spatial coordinates, gene expression, cell type labels, etc.
+        color: The column name in the adata.obs that will be used to color the polygons.
+        fov: The fov name that will be used to select the polygons. If None, all polygons will be plotted.
+        kwargs: Additional arguments passed to :func ~`spateo.pl.geo.geo()`.
+    """
+
+    # Search for global spatial coordinates if fov is not provided:
+    if fov is None:
+        try:
+            adata.obsm["global_spatial"] = np.hstack(
+                (
+                    adata.obs["CenterX_global_px"].values.reshape(-1, 1),
+                    adata.obs["CenterY_global_px"].values.reshape(-1, 1),
+                )
+            )
+        except:
+            raise ValueError(
+                "Global spatial coordinates could not be found in AnnData object. Conventional Nanostring "
+                "data stores "
+                "these in 'CenterX_global_px' and 'CenterY_global_px', and so the search was done for "
+                "these columns."
+            )
+
+    polygons = pd.read_csv(polygons_path)
+
+    # It is assumed that each row in the polygons dataframe corresponds to the cell at the same position in the
+    # AnnData object
+    polygons["cellID_fov"] = polygons.apply(lambda row: f"{int(row['cellID'])}_{int(row['fov'])}", axis=1)
+    polygons["cellID_fov"] = polygons["cellID_fov"].astype(str)
+
+    if fov is not None:
+        polygons_fov = polygons[polygons["fov"] == fov]
+        adata = adata[adata.obs["fov"] == fov]
+    else:
+        polygons_fov = polygons
+
+    props = create_polygon_object_nanostring(polygons_fov)
+    adata.obs["area"] = props["area"].values.astype(float)
+    adata.obsm["spatial"] = props.filter(regex="centroid-").values.astype(float)
+    adata.obsm["contour"] = props["contour"].values.astype(str)
+    adata.obsm["bbox"] = props.filter(regex="bbox-").values.astype(int)
+    adata.obsm["scaled_spatial"] = adata.obsm["spatial"] // 100
+
+    geo(adata, color=color, **kwargs)
+
+
+def create_polygon_object_nanostring(polygon_df: pd.DataFrame):
+    """Process cell data to construct contours and calculate area and centroid.
+
+    Args:
+        polygon_df: Input DataFrame containing pixel-to-cell correspondence data with columns 'cellID_fov',
+            'x_local_px', and 'y_local_px'.
+
+    Returns:
+        processed_polygon_df: Dataframe containing polygon information. Contains columns 'label', 'area', 'bbox-0',
+            'bbox-1', 'bbox-2', 'bbox-3', 'centroid-0', 'centroid-1', and 'contour'. Indexed by the 'label' column.
+    """
+    rows = []  # Initialize the rows list
+
+    # Loop over the cell IDs to construct the contour for each cell
+    for cell_id in polygon_df["cellID_fov"].unique():
+        # Filter the DataFrame for the current cell ID
+        cell_df = polygon_df[polygon_df["cellID_fov"] == cell_id]
+
+        # Retrieve the relevant coordinates for constructing the contour
+        coordinates = cell_df[["x_local_px", "y_local_px"]].values.astype(int)
+
+        min_offset = coordinates.min(axis=0)
+        max_offset = coordinates.max(axis=0)
+        min0, min1 = min_offset
+        max0, max1 = max_offset
+
+        # Construct the polygon/contour for the cell using the coordinates
+        polygon = Polygon(coordinates)
+
+        poly = dumps(polygon, hex=True)  # geometry object to hex
+
+        # Convert the polygon to a numpy array representing the contour
+        contour = coordinates
+
+        # Calculate the moments using cv2.moments()
+        moments = cv2.moments(contour)
+
+        # Calculate the area and centroid using the moments
+        area = moments["m00"]
+        if area > 0:
+            centroid0 = moments["m10"] / area
+            centroid1 = moments["m01"] / area
+        elif contour.shape[0] == 2:
+            line = contour - min_offset
+            mask = cv2.line(np.zeros((max_offset - min_offset + 1)[::-1], dtype=np.uint8), line[0], line[1], color=1).T
+            area = mask.sum()
+            centroid0, centroid1 = contour.mean(axis=0)
+        elif contour.shape[0] == 1:
+            area = 1
+            centroid0, centroid1 = contour[0] + 0.5
+        else:
+            raise IOError(f"Contour contains {contour.shape[0]} points.")
+
+        rows.append([str(cell_id), area, min0, min1, max0 + 1, max1 + 1, centroid0, centroid1, poly])
+
+    # Construct the DataFrame from the rows list:
+    processed_polygon_df = pd.DataFrame(
+        rows, columns=["label", "area", "bbox-0", "bbox-1", "bbox-2", "bbox-3", "centroid-0", "centroid-1", "contour"]
+    ).set_index("label")
+
+    return processed_polygon_df

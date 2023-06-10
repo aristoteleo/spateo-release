@@ -1,8 +1,11 @@
 """
 Functions to either scale single-cell data or normalize such that the row-wise sums are identical.
 """
+import inspect
 import warnings
 from typing import Dict, Iterable, Optional, Union
+
+from ..configuration import SKM
 
 try:
     from typing import Literal
@@ -62,7 +65,8 @@ def _normalize_data(X, counts, after=None, copy=False, rows=True, round=False):
 # Normalization wrapper:
 def normalize_total(
     adata: AnnData,
-    target_sum: Optional[float] = 1e4,
+    target_sum: float = 1e4,
+    norm_factor: Optional[np.ndarray] = None,
     exclude_highly_expressed: bool = False,
     max_fraction: float = 0.05,
     key_added: Optional[str] = None,
@@ -83,6 +87,8 @@ def normalize_total(
         target_sum: Desired sum of counts for each gene post-normalization. If `None`, after normalization,
             each observation (cell) will have a total count equal to the median of total counts for observations (
             cells) before normalization.
+        norm_factor: Optional array of shape `n_obs` × `1`, where `n_obs` is the number of observations (cells). Each
+            entry contains a pre-computed normalization factor for that cell.
         exclude_highly_expressed: Exclude (very) highly expressed genes for the computation of the normalization factor
             for each cell. A gene is considered highly expressed if it has more than `max_fraction` of the total counts
             in at least one cell.
@@ -132,6 +138,9 @@ def normalize_total(
         counts_per_cell = X[:, gene_subset].sum(1)
     else:
         counts_per_cell = X.sum(1)
+
+    if norm_factor is not None:
+        counts_per_cell *= norm_factor
 
     # logger.info(msg)
     counts_per_cell = np.ravel(counts_per_cell)
@@ -202,7 +211,10 @@ def calcFactorQuantile(data: np.ndarray, lib_size: float, p: float = 0.75) -> np
     """
     factors = np.percentile(data, p * 100, axis=1)
     if np.min(factors) == 0:
-        print("One or more quantiles are zero")
+        print(
+            f"Quantile method note: one or more quantiles are zero ({p * 100}th percentile for one or more cells "
+            f"is zero."
+        )
     factors /= lib_size
     return factors
 
@@ -389,13 +401,14 @@ def calcNormFactors(
     doWeighting: bool = True,
     Acutoff: float = -1e10,
     p: float = 0.75,
-) -> float:
+) -> np.ndarray:
     """
     Function to scale normalize RNA-Seq data for count matrices.
     This is a Python translation of an R function from edgeR package.
 
     Args:
-        object: Array or sparse array of shape [n_samples, n_features] containing gene expression data
+        object: Array or sparse array of shape [n_samples, n_features] containing gene expression data. Note that a
+            sparse array will be converted to dense before calculations.
         lib_size: The library sizes for each sample.
         method: The normalization method. Can be:
                 -"TMM": trimmed mean of M-values,
@@ -493,3 +506,65 @@ def calcNormFactors(
     # Normalize factors:
     factors = factors / np.exp(np.mean(np.log(factors)))
     return factors
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def factor_normalization(adata: AnnData, norm_factors: Optional[np.ndarray] = None, **kwargs):
+    """Wrapper to apply factor normalization to AnnData object.
+
+    Args:
+        adata: The annotated data matrix of shape `n_obs` × `n_vars`. Rows correspond to cells and columns to genes.
+        norm_factors: Array of shape (`n_obs`, ), the normalization factors for each sample. If not given,
+            will compute using :func `calcNormFactors` and any arguments given to `kwargs`.
+        **kwargs: Keyword arguments to pass to :func `calcNormFactors` or :func `normalize_total`. Options:
+            lib_size: The library sizes for each sample.
+            method: The normalization method. Can be:
+                    -"TMM": trimmed mean of M-values,
+                    -"TMMwsp": trimmed mean of M-values with singleton pairings,
+                    -"RLE": relative log expression, or
+                    -"upperquartile": using the quantile method
+                Defaults to "TMM".
+            refColumn: Optional reference column for normalization
+            logratioTrim: For TMM normalization, the fraction of extreme log-ratios to be trimmed (default: 0.3).
+            sumTrim: For TMM normalization, the fraction of extreme log-ratios to be trimmed based on the absolute
+                expression (default: 0.05).
+            doWeighting: Whether to perform weighted TMM estimation (default: True).
+            Acutoff: For TMM normalization, the cutoff value for removing infinite values (default: -1e10).
+            p: Parameter for upper quartile normalization. Defaults to 0.75.
+            target_sum: Desired sum of counts for each gene post-normalization. If `None`, after normalization,
+            each observation (cell) will have a total count equal to the median of total counts for observations (
+            cells) before normalization.
+            exclude_highly_expressed: Exclude (very) highly expressed genes for the computation of the normalization
+                factor for each cell. A gene is considered highly expressed if it has more than `max_fraction` of the
+                total counts in at least one cell.
+            max_fraction: If `exclude_highly_expressed=True`, this is the cutoff threshold for excluding genes.
+            key_added: Name of the field in `adata.obs` where the normalization factor is stored.
+            layer: Layer to normalize instead of `X`. If `None`, `X` is normalized.
+            inplace: Whether to update `adata` or return dictionary with normalized copies of `adata.X` and
+                `adata.layers`.
+            copy: Whether to modify copied input object. Not compatible with inplace=False.
+
+    Returns:
+        adata: The normalized AnnData object.
+    """
+
+    calc_norm_factors_signatures = inspect.signature(calcNormFactors)
+    calc_norm_factors_valid_params = [
+        p.name for p in calc_norm_factors_signatures.parameters.values() if p.name in kwargs
+    ]
+    calc_norm_factors_params = {k: kwargs.pop(k) for k in calc_norm_factors_valid_params}
+
+    normalize_total_signatures = inspect.signature(normalize_total)
+    normalize_total_valid_params = [p.name for p in normalize_total_signatures.parameters.values() if p.name in kwargs]
+    normalize_total_params = {k: kwargs.pop(k) for k in normalize_total_valid_params}
+
+    if norm_factors is None:
+        norm_factors = calcNormFactors(adata.X, **calc_norm_factors_params)
+
+    # If 'inplace' is False or 'copy' is True, get appropriate return from :func `normalize_total`
+    if not kwargs.get("inplace", True) or kwargs.get("copy", False):
+        norm_return = normalize_total(adata, norm_factor=norm_factors, **normalize_total_params)
+        return norm_return
+    else:
+        normalize_total(adata, norm_factor=norm_factors, **normalize_total_params)
+        return adata

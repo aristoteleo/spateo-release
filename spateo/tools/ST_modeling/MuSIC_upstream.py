@@ -9,15 +9,13 @@ import re
 import sys
 from functools import partial
 from multiprocessing import Pool
-from typing import Optional, Tuple, Union
+from typing import Union
 
 import anndata
 import numpy as np
 import pandas as pd
 import scipy
 import tensorflow as tf
-from mpi4py import MPI
-from MuSIC import MuSIC
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import r2_score
 from sklearn.utils import check_random_state
@@ -517,6 +515,12 @@ class MuSIC_target_selector:
                 targets = [
                     t for t in targets if self.adata[:, t].X.getnnz() >= self.n_samples * self.target_expr_threshold
                 ]
+
+        # Check if targets are specified using a category column and category of choice- in this case,
+        # compute differentially expressed genes for this category:
+        elif self.group_key is not None and self.group_subset is not None:
+            "filler"
+
         else:
             # If targets are not provided, check through all genes expressed in above a threshold proportion of cells:
             targets = [
