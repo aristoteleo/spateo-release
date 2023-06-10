@@ -140,7 +140,8 @@ def normalize_total(
         counts_per_cell = X.sum(1)
 
     if norm_factor is not None:
-        counts_per_cell *= norm_factor
+        norm_factor = norm_factor.reshape(-1, 1)
+        counts_per_cell = np.multiply(counts_per_cell, norm_factor)
 
     # logger.info(msg)
     counts_per_cell = np.ravel(counts_per_cell)
@@ -213,7 +214,7 @@ def calcFactorQuantile(data: np.ndarray, lib_size: float, p: float = 0.75) -> np
     if np.min(factors) == 0:
         print(
             f"Quantile method note: one or more quantiles are zero ({p * 100}th percentile for one or more cells "
-            f"is zero."
+            f"is zero)."
         )
     factors /= lib_size
     return factors
