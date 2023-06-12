@@ -29,7 +29,7 @@ from sklearn.cluster import KMeans
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
 from spateo.logging import logger_manager as lm
-from spateo.preprocessing.normalize import normalize_total
+from spateo.preprocessing.normalize import factor_normalization, normalize_total
 from spateo.preprocessing.transform import log1p
 from spateo.tools.find_neighbors import get_wi, transcriptomic_connectivity
 from spateo.tools.spatial_degs import moran_i
@@ -464,11 +464,14 @@ class MuSIC:
 
         if self.normalize:
             if self.distr == "gaussian":
-                self.logger.info("Setting total counts in each cell to 1e6 inplace...")
-                normalize_total(self.adata, target_sum=1e6)
+                self.logger.info("Computing TMM factors and setting total counts in each cell to 1e4 inplace...")
+                self.adata = factor_normalization(self.adata, method="TMM", target_sum=1e4)
             else:
-                self.logger.info("Setting total counts in each cell to 1e6 and rounding nonintegers inplace...")
-                normalize_total(self.adata, target_sum=1e6)
+                self.logger.info(
+                    "Computing TMM factors, setting total counts in each cell to 1e4 and rounding "
+                    "nonintegers inplace..."
+                )
+                self.adata = factor_normalization(self.adata, method="TMM", target_sum=1e4)
                 self.adata.X = (
                     scipy.sparse.csr_matrix(np.round(self.adata.X))
                     if scipy.sparse.issparse(self.adata.X)

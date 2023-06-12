@@ -17,12 +17,17 @@ import sys
 from multiprocessing import Pool
 from typing import List, Literal, Optional, Tuple, Union
 
+import anndata
 import numpy as np
 import pandas as pd
 import scipy.sparse
 from mpi4py import MPI
 from MuSIC import MuSIC
-from sklearn.preprocessing import normalize
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler, normalize
+from statsmodels.gam.smooth_basis import BSplines
+
+from spateo.tools.cluster.leiden import calculate_leiden_partition
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
@@ -33,6 +38,7 @@ from spateo.tools.gene_expression_variance import (
     get_highvar_genes_sparse,
 )
 from spateo.tools.ST_modeling.regression_utils import (
+    DE_GAM_test,
     fit_DE_GAM,
     multitesting_correction,
     wald_test,
@@ -63,7 +69,7 @@ class MuSIC_Interpreter(MuSIC):
 
         # Coefficients:
         if not self.set_up:
-            self.logger.info("Model has not yet been set up to run, running :func `SWR._set_up_model()` now...")
+            self.logger.info("Model has not yet been set up, running :func `SWR._set_up_model()` now...")
             self._set_up_model()
 
         # Dictionary containing coefficients:
@@ -87,18 +93,18 @@ class MuSIC_Interpreter(MuSIC):
              method: Method to use for correction. Available methods can be found in the documentation for
                 statsmodels.stats.multitest.multipletests(), and are also listed below (in correct case) for
                 convenience:
-            - Named methods:
-                - bonferroni
-                - sidak
-                - holm-sidak
-                - holm
-                - simes-hochberg
-                - hommel
-            - Abbreviated methods:
-                - fdr_bh: Benjamini-Hochberg correction
-                - fdr_by: Benjamini-Yekutieli correction
-                - fdr_tsbh: Two-stage Benjamini-Hochberg
-                - fdr_tsbky: Two-stage Benjamini-Krieger-Yekutieli method
+                - Named methods:
+                    - bonferroni
+                    - sidak
+                    - holm-sidak
+                    - holm
+                    - simes-hochberg
+                    - hommel
+                - Abbreviated methods:
+                    - fdr_bh: Benjamini-Hochberg correction
+                    - fdr_by: Benjamini-Yekutieli correction
+                    - fdr_tsbh: Two-stage Benjamini-Hochberg
+                    - fdr_tsbky: Two-stage Benjamini-Krieger-Yekutieli method
             significance_threshold: p-value (or q-value) needed to call a parameter significant.
 
         Returns:
@@ -571,6 +577,10 @@ class MuSIC_Interpreter(MuSIC):
                 ligand/receptor and sender/receiver cell type if provided.
             sender_cell_type: Sender cell type to use for differential expression analysis.
             receiver_cell_type: Receiver cell type to use for differential expression analysis.
+
+        Returns:
+            GAM_adata: AnnData object where each entry in .var contains a gene that has been modeled, with results of
+                statistical testing added
         """
 
         if diff_sending_or_receiving not in ["sending", "receiving"]:
@@ -750,6 +760,115 @@ class MuSIC_Interpreter(MuSIC):
             cells=self.sample_names,
         )
 
+        # Compute q-values for each gene:
+        GAM_adata = DE_GAM_test(GAM_adata, bs)
+        return GAM_adata
+
+    def group_sender_receiver_effect_degs(
+        self,
+        GAM_adata: anndata.AnnData,
+        bs_obj: BSplines,
+        offset: Optional[np.ndarray] = None,
+        n_points: int = 50,
+        num_pcs: int = 10,
+        num_neighbors: int = 5,
+        leiden_resolution: float = 1.0,
+        q_val_cutoff: float = 0.05,
+        top_n_genes: Optional[int] = None,
+    ):
+        """Given differential expression of genes in cells with high or low sent signaling effect potential,
+        or differential expression of genes in cells with high or low received signaling effect potential,
+        cluster genes by these observed patterns.
+
+        Args:
+            GAM_adata: AnnData object containing results of GAM models
+            bs_obj: BSplines object containing information about the basis functions used for the model
+            offset: Optional offset term of shape [n_samples, ]
+            n_points: Number of points to sample when constructing the linear predictor, to enable evaluation of the
+                fitted GAM for each model
+            num_pcs: Number of PCs when performing PCA to cluster gene expression patterns
+            num_neighbors: Number of neighbors when constructing the KNN graph for leiden clustering
+            leiden_resolution: Resolution parameter for leiden clustering
+            q_val_cutoff: Adjusted p-value cutoff to select genes to include in clustering analyses
+            top_n_genes: Optional integer- if provided, cluster only the top n genes by Wald statistic that represent
+                the genes that are most positively and most negatively enriched in relation to signaling effect
+                potential
+
+        Returns:
+            df_clustered: DataFrame containing cluster assignments for each gene along with statistical information
+            df_yhat: Estimated gene expression patterns from each model fit
+        """
+        design_matrix = GAM_adata.obsm["var"]
+
+        # Sample points for which to construct the linear predictor:
+        # Min and max values for predictor:
+        n_curves = design_matrix.shape[1]
+        min_val = np.min(design_matrix)
+        max_val = np.max(design_matrix)
+
+        if n_curves == 1:
+            data_points = np.linspace(min_val, max_val, num=n_points).reshape(-1, 1)
+            # Compute linear predictor at the selected points:
+            exog_smooth_interp = bs_obj.transform(data_points)
+            exog_smooth_pred = np.hstack((data_points, exog_smooth_interp))
+        else:
+            raise RuntimeError("Operability with multiple predictors not yet implemented.")
+
+        # Get genes that are below p-value cutoff:
+        adata_subset = GAM_adata[:, GAM_adata.var["qvals"] < q_val_cutoff]
+
+        # To predict expression given the linear predictor and the coefficients:
+        betaAll = GAM_adata.uns["beta"]
+
+        scaled_yhat_df = pd.DataFrame()
+
+        for gene in adata_subset.var_names:
+            if GAM_adata.var["converged"][gene]:
+                beta_gene = betaAll.loc[gene].values
+                yhat = np.dot(exog_smooth_pred, beta_gene)
+                if GAM_adata.uns["family"] == "nb" or GAM_adata.uns["family"] == "poisson":
+                    yhat = np.exp(yhat)
+                if offset is not None:
+                    yhat += offset
+                GAM_adata.obs[f"{gene}_predicted"] = yhat
+
+                # Scale the predicted expression values for PCA:
+                scaler = StandardScaler()
+                scaled_yhat = scaler.fit_transform(yhat.reshape(-1, 1))
+                scaled_yhat_df[gene] = scaled_yhat
+
+        if top_n_genes is not None:
+            # Check if there are enough genes to cluster:
+            top_n_genes = min(top_n_genes, scaled_yhat_df.shape[1])
+
+            # Get top n genes by Wald statistic:
+            top_n_genes = GAM_adata.var.sort_values("wald_stats").head(top_n_genes).index.tolist()
+            adata_subset = adata_subset[:, top_n_genes]
+            scaled_yhat_df = scaled_yhat_df[top_n_genes]
+
+        pca_obj = PCA(n_components=num_pcs, svd_solver="full")
+        x_pca = pca_obj.fit_transform(scaled_yhat_df.values)
+        cluster_labels = calculate_leiden_partition(
+            x_pca, num_neighbors=num_neighbors, resolution=leiden_resolution, graph_type="distance"
+        )
+
+        # Collate data:
+        tmp = np.concatenate(
+            (
+                adata_subset.var["wald_stats"].values.reshape(-1, 1),
+                adata_subset.var["df"].values.reshape(-1, 1),
+                adata_subset.var["pvals"].values.reshape(-1, 1),
+                adata_subset.var["qvals"].values.reshape(-1, 1),
+                cluster_labels.reshape(-1, 1),
+            ),
+            axis=1,
+        )
+
+        clustered_df = pd.DataFrame(
+            tmp, index=adata_subset.var_names, columns=["wald_stats", "df", "pvals", "qvals", "cluster"]
+        )
+        return clustered_df
+
     def compute_cell_type_coupling(self):
         """Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
         categories- if :attr `mod_type` is "niche", this directly averages the effects for each neighboring cell type
@@ -763,3 +882,7 @@ class MuSIC_Interpreter(MuSIC):
         # Sum of each cell type in the neighborhood of the receiving cell:
 
         #
+
+
+# NOTE TO SELF: ADD WRAPPER FUNC HERE THAT ALLOWS FOR MULTIPLE TARGETS, LIGANDS/RECEPTORS, ETC. TO BE SPECIFIED,
+# AND THE DOWNSTREAM FUNCTION WILL RUN USING ALL OF THE PASSED VALUES

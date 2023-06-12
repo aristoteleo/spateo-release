@@ -540,6 +540,7 @@ def fit_DE_GAM(
 
     Returns:
         sc_obj: AnnData object containing information gathered from fitting all GAM models
+        bs: BSplines object containing information about the fitted splines
         return_gams: Dictionary of GAM models, with keys corresponding to the target gene and values corresponding
             to :class `statsmodels.GLMGam` objects
     """
@@ -562,8 +563,12 @@ def fit_DE_GAM(
         counts = counts.reshape(-1, 1)
 
     # Check non-negativity of counts:
-    if (counts < 0).any().any():
-        raise ValueError("All values of the count matrix should be non-negative")
+    if scipy.sparse.issparse(counts):
+        if not (counts.data >= 0).all():
+            raise ValueError("All values of the count matrix should be non-negative")
+    else:
+        if (counts < 0).any():
+            raise ValueError("All values of the count matrix should be non-negative")
 
     # Check that all vectors have the same shape:
     if var.shape != weights.shape:
@@ -706,6 +711,7 @@ def fit_DE_GAM(
             knotpoints["v" + str(idx + 1)] = list(set(all_points))
 
     sc_obj.uns["knotpoints"] = knotpoints
+    sc_obj.uns["family"] = family
 
     # Return model of choice if specified:
     if return_model_idx is not None:
@@ -717,7 +723,7 @@ def fit_DE_GAM(
         return sc_obj, return_gams, bs
     # Otherwise, don't return any models, only the object and the basis splines:
     else:
-        return_gams = dict(zip(genelist, gamList))
+        # return_gams = dict(zip(genelist, gamList))
         return sc_obj, bs
 
 
@@ -789,7 +795,8 @@ def DE_GAM_test(
     contrast_type: Literal["start", "end", "consecutive"] = "start",
     n_points: Optional[int] = None,
     inverse: Literal["cholesky", "qr", "generalized"] = "cholesky",
-):
+    fdr_method: str = "fdr_bh",
+) -> Tuple[anndata.AnnData, BSplines]:
     """Statistical testing for outputs from GAM model(s).
 
     Args:
@@ -807,11 +814,26 @@ def DE_GAM_test(
         n_points: The number of contrast points to use. If not given, defaults to 2 * the number of knot points.
         inverse: The method for inverting the covariance matrix. Options are "cholesky" (for Cholesky decomposition),
             "qr" (for QR decomposition), or "generalized" (for inverse using the Moore-Penrose pseudoinverse).
+        fdr_method: Method to use for correction. Available methods can be found in the documentation for
+                :func `statsmodels.stats.multitest.multipletests()`, and are also listed below (in correct case) for
+                convenience:
+                - Named methods:
+                    - bonferroni
+                    - sidak
+                    - holm-sidak
+                    - holm
+                    - simes-hochberg
+                    - hommel
+                - Abbreviated methods:
+                    - fdr_bh: Benjamini-Hochberg correction
+                    - fdr_by: Benjamini-Yekutieli correction
+                    - fdr_tsbh: Two-stage Benjamini-Hochberg
+                    - fdr_tsbky: Two-stage Benjamini-Krieger-Yekutieli method
 
     Returns:
         GAM_adata: AnnData object with results of statistical testing added
+        bs:
     """
-    logger = lm.get_main_logger()
 
     design_matrix = GAM_adata.obsm["var"]
     linear_predictor = GAM_adata.obsm["lin_pred"]
@@ -832,7 +854,7 @@ def DE_GAM_test(
         # Set column names for L1 matrix
         contrast_matrix.columns = ["point" + str(i) for i in range(1, n_points)]
         # Get predictor matrix
-        contrastPoints = np.linspace(0, max_val, num=n_points)
+        contrastPoints = np.linspace(0, max_val, num=n_points).reshape(-1, 1)
         # Compute linear predictor at the contrast points:
         exog_smooth_interp = bs_obj.transform(contrastPoints)
         exog_smooth_pred = np.hstack((contrastPoints, exog_smooth_interp))
@@ -851,26 +873,37 @@ def DE_GAM_test(
                 contrast_matrix.iloc[:, i] = exog_smooth_pred[i + 1, :] - exog_smooth_pred[i, :]
 
     else:
-        logger.info("Operability with multiple predictors not yet implemented.")
+        raise RuntimeError("Operability with multiple predictors not yet implemented.")
 
     # Statistical test for each model:
     betaAll = GAM_adata.uns["beta"]
     SigmaAll = GAM_adata.uns["Sigma"]
 
     # Wald test results for each fitted gene and store results in DataFrame:
-    all_pvals = []
+    all_wald_stats, all_df, all_pvals = [], [], []
     for gene in GAM_adata.var_names:
         if GAM_adata.var["converged"][gene]:
             Sigma_gene = SigmaAll.loc[gene].values
             beta_gene = betaAll.loc[gene].values
-            pval_gene = wald_test_GAM(beta_gene, Sigma_gene, contrast_matrix, lfc=lfc_thresh, inverse=inverse)
+            wald_stat_gene, df_gene, pval_gene = wald_test_GAM(
+                beta_gene, Sigma_gene, contrast_matrix, lfc=lfc_thresh, inverse=inverse
+            )
+            all_wald_stats.append(wald_stat_gene)
             all_pvals.append(pval_gene)
+            all_df.append(df_gene)
         else:
+            all_wald_stats.append(np.nan)
             all_pvals.append(np.nan)
+            all_df.append(np.nan)
 
-    GAM_adata.obs["pvals"] = all_pvals
+    qvals = multitesting_correction(all_pvals, method=fdr_method)
 
-    return GAM_adata
+    GAM_adata.var["pvals"] = all_pvals
+    GAM_adata.var["wald_stats"] = all_wald_stats
+    GAM_adata.var["df"] = all_df
+    GAM_adata.var["qvals"] = qvals
+
+    return GAM_adata, bs_obj
 
 
 def library_scaling_factors(
@@ -892,6 +925,8 @@ def library_scaling_factors(
     Returns:
         offset: Array of shape [n_samples, ] containing offset values.
     """
+    logger = lm.get_main_logger()
+
     if offset is None and counts is None:
         raise ValueError("Either offset or counts must be provided.")
 
@@ -902,7 +937,7 @@ def library_scaling_factors(
         try:
             nf = calcNormFactors(counts, method="TMMwsp")
         except:
-            print("TMMwsp normalization failed. Will use unnormalized library sizes as offset.\n")
+            logger.info("TMMwsp normalization failed. Will use unnormalized library sizes as offset.")
             nf = np.ones(counts.shape[0])
 
         libsize = np.sum(counts, axis=1) * nf
@@ -912,7 +947,7 @@ def library_scaling_factors(
             offset = libsize
 
         if np.any(libsize == 0):
-            print("Some library sizes are zero. Offsetting these to 0.\n")
+            logger.info("Some library sizes are zero. Offsetting these to 0.")
             offset[libsize == 0] = 0
 
     return offset
@@ -1020,8 +1055,12 @@ def wald_test(
 
 
 def wald_test_GAM(
-    beta: np.ndarray, Sigma: np.ndarray, contrast_mat: np.ndarray, lfc: float = 0.0, inverse: str = "QR"
-) -> float:
+    beta: np.ndarray,
+    Sigma: np.ndarray,
+    contrast_mat: Union[np.ndarray, pd.DataFrame],
+    lfc: float = 0.0,
+    inverse: str = "QR",
+) -> Tuple[float, int, float]:
     """Variant of the Wald test function for generalized additive models, computes Wald statistic and p-value
         considering each independent variable alongside all of its spline bases.
 
@@ -1034,9 +1073,14 @@ def wald_test_GAM(
             "qr" (for QR decomposition), or "generalized" (for inverse using the Moore-Penrose pseudoinverse).
 
     Returns:
-        pval: Array containing the Wald statistic, degrees of freedom and p-value for this feature (i.e. for
-            this beta vector/sigma array).
+        wald: The Wald statistic for this feature (i.e. for this beta vector/sigma array)
+        df: Degrees of freedom for this feature
+        pval: p-value for this feature
     """
+    # If contrast matrix is given in another form:
+    if isinstance(contrast_mat, pd.DataFrame):
+        contrast_mat = contrast_mat.values
+
     # Contrast matrix for multivariate Wald test:
     # R = upper triangular matrix, P = permutation matrix (mapping between the permuted matrix and the original
     # matrix- needed if pivoting is done for numerical stability)
@@ -1082,11 +1126,16 @@ def wald_test_GAM(
         wald = 0
     df = mod_contrast_matrix.shape[1]
     pval = 1 - scipy.stats.chi2.cdf(wald, df)
+    # Convert to floating point:
+    wald = wald.item()
+    pval = pval.item()
 
-    return pval
+    return wald, df, pval
 
 
-def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: float = 0.05) -> np.ndarray:
+def multitesting_correction(
+    pvals: Union[List[float], np.ndarray], method: str = "fdr_bh", alpha: float = 0.05
+) -> np.ndarray:
     """In the case of testing multiple hypotheses from the same experiment, perform multiple test correction to adjust
     q-values.
 
@@ -1113,7 +1162,8 @@ def multitesting_correction(pvals: np.ndarray, method: str = "fdr_bh", alpha: fl
     Returns
         qval: p-values post-correction
     """
-
+    if isinstance(pvals, list):
+        pvals = np.array(pvals)
     qval = np.zeros([pvals.shape[0]]) + np.nan
     qval[np.isnan(pvals) == False] = statsmodels.stats.multitest.multipletests(
         pvals=pvals[np.isnan(pvals) == False], alpha=alpha, method=method, is_sorted=False, returnsorted=False

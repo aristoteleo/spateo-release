@@ -118,80 +118,6 @@ def pca_spateo(
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
-def sctransform(
-    adata: AnnData,
-    rlib_path: str,
-    n_top_genes: Optional[int] = 3000,
-    save_sct_img_1: Optional[str] = None,
-    save_sct_img_2: Optional[str] = None,
-    **kwargs,
-):
-    """
-    Use sctransform with an additional flag vst.flavor="v2" to perform normalization and dimensionality reduction
-    Original Code Repository: https://github.com/saketkc/pySCTransform
-
-    Installation:
-    Conda:
-        ```conda install R```
-    R:
-        ```if (!require("BiocManager", quietly = TRUE))
-            install.packages("BiocManager")```
-        ```BiocManager::install(version = "3.14")```
-        ```BiocManager::install("glmGamPoi")```
-    Python:
-        ```pip install rpy2```
-        ```pip install git+https://github.com/saketkc/pysctransform```
-
-    Examples:
-        >>> sctransform(adata=adata, rlib_path="/Users/jingzehua/opt/anaconda3/envs/spateo/lib/R")
-
-    Args:
-        adata: An Anndata object.
-        rlib_path: library path for R environment.
-        n_top_genes: Number of highly-variable genes to keep.
-        save_sct_img_1: If save_sct_img_1 != None, save the image of the GLM model parameters.
-        save_sct_img_2: If save_sct_img_2 != None, save the image of the final residual variances.
-        **kwargs: Additional keyword arguments to ``pysctransform.SCTransform``.
-
-    Returns:
-        Updates adata with the field ``adata.obsm["pearson_residuals"]``, containing pearson_residuals.
-    """
-    import os
-
-    os.environ["R_HOME"] = rlib_path
-
-    try:
-        from pysctransform import SCTransform, vst
-        from pysctransform.plotting import plot_fit, plot_residual_var
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `pysctransform`."
-            "Install pysctransform via `pip install git+https://github.com/saketkc/pysctransform.git`"
-        )
-
-    residuals = SCTransform(adata, var_features_n=n_top_genes, **kwargs)
-    adata.obsm["pearson_residuals"] = residuals
-
-    # Plot model characteristics.
-    if save_sct_img_1 is not None or save_sct_img_2 is not None:
-        vst_out = vst(
-            adata.X.T,
-            gene_names=adata.var_names.tolist(),
-            cell_names=adata.obs_names.tolist(),
-            method="fix-slope",
-            exclude_poisson=True,
-        )
-        # Visualize the GLM model parameters.
-        if save_sct_img_1 is not None:
-            _ = plot_fit(vst_out)
-            plt.savefig(save_sct_img_1, dpi=100)
-        # Visualize the final residual variances with respect to mean and highlight highly variable genes.
-        if save_sct_img_2 is not None:
-            _ = plot_residual_var(vst_out)
-            plt.savefig(save_sct_img_2, dpi=100)
-
-
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def pearson_residuals(
     adata: AnnData,
     n_top_genes: Optional[int] = 3000,
@@ -312,58 +238,6 @@ def integrate(
             integrated_adata.uns[key] = value
 
     return integrated_adata
-
-
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
-def harmony_debatch(
-    adata: AnnData,
-    key: str,
-    basis: str = "X_pca",
-    adjusted_basis: str = "X_pca_harmony",
-    max_iter_harmony: int = 10,
-    copy: bool = False,
-) -> Optional[AnnData]:
-    """\
-    Use harmonypy [Korunsky19]_ to remove batch effects.
-    This function should be run after performing PCA but before computing the neighbor graph.
-    Original Code Repository: https://github.com/slowkow/harmonypy
-    Interesting example: https://slowkow.com/notes/harmony-animation/
-
-    Args:
-        adata: An Anndata object.
-        key: The name of the column in ``adata.obs`` that differentiates among experiments/batches.
-        basis: The name of the field in ``adata.obsm`` where the PCA table is stored.
-        adjusted_basis: The name of the field in ``adata.obsm`` where the adjusted PCA table will be stored after
-            running this function.
-        max_iter_harmony: Maximum number of rounds to run Harmony. One round of Harmony involves one clustering and one
-            correction step.
-        copy: Whether to copy `adata` or modify it inplace.
-
-    Returns:
-        Updates adata with the field ``adata.obsm[adjusted_basis]``, containing principal components adjusted by
-        Harmony.
-    """
-    try:
-        import harmonypy
-    except ImportError:
-        raise ImportError("\nplease install harmonypy:\n\n\tpip install harmonypy")
-
-    adata = adata.copy() if copy else adata
-
-    # Convert sparse matrix to dense matrix.
-    matrix = to_dense_matrix(adata.obsm[basis])
-
-    # Use Harmony to adjust the PCs.
-    harmony_out = harmonypy.run_harmony(matrix, adata.obs, key, max_iter_harmony=max_iter_harmony)
-    adjusted_matrix = harmony_out.Z_corr.T
-
-    # Convert dense matrix to sparse matrix.
-    if isspmatrix(adata.obsm[basis]):
-        adjusted_matrix = csr_matrix(adjusted_matrix)
-
-    adata.obsm[adjusted_basis] = adjusted_matrix
-
-    return adata if copy else None
 
 
 def ecp_silhouette(

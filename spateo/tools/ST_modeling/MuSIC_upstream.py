@@ -16,9 +16,12 @@ import numpy as np
 import pandas as pd
 import scipy
 import tensorflow as tf
+from scipy.stats import mannwhitneyu
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import r2_score
 from sklearn.utils import check_random_state
+
+from spateo.preprocessing.normalize import factor_normalization
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
@@ -242,11 +245,14 @@ class MuSIC_target_selector:
 
         if self.normalize:
             if self.distr == "gaussian":
-                self.logger.info("Setting total counts in each cell to 1e4 inplace...")
-                normalize_total(self.adata)
+                self.logger.info("Computing TMM factors and setting total counts in each cell to 1e4 inplace...")
+                self.adata = factor_normalization(self.adata, method="TMM", target_sum=1e4)
             else:
-                self.logger.info("Setting total counts in each cell to 1e4 and rounding nonintegers inplace...")
-                normalize_total(self.adata)
+                self.logger.info(
+                    "Computing TMM factors, setting total counts in each cell to 1e4 and rounding "
+                    "nonintegers inplace..."
+                )
+                self.adata = factor_normalization(self.adata, method="TMM", target_sum=1e4)
                 self.adata.X = (
                     scipy.sparse.csr_matrix(np.round(self.adata.X))
                     if scipy.sparse.issparse(self.adata.X)
@@ -519,10 +525,91 @@ class MuSIC_target_selector:
         # Check if targets are specified using a category column and category of choice- in this case,
         # compute differentially expressed genes for this category:
         elif self.group_key is not None and self.group_subset is not None:
-            "filler"
+            if len(self.group_subset) == 2:
+                group1_cat, group2_cat = self.group_subset
+                group1 = self.adata[self.adata.obs[self.group_key] == group1_cat]
+                group2 = self.adata[self.adata.obs[self.group_key] == group2_cat]
+
+                results = []
+                for gene in self.adata.var_names:
+                    if scipy.sparse.issparse(self.adata.X):
+                        group1_gene = group1[:, gene].X.toarray()
+                        group2_gene = group2[:, gene].X.toarray()
+                    else:
+                        group1_gene = group1[:, gene].X
+                        group2_gene = group2[:, gene].X
+
+                    stat, p = mannwhitneyu(group1_gene, group2_gene)
+                    results.append((gene, stat[0], p[0]))
+
+                results = pd.DataFrame(results, columns=["gene", "statistic", "p_value"])
+                # Multitesting correction w/ Benjamini-Hochberg:
+                results["q_value"] = multitesting_correction(results["p_value"])
+                sorted_results = results.sort_values(by="q_value")
+                significant = sorted_results[sorted_results["q_value"] < 0.05]
+
+                # Check if any gene has a difference in proportional expression >= 30%- if so, this indicates a
+                # particularly interesting specifically-expressed target:
+                targets = []
+
+                for gene in significant["gene"]:
+                    percentage_group1_expressing = (group1[:, gene].X > 0).sum() / group1.shape[0]
+                    percentage_group2_expressing = (group2[:, gene].X > 0).sum() / group2.shape[0]
+                    if np.abs(percentage_group1_expressing - percentage_group2_expressing) >= 0.3:
+                        targets.append(gene)
+                # If not, use all significant genes:
+                if len(targets) == 0:
+                    targets = significant["gene"].tolist()
+
+            elif len(self.group_subset) > 2:
+                results = []
+
+                for group in self.group_subset:
+                    group = self.adata[self.adata.obs[self.group_key] == group]
+                    rest = self.adata[self.adata.obs[self.group_key] != group]
+
+                    for gene in self.adata.var_names:
+                        if scipy.sparse.issparse(self.adata.X):
+                            group_gene = group[:, gene].X.toarray()
+                            rest_gene = rest[:, gene].X.toarray()
+                        else:
+                            group_gene = group[:, gene].X
+                            rest_gene = rest[:, gene].X
+
+                        stat, p = mannwhitneyu(group_gene, rest_gene)
+                        results.append((group, "rest", gene, stat[0], p[0]))
+
+                results = pd.DataFrame(results, columns=["group", "rest", "gene", "statistic", "p_value"])
+                # Multitesting correction w/ Benjamini-Hochberg:
+                results["q_value"] = multitesting_correction(results["p_value"])
+                sorted_results = results.sort_values(by="q_value")
+                significant = sorted_results[sorted_results["q_value"] < 0.05]
+
+                # Check if any gene has a difference in proportional expression between the reference group and the
+                # rest of the cells >= 30%- if so, this indicates a particularly interesting specifically-expressed
+                # target:
+                targets = []
+
+                for _, row in significant.iterrows():
+                    gene = row["gene"]
+                    if gene not in targets:
+                        group = row["group"]
+                        group_data = self.adata[self.adata.obs[self.group_key] == group]
+                        rest_data = self.adata[self.adata.obs[self.group_key] != group]
+
+                        percentage_group_expressing = (group_data[:, gene].X > 0).sum() / group_data.shape[0]
+                        percentage_rest_expressing = (rest_data[:, gene].X > 0).sum() / rest_data.shape[0]
+
+                        if np.abs(percentage_group_expressing - percentage_rest_expressing) >= 0.3:
+                            targets.append(gene)
+
+                # If not, use all significant genes:
+                if len(targets) == 0:
+                    targets = significant["gene"].unique().tolist()
 
         else:
-            # If targets are not provided, check through all genes expressed in above a threshold proportion of cells:
+            # If targets are not provided in any other way, check through all genes expressed in above a threshold
+            # proportion of cells:
             targets = [
                 t
                 for t in self.adata.var_names
