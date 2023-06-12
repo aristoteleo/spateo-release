@@ -832,8 +832,10 @@ class MuSIC_Interpreter(MuSIC):
                 partitioning results added. Note that this may be a subset of the original AnnData object
         """
         if "predictor_key" not in GAM_adata.uns_keys():
-            raise RuntimeError("Must run :func `sender_receiver_effect_deg_detection` before running :func "
-                               "`group_sender_receiver_effect_degs`.")
+            raise RuntimeError(
+                "Must run :func `sender_receiver_effect_deg_detection` before running :func "
+                "`group_sender_receiver_effect_degs`."
+            )
 
         design_matrix = GAM_adata.obsm["var"]
 
