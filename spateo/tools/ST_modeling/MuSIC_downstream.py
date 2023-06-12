@@ -605,6 +605,12 @@ class MuSIC_Interpreter(MuSIC):
             if send_key not in self.adata.obsm_keys():
                 _, _, _ = self.get_pathway_potential(pathway, target, spatial_weights=None, store_summed_potential=True)
 
+            # Key for AnnData storage of the source signal:
+            if diff_sending_or_receiving == "sending":
+                source_key = f"Sent potential {pathway}"
+            else:
+                source_key = f"Received potential {pathway}"
+
         elif ligand is not None:
             if receptor is not None:
                 if self.mod_type != "lr":
@@ -620,6 +626,12 @@ class MuSIC_Interpreter(MuSIC):
                     _, _, _ = self.get_effect_potential(
                         ligand, receptor, spatial_weights=None, store_summed_potential=True
                     )
+
+                # Key for AnnData storage of the source signal:
+                if diff_sending_or_receiving == "sending":
+                    source_key = f"Sent potential {ligand}-via-{receptor}"
+                else:
+                    source_key = f"Received potential {ligand}-via-{receptor}"
 
             else:
                 if self.mod_type != "ligand":
@@ -637,6 +649,12 @@ class MuSIC_Interpreter(MuSIC):
                         ligand, target, spatial_weights=None, store_summed_potential=True
                     )
 
+                # Key for AnnData storage of the source signal:
+                if diff_sending_or_receiving == "sending":
+                    source_key = f"Sent potential {ligand}"
+                else:
+                    source_key = f"Received potential {ligand}"
+
         elif sender_cell_type is not None:
             if self.mod_type != "niche":
                 raise ValueError(
@@ -649,9 +667,22 @@ class MuSIC_Interpreter(MuSIC):
                 receive_key = (
                     f"norm_sum_{receiver_cell_type}_received_effect_potential_from_{sender_cell_type}_for_" f"{target}"
                 )
+
+                # Key for AnnData storage of the source signal:
+                if diff_sending_or_receiving == "sending":
+                    source_key = f"Sent potential {sender_cell_type}"
+                else:
+                    source_key = f"Received potential {sender_cell_type}"
+
             else:
                 send_key = f"norm_sum_sent_effect_potential_{sender_cell_type}_for_{target}"
                 receive_key = f"norm_sum_received_effect_potential_from_{sender_cell_type}_for_{target}"
+
+                # Key for AnnData storage of the source signal:
+                if diff_sending_or_receiving == "sending":
+                    source_key = f"Sent potential {sender_cell_type}-via-{receiver_cell_type}"
+                else:
+                    source_key = f"Received potential {sender_cell_type}-via-{receiver_cell_type}"
 
         if diff_sending_or_receiving == "sending":
             effect_potential = self.adata.obsm[send_key]
@@ -760,6 +791,8 @@ class MuSIC_Interpreter(MuSIC):
             cells=self.sample_names,
         )
 
+        GAM_adata.uns["predictor_key"] = source_key
+
         # Compute q-values for each gene:
         GAM_adata = DE_GAM_test(GAM_adata, bs)
         return GAM_adata
@@ -795,9 +828,13 @@ class MuSIC_Interpreter(MuSIC):
                 potential
 
         Returns:
-            df_clustered: DataFrame containing cluster assignments for each gene along with statistical information
-            df_yhat: Estimated gene expression patterns from each model fit
+            GAM_adata: AnnData object where each entry in .var contains a gene that has been modeled, with Leiden
+                partitioning results added. Note that this may be a subset of the original AnnData object
         """
+        if "predictor_key" not in GAM_adata.uns_keys():
+            raise RuntimeError("Must run :func `sender_receiver_effect_deg_detection` before running :func "
+                               "`group_sender_receiver_effect_degs`.")
+
         design_matrix = GAM_adata.obsm["var"]
 
         # Sample points for which to construct the linear predictor:
@@ -820,7 +857,7 @@ class MuSIC_Interpreter(MuSIC):
         # To predict expression given the linear predictor and the coefficients:
         betaAll = GAM_adata.uns["beta"]
 
-        scaled_yhat_df = pd.DataFrame()
+        scaled_yhat_df = pd.DataFrame(index=adata_subset.var_names, columns=adata_subset.obs_names)
 
         for gene in adata_subset.var_names:
             if GAM_adata.var["converged"][gene]:
@@ -830,12 +867,14 @@ class MuSIC_Interpreter(MuSIC):
                     yhat = np.exp(yhat)
                 if offset is not None:
                     yhat += offset
-                GAM_adata.obs[f"{gene}_predicted"] = yhat
 
-                # Scale the predicted expression values for PCA:
-                scaler = StandardScaler()
-                scaled_yhat = scaler.fit_transform(yhat.reshape(-1, 1))
-                scaled_yhat_df[gene] = scaled_yhat
+                scaled_yhat_df[gene] = yhat
+
+        # Scale the overall predicted expression values for PCA:
+        scaler = StandardScaler()
+        scaled_yhat_df = scaler.fit_transform(scaled_yhat_df.values)
+
+        GAM_adata.varm["pred_y"] = scaled_yhat_df
 
         if top_n_genes is not None:
             # Check if there are enough genes to cluster:
@@ -852,22 +891,9 @@ class MuSIC_Interpreter(MuSIC):
             x_pca, num_neighbors=num_neighbors, resolution=leiden_resolution, graph_type="distance"
         )
 
-        # Collate data:
-        tmp = np.concatenate(
-            (
-                adata_subset.var["wald_stats"].values.reshape(-1, 1),
-                adata_subset.var["df"].values.reshape(-1, 1),
-                adata_subset.var["pvals"].values.reshape(-1, 1),
-                adata_subset.var["qvals"].values.reshape(-1, 1),
-                cluster_labels.reshape(-1, 1),
-            ),
-            axis=1,
-        )
-
-        clustered_df = pd.DataFrame(
-            tmp, index=adata_subset.var_names, columns=["wald_stats", "df", "pvals", "qvals", "cluster"]
-        )
-        return clustered_df
+        adata_subset.var["cluster"] = cluster_labels
+        adata_subset.uns["__type"] = "UMI"
+        return adata_subset
 
     def compute_cell_type_coupling(self):
         """Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver

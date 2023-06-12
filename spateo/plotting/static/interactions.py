@@ -16,12 +16,14 @@ import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from anndata import AnnData
 from matplotlib import rcParams
 from scipy.cluster import hierarchy as sch
 
 from ...configuration import SKM, config_spateo_rcParams, set_pub_style
 from ...logging import logger_manager as lm
+from ...plotting.static.colorlabel import interaction_colors
 from ...plotting.static.dotplot import CCDotplot
 from .utils import _dendrogram_sig, save_return_show_fig_utils
 
@@ -302,6 +304,211 @@ def ligrec(
         total_panels=1,
         fig=dp.fig,
         axes=dp.ax_dict,
+        # Return all parameters are for returning multiple values for 'axes', but this function uses a single dictionary
+        return_all=False,
+        return_all_list=None,
+    )
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def plot_sender_upstream_degs(
+    adata: AnnData,
+    colormap: str = "magma",
+    show_n_genes_per_cluster: Optional[int] = None,
+    font_scale: float = 1.0,
+    figsize: Union[None, Tuple[float, float]] = None,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[dict] = {},
+):
+    """Plots the smoothed gene expression as predicted by regression using the sent signaling potential,
+        e.g. of a particular ligand or particular "sending" cell type. Note that this function is largely identical
+        to :func `plot_receiver_coexpressed_degs`- the two are given distinct names for clarity.
+
+    Args:
+        adata: AnnData object where each entry in .var contains a gene that has been modeled using the GAM method
+            implemented :func `MuSIC_interpreter.sender_receiver_effect_deg_detection` and with Leiden partitioning
+            results added from :func `MuSIC_interpreter.group_sender_receiver_effect_degs`.
+        colormap: Colormap for the smoothed predicted expression- any of the colormaps in `seaborn` can be used.
+        show_n_genes_per_cluster: For larger datasets, it may be useful to only show a subset of genes per cluster-
+            if selected, will plot the top n genes per cluster, where n is the value of this parameter; these genes
+            will be selected by sorting by Wald statistic.
+        font_scale: Multiplicative factor for the font size in Seaborn
+        figsize: The width and height of a figure
+        save_show_or_return: Options: "save", "show", "return", "both", "all"
+                - "both" for save and show
+        save_kwargs: A dictionary that will passed to the save_fig function. By default it is an empty dictionary
+            and the save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf',
+            "transparent": True, "close": True, "verbose": True} as its parameters. But to change any of these
+            parameters, this dictionary can be used to do so.
+    """
+    logger = lm.get_main_logger()
+
+    if "Sent potential" not in adata.uns["predictor_key"]:
+        raise KeyError("Sent signaling potential was not used to model the gene expression; if AnnData object is "
+                       "already the output of , :func `plot_receiver_coexpressed_degs` is more appropriate.")
+
+    wald_stats = adata.var["wald_stats"].values
+    cluster_labels = np.array(adata.obs["cluster"].values, dtype=int)
+    n_clusters = np.max(cluster_labels) + 1
+
+    scaled_predictions = adata.varm["pred_y"].values
+
+    # Sort clusters by max predicted value:
+    all_clusters_peak_idx = []
+
+    for cluster in range(n_clusters):
+        cluster_idx = np.where(cluster_labels == cluster)[0]
+        y_pred_cluster = scaled_predictions[cluster_idx, :]
+        # Find the cell at which the predicted expression is highest for this cluster- take the average over all
+        # genes to get an indication of approximately where this cluster should be positioned:
+        all_clusters_peak_idx.append(np.mean(np.argmax(y_pred_cluster, axis=1)))
+
+    cluster_order = np.argsort(all_clusters_peak_idx)
+    all_idx = np.array([])
+    row_colors = []
+    for i in cluster_order:
+        cluster_idx = np.where(cluster_labels == i)[0]
+        cluster_order = np.argsort(-wald_stats[cluster_idx])
+        if show_n_genes_per_cluster is not None:
+            top_n = min(len(cluster_idx), show_n_genes_per_cluster)
+            if top_n < show_n_genes_per_cluster:
+                logger.info(f"Using the top {len(cluster_idx)} genes instead of {show_n_genes_per_cluster} because "
+                            f"cluster {i} has fewer than {show_n_genes_per_cluster} genes.")
+        else:
+            top_n = len(cluster_idx)
+        idx = np.concatenate((all_idx, cluster_idx[cluster_order][:top_n]))
+        for j in range(top_n):
+            row_colors.append(interaction_colors[i % len(interaction_colors)])
+
+    sns.set(font_scale = font_scale)
+    predictions_df = pd.DataFrame(scaled_predictions, index=adata.var_names, columns=adata.obs_names)
+    g = sns.clustermap(
+        predictions_df.iloc[all_idx, :],
+        row_cluster=False,
+        col_cluster=False,
+        row_colors=row_colors,
+        cmap=colormap,
+        figsize=figsize,
+        xticklabels=False,
+        yticklabels=predictions_df.index,
+        linewidths=0
+    )
+    g.cax.set_position([.1, .2, .03, .45])
+
+    # Save, show or return figures:
+    return save_return_show_fig_utils(
+        save_show_or_return=save_show_or_return,
+        # Doesn't matter what show_legend is for this plotting function
+        show_legend=False,
+        background="white",
+        prefix="dotplot",
+        save_kwargs=save_kwargs,
+        total_panels=1,
+        fig=g.fig,
+        axes=g.ax_heatmap,
+        # Return all parameters are for returning multiple values for 'axes', but this function uses a single dictionary
+        return_all=False,
+        return_all_list=None,
+    )
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def plot_receiver_coexpressed_degs(
+    adata: AnnData,
+    colormap: str = "magma",
+    show_n_genes_per_cluster: Optional[int] = None,
+    font_scale: float = 1.0,
+    figsize: Union[None, Tuple[float, float]] = None,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[dict] = {},
+):
+    """Plots the smoothed gene expression as predicted by regression using the received signaling potential,
+        i.e. the amount of predicted influence the sent signal has on the downstream expression pattern (potentially
+        mediated by a particular receptor). Note that this function is largely identical to :func
+        `plot_sender_upstream_degs`; the two are given distinct names for clarity.
+
+    Args:
+        adata: AnnData object where each entry in .var contains a gene that has been modeled using the GAM method
+            implemented :func `MuSIC_interpreter.sender_receiver_effect_deg_detection` and with Leiden partitioning
+            results added from :func `MuSIC_interpreter.group_sender_receiver_effect_degs`.
+        colormap: Colormap for the smoothed predicted expression- any of the colormaps in `seaborn` can be used.
+        show_n_genes_per_cluster: For larger datasets, it may be useful to only show a subset of genes per cluster-
+            if selected, will plot the top n genes per cluster, where n is the value of this parameter; these genes
+            will be selected by sorting by Wald statistic.
+        font_scale: Multiplicative factor for the font size in Seaborn
+        figsize: The width and height of a figure
+        save_show_or_return: Options: "save", "show", "return", "both", "all"
+                - "both" for save and show
+        save_kwargs: A dictionary that will passed to the save_fig function. By default it is an empty dictionary
+            and the save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf',
+            "transparent": True, "close": True, "verbose": True} as its parameters. But to change any of these
+            parameters, this dictionary can be used to do so.
+    """
+    logger = lm.get_main_logger()
+
+    if "Sent potential" not in adata.uns["predictor_key"]:
+        raise KeyError("Sent signaling potential was not used to model the gene expression; if AnnData object is "
+                       "already the output of , :func `plot_receptor_coexpressed_degs` is more appropriate.")
+
+    wald_stats = adata.var["wald_stats"].values
+    cluster_labels = np.array(adata.obs["cluster"].values, dtype=int)
+    n_clusters = np.max(cluster_labels) + 1
+
+    scaled_predictions = adata.varm["pred_y"].values
+
+    # Sort clusters by max predicted value:
+    all_clusters_peak_idx = []
+
+    for cluster in range(n_clusters):
+        cluster_idx = np.where(cluster_labels == cluster)[0]
+        y_pred_cluster = scaled_predictions[cluster_idx, :]
+        # Find the cell at which the predicted expression is highest for this cluster- take the average over all
+        # genes to get an indication of approximately where this cluster should be positioned:
+        all_clusters_peak_idx.append(np.mean(np.argmax(y_pred_cluster, axis=1)))
+
+    cluster_order = np.argsort(all_clusters_peak_idx)
+    all_idx = np.array([])
+    row_colors = []
+    for i in cluster_order:
+        cluster_idx = np.where(cluster_labels == i)[0]
+        cluster_order = np.argsort(-wald_stats[cluster_idx])
+        if show_n_genes_per_cluster is not None:
+            top_n = min(len(cluster_idx), show_n_genes_per_cluster)
+            if top_n < show_n_genes_per_cluster:
+                logger.info(f"Using the top {len(cluster_idx)} genes instead of {show_n_genes_per_cluster} because "
+                            f"cluster {i} has fewer than {show_n_genes_per_cluster} genes.")
+        else:
+            top_n = len(cluster_idx)
+        idx = np.concatenate((all_idx, cluster_idx[cluster_order][:top_n]))
+        for j in range(top_n):
+            row_colors.append(interaction_colors[i % len(interaction_colors)])
+
+    sns.set(font_scale = font_scale)
+    predictions_df = pd.DataFrame(scaled_predictions, index=adata.var_names, columns=adata.obs_names)
+    g = sns.clustermap(
+        predictions_df.iloc[all_idx, :],
+        row_cluster=False,
+        col_cluster=False,
+        row_colors=row_colors,
+        cmap=colormap,
+        figsize=figsize,
+        xticklabels=False,
+        yticklabels=predictions_df.index,
+        linewidths=0
+    )
+    g.cax.set_position([.1, .2, .03, .45])
+
+    # Save, show or return figures:
+    return save_return_show_fig_utils(
+        save_show_or_return=save_show_or_return,
+        # Doesn't matter what show_legend is for this plotting function
+        show_legend=False,
+        background="white",
+        prefix="dotplot",
+        save_kwargs=save_kwargs,
+        total_panels=1,
+        fig=g.fig,
+        axes=g.ax_heatmap,
         # Return all parameters are for returning multiple values for 'axes', but this function uses a single dictionary
         return_all=False,
         return_all_list=None,
