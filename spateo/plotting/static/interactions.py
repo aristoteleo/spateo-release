@@ -344,8 +344,10 @@ def plot_sender_upstream_degs(
     logger = lm.get_main_logger()
 
     if "Sent potential" not in adata.uns["predictor_key"]:
-        raise KeyError("Sent signaling potential was not used to model the gene expression; if AnnData object is "
-                       "already the output of , :func `plot_receiver_coexpressed_degs` is more appropriate.")
+        raise KeyError(
+            "Sent signaling potential was not used to model the gene expression; if AnnData object is "
+            "already the output of , :func `plot_receiver_coexpressed_degs` is more appropriate."
+        )
 
     wald_stats = adata.var["wald_stats"].values
     cluster_labels = np.array(adata.obs["cluster"].values, dtype=int)
@@ -372,15 +374,17 @@ def plot_sender_upstream_degs(
         if show_n_genes_per_cluster is not None:
             top_n = min(len(cluster_idx), show_n_genes_per_cluster)
             if top_n < show_n_genes_per_cluster:
-                logger.info(f"Using the top {len(cluster_idx)} genes instead of {show_n_genes_per_cluster} because "
-                            f"cluster {i} has fewer than {show_n_genes_per_cluster} genes.")
+                logger.info(
+                    f"Using the top {len(cluster_idx)} genes instead of {show_n_genes_per_cluster} because "
+                    f"cluster {i} has fewer than {show_n_genes_per_cluster} genes."
+                )
         else:
             top_n = len(cluster_idx)
         idx = np.concatenate((all_idx, cluster_idx[cluster_order][:top_n]))
         for j in range(top_n):
             row_colors.append(interaction_colors[i % len(interaction_colors)])
 
-    sns.set(font_scale = font_scale)
+    sns.set(font_scale=font_scale)
     predictions_df = pd.DataFrame(scaled_predictions, index=adata.var_names, columns=adata.obs_names)
     g = sns.clustermap(
         predictions_df.iloc[all_idx, :],
@@ -391,9 +395,10 @@ def plot_sender_upstream_degs(
         figsize=figsize,
         xticklabels=False,
         yticklabels=predictions_df.index,
-        linewidths=0
+        linewidths=0,
     )
-    g.cax.set_position([.1, .2, .03, .45])
+    g.cax.set_position([0.1, 0.2, 0.03, 0.45])
+    g.fig.suptitle(f"Coexpression w/ {adata.uns['predictor_key'].lower()}")
 
     # Save, show or return figures:
     return save_return_show_fig_utils(
@@ -401,7 +406,7 @@ def plot_sender_upstream_degs(
         # Doesn't matter what show_legend is for this plotting function
         show_legend=False,
         background="white",
-        prefix="dotplot",
+        prefix="signaling_clustermap",
         save_kwargs=save_kwargs,
         total_panels=1,
         fig=g.fig,
@@ -447,8 +452,10 @@ def plot_receiver_coexpressed_degs(
     logger = lm.get_main_logger()
 
     if "Sent potential" not in adata.uns["predictor_key"]:
-        raise KeyError("Sent signaling potential was not used to model the gene expression; if AnnData object is "
-                       "already the output of , :func `plot_receptor_coexpressed_degs` is more appropriate.")
+        raise KeyError(
+            "Sent signaling potential was not used to model the gene expression; if AnnData object is "
+            "already the output of , :func `plot_receptor_coexpressed_degs` is more appropriate."
+        )
 
     wald_stats = adata.var["wald_stats"].values
     cluster_labels = np.array(adata.obs["cluster"].values, dtype=int)
@@ -475,15 +482,17 @@ def plot_receiver_coexpressed_degs(
         if show_n_genes_per_cluster is not None:
             top_n = min(len(cluster_idx), show_n_genes_per_cluster)
             if top_n < show_n_genes_per_cluster:
-                logger.info(f"Using the top {len(cluster_idx)} genes instead of {show_n_genes_per_cluster} because "
-                            f"cluster {i} has fewer than {show_n_genes_per_cluster} genes.")
+                logger.info(
+                    f"Using the top {len(cluster_idx)} genes instead of {show_n_genes_per_cluster} because "
+                    f"cluster {i} has fewer than {show_n_genes_per_cluster} genes."
+                )
         else:
             top_n = len(cluster_idx)
         idx = np.concatenate((all_idx, cluster_idx[cluster_order][:top_n]))
         for j in range(top_n):
             row_colors.append(interaction_colors[i % len(interaction_colors)])
 
-    sns.set(font_scale = font_scale)
+    sns.set(font_scale=font_scale)
     predictions_df = pd.DataFrame(scaled_predictions, index=adata.var_names, columns=adata.obs_names)
     g = sns.clustermap(
         predictions_df.iloc[all_idx, :],
@@ -494,9 +503,10 @@ def plot_receiver_coexpressed_degs(
         figsize=figsize,
         xticklabels=False,
         yticklabels=predictions_df.index,
-        linewidths=0
+        linewidths=0,
     )
-    g.cax.set_position([.1, .2, .03, .45])
+    g.cax.set_position([0.1, 0.2, 0.03, 0.45])
+    g.fig.suptitle(f"Coexpression w/ {adata.uns['predictor_key'].lower()}")
 
     # Save, show or return figures:
     return save_return_show_fig_utils(
@@ -504,7 +514,7 @@ def plot_receiver_coexpressed_degs(
         # Doesn't matter what show_legend is for this plotting function
         show_legend=False,
         background="white",
-        prefix="dotplot",
+        prefix="signaling_clustermap",
         save_kwargs=save_kwargs,
         total_panels=1,
         fig=g.fig,
