@@ -2,6 +2,7 @@
 Functions to either scale single-cell data or normalize such that the row-wise sums are identical.
 """
 import inspect
+import math
 import warnings
 from typing import Dict, Iterable, Optional, Union
 
@@ -65,7 +66,7 @@ def _normalize_data(X, counts, after=None, copy=False, rows=True, round=False):
 # Normalization wrapper:
 def normalize_total(
     adata: AnnData,
-    target_sum: float = 1e4,
+    target_sum: Optional[float] = None,
     norm_factor: Optional[np.ndarray] = None,
     exclude_highly_expressed: bool = False,
     max_fraction: float = 0.05,
@@ -86,7 +87,8 @@ def normalize_total(
         adata: The annotated data matrix of shape `n_obs` × `n_vars`. Rows correspond to cells and columns to genes.
         target_sum: Desired sum of counts for each gene post-normalization. If `None`, after normalization,
             each observation (cell) will have a total count equal to the median of total counts for observations (
-            cells) before normalization.
+            cells) before normalization. 1e4 is a suitable recommendation, but if not given, will find a suitable
+            number based on the library sizes.
         norm_factor: Optional array of shape `n_obs` × `1`, where `n_obs` is the number of observations (cells). Each
             entry contains a pre-computed normalization factor for that cell.
         exclude_highly_expressed: Exclude (very) highly expressed genes for the computation of the normalization factor
@@ -121,13 +123,24 @@ def normalize_total(
     else:
         X = adata.X
 
+    # If target_sum is None, find a suitable number based on the library sizes.
+    if target_sum is None:
+        if scipy.sparse.issparse(adata.X):
+            library_size = np.mean(adata.X.sum(axis=1))
+        else:
+            library_size = np.mean(np.sum(adata.X, axis=1))
+
+        power = math.ceil(math.log10(library_size))
+        nearest_power = 10**power
+        target_sum = nearest_power
+
     gene_subset = None
     msg = "Normalizing counts per cell..."
     if exclude_highly_expressed:
-        counts_per_cell = X.sum(1)  # original counts per cell
+        counts_per_cell = X.sum(axis=1)  # original counts per cell
         counts_per_cell = np.ravel(counts_per_cell)
 
-        gene_subset = (X > counts_per_cell[:, None] * max_fraction).sum(0)
+        gene_subset = (X > counts_per_cell[:, None] * max_fraction).sum(axis=0)
         gene_subset = np.ravel(gene_subset) == 0
 
         msg += (
@@ -135,9 +148,9 @@ def normalize_total(
             f"normalization factor computation:\n{adata.var_names[~gene_subset].tolist()}"
         )
 
-        counts_per_cell = X[:, gene_subset].sum(1)
+        counts_per_cell = X[:, gene_subset].sum(axis=1)
     else:
-        counts_per_cell = X.sum(1)
+        counts_per_cell = X.sum(axis=1)
 
     if norm_factor is not None:
         norm_factor = norm_factor.reshape(-1, 1)
@@ -558,6 +571,17 @@ def factor_normalization(adata: AnnData, norm_factors: Optional[np.ndarray] = No
     normalize_total_signatures = inspect.signature(normalize_total)
     normalize_total_valid_params = [p.name for p in normalize_total_signatures.parameters.values() if p.name in kwargs]
     normalize_total_params = {k: kwargs.pop(k) for k in normalize_total_valid_params}
+
+    # Check if target_sum is None, and if so, use the library size to find an appropriate target sum:
+    if normalize_total_params["target_sum"] is None:
+        if scipy.sparse.issparse(adata.X):
+            library_size = np.mean(adata.X.sum(axis=1))
+        else:
+            library_size = np.mean(np.sum(adata.X, axis=1))
+
+        power = math.ceil(math.log10(library_size))
+        nearest_power = 10**power
+        normalize_total_params["target_sum"] = nearest_power
 
     if norm_factors is None:
         norm_factors = calcNormFactors(adata.X, **calc_norm_factors_params)

@@ -464,14 +464,18 @@ class MuSIC:
 
         if self.normalize:
             if self.distr == "gaussian":
-                self.logger.info("Computing TMM factors and setting total counts in each cell to 1e4 inplace...")
-                self.adata = factor_normalization(self.adata, method="TMM", target_sum=1e4)
+                self.logger.info(
+                    "Computing TMM factors and setting total counts in each cell to uniform target sum " "inplace..."
+                )
+                # target_sum to None to automatically determine suitable target sum:
+                self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
             else:
                 self.logger.info(
-                    "Computing TMM factors, setting total counts in each cell to 1e4 and rounding "
+                    "Computing TMM factors, setting total counts in each cell to uniform target sum and rounding "
                     "nonintegers inplace..."
                 )
-                self.adata = factor_normalization(self.adata, method="TMM", target_sum=1e4)
+                # target_sum to None to automatically determine suitable target sum:
+                self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
                 self.adata.X = (
                     scipy.sparse.csr_matrix(np.round(self.adata.X))
                     if scipy.sparse.issparse(self.adata.X)
