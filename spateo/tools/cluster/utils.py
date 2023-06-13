@@ -60,7 +60,7 @@ def compute_pca_components(
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def pca_spateo(
     adata: AnnData,
-    X_data=None,
+    X_data: Optional[np.ndarray] = None,
     n_pca_components: Optional[int] = None,
     pca_key: Optional[str] = "X_pca",
     genes: Union[list, None] = None,
@@ -115,6 +115,7 @@ def pca_spateo(
         pcs = pca.fit_transform(matrix)
 
     adata.obsm[pca_key] = pcs[:, :n_pca_components]
+    return adata
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)

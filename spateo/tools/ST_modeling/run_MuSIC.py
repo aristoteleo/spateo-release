@@ -88,7 +88,7 @@ def main():
 #     "is a TF (or other regulatory molecule) to constitute the "
 #     "independent variable block.",
 # )
-# @click.option("custom_targets_path", required=False)
+@click.option("targets_path", required=False)
 @click.option("target", required=False, multiple=True)
 @click.option(
     "target_expr_threshold",
@@ -188,7 +188,7 @@ def run(
     receptor,
     custom_pathways_path,
     pathway,
-    custom_targets_path,
+    targets_path,
     target,
     target_expr_threshold,
     r_squared_threshold,
@@ -245,8 +245,8 @@ def run(
         custom_pathways_path: Rather than providing a list of receptors, can provide a list of signaling pathways-
             all receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
             is "lr".
-        custom_targets_path: Path to file containing a list of targets to be used in the GRN model
-        target: Can be used as an alternative to `custom_targets_path`. Can be used to provide a custom list of
+        targets_path: Path to file containing a list of targets to be used in the GRN model
+        target: Can be used as an alternative to `targets_path`. Can be used to provide a custom list of
             targets.
         target_expr_threshold: For automated selection, the threshold proportion of cells for which transcript needs
             to be expressed in to be selected as a target of interest.
@@ -371,8 +371,8 @@ def run(
     #     for t in tf:
     #         command += t + " "
 
-    if custom_targets_path is not None:
-        command += " -custom_targets_path " + custom_targets_path
+    if targets_path is not None:
+        command += " -targets_path " + targets_path
     if target is not None:
         command += " -target "
         for tar in target:
