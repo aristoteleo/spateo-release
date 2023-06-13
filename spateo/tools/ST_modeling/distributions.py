@@ -389,7 +389,7 @@ class VarianceFunction(object):
         Returns:
             var: Variance
         """
-        var = np.ones_like(fitted, dtype=np.float64)
+        var = np.ones_like(fitted, dtype=float64)
         return var
 
     def deriv(self, fitted):
@@ -704,7 +704,7 @@ class Distribution(object):
         return predictors
 
     def deviance(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> float:
         """Deviance function to measure goodness-of-fit of model fitting. Defined as twice the log-likelihood ratio.
 
@@ -722,7 +722,7 @@ class Distribution(object):
         raise NotImplementedError
 
     def deviance_residuals(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> np.ndarray:
         """Deviance residuals for the model, representing the difference between the observed and expected values of
         the dependent variable.
@@ -741,7 +741,7 @@ class Distribution(object):
         raise NotImplementedError
 
     def log_likelihood(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> np.ndarray:
         """Log-likelihood function for the model.
 
@@ -799,7 +799,7 @@ class Poisson(Distribution):
         return vals
 
     def deviance(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> float:
         """Poisson deviance function.
 
@@ -824,7 +824,7 @@ class Poisson(Distribution):
         return dev
 
     def deviance_residuals(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> np.ndarray:
         """Poisson deviance residuals.
 
@@ -851,7 +851,7 @@ class Poisson(Distribution):
         return dev_resid
 
     def log_likelihood(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> np.ndarray:
         """Poisson log likelihood of the fitted mean response.
 
@@ -903,7 +903,7 @@ class Gaussian(Distribution):
         self.link = link()
 
     def deviance(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> float:
         """Gaussian deviance function.
 
@@ -928,7 +928,7 @@ class Gaussian(Distribution):
         return dev
 
     def deviance_residuals(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> np.ndarray:
         """Gaussian deviance residuals.
 
@@ -950,7 +950,7 @@ class Gaussian(Distribution):
         return dev_resid
 
     def log_likelihood(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ):
         """Gaussian log likelihood of the fitted mean response.
 
@@ -1014,7 +1014,7 @@ class Gamma(Distribution):
         return vals
 
     def deviance(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> float:
         """Gamma deviance function.
 
@@ -1039,7 +1039,7 @@ class Gamma(Distribution):
         return dev
 
     def deviance_residuals(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> np.ndarray:
         """Gamma deviance residuals.
 
@@ -1069,7 +1069,7 @@ class Gamma(Distribution):
         return dev_resid
 
     def log_likelihood(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> np.ndarray:
         """Gamma log likelihood of the fitted mean response.
 
@@ -1149,7 +1149,7 @@ class Binomial(Distribution):
         endog: np.ndarray,
         fitted: np.ndarray,
         freq_weights: Optional[np.ndarray] = None,
-        scale: np.float = 1.0,
+        scale: float = 1.0,
         axis: Optional[int] = None,
     ) -> float:
         """Binomial deviance function.
@@ -1179,7 +1179,7 @@ class Binomial(Distribution):
                 axis=axis,
             )
 
-    def deviance_residuals(self, endog: np.ndarray, fitted: np.ndarray, scale: np.float = 1.0) -> np.ndarray:
+    def deviance_residuals(self, endog: np.ndarray, fitted: np.ndarray, scale: float = 1.0) -> np.ndarray:
         """
         Binomial deviance residuals.
 
@@ -1213,7 +1213,7 @@ class Binomial(Distribution):
             return dev_resid
 
     def log_likelihood(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> np.ndarray:
         """Binomial log likelihood of the fitted mean response.
 
@@ -1292,7 +1292,7 @@ class NegativeBinomial(Distribution):
         return vals
 
     def deviance(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> float:
         """Negative binomial deviance function.
 
@@ -1331,7 +1331,7 @@ class NegativeBinomial(Distribution):
         return dev
 
     def deviance_residuals(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> np.ndarray:
         """Negative binomial deviance residuals.
 
@@ -1359,7 +1359,7 @@ class NegativeBinomial(Distribution):
         return dev_resid
 
     def log_likelihood(
-        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: np.float = 1.0
+        self, endog: np.ndarray, fitted: np.ndarray, freq_weights: Optional[np.ndarray] = None, scale: float = 1.0
     ) -> np.ndarray:
         """Negative binomial log likelihood of the fitted mean response.
 

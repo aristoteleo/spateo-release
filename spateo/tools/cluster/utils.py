@@ -99,13 +99,13 @@ def pca_spateo(
             genes = adata.var_names
         if layer is not None:
             matrix = adata[:, genes].layers[layer].copy()
-            lm.main_info('Runing PCA on adata.layers["' + layer + '"]...')
+            lm.main_info('Running PCA on adata.layers["' + layer + '"]...')
         else:
             matrix = adata[:, genes].X.copy()
-            lm.main_info("Runing PCA on adata.X...")
+            lm.main_info("Running PCA on adata.X...")
     else:
         matrix = X_data.copy()
-        lm.main_info("Runing PCA on user provided data...")
+        lm.main_info("Running PCA on user provided data...")
 
     if n_pca_components is None:
         pcs, n_pca_components, _ = compute_pca_components(adata.X, random_state=random_state, save_curve_img=None)
