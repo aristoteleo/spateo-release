@@ -941,6 +941,14 @@ class MuSIC:
             if self.multicollinear_threshold is not None:
                 X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
+            # Save design matrix:
+            if not os.path.exists(os.path.join(self.output_path, "design_matrix")):
+                os.makedirs(os.path.join(self.output_path, "design_matrix"))
+            X_df.to_csv(os.path.join(self.output_path, "design_matrix", "design_matrix.csv"))
+            self.logger.info(
+                f"Saving design matrix to {os.path.join(self.output_path, 'design_matrix', 'design_matrix.csv')}."
+            )
+
             self.X = X_df.values
             self.feature_names = [pair[0] + "-" + pair[1] for pair in X_df.columns]
 
@@ -967,6 +975,14 @@ class MuSIC:
             # If applicable, check for multicollinearity:
             if self.multicollinear_threshold is not None:
                 X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+
+            # Save design matrix:
+            if not os.path.exists(os.path.join(self.output_path, "design_matrix")):
+                os.makedirs(os.path.join(self.output_path, "design_matrix"))
+            X_df.to_csv(os.path.join(self.output_path, "design_matrix", "design_matrix.csv"))
+            self.logger.info(
+                f"Saving design matrix to {os.path.join(self.output_path, 'design_matrix', 'design_matrix.csv')}."
+            )
 
             self.X = X_df.values
             self.feature_names = X_df.columns
@@ -1897,7 +1913,9 @@ class MuSIC:
                         to_save = np.hstack((y_binary, predictions, X))
                         cols = ["true y", "predictions"] + list(self.feature_names)
                         predictions_df = pd.DataFrame(to_save, columns=cols, index=self.sample_names[self.x_chunk])
-                        predictions_df.to_csv(f"logistic_predictions_{target}.csv")
+                        predictions_df.to_csv(
+                            os.path.join(self.output_path, f"logistic_predictions/logistic_predictions_{target}.csv")
+                        )
 
                         # Mask indices where variable is predicted to be nonzero but is actually zero (based on inferences,
                         # these will result in likely underestimation of the effect)- we infer that the effect of the
