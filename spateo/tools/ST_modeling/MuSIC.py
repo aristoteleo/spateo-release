@@ -816,7 +816,7 @@ class MuSIC:
                     f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
                 )
 
-                self.logger.info(f"Set of ligand-receptor pairs: {self.lr_pairs}")
+                self.logger.info(f"Set of {len(self.lr_pairs)} ligand-receptor pairs: {self.lr_pairs}")
 
         # Get gene targets:
         self.logger.info("Preparing data: getting gene targets.")
@@ -875,7 +875,7 @@ class MuSIC:
                 expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
                 lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
                 lagged_expr_mat[:, i] = lagged_expr
-            self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=adata.obs_names, columns=ligands)
+            self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=adata.obs_names, columns=self.ligands_expr.columns)
 
         # Set dependent variable array based on input given as "mod_type":
         if self.mod_type == "niche":
