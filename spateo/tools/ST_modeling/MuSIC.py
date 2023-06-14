@@ -919,7 +919,9 @@ class MuSIC:
             # Use the ligand expression array and receptor expression array to compute the ligand-receptor pairing
             # array across all cells in the sample:
             X_df = pd.DataFrame(
-                np.zeros((self.n_samples, len(self.lr_pairs))), columns=self.feature_names, index=self.adata.obs_names
+                np.zeros((self.n_samples, len(self.lr_pairs))),
+                columns=[f"{lr_pair[0]-lr_pair[1]}" for lr_pair in self.lr_pairs],
+                index=self.adata.obs_names,
             )
 
             for lr_pair in self.lr_pairs:
