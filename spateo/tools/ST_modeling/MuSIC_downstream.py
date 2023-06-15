@@ -13,6 +13,7 @@ import argparse
 import itertools
 import math
 import os
+import re
 import sys
 from multiprocessing import Pool
 from typing import List, Literal, Optional, Tuple, Union
@@ -23,16 +24,15 @@ import pandas as pd
 import scipy.sparse
 from mpi4py import MPI
 from MuSIC import MuSIC
+from scipy.stats import pearsonr, zscore
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, normalize
 from statsmodels.gam.smooth_basis import BSplines
 
-from spateo.tools.cluster.leiden import calculate_leiden_partition
-
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
-from spateo.logging import logger_manager as lm
+from spateo.tools.cluster.leiden import calculate_leiden_partition
 from spateo.tools.gene_expression_variance import (
     compute_gene_groups_p_val,
     get_highvar_genes_sparse,
@@ -41,6 +41,7 @@ from spateo.tools.ST_modeling.regression_utils import (
     DE_GAM_test,
     fit_DE_GAM,
     multitesting_correction,
+    permutation_testing,
     wald_test,
 )
 
@@ -76,6 +77,9 @@ class MuSIC_Interpreter(MuSIC):
         self.coeffs, self.standard_errors = self.return_outputs()
         self.coeffs = self.comm.bcast(self.coeffs, root=0)
         self.standard_errors = self.comm.bcast(self.standard_errors, root=0)
+
+        self.predictions = self.predict(coeffs=self.coeffs)
+        self.predictions = self.comm.bcast(self.predictions, root=0)
 
         chunk_size = int(math.ceil(float(len(range(self.n_samples))) / self.comm.size))
         self.x_chunk = np.arange(self.n_samples)[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
@@ -227,7 +231,6 @@ class MuSIC_Interpreter(MuSIC):
                         "the form of a tuple."
                     )
 
-            idx = self.ligands_expr.columns.index(ligand)
             # Use the non-lagged ligand expression array:
             ligand_expr = self.ligands_expr_nonlag[ligand].values.reshape(-1, 1)
             # Referred to as "sent potential"
@@ -236,10 +239,17 @@ class MuSIC_Interpreter(MuSIC):
 
             # If "lr", incorporate the receptor expression array:
             if self.mod_type == "lr":
-                idx = self.receptors_expr.columns.index(receptor)
                 receptor_expr = self.receptors_expr[receptor].values.reshape(1, -1)
                 sent_potential = sent_potential.multiply(receptor_expr)
                 sent_potential.eliminate_zeros()
+
+            # Find the location of the correct coefficient:
+            if self.mod_type == "ligand":
+                ligand_coeff_label = f"b_{ligand}"
+                idx = coeffs.columns.index(ligand_coeff_label)
+            elif self.mod_type == "lr":
+                lr_coeff_label = f"b_{ligand}-{receptor}"
+                idx = coeffs.columns.index(lr_coeff_label)
 
             coeff = coeffs.iloc[:, idx].values.reshape(1, -1)
             # Weight each column by the coefficient magnitude and finally by the indicator for expression/no
@@ -253,19 +263,19 @@ class MuSIC_Interpreter(MuSIC):
             if sender_cell_type is None:
                 raise ValueError("Must provide sending cell type name for niche models.")
 
-            idx = self.cell_categories.columns.index(sender_cell_type)
             sender_cell_type = self.cell_categories[sender_cell_type].values.reshape(-1, 1)
+            # Get sending cells only of the specified type:
             sent_potential = spatial_weights.multiply(sender_cell_type)
             sent_potential.eliminate_zeros()
 
             # Check whether to condition on receiver cell type:
             if receiver_cell_type is not None:
-                idx = self.cell_categories.columns.index(receiver_cell_type)
                 receiver_cell_type = self.cell_categories[receiver_cell_type].values.reshape(1, -1)
                 sent_potential = sent_potential.multiply(receiver_cell_type)
                 sent_potential.eliminate_zeros()
 
-            coeff = coeffs.iloc[:, idx].values.reshape(1, -1)
+            sending_ct_coeff_label = f"b_Proxim{sender_cell_type}"
+            coeff = coeffs[sending_ct_coeff_label].values.reshape(1, -1)
             # Weight each column by the coefficient magnitude and finally by the indicator for expression/no expression
             # of the target and store as sparse array:
             sig_interm = sent_potential.multiply(coeff)
@@ -440,7 +450,12 @@ class MuSIC_Interpreter(MuSIC):
             normalized_effect_potential_sum_receiver,
         )
 
-    def inferred_effect_direction(self, targets: Optional[Union[str, List[str]]] = None):
+    def inferred_effect_direction(
+        self,
+        targets: Optional[Union[str, List[str]]] = None,
+        filter_targets: bool = False,
+        filter_target_threshold: float = 0.5,
+    ):
         """For visualization purposes, used for models that consider ligand expression (:attr `mod_type` is 'ligand' or
         'lr' (for receptor models, assigning directionality is impossible and for niche models, it makes much less
         sense to draw/compute a vector field). Construct spatial vector fields to infer the directionality of
@@ -451,6 +466,10 @@ class MuSIC_Interpreter(MuSIC):
         Args:
             targets: Optional string or list of strings to select targets from among the genes used to fit the model
                 to compute signaling effects for. If not given, will use all targets.
+            filter_targets: Whether to filter targets based on the :attr:`filter_target_threshold` value. This
+                threshold is based on the Pearson correlation w/ the true expression and should be between 0 and 1.
+            filter_target_threshold: Only used if 'filter_targets' is True. Threshold to use for filtering targets
+                based on the Pearson correlation of the reconstruction w/ the true expression
         """
         if not self.mod_type == "ligand" or self.mod_type == "lr":
             raise ValueError(
@@ -470,13 +489,31 @@ class MuSIC_Interpreter(MuSIC):
         elif isinstance(targets, str):
             targets = [targets]
 
-        cols = self.ligands_expr.columns if self.mod_type == "ligand" else self.lr_pairs
+        if filter_targets:
+            pearson_dict = {}
+            for target in targets:
+                observed = self.adata[:, target].X.toarray().reshape(-1, 1)
+                predicted = self.predictions[target].reshape(-1, 1)
+
+                # Ignore large predicted values that are actually zero- these have a high likelihood of being
+                # dropouts rather than biological zeros:
+                z_scores = zscore(predicted)
+                outlier_indices = np.where((observed == 0) & (z_scores > 2))[0]
+                predicted = np.delete(predicted, outlier_indices)
+                observed = np.delete(observed, outlier_indices)
+
+                rp, _ = pearsonr(observed, predicted)
+                pearson_dict[target] = rp
+
+            targets = [target for target in targets if pearson_dict[target] > filter_target_threshold]
+
+        cols = self.feature_names
 
         for target in targets:
             for j, col in enumerate(cols):
                 if self.mod_type == "lr":
-                    ligand = col[0]
-                    receptor = col[1]
+                    ligand = col.split("-")[0]
+                    receptor = col.split("-")[1]
                     (
                         effect_potential,
                         normalized_effect_potential_sum_sender,
@@ -897,17 +934,175 @@ class MuSIC_Interpreter(MuSIC):
         adata_subset.uns["__type"] = "UMI"
         return adata_subset
 
-    def compute_cell_type_coupling(self):
+    def compute_cell_type_coupling(
+        self,
+        targets: Optional[Union[str, List[str]]] = None,
+        filter_targets: bool = False,
+        filter_target_threshold: float = 0.5,
+    ):
         """Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
         categories- if :attr `mod_type` is "niche", this directly averages the effects for each neighboring cell type
         for each observation. If :attr `mod_type` is "lr" or "ligand", this correlates cell type prevalence with the
         size of the predicted effect on downstream expression for each L:R pair.
+
+        Args:
+            targets: Optional string or list of strings to select targets from among the genes used to fit the model
+                to compute signaling effects for. If not given, will use all targets.
+            filter_targets: Whether to filter targets based on the :attr:`filter_target_threshold` value. This
+                threshold is based on the Pearson correlation w/ the true expression and should be between 0 and 1.
+            filter_target_threshold: Only used if 'filter_targets' is True. Threshold to use for filtering targets
+                based on the Pearson correlation of the reconstruction w/ the true expression
         """
 
         # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
         spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True).toarray()
 
-        # Sum of each cell type in the neighborhood of the receiving cell:
+        if not self.mod_type != "receptor":
+            raise ValueError("Knowledge of the source is required to sent effect potential.")
+
+        # Compute signaling potential for each target (mediated by each of the possible signaling patterns-
+        # ligand/receptor or cell type/cell type pair):
+
+        # Columns consist of the spatial weights of each observation- convolve with expression of each ligand to
+        # get proxy of ligand signal "sent", weight by the local coefficient value to get a proxy of the "signal
+        # functionally received" in generating the downstream effect and store in .obsp.
+        if targets is None:
+            targets = self.coeffs.keys()
+        elif isinstance(targets, str):
+            targets = [targets]
+
+        if filter_targets:
+            pearson_dict = {}
+            for target in targets:
+                observed = self.adata[:, target].X.toarray().reshape(-1, 1)
+                predicted = self.predictions[target].reshape(-1, 1)
+
+                # Ignore large predicted values that are actually zero- these have a high likelihood of being
+                # dropouts rather than biological zeros:
+                z_scores = zscore(predicted)
+                outlier_indices = np.where((observed == 0) & (z_scores > 2))[0]
+                predicted = np.delete(predicted, outlier_indices)
+                observed = np.delete(observed, outlier_indices)
+
+                rp, _ = pearsonr(observed, predicted)
+                pearson_dict[target] = rp
+
+            targets = [target for target in targets if pearson_dict[target] > filter_target_threshold]
+
+        # Cell type pairings:
+        if not hasattr(self, "cell_categories"):
+            group_name = self.adata.obs[self.group_key]
+            # db = pd.DataFrame({"group": group_name})
+            db = pd.DataFrame({"group": group_name})
+            categories = np.array(group_name.unique().tolist())
+            # db["group"] = pd.Categorical(db["group"], categories=categories)
+            db["group"] = pd.Categorical(db["group"], categories=categories)
+
+            self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
+            X = pd.get_dummies(data=db, drop_first=False)
+            # Ensure columns are in order:
+            self.cell_categories = X.reindex(sorted(X.columns), axis=1)
+            # Ensure each category is one word with no spaces or special characters:
+            self.cell_categories.columns = [
+                re.sub(r"\b([a-zA-Z0-9])", lambda match: match.group(1).upper(), re.sub(r"[^a-zA-Z0-9]+", "", s))
+                for s in self.cell_categories.columns
+            ]
+
+        celltype_pairs = list(itertools.product(self.cell_categories.columns, self.cell_categories.columns))
+        celltype_pairs = [f"{cat[0]}-{cat[1]}" for cat in celltype_pairs]
+
+        if self.mod_type in ["lr", "ligand"]:
+            cols = self.feature_names
+        else:
+            cols = celltype_pairs
+
+        # Storage for cell type-cell type coupling results:
+        ct_coupling = pd.DataFrame(0, index=targets, columns=celltype_pairs)
+        ct_coupling_significance = pd.DataFrame(0, index=targets, columns=celltype_pairs)
+
+        for target in targets:
+            for j, col in enumerate(cols):
+                if self.mod_type == "lr":
+                    ligand = col.split("-")[0]
+                    receptor = col.split("-")[1]
+
+                    effect_potential, _, _ = self.get_effect_potential(
+                        target=target, ligand=ligand, receptor=receptor, spatial_weights=spatial_weights
+                    )
+
+                    # For each cell type pair, compute average effect potential across all cells of the sending and
+                    # receiving type:
+                    for pair in celltype_pairs:
+                        sending_cell_type = pair.split("-")[0]
+                        receiving_cell_type = pair.split("-")[1]
+
+                        # Get indices of cells of each type:
+                        sending_indices = np.where(self.cell_categories[sending_cell_type] == 1)[0]
+                        receiving_indices = np.where(self.cell_categories[receiving_cell_type] == 1)[0]
+
+                        # Get average effect potential across all cells of each type:
+                        avg_effect_potential = np.mean(effect_potential[sending_indices, receiving_indices])
+                        ct_coupling.loc[target, pair] = avg_effect_potential
+                        ct_coupling_significance.loc[target, pair] = permutation_testing(
+                            avg_effect_potential,
+                            n_permutations=10000,
+                            n_jobs=30,
+                            subset_rows=sending_indices,
+                            subset_cols=receiving_indices,
+                        )
+
+                elif self.mod_type == "ligand":
+                    effect_potential, _, _ = self.get_effect_potential(
+                        target=target, ligand=col, spatial_weights=spatial_weights
+                    )
+
+                    # For each cell type pair, compute average effect potential across all cells of the sending and
+                    # receiving type:
+                    for pair in celltype_pairs:
+                        sending_cell_type = pair.split("-")[0]
+                        receiving_cell_type = pair.split("-")[1]
+
+                        # Get indices of cells of each type:
+                        sending_indices = np.where(self.cell_categories[sending_cell_type] == 1)[0]
+                        receiving_indices = np.where(self.cell_categories[receiving_cell_type] == 1)[0]
+
+                        # Get average effect potential across all cells of each type:
+                        avg_effect_potential = np.mean(effect_potential[sending_indices, receiving_indices])
+                        ct_coupling.loc[target, pair] = avg_effect_potential
+                        ct_coupling_significance.loc[target, pair] = permutation_testing(
+                            avg_effect_potential,
+                            n_permutations=10000,
+                            n_jobs=30,
+                            subset_rows=sending_indices,
+                            subset_cols=receiving_indices,
+                        )
+
+                elif self.mod_type == "niche":
+                    sending_cell_type = col.split("-")[0]
+                    receiving_cell_type = col.split("-")[1]
+                    effect_potential, _, _ = self.get_effect_potential(
+                        target=target,
+                        sender_cell_type=sending_cell_type,
+                        receiver_cell_type=receiving_cell_type,
+                        spatial_weights=spatial_weights,
+                    )
+
+                    # Directly compute the average- the processing steps when providing sender and receiver cell
+                    # types already handle filtering down to the pertinent cells:
+                    for pair in celltype_pairs:
+                        sending_cell_type = pair.split("-")[0]
+                        receiving_cell_type = pair.split("-")[1]
+
+                        
+
+
+        # Save results:
+        parent_dir = os.path.dirname(self.output_path)
+        if not os.path.exists(os.path.join(parent_dir, "cell_type_coupling")):
+            os.makedirs(os.path.join(parent_dir, "cell_type_coupling"))
+
+        ct_coupling.to_csv(os.path.join(parent_dir, "cell_type_coupling", f"celltype_effects_coupling.csv"))
+        ct_coupling_significance.to_csv(os.path.join(parent_dir, "cell_type_coupling", f"celltype_effects_sig.csv"))
 
         #
 

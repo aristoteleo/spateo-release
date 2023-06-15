@@ -29,7 +29,7 @@ from sklearn.cluster import KMeans
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
 from spateo.logging import logger_manager as lm
-from spateo.preprocessing.normalize import factor_normalization, normalize_total
+from spateo.preprocessing.normalize import factor_normalization
 from spateo.preprocessing.transform import log1p
 from spateo.tools.find_neighbors import get_wi, transcriptomic_connectivity
 from spateo.tools.spatial_degs import moran_i
@@ -630,10 +630,17 @@ class MuSIC:
 
             ligands = [l for l in ligands if l in adata.var_names]
             self.ligands_expr = pd.DataFrame(
-                adata[:, ligands].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
+                adata[:, ligands].X.A if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
                 index=adata.obs_names,
                 columns=ligands,
             )
+
+            # Log-scale ligand expression- to reduce the impact of very large values:
+            self.ligands_expr = self.ligands_expr.applymap(np.log1p)
+            # self.ligands_expr = self.ligands_expr.apply(
+            #     lambda column: (column - column.min()) / (column.max() - column.min())
+            # )
+
             # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
             # but store them in a temporary list to do so later because some may contribute to multiple complexes:
             to_drop = []
@@ -739,10 +746,16 @@ class MuSIC:
             receptors = [r for r in receptors if r in adata.var_names]
 
             self.receptors_expr = pd.DataFrame(
-                adata[:, receptors].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, receptors].X,
+                adata[:, receptors].X.A if scipy.sparse.issparse(adata.X) else adata[:, receptors].X,
                 index=adata.obs_names,
                 columns=receptors,
             )
+
+            # Log-scale receptor expression (to reduce the impact of very large values):
+            self.receptors_expr = self.receptors_expr.applymap(np.log1p)
+            # self.receptors_expr = self.receptors_expr.apply(
+            #     lambda column: (column - column.min()) / (column.max() - column.min())
+            # )
 
             # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
             # but store them in a temporary list to do so later because some may contribute to multiple complexes:
@@ -859,7 +872,7 @@ class MuSIC:
             targets = np.array(targets)[target_expr_percentage > self.target_expr_threshold]
 
         self.targets_expr = pd.DataFrame(
-            adata[:, targets].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
+            adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
             index=adata.obs_names,
             columns=targets,
         )
@@ -873,7 +886,7 @@ class MuSIC:
             for i, ligand in enumerate(self.ligands_expr.columns):
                 expr = self.ligands_expr[ligand]
                 expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
-                lagged_expr = spatial_weights.dot(expr_sparse).toarray().flatten()
+                lagged_expr = spatial_weights.dot(expr_sparse).A.flatten()
                 lagged_expr_mat[:, i] = lagged_expr
             self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=adata.obs_names, columns=self.ligands_expr.columns)
 
@@ -920,7 +933,7 @@ class MuSIC:
             # array across all cells in the sample:
             X_df = pd.DataFrame(
                 np.zeros((self.n_samples, len(self.lr_pairs))),
-                columns=[f"{lr_pair[0]-lr_pair[1]}" for lr_pair in self.lr_pairs],
+                columns=[f"{lr_pair[0]}-{lr_pair[1]}" for lr_pair in self.lr_pairs],
                 index=self.adata.obs_names,
             )
 
@@ -939,9 +952,13 @@ class MuSIC:
                     f"Dropped all-zero columns from cell type-specific signaling array, from "
                     f"{len(self.lr_pairs)} to {X_df.shape[1]}."
                 )
+
             # If applicable, check for multicollinearity:
             if self.multicollinear_threshold is not None:
                 X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+
+            # Log-scale to reduce the impact of cells with higher expression:
+            X_df = X_df.applymap(np.log1p)
 
             # Save design matrix:
             if not os.path.exists(os.path.join(self.output_path, "design_matrix")):
@@ -952,7 +969,7 @@ class MuSIC:
             )
 
             self.X = X_df.values
-            self.feature_names = [pair[0] + "-" + pair[1] for pair in X_df.columns]
+            self.feature_names = [pair.split("-")[0] + "-" + pair.split("-")[1] for pair in X_df.columns]
 
         elif self.mod_type == "ligand" or self.mod_type == "receptor":
             if self.mod_type == "ligand":
@@ -1007,7 +1024,7 @@ class MuSIC:
                         f"covariate to the X matrix."
                     )
             matched_obs_matrix = self.adata.obs[matched_obs].to_numpy()
-            matched_var_matrix = self.adata[:, matched_var_names].X.toarray()
+            matched_var_matrix = self.adata[:, matched_var_names].X.A
             cov_names = matched_obs + matched_var_names
             concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
             self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
@@ -1194,31 +1211,32 @@ class MuSIC:
             y: Array of dependent variable values, used to determine the search range for the bandwidth selection
         """
 
-        if self.bw_fixed:
-            # max_dist = np.max(np.array([np.max(cdist([self.coords[i]], self.coords)) for i in range(self.n_samples)]))
-            if self.minbw is None:
-                # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
-                min_dist = np.min(
-                    np.array(
-                        [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
-                    )
-                )
-                # if self.mod_type == "niche":
-                #     self.minbw = min_dist * 2
-                # else:
-                #     self.minbw = min_dist * 5
+        if self.minbw is None:
+            # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
+            min_dist = np.min(
+                np.array([np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)])
+            )
+            # Arbitrarily chosen limits:
+            if self.mod_type == "niche":
+                self.minbw = min_dist * 2
+                self.maxbw = min_dist * 4
+            else:
                 self.minbw = min_dist * 3
-
-                # Set max bandwidth to 6x (arbitrarily chosen) the max distance between neighboring points:
-                self.maxbw = min_dist * 6
+                self.max_bw = min_dist * 6
 
         # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
         else:
             if self.maxbw is None:
-                self.maxbw = 10
+                if self.mod_type == "niche":
+                    self.maxbw = 10
+                else:
+                    self.maxbw = 20
 
             if self.minbw is None:
-                self.minbw = 3
+                if self.mod_type == "niche":
+                    self.minbw = 3
+                else:
+                    self.minbw = 6
 
         if self.minbw >= self.maxbw:
             raise ValueError(
@@ -1288,6 +1306,7 @@ class MuSIC:
         y_label: str,
         coords: Optional[np.ndarray] = None,
         mask_indices: Optional[np.ndarray] = None,
+        feature_mask: Optional[np.ndarray] = None,
         final: bool = False,
         multiscale: bool = False,
         fit_predictor: bool = False,
@@ -1303,6 +1322,7 @@ class MuSIC:
             coords: Can be optionally used to provide coordinates for samples- used if subsampling was performed to
                 maintain all original sample coordinates (to take original neighborhoods into account)
             mask_indices: Can be optionally used to provide indices of samples to mask out of the dataset
+            feature_mask: Can be optionally used to provide a mask for features to mask out of the dataset
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
             multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
@@ -1348,32 +1368,6 @@ class MuSIC:
             -1, 1
         )
 
-        # Global relationship regularization (only for non-niche models):
-        if self.mod_type != "niche":
-            correlations = []
-            for idx in range(X.shape[1]):
-                # Create a boolean mask where both the current X column and y are nonzero
-                mask = (X[:, idx].ravel() != 0) & (y.ravel() != 0)
-
-                # Create a subset of the data using the mask
-                X_subset = X[mask, idx]
-                y_subset = y[mask]
-
-                # Compute the Pearson correlation coefficient for the subset
-                if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
-                    correlation = pearsonr(X_subset, y_subset)[0]
-                else:
-                    correlation = np.nan  # Not enough data points to compute correlation
-
-                # Append the correlation to the correlations list
-                correlations.append(correlation)
-            correlations = np.array(correlations)
-
-            threshold = np.abs(correlations) < 0.1
-            mask = np.where(threshold, np.abs(correlations), 1.0)
-        else:
-            mask = None
-
         if mask_indices is not None:
             wi[mask_indices] = 0.0
         else:
@@ -1409,7 +1403,7 @@ class MuSIC:
                 offset=self.offset,
                 link=None,
                 ridge_lambda=self.ridge_lambda,
-                mask=mask,
+                mask=feature_mask,
             )
 
             # For multiscale GLM models, this is the predicted dependent variable value- if i is in the mask,
@@ -1421,6 +1415,8 @@ class MuSIC:
                 pred_y = y_hat[i]
 
             diagnostic = pred_y
+            if isinstance(diagnostic, np.ndarray):
+                diagnostic = pred_y[0]
             # For multiscale models, keep track of the residual as well- in this case,
             # the given y is assumed to also be the linear predictor:
             if multiscale:
@@ -1582,6 +1578,7 @@ class MuSIC:
         bw: Union[float, int],
         coords: Optional[np.ndarray] = None,
         mask_indices: Optional[np.ndarray] = None,
+        feature_mask: Optional[np.ndarray] = None,
         final: bool = False,
         multiscale: bool = False,
         fit_predictor: bool = False,
@@ -1597,6 +1594,7 @@ class MuSIC:
             bw: Bandwidth for the spatial kernel
             coords: Coordinates of each point in the X array
             mask_indices: Optional array used to mask out indices in the fitting process
+            feature_mask: Optional array used to mask out features in the fitting process
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
             multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
@@ -1627,6 +1625,7 @@ class MuSIC:
                     y_label=y_label,
                     coords=coords,
                     mask_indices=mask_indices,
+                    feature_mask=feature_mask,
                     bw=bw,
                     final=final,
                     multiscale=multiscale,
@@ -1742,6 +1741,7 @@ class MuSIC:
                     y_label=y_label,
                     coords=coords,
                     mask_indices=mask_indices,
+                    feature_mask=feature_mask,
                     bw=bw,
                     final=False,
                     multiscale=multiscale,
@@ -1779,6 +1779,7 @@ class MuSIC:
                     y_label=y_label,
                     coords=coords,
                     mask_indices=mask_indices,
+                    feature_mask=feature_mask,
                     bw=bw,
                     final=False,
                     multiscale=multiscale,
@@ -1933,6 +1934,36 @@ class MuSIC:
                 # Find indices where y is zero but x is nonzero:
                 mask_indices = np.where((y == 0).reshape(-1, 1) & (np.all(np.abs(X) > 1e-3, axis=1)).reshape(-1, 1))[0]
 
+            # Global relationship regularization (only for non-niche models):
+            if self.mod_type != "niche":
+                correlations = []
+                for idx in range(X.shape[1]):
+                    # Create a boolean mask where both the current X column and y are nonzero
+                    mask = (X[:, idx].ravel() != 0) & (y.ravel() != 0)
+
+                    # Create a subset of the data using the mask
+                    X_subset = np.squeeze(X[mask, idx])
+                    y_subset = np.squeeze(y[mask])
+
+                    if X_subset.size <= 1:
+                        # X and y are not both nonzero anywhere
+                        correlation = 0.0
+                    else:
+                        # Compute the Pearson correlation coefficient for the subset
+                        if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
+                            correlation = pearsonr(X_subset, y_subset)[0]
+                        else:
+                            correlation = np.nan  # Not enough data points to compute correlation
+
+                        # Append the correlation to the correlations list
+                    correlations.append(correlation)
+                correlations = np.array(correlations)
+
+                threshold = np.abs(correlations) < 0.1
+                feature_mask = np.where(threshold, np.abs(correlations), 1.0)
+            else:
+                feature_mask = None
+
             # Use y to find the appropriate upper and lower bounds for coefficients:
             if self.distr != "gaussian":
                 lim = np.log(np.abs(y + 1e-6))
@@ -1947,7 +1978,14 @@ class MuSIC:
                     self.logger.info(f"Starting fitting process for target {target}. Initial bandwidth: {self.bw}.")
                 # If bandwidth is already known, run the main fit function:
                 self.mpi_fit(
-                    y, X, y_label=target, bw=self.bw, coords=self.coords, mask_indices=mask_indices, final=True
+                    y,
+                    X,
+                    y_label=target,
+                    bw=self.bw,
+                    coords=self.coords,
+                    mask_indices=mask_indices,
+                    feature_mask=feature_mask,
+                    final=True,
                 )
                 return
 
@@ -1971,6 +2009,7 @@ class MuSIC:
                 bw=bw,
                 coords=self.coords,
                 mask_indices=mask_indices,
+                feature_mask=feature_mask,
                 final=False,
                 multiscale=multiscale,
                 fit_predictor=fit_predictor,
@@ -1990,6 +2029,7 @@ class MuSIC:
                 bw=optimal_bw,
                 coords=self.coords,
                 mask_indices=mask_indices,
+                feature_mask=feature_mask,
                 final=True,
                 multiscale=multiscale,
                 fit_predictor=fit_predictor,

@@ -6,6 +6,8 @@ import sys
 import warnings
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+from joblib import Parallel, delayed
+
 try:
     from typing import Literal
 except ImportError:
@@ -1203,6 +1205,78 @@ def get_fisher_inverse(x: np.ndarray, y: np.ndarray) -> np.ndarray:
             inverse_fisher = np.linalg.pinv(fisher)
 
     return inverse_fisher
+
+
+def run_permutation_test(data, thresh, subset_rows=None, subset_cols=None):
+    """Permutes the input data array and calculates whether the mean of the permuted array is higher than the
+        provided value.
+
+    Args:
+        data: Input array or sparse matrix
+        thresh: Value to compare against the permuted means
+        subset_rows: Optional indices to subset the rows of 'data'
+        subset_cols: Optional indices to subset the columns of 'data'
+
+    Returns:
+        is_higher: Boolean indicating whether the mean of the permuted data is higher than 'thresh'
+    """
+    permuted = np.random.permutation(data)
+    if subset_rows is not None:
+        if subset_cols is not None:
+            permuted_mean = np.mean(permuted[subset_rows, subset_cols])
+        else:
+            permuted_mean = np.mean(permuted[subset_rows, :])
+    elif subset_cols is not None:
+        permuted_mean = np.mean(permuted[:, subset_cols])
+    else:
+        permuted_mean = np.mean(permuted)
+
+    is_higher = permuted_mean > thresh
+    return is_higher
+
+
+def permutation_testing(
+    data: Union[np.ndarray, scipy.sparse.spmatrix],
+    n_permutations: int = 10000,
+    n_jobs: int = 1,
+    subset_rows: Optional[Union[np.ndarray, List[int]]] = None,
+    subset_cols: Optional[Union[np.ndarray, List[int]]] = None,
+) -> float:
+    """Permutes the input array and calculates the p-value based on the number of times the mean of the permuted
+        array is higher than the provided value.
+
+    Args:
+        data: Input array or sparse matrix
+        n_permutations: Number of permutations
+        n_jobs: Number of parallel jobs to use (-1 for all available CPUs)
+        subset_rows: Optional indices to subset the rows of 'data'
+        subset_cols: Optional indices to subset the columns of 'data'
+
+    Returns:
+        pval: The calculated p-value.
+    """
+    if scipy.sparse.issparse(data):
+        data = data.A
+
+    if subset_rows is not None:
+        if subset_cols is not None:
+            mean_observed = np.mean(data[subset_rows, subset_cols])
+        else:
+            mean_observed = np.mean(data[subset_rows, :])
+    elif subset_cols is not None:
+        mean_observed = np.mean(data[:, subset_cols])
+    else:
+        mean_observed = np.mean(data)
+
+    n_trials_higher = sum(
+        Parallel(n_jobs=n_jobs)(
+            delayed(run_permutation_test)(data, mean_observed, subset_rows, subset_cols) for _ in range(n_permutations)
+        )
+    )
+
+    # Add 1 to numerator and denominator for continuity correction
+    p_value = (n_trials_higher + 1) / (n_permutations + 1)
+    return p_value
 
 
 # ---------------------------------------------------------------------------------------------------
