@@ -1088,13 +1088,25 @@ class MuSIC_Interpreter(MuSIC):
                     )
 
                     # Directly compute the average- the processing steps when providing sender and receiver cell
-                    # types already handle filtering down to the pertinent cells:
+                    # types already handle filtering down to the pertinent cells- but for the permutation we still have
+                    # to supply indices to keep track of the original indices of the cells:
                     for pair in celltype_pairs:
                         sending_cell_type = pair.split("-")[0]
                         receiving_cell_type = pair.split("-")[1]
 
-                        
+                        # Get indices of cells of each type:
+                        sending_indices = np.where(self.cell_categories[sending_cell_type] == 1)[0]
+                        receiving_indices = np.where(self.cell_categories[receiving_cell_type] == 1)[0]
 
+                        avg_effect_potential = np.mean(effect_potential)
+                        ct_coupling.loc[target, pair] = avg_effect_potential
+                        ct_coupling_significance.loc[target, pair] = permutation_testing(
+                            avg_effect_potential,
+                            n_permutations=10000,
+                            n_jobs=30,
+                            subset_rows=sending_indices,
+                            subset_cols=receiving_indices,
+                        )
 
         # Save results:
         parent_dir = os.path.dirname(self.output_path)
@@ -1103,8 +1115,6 @@ class MuSIC_Interpreter(MuSIC):
 
         ct_coupling.to_csv(os.path.join(parent_dir, "cell_type_coupling", f"celltype_effects_coupling.csv"))
         ct_coupling_significance.to_csv(os.path.join(parent_dir, "cell_type_coupling", f"celltype_effects_sig.csv"))
-
-        #
 
 
 # NOTE TO SELF: ADD WRAPPER FUNC HERE THAT ALLOWS FOR MULTIPLE TARGETS, LIGANDS/RECEPTORS, ETC. TO BE SPECIFIED,

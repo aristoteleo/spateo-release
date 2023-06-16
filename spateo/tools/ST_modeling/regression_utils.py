@@ -1249,8 +1249,10 @@ def permutation_testing(
         data: Input array or sparse matrix
         n_permutations: Number of permutations
         n_jobs: Number of parallel jobs to use (-1 for all available CPUs)
-        subset_rows: Optional indices to subset the rows of 'data'
-        subset_cols: Optional indices to subset the columns of 'data'
+        subset_rows: Optional indices to subset the rows of 'data' (to take the mean value of only the subset of
+            interest)
+        subset_cols: Optional indices to subset the columns of 'data' (to take the mean value of only the subset of
+            interest)
 
     Returns:
         pval: The calculated p-value.

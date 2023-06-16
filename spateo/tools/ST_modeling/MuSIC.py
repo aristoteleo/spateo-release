@@ -1217,26 +1217,16 @@ class MuSIC:
                 np.array([np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)])
             )
             # Arbitrarily chosen limits:
-            if self.mod_type == "niche":
-                self.minbw = min_dist * 2
-                self.maxbw = min_dist * 4
-            else:
-                self.minbw = min_dist * 3
-                self.max_bw = min_dist * 6
+            self.minbw = min_dist * 2
+            self.maxbw = min_dist * 6
 
         # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
         else:
             if self.maxbw is None:
-                if self.mod_type == "niche":
-                    self.maxbw = 10
-                else:
-                    self.maxbw = 20
+                self.maxbw = 20
 
             if self.minbw is None:
-                if self.mod_type == "niche":
-                    self.minbw = 3
-                else:
-                    self.minbw = 6
+                self.minbw = 3
 
         if self.minbw >= self.maxbw:
             raise ValueError(
