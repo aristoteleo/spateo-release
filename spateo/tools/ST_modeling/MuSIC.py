@@ -1007,7 +1007,7 @@ class MuSIC:
             )
 
             self.X = X_df.values
-            self.feature_names = [pair.split("-")[0] + ":" + pair.split("-")[1] for pair in X_df.columns]
+            self.feature_names = [pair.split(":")[0] + ":" + pair.split(":")[1] for pair in X_df.columns]
 
             # Update :attr `lr_pairs` to reflect the final L:R pairs used:
             self.lr_pairs = [tuple((pair.split(":")[0], pair.split(":")[1])) for pair in self.feature_names]
@@ -1259,21 +1259,22 @@ class MuSIC:
         """
 
         if self.minbw is None:
-            # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
-            min_dist = np.min(
-                np.array([np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)])
-            )
-            # Arbitrarily chosen limits:
-            self.minbw = min_dist * 2
-            self.maxbw = min_dist * 6
+            if self.bw_fixed:
+                # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
+                min_dist = np.min(
+                    np.array([np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)])
+                )
+                # Arbitrarily chosen limits:
+                self.minbw = min_dist * 2
+                self.maxbw = min_dist * 6
 
-        # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
-        else:
-            if self.maxbw is None:
-                self.maxbw = 20
+            # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
+            else:
+                if self.maxbw is None:
+                    self.maxbw = 20
 
-            if self.minbw is None:
-                self.minbw = 3
+                if self.minbw is None:
+                    self.minbw = 3
 
         if self.minbw >= self.maxbw:
             raise ValueError(

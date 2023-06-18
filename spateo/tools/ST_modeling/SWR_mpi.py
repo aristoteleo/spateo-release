@@ -250,48 +250,48 @@ if __name__ == "__main__":
 
     t1 = MPI.Wtime()
 
-    # Testing time! Uncomment this (and comment anything below) to test the downstream functions:
-    test_downstream = MuSIC_Interpreter(comm, parser)
-    # test_downstream.compute_coeff_significance()
-    # test_downstream.get_sig_potential()
-    test_downstream.compute_cell_type_coupling()
+    # # Testing time! Uncomment this (and comment anything below) to test the downstream functions:
+    # test_downstream = MuSIC_Interpreter(comm, parser)
+    # # test_downstream.compute_coeff_significance()
+    # # test_downstream.get_sig_potential()
+    # test_downstream.compute_cell_type_coupling()
 
     # # Testing time! Uncomment this (and then comment anything above and below) to test the upstream functions:
     # # test = MuSIC_target_selector(parser)
     # test_gene = self.adata[:, "MMP1"].X
     # # test.parse_predictors(data=test_gene)
     #
-    # # Check if GRN model is specified:
-    # # if parser.parse_args().grn:
-    # #     "filler"
-    #
-    # # else:
-    # # For use only with VMuSIC:
-    # n_multiscale_chunks = parser.parse_args().chunks
-    #
-    # if parser.parse_args().run_upstream:
-    #     swr_selector = MuSIC_target_selector(parser)
-    #     swr_selector.select_features()
-    #
-    # if parser.parse_args().multiscale:
-    #     print(
-    #         "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
-    #         "case, it is advisable to reduce the number of parameters."
-    #     )
-    #     multiscale_model = VMuSIC(comm, parser)
-    #     multiscale_model.multiscale_backfitting()
-    #     multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
-    #     multiscale_model.predict_and_save()
-    #
+    # Check if GRN model is specified:
+    # if parser.parse_args().grn:
+    #     "filler"
+
     # else:
-    #     swr_model = MuSIC(comm, parser)
-    #     swr_model._set_up_model()
-    #     swr_model.fit()
-    #     swr_model.predict_and_save()
-    #
-    # t_last = MPI.Wtime()
-    #
-    # wt = comm.gather(t_last - t1, root=0)
-    # if rank == 0:
-    #     print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
-    #     print("-" * 60)
+    # For use only with VMuSIC:
+    n_multiscale_chunks = parser.parse_args().chunks
+
+    if parser.parse_args().run_upstream:
+        swr_selector = MuSIC_target_selector(parser)
+        swr_selector.select_features()
+
+    if parser.parse_args().multiscale:
+        print(
+            "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
+            "case, it is advisable to reduce the number of parameters."
+        )
+        multiscale_model = VMuSIC(comm, parser)
+        multiscale_model.multiscale_backfitting()
+        multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
+        multiscale_model.predict_and_save()
+
+    else:
+        swr_model = MuSIC(comm, parser)
+        swr_model._set_up_model()
+        swr_model.fit()
+        swr_model.predict_and_save()
+
+    t_last = MPI.Wtime()
+
+    wt = comm.gather(t_last - t1, root=0)
+    if rank == 0:
+        print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
+        print("-" * 60)
