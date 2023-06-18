@@ -46,17 +46,18 @@ if __name__ == "__main__":
     )
     # Flag to return additional metrics along with the coefficients for multiscale models.
     parser.add_argument("-multiscale_params_only", action="store_true")
-    parser.add_argument("-mod_type", type=str)
+    parser.add_argument("-mod_type", type=str, default="niche")
     parser.add_argument("-cci_dir", type=str)
     parser.add_argument("-species", type=str, default="human")
     parser.add_argument(
         "-output_path",
         default="./output/stgwr_results.csv",
         type=str,
-        help="Path to output file. Make sure the parent "
-        "directory is empty- any existing files will "
-        "be deleted."
-        "It is recommended to create a new folder to serve as the output directory.",
+        help="Path to output file. Make sure the parent directory is empty- "
+        "any existing files will be deleted. It is recommended to create "
+        "a new folder to serve as the output directory. This should be "
+        "supplied of the form '/path/to/file.csv', where file.csv will "
+        "store coefficients. The name of the target will be appended at runtime.",
     )
     parser.add_argument("-custom_lig_path", type=str)
     parser.add_argument(
@@ -128,12 +129,6 @@ if __name__ == "__main__":
         type=float,
         help="For automated selection, the threshold proportion of cells for which transcript "
         "needs to be expressed in to be selected as a target of interest. Not used if 'targets_path' is not None.",
-    )
-    parser.add_argument(
-        "-r_squared_threshold",
-        default=0.5,
-        type=float,
-        help="For automated selection, the threshold R^2 value for a gene to be kept as a target gene.",
     )
     parser.add_argument(
         "-multicollinear_threshold",
@@ -217,6 +212,7 @@ if __name__ == "__main__":
         "memory from running out, otherwise keep as low as possible.",
     )
 
+    # Options for downstream analysis:
     parser.add_argument(
         "-search_bw",
         help="Used for downstream analyses; specifies the bandwidth to search for "
@@ -227,54 +223,75 @@ if __name__ == "__main__":
         "-top_k_receivers",
         default=10,
         type=int,
-        help="Used for downstream analyses; specifies the number of top senders/receivers to "
-        "consider for each cell.",
+        help="Used for downstream analyses, specifically :func `infer_effect_direction`; specifies the number of top "
+        "senders/receivers to consider for each cell.",
+    )
+    parser.add_argument(
+        "-filter_targets",
+        action="store_true",
+        help="Used for downstream analyses, specifically :func `infer_effect_direction`; if True, will subset to only "
+        "the targets that were predicted well by the model.",
+    )
+    parser.add_argument(
+        "-filter_targets_threshold",
+        default=0.65,
+        type=float,
+        help="Used for downstream analyses, specifically :func `infer_effect_direction`; specifies the threshold "
+        "Pearson coefficient for target subsetting. Only used if `filter_targets` is True.",
+    )
+    parser.add_argument(
+        "-diff_sending_or_receiving",
+        default="sending",
+        type=str,
+        help="Used for downstream analyses, specifically :func `sender_receiver_effect_deg_detection`; specifies "
+        "whether to compute differential expression of genes in cells with high or low sending effect potential "
+        "('sending cells') or high or low receiving effect potential ('receiving cells').",
     )
 
     t1 = MPI.Wtime()
 
-    # # Testing time! Uncomment this (and comment anything below) to test the downstream functions:
-    # test_upstream = MuSIC_Interpreter(comm, parser)
-    # # test_upstream.compute_coeff_significance()
-    # test_upstream.get_sig_potential()
+    # Testing time! Uncomment this (and comment anything below) to test the downstream functions:
+    test_downstream = MuSIC_Interpreter(comm, parser)
+    # test_downstream.compute_coeff_significance()
+    # test_downstream.get_sig_potential()
+    test_downstream.compute_cell_type_coupling()
 
-    # Testing time! Uncomment this (and then comment anything above and below) to test the capabilities of any of the
-    # constituent functions:
-    # test = MuSIC_setup(comm, parser)
-    # test.multicollinearity_filter()
-    # print(test.X_df)
-
-    # Check if GRN model is specified:
-    # if parser.parse_args().grn:
-    #     "filler"
-
+    # # Testing time! Uncomment this (and then comment anything above and below) to test the upstream functions:
+    # # test = MuSIC_target_selector(parser)
+    # test_gene = self.adata[:, "MMP1"].X
+    # # test.parse_predictors(data=test_gene)
+    #
+    # # Check if GRN model is specified:
+    # # if parser.parse_args().grn:
+    # #     "filler"
+    #
+    # # else:
+    # # For use only with VMuSIC:
+    # n_multiscale_chunks = parser.parse_args().chunks
+    #
+    # if parser.parse_args().run_upstream:
+    #     swr_selector = MuSIC_target_selector(parser)
+    #     swr_selector.select_features()
+    #
+    # if parser.parse_args().multiscale:
+    #     print(
+    #         "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
+    #         "case, it is advisable to reduce the number of parameters."
+    #     )
+    #     multiscale_model = VMuSIC(comm, parser)
+    #     multiscale_model.multiscale_backfitting()
+    #     multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
+    #     multiscale_model.predict_and_save()
+    #
     # else:
-    # For use only with VMuSIC:
-    n_multiscale_chunks = parser.parse_args().chunks
-
-    if parser.parse_args().run_upstream:
-        swr_selector = MuSIC_target_selector(parser)
-        swr_selector.select_features()
-
-    if parser.parse_args().multiscale:
-        print(
-            "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
-            "case, it is advisable to reduce the number of parameters."
-        )
-        multiscale_model = VMuSIC(comm, parser)
-        multiscale_model.multiscale_backfitting()
-        multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
-        multiscale_model.predict_and_save()
-
-    else:
-        swr_model = MuSIC(comm, parser)
-        swr_model._set_up_model()
-        swr_model.fit()
-        swr_model.predict_and_save()
-
-    t_last = MPI.Wtime()
-
-    wt = comm.gather(t_last - t1, root=0)
-    if rank == 0:
-        print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
-        print("-" * 60)
+    #     swr_model = MuSIC(comm, parser)
+    #     swr_model._set_up_model()
+    #     swr_model.fit()
+    #     swr_model.predict_and_save()
+    #
+    # t_last = MPI.Wtime()
+    #
+    # wt = comm.gather(t_last - t1, root=0)
+    # if rank == 0:
+    #     print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
+    #     print("-" * 60)

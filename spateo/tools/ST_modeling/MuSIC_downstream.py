@@ -15,6 +15,7 @@ import math
 import os
 import re
 import sys
+from collections import Counter
 from multiprocessing import Pool
 from typing import List, Literal, Optional, Tuple, Union
 
@@ -22,6 +23,7 @@ import anndata
 import numpy as np
 import pandas as pd
 import scipy.sparse
+import xarray as xr
 from mpi4py import MPI
 from MuSIC import MuSIC
 from scipy.stats import pearsonr, zscore
@@ -89,6 +91,10 @@ class MuSIC_Interpreter(MuSIC):
         parent_dir = os.path.dirname(self.output_path)
         if not os.path.exists(os.path.join(parent_dir, "significance")):
             os.makedirs(os.path.join(parent_dir, "significance"))
+
+        # Arguments for cell type coupling computation:
+        self.filter_targets = self.arg_retrieve.filter_targets
+        self.filter_target_threshold = self.arg_retrieve.filter_target_threshold
 
     def compute_coeff_significance(self, method: str = "fdr_bh", significance_threshold: float = 0.05):
         """Computes local statistical significance for fitted coefficients.
@@ -384,6 +390,12 @@ class MuSIC_Interpreter(MuSIC):
             # All possible ligand-receptor combinations:
             possible_lr_combos = list(itertools.product(all_senders, all_receivers))
             valid_lr_combos = list(set(possible_lr_combos).intersection(set(self.lr_pairs)))
+            if len(valid_lr_combos) < 2:
+                raise ValueError(
+                    f"Pathway effect potential computation for pathway {pathway} is unsuitable for this model, "
+                    f"since there are fewer than two valid ligand-receptor pairs in the pathway that were "
+                    f"incorporated in the initial model."
+                )
 
             all_pathway_member_effects = {}
             for j, col in enumerate(valid_lr_combos):
@@ -453,8 +465,7 @@ class MuSIC_Interpreter(MuSIC):
     def inferred_effect_direction(
         self,
         targets: Optional[Union[str, List[str]]] = None,
-        filter_targets: bool = False,
-        filter_target_threshold: float = 0.5,
+        compute_pathway_effect: bool = False,
     ):
         """For visualization purposes, used for models that consider ligand expression (:attr `mod_type` is 'ligand' or
         'lr' (for receptor models, assigning directionality is impossible and for niche models, it makes much less
@@ -489,7 +500,7 @@ class MuSIC_Interpreter(MuSIC):
         elif isinstance(targets, str):
             targets = [targets]
 
-        if filter_targets:
+        if self.filter_targets:
             pearson_dict = {}
             for target in targets:
                 observed = self.adata[:, target].X.toarray().reshape(-1, 1)
@@ -505,86 +516,153 @@ class MuSIC_Interpreter(MuSIC):
                 rp, _ = pearsonr(observed, predicted)
                 pearson_dict[target] = rp
 
-            targets = [target for target in targets if pearson_dict[target] > filter_target_threshold]
+            targets = [target for target in targets if pearson_dict[target] > self.filter_target_threshold]
 
-        cols = self.feature_names
+        queries = self.lr_pairs if self.mod_type == "lr" else self.ligands
+
+        if compute_pathway_effect:
+            # Find pathways that are represented among the ligands or ligand-receptor pairs:
+            pathways = []
+            for query in queries:
+                if self.mod_type == "lr":
+                    ligand = query.split(":")[0]
+                    receptor = query.split(":")[1]
+                    col_pathways = list(
+                        self.lr_db.loc[
+                            (self.lr_db["from"] == ligand) & (self.lr_db["to"] == receptor), "pathway"
+                        ].values
+                    )
+                    pathways.extend(col_pathways)
+                elif self.mod_type == "ligand":
+                    col_pathways = list(self.lr_db.loc[self.lr_db["from"] == query, "pathway"].values)
+                    pathways.extend(col_pathways)
+            # Before taking the set of pathways, count number of occurrences of each pathway in the list- remove
+            # pathways for which there are fewer than three ligands or ligand-receptor pairs- these are not enough to
+            # constitute a pathway:
+            pathway_counts = Counter(pathways)
+            pathways = [pathway for pathway, count in pathway_counts.items() if count >= 3]
+            # Take the set of pathways:
+            queries = list(set(pathways))
 
         for target in targets:
-            for j, col in enumerate(cols):
+            for j, query in enumerate(queries):
                 if self.mod_type == "lr":
-                    ligand = col.split("-")[0]
-                    receptor = col.split("-")[1]
-                    (
-                        effect_potential,
-                        normalized_effect_potential_sum_sender,
-                        normalized_effect_potential_sum_receiver,
-                    ) = self.get_effect_potential(
-                        target=target, ligand=ligand, receptor=receptor, spatial_weights=spatial_weights
-                    )
+                    if compute_pathway_effect:
+                        (
+                            effect_potential,
+                            normalized_effect_potential_sum_sender,
+                            normalized_effect_potential_sum_receiver,
+                        ) = self.get_pathway_potential(target=target, pathway=query, spatial_weights=spatial_weights)
+                    else:
+                        ligand = query.split(":")[0]
+                        receptor = query.split(":")[1]
+                        (
+                            effect_potential,
+                            normalized_effect_potential_sum_sender,
+                            normalized_effect_potential_sum_receiver,
+                        ) = self.get_effect_potential(
+                            target=target, ligand=ligand, receptor=receptor, spatial_weights=spatial_weights
+                        )
                 else:
-                    (
-                        effect_potential,
-                        normalized_effect_potential_sum_sender,
-                        normalized_effect_potential_sum_receiver,
-                    ) = self.get_effect_potential(target=target, ligand=col, spatial_weights=spatial_weights)
-
-                sending_vf = np.zeros_like(self.coords)
-                receiving_vf = np.zeros_like(self.coords)
-
-                # Vector field for sent signal:
-                effect_potential_lil = effect_potential.tolil()
-                for i in range(self.n_samples):
-                    if len(effect_potential_lil.rows[i]) <= self.k:
-                        temp_idx = np.array(effect_potential_lil.rows[i], dtype=int)
-                        temp_val = np.array(effect_potential_lil.data[i], dtype=float)
+                    if compute_pathway_effect:
+                        (
+                            effect_potential,
+                            normalized_effect_potential_sum_sender,
+                            normalized_effect_potential_sum_receiver,
+                        ) = self.get_pathway_potential(target=target, pathway=query, spatial_weights=spatial_weights)
                     else:
-                        row_np = np.array(effect_potential_lil.rows[i], dtype=int)
-                        data_np = np.array(effect_potential_lil.data[i], dtype=float)
-                        temp_idx = row_np[np.argsort(-data_np)[: self.k]]
-                        temp_val = data_np[np.argsort(-data_np)[: self.k]]
-                    if len(temp_idx) == 0:
-                        continue
-                    elif len(temp_idx) == 1:
-                        avg_v = self.coords[temp_idx[0], :] - self.coords[i, :]
-                    else:
-                        temp_v = self.coords[temp_idx, :] - self.coords[i, :]
-                        temp_v = normalize(temp_v, norm="l2")
-                        avg_v = np.sum(temp_v * temp_val.reshape(-1, 1), axis=0)
-                    avg_v = normalize(avg_v.reshape(1, -1))
-                    sending_vf[i, :] = avg_v[0, :] * normalized_effect_potential_sum_sender[i]
-                sending_vf = np.clip(sending_vf, -0.02, 0.02)
+                        (
+                            effect_potential,
+                            normalized_effect_potential_sum_sender,
+                            normalized_effect_potential_sum_receiver,
+                        ) = self.get_effect_potential(target=target, ligand=query, spatial_weights=spatial_weights)
 
-                # Vector field for received signal:
-                effect_potential_lil = effect_potential.T.tolil()
-                for i in range(self.n_samples):
-                    if len(effect_potential_lil.rows[i]) <= self.k:
-                        temp_idx = np.array(effect_potential_lil.rows[i], dtype=int)
-                        temp_val = np.array(effect_potential_lil.data[i], dtype=float)
-                    else:
-                        row_np = np.array(effect_potential_lil.rows[i], dtype=int)
-                        data_np = np.array(effect_potential_lil.data[i], dtype=float)
-                        temp_idx = row_np[np.argsort(-data_np)[: self.k]]
-                        temp_val = data_np[np.argsort(-data_np)[: self.k]]
-                    if len(temp_idx) == 0:
-                        continue
-                    elif len(temp_idx) == 1:
-                        avg_v = self.coords[temp_idx, :] - self.coords[i, :]
-                    else:
-                        temp_v = self.coords[temp_idx, :] - self.coords[i, :]
-                        temp_v = normalize(temp_v, norm="l2")
-                        avg_v = np.sum(temp_v * temp_val.reshape(-1, 1), axis=0)
-                    avg_v = normalize(avg_v.reshape(1, -1))
-                    receiving_vf[i, :] = avg_v[0, :] * normalized_effect_potential_sum_receiver[i]
-                receiving_vf = np.clip(receiving_vf, -0.02, 0.02)
-
-                del effect_potential
-
-                self.adata.obsm[f"spatial_effect_sender_vf_{col}_{target}"] = sending_vf
-                self.adata.obsm[f"spatial_effect_receiver_vf_{col}_{target}"] = receiving_vf
+                # Compute vector field:
+                self.define_effect_vf(
+                    effect_potential,
+                    normalized_effect_potential_sum_sender,
+                    normalized_effect_potential_sum_receiver,
+                    query,
+                    target,
+                )
 
         # Save AnnData object with effect direction information:
         adata_name = os.path.splitext(self.adata_path)[0]
         self.adata.write(f"{adata_name}_effect_directions.h5ad")
+
+    def define_effect_vf(
+        self,
+        effect_potential: scipy.sparse.spmatrix,
+        normalized_effect_potential_sum_sender: np.ndarray,
+        normalized_effect_potential_sum_receiver: np.ndarray,
+        sig: str,
+        target: str,
+    ):
+        """Given the pairwise effect potential array, computes the effect vector field.
+
+        Args:
+            effect_potential: Sparse array containing computed effect potentials- output from
+                :func:`get_effect_potential`
+            normalized_effect_potential_sum_sender: Array containing the sum of the effect potentials sent by each
+                cell. Output from :func:`get_effect_potential`.
+            normalized_effect_potential_sum_receiver: Array containing the sum of the effect potentials received by
+                each cell. Output from :func:`get_effect_potential`.
+            sig: Label for the mediating interaction (e.g. name of a ligand, name of a ligand-receptor pair, etc.)
+            target: Name of the target that the vector field describes the effect for
+        """
+        sending_vf = np.zeros_like(self.coords)
+        receiving_vf = np.zeros_like(self.coords)
+
+        # Vector field for sent signal:
+        effect_potential_lil = effect_potential.tolil()
+        for i in range(self.n_samples):
+            if len(effect_potential_lil.rows[i]) <= self.k:
+                temp_idx = np.array(effect_potential_lil.rows[i], dtype=int)
+                temp_val = np.array(effect_potential_lil.data[i], dtype=float)
+            else:
+                row_np = np.array(effect_potential_lil.rows[i], dtype=int)
+                data_np = np.array(effect_potential_lil.data[i], dtype=float)
+                temp_idx = row_np[np.argsort(-data_np)[: self.k]]
+                temp_val = data_np[np.argsort(-data_np)[: self.k]]
+            if len(temp_idx) == 0:
+                continue
+            elif len(temp_idx) == 1:
+                avg_v = self.coords[temp_idx[0], :] - self.coords[i, :]
+            else:
+                temp_v = self.coords[temp_idx, :] - self.coords[i, :]
+                temp_v = normalize(temp_v, norm="l2")
+                avg_v = np.sum(temp_v * temp_val.reshape(-1, 1), axis=0)
+            avg_v = normalize(avg_v.reshape(1, -1))
+            sending_vf[i, :] = avg_v[0, :] * normalized_effect_potential_sum_sender[i]
+        sending_vf = np.clip(sending_vf, -0.02, 0.02)
+
+        # Vector field for received signal:
+        effect_potential_lil = effect_potential.T.tolil()
+        for i in range(self.n_samples):
+            if len(effect_potential_lil.rows[i]) <= self.k:
+                temp_idx = np.array(effect_potential_lil.rows[i], dtype=int)
+                temp_val = np.array(effect_potential_lil.data[i], dtype=float)
+            else:
+                row_np = np.array(effect_potential_lil.rows[i], dtype=int)
+                data_np = np.array(effect_potential_lil.data[i], dtype=float)
+                temp_idx = row_np[np.argsort(-data_np)[: self.k]]
+                temp_val = data_np[np.argsort(-data_np)[: self.k]]
+            if len(temp_idx) == 0:
+                continue
+            elif len(temp_idx) == 1:
+                avg_v = self.coords[temp_idx, :] - self.coords[i, :]
+            else:
+                temp_v = self.coords[temp_idx, :] - self.coords[i, :]
+                temp_v = normalize(temp_v, norm="l2")
+                avg_v = np.sum(temp_v * temp_val.reshape(-1, 1), axis=0)
+            avg_v = normalize(avg_v.reshape(1, -1))
+            receiving_vf[i, :] = avg_v[0, :] * normalized_effect_potential_sum_receiver[i]
+        receiving_vf = np.clip(receiving_vf, -0.02, 0.02)
+
+        del effect_potential
+
+        self.adata.obsm[f"spatial_effect_sender_vf_{sig}_{target}"] = sending_vf
+        self.adata.obsm[f"spatial_effect_receiver_vf_{sig}_{target}"] = receiving_vf
 
     def sender_receiver_effect_deg_detection(
         self,
@@ -602,8 +680,8 @@ class MuSIC_Interpreter(MuSIC):
         Args:
             target: Target to use for differential expression analysis. If None, will use the first listed target.
             diff_sending_or_receiving: Whether to compute differential expression of genes in cells with high or low
-                sending potential ("sending cells") or high or low receiving potential ("receiving cells"). Can only
-                be used if :attr `mod_type` is 'lr' or 'niche' (not if :attr `mod_type` is 'ligand').
+                sending effect potential ("sending cells") or high or low receiving effect potential ("receiving
+                cells").
             ligand: Ligand to use for differential expression analysis. Will take precedent over sender/receiver cell
                 type if also provided.
             receptor: Optional receptor to use for differential expression analysis. Needed if
@@ -856,7 +934,7 @@ class MuSIC_Interpreter(MuSIC):
             offset: Optional offset term of shape [n_samples, ]
             n_points: Number of points to sample when constructing the linear predictor, to enable evaluation of the
                 fitted GAM for each model
-            num_pcs: Number of PCs when performing PCA to cluster gene expression patterns
+            num_pcs: Number of PCs when performing PCA to cluster differential gene expression patterns
             num_neighbors: Number of neighbors when constructing the KNN graph for leiden clustering
             leiden_resolution: Resolution parameter for leiden clustering
             q_val_cutoff: Adjusted p-value cutoff to select genes to include in clustering analyses
@@ -937,8 +1015,6 @@ class MuSIC_Interpreter(MuSIC):
     def compute_cell_type_coupling(
         self,
         targets: Optional[Union[str, List[str]]] = None,
-        filter_targets: bool = False,
-        filter_target_threshold: float = 0.5,
     ):
         """Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
         categories- if :attr `mod_type` is "niche", this directly averages the effects for each neighboring cell type
@@ -952,6 +1028,11 @@ class MuSIC_Interpreter(MuSIC):
                 threshold is based on the Pearson correlation w/ the true expression and should be between 0 and 1.
             filter_target_threshold: Only used if 'filter_targets' is True. Threshold to use for filtering targets
                 based on the Pearson correlation of the reconstruction w/ the true expression
+
+        Returns:
+            ct_coupling: 3D array summarizing cell type coupling in terms of effect on downstream expression
+            ct_coupling_significance: 3D array summarizing significance of cell type coupling in terms of effect on
+                downstream expression
         """
 
         # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
@@ -971,7 +1052,7 @@ class MuSIC_Interpreter(MuSIC):
         elif isinstance(targets, str):
             targets = [targets]
 
-        if filter_targets:
+        if self.filter_targets:
             pearson_dict = {}
             for target in targets:
                 observed = self.adata[:, target].X.toarray().reshape(-1, 1)
@@ -987,7 +1068,7 @@ class MuSIC_Interpreter(MuSIC):
                 rp, _ = pearsonr(observed, predicted)
                 pearson_dict[target] = rp
 
-            targets = [target for target in targets if pearson_dict[target] > filter_target_threshold]
+            targets = [target for target in targets if pearson_dict[target] > self.filter_target_threshold]
 
         # Cell type pairings:
         if not hasattr(self, "cell_categories"):
@@ -1012,19 +1093,20 @@ class MuSIC_Interpreter(MuSIC):
         celltype_pairs = [f"{cat[0]}-{cat[1]}" for cat in celltype_pairs]
 
         if self.mod_type in ["lr", "ligand"]:
-            cols = self.feature_names
+            cols = self.lr_pairs if self.mod_type == "lr" else self.ligands
         else:
             cols = celltype_pairs
 
-        # Storage for cell type-cell type coupling results:
-        ct_coupling = pd.DataFrame(0, index=targets, columns=celltype_pairs)
-        ct_coupling_significance = pd.DataFrame(0, index=targets, columns=celltype_pairs)
+        # Storage for cell type-cell type coupling results- primary axis: targets, secondary: L:R pairs/ligands,
+        # tertiary: cell type pairs:
+        ct_coupling = np.zeros((len(targets), len(cols), len(celltype_pairs)))
+        ct_coupling_significance = np.zeros((len(targets), len(cols), len(celltype_pairs)))
 
-        for target in targets:
+        for i, target in enumerate(targets):
             for j, col in enumerate(cols):
                 if self.mod_type == "lr":
-                    ligand = col.split("-")[0]
-                    receptor = col.split("-")[1]
+                    ligand = col.split(":")[0]
+                    receptor = col.split(":")[1]
 
                     effect_potential, _, _ = self.get_effect_potential(
                         target=target, ligand=ligand, receptor=receptor, spatial_weights=spatial_weights
@@ -1032,7 +1114,7 @@ class MuSIC_Interpreter(MuSIC):
 
                     # For each cell type pair, compute average effect potential across all cells of the sending and
                     # receiving type:
-                    for pair in celltype_pairs:
+                    for k, pair in enumerate(celltype_pairs):
                         sending_cell_type = pair.split("-")[0]
                         receiving_cell_type = pair.split("-")[1]
 
@@ -1042,8 +1124,8 @@ class MuSIC_Interpreter(MuSIC):
 
                         # Get average effect potential across all cells of each type:
                         avg_effect_potential = np.mean(effect_potential[sending_indices, receiving_indices])
-                        ct_coupling.loc[target, pair] = avg_effect_potential
-                        ct_coupling_significance.loc[target, pair] = permutation_testing(
+                        ct_coupling[i, j, k] = avg_effect_potential
+                        ct_coupling_significance[i, j, k] = permutation_testing(
                             avg_effect_potential,
                             n_permutations=10000,
                             n_jobs=30,
@@ -1058,7 +1140,7 @@ class MuSIC_Interpreter(MuSIC):
 
                     # For each cell type pair, compute average effect potential across all cells of the sending and
                     # receiving type:
-                    for pair in celltype_pairs:
+                    for k, pair in enumerate(celltype_pairs):
                         sending_cell_type = pair.split("-")[0]
                         receiving_cell_type = pair.split("-")[1]
 
@@ -1068,8 +1150,8 @@ class MuSIC_Interpreter(MuSIC):
 
                         # Get average effect potential across all cells of each type:
                         avg_effect_potential = np.mean(effect_potential[sending_indices, receiving_indices])
-                        ct_coupling.loc[target, pair] = avg_effect_potential
-                        ct_coupling_significance.loc[target, pair] = permutation_testing(
+                        ct_coupling[i, j, k] = avg_effect_potential
+                        ct_coupling_significance[i, j, k] = permutation_testing(
                             avg_effect_potential,
                             n_permutations=10000,
                             n_jobs=30,
@@ -1090,7 +1172,7 @@ class MuSIC_Interpreter(MuSIC):
                     # Directly compute the average- the processing steps when providing sender and receiver cell
                     # types already handle filtering down to the pertinent cells- but for the permutation we still have
                     # to supply indices to keep track of the original indices of the cells:
-                    for pair in celltype_pairs:
+                    for k, pair in enumerate(celltype_pairs):
                         sending_cell_type = pair.split("-")[0]
                         receiving_cell_type = pair.split("-")[1]
 
@@ -1099,8 +1181,8 @@ class MuSIC_Interpreter(MuSIC):
                         receiving_indices = np.where(self.cell_categories[receiving_cell_type] == 1)[0]
 
                         avg_effect_potential = np.mean(effect_potential)
-                        ct_coupling.loc[target, pair] = avg_effect_potential
-                        ct_coupling_significance.loc[target, pair] = permutation_testing(
+                        ct_coupling[i, j, k] = avg_effect_potential
+                        ct_coupling_significance[i, j, k] = permutation_testing(
                             avg_effect_potential,
                             n_permutations=10000,
                             n_jobs=30,
@@ -1113,8 +1195,199 @@ class MuSIC_Interpreter(MuSIC):
         if not os.path.exists(os.path.join(parent_dir, "cell_type_coupling")):
             os.makedirs(os.path.join(parent_dir, "cell_type_coupling"))
 
-        ct_coupling.to_csv(os.path.join(parent_dir, "cell_type_coupling", f"celltype_effects_coupling.csv"))
-        ct_coupling_significance.to_csv(os.path.join(parent_dir, "cell_type_coupling", f"celltype_effects_sig.csv"))
+        # Convert Numpy array to xarray object for storage and save as .h5 object:
+        ct_coupling = xr.DataArray(
+            ct_coupling,
+            dims=["target", "signal_source", "celltype_pair"],
+            coords={"target": targets, "signal_source": cols, "celltype_pair": celltype_pairs},
+            name="ct_coupling",
+        )
+
+        ct_coupling_significance = xr.DataArray(
+            ct_coupling_significance,
+            dims=["target", "signal_source", "celltype_pair"],
+            coords={"target": targets, "signal_source": cols, "celltype_pair": celltype_pairs},
+            name="ct_coupling_significance",
+        )
+        coupling_results_path = os.path.join(
+            parent_dir, "cell_type_coupling", "celltype_effects_coupling_and_significance.nc"
+        )
+
+        # Combine coupling and significance into the same dataset:
+        ds = xr.merge([ct_coupling, ct_coupling_significance])
+        ds.to_netcdf(coupling_results_path)
+
+        return ct_coupling, ct_coupling_significance
+
+    def pathway_coupling(self, pathway: Union[str, List[str]]):
+        """From computed cell type coupling results, compute pathway coupling by leveraging the pathway membership of
+        constituent ligands/ligand:receptor pairs.
+
+        Args:
+            pathway: Name of the pathway(s) to compute coupling for.
+
+        Returns:
+            pathway_coupling: Dictionary where pathway names are indices and values are coupling score dataframes for
+                the pathway
+            pathway_coupling_significance: Dictionary where pathway names are indices and values are coupling score
+                significance dataframes for the pathway
+        """
+        # Check for already existing cell coupling results:
+        parent_dir = os.path.dirname(self.output_path)
+        coupling_results_path = os.path.join(
+            parent_dir, "cell_type_coupling", "celltype_effects_coupling_and_significance.nc"
+        )
+
+        try:
+            coupling_ds = xr.open_dataset(coupling_results_path)
+            coupling_results = coupling_ds["ct_coupling"]
+            coupling_significance = coupling_ds["ct_coupling_significance"]
+        except FileNotFoundError:
+            self.logger.info("No coupling results found. Computing cell type coupling...")
+            coupling_results, coupling_significance = self.compute_cell_type_coupling()
+
+        predictors = list(coupling_results["signal_source"].values)
+
+        # For chosen pathway(s), get the ligands/ligand:receptor pairs that are members:
+        if isinstance(pathway, str):
+            if self.mod_type == "lr":
+                pathway_ligands = list(self.lr_db.loc[self.lr_db["pathway"] == pathway, "from"].values)
+                pathway_receptors = list(self.lr_db.loc[self.lr_db["pathway"] == pathway, "to"].values)
+                all_pathway_lr = [f"{l}:{r}" for l, r in zip(pathway_ligands, pathway_receptors)]
+                matched_pathway_lr = list(set(all_pathway_lr).intersection(set(predictors)))
+                # Make sure the pathway has at least three ligands or ligand-receptor pairs after processing-
+                # otherwise, there is not enough measured signal in the model to constitute a pathway:
+                if len(matched_pathway_lr) < 3:
+                    raise ValueError(
+                        "The chosen pathway has too little representation (<= 3 interactions) in the modeling "
+                        "features. Specify a different pathway or fit an additional model."
+                    )
+
+                matched_pathway_coupling_scores = [
+                    coupling_results.sel(signal_source=lr).values for lr in matched_pathway_lr
+                ]
+                matched_pathway_coupling_significance = [
+                    coupling_significance.sel(signal_source=lr).values for lr in matched_pathway_lr
+                ]
+
+            elif self.mod_type == "ligand":
+                pathway_ligands = list(self.lr_db.loc[self.lr_db["pathway"] == pathway, "from"].values)
+                matched_pathway_ligands = list(set(pathway_ligands).intersection(set(predictors)))
+                # Make sure the pathway has at least three ligands or ligand-receptor pairs after processing-
+                # otherwise, there is not enough measured signal in the model to constitute a pathway:
+                if len(matched_pathway_ligands) < 3:
+                    raise ValueError(
+                        "The chosen pathway has too little representation (<= 3 interactions) in the modeling "
+                        "features. Specify a different pathway or fit an additional model."
+                    )
+
+                matched_pathway_coupling_scores = [
+                    coupling_results.sel(signal_source=ligand).values for ligand in matched_pathway_ligands
+                ]
+                matched_pathway_coupling_significance = [
+                    coupling_significance.sel(signal_source=ligand).values for ligand in matched_pathway_ligands
+                ]
+
+            # Compute mean over pathway:
+            stack = np.hstack(matched_pathway_coupling_scores)
+            pathway_coupling = np.mean(stack, axis=0)
+
+            # Convert to DataFrame:
+            pathway_coupling_df = pd.DataFrame(
+                pathway_coupling,
+                index=list(coupling_results["target"].values),
+                columns=list(coupling_results["celltype_pair"].values),
+            )
+
+            # And pathway score significance- if the majority of pathway L:R pairs are significant, then consider
+            # the pathway significant for the given cell type pair + target combo:
+            stack = np.hstack(matched_pathway_coupling_significance)
+            pathway_coupling_significance = np.mean(stack, axis=0)
+            pathway_coupling_significance[pathway_coupling_significance >= 0.5] = True
+
+            # Convert to DataFrame:
+            pathway_coupling_significance_df = pd.DataFrame(
+                pathway_coupling_significance,
+                index=list(coupling_results["target"].values),
+                columns=list(coupling_results["celltype_pair"].values),
+            )
+
+            # Store in dictionary:
+            pathway_coupling = {pathway: pathway_coupling_df}
+            pathway_coupling_significance = {pathway: pathway_coupling_significance_df}
+
+        elif isinstance(pathway, list):
+            pathway_coupling = {}
+            pathway_coupling_significance = {}
+
+            for p in pathway:
+                if self.mod_type == "lr":
+                    pathway_ligands = list(self.lr_db.loc[self.lr_db["pathway"] == p, "from"].values)
+                    pathway_receptors = list(self.lr_db.loc[self.lr_db["pathway"] == p, "to"].values)
+                    all_pathway_lr = [f"{l}:{r}" for l, r in zip(pathway_ligands, pathway_receptors)]
+                    matched_pathway_lr = list(set(all_pathway_lr).intersection(set(predictors)))
+                    # Make sure the pathway has at least three ligands or ligand-receptor pairs after processing-
+                    # otherwise, there is not enough measured signal in the model to constitute a pathway:
+                    if len(matched_pathway_lr) < 3:
+                        raise ValueError(
+                            "The chosen pathway has too little representation (<= 3 interactions) in the modeling "
+                            "features. Specify a different pathway or fit an additional model."
+                        )
+
+                    matched_pathway_coupling_scores = [
+                        coupling_results.sel(signal_source=lr).values for lr in matched_pathway_lr
+                    ]
+                    matched_pathway_coupling_significance = [
+                        coupling_significance.sel(signal_source=lr).values for lr in matched_pathway_lr
+                    ]
+
+                elif self.mod_type == "ligand":
+                    pathway_ligands = list(self.lr_db.loc[self.lr_db["pathway"] == p, "from"].values)
+                    matched_pathway_ligands = list(set(pathway_ligands).intersection(set(predictors)))
+                    # Make sure the pathway has at least three ligands or ligand-receptor pairs after processing-
+                    # otherwise, there is not enough measured signal in the model to constitute a pathway:
+                    if len(matched_pathway_ligands) < 3:
+                        raise ValueError(
+                            "The chosen pathway has too little representation (<= 3 interactions) in the modeling "
+                            "features. Specify a different pathway or fit an additional model."
+                        )
+
+                    matched_pathway_coupling_scores = [
+                        coupling_results.sel(signal_source=ligand).values for ligand in matched_pathway_ligands
+                    ]
+                    matched_pathway_coupling_significance = [
+                        coupling_significance.sel(signal_source=ligand).values for ligand in matched_pathway_ligands
+                    ]
+
+                # Compute mean over pathway:
+                stack = np.hstack(matched_pathway_coupling_scores)
+                pathway_coupling = np.mean(stack, axis=0)
+
+                # Convert to DataFrame:
+                pathway_coupling_df = pd.DataFrame(
+                    pathway_coupling,
+                    index=list(coupling_results["target"].values),
+                    columns=list(coupling_results["celltype_pair"].values),
+                )
+
+                # And pathway score significance- if the majority of pathway L:R pairs are significant, then consider
+                # the pathway significant for the given cell type pair + target combo:
+                stack = np.hstack(matched_pathway_coupling_significance)
+                pathway_coupling_significance = np.mean(stack, axis=0)
+                pathway_coupling_significance[pathway_coupling_significance >= 0.5] = True
+
+                # Convert to DataFrame:
+                pathway_coupling_significance_df = pd.DataFrame(
+                    pathway_coupling_significance,
+                    index=list(coupling_results["target"].values),
+                    columns=list(coupling_results["celltype_pair"].values),
+                )
+
+                # Store in dictionary:
+                pathway_coupling[pathway] = pathway_coupling_df
+                pathway_coupling_significance[pathway] = pathway_coupling_significance_df
+
+        return pathway_coupling, pathway_coupling_significance
 
 
 # NOTE TO SELF: ADD WRAPPER FUNC HERE THAT ALLOWS FOR MULTIPLE TARGETS, LIGANDS/RECEPTORS, ETC. TO BE SPECIFIED,

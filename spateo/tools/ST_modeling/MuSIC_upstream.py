@@ -9,13 +9,14 @@ import re
 import sys
 from functools import partial
 from multiprocessing import Pool
-from typing import Union
+from typing import Optional, Union
 
 import anndata
 import numpy as np
 import pandas as pd
 import scipy
-import tensorflow as tf
+from mpi4py import MPI
+from MuSIC import MuSIC
 from scipy.stats import mannwhitneyu
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import r2_score
@@ -113,20 +114,9 @@ class MuSIC_target_selector:
         self.logger = lm.get_main_logger()
 
         self.parser = parser
-
-        self.mod_type = None
-        self.species = None
-        self.ligands = None
-        self.receptors = None
-        self.targets = None
-        self.normalize = None
-        self.smooth = None
-        self.log_transform = None
-        self.target_expr_threshold = None
-        self.coords = None
+        self.comm = MPI.COMM_WORLD
 
         self.parse_args()
-        self.load_and_process()
 
     def parse_args(self):
         """
@@ -139,9 +129,13 @@ class MuSIC_target_selector:
         self.distr = self.arg_retrieve.distr
 
         self.adata_path = self.arg_retrieve.adata_path
+        self.adata = anndata.read_h5ad(self.adata_path)
+
         self.cci_dir = self.arg_retrieve.cci_dir
         self.species = self.arg_retrieve.species
         self.output_path = self.arg_retrieve.output_path
+        if self.output_path is None:
+            raise ValueError("Must provide an output path for the results file, of the form 'path/to/file.csv'.")
         self.custom_ligands_path = self.arg_retrieve.custom_lig_path
         self.custom_ligands = self.arg_retrieve.ligand
         self.custom_receptors_path = self.arg_retrieve.custom_rec_path
@@ -164,6 +158,9 @@ class MuSIC_target_selector:
         self.n_neighbors = self.arg_retrieve.n_neighbors
         self.bw_fixed = self.arg_retrieve.bw_fixed
 
+    def set_predictors_or_targets(self):
+        """Unbiased identification of appropriate signaling molecules and/or target genes for modeling with
+        heuristical methods."""
         any_predictors_given = any(
             x is not None
             for x in [
@@ -188,494 +185,232 @@ class MuSIC_target_selector:
             not any_predictors_given and self.custom_targets is not None
         ):
             self.auto_select_targets = True
+            self.auto_select_predictors = True
             self.logger.info(
                 "Targets were not provided, and neither were predictors (ligands and/or receptors). "
-                "First, automatically selecting spatially-interesting targets."
+                "First, automatically selecting highly-variable targets. Then, selecting predictors for "
+                "these targets."
             )
 
-    def load_and_process(self):
-        """
-        Load AnnData object and subset to ligand, receptor, and/or target expression where appropriate (depending on
-        inputs to "mod_type" and to the custom ligands, receptors, targets, and/or pathways arguments).
-        """
-        self.adata = anndata.read_h5ad(self.adata_path)
-        self.n_samples = self.adata.n_obs
-        self.sample_names = self.adata.obs_names
-        self.coords = self.adata.obsm[self.coords_key]
-        # If group_subset is given, subset the AnnData object to contain the specified groups as well as neighboring
-        # cells:
-        if self.group_subset is not None:
-            # Set up if ligand expression is involved in the predictors or the targets:
-            if self.mod_type in ["ligand", "lr"]:
-                subset = self.adata.obs[self.group_key].isin(self.group_subset)
-                fitted_indices = [self.sample_names.get_loc(name) for name in subset.index]
-                # Add cells that are neighboring cells of the chosen type, but which are not of the chosen type:
-                get_wi_partial = partial(
-                    get_wi,
-                    n_samples=self.n_samples,
-                    coords=self.coords,
-                    fixed_bw=False,
-                    exclude_self=True,
-                    kernel="bisquare",
-                    bw=self.n_neighbors,
-                    threshold=0.01,
-                    sparse_array=True,
-                )
-
-                with Pool() as pool:
-                    weights = pool.map(get_wi_partial, fitted_indices)
-                w_subset = scipy.sparse.vstack(weights)
-                rows, cols = w_subset.nonzero()
-                unique_indices = set(rows)
-                names_all_neighbors = self.sample_names[unique_indices]
-                self.adata = self.adata[self.adata.obs[self.group_key].isin(names_all_neighbors)]
-
-            elif self.mod_type == "receptor":
-                self.adata = self.adata[self.adata.obs[self.group_key].isin(self.group_subset)]
-
-        # Preprocess AnnData object:
-        if self.distr in ["poisson", "nb"]:
-            if self.normalize or self.smooth or self.log_transform:
-                self.logger.info(
-                    f"With a {self.distr} assumption, discrete counts are required for the response variable. "
-                    f"Computing normalizations and transforms if applicable, but rounding nonintegers to nearest "
-                    f"integer; original counts can be round in .layers['raw']. Log-transform should not be applied."
-                )
-                self.adata.layers["raw"] = self.adata.X
-
-        if self.normalize:
-            if self.distr == "gaussian":
-                self.logger.info("Computing TMM factors and setting total counts in each cell to 1e4 inplace...")
-                self.adata = factor_normalization(self.adata, method="TMM", target_sum=1e4)
-            else:
-                self.logger.info(
-                    "Computing TMM factors, setting total counts in each cell to 1e4 and rounding "
-                    "nonintegers inplace..."
-                )
-                self.adata = factor_normalization(self.adata, method="TMM", target_sum=1e4)
-                self.adata.X = (
-                    scipy.sparse.csr_matrix(np.round(self.adata.X))
-                    if scipy.sparse.issparse(self.adata.X)
-                    else np.round(self.adata.X)
-                )
-
-        # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
-        if self.smooth:
-            # Compute connectivity matrix if not already existing:
-            try:
-                conn = self.adata.obsp["expression_connectivities"]
-            except:
-                _, adata = transcriptomic_connectivity(self.adata, n_neighbors_method="ball_tree")
-                conn = adata.obsp["expression_connectivities"]
-
-            if self.distr == "gaussian":
-                self.logger.info("Smoothing gene expression inplace...")
-                adata_smooth_norm, _ = smooth(self.adata.X, conn, normalize_W=True)
-                self.adata.X = adata_smooth_norm
-
-            else:
-                self.logger.info("Smoothing gene expression and rounding nonintegers inplace...")
-                adata_smooth_norm, _ = smooth(self.adata.X, conn, normalize_W=True, return_discrete=True)
-                self.adata.X = adata_smooth_norm
-
-        if self.log_transform:
-            if self.distr == "gaussian":
-                self.logger.info("Log-transforming expression inplace...")
-                self.adata.X = log1p(self.adata)
-            else:
-                self.logger.info(
-                    "For the chosen distributional assumption, log-transform should not be applied. Log-transforming "
-                    "expression and storing in adata.layers['X_log1p'], but not applying inplace and not using for "
-                    "modeling."
-                )
-                self.adata.layers["X_log1p"] = log1p(self.adata)
-
-        if self.mod_type in ["lr", "ligand", "receptor"]:
-            self.define_predictors_and_targets()
-        else:
-            self.define_cell_categories()
-
-    def define_predictors_and_targets(self):
-        """Define ligand expression array, receptor expression array and target expression array, depending on the
-        provided inputs."""
-
-        # # First, define targets if need be:
-        # if hasattr(self, "auto_select_targets"):
-        #
-
-        if self.species == "human":
-            self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
-            r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
-            tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_target_db.csv"), index_col=0)
-        elif self.species == "mouse":
-            self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
-            r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
-            tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_target_db.csv"), index_col=0)
-        else:
-            raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
-
-        database_ligands = set(self.lr_db["from"])
-        database_receptors = set(self.lr_db["to"])
-        database_pathways = set(r_tf_db["pathway"])
-
-        if self.custom_ligands_path is not None or self.custom_ligands is not None:
-            if self.custom_ligands_path is not None:
-                with open(self.custom_ligands_path, "r") as f:
-                    ligands = f.read().splitlines()
-            else:
-                ligands = self.custom_ligands
-            ligands = [l for l in ligands if l in database_ligands]
-        else:
-            # Use all possible ligands:
-            ligands = database_ligands
-
-        l_complexes = [elem for elem in ligands if "_" in elem]
-        # Get individual components if any complexes are included in this list:
-        ligands = [l for item in ligands for l in item.split("_")]
-        ligands = [l for l in ligands if l in self.adata.var_names]
-        # Subset ligands based on expression in sufficient numbers of cells:
-        if scipy.sparse.issparse(self.adata.X):
-            ligands = [
-                l for l in ligands if (self.adata[:, l].X > 0).sum() >= self.n_samples * self.target_expr_threshold
-            ]
-        else:
-            ligands = [l for l in ligands if self.adata[:, l].X.getnnz() >= self.n_samples * self.target_expr_threshold]
-
-        self.ligands_expr = pd.DataFrame(
-            self.adata[:, ligands].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, ligands].X,
-            index=self.sample_names,
-            columns=ligands,
-        )
-
-        # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
-        # but store them in a temporary list to do so later because some may contribute to multiple complexes:
-        to_drop = []
-        for element in l_complexes:
-            parts = element.split("_")
-            if all(part in self.ligands_expr.columns for part in parts):
-                # Combine the columns into a new column with the name of the hyphenated element- here we will
-                # compute the geometric mean of the expression values of the complex components:
-                self.ligands_expr[element] = self.ligands_expr[parts].apply(
-                    lambda x: x.prod() ** (1 / len(parts)), axis=1
-                )
-                # Mark the individual components for removal if the individual components cannot also be
-                # found as ligands:
-                to_drop.extend([part for part in parts if part not in database_ligands])
-            else:
-                # Drop the hyphenated element from the dataframe if all components are not found in the
-                # dataframe columns
-                partial_components = [l for l in ligands if l in parts]
-                to_drop.extend(partial_components)
-                if len(partial_components) > 0:
-                    self.logger.info(
-                        f"Not all components from the {element} heterocomplex could be found in the " f"dataset."
-                    )
-
-        # Drop any possible duplicate ligands alongside any other columns to be dropped:
-        to_drop = list(set(to_drop))
-        self.ligands_expr.drop(to_drop, axis=1, inplace=True)
-        first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
-        self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
-        # Save copy of non-lagged ligand expression array:
-        self.ligands_expr_nonlag = self.ligands_expr.copy()
-
-        if (
-            self.custom_receptors_path is not None
-            or self.custom_receptors is not None
-            or self.custom_pathways_path is not None
-            or self.custom_pathways is not None
-        ):
-            if self.custom_receptors_path is not None:
-                with open(self.custom_receptors_path, "r") as f:
-                    receptors = f.read().splitlines()
-            elif self.custom_receptors is not None:
-                receptors = self.custom_receptors
-            elif self.custom_pathways_path is not None:
-                with open(self.custom_pathways_path, "r") as f:
-                    pathways = f.read().splitlines()
-            else:
-                pathways = self.custom_pathways
-
-            if "pathways" in locals():
-                pathways = [p for p in pathways if p in database_pathways]
-                # Get all receptors associated with these pathway(s):
-                r_tf_db_subset = r_tf_db[r_tf_db["pathway"].isin(pathways)]
-                receptors = set(r_tf_db_subset["receptor"])
-                r_complexes = [elem for elem in receptors if "_" in elem]
-                # Get individual components if any complexes are included in this list:
-                receptors = [r for item in receptors for r in item.split("_")]
-                receptors = list(set(receptors))
-        else:
-            # Use all possible receptors:
-            receptors = database_receptors
-
-        receptors = [r for r in receptors if r in database_receptors]
-        r_complexes = [elem for elem in receptors if "_" in elem]
-        # Get individual components if any complexes are included in this list:
-        receptors = [r for item in receptors for r in item.split("_")]
-        receptors = [r for r in receptors if r in self.adata.var_names]
-        # Subset receptors based on expression in sufficient numbers of cells:
-        if scipy.sparse.issparse(self.adata.X):
-            receptors = [
-                r for r in receptors if (self.adata[:, r].X > 0).sum() >= self.n_samples * self.target_expr_threshold
-            ]
-        else:
-            receptors = [
-                r for r in receptors if self.adata[:, r].X.getnnz() >= self.n_samples * self.target_expr_threshold
-            ]
-
-        self.receptors_expr = pd.DataFrame(
-            self.adata[:, receptors].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, receptors].X,
-            index=self.sample_names,
-            columns=receptors,
-        )
-
-        # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
-        # but store them in a temporary list to do so later because some may contribute to multiple complexes:
-        to_drop = []
-        for element in r_complexes:
-            if "_" in element:
-                parts = element.split("_")
-                if all(part in self.receptors_expr.columns for part in parts):
-                    # Combine the columns into a new column with the name of the hyphenated element- here we will
-                    # compute the geometric mean of the expression values of the complex components:
-                    self.receptors_expr[element] = self.receptors_expr[parts].apply(
-                        lambda x: x.prod() ** (1 / len(parts)), axis=1
-                    )
-                    # Mark the individual components for removal if the individual components cannot also be
-                    # found as receptors:
-                    to_drop.extend([part for part in parts if part not in database_receptors])
-                else:
-                    # Drop the hyphenated element from the dataframe if all components are not found in the
-                    # dataframe columns
-                    partial_components = [r for r in receptors if r in parts]
-                    to_drop.extend(partial_components)
-                    if len(partial_components) > 0:
-                        self.logger.info(
-                            f"Not all components from the {element} heterocomplex could be found in the "
-                            f"dataset, so this complex was not included."
-                        )
-
-        # Drop any possible duplicate ligands alongside any other columns to be dropped:
-        to_drop = list(set(to_drop))
-        self.receptors_expr.drop(to_drop, axis=1, inplace=True)
-        first_occurrences = self.receptors_expr.columns.duplicated(keep="first")
-        self.receptors_expr = self.receptors_expr.loc[:, ~first_occurrences]
-
-        # Ensure there is some degree of compatibility between the selected ligands and receptors if model uses
-        # both ligands and receptors:
-        if self.mod_type == "lr":
-            self.logger.info("Preparing data: finding matched pairs between the selected ligands and receptors.")
-            starting_n_ligands = len(self.ligands_expr.columns)
-            starting_n_receptors = len(self.receptors_expr.columns)
-
-            lr_ref = self.lr_db[["from", "to"]]
-            # Don't need entire dataframe, just take the first two rows of each:
-            lig_melt = self.ligands_expr.iloc[[0, 1], :].melt(var_name="from", value_name="value_ligand")
-            rec_melt = self.receptors_expr.iloc[[0, 1], :].melt(var_name="to", value_name="value_receptor")
-
-            merged_df = pd.merge(lr_ref, rec_melt, on="to")
-            merged_df = pd.merge(merged_df, lig_melt, on="from")
-            pairs = merged_df[["from", "to"]].drop_duplicates(keep="first")
-            self.lr_pairs = [tuple(x) for x in zip(pairs["from"], pairs["to"])]
-            if len(self.lr_pairs) == 0:
-                raise RuntimeError(
-                    "No matched pairs between the selected ligands and receptors were found. If path to custom list of "
-                    "ligands and/or receptors was provided, ensure ligand-receptor pairings exist among these lists, "
-                    "or check data to make sure these ligands and/or receptors were measured and were not filtered out."
-                )
-
-            pivoted_df = merged_df.pivot_table(values=["value_ligand", "value_receptor"], index=["from", "to"])
-            filtered_df = pivoted_df[pivoted_df.notna().all(axis=1)]
-            # Filter ligand and receptor expression to those that have a matched pair:
-            self.ligands_expr = self.ligands_expr[filtered_df.index.get_level_values("from").unique()]
-            self.receptors_expr = self.receptors_expr[filtered_df.index.get_level_values("to").unique()]
-            final_n_ligands = len(self.ligands_expr.columns)
-            final_n_receptors = len(self.receptors_expr.columns)
-
-            self.logger.info(
-                f"Found {final_n_ligands} ligands and {final_n_receptors} receptors that have matched pairs. "
-                f"{starting_n_ligands - final_n_ligands} ligands removed from the list and "
-                f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the list due to not "
-                f"having matched pairs among the corresponding set of receptors/ligands, respectively."
-                f"Remaining ligands: {self.ligands_expr.columns.tolist()}."
-                f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
-            )
-
-            self.logger.info(f"Set of ligand-receptor pairs: {self.lr_pairs}")
-
-        if self.targets_path is not None or self.custom_targets is not None:
-            if self.targets_path is not None:
-                with open(self.targets_path, "r") as f:
-                    targets = f.read().splitlines()
-            else:
-                targets = self.custom_targets
-            targets = [t for t in targets if t in self.adata.var_names]
-
-            # Subset targets based on expression in sufficient numbers of cells:
+            # Automatically select targets- choose between the top 3000 and the top 50% of genes by variance,
+            # depending on the breadth of the dataset:
+            # First filter AnnData to genes that are expressed above target threshold (5% of cells by default):
             if scipy.sparse.issparse(self.adata.X):
-                targets = [
-                    t for t in targets if (self.adata[:, t].X > 0).sum() >= self.n_samples * self.target_expr_threshold
-                ]
+                expr_percentage = np.array((self.adata.X > 0).sum(axis=0) / self.adata.n_obs)[0]
             else:
-                targets = [
-                    t for t in targets if self.adata[:, t].X.getnnz() >= self.n_samples * self.target_expr_threshold
-                ]
+                expr_percentage = np.count_nonzero(self.adata.X, axis=0) / self.adata.n_obs
+            valid = list(np.array(self.adata.var_names)[expr_percentage > self.target_expr_threshold])
+            self.adata = self.adata[:, valid]
 
-        # Check if targets are specified using a category column and category of choice- in this case,
-        # compute differentially expressed genes for this category:
-        elif self.group_key is not None and self.group_subset is not None:
-            if len(self.group_subset) == 2:
-                group1_cat, group2_cat = self.group_subset
-                group1 = self.adata[self.adata.obs[self.group_key] == group1_cat]
-                group2 = self.adata[self.adata.obs[self.group_key] == group2_cat]
+            n_genes = min(3000, int(self.adata.n_vars / 2))
+            (gene_counts_stats, gene_fano_params) = get_highvar_genes_sparse(self.adata.X, numgenes=n_genes)
+            high_variance_genes_filter = list(self.adata.var.index[gene_counts_stats.high_var.values])
 
-                results = []
-                for gene in self.adata.var_names:
-                    if scipy.sparse.issparse(self.adata.X):
-                        group1_gene = group1[:, gene].X.toarray()
-                        group2_gene = group2[:, gene].X.toarray()
-                    else:
-                        group1_gene = group1[:, gene].X
-                        group2_gene = group2[:, gene].X
+            all_predictors = []
+            for target in high_variance_genes_filter:
+                data = self.adata[:, target].X
+                predictors_for_target = self.parse_predictors(data)
+                all_predictors.extend(predictors_for_target)
 
-                    stat, p = mannwhitneyu(group1_gene, group2_gene)
-                    results.append((gene, stat[0], p[0]))
+            all_predictors = list(set(all_predictors))
+            # Save the list of regulators to a file in the same directory as the AnnData file:
+            save_dir = os.path.dirname(self.adata_path)
+            predictors_path = os.path.join(save_dir, f"predictors_{self.species}.txt")
+            with open(predictors_path, "w") as f:
+                f.write("\n".join(all_predictors))
+            self.logger.info(f"Check {predictors_path} for the list of predictors.")
 
-                results = pd.DataFrame(results, columns=["gene", "statistic", "p_value"])
-                # Multitesting correction w/ Benjamini-Hochberg:
-                results["q_value"] = multitesting_correction(results["p_value"])
-                sorted_results = results.sort_values(by="q_value")
-                significant = sorted_results[sorted_results["q_value"] < 0.05]
+            # Also save the list of targets to a file in the same directory as the AnnData file:
+            targets_path = os.path.join(save_dir, f"targets_{self.species}.txt")
+            with open(targets_path, "w") as f:
+                f.write("\n".join(high_variance_genes_filter))
+            self.logger.info(f"Check {targets_path} for the list of targets.")
 
-                # Check if any gene has a difference in proportional expression >= 30%- if so, this indicates a
-                # particularly interesting specifically-expressed target:
-                targets = []
+        elif (self.targets_path is not None and not any_predictors_given) or (
+            self.custom_targets is not None and not any_predictors_given
+        ):
+            self.auto_select_targets = False
+            self.auto_select_predictors = True
+            self.logger.info(
+                "Targets were provided, but predictors (ligands and/or receptors) were not."
+                "Finding subset of interactions/interaction molecules that is appropriate for these targets."
+            )
 
-                for gene in significant["gene"]:
-                    percentage_group1_expressing = (group1[:, gene].X > 0).sum() / group1.shape[0]
-                    percentage_group2_expressing = (group2[:, gene].X > 0).sum() / group2.shape[0]
-                    if np.abs(percentage_group1_expressing - percentage_group2_expressing) >= 0.3:
-                        targets.append(gene)
-                # If not, use all significant genes:
-                if len(targets) == 0:
-                    targets = significant["gene"].tolist()
+            # Read targets and subset to target expression:
+            if self.targets_path is not None:
+                try:
+                    with open(self.targets_path, "r") as file:
+                        self.custom_targets = [x.strip() for x in file.readlines()]
+                except FileNotFoundError:
+                    raise FileNotFoundError(
+                        "The provided targets file could not be found. Please check the path and try again."
+                    )
+                except IOError:
+                    raise IOError("The provided targets file could not be read. Please check the file and try again.")
 
-            elif len(self.group_subset) > 2:
-                results = []
+            # Iterate over targets and get the set of appropriate L:R interactions:
+            all_predictors = []
+            for target in self.custom_targets:
+                data = self.adata[:, target].X
+                predictors_for_target = self.parse_predictors(data)
+                all_predictors.extend(predictors_for_target)
 
-                for group in self.group_subset:
-                    group = self.adata[self.adata.obs[self.group_key] == group]
-                    rest = self.adata[self.adata.obs[self.group_key] != group]
+            all_predictors = list(set(all_predictors))
+            # Save the list of regulators to a file in the same directory as the AnnData file:
+            save_dir = os.path.dirname(self.adata_path)
+            predictors_path = os.path.join(save_dir, f"predictors_{self.species}.txt")
+            with open(predictors_path, "w") as f:
+                f.write("\n".join(all_predictors))
+            self.logger.info(f"Check {predictors_path} for the list of predictors.")
 
-                    for gene in self.adata.var_names:
-                        if scipy.sparse.issparse(self.adata.X):
-                            group_gene = group[:, gene].X.toarray()
-                            rest_gene = rest[:, gene].X.toarray()
-                        else:
-                            group_gene = group[:, gene].X
-                            rest_gene = rest[:, gene].X
+        elif (self.targets_path is None and any_predictors_given) or (
+            self.custom_targets is None and any_predictors_given
+        ):
+            self.auto_select_targets = True
+            self.auto_select_predictors = False
+            self.logger.info(
+                "Predictors (ligands and/or receptors) were provided, but targets were not. "
+                "Automatically selecting highly-variable targets."
+            )
 
-                        stat, p = mannwhitneyu(group_gene, rest_gene)
-                        results.append((group, "rest", gene, stat[0], p[0]))
+            # Automatically select targets- choose between the top 3000 and the top 50% of genes by variance,
+            # depending on the breadth of the dataset:
+            # First filter AnnData to genes that are expressed above target threshold (5% of cells by default):
+            if scipy.sparse.issparse(self.adata.X):
+                expr_percentage = np.array((self.adata.X > 0).sum(axis=0) / self.adata.n_obs)[0]
+            else:
+                expr_percentage = np.count_nonzero(self.adata.X, axis=0) / self.adata.n_obs
+            valid = list(np.array(self.adata.var_names)[expr_percentage > self.target_expr_threshold])
+            self.adata = self.adata[:, valid]
 
-                results = pd.DataFrame(results, columns=["group", "rest", "gene", "statistic", "p_value"])
-                # Multitesting correction w/ Benjamini-Hochberg:
-                results["q_value"] = multitesting_correction(results["p_value"])
-                sorted_results = results.sort_values(by="q_value")
-                significant = sorted_results[sorted_results["q_value"] < 0.05]
+            n_genes = min(3000, int(self.adata.n_vars / 2))
+            (gene_counts_stats, gene_fano_params) = get_highvar_genes_sparse(self.adata.X, numgenes=n_genes)
+            high_variance_genes_filter = list(self.adata.var.index[gene_counts_stats.high_var.values])
 
-                # Check if any gene has a difference in proportional expression between the reference group and the
-                # rest of the cells >= 30%- if so, this indicates a particularly interesting specifically-expressed
-                # target:
-                targets = []
+            # Save the list of targets to a file in the same directory as the AnnData file:
+            save_dir = os.path.dirname(self.adata_path)
+            targets_path = os.path.join(save_dir, f"targets_{self.species}.txt")
+            with open(targets_path, "w") as f:
+                f.write("\n".join(high_variance_genes_filter))
+            self.logger.info(f"Check {targets_path} for the list of targets.")
 
-                for _, row in significant.iterrows():
-                    gene = row["gene"]
-                    if gene not in targets:
-                        group = row["group"]
-                        group_data = self.adata[self.adata.obs[self.group_key] == group]
-                        rest_data = self.adata[self.adata.obs[self.group_key] != group]
-
-                        percentage_group_expressing = (group_data[:, gene].X > 0).sum() / group_data.shape[0]
-                        percentage_rest_expressing = (rest_data[:, gene].X > 0).sum() / rest_data.shape[0]
-
-                        if np.abs(percentage_group_expressing - percentage_rest_expressing) >= 0.3:
-                            targets.append(gene)
-
-                # If not, use all significant genes:
-                if len(targets) == 0:
-                    targets = significant["gene"].unique().tolist()
-
-        else:
-            # If targets are not provided in any other way, check through all genes expressed in above a threshold
-            # proportion of cells:
-            targets = [
-                t
-                for t in self.adata.var_names
-                if (self.adata[:, t].X > 0).sum() >= self.n_samples * self.target_expr_threshold
-            ]
-
-        self.targets_expr = pd.DataFrame(
-            self.adata[:, targets].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
-            index=self.sample_names,
-            columns=targets,
-        )
-
-        self.target_list = targets
-
-    def define_cell_categories(self):
-        group_name = self.adata.obs[self.group_key]
-        db = pd.DataFrame({"group": group_name})
-        categories = np.array(group_name.unique().tolist())
-        db["group"] = pd.Categorical(db["group"], categories=categories)
-
-        self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
-        X = pd.get_dummies(data=db, drop_first=False)
-        # Ensure columns are in order:
-        self.cell_categories = X.reindex(sorted(X.columns), axis=1)
-        # Ensure each category is one word with no spaces or special characters:
-        self.cell_categories.columns = [
-            re.sub(r"\b([a-zA-Z0-9])", lambda match: match.group(1).upper(), re.sub(r"[^a-zA-Z0-9]+", "", s))
-            for s in self.cell_categories.columns
-        ]
-
-    def _compute_all_wi(
-        self,
-        bw: Union[float, int],
-        bw_fixed: bool = False,
-        exclude_self: bool = True,
-        kernel: str = "bisquare",
-    ) -> scipy.sparse.spmatrix:
-        """Compute spatial weights for all samples in the dataset given a specified bandwidth.
+    def parse_predictors(self, data: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None):
+        """Unbiased identification of appropriate signaling molecules and/or target genes for modeling with
+            heuristical methods.
 
         Args:
-            bw: Bandwidth for the spatial kernel
-            fixed_bw: Whether the bandwidth considers a uniform distance for each sample (True) or a nonconstant
-                distance for each sample that depends on the number of neighbors (False). If not given, will default
-                to self.fixed_bw.
-            exclude_self: Whether to include each sample itself as one of its nearest neighbors. If not given,
-                will default to self.exclude_self.
-            kernel: Kernel to use for the spatial weights. If not given, will default to self.kernel.
-
-        Returns:
-            wi: Array of weights for all samples in the dataset
+            data: Optional 1D array containing gene expression values. If given, will be queried to find cells that
+                express the target genes, which can then be used to find appropriate predictors. If not given,
+                will use :attr `adata`.
         """
 
-        # Parallelized computation of spatial weights for all samples:
-        get_wi_partial = partial(
-            get_wi,
-            n_samples=self.n_samples,
-            coords=self.coords,
-            fixed_bw=bw_fixed,
-            exclude_self=exclude_self,
-            kernel=kernel,
-            bw=bw,
-            threshold=0.01,
-            sparse_array=True,
-        )
+        if data is not None:
+            # Get the indices to search over- where the target is nonzero:
+            if isinstance(data, np.ndarray):
+                indices = np.nonzero(data)[0]
+            elif isinstance(data, scipy.sparse.spmatrix):
+                indices = data.nonzero()[0]
+            subset_indices = self.adata.obs_names[indices]
+            n_obs = indices.shape[0]
+        else:
+            # All cells will be queried:
+            subset_indices = self.adata.obs_names
+            n_obs = self.adata.n_obs
 
-        with Pool() as pool:
-            weights = pool.map(get_wi_partial, range(self.n_samples))
-        w = scipy.sparse.vstack(weights)
-        return w
+        # Set threshold (either user-provided percentage or enough to be expressed in 50 cells) for expression of
+        # target genes:
+        threshold = max(self.target_expr_threshold, 50.0 / n_obs)
+
+        # Get list of all available predictors, filter by threshold expression to get finalized list to save to
+        # file in the same directory as the AnnData file:
+        self.logger.info("Finding all available predictors...")
+        lr_dir = pd.read_csv(os.path.join(self.cci_dir, f"lr_db_{self.species}.csv"), index_col=0)
+        # Check ligands, receptors, or both depending on the model framing:
+        set_ligands = set(lr_dir["from"])
+        set_receptors = list(set(lr_dir["to"]))
+        l_complexes = [s for s in set_ligands if "_" in s]
+        r_complexes = [s for s in set_receptors if "_" in s]
+
+        all_ligands = []
+        for lig in set_ligands:
+            if "_" in lig:
+                components = lig.split("_")
+                all_ligands.extend(components)
+                all_ligands.remove(lig)
+
+        all_receptors = []
+        for rec in set_receptors:
+            if "_" in rec:
+                components = rec.split("_")
+                all_receptors.extend(components)
+                all_receptors.remove(rec)
+
+        if self.mod_type == "ligand" or self.mod_type == "lr":
+            # Subset to ligands that are expressed in > threshold number of cells:
+            if scipy.sparse.issparse(self.adata.X):
+                lig_expr_percentage = np.array((self.adata[subset_indices, all_ligands].X > 0).sum(axis=0) / n_obs)[0]
+            else:
+                lig_expr_percentage = np.count_nonzero(self.adata[subset_indices, all_ligands].X, axis=0) / n_obs
+            ligands = list(np.array(all_ligands)[lig_expr_percentage > threshold])
+
+            # Recombine complex components if all components passed the thresholding:
+            complex_members = [
+                lig for lig in ligands for complex_string in l_complexes if lig == complex_string.split("_")[0]
+            ]
+            complex_associated = [
+                complex_string.split("_")[1:]
+                for lig in complex_members
+                for complex_string in l_complexes
+                if lig == complex_string.split("_")[0]
+            ]
+            complex_associated = [item for sublist in complex_associated for item in sublist]
+            combined_complex = [
+                f"{comp}-{'_'.join(other_comps)}" for comp, other_comps in zip(complex_members, complex_associated)
+            ]
+            # Drop the individual components if they are not standalone ligands as well (i.e. also in the set
+            # of possible receptors by themselves):
+            for comp in complex_members + complex_associated:
+                if comp not in set_ligands:
+                    all_ligands.remove(comp)
+            all_ligands.extend(combined_complex)
+
+        elif self.mod_type == "receptor" or self.mod_type == "lr":
+            # Subset to receptors that are expressed in > threshold number of cells:
+            if scipy.sparse.issparse(self.adata.X):
+                rec_expr_percentage = np.array(
+                    (self.adata[subset_indices, all_receptors].X > 0).sum(axis=0) / self.adata.n_obs
+                )[0]
+            else:
+                rec_expr_percentage = (
+                    np.count_nonzero(self.adata[subset_indices, all_receptors].X, axis=0) / self.adata.n_obs
+                )
+            receptors = list(np.array(all_receptors)[rec_expr_percentage > threshold])
+
+            # Recombine complex components if all components passed the thresholding:
+            complex_members = [
+                rec for rec in receptors for complex_string in r_complexes if rec == complex_string.split("_")[0]
+            ]
+            complex_associated = [
+                complex_string.split("_")[1:]
+                for rec in complex_members
+                for complex_string in r_complexes
+                if rec == complex_string.split("_")[0]
+            ]
+            combined_complex = [
+                f"{comp}-{'_'.join(other_comps)}" for comp, other_comps in zip(complex_members, complex_associated)
+            ]
+            # Drop the individual components if they are not standalone receptors as well (i.e. also in the set
+            # of possible receptors by themselves):
+            for comp in complex_members + complex_associated:
+                if comp not in set_receptors:
+                    all_receptors.remove(comp)
+            all_receptors.extend(combined_complex)
+
+        if self.mod_type == "ligand":
+            regulators = all_ligands
+        elif self.mod_type == "receptor":
+            regulators = all_receptors
+        elif self.mod_type == "lr":
+            regulators = all_ligands + all_receptors
+
+        return regulators

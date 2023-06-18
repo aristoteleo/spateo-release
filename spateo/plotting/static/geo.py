@@ -41,7 +41,7 @@ def geo(
 
     Args:
         adata: an Annodata object that contain the physical coordinates for each bin/cell, etc.
-        basis: The key to the column in the adata.obs, from which the contour of the cell segmentation will be
+        basis: The key to the column in adata.obs from which the contour of the cell segmentation will be
             generated.
         color: Any or any list of column names or gene name, etc. that will be used for coloring cells.
             If `color` is not None, stack_genes will be disabled automatically because `color` can contain non numerical

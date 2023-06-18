@@ -8,6 +8,7 @@ from sklearn.neighbors import NearestNeighbors
 from ...configuration import SKM
 from ...tools.utils import compute_smallest_distance
 from .scatters import scatters
+from .utils import _convert_to_geo_dataframe
 
 # from .scatters import (
 #     scatters,
@@ -154,6 +155,7 @@ def space(
 def plot_cell_signaling(
     adata: anndata.AnnData,
     vf_key: str,
+    geo: bool = False,
     color: Optional[Union[List[str], str, None]] = None,
     arrow_color: str = "tab:blue",
     genes: List[str] = [],
@@ -161,6 +163,9 @@ def plot_cell_signaling(
     space: str = "spatial",
     width: float = 6,
     marker: str = ".",
+    basis: str = "contour",
+    boundary_width: float = 0.2,
+    boundary_color: str = "black",
     pointsize: Optional[float] = None,
     dpi: int = 100,
     ps_sample_num: int = 1000,
@@ -188,6 +193,8 @@ def plot_cell_signaling(
     Args:
         adata: An AnnData object that contains the physical coordinates for each bin/cell, etc.
         vf_key: Key in .obsm where the vector field is stored
+        geo: Whether to plot the vector field on top of a geometry plot rather than a scatter plot of cells. Note
+            that none of the pointsize arguments (e.g. 'pointsize', 'ps_sample_num') will be used if this is True.
         color: `string` (default: `ntr`)
             Any or any list of column names or gene name, etc. that will be used for coloring cells. If `color` is not
             None, stack_genes will be disabled automatically because `color` can contain non numerical values.
@@ -200,7 +207,15 @@ def plot_cell_signaling(
         width: Width of the figure
         marker: A string representing some marker from matplotlib
             https://matplotlib.org/stable/api/markers_api.html#module-matplotlib.markers
-        pointsize: The size of the points on the scatter plot
+
+
+        basis: Only used if `geo` is True. The key to the column in adata.obs from which the contour of the cell
+            segmentation will be generated.
+        boundary_width: Only used if `geo` is True. The width of the contour lines.
+        boundary_color: Only used if `geo` is True. The color of the contour lines.
+
+
+        pointsize: The size of the points on the scatter plot. Not used if 'geo' is True.
         dpi: `float`, (default: 100.0)
             The resolution of the figure in dots-per-inch. Dots per inches (dpi) determines how many pixels the figure
             comprises. dpi is different from ppi or points per inches. Note that most elements like lines, markers,
@@ -216,6 +231,7 @@ def plot_cell_signaling(
             https://stackoverflow.com/questions/47633546/relationship-between-dpi-and-figure-size
         ps_sample_num: The number of bins / cells that will be sampled to estimate the distance between different
             bin / cells
+
 
         plot_method: The method used to plot the vector field. Can be one of the following:
             'cell': Plot the vector field at the center of each cell.
@@ -352,6 +368,10 @@ def plot_cell_signaling(
 
     V = vf_cell if plot_method == "cell" else vf_grid
 
+    if geo:
+        adata = adata.copy()  # make sure don't modify the original data.
+        adata = _convert_to_geo_dataframe(adata, basis)
+
     res = scatters(
         adata,
         vf_key=vf_key,
@@ -365,6 +385,9 @@ def plot_cell_signaling(
         dpi=dpi,
         alpha=alpha,
         stack_colors_cmaps=gene_cmaps,
+        geo=geo,
+        boundary_width=boundary_width,
+        boundary_color=boundary_color,
         vf_kwargs=vf_kwargs,
         *args,
         **kwargs,

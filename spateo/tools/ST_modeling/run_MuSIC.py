@@ -99,11 +99,6 @@ def main():
     "Not used if 'targets_path' is not None.",
 )
 @click.option(
-    "r_squared_threshold",
-    default=0.5,
-    help="For automated selection, the threshold " "r-squared value for a gene to be selected.",
-)
-@click.option(
     "multicollinear_threshold",
     required=False,
     help="Used only if `mod_type` is 'slice'. If this argument is provided, independent variables that are highly "
@@ -166,8 +161,36 @@ def main():
     "stabilized. Only used if `multiscale` is True.",
 )
 @click.option("ridge_lambda", required=False)
+
+# Downstream analysis arguments
 @click.option("search_bw", default=10)
-@click.option("top_k_receivers", default=10)
+@click.option(
+    "top_k_receivers",
+    default=10,
+    help="Used for :func `infer_effect_direction`; specifies the number of top "
+    "senders/receivers to consider for each cell.",
+)
+@click.option(
+    "filter_targets",
+    default=False,
+    is_flag=True,
+    help="Used for :func `infer_effect_direction`; if True, will subset to only "
+    "the targets that were predicted well by the model.",
+)
+@click.option(
+    "filter_targets_threshold",
+    default=0.65,
+    help="Used for :func `infer_effect_direction`; specifies the "
+    "threshold "
+    "Pearson coefficient for target subsetting. Only used if `filter_targets` is True.",
+)
+@click.option(
+    "diff_sending_or_receiving",
+    default="sending",
+    help="Used for :func `sender_receiver_effect_deg_detection`; specifies "
+    "whether to compute differential expression of genes in cells with high or low sending effect potential "
+    "('sending cells') or high or low receiving effect potential ('receiving cells').",
+)
 def run(
     np,
     adata_path,
@@ -191,7 +214,6 @@ def run(
     targets_path,
     target,
     target_expr_threshold,
-    r_squared_threshold,
     init_betas_path,
     normalize,
     smooth,
@@ -214,6 +236,9 @@ def run(
     ridge_lambda,
     search_bw,
     top_k_receivers,
+    filter_targets,
+    filter_targets_threshold,
+    diff_sending_or_receiving,
     chunks,
 ):
     """Command line shortcut to run any STGWR models.
@@ -250,7 +275,6 @@ def run(
             targets.
         target_expr_threshold: For automated selection, the threshold proportion of cells for which transcript needs
             to be expressed in to be selected as a target of interest.
-        r_squared_threshold: For automated selection, the threshold R^2 value for a gene to be selected as a target
 
 
         init_betas_path: Path to file containing initial values for beta coefficients
@@ -286,8 +310,16 @@ def run(
 
         search_bw: Used for downstream analyses; specifies the bandwidth to search for senders/receivers.
             Recommended to set equal to the `n_neighbors` argument given during model fitting.
-        top_k_receivers: Used for downstream analyses; specifies the number of top senders/receivers to consider
-            for each cell.
+        top_k_receivers: Used for downstream analyses, specifically :func `infer_effect_direction`; if True,
+            will subset to only the targets that were predicted well by the model.
+        filter_targets: Used for downstream analyses, specifically :func `infer_effect_direction`; if True,
+            will subset to only the targets that were predicted well by the model.
+        filter_targets_threshold: Used for downstream analyses, specifically :func `infer_effect_direction`;
+            specifies the threshold Pearson coefficient for target subsetting. Only used if `filter_targets` is True.
+        diff_sending_or_receiving: Used for downstream analyses, specifically :func
+            `sender_receiver_effect_deg_detection`; specifies whether to compute differential expression of genes
+            in cells with high or low sending effect potential ('sending cells') or high or low receiving effect
+            potential ('receiving cells').
     """
 
     mpi_path = os.path.dirname(fast_swr.__file__) + "/SWR_mpi.py"
@@ -306,8 +338,6 @@ def run(
         + output_path
         + " -target_expr_threshold "
         + str(target_expr_threshold)
-        + " -r_squared_threshold "
-        + str(r_squared_threshold)
         + " -coords_key "
         + coords_key
         + " -group_key "
@@ -364,13 +394,6 @@ def run(
         for path in pathway:
             command += path + " "
 
-    # if custom_regulators_path is not None:
-    #     command += " -custom_regulators_path " + custom_regulators_path
-    # if tf is not None:
-    #     command += " -tf "
-    #     for t in tf:
-    #         command += t + " "
-
     if targets_path is not None:
         command += " -targets_path " + targets_path
     if target is not None:
@@ -417,6 +440,12 @@ def run(
         command += " -search_bw " + str(search_bw)
     if top_k_receivers is not None:
         command += " -top_k_receivers " + str(top_k_receivers)
+    if filter_targets:
+        command += " -filter_targets "
+    if filter_targets_threshold is not None:
+        command += " -filter_targets_threshold " + str(filter_targets_threshold)
+    if diff_sending_or_receiving is not None:
+        command += " -diff_sending_or_receiving " + str(diff_sending_or_receiving)
 
     os.system(command)
     pass

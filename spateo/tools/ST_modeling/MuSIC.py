@@ -201,7 +201,13 @@ class MuSIC:
                         "to provide a default dataset to fit."
                     )
                 else:
-                    custom_data = pd.read_csv(self.csv_path, index_col=0)
+                    try:
+                        custom_data = pd.read_csv(self.csv_path, index_col=0)
+                    except FileNotFoundError:
+                        raise FileNotFoundError(f"Could not find file at path {self.csv_path}.")
+                    except IOError:
+                        raise IOError(f"Error reading file at path {self.csv_path}.")
+
                     self.coords = custom_data.iloc[:, :2].values
                     self.target = pd.DataFrame(
                         custom_data.iloc[:, 2], index=custom_data.index, columns=[custom_data.columns[2]]
@@ -419,7 +425,16 @@ class MuSIC:
         """
         Load AnnData object and process it for modeling.
         """
-        self.adata = anndata.read_h5ad(self.adata_path)
+        try:
+            self.adata = anndata.read_h5ad(self.adata_path)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find file: {self.adata_path}")
+        except IOError:
+            raise IOError(
+                f"Could not read file: {self.adata_path}. Try opening with older version of AnnData and "
+                f"removing the `.raw` attribute or any unnecessary entries in e.g. .uns or .obsp."
+            )
+
         self.adata.uns["__type"] = "UMI"
         # If group_subset is given, subset the AnnData object to contain the specified groups as well as neighboring
         # cells:
@@ -544,11 +559,33 @@ class MuSIC:
         # Ligand-receptor expression arrays:
         elif self.mod_type in ["lr", "ligand", "receptor"]:
             if self.species == "human":
-                self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                try:
+                    self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                except FileNotFoundError:
+                    raise FileNotFoundError(
+                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                    )
+                except IOError:
+                    raise IOError(
+                        "Issue reading L:R database. Files can be downloaded from "
+                        "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
+                    )
+
                 r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
                 tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_target_db.csv"), index_col=0)
             elif self.species == "mouse":
-                self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+                try:
+                    self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+                except FileNotFoundError:
+                    raise FileNotFoundError(
+                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                    )
+                except IOError:
+                    raise IOError(
+                        "Issue reading L:R database. Files can be downloaded from "
+                        "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
+                    )
+
                 r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
                 tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_target_db.csv"), index_col=0)
             else:
@@ -882,6 +919,7 @@ class MuSIC:
         if self.mod_type == "lr" or self.mod_type == "ligand":
             if "spatial_weights" not in locals():
                 spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=False, exclude_self=True)
+
             lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
             for i, ligand in enumerate(self.ligands_expr.columns):
                 expr = self.ligands_expr[ligand]
@@ -933,7 +971,7 @@ class MuSIC:
             # array across all cells in the sample:
             X_df = pd.DataFrame(
                 np.zeros((self.n_samples, len(self.lr_pairs))),
-                columns=[f"{lr_pair[0]}-{lr_pair[1]}" for lr_pair in self.lr_pairs],
+                columns=[f"{lr_pair[0]}:{lr_pair[1]}" for lr_pair in self.lr_pairs],
                 index=self.adata.obs_names,
             )
 
@@ -943,7 +981,7 @@ class MuSIC:
                 rec_expr_values = self.receptors_expr[rec].values.reshape(-1, 1)
 
                 # Communication signature b/w receptor in target and ligand in neighbors:
-                X_df[f"{lig}-{rec}"] = lig_expr_values * rec_expr_values
+                X_df[f"{lig}:{rec}"] = lig_expr_values * rec_expr_values
 
             # If applicable, drop all-zero columns:
             X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
@@ -969,7 +1007,10 @@ class MuSIC:
             )
 
             self.X = X_df.values
-            self.feature_names = [pair.split("-")[0] + "-" + pair.split("-")[1] for pair in X_df.columns]
+            self.feature_names = [pair.split("-")[0] + ":" + pair.split("-")[1] for pair in X_df.columns]
+
+            # Update :attr `lr_pairs` to reflect the final L:R pairs used:
+            self.lr_pairs = [tuple((pair.split(":")[0], pair.split(":")[1])) for pair in self.feature_names]
 
         elif self.mod_type == "ligand" or self.mod_type == "receptor":
             if self.mod_type == "ligand":
@@ -1005,6 +1046,12 @@ class MuSIC:
 
             self.X = X_df.values
             self.feature_names = X_df.columns
+            # (For interpretability in downstream analyses) update ligand names/receptor names to reflect the final
+            # molecules used:
+            if self.mod_type == "ligand":
+                self.ligands = self.feature_names
+            elif self.mod_type == "receptor":
+                self.receptors = self.feature_names
 
         else:
             raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
