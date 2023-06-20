@@ -135,6 +135,16 @@ def sparse_minmax_scale(a: Union[scipy.sparse.csr_matrix, scipy.sparse.csc_matri
     return a_scaled
 
 
+def sparse_add_pseudocount(a: Union[scipy.sparse.csr_matrix, scipy.sparse.csc_matrix], pseudocount: float = 1.0):
+    """Add pseudocount to sparse matrix."""
+    if type(a).__name__ == "csr_matrix" or type(a).__name__ == "csc_matrix":
+        a.data += pseudocount
+    else:
+        raise Exception("Invalid format for 'a' argument: %s" % (type(a).__name__))
+
+    return a
+
+
 # ---------------------------------------------------------------------------------------------------
 # Maximum likelihood estimation procedure
 # ---------------------------------------------------------------------------------------------------

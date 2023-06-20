@@ -34,6 +34,7 @@ from statsmodels.gam.smooth_basis import BSplines
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
+from spateo.configuration import SKM
 from spateo.tools.cluster.leiden import calculate_leiden_partition
 from spateo.tools.gene_expression_variance import (
     compute_gene_groups_p_val,
@@ -218,6 +219,8 @@ class MuSIC_Interpreter(MuSIC):
         coeffs = self.coeffs[target]
         # Set negligible coefficients to zero:
         coeffs[coeffs.abs() < 1e-2] = 0
+
+        # Target indicator array:
         target_expr = self.targets_expr[target].values.reshape(1, -1)
         target_indicator = np.where(target_expr != 0, 1, 0)
 
@@ -237,13 +240,13 @@ class MuSIC_Interpreter(MuSIC):
                         "the form of a tuple."
                     )
 
-            # Use the non-lagged ligand expression array:
+            # Use the non-lagged ligand expression to construct ligand indicator array:
             ligand_expr = self.ligands_expr_nonlag[ligand].values.reshape(-1, 1)
             # Referred to as "sent potential"
             sent_potential = spatial_weights.multiply(ligand_expr)
             sent_potential.eliminate_zeros()
 
-            # If "lr", incorporate the receptor expression array:
+            # If "lr", incorporate the receptor expression indicator array:
             if self.mod_type == "lr":
                 receptor_expr = self.receptors_expr[receptor].values.reshape(1, -1)
                 sent_potential = sent_potential.multiply(receptor_expr)
@@ -673,6 +676,7 @@ class MuSIC_Interpreter(MuSIC):
         pathway: Optional[str] = None,
         sender_cell_type: Optional[str] = None,
         receiver_cell_type: Optional[str] = None,
+        no_cell_type_markers: bool = False,
     ):
         """Computes differential expression of genes in cells with high or low sent signaling effect potential,
         or differential expression of genes in cells with high or low received signaling effect potential.
@@ -692,10 +696,14 @@ class MuSIC_Interpreter(MuSIC):
                 ligand/receptor and sender/receiver cell type if provided.
             sender_cell_type: Sender cell type to use for differential expression analysis.
             receiver_cell_type: Receiver cell type to use for differential expression analysis.
+            no_cell_type_markers: Whether to consider cell type markers during differential expression testing,
+                as these are least likely to be interesting patterns. Defaults to False, and if True will first
+                perform differential expression testing for each cell type group, removing significant results.
 
         Returns:
             GAM_adata: AnnData object where each entry in .var contains a gene that has been modeled, with results of
                 statistical testing added
+            bs: BSplines object containing information about the basis splines
         """
 
         if diff_sending_or_receiving not in ["sending", "receiving"]:
@@ -718,6 +726,9 @@ class MuSIC_Interpreter(MuSIC):
 
             # Check for already computed pathway effect potential, and if not existing, compute it:
             if send_key not in self.adata.obsm_keys():
+                self.logger.info(
+                    f"Ligand-receptor effect potential for {target} via {pathway}. " f"Computing effect potential now."
+                )
                 _, _, _ = self.get_pathway_potential(pathway, target, spatial_weights=None, store_summed_potential=True)
 
             # Key for AnnData storage of the source signal:
@@ -738,6 +749,10 @@ class MuSIC_Interpreter(MuSIC):
                 receive_key = f"norm_sum_received_effect_potential_{ligand}_for_{target}_via_{receptor}"
                 # Check for already computed ligand-receptor effect potential, and if not existing, compute it:
                 if send_key not in self.adata.obsm_keys():
+                    self.logger.info(
+                        f"Ligand-receptor effect potential for {target} via {ligand}-{receptor}. "
+                        f"Computing effect potential now."
+                    )
                     _, _, _ = self.get_effect_potential(
                         ligand, receptor, spatial_weights=None, store_summed_potential=True
                     )
@@ -759,6 +774,9 @@ class MuSIC_Interpreter(MuSIC):
                 send_key = f"norm_sum_sent_effect_potential_{ligand}_for_{target}"
                 receive_key = f"norm_sum_received_effect_potential_from_{ligand}_for_{target}"
                 # Check for already computed ligand effect potential, and if not existing, compute it:
+                self.logger.info(
+                    f"Ligand-receptor effect potential for {target} via {ligand}. " f"Computing effect potential now."
+                )
                 if send_key not in self.adata.obsm_keys():
                     _, _, _ = self.get_effect_potential(
                         ligand, target, spatial_weights=None, store_summed_potential=True
@@ -812,13 +830,22 @@ class MuSIC_Interpreter(MuSIC):
 
             if self.species == "human":
                 grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
+                rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "human_RBP_db.csv"), index_col=0)
                 lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
             elif self.species == "mouse":
                 grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
+                rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_RBP_db.csv"), index_col=0)
                 lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
 
-            self.logger.info("Selecting transcription factors for analysis of differential expression.")
+            self.logger.info(
+                "Selecting transcription factors and RNA-binding proteins for analysis of differential " "expression."
+            )
             all_TFs = list(grn.columns)
+            all_RBPs = list(rna_bp_db["Gene_Name"].values)
+            # First filter to genes that were actually measured in the data:
+            all_TFs = [tf for tf in all_TFs if tf in self.adata.var_names]
+            all_RBPs = [r for r in all_RBPs if r in self.adata.var_names]
+
             # Further subset list of TFs to those that are implicated in signaling patterns of interest and also
             # are expressed in at least n% of the cells that are nonzero for sending potential (use the user input
             # 'target_expr_threshold'):
@@ -837,6 +864,8 @@ class MuSIC_Interpreter(MuSIC):
             else:
                 # Set sender regulators to all TFs:
                 sender_regulators = all_TFs
+
+            sender_regulators.extend(all_RBPs)
 
             if scipy.sparse.issparse(self.adata.X):
                 nnz_counts = np.array(adata_subset[:, sender_regulators].X.getnnz(axis=0)).flatten()
@@ -865,44 +894,47 @@ class MuSIC_Interpreter(MuSIC):
 
             genes_to_keep = list(np.array(adata_subset.var_names)[nnz_counts >= n_cells_threshold])
 
-            # Remove cell type markers (more likely to be reflective than responsive to signaling) using a series of
-            # binomial models- each column is the p-value for a particular cell type group compared to all other groups
-            p_values = pd.DataFrame(
-                index=adata_hvg.var_names,
-                columns=[f"p-value {cat}_v_all_other_groups" for cat in self.adata.obs[self.group_key].cat.categories],
-            )
+            if no_cell_type_markers:
+                # Remove cell type markers (more likely to be reflective than responsive to signaling) using a series of
+                # binomial models- each column is the p-value for a particular cell type group compared to all other groups
+                p_values = pd.DataFrame(
+                    index=adata_hvg.var_names,
+                    columns=[
+                        f"p-value {cat}_v_all_other_groups" for cat in self.adata.obs[self.group_key].cat.categories
+                    ],
+                )
 
-            with Pool() as pool:
-                for cat in self.adata.obs[self.group_key].cat.categories:
-                    group1 = self.adata[self.adata.obs[self.group_key] == cat]
-                    group2 = self.adata[self.adata.obs[self.group_key] != cat]
+                with Pool() as pool:
+                    for cat in self.adata.obs[self.group_key].cat.categories:
+                        group1 = self.adata[self.adata.obs[self.group_key] == cat]
+                        group2 = self.adata[self.adata.obs[self.group_key] != cat]
 
-                    # For each gene, compute Mann-Whitney U test:
-                    gene_p_vals = pool.starmap(
-                        compute_gene_groups_p_val, [(gene, group1, group2) for gene in genes_to_keep]
-                    )
-                    genes, pvals = zip(*gene_p_vals)
-                    qvals = multitesting_correction(pvals, method="fdr_bh")
+                        # For each gene, compute Mann-Whitney U test:
+                        gene_p_vals = pool.starmap(
+                            compute_gene_groups_p_val, [(gene, group1, group2) for gene in genes_to_keep]
+                        )
+                        genes, pvals = zip(*gene_p_vals)
+                        qvals = multitesting_correction(pvals, method="fdr_bh")
 
-                    for gene, qval in zip(genes, qvals):
-                        p_values.loc[gene, f"p-value {cat}_v_all_other_groups"] = qval
+                        for gene, qval in zip(genes, qvals):
+                            p_values.loc[gene, f"p-value {cat}_v_all_other_groups"] = qval
 
-            significant_p_values = p_values[p_values < 0.05]
-            # Collect significant genes for each column (group)
-            significant_genes_per_group = [
-                significant_p_values.index[significant_p_values[col].notna()].tolist()
-                for col in significant_p_values.columns
-            ]
-            # Flatten the list of lists and take the set to get unique significant genes across all groups
-            significant_markers = list(set([gene for sublist in significant_genes_per_group for gene in sublist]))
-            to_keep = list(set(genes_to_keep) - set(significant_markers))
+                significant_p_values = p_values[p_values < 0.05]
+                # Collect significant genes for each column (group)
+                significant_genes_per_group = [
+                    significant_p_values.index[significant_p_values[col].notna()].tolist()
+                    for col in significant_p_values.columns
+                ]
+                # Flatten the list of lists and take the set to get unique significant genes across all groups
+                significant_markers = list(set([gene for sublist in significant_genes_per_group for gene in sublist]))
+                genes_to_keep = list(set(genes_to_keep) - set(significant_markers))
 
-            counts = self.adata[:, to_keep].X
+            counts = self.adata[:, genes_to_keep].X
 
         GAM_adata, bs = fit_DE_GAM(
             counts,
             var=effect_potential,
-            genes=to_keep,
+            genes=genes_to_keep,
             cells=self.sample_names,
         )
 
@@ -910,7 +942,7 @@ class MuSIC_Interpreter(MuSIC):
 
         # Compute q-values for each gene:
         GAM_adata = DE_GAM_test(GAM_adata, bs)
-        return GAM_adata
+        return GAM_adata, bs
 
     def group_sender_receiver_effect_degs(
         self,
@@ -1001,6 +1033,15 @@ class MuSIC_Interpreter(MuSIC):
             top_n_genes = GAM_adata.var.sort_values("wald_stats").head(top_n_genes).index.tolist()
             adata_subset = adata_subset[:, top_n_genes]
             scaled_yhat_df = scaled_yhat_df[top_n_genes]
+        else:
+            # Check if there are too many genes to easily represent on a plot:
+            if scaled_yhat_df.shape[1] > 200:
+                top_n_genes = 200
+
+                # Get top n genes by Wald statistic:
+                top_n_genes = GAM_adata.var.sort_values("wald_stats").head(top_n_genes).index.tolist()
+                adata_subset = adata_subset[:, top_n_genes]
+                scaled_yhat_df = scaled_yhat_df[top_n_genes]
 
         pca_obj = PCA(n_components=num_pcs, svd_solver="full")
         x_pca = pca_obj.fit_transform(scaled_yhat_df.values)
@@ -1011,6 +1052,103 @@ class MuSIC_Interpreter(MuSIC):
         adata_subset.var["cluster"] = cluster_labels
         adata_subset.uns["__type"] = "UMI"
         return adata_subset
+
+    @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+    def calc_and_group_sender_receiver_effect_degs(
+        self,
+        target: Optional[str] = None,
+        diff_sending_or_receiving: Literal["sending", "receiving"] = "sending",
+        ligand: Optional[str] = None,
+        receptor: Optional[str] = None,
+        pathway: Optional[str] = None,
+        sender_cell_type: Optional[str] = None,
+        receiver_cell_type: Optional[str] = None,
+        no_cell_type_markers: bool = False,
+        n_points: int = 50,
+        num_pcs: int = 10,
+        num_neighbors: int = 5,
+        leiden_resolution: float = 1.0,
+        top_n_genes: Optional[int] = None,
+    ):
+        """Wrapper to find differential expression of genes in cells with high or low sent signaling effect potential,
+        or differential expression of genes in cells with high or low received signaling effect potential, and
+        cluster genes by these observed patterns.
+
+        Args:
+            target: Target to use for differential expression analysis. If None, will use the first listed target.
+            diff_sending_or_receiving: Whether to compute differential expression of genes in cells with high or low
+                sending effect potential ("sending cells") or high or low receiving effect potential ("receiving
+                cells").
+            ligand: Ligand to use for differential expression analysis. Will take precedent over sender/receiver cell
+                type if also provided.
+            receptor: Optional receptor to use for differential expression analysis. Needed if
+                'diff_sending_or_receiving' is 'receiving'. Will take precedent over sender/receiver cell type if
+                also provided.
+            pathway: Optional pathway to use for differential expression analysis. Will use ligands and receptors in
+                these pathways to collectively compute signaling potential score. Will take precedent over
+                ligand/receptor and sender/receiver cell type if provided.
+            sender_cell_type: Sender cell type to use for differential expression analysis.
+            receiver_cell_type: Receiver cell type to use for differential expression analysis.
+            no_cell_type_markers: Whether to consider cell type markers during differential expression testing,
+                as these are least likely to be interesting patterns. Defaults to False, and if True will first
+                perform differential expression testing for each cell type group, removing significant results.
+            n_points: Number of points to sample when constructing the linear predictor, to enable evaluation of the
+                fitted GAM for each model
+            num_pcs: Number of PCs when performing PCA to cluster differential gene expression patterns
+            num_neighbors: Number of neighbors when constructing the KNN graph for leiden clustering
+            leiden_resolution: Resolution parameter for leiden clustering
+            top_n_genes: Optional integer- if provided, cluster only the top n genes by Wald statistic that represent
+                the genes that are most positively and most negatively enriched in relation to signaling effect
+                potential
+        """
+        GAM_adata, bs_obj = self.sender_receiver_effect_deg_detection(
+            target=target,
+            diff_sending_or_receiving=diff_sending_or_receiving,
+            ligand=ligand,
+            receptor=receptor,
+            pathway=pathway,
+            sender_cell_type=sender_cell_type,
+            receiver_cell_type=receiver_cell_type,
+            no_cell_type_markers=no_cell_type_markers,
+        )
+
+        GAM_adata_subset = self.group_sender_receiver_effect_degs(
+            GAM_adata=GAM_adata,
+            bs_obj=bs_obj,
+            n_points=n_points,
+            num_pcs=num_pcs,
+            num_neighbors=num_neighbors,
+            leiden_resolution=leiden_resolution,
+            top_n_genes=top_n_genes,
+        )
+
+        # Save final AnnData object- different naming convention depending on which signaling molecules or cell types
+        # were supplied:
+        if ligand is not None:
+            if receptor is not None:
+                GAM_adata_subset.write_h5ad(
+                    os.path.join(os.path.dirname(self.adata_path), f"{ligand}-{receptor}_effect_on_{target}_deg.h5ad")
+                )
+            else:
+                GAM_adata_subset.write_h5ad(
+                    os.path.join(os.path.dirname(self.adata_path), f"{ligand}_effect_on_{target}_deg.h5ad")
+                )
+        elif pathway is not None:
+            GAM_adata_subset.write_h5ad(
+                os.path.join(os.path.dirname(self.adata_path), f"{pathway}_effect_on_{target}_deg.h5ad")
+            )
+        elif sender_cell_type is not None:
+            if receiver_cell_type is not None:
+                GAM_adata_subset.write_h5ad(
+                    os.path.join(
+                        os.path.dirname(self.adata_path),
+                        f"{sender_cell_type}_effect_on_{target}_in_{receiver_cell_type}_deg.h5ad",
+                    )
+                )
+            else:
+                GAM_adata_subset.write_h5ad(
+                    os.path.join(os.path.dirname(self.adata_path), f"{sender_cell_type}_effect_on_{target}_deg.h5ad")
+                )
 
     def compute_cell_type_coupling(
         self,

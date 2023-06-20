@@ -322,6 +322,7 @@ class MuSIC:
         self.normalize = self.arg_retrieve.normalize
         self.smooth = self.arg_retrieve.smooth
         self.log_transform = self.arg_retrieve.log_transform
+        self.normalize_signaling = self.arg_retrieve.normalize_signaling
         self.target_expr_threshold = self.arg_retrieve.target_expr_threshold
         self.multicollinear_threshold = self.arg_retrieve.multicollinear_threshold
 
@@ -491,11 +492,24 @@ class MuSIC:
                 )
                 # target_sum to None to automatically determine suitable target sum:
                 self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
-                self.adata.X = (
-                    scipy.sparse.csr_matrix(np.round(self.adata.X))
-                    if scipy.sparse.issparse(self.adata.X)
-                    else np.round(self.adata.X)
-                )
+                # Round, except for the case where data would round down to zero-
+                if scipy.sparse.issparse(self.adata.X):
+                    mask_less_than_1 = self.adata.X < 1
+                    mask_greater_than_1 = self.adata.X >= 1
+
+                    mask_less_than_1_values = self.adata.X.copy()
+                    mask_greater_than_1_values = self.adata.X.copy()
+
+                    mask_less_than_1_values.data = np.ceil(mask_less_than_1_values.data)
+                    mask_greater_than_1_values.data = np.round(mask_greater_than_1_values.data)
+                    result = mask_less_than_1.multiply(mask_less_than_1_values) + mask_greater_than_1.multiply(
+                        mask_greater_than_1_values
+                    )
+
+                    self.adata.X = scipy.sparse.csr_matrix(result)
+
+                else:
+                    self.adata.X = np.where(self.adata.X < 1, np.ceil(self.adata.X), np.round(self.adata.X))
 
         # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
         if self.smooth:
@@ -527,6 +541,15 @@ class MuSIC:
                     "modeling."
                 )
                 self.adata.layers["X_log1p"] = log1p(self.adata)
+
+        # If distribution is Poisson or negative binomial, add pseudocount to each nonzero so that the min. is 2 and
+        # not 1- expression of 1 indicates some interaction has a positive effect, but the linear predictor that
+        # corresponds to this is 0, indicating no net effect:
+        if self.distr in ["poisson", "nb"]:
+            if scipy.sparse.issparse(self.adata.X):
+                self.adata.X.data += 1
+            else:
+                self.adata.X += 1
 
         # Construct initial arrays for CCI modeling:
         self.define_sig_inputs()
@@ -674,9 +697,12 @@ class MuSIC:
 
             # Log-scale ligand expression- to reduce the impact of very large values:
             self.ligands_expr = self.ligands_expr.applymap(np.log1p)
-            # self.ligands_expr = self.ligands_expr.apply(
-            #     lambda column: (column - column.min()) / (column.max() - column.min())
-            # )
+
+            if self.normalize_signaling:
+                # Normalize ligand expression to be between 0 and 1:
+                self.ligands_expr = self.ligands_expr.apply(
+                    lambda column: (column - column.min()) / (column.max() - column.min())
+                )
 
             # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
             # but store them in a temporary list to do so later because some may contribute to multiple complexes:
@@ -790,9 +816,12 @@ class MuSIC:
 
             # Log-scale receptor expression (to reduce the impact of very large values):
             self.receptors_expr = self.receptors_expr.applymap(np.log1p)
-            # self.receptors_expr = self.receptors_expr.apply(
-            #     lambda column: (column - column.min()) / (column.max() - column.min())
-            # )
+
+            if self.normalize_signaling:
+                # Normalize receptor expression to be between 0 and 1:
+                self.receptors_expr = self.receptors_expr.apply(
+                    lambda column: (column - column.min()) / (column.max() - column.min())
+                )
 
             # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
             # but store them in a temporary list to do so later because some may contribute to multiple complexes:
@@ -999,11 +1028,12 @@ class MuSIC:
             X_df = X_df.applymap(np.log1p)
 
             # Save design matrix:
-            if not os.path.exists(os.path.join(self.output_path, "design_matrix")):
-                os.makedirs(os.path.join(self.output_path, "design_matrix"))
-            X_df.to_csv(os.path.join(self.output_path, "design_matrix", "design_matrix.csv"))
+            if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix")):
+                os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix"))
+            X_df.to_csv(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"))
             self.logger.info(
-                f"Saving design matrix to {os.path.join(self.output_path, 'design_matrix', 'design_matrix.csv')}."
+                f"Saving design matrix to "
+                f"{os.path.join(os.path.splitext(self.output_path)[0], 'design_matrix', 'design_matrix.csv')}."
             )
 
             self.X = X_df.values
@@ -1262,7 +1292,9 @@ class MuSIC:
             if self.bw_fixed:
                 # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
                 min_dist = np.min(
-                    np.array([np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)])
+                    np.array(
+                        [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
+                    )
                 )
                 # Arbitrarily chosen limits:
                 self.minbw = min_dist * 2
@@ -1271,7 +1303,7 @@ class MuSIC:
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
                 if self.maxbw is None:
-                    self.maxbw = 20
+                    self.maxbw = 12
 
                 if self.minbw is None:
                     self.minbw = 3
@@ -1451,6 +1483,8 @@ class MuSIC:
                 pred_y = 0.0
             else:
                 pred_y = y_hat[i]
+                # Adjustment for the pseudocount added in preprocessing:
+                pred_y[pred_y <= 1.2] -= 1
 
             diagnostic = pred_y
             if isinstance(diagnostic, np.ndarray):
@@ -2109,7 +2143,13 @@ class MuSIC:
                         # Subtract 1 because in the case that all coefficients are zero, np.exp(linear predictor)
                         # will be 1 at minimum, though it should be zero.
                         y_pred = self.distr_obj.predict(y_pred)
-                        y_pred[y_pred <= 1.01] = 0.0
+
+                        # Subtract 1 from predictions for predictions that are close to 1- accounting for the
+                        # pseudocount from model setup:
+                        y_pred[y_pred <= 1.2] -= 1
+
+                        # thresh = 1.01 if self.normalize else 0
+                        # y_pred[y_pred <= thresh] = 0.0
                     y_pred = pd.DataFrame(y_pred, index=self.sample_names, columns=[target])
                     all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
                 return all_y_pred

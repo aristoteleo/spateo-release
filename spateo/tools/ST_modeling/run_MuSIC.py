@@ -110,6 +110,15 @@ def main():
 @click.option("smooth", default=False, is_flag=True)
 @click.option("log_transform", default=False, is_flag=True)
 @click.option(
+    "normalize_signaling",
+    default=False,
+    is_flag=True,
+    help="For ligand, receptor or L:R models, "
+    "normalize computed signaling values. This "
+    "should be used to find signaling effects that"
+    "may be mediated by rarer signals.",
+)
+@click.option(
     "covariate_keys",
     required=False,
     multiple=True,
@@ -218,6 +227,7 @@ def run(
     normalize,
     smooth,
     log_transform,
+    normalize_signaling,
     covariate_keys,
     bw,
     minbw,
@@ -281,6 +291,8 @@ def run(
         normalize: If True, the data will be normalized
         smooth: If True, the data will be smoothed
         log_transform: If True, the data will be log-transformed
+        normalize_signaling: If True, will minmax scale the signaling matrix- meant to find and characterize rarer
+            signaling patterns
         covariate_keys: Any number of keys to entry in .obs or .var_names of an AnnData object. Values here will
             be added to the model as covariates.
         bw: Bandwidth to use for spatial weights
@@ -409,6 +421,8 @@ def run(
         command += " -smooth "
     if log_transform:
         command += " -log_transform "
+    if normalize_signaling:
+        command += " -normalize_signaling "
     if covariate_keys is not None:
         command += " -covariate_keys "
         for key in covariate_keys:
@@ -458,3 +472,5 @@ if __name__ == "__main__":
 
 
 # ADD INTERPRETATION COMMANDS BELOW:
+# Note: for the interpretation command that clusters the sender-receiver effect DEGs, call a wrapper function that
+# first computes sender_receiver_effect_deg_detection, returns GAM_adata and bs_obj.
