@@ -97,6 +97,25 @@ class MuSIC_Interpreter(MuSIC):
         self.filter_targets = self.arg_retrieve.filter_targets
         self.filter_target_threshold = self.arg_retrieve.filter_target_threshold
 
+        # Get targets for the downstream ligand(s), receptor(s), target(s), etc. to use for analysis:
+        self.ligand_for_downstream = self.arg_retrieve.ligand_for_downstream
+        self.receptor_for_downstream = self.arg_retrieve.receptor_for_downstream
+        self.pathway_for_downstream = self.arg_retrieve.pathway_for_downstream
+        self.target_for_downstream = self.arg_retrieve.target_for_downstream
+        self.sender_ct_for_downstream = self.arg_retrieve.sender_ct_for_downstream
+        self.receiver_ct_for_downstream = self.arg_retrieve.receiver_ct_for_downstream
+
+        # Other downstream analysis-pertinent argparse arguments:
+        self.no_cell_type_markers = self.arg_retrieve.no_cell_type_markers
+        self.compute_pathway_effect = self.arg_retrieve.compute_pathway_effect
+        self.diff_sending_or_receiving = self.arg_retrieve.diff_sending_or_receiving
+        self.no_cell_type_markers = self.arg_retrieve.no_cell_type_markers
+        self.n_GAM_points = self.arg_retrieve.n_GAM_points
+        self.n_leiden_pcs = self.arg_retrieve.n_leiden_pcs
+        self.n_leiden_neighbors = self.arg_retrieve.n_leiden_neighbors
+        self.leiden_resolution = self.arg_retrieve.leiden_resolution
+        self.top_n_DE_genes = self.arg_retrieve.top_n_DE_genes
+
     def compute_coeff_significance(self, method: str = "fdr_bh", significance_threshold: float = 0.05):
         """Computes local statistical significance for fitted coefficients.
 
@@ -203,11 +222,37 @@ class MuSIC_Interpreter(MuSIC):
             normalized_effect_potential_sum_receiver: Array of shape [n_samples,]; for each receiving cell, the sum of
                 the signaling potential from all sender cells for a given target gene, normalized between 0 and 1.
         """
+
         if self.mod_type == "receptor":
             raise ValueError("Sent potential is not defined for receptor models.")
 
-        if target is None:
+        if target is None and self.target_for_downstream is not None:
+            target = self.target_for_downstream
+        else:
+            self.logger.info("Target gene not provided for :func `get_effect_potential`. Using first target listed.")
             target = list(self.coeffs.keys())[0]
+
+        # Check for valid inputs:
+        if ligand is None and self.ligand_for_downstream is not None:
+            ligand = self.ligand_for_downstream
+        else:
+            if self.mod_type == "ligand" or self.mod_type == "lr":
+                raise ValueError("Must provide ligand for ligand models.")
+
+        if receptor is None and self.receptor_for_downstream is not None:
+            receptor = self.receptor_for_downstream
+        else:
+            if self.mod_type == "lr":
+                raise ValueError("Must provide receptor for lr models.")
+
+        if sender_cell_type is None and self.sender_ct_for_downstream is not None:
+            sender_cell_type = self.sender_ct_for_downstream
+        else:
+            if self.mod_type == "niche":
+                raise ValueError("Must provide sender cell type for niche models.")
+
+        if receiver_cell_type is None and self.receiver_ct_for_downstream is not None:
+            receiver_cell_type = self.receiver_ct_for_downstream
 
         if spatial_weights is None:
             # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver.
@@ -343,7 +388,7 @@ class MuSIC_Interpreter(MuSIC):
 
     def get_pathway_potential(
         self,
-        pathway: str,
+        pathway: Optional[str] = None,
         target: Optional[str] = None,
         spatial_weights: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
         store_summed_potential: bool = True,
@@ -377,8 +422,16 @@ class MuSIC_Interpreter(MuSIC):
         # Columns consist of the spatial weights of each observation- convolve with expression of each ligand to
         # get proxy of ligand signal "sent", weight by the local coefficient value to get a proxy of the "signal
         # functionally received" in generating the downstream effect and store in .obsp.
-        if target is None:
-            target = self.coeffs.keys()[0]
+        if target is None and self.target_for_downstream is not None:
+            target = self.target_for_downstream
+        else:
+            self.logger.info("Target gene not provided for :func `get_effect_potential`. Using first target listed.")
+            target = list(self.coeffs.keys())[0]
+
+        if pathway is None and self.pathway_for_downstream is not None:
+            pathway = self.pathway_for_downstream
+        else:
+            raise ValueError("Must provide pathway to analyze.")
 
         lr_db_subset = self.lr_db[self.lr_db["pathway"] == pathway]
         all_senders = list(set(lr_db_subset["from"]))
@@ -480,15 +533,19 @@ class MuSIC_Interpreter(MuSIC):
         Args:
             targets: Optional string or list of strings to select targets from among the genes used to fit the model
                 to compute signaling effects for. If not given, will use all targets.
-            filter_targets: Whether to filter targets based on the :attr:`filter_target_threshold` value. This
-                threshold is based on the Pearson correlation w/ the true expression and should be between 0 and 1.
-            filter_target_threshold: Only used if 'filter_targets' is True. Threshold to use for filtering targets
-                based on the Pearson correlation of the reconstruction w/ the true expression
+            compute_pathway_effect: Whether to compute the effect potential for each pathway in the model. If True,
+                will collectively take the effect potential of all pathway components. If False, will compute effect
+                potential for each for each individual signal.
         """
         if not self.mod_type == "ligand" or self.mod_type == "lr":
             raise ValueError(
                 "Direction of effect can only be inferred if ligand expression is used as part of the " "model."
             )
+
+        if self.compute_pathway_effect is not None:
+            compute_pathway_effect = self.compute_pathway_effect
+        if self.target_for_downstream is not None:
+            targets = self.target_for_downstream
 
         # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
         # Note: as the default (if bw is not otherwise provided), the n nearest neighbors will be used for the
@@ -1053,7 +1110,6 @@ class MuSIC_Interpreter(MuSIC):
         adata_subset.uns["__type"] = "UMI"
         return adata_subset
 
-    @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
     def calc_and_group_sender_receiver_effect_degs(
         self,
         target: Optional[str] = None,
@@ -1063,11 +1119,11 @@ class MuSIC_Interpreter(MuSIC):
         pathway: Optional[str] = None,
         sender_cell_type: Optional[str] = None,
         receiver_cell_type: Optional[str] = None,
-        no_cell_type_markers: bool = False,
+        no_cell_type_markers: Optional[bool] = None,
         n_points: int = 50,
         num_pcs: int = 10,
         num_neighbors: int = 5,
-        leiden_resolution: float = 1.0,
+        leiden_resolution: float = 0.5,
         top_n_genes: Optional[int] = None,
     ):
         """Wrapper to find differential expression of genes in cells with high or low sent signaling effect potential,
@@ -1101,6 +1157,45 @@ class MuSIC_Interpreter(MuSIC):
                 the genes that are most positively and most negatively enriched in relation to signaling effect
                 potential
         """
+
+        # Input checks- if not manually provided, check argparse inputs (make sure an input was given from somewhere,
+        # though):
+        if self.diff_sending_or_receiving is not None:
+            diff_sending_or_receiving = self.diff_sending_or_receiving
+        if self.n_GAM_points is not None:
+            n_points = self.n_GAM_points
+        if self.n_leiden_pcs is not None:
+            num_pcs = self.n_leiden_pcs
+        if self.n_leiden_neighbors is not None:
+            num_neighbors = self.n_leiden_neighbors
+        if self.leiden_resolution is not None:
+            leiden_resolution = self.leiden_resolution
+        if self.top_n_DE_genes is not None:
+            top_n_genes = self.top_n_DE_genes
+        if self.no_cell_type_markers is not None:
+            no_cell_type_markers = self.no_cell_type_markers
+
+        if ligand is None and self.ligand_for_downstream is not None:
+            ligand = self.ligand_for_downstream
+        else:
+            if self.mod_type == "ligand" or self.mod_type == "lr":
+                raise ValueError("Must provide ligand for ligand models.")
+
+        if receptor is None and self.receptor_for_downstream is not None:
+            receptor = self.receptor_for_downstream
+        else:
+            if self.mod_type == "lr":
+                raise ValueError("Must provide receptor for lr models.")
+
+        if sender_cell_type is None and self.sender_ct_for_downstream is not None:
+            sender_cell_type = self.sender_ct_for_downstream
+        else:
+            if self.mod_type == "niche":
+                raise ValueError("Must provide sender cell type for niche models.")
+
+        if receiver_cell_type is None and self.receiver_ct_for_downstream is not None:
+            receiver_cell_type = self.receiver_ct_for_downstream
+
         GAM_adata, bs_obj = self.sender_receiver_effect_deg_detection(
             target=target,
             diff_sending_or_receiving=diff_sending_or_receiving,

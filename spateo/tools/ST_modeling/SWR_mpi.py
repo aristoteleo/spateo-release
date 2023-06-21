@@ -13,15 +13,172 @@ from spateo.tools.ST_modeling.MuSIC_upstream import MuSIC_target_selector
 np.random.seed(888)
 random.seed(888)
 
-if __name__ == "__main__":
-    # From the command line, run spatial GWR
 
+def define_spateo_argparse():
+    """Defines and returns MPI and argparse objects for model fitting and interpretation.
+
+    Parser arguments:
+        run_upstream: Flag to run the upstream target selection step. If True, will run the target selection step
+        adata_path: Path to AnnData object containing gene expression data. This or 'csv_path' must be given to run.
+        csv_path: Path to .csv file containing gene expression data. This or 'adata_path' must be given to run.
+        subsample: Flag to subsample the data. Recommended for large datasets (>5000 samples).
+        multiscale: Flag to create multiscale models. Currently, it is recommended to only create multiscale models
+            for Gaussian data.
+        multiscale_params_only: Flag to return additional metrics along with the coefficients for multiscale models (
+            specifying this argument sets Flag to True)
+        mod_type: The type of model that will be employed- this dictates how the data will be processed and
+            prepared. Options:
+                - "niche": Spatially-aware, uses categorical cell type labels as independent variables.
+                - "lr": Spatially-aware, essentially uses the combination of receptor expression in the "target" cell
+                    and spatially lagged ligand expression in the neighboring cells as independent variables.
+                - "ligand": Spatially-aware, essentially uses ligand expression in the neighboring cells as
+                    independent variables.
+                - "receptor": Uses receptor expression in the "target" cell as independent variables.
+        cci_dir: Path to directory containing cell-cell interaction databases
+        species: Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
+                "human", "mouse".
+        output_path: Full path name for the .csv file in which results will be saved. Make sure the parent directory
+            is empty- any existing files will be deleted. It is recommended to create a new folder to serve as the
+            output directory. This should be supplied of the form '/path/to/file.csv', where file.csv will store
+            coefficients. The name of the target will be appended at runtime.
+
+
+        custom_lig_path: Path to .txt file containing a custom list of ligands. Each ligand should have its own line
+            in the .txt file.
+        ligand: Alternative to the custom ligand path, can be used to provide a single ligand or a list of ligands (
+            separated by whitespace in the command line).
+        custom_rec_path: Path to .txt file containing a custom list of receptors. Each receptor should have its own
+            line in the .txt file.
+        receptor: Alternative to the custom receptor path, can be used to provide a single receptor or a list of
+            receptors (separated by whitespace in the command line).
+        custom_pathways_path: Path to .txt file containing a custom list of pathways. Each pathway should have its own
+            line in the .txt file.
+        pathway: Alternative to the custom pathway path, can be used to provide a single pathway or a list of pathways (
+            separated by whitespace in the command line).
+        targets_path: Path to .txt file containing a custom list of targets. Each target should have its own line in
+            the .txt file.
+        target: Alternative to the custom target path, can be used to provide a single target or a list of targets (
+            separated by whitespace in the command line).
+
+
+        init_betas_path: Optional path to a .json file or .csv file containing initial coefficient values for the model
+            for each target variable. If encoded in .json, keys should be target gene names, values should be numpy
+            arrays containing coefficients. If encoded in .csv, columns should be target gene names. Initial
+            coefficients should have shape [n_features, ].
+
+
+        normalize: Flag to perform library size normalization, to set total counts in each cell to the same
+            number (adjust for cell size). Will be set to True if provided.
+        smooth: Flag to correct for dropout effects by leveraging gene expression neighborhoods to smooth
+            expression. It is advisable not to do this if performing Poisson or negative binomial regression. Will
+            be set to True if provided.
+        log_transform: Flag for whether log-transformation should be applied to expression. It is advisable not to do
+            this if performing Poisson or negative binomial regression. Will be set to True if provided.
+        normalize_signaling: Flag to minmax scale the final ligand expression array (for :attr `mod_type` =
+            "ligand"), or the final ligand-receptor array (for :attr `mod_type` = "lr"). This is recommended to
+            associate downstream expression with rarer/less prevalent signaling mechanisms.
+        target_expr_threshold: Only used when automatically selecting targets- finds the L:R-downstream TFs and their
+            targets and searches for expression above a threshold proportion of cells to filter to a subset of
+            candidate target genes. This argument sets that proportion, and defaults to 0.2.
+        multicollinear_threshold: Variance inflation factor threshold used to filter out multicollinear features. A
+            value of 5 or 10 is recommended.
+
+
+        coords_key: Entry in :attr:`adata` .obsm that contains spatial coordinates. Defaults to "spatial".
+        group_key: Entry in :attr:`adata` .obs that contains cell type labels. Defaults to "cell_type".
+        group_subset: Subset of cell types to include in the model (provided as a whitespace-separated list in
+            command line). If given, will consider only cells of these types in modeling. Defaults to all cell types.
+        covariate_keys: Entries in :attr:`adata` .obs or :attr:`adata` .var that contain covariates to include
+            in the model. Can be provided as a whitespace-separated list in the command line.
+
+
+        bw: Bandwidth for kernel density estimation. Consists of either a distance value or N for the number of
+            nearest neighbors, depending on :attr:`bw_fixed`
+        minbw: For use in automated bandwidth selection- the lower-bound bandwidth to test.
+        maxbw: For use in automated bandwidth selection- the upper-bound bandwidth to test.
+        bw_fixed: Flag to use a fixed bandwidth (True) or to automatically select a bandwidth (False). This should be
+            True if the input to/values to test for :attr:`bw` are distance values, and False if they are numbers of
+            neighbors.
+        exclude_self: Flag to exclude the target cell from the neighborhood when computing spatial weights. Note that
+            if True and :attr:`bw` is defined by the number of neighbors, your desired bw should be 1 + the number of
+            neighbors you want to include.
+
+
+        kernel: Type of kernel function used to weight observations; one of "bisquare", "exponential", "gaussian",
+            "quadratic", "triangular" or "uniform".
+        n_neighbors: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the neighboring
+            cells- this defines the number of cells to use. A value of 10 should typically capture the region where
+            the majority of the signaling is sourced from.
+        distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb"
+
+
+        fit_intercept: Flag to fit an intercept term in the model. Will be set to True if provided.
+        no_hurdle: By default, a hurdle model will be used to account for the zero-inflated nature of single-cell
+            data. To skip this step, set this flag.
+
+
+        tolerance: Convergence tolerance for IWLS
+        max_iter: Maximum number of iterations for IWLS
+        patience: When checking various values for the bandwidth, this is the number of iterations to wait for
+            without the score changing before stopping. Defaults to 5.
+        ridge_lambda: Sets the strength of the regularization, between 0 and 1. The higher values typically will
+            result in more features removed.
+
+
+        search_bw: For downstream analysis; specifies the bandwidth to search for senders/receivers. Recommended to
+            set equal to the bandwidth of a fitted model.
+        filter_targets: For downstream analysis, specifically :func `infer_effect_direction`; if True, will subset to
+            only the targets that were predicted well by the model.
+        filter_target_threshold: For downstream analysis, specifically :func `infer_effect_direction`; specifies the
+            threshold Pearson coefficient for target subsetting. Only used if `filter_targets` is True.
+        diff_sending_or_receiving: For downstream analyses, specifically :func
+            `sender_receiver_effect_deg_detection`; specifies whether to compute differential expression of genes in
+            cells with high or low sending effect potential ('sending cells') or high or low receiving effect
+            potential ('receiving cells').
+        target_for_downstream: A string or a list (provided as a whitespace-separated list in the command line) of
+            target genes for :func `get_effect_potential`, :func `get_pathway_potential` and :func
+             `calc_and_group_sender_receiver_effect_degs` (provide only one target), as well as :func
+             `compute_cell_type_coupling` (can provide multiple targets).
+        ligand_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
+            `calc_and_group_sender_receiver_effect_degs`, used to specify the ligand gene to consider with respect
+            to the target.
+        receptor_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
+            `calc_and_group_sender_receiver_effect_degs`, used to specify the receptor gene to consider with respect
+            to the target.
+        pathway_for_downstream: For downstream analyses; used for :func `get_pathway_potential` and :func
+            `calc_and_group_sender_receiver_effect_degs`, used to specify the pathway to consider with respect to
+            the target.
+        sender_ct_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
+            `calc_and_group_sender_receiver_effect_degs`, used to specify the cell type to consider as a sender.
+        receiver_ct_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
+            `calc_and_group_sender_receiver_effect_degs`, used to specify the cell type to consider as a receiver.
+        no_cell_type_markers: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+            if True, will exclude cell type markers from the set of genes for which to compare to sent/received signal.
+        compute_pathway_effect: For downstream analyses; used for :func `inferred_effect_direction`; if True,
+            will summarize the effects of all ligands/ligand-receptor interactions in a pathway.
+        n_GAM_points: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+            specifies the number of points to sample along the spline function when evaluating a fitted GAM model.
+        num_leiden_pcs: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+            specifies the number of principal components to use when computing partitioning for the discovered
+            differentially expressed genes.
+        num_leiden_neighbors: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+            specifies the number of neighbors to use when computing partitioning for the discovered differentially
+            expressed genes.
+        leiden_resolution: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+            specifies the resolution parameter to use for Leiden partitioning.
+        top_n_DE_genes: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`; if
+            given, will restrict the number of genes that are clustered and displayed on the final plot. Note that
+            if there are more than 200 differentially expressed genes, the program will automatically use 200 for
+            this parameter.
+
+    Returns:
+        comm: MPI comm object for parallel processing
+        parser: Argparse object defining important arguments for model fitting and interpretation
+    """
     # Initialize MPI
     comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
 
-    parser = argparse.ArgumentParser(description="Spatial GWR")
+    parser = argparse.ArgumentParser(description="MuSIC arguments")
 
     # Temporary- for selection of targets/predictors:
     parser.add_argument("-run_upstream", action="store_true")
@@ -42,7 +199,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-multiscale",
         action="store_true",
-        help="Currently, it is recommended to only create " "multiscale models for Gaussian regression models.",
+        help="Currently, it is recommended to only create multiscale models for Gaussian regression models.",
     )
     # Flag to return additional metrics along with the coefficients for multiscale models.
     parser.add_argument("-multiscale_params_only", action="store_true")
@@ -66,43 +223,12 @@ if __name__ == "__main__":
         type=str,
         help="Alternative to the custom ligand path, can be used to provide a custom list of ligands.",
     )
-    parser.add_argument(
-        "-fit_ligands_grn",
-        action="store_true",
-        help="Set True to indicate that ligands should be "
-        "included in the GRN model. If True and path to"
-        "custom ligands list is not given, will"
-        "automatically find ligands from the data. If False,"
-        "will not include ligands in the GRN model.",
-    )
     parser.add_argument("-custom_rec_path", type=str)
     parser.add_argument(
         "-receptor",
         nargs="+",
         type=str,
         help="Alternative to the custom receptor path, can be used to provide a custom list of receptors.",
-    )
-    parser.add_argument(
-        "-fit_receptors_grn",
-        action="store_true",
-        help="Set True to indicate that receptors should be "
-        "included in the GRN model. If True and path to"
-        "custom receptors list is not given, will"
-        "automatically find receptors from the data. If False, "
-        "will not include receptors in the GRN model.",
-    )
-    parser.add_argument(
-        "-custom_regulators_path",
-        type=str,
-        help="Only used for GRN models. This file contains a list of TFs (or other regulatory molecules)"
-        "to constitute the independent variable block.",
-    )
-    parser.add_argument(
-        "-tf",
-        nargs="+",
-        type=str,
-        help="Alternative to the custom receptor path, can be used to provide a custom list of transcription factors "
-        "or other regulatory molecules.",
     )
     parser.add_argument("-custom_pathways_path", type=str)
     parser.add_argument(
@@ -193,7 +319,7 @@ if __name__ == "__main__":
 
     parser.add_argument("-distr", default="gaussian", type=str)
     parser.add_argument("-fit_intercept", action="store_true")
-    parser.add_argument("-include_offset", action="store_true")
+    # parser.add_argument("-include_offset", action="store_true")
     parser.add_argument(
         "-no_hurdle",
         action="store_true",
@@ -219,13 +345,6 @@ if __name__ == "__main__":
         help="Used for downstream analyses; specifies the bandwidth to search for "
         "senders/receivers. Recommended to set equal to the bandwidth of a fitted "
         "model.",
-    )
-    parser.add_argument(
-        "-top_k_receivers",
-        default=10,
-        type=int,
-        help="Used for downstream analyses, specifically :func `infer_effect_direction`; specifies the number of top "
-        "senders/receivers to consider for each cell.",
     )
     parser.add_argument(
         "-filter_targets",
@@ -293,6 +412,57 @@ if __name__ == "__main__":
         help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if True, will exclude cell type markers "
         "from the set of genes for which to compare to sent/received signal.",
     )
+    parser.add_argument(
+        "-compute_pathway_effect",
+        action="store_true",
+        help="Used for :func `inferred_effect_direction`; if True, will summarize the effects of all "
+        "ligands/ligand-receptor interactions in a pathway.",
+    )
+    parser.add_argument(
+        "-n_GAM_points",
+        default=50,
+        type=int,
+        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of points to sample "
+        "along the spline function when evaluating a fitted GAM model.",
+    )
+    parser.add_argument(
+        "-num_leiden_pcs",
+        default=10,
+        type=int,
+        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of principal "
+        "components to use when computing partitioning for the discovered differentially expressed genes.",
+    )
+    parser.add_argument(
+        "-num_leiden_neighbors",
+        default=5,
+        type=int,
+        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of neighbors to use "
+        "when computing partitioning for the discovered differentially expressed genes.",
+    )
+    parser.add_argument(
+        "-leiden_resolution",
+        default=0.5,
+        type=float,
+        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the resolution parameter to use "
+        "for Leiden partitioning.",
+    )
+    parser.add_argument(
+        "-top_n_DE_genes",
+        type=int,
+        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if given, will restrict the number of "
+        "genes that are clustered and displayed on the final plot. Note that if there are more than 200 "
+        "differentially expressed genes, the program will automatically use 200 for this parameter.",
+    )
+
+    return comm, parser
+
+
+if __name__ == "__main__":
+    # From the command line, run spatial GWR
+    comm, parser = define_spateo_argparse()
+
+    rank = comm.Get_rank()
+    size = comm.Get_size()
 
     t1 = MPI.Wtime()
 

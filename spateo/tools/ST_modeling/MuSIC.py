@@ -72,16 +72,20 @@ class MuSIC:
         csv_path: Can also be used to specify path to non-AnnData .csv object. Assumes the first three columns
             contain x- and y-coordinates and then dependent variable values, in that order, with all subsequent
             columns containing independent variable values.
-        normalize: Set True to Perform library size normalization, to set total counts in each cell to the same
-            number (adjust for cell size). It is advisable not to do this if performing Poisson or negative binomial
-            regression.
+        normalize: Set True to perform library size normalization, to set total counts in each cell to the same
+            number (adjust for cell size).
         smooth: Set True to correct for dropout effects by leveraging gene expression neighborhoods to smooth
             expression. It is advisable not to do this if performing Poisson or negative binomial regression.
         log_transform: Set True if log-transformation should be applied to expression. It is advisable not to do
             this if performing Poisson or negative binomial regression.
+        normalize_signaling: Set True to minmax scale the final ligand expression array (for :attr `mod_type` =
+            "ligand"), or the final ligand-receptor array (for :attr `mod_type` = "lr"). This is recommended to
+            associate downstream expression with rarer/less prevalent signaling mechanisms.
         target_expr_threshold: Only used if :param `mod_type` is "lr" or "ligand" and :param `targets_path` is not
             given. When manually selecting targets, expression above a threshold percentage of cells will be used to
             filter to a smaller subset of interesting genes. Defaults to 0.2.
+        multicollinear_threshold: Variance inflation factor threshold used to filter out multicollinear features. A
+            value of 5 or 10 is recommended.
 
 
         custom_lig_path: Optional path to a .txt file containing a list of ligands for the model, separated by
@@ -124,9 +128,8 @@ class MuSIC:
 
 
         bw: Used to provide previously obtained bandwidth for the spatial kernel. Consists of either a distance
-            value or N for the number of nearest neighbors. Can be obtained using BW_Selector or some other
-            user-defined method. Pass "np.inf" if all other points should have the same spatial weight. Defaults to
-            1000 if not provided.
+            value or N for the number of nearest neighbors. Pass "np.inf" if all other points should have the same
+            spatial weight.
         minbw: For use in automated bandwidth selection- the lower-bound bandwidth to test.
         maxbw: For use in automated bandwidth selection- the upper-bound bandwidth to test.
 
@@ -1927,12 +1930,12 @@ class MuSIC:
         if X is None:
             X = self.X
 
-        # Compute offset if included:
-        if self.include_offset:
-            self.offset = library_scaling_factors(counts=self.adata.X, distr=self.distr)
-        else:
-            self.offset = None
-        self.offset = self.comm.bcast(self.offset, root=0)
+        # # Compute offset if included:
+        # if self.include_offset:
+        #     self.offset = library_scaling_factors(counts=self.adata.X, distr=self.distr)
+        # else:
+        #     self.offset = None
+        # self.offset = self.comm.bcast(self.offset, root=0)
 
         # Compute fit for each column of the dependent variable array individually- store each output array (if
         # applicable, i.e. if :param `multiscale` is True) and optimal bandwidth (also if applicable, i.e. if :param
@@ -2109,6 +2112,13 @@ class MuSIC:
             if data is not None:
                 all_data[target] = data
             all_bws[target] = optimal_bw
+
+        index = "fixed" if self.bw_fixed else "variable"
+        all_bws_df = pd.DataFrame(all_bws, index=[index])
+
+        if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "bandwidths")):
+            os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "bandwidths"))
+        all_bws_df.to_csv(os.path.join(os.path.splitext(self.output_path)[0], "bandwidths", "optimal_bandwidths.csv"))
 
         return all_data, all_bws
 
@@ -2357,24 +2367,27 @@ class VMuSIC(MuSIC):
                     and spatially lagged ligand expression in the neighboring cells as independent variables.
                 - "ligand": Spatially-aware, essentially uses ligand expression in the neighboring cells as
                     independent variables.
-                - "receptor": Non-spatially-aware, uses receptor expression in the "target" cell as independent
-                    variables
+                - "receptor": Uses receptor expression in the "target" cell as independent variables.
 
 
         adata_path: Path to the AnnData object from which to extract data for modeling
         csv_path: Can also be used to specify path to non-AnnData .csv object. Assumes the first three columns
             contain x- and y-coordinates and then dependent variable values, in that order, with all subsequent
             columns containing independent variable values.
-        normalize: Set True to Perform library size normalization, to set total counts in each cell to the same
-            number (adjust for cell size). It is advisable not to do this if performing Poisson or negative binomial
-            regression.
+        normalize: Set True to perform library size normalization, to set total counts in each cell to the same
+            number (adjust for cell size).
         smooth: Set True to correct for dropout effects by leveraging gene expression neighborhoods to smooth
             expression. It is advisable not to do this if performing Poisson or negative binomial regression.
         log_transform: Set True if log-transformation should be applied to expression. It is advisable not to do
             this if performing Poisson or negative binomial regression.
+        normalize_signaling: Set True to minmax scale the final ligand expression array (for :attr `mod_type` =
+            "ligand"), or the final ligand-receptor array (for :attr `mod_type` = "lr"). This is recommended to
+            associate downstream expression with rarer/less prevalent signaling mechanisms.
         target_expr_threshold: Only used if :param `mod_type` is "lr" or "ligand" and :param `targets_path` is not
             given. When manually selecting targets, expression above a threshold percentage of cells will be used to
             filter to a smaller subset of interesting genes. Defaults to 0.2.
+        multicollinear_threshold: Variance inflation factor threshold used to filter out multicollinear features. A
+            value of 5 or 10 is recommended.
 
 
         custom_lig_path: Optional path to a .txt file containing a list of ligands for the model, separated by
@@ -2417,9 +2430,8 @@ class VMuSIC(MuSIC):
 
 
         bw: Used to provide previously obtained bandwidth for the spatial kernel. Consists of either a distance
-            value or N for the number of nearest neighbors. Can be obtained using BW_Selector or some other
-            user-defined method. Pass "np.inf" if all other points should have the same spatial weight. Defaults to
-            1000 if not provided.
+            value or N for the number of nearest neighbors. Pass "np.inf" if all other points should have the same
+            spatial weight.
         minbw: For use in automated bandwidth selection- the lower-bound bandwidth to test.
         maxbw: For use in automated bandwidth selection- the upper-bound bandwidth to test.
 

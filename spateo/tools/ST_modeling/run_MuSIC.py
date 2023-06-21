@@ -73,21 +73,6 @@ def main():
 @click.option("receptor", required=False, multiple=True)
 @click.option("custom_pathways_path", required=False)
 @click.option("pathway", required=False, multiple=True)
-@click.option(
-    "custom_regulators_path",
-    required=False,
-    help="Only used for GRN models. This file contains a list "
-    "of TFs (or other regulatory molecules)"
-    "to constitute the independent variable block.",
-)
-# @click.option(
-#     "tf",
-#     required=False,
-#     multiple=True,
-#     help="Only used for GRN models. Each input specified using this "
-#     "is a TF (or other regulatory molecule) to constitute the "
-#     "independent variable block.",
-# )
 @click.option("targets_path", required=False)
 @click.option("target", required=False, multiple=True)
 @click.option(
