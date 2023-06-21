@@ -1,6 +1,7 @@
 import argparse
 import random
 import sys
+from collections.abc import Iterable
 
 import numpy as np
 from mpi4py import MPI
@@ -18,8 +19,11 @@ np.random.seed(888)
 random.seed(888)
 
 
-def define_spateo_argparse():
+def define_spateo_argparse(**kwargs):
     """Defines and returns MPI and argparse objects for model fitting and interpretation.
+
+    Args:
+        kwargs: Keyword arguments for any of the argparse arguments defined below.
 
     Parser arguments:
         run_upstream: Flag to run the upstream target selection step. If True, will run the target selection step
@@ -184,288 +188,328 @@ def define_spateo_argparse():
     # Initialize MPI
     comm = MPI.COMM_WORLD
 
+    arg_dict = {
+        "-run_upstream": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+        },
+        "-adata_path": {
+            "type": str,
+        },
+        "-csv_path": {
+            "type": str,
+            "help": "Can be used to provide a .csv file, containing gene expression data or any other kind of data. "
+            "Assumes the first three columns contain x- and y-coordinates and then dependent variable "
+            "values, in that order.",
+        },
+        "-subsample": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+            "help": "Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
+        },
+        "-multiscale": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+            "help": "Currently, it is recommended to only create multiscale models for Gaussian regression models.",
+        },
+        "-multiscale_params_only": {
+            "type": bool,
+            "default": False,
+            "action": "store_true",
+        },
+        "-mod_type": {
+            "type": str,
+            "default": "niche",
+        },
+        "-cci_dir": {"type": str},
+        "-species": {"type": str, "default": "human"},
+        "-output_path": {
+            "type": str,
+            "default": "./output/stgwr_results.csv",
+            "help": "Path to output file. Make sure the parent directory is empty- "
+            "any existing files will be deleted. It is recommended to create "
+            "a new folder to serve as the output directory. This should be "
+            "supplied of the form '/path/to/file.csv', where file.csv will "
+            "store coefficients. The name of the target will be appended at runtime.",
+        },
+        "-custom_lig_path": {"type": str},
+        "-ligand": {
+            "nargs": "+",
+            "type": str,
+            "help": "Alternative to the custom ligand path, can be used to provide a custom list of ligands.",
+        },
+        "-custom_rec_path": {"type": str},
+        "-receptor": {
+            "nargs": "+",
+            "type": str,
+            "help": "Alternative to the custom receptor path, can be used to provide a custom list of receptors.",
+        },
+        "-custom_pathways_path": {"type": str},
+        "-pathway": {
+            "nargs": "+",
+            "type": str,
+            "help": "Alternative to the custom pathway path, can be used to provide a custom list of pathways.",
+        },
+        "-targets_path": {"type": str},
+        "-target": {
+            "nargs": "+",
+            "type": str,
+            "help": "Alternative to the custom target path, can be used to provide a custom list of target molecules.",
+        },
+        "-init_betas_path": {"type": str},
+        "-normalize": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+        },
+        "-smooth": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+        },
+        "-log_transform": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+        },
+        "-normalize_signaling": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+            "help": "For ligand, receptor or L:R models, normalize computed signaling values. This should be used to "
+            "find signaling effects that may be mediated by rarer signals.",
+        },
+        "-target_expr_threshold": {
+            "default": 0.05,
+            "type": float,
+            "help": "For automated selection, the threshold proportion of cells for which transcript "
+            "needs to be expressed in to be selected as a target of interest. Not used if 'targets_path' is not None.",
+        },
+        "-multicollinear_threshold": {
+            "type": float,
+            "help": "Used only if `mod_type` is 'slice'. If this argument is provided, independent variables that are "
+            "highly correlated will be filtered out based on variance inflation factor threshold. A value "
+            "of 5 or 10 is recommended. This can be useful in reducing computation time.",
+        },
+        "-coords_key": {"default": "spatial", "type": str},
+        "-group_key": {
+            "default": "cell_type",
+            "type": str,
+            "help": "Key to entry in .obs containing cell type "
+            "or other category labels. Required if "
+            "'mod_type' is 'niche' or 'slice'.",
+        },
+        "-group_subset": {
+            "nargs": "+",
+            "type": str,
+            "help": "If provided, only cells with labels that correspond to these group(s) will be used as prediction "
+            "targets. Will search in key corresponding to the input to arg 'cell_type' if given.",
+        },
+        "-covariate_keys": {
+            "nargs": "+",
+            "type": str,
+            "help": "Any number of keys to entry in .obs or .var_names of an "
+            "AnnData object. Values here will be added to"
+            "the model as covariates.",
+        },
+        "-bw": {
+            "type": float,
+        },
+        "-minbw": {
+            "type": float,
+        },
+        "-maxbw": {
+            "type": float,
+        },
+        "-bw_fixed": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+            "help": "If this argument is provided, the bandwidth will be interpreted as a distance during kernel "
+            "operations. If not, it will be interpreted as the number of nearest neighbors.",
+        },
+        "-exclude_self": {
+            "type": bool,
+            "action": "store_true",
+            "help": "When computing spatial weights, do not count the cell itself as a neighbor. Recommended to set to "
+            "True for the CCI models because the independent variable array is also spatially-dependent.",
+        },
+        "-kernel": {"default": "bisquare", "type": str},
+        "-n_neighbors": {
+            "default": 10,
+            "type": int,
+            "help": "Only used if `mod_type` is 'niche', to define the number of neighbors to consider for each "
+            "cell when defining the independent variable array.",
+        },
+        "-distr": {"default": "gaussian", "type": str},
+        "-fit_intercept": {"type": bool, "action": "store_true", "default": False},
+        "-no_hurdle": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+            "help": "If True, do not implement spatially-weighted hurdle model- will only perform generalized linear "
+            "modeling.",
+        },
+        "-tolerance": {"default": 1e-3, "type": float},
+        "-max_iter": {"default": 500, "type": int},
+        "-patience": {"default": 5, "type": int},
+        "-ridge_lambda": {"type": float},
+        "-chunks": {
+            "default": 1,
+            "type": int,
+            "help": "For use if `multiscale` is True- increase the number of parallel processes. Can be used to help "
+            "prevent memory from running out, otherwise keep as low as possible.",
+        },
+        # Downstream arguments:
+        "-search_bw": {
+            "type": float,
+            "help": "Used for downstream analyses; specifies the bandwidth to search for "
+            "senders/receivers. Recommended to set equal to the bandwidth of a fitted "
+            "model.",
+        },
+        "-top_k_receivers": {
+            "default": 10,
+            "type": int,
+            "help": "Used for downstream analyses, specifically for :func `define_effect_vf`; specifies the number of "
+            "nearest neighbors to consider when computing signaling effect vectors.",
+        },
+        "-filter_targets": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+            "help": "Used for downstream analyses, specifically :func `infer_effect_direction`; if True, will subset to only "
+            "the targets that were predicted well by the model.",
+        },
+        "-filter_targets_threshold": {
+            "default": 0.65,
+            "type": float,
+            "help": "Used for downstream analyses, specifically :func `infer_effect_direction`; specifies the threshold "
+            "Pearson coefficient for target subsetting. Only used if `filter_targets` is True.",
+        },
+        "-diff_sending_or_receiving": {
+            "default": "sending",
+            "type": str,
+            "help": "Used for downstream analyses, specifically :func `sender_receiver_effect_deg_detection`; specifies "
+            "whether to compute differential expression of genes in cells with high or low sending effect potential "
+            "('sending cells') or high or low receiving effect potential ('receiving cells').",
+        },
+        "-target_for_downstream": {
+            "nargs": "+",
+            "type": str,
+            "help": "Used for :func `get_effect_potential`, :func `get_pathway_potential` and :func "
+            "`calc_and_group_sender_receiver_effect_degs` (provide only one target), as well as :func "
+            "`compute_cell_type_coupling` (can provide multiple targets). Used to specify the target "
+            "gene(s) to analyze with these functions.",
+        },
+        "-ligand_for_downstream": {
+            "type": str,
+            "help": "Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
+            "used to specify the ligand gene to consider with respect to the target.",
+        },
+        "-receptor_for_downstream": {
+            "type": str,
+            "help": "Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
+            "used to specify the receptor gene to consider with respect to the target.",
+        },
+        "-pathway_for_downstream": {
+            "type": str,
+            "help": "Used for :func `get_pathway_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
+            "used to specify the pathway to consider with respect to the target.",
+        },
+        "-sender_ct_for_downstream": {
+            "type": str,
+            "help": "Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
+            "used to specify the cell type to consider as a sender.",
+        },
+        "-receiver_ct_for_downstream": {
+            "type": str,
+            "help": "Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
+            "used to specify the cell type to consider as a receiver.",
+        },
+        "-no_cell_type_markers": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; if True, will exclude cell type "
+            "markers from the set of genes for which to compare to sent/received signal.",
+        },
+        "-compute_pathway_effect": {
+            "type": bool,
+            "action": "store_true",
+            "default": False,
+            "help": "Used for :func `inferred_effect_direction`; if True, will summarize the effects of all "
+            "ligands/ligand-receptor interactions in a pathway.",
+        },
+        "-n_GAM_points": {
+            "default": 50,
+            "type": int,
+            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of points to "
+            "sample along the spline function when evaluating a fitted GAM model.",
+        },
+        "-num_leiden_pcs": {
+            "default": 10,
+            "type": int,
+            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of principal "
+            "components to use when computing partitioning for the discovered differentially expressed genes.",
+        },
+        "-num_leiden_neighbors": {
+            "default": 5,
+            "type": int,
+            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of neighbors to "
+            "use when computing partitioning for the discovered differentially expressed genes.",
+        },
+        "-leiden_resolution": {
+            "default": 0.5,
+            "type": float,
+            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the resolution parameter to"
+            "use for Leiden partitioning.",
+        },
+        "-top_n_DE_genes": {
+            "type": int,
+            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; if given, will restrict the number "
+            "of genes that are clustered and displayed on the final plot. Note that if there are more than 200 "
+            "differentially expressed genes, the program will automatically use 200 for this parameter.",
+        },
+    }
+
+    # Update kwargs to match the argparse signature:
+    kwargs = {f"-{key}": value for key, value in kwargs.items()}
+
+    # Iterate over the keyword items to validate the form of the given arguments:
+    for key, value in kwargs.items():
+        if key not in arg_dict.keys():
+            raise ValueError(f"Argument {key} not recognized. Please check the documentation for valid arguments.")
+
+        arg_info = arg_dict[key]
+        arg_type = arg_info.get("type")
+        if arg_type is not None:
+            if not isinstance(value, arg_type):
+                raise TypeError(f"Argument {key} must be of type {arg_type}.")
+
+        if arg_info.get("action") == "store_true" and not isinstance(value, bool):
+            raise TypeError(f"Argument {key} must be of type bool.")
+
+        # Check for iterable to allow input to be set, list, tuple, etc. Also a single string is fine.
+        if arg_info.get("nargs") is not None:
+            if not isinstance(value, Iterable):
+                raise TypeError(f"Argument {key} must be an iterable.")
+
+            element_type = type(next(iter(value)))
+            if not all(isinstance(element, element_type) for element in value):
+                raise TypeError(f"Argument {key} must be an iterable containing values of type {element_type}.")
+
+    # Update the argument dictionary with arguments from kwargs:
+    arg_dict.update(kwargs)
+
+    # Initialize parser:
     parser = argparse.ArgumentParser(description="MuSIC arguments")
 
-    # Temporary- for selection of targets/predictors:
-    parser.add_argument("-run_upstream", action="store_true")
-
-    parser.add_argument("-adata_path", type=str)
-    parser.add_argument(
-        "-csv_path",
-        type=str,
-        help="Can be used to provide a .csv file, containing gene expression data or any other kind of data. "
-        "Assumes the first three columns contain x- and y-coordinates and then dependent variable "
-        "values, in that order.",
-    )
-    parser.add_argument(
-        "-subsample",
-        action="store_true",
-        help="Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
-    )
-    parser.add_argument(
-        "-multiscale",
-        action="store_true",
-        help="Currently, it is recommended to only create multiscale models for Gaussian regression models.",
-    )
-    # Flag to return additional metrics along with the coefficients for multiscale models.
-    parser.add_argument("-multiscale_params_only", action="store_true")
-    parser.add_argument("-mod_type", type=str, default="niche")
-    parser.add_argument("-cci_dir", type=str)
-    parser.add_argument("-species", type=str, default="human")
-    parser.add_argument(
-        "-output_path",
-        default="./output/stgwr_results.csv",
-        type=str,
-        help="Path to output file. Make sure the parent directory is empty- "
-        "any existing files will be deleted. It is recommended to create "
-        "a new folder to serve as the output directory. This should be "
-        "supplied of the form '/path/to/file.csv', where file.csv will "
-        "store coefficients. The name of the target will be appended at runtime.",
-    )
-    parser.add_argument("-custom_lig_path", type=str)
-    parser.add_argument(
-        "-ligand",
-        nargs="+",
-        type=str,
-        help="Alternative to the custom ligand path, can be used to provide a custom list of ligands.",
-    )
-    parser.add_argument("-custom_rec_path", type=str)
-    parser.add_argument(
-        "-receptor",
-        nargs="+",
-        type=str,
-        help="Alternative to the custom receptor path, can be used to provide a custom list of receptors.",
-    )
-    parser.add_argument("-custom_pathways_path", type=str)
-    parser.add_argument(
-        "-pathway",
-        nargs="+",
-        type=str,
-        help="Alternative to the custom pathway path, can be used to provide a custom list of pathways.",
-    )
-    parser.add_argument("-targets_path", type=str)
-    parser.add_argument(
-        "-target",
-        nargs="+",
-        type=str,
-        help="Alternative to the custom target path, can be used to provide a custom list of target molecules.",
-    )
-    parser.add_argument("-init_betas_path", type=str)
-
-    parser.add_argument("-normalize", action="store_true")
-    parser.add_argument("-smooth", action="store_true")
-    parser.add_argument("-log_transform", action="store_true")
-    parser.add_argument("-normalize_signaling", action="store_true", help="Set True to ")
-    parser.add_argument(
-        "-target_expr_threshold",
-        default=0.05,
-        type=float,
-        help="For automated selection, the threshold proportion of cells for which transcript "
-        "needs to be expressed in to be selected as a target of interest. Not used if 'targets_path' is not None.",
-    )
-    parser.add_argument(
-        "-multicollinear_threshold",
-        type=float,
-        help="Used only if `mod_type` is 'slice'. If this argument is provided, independent variables that are highly "
-        "correlated will be filtered out based on variance inflation factor threshold. A value of 5 or 10 is "
-        "recommended. This can be useful in reducing computation time.",
-    )
-
-    parser.add_argument("-coords_key", default="spatial", type=str)
-    parser.add_argument(
-        "-group_key",
-        default="cell_type",
-        type=str,
-        help="Key to entry in .obs containing cell type "
-        "or other category labels. Required if "
-        "'mod_type' is 'niche' or 'slice'.",
-    )
-    parser.add_argument(
-        "-group_subset",
-        nargs="+",
-        type=str,
-        help="If provided, only cells with labels that correspond to these group(s) will be used as prediction "
-        "targets. Will search in key corresponding to the input to arg 'cell_type' if given.",
-    )
-    parser.add_argument(
-        "-covariate_keys",
-        nargs="+",
-        type=str,
-        help="Any number of keys to entry in .obs or .var_names of an "
-        "AnnData object. Values here will be added to"
-        "the model as covariates.",
-    )
-
-    parser.add_argument("-bw")
-    parser.add_argument("-minbw")
-    parser.add_argument("-maxbw")
-    parser.add_argument(
-        "-bw_fixed",
-        action="store_true",
-        help="If this argument is provided, the bandwidth will be "
-        "interpreted as a distance during kernel operations. If not, it will be interpreted "
-        "as the number of nearest neighbors.",
-    )
-    parser.add_argument(
-        "-exclude_self",
-        action="store_true",
-        help="When computing spatial weights, do not count the "
-        "cell itself as a neighbor. Recommended to set to "
-        "True for the CCI models because the independent "
-        "variable array is also spatially-dependent.",
-    )
-    parser.add_argument("-kernel", default="bisquare", type=str)
-    parser.add_argument(
-        "-n_neighbors",
-        default=10,
-        type=int,
-        help="Only used if `mod_type` is 'niche', to define the number of neighbors "
-        "to consider for each cell when defining the independent variable array.",
-    )
-
-    parser.add_argument("-distr", default="gaussian", type=str)
-    parser.add_argument("-fit_intercept", action="store_true")
-    # parser.add_argument("-include_offset", action="store_true")
-    parser.add_argument(
-        "-no_hurdle",
-        action="store_true",
-        help="If True, do not implement spatially-weighted hurdle model- will only perform generalized linear "
-        "modeling.",
-    )
-    parser.add_argument("-tolerance", default=1e-3, type=float)
-    parser.add_argument("-max_iter", default=500, type=int)
-    parser.add_argument("-patience", default=5, type=int)
-    parser.add_argument("-ridge_lambda", type=float)
-
-    parser.add_argument(
-        "-chunks",
-        default=1,
-        type=int,
-        help="For use if `multiscale` is True- increase the number of parallel processes. Can be used to help prevent"
-        "memory from running out, otherwise keep as low as possible.",
-    )
-
-    # Options for downstream analysis:
-    parser.add_argument(
-        "-search_bw",
-        help="Used for downstream analyses; specifies the bandwidth to search for "
-        "senders/receivers. Recommended to set equal to the bandwidth of a fitted "
-        "model.",
-    )
-    parser.add_argument(
-        "-top_k_receivers",
-        default=10,
-        type=int,
-        help="Used for downstream analyses, specifically for :func `define_effect_vf`; specifies the number of "
-        "nearest neighbors to consider when computing signaling effect vectors.",
-    )
-    parser.add_argument(
-        "-filter_targets",
-        action="store_true",
-        help="Used for downstream analyses, specifically :func `infer_effect_direction`; if True, will subset to only "
-        "the targets that were predicted well by the model.",
-    )
-    parser.add_argument(
-        "-filter_targets_threshold",
-        default=0.65,
-        type=float,
-        help="Used for downstream analyses, specifically :func `infer_effect_direction`; specifies the threshold "
-        "Pearson coefficient for target subsetting. Only used if `filter_targets` is True.",
-    )
-    parser.add_argument(
-        "-diff_sending_or_receiving",
-        default="sending",
-        type=str,
-        help="Used for downstream analyses, specifically :func `sender_receiver_effect_deg_detection`; specifies "
-        "whether to compute differential expression of genes in cells with high or low sending effect potential "
-        "('sending cells') or high or low receiving effect potential ('receiving cells').",
-    )
-    parser.add_argument(
-        "-target_for_downstream",
-        nargs="+",
-        type=str,
-        help="Used for :func `get_effect_potential`, :func `get_pathway_potential` and :func "
-        "`calc_and_group_sender_receiver_effect_degs` (provide only one target), as well as :func "
-        "`compute_cell_type_coupling` (can provide multiple targets). Used to specify the target "
-        "gene(s) to analyze with these functions.",
-    )
-    parser.add_argument(
-        "-ligand_for_downstream",
-        type=str,
-        help="Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
-        "used to specify the ligand gene to consider with respect to the target.",
-    )
-    parser.add_argument(
-        "-receptor_for_downstream",
-        type=str,
-        help="Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
-        "used to specify the receptor gene to consider with respect to the target.",
-    )
-    parser.add_argument(
-        "-pathway_for_downstream",
-        type=str,
-        help="Used for :func `get_pathway_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
-        "used to specify the pathway to consider with respect to the target.",
-    )
-    parser.add_argument(
-        "-sender_ct_for_downstream",
-        type=str,
-        help="Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
-        "used to specify the cell type to consider as a sender.",
-    )
-    parser.add_argument(
-        "-receiver_ct_for_downstream",
-        type=str,
-        help="Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
-        "used to specify the cell type to consider as a receiver.",
-    )
-    parser.add_argument(
-        "-no_cell_type_markers",
-        action="store_true",
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if True, will exclude cell type markers "
-        "from the set of genes for which to compare to sent/received signal.",
-    )
-    parser.add_argument(
-        "-compute_pathway_effect",
-        action="store_true",
-        help="Used for :func `inferred_effect_direction`; if True, will summarize the effects of all "
-        "ligands/ligand-receptor interactions in a pathway.",
-    )
-    parser.add_argument(
-        "-n_GAM_points",
-        default=50,
-        type=int,
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of points to sample "
-        "along the spline function when evaluating a fitted GAM model.",
-    )
-    parser.add_argument(
-        "-num_leiden_pcs",
-        default=10,
-        type=int,
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of principal "
-        "components to use when computing partitioning for the discovered differentially expressed genes.",
-    )
-    parser.add_argument(
-        "-num_leiden_neighbors",
-        default=5,
-        type=int,
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of neighbors to use "
-        "when computing partitioning for the discovered differentially expressed genes.",
-    )
-    parser.add_argument(
-        "-leiden_resolution",
-        default=0.5,
-        type=float,
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the resolution parameter to use "
-        "for Leiden partitioning.",
-    )
-    parser.add_argument(
-        "-top_n_DE_genes",
-        type=int,
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if given, will restrict the number of "
-        "genes that are clustered and displayed on the final plot. Note that if there are more than 200 "
-        "differentially expressed genes, the program will automatically use 200 for this parameter.",
-    )
+    # Use arg_dict to population parser:
+    for arg, arg_info in arg_dict.items():
+        parser.add_argument(arg, **arg_info)
 
     return comm, parser
 
