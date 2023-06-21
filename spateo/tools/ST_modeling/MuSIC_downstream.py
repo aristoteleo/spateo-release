@@ -25,7 +25,6 @@ import pandas as pd
 import scipy.sparse
 import xarray as xr
 from mpi4py import MPI
-from MuSIC import MuSIC
 from scipy.stats import pearsonr, zscore
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, normalize
@@ -40,6 +39,7 @@ from spateo.tools.gene_expression_variance import (
     compute_gene_groups_p_val,
     get_highvar_genes_sparse,
 )
+from spateo.tools.ST_modeling.MuSIC import MuSIC
 from spateo.tools.ST_modeling.regression_utils import (
     DE_GAM_test,
     fit_DE_GAM,

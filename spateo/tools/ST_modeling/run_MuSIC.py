@@ -185,6 +185,90 @@ def main():
     "whether to compute differential expression of genes in cells with high or low sending effect potential "
     "('sending cells') or high or low receiving effect potential ('receiving cells').",
 )
+@click.option(
+    "-target_for_downstream",
+    required=False,
+    multiple=True,
+    help="Used for :func `get_effect_potential`, :func `get_pathway_potential` and :func "
+    "`calc_and_group_sender_receiver_effect_degs` (provide only one target), as well as :func "
+    "`compute_cell_type_coupling` (can provide multiple targets). Used to specify the target "
+    "gene(s) to analyze with these functions.",
+)
+@click.option(
+    "-ligand_for_downstream",
+    required=False,
+    help="Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
+    "used to specify the ligand gene to consider with respect to the target.",
+)
+@click.option(
+    "-receptor_for_downstream",
+    required=False,
+    help="Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
+    "used to specify the receptor gene to consider with respect to the target.",
+)
+@click.option(
+    "-pathway_for_downstream",
+    required=False,
+    help="Used for :func `get_pathway_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
+    "used to specify the pathway to consider with respect to the target.",
+)
+@click.option(
+    "-sender_ct_for_downstream",
+    required=False,
+    help="Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
+    "used to specify the cell type to consider as a sender.",
+)
+@click.option(
+    "-receiver_ct_for_downstream",
+    required=False,
+    help="Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
+    "used to specify the cell type to consider as a receiver.",
+)
+@click.option(
+    "-no_cell_type_markers",
+    default=False,
+    is_flag=True,
+    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if True, will exclude cell type markers "
+    "from the set of genes for which to compare to sent/received signal.",
+)
+@click.option(
+    "-compute_pathway_effect",
+    default=False,
+    is_flag=True,
+    help="Used for :func `inferred_effect_direction`; if True, will summarize the effects of all "
+    "ligands/ligand-receptor interactions in a pathway.",
+)
+@click.option(
+    "-n_GAM_points",
+    default=50,
+    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of points to sample "
+    "along the spline function when evaluating a fitted GAM model.",
+)
+@click.option(
+    "-num_leiden_pcs",
+    default=10,
+    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of principal "
+    "components to use when computing partitioning for the discovered differentially expressed genes.",
+)
+@click.option(
+    "-num_leiden_neighbors",
+    default=5,
+    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of neighbors to use "
+    "when computing partitioning for the discovered differentially expressed genes.",
+)
+@click.option(
+    "-leiden_resolution",
+    default=0.5,
+    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the resolution parameter to use "
+    "for Leiden partitioning.",
+)
+@click.option(
+    "-top_n_DE_genes",
+    required=False,
+    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if given, will restrict the number of "
+    "genes that are clustered and displayed on the final plot. Note that if there are more than 200 "
+    "differentially expressed genes, the program will automatically use 200 for this parameter.",
+)
 def run(
     np,
     adata_path,
@@ -234,6 +318,19 @@ def run(
     filter_targets,
     filter_targets_threshold,
     diff_sending_or_receiving,
+    target_for_downstream,
+    ligand_for_downstream,
+    receptor_for_downstream,
+    pathway_for_downstream,
+    sender_ct_for_downstream,
+    receiver_ct_for_downstream,
+    no_cell_type_markers,
+    compute_pathway_effect,
+    n_GAM_points,
+    num_leiden_pcs,
+    num_leiden_neighbors,
+    leiden_resolution,
+    top_n_DE_genes,
     chunks,
 ):
     """Command line shortcut to run any STGWR models.
@@ -317,6 +414,41 @@ def run(
             `sender_receiver_effect_deg_detection`; specifies whether to compute differential expression of genes
             in cells with high or low sending effect potential ('sending cells') or high or low receiving effect
             potential ('receiving cells').
+        target_for_downstream: A string or a list (provided as a whitespace-separated list in the command line) of
+            target genes for :func `get_effect_potential`, :func `get_pathway_potential` and :func
+             `calc_and_group_sender_receiver_effect_degs` (provide only one target), as well as :func
+             `compute_cell_type_coupling` (can provide multiple targets).
+        ligand_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
+            `calc_and_group_sender_receiver_effect_degs`, used to specify the ligand gene to consider with respect
+            to the target.
+        receptor_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
+            `calc_and_group_sender_receiver_effect_degs`, used to specify the receptor gene to consider with respect
+            to the target.
+        pathway_for_downstream: For downstream analyses; used for :func `get_pathway_potential` and :func
+            `calc_and_group_sender_receiver_effect_degs`, used to specify the pathway to consider with respect to
+            the target.
+        sender_ct_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
+            `calc_and_group_sender_receiver_effect_degs`, used to specify the cell type to consider as a sender.
+        receiver_ct_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
+            `calc_and_group_sender_receiver_effect_degs`, used to specify the cell type to consider as a receiver.
+        no_cell_type_markers: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+            if True, will exclude cell type markers from the set of genes for which to compare to sent/received signal.
+        compute_pathway_effect: For downstream analyses; used for :func `inferred_effect_direction`; if True,
+            will summarize the effects of all ligands/ligand-receptor interactions in a pathway.
+        n_GAM_points: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+            specifies the number of points to sample along the spline function when evaluating a fitted GAM model.
+        num_leiden_pcs: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+            specifies the number of principal components to use when computing partitioning for the discovered
+            differentially expressed genes.
+        num_leiden_neighbors: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+            specifies the number of neighbors to use when computing partitioning for the discovered differentially
+            expressed genes.
+        leiden_resolution: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+            specifies the resolution parameter to use for Leiden partitioning.
+        top_n_DE_genes: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`; if
+            given, will restrict the number of genes that are clustered and displayed on the final plot. Note that
+            if there are more than 200 differentially expressed genes, the program will automatically use 200 for
+            this parameter.
     """
 
     mpi_path = os.path.dirname(fast_swr.__file__) + "/SWR_mpi.py"
@@ -445,6 +577,34 @@ def run(
         command += " -filter_targets_threshold " + str(filter_targets_threshold)
     if diff_sending_or_receiving is not None:
         command += " -diff_sending_or_receiving " + str(diff_sending_or_receiving)
+    if target_for_downstream is not None:
+        command += " -target "
+        for tar in target_for_downstream:
+            command += tar + " "
+    if ligand_for_downstream is not None:
+        command += " -ligand " + ligand_for_downstream
+    if receptor_for_downstream is not None:
+        command += " -receptor " + receptor_for_downstream
+    if pathway_for_downstream is not None:
+        command += " -pathway " + pathway_for_downstream
+    if sender_ct_for_downstream is not None:
+        command += " -sender_ct " + sender_ct_for_downstream
+    if receiver_ct_for_downstream is not None:
+        command += " -receiver_ct " + receiver_ct_for_downstream
+    if no_cell_type_markers:
+        command += " -no_cell_type_markers "
+    if compute_pathway_effect:
+        command += " -compute_pathway_effect "
+    if n_GAM_points is not None:
+        command += " -n_GAM_points " + str(n_GAM_points)
+    if num_leiden_pcs is not None:
+        command += " -num_leiden_pcs " + str(num_leiden_pcs)
+    if num_leiden_neighbors is not None:
+        command += " -num_leiden_neighbors " + str(num_leiden_neighbors)
+    if leiden_resolution is not None:
+        command += " -leiden_resolution " + str(leiden_resolution)
+    if top_n_DE_genes is not None:
+        command += " -top_n_DE_genes " + str(top_n_DE_genes)
 
     os.system(command)
     pass

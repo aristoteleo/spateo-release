@@ -16,21 +16,20 @@ import numpy as np
 import pandas as pd
 import scipy
 from mpi4py import MPI
-from MuSIC import MuSIC
 from scipy.stats import mannwhitneyu
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import r2_score
 from sklearn.utils import check_random_state
-
-from spateo.preprocessing.normalize import factor_normalization
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
 from spateo.logging import logger_manager as lm
 from spateo.preprocessing import log1p, normalize_total
+from spateo.preprocessing.normalize import factor_normalization
 from spateo.tools.find_neighbors import get_wi, transcriptomic_connectivity
 from spateo.tools.gene_expression_variance import get_highvar_genes_sparse
+from spateo.tools.ST_modeling.MuSIC import MuSIC
 from spateo.tools.ST_modeling.regression_utils import (
     multicollinearity_check,
     multitesting_correction,

@@ -1,12 +1,16 @@
 import argparse
 import random
+import sys
 
 import numpy as np
 from mpi4py import MPI
-from MuSIC import MuSIC, VMuSIC
 
 # For testing:
+# For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
+sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
+
 from spateo.plotting.static.space import plot_cell_signaling
+from spateo.tools.ST_modeling.MuSIC import MuSIC, VMuSIC
 from spateo.tools.ST_modeling.MuSIC_downstream import MuSIC_Interpreter
 from spateo.tools.ST_modeling.MuSIC_upstream import MuSIC_target_selector
 
@@ -127,6 +131,8 @@ def define_spateo_argparse():
 
         search_bw: For downstream analysis; specifies the bandwidth to search for senders/receivers. Recommended to
             set equal to the bandwidth of a fitted model.
+        top_k_receivers: For downstream analysis, specifically when constructing vector fields of signaling effects.
+            Specifies the number of nearest neighbors to consider when computing signaling effect vectors.
         filter_targets: For downstream analysis, specifically :func `infer_effect_direction`; if True, will subset to
             only the targets that were predicted well by the model.
         filter_target_threshold: For downstream analysis, specifically :func `infer_effect_direction`; specifies the
@@ -345,6 +351,13 @@ def define_spateo_argparse():
         help="Used for downstream analyses; specifies the bandwidth to search for "
         "senders/receivers. Recommended to set equal to the bandwidth of a fitted "
         "model.",
+    )
+    parser.add_argument(
+        "-top_k_receivers",
+        default=10,
+        type=int,
+        help="Used for downstream analyses, specifically for :func `define_effect_vf`; specifies the number of "
+        "nearest neighbors to consider when computing signaling effect vectors.",
     )
     parser.add_argument(
         "-filter_targets",

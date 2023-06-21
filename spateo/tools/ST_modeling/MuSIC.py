@@ -361,7 +361,7 @@ class MuSIC:
             )
 
         self.fit_intercept = self.arg_retrieve.fit_intercept
-        self.include_offset = self.arg_retrieve.include_offset
+        # self.include_offset = self.arg_retrieve.include_offset
         self.no_hurdle = self.arg_retrieve.no_hurdle
 
         # Parameters related to the fitting process (tolerance, number of iterations, etc.)
