@@ -399,7 +399,7 @@ class MuSIC:
         # Helpful messages at process start:
         if self.comm.rank == 0:
             print("-" * 60, flush=True)
-            self.logger.info(f"Running SWR on {self.comm.size} processes...")
+            self.logger.info(f"Running SWR or downstream analyses on {self.comm.size} processes...")
             fixed_or_adaptive = "Fixed " if self.bw_fixed else "Adaptive "
             type = fixed_or_adaptive + self.kernel.capitalize()
             self.logger.info(f"Spatial kernel: {type}")
@@ -427,7 +427,8 @@ class MuSIC:
                 if self.custom_targets is not None:
                     self.logger.info(f"Using provided list of target genes: {self.custom_targets}.")
                 self.logger.info(
-                    f"Saving results to: {self.output_path}. Note that running `fit` or "
+                    f"Saving all outputs to this directory: "
+                    f"{os.path.dirname(self.output_path)}. Note that running `fit` or "
                     f"`predict_and_save` will clear the contents of this folder- copy any essential "
                     f"files beforehand."
                 )
@@ -957,7 +958,9 @@ class MuSIC:
         # autocrine signaling is not possible:
         if self.mod_type == "lr" or self.mod_type == "ligand":
             if "spatial_weights" not in locals():
-                spatial_weights = self._compute_all_wi(bw=self.n_neighbors, bw_fixed=False, exclude_self=True)
+                spatial_weights = self._compute_all_wi(
+                    bw=self.n_neighbors, bw_fixed=False, exclude_self=True, verbose=False
+                )
 
             lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
             for i, ligand in enumerate(self.ligands_expr.columns):
@@ -1330,6 +1333,7 @@ class MuSIC:
         bw_fixed: Optional[bool] = None,
         exclude_self: Optional[bool] = None,
         kernel: Optional[str] = None,
+        verbose: bool = False,
     ) -> scipy.sparse.spmatrix:
         """Compute spatial weights for all samples in the dataset given a specified bandwidth.
 
@@ -1341,17 +1345,19 @@ class MuSIC:
             exclude_self: Whether to include each sample itself as one of its nearest neighbors. If not given,
                 will default to self.exclude_self.
             kernel: Kernel to use for the spatial weights. If not given, will default to self.kernel.
+            verbose: Whether to display messages during runtime
 
         Returns:
             wi: Array of weights for all samples in the dataset
         """
 
         # Parallelized computation of spatial weights for all samples:
-        if not self.bw_fixed:
-            self.logger.info(
-                "Note that 'fixed' was not selected for the bandwidth estimation. Input to 'bw' will be "
-                "taken to be the number of nearest neighbors to use in the bandwidth estimation."
-            )
+        if verbose:
+            if not self.bw_fixed:
+                self.logger.info(
+                    "Note that 'fixed' was not selected for the bandwidth estimation. Input to 'bw' will be "
+                    "taken to be the number of nearest neighbors to use in the bandwidth estimation."
+                )
 
         if bw_fixed is None:
             bw_fixed = self.bw_fixed

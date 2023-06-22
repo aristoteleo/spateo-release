@@ -1230,16 +1230,31 @@ def run_permutation_test(data, thresh, subset_rows=None, subset_cols=None):
     Returns:
         is_higher: Boolean indicating whether the mean of the permuted data is higher than 'thresh'
     """
-    permuted = np.random.permutation(data)
-    if subset_rows is not None:
-        if subset_cols is not None:
-            permuted_mean = np.mean(permuted[subset_rows, subset_cols])
+    if scipy.sparse.issparse(data):
+        permuted = data.copy()
+        np.random.shuffle(permuted.data)
+
+        if subset_rows is not None:
+            if subset_cols is not None:
+                permuted_mean = permuted[subset_rows, subset_cols].mean()
+            else:
+                permuted_mean = permuted[subset_rows, :].mean()
+        elif subset_cols is not None:
+            permuted_mean = permuted[:, subset_cols].mean()
         else:
-            permuted_mean = np.mean(permuted[subset_rows, :])
-    elif subset_cols is not None:
-        permuted_mean = np.mean(permuted[:, subset_cols])
+            permuted_mean = permuted.mean()
+
     else:
-        permuted_mean = np.mean(permuted)
+        permuted = np.random.permutation(data)
+        if subset_rows is not None:
+            if subset_cols is not None:
+                permuted_mean = np.mean(permuted[subset_rows, subset_cols])
+            else:
+                permuted_mean = np.mean(permuted[subset_rows, :])
+        elif subset_cols is not None:
+            permuted_mean = np.mean(permuted[:, subset_cols])
+        else:
+            permuted_mean = np.mean(permuted)
 
     is_higher = permuted_mean > thresh
     return is_higher

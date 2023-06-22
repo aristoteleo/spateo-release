@@ -117,6 +117,7 @@ class MuSIC_Interpreter(MuSIC):
         self.n_leiden_neighbors = self.arg_retrieve.n_leiden_neighbors
         self.leiden_resolution = self.arg_retrieve.leiden_resolution
         self.top_n_DE_genes = self.arg_retrieve.top_n_DE_genes
+        self.effect_strength_threshold = self.arg_retrieve.effect_strength_threshold
 
     def compute_coeff_significance(self, method: str = "fdr_bh", significance_threshold: float = 0.05):
         """Computes local statistical significance for fitted coefficients.
@@ -217,8 +218,8 @@ class MuSIC_Interpreter(MuSIC):
                 .obs of the AnnData object.
 
         Returns:
-            effect_potential: Array of shape [n_samples, n_samples]; proxy for the "signaling effect potential" with
-                respect to a particular target gene between each sender-receiver pair of cells.
+            effect_potential: Sparse array of shape [n_samples, n_samples]; proxy for the "signaling effect potential"
+                with respect to a particular target gene between each sender-receiver pair of cells.
             normalized_effect_potential_sum_sender: Array of shape [n_samples,]; for each sending cell, the sum of the
                 signaling potential to all receiver cells for a given target gene, normalized between 0 and 1.
             normalized_effect_potential_sum_receiver: Array of shape [n_samples,]; for each receiving cell, the sum of
@@ -1250,6 +1251,7 @@ class MuSIC_Interpreter(MuSIC):
     def compute_cell_type_coupling(
         self,
         targets: Optional[Union[str, List[str]]] = None,
+        effect_strength_threshold: Optional[float] = None,
     ):
         """Generates heatmap of spatially differentially-expressed features for each pair of sender and receiver
         categories- if :attr `mod_type` is "niche", this directly averages the effects for each neighboring cell type
@@ -1259,10 +1261,9 @@ class MuSIC_Interpreter(MuSIC):
         Args:
             targets: Optional string or list of strings to select targets from among the genes used to fit the model
                 to compute signaling effects for. If not given, will use all targets.
-            filter_targets: Whether to filter targets based on the :attr:`filter_target_threshold` value. This
-                threshold is based on the Pearson correlation w/ the true expression and should be between 0 and 1.
-            filter_target_threshold: Only used if 'filter_targets' is True. Threshold to use for filtering targets
-                based on the Pearson correlation of the reconstruction w/ the true expression
+            effect_strength_threshold: Optional percentile for filtering the computed signaling effect. If not None,
+                will filter to those cells for which a given signaling effect is predicted to have a strong effect
+                on target gene expression. Otherwise, will compute cell type coupling over all cells in the sample.
 
         Returns:
             ct_coupling: 3D array summarizing cell type coupling in terms of effect on downstream expression
@@ -1270,8 +1271,13 @@ class MuSIC_Interpreter(MuSIC):
                 downstream expression
         """
 
+        if self.effect_strength_threshold is not None:
+            effect_strength_threshold = self.effect_strength_threshold
+
         # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
-        spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True).toarray()
+        spatial_weights = self._compute_all_wi(
+            self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True, verbose=False
+        ).toarray()
 
         if not self.mod_type != "receptor":
             raise ValueError("Knowledge of the source is required to sent effect potential.")
@@ -1357,11 +1363,33 @@ class MuSIC_Interpreter(MuSIC):
                         sending_indices = np.where(self.cell_categories[sending_cell_type] == 1)[0]
                         receiving_indices = np.where(self.cell_categories[receiving_cell_type] == 1)[0]
 
-                        # Get average effect potential across all cells of each type:
+                        # Get average effect potential across all cells of each type- first filter if threshold is
+                        # given:
+                        if effect_strength_threshold is not None:
+                            effect_potential_data = effect_potential.data
+                            # Threshold is taken to be a percentile value:
+                            effect_strength_threshold = np.percentile(
+                                effect_potential_data, effect_strength_threshold * 100
+                            )
+                            strong_effect_mask = effect_potential > effect_strength_threshold
+                            rem_row_indices, rem_col_indices = strong_effect_mask.nonzero()
+
+                            # Update sending and receiving indices to now include cells of the given sending and
+                            # receiving type that send/receive signal:
+                            sending_indices = np.intersect1d(sending_indices, rem_row_indices)
+                            receiving_indices = np.intersect1d(receiving_indices, rem_col_indices)
+
+                        # Check if there is no signal being transmitted and/or received between cells of the given
+                        # two types:
+                        if len(sending_indices) == 0 or len(receiving_indices) == 0:
+                            ct_coupling[i, j, k] = 0
+                            ct_coupling_significance[i, j, k] = 0
+                            continue
+
                         avg_effect_potential = np.mean(effect_potential[sending_indices, receiving_indices])
                         ct_coupling[i, j, k] = avg_effect_potential
                         ct_coupling_significance[i, j, k] = permutation_testing(
-                            avg_effect_potential,
+                            effect_potential,
                             n_permutations=10000,
                             n_jobs=30,
                             subset_rows=sending_indices,
@@ -1387,7 +1415,7 @@ class MuSIC_Interpreter(MuSIC):
                         avg_effect_potential = np.mean(effect_potential[sending_indices, receiving_indices])
                         ct_coupling[i, j, k] = avg_effect_potential
                         ct_coupling_significance[i, j, k] = permutation_testing(
-                            avg_effect_potential,
+                            effect_potential,
                             n_permutations=10000,
                             n_jobs=30,
                             subset_rows=sending_indices,

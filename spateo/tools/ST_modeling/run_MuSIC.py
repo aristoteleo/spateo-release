@@ -172,7 +172,7 @@ def main():
     "the targets that were predicted well by the model.",
 )
 @click.option(
-    "filter_targets_threshold",
+    "filter_target_threshold",
     default=0.65,
     help="Used for :func `infer_effect_direction`; specifies the "
     "threshold "
@@ -269,6 +269,13 @@ def main():
     "genes that are clustered and displayed on the final plot. Note that if there are more than 200 "
     "differentially expressed genes, the program will automatically use 200 for this parameter.",
 )
+@click.option(
+    "-effect_strength_threshold",
+    default=0.1,
+    help="Used for for :func `compute_cell_type_coupling`; specifies the threshold percentile to filter signaling "
+    "effect potential before computing the cell type coupling- essentially, this calculates sender and "
+    "receiver cell type enrichment for cells that strongly influence target gene expression.",
+)
 def run(
     np,
     adata_path,
@@ -316,7 +323,7 @@ def run(
     search_bw,
     top_k_receivers,
     filter_targets,
-    filter_targets_threshold,
+    filter_target_threshold,
     diff_sending_or_receiving,
     target_for_downstream,
     ligand_for_downstream,
@@ -331,6 +338,7 @@ def run(
     num_leiden_neighbors,
     leiden_resolution,
     top_n_DE_genes,
+    effect_strength_threshold,
     chunks,
 ):
     """Command line shortcut to run any STGWR models.
@@ -449,6 +457,10 @@ def run(
             given, will restrict the number of genes that are clustered and displayed on the final plot. Note that
             if there are more than 200 differentially expressed genes, the program will automatically use 200 for
             this parameter.
+        effect_strength_threshold: For downstream analyses, used for :func `compute_cell_type_coupling`; specifies
+            the threshold percentile (should be between 0 and 1) to filter signaling effect potential before computing
+            the cell type coupling- essentially, this calculates sender and receiver cell type enrichment for cells
+            that strongly influence target gene expression.
     """
 
     mpi_path = os.path.dirname(fast_swr.__file__) + "/SWR_mpi.py"
@@ -573,8 +585,8 @@ def run(
         command += " -top_k_receivers " + str(top_k_receivers)
     if filter_targets:
         command += " -filter_targets "
-    if filter_targets_threshold is not None:
-        command += " -filter_targets_threshold " + str(filter_targets_threshold)
+    if filter_target_threshold is not None:
+        command += " -filter_target_threshold " + str(filter_target_threshold)
     if diff_sending_or_receiving is not None:
         command += " -diff_sending_or_receiving " + str(diff_sending_or_receiving)
     if target_for_downstream is not None:
@@ -605,6 +617,8 @@ def run(
         command += " -leiden_resolution " + str(leiden_resolution)
     if top_n_DE_genes is not None:
         command += " -top_n_DE_genes " + str(top_n_DE_genes)
+    if effect_strength_threshold is not None:
+        command += " -effect_strength_threshold " + str(effect_strength_threshold)
 
     os.system(command)
     pass

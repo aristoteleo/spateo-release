@@ -171,10 +171,10 @@ def define_spateo_argparse(**kwargs):
             will summarize the effects of all ligands/ligand-receptor interactions in a pathway.
         n_GAM_points: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
             specifies the number of points to sample along the spline function when evaluating a fitted GAM model.
-        num_leiden_pcs: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+        n_leiden_pcs: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
             specifies the number of principal components to use when computing partitioning for the discovered
             differentially expressed genes.
-        num_leiden_neighbors: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
+        n_leiden_neighbors: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
             specifies the number of neighbors to use when computing partitioning for the discovered differentially
             expressed genes.
         leiden_resolution: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
@@ -368,7 +368,7 @@ def define_spateo_argparse(**kwargs):
             "help": "Used for downstream analyses, specifically :func `infer_effect_direction`; if True, will subset to only "
             "the targets that were predicted well by the model.",
         },
-        "-filter_targets_threshold": {
+        "-filter_target_threshold": {
             "default": 0.65,
             "type": float,
             "help": "Used for downstream analyses, specifically :func `infer_effect_direction`; specifies the threshold "
@@ -430,13 +430,13 @@ def define_spateo_argparse(**kwargs):
             "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of points to "
             "sample along the spline function when evaluating a fitted GAM model.",
         },
-        "-num_leiden_pcs": {
+        "-n_leiden_pcs": {
             "default": 10,
             "type": int,
             "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of principal "
             "components to use when computing partitioning for the discovered differentially expressed genes.",
         },
-        "-num_leiden_neighbors": {
+        "-n_leiden_neighbors": {
             "default": 5,
             "type": int,
             "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of neighbors to "
@@ -453,6 +453,14 @@ def define_spateo_argparse(**kwargs):
             "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; if given, will restrict the number "
             "of genes that are clustered and displayed on the final plot. Note that if there are more than 200 "
             "differentially expressed genes, the program will automatically use 200 for this parameter.",
+        },
+        "-effect_strength_threshold": {
+            "type": float,
+            "default": 0.1,
+            "help": "Used for downstream analyses, specifically for :func `compute_cell_type_coupling`; specifies the "
+            "threshold percentile to filter signaling effect potential before computing the cell type coupling- "
+            "essentially, this calculates sender and receiver cell type enrichment for cells that strongly influence "
+            "target gene expression.",
         },
     }
 
@@ -501,6 +509,9 @@ def define_spateo_argparse(**kwargs):
             )
             continue
         all_args.append(key)
+        # If Boolean, don't do anything- giving the argument will store it as True and so appending the key is enough:
+        if isinstance(value, bool):
+            continue
         # Check for arguments that allow multiple inputs:
         arg_info = arg_dict[key]
         if arg_info.get("nargs") is not None:
@@ -700,7 +711,7 @@ if __name__ == "__main__":
         "the targets that were predicted well by the model.",
     )
     parser.add_argument(
-        "-filter_targets_threshold",
+        "-filter_target_threshold",
         default=0.65,
         type=float,
         help="Used for downstream analyses, specifically :func `infer_effect_direction`; specifies the threshold "
@@ -773,14 +784,14 @@ if __name__ == "__main__":
         "along the spline function when evaluating a fitted GAM model.",
     )
     parser.add_argument(
-        "-num_leiden_pcs",
+        "-n_leiden_pcs",
         default=10,
         type=int,
         help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of principal "
         "components to use when computing partitioning for the discovered differentially expressed genes.",
     )
     parser.add_argument(
-        "-num_leiden_neighbors",
+        "-n_leiden_neighbors",
         default=5,
         type=int,
         help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of neighbors to use "
@@ -799,6 +810,14 @@ if __name__ == "__main__":
         help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if given, will restrict the number of "
         "genes that are clustered and displayed on the final plot. Note that if there are more than 200 "
         "differentially expressed genes, the program will automatically use 200 for this parameter.",
+    )
+    parser.add_argument(
+        "-effect_strength_threshold",
+        default=0.1,
+        help="Used for downstream analyses, specifically for :func `compute_cell_type_coupling`; specifies the "
+        "threshold percentile to filter signaling effect potential before computing the cell type coupling- "
+        "essentially, this calculates sender and receiver cell type enrichment for cells that strongly influence "
+        "target gene expression.",
     )
 
     comm = MPI.COMM_WORLD
