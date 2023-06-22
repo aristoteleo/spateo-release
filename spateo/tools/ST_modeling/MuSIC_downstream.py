@@ -60,10 +60,12 @@ class MuSIC_Interpreter(MuSIC):
         comm: MPI communicator object initialized with mpi4py, to control parallel processing operations
         parser: ArgumentParser object initialized with argparse, to parse command line arguments for arguments
             pertinent to modeling.
+        args_list: If parser is provided by function call, the arguments to parse must be provided as a separate
+            list. It is recommended to use the return from :func `define_spateo_argparse()` for this.
     """
 
-    def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser):
-        super().__init__(comm, parser)
+    def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
+        super().__init__(comm, parser, args_list)
 
         self.search_bw = self.arg_retrieve.search_bw
         if self.search_bw is None:

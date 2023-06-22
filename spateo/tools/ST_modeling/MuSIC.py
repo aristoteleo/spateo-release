@@ -56,6 +56,8 @@ class MuSIC:
         comm: MPI communicator object initialized with mpi4py, to control parallel processing operations
         parser: ArgumentParser object initialized with argparse, to parse command line arguments for arguments
             pertinent to modeling.
+        args_list: If parser is provided by function call, the arguments to parse must be provided as a separate
+            list. It is recommended to use the return from :func `define_spateo_argparse()` for this.
 
     Attributes:
         mod_type: The type of model that will be employed- this dictates how the data will be processed and
@@ -144,11 +146,12 @@ class MuSIC:
         fit_intercept: Set True to include intercept in the model and False to exclude intercept
     """
 
-    def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser):
+    def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
         self.logger = lm.get_main_logger()
 
         self.comm = comm
         self.parser = parser
+        self.args_list = args_list
 
         self.mod_type = None
         self.species = None
@@ -292,7 +295,11 @@ class MuSIC:
         """
         Parse command line arguments for arguments pertinent to modeling.
         """
-        self.arg_retrieve = self.parser.parse_args()
+        if self.args_list is not None:
+            self.arg_retrieve = self.parser.parse_args(self.args_list)
+        else:
+            self.arg_retrieve = self.parser.parse_args()
+
         self.mod_type = self.arg_retrieve.mod_type
         # Set flag to evenly subsample spatial data:
         self.subsample = self.arg_retrieve.subsample
