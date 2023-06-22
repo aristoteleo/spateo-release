@@ -11,7 +11,6 @@ import scipy
 import scipy.stats
 from anndata import AnnData
 from dynamo.tools.sampling import sample
-from loess.loess_1d import loess_1d
 from scipy.sparse import csr_matrix, issparse
 from scipy.stats import norm
 from statsmodels.stats.multitest import multipletests
@@ -76,6 +75,12 @@ def svg_iden_reg(
             adata.var["raw_pos_rate"]: The positive rate of each gene.
 
     """
+    try:
+        from loess.loess_1d import loess_1d
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `loess`." "\nInstall fbgbp via `pip install loess`"
+        )
     w0 = cal_wass_dis_nobs(
         adata,
         bin_size=1,
