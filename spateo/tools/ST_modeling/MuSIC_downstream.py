@@ -65,7 +65,7 @@ class MuSIC_Interpreter(MuSIC):
     """
 
     def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
-        super().__init__(comm, parser, args_list)
+        super().__init__(comm, parser, args_list, verbose=False)
 
         self.search_bw = self.arg_retrieve.search_bw
         if self.search_bw is None:
@@ -75,8 +75,12 @@ class MuSIC_Interpreter(MuSIC):
 
         # Coefficients:
         if not self.set_up:
-            self.logger.info("Model has not yet been set up, running :func `SWR._set_up_model()` now...")
+            self.logger.info(
+                "Running :func `SWR._set_up_model()` to organize predictors and targets for downstream "
+                "analysis now..."
+            )
             self._set_up_model()
+            self.logger.info("Finished preprocessing, getting fitted coefficients and standard errors.")
 
         # Dictionary containing coefficients:
         self.coeffs, self.standard_errors = self.return_outputs()
@@ -229,30 +233,36 @@ class MuSIC_Interpreter(MuSIC):
         if self.mod_type == "receptor":
             raise ValueError("Sent potential is not defined for receptor models.")
 
-        if target is None and self.target_for_downstream is not None:
-            target = self.target_for_downstream
-        else:
-            self.logger.info("Target gene not provided for :func `get_effect_potential`. Using first target listed.")
-            target = list(self.coeffs.keys())[0]
+        if target is None:
+            if self.target_for_downstream is not None:
+                target = self.target_for_downstream
+            else:
+                self.logger.info(
+                    "Target gene not provided for :func `get_effect_potential`. Using first target " "listed."
+                )
+                target = list(self.coeffs.keys())[0]
 
         # Check for valid inputs:
-        if ligand is None and self.ligand_for_downstream is not None:
-            ligand = self.ligand_for_downstream
-        else:
-            if self.mod_type == "ligand" or self.mod_type == "lr":
-                raise ValueError("Must provide ligand for ligand models.")
+        if ligand is None:
+            if self.ligand_for_downstream is not None:
+                ligand = self.ligand_for_downstream
+            else:
+                if self.mod_type == "ligand" or self.mod_type == "lr":
+                    raise ValueError("Must provide ligand for ligand models.")
 
-        if receptor is None and self.receptor_for_downstream is not None:
-            receptor = self.receptor_for_downstream
-        else:
-            if self.mod_type == "lr":
-                raise ValueError("Must provide receptor for lr models.")
+        if receptor is None:
+            if self.receptor_for_downstream is not None:
+                receptor = self.receptor_for_downstream
+            else:
+                if self.mod_type == "lr":
+                    raise ValueError("Must provide receptor for lr models.")
 
-        if sender_cell_type is None and self.sender_ct_for_downstream is not None:
-            sender_cell_type = self.sender_ct_for_downstream
-        else:
-            if self.mod_type == "niche":
-                raise ValueError("Must provide sender cell type for niche models.")
+        if sender_cell_type is None:
+            if self.sender_ct_for_downstream is not None:
+                sender_cell_type = self.sender_ct_for_downstream
+            else:
+                if self.mod_type == "niche":
+                    raise ValueError("Must provide sender cell type for niche models.")
 
         if receiver_cell_type is None and self.receiver_ct_for_downstream is not None:
             receiver_cell_type = self.receiver_ct_for_downstream
@@ -303,12 +313,13 @@ class MuSIC_Interpreter(MuSIC):
             # Find the location of the correct coefficient:
             if self.mod_type == "ligand":
                 ligand_coeff_label = f"b_{ligand}"
-                idx = coeffs.columns.index(ligand_coeff_label)
+                idx = coeffs.columns.get_loc(ligand_coeff_label)
             elif self.mod_type == "lr":
-                lr_coeff_label = f"b_{ligand}-{receptor}"
-                idx = coeffs.columns.index(lr_coeff_label)
+                lr_coeff_label = f"b_{ligand}:{receptor}"
+                idx = coeffs.columns.get_loc(lr_coeff_label)
 
             coeff = coeffs.iloc[:, idx].values.reshape(1, -1)
+            effect_sign = np.where(coeff > 0, 1, -1)
             # Weight each column by the coefficient magnitude and finally by the indicator for expression/no
             # expression of the target and store as sparse array:
             sig_interm = sent_potential.multiply(coeff)
@@ -333,6 +344,7 @@ class MuSIC_Interpreter(MuSIC):
 
             sending_ct_coeff_label = f"b_Proxim{sender_cell_type}"
             coeff = coeffs[sending_ct_coeff_label].values.reshape(1, -1)
+            effect_sign = np.where(coeff > 0, 1, -1)
             # Weight each column by the coefficient magnitude and finally by the indicator for expression/no expression
             # of the target and store as sparse array:
             sig_interm = sent_potential.multiply(coeff)
@@ -341,13 +353,22 @@ class MuSIC_Interpreter(MuSIC):
             effect_potential.eliminate_zeros()
 
         effect_potential_sum_sender = np.array(effect_potential.sum(axis=1)).reshape(-1)
+        sign = np.where(effect_potential_sum_sender > 0, 1, -1)
+        # Take the absolute value to get the overall measure of the effect- after normalizing, add the sign back in:
+        effect_potential_sum_sender = np.abs(effect_potential_sum_sender)
         normalized_effect_potential_sum_sender = (effect_potential_sum_sender - np.min(effect_potential_sum_sender)) / (
             np.max(effect_potential_sum_sender) - np.min(effect_potential_sum_sender)
         )
+        normalized_effect_potential_sum_sender = normalized_effect_potential_sum_sender * sign
+
         effect_potential_sum_receiver = np.array(effect_potential.sum(axis=0)).reshape(-1)
+        sign = np.where(effect_potential_sum_receiver > 0, 1, -1)
+        # Take the absolute value to get the overall measure of the effect- after normalizing, add the sign back in:
+        effect_potential_sum_receiver = np.abs(effect_potential_sum_receiver)
         normalized_effect_potential_sum_receiver = (
             effect_potential_sum_receiver - np.min(effect_potential_sum_receiver)
         ) / (np.max(effect_potential_sum_receiver) - np.min(effect_potential_sum_receiver))
+        normalized_effect_potential_sum_receiver = normalized_effect_potential_sum_receiver * sign
 
         # Store summed sent/received potential:
         if store_summed_potential:
@@ -386,6 +407,8 @@ class MuSIC_Interpreter(MuSIC):
                 self.adata.obs[
                     f"norm_sum_received_effect_potential_from_{ligand}_for_{target}_via_{receptor}"
                 ] = normalized_effect_potential_sum_receiver
+
+            self.adata.obs["effect_sign"] = effect_sign.reshape(-1, 1)
 
         return effect_potential, normalized_effect_potential_sum_sender, normalized_effect_potential_sum_receiver
 
@@ -449,10 +472,10 @@ class MuSIC_Interpreter(MuSIC):
             # All possible ligand-receptor combinations:
             possible_lr_combos = list(itertools.product(all_senders, all_receivers))
             valid_lr_combos = list(set(possible_lr_combos).intersection(set(self.lr_pairs)))
-            if len(valid_lr_combos) < 2:
+            if len(valid_lr_combos) < 3:
                 raise ValueError(
                     f"Pathway effect potential computation for pathway {pathway} is unsuitable for this model, "
-                    f"since there are fewer than two valid ligand-receptor pairs in the pathway that were "
+                    f"since there are fewer than three valid ligand-receptor pairs in the pathway that were "
                     f"incorporated in the initial model."
                 )
 
@@ -743,9 +766,9 @@ class MuSIC_Interpreter(MuSIC):
 
         Args:
             target: Target to use for differential expression analysis. If None, will use the first listed target.
-            diff_sending_or_receiving: Whether to compute differential expression of genes in cells with high or low
-                sending effect potential ("sending cells") or high or low receiving effect potential ("receiving
-                cells").
+            diff_sending_or_receiving: Whether to compute differential expression of genes in cells with high ligand
+                expression or high or low "receiving effect" potential (defined as predicted influence of an
+                interaction event on downstream expression).
             ligand: Ligand to use for differential expression analysis. Will take precedent over sender/receiver cell
                 type if also provided.
             receptor: Optional receptor to use for differential expression analysis. Needed if
@@ -775,29 +798,24 @@ class MuSIC_Interpreter(MuSIC):
             raise ValueError("Must provide at least one pathway, ligand, or sender_cell_type.")
 
         if pathway is not None:
+            # For sending analysis, use ligand expression as the dependent variable:
+            send_key = ligand
             if self.mod_type == "lr":
-                send_key = f"norm_sum_sent_effect_potential_{pathway}_lr_for_{target}"
                 receive_key = f"norm_sum_received_effect_potential_{pathway}_lr_for_{target}"
             elif self.mod_type == "ligand":
-                send_key = f"norm_sum_sent_effect_potential_{pathway}_ligands_for_{target}"
                 receive_key = f"norm_sum_received_effect_potential_{pathway}_ligands_for_{target}"
             else:
                 raise ValueError(f"No signaling effects with mod_type {self.mod_type}.")
 
             # Check for already computed pathway effect potential, and if not existing, compute it:
-            if send_key not in self.adata.obsm_keys():
+            if receive_key not in self.adata.obs_keys():
                 self.logger.info(
-                    f"Ligand-receptor effect potential for {target} via {pathway}. " f"Computing effect potential now."
+                    f"Ligand-receptor effect potential for {target} via {pathway}. Computing effect potential now."
                 )
                 _, _, _ = self.get_pathway_potential(pathway, target, spatial_weights=None, store_summed_potential=True)
 
-            # Key for AnnData storage of the source signal:
-            if diff_sending_or_receiving == "sending":
-                source_key = f"Sent potential {pathway}"
-            else:
-                source_key = f"Received potential {pathway}"
-
         elif ligand is not None:
+            send_key = ligand
             if receptor is not None:
                 if self.mod_type != "lr":
                     raise ValueError(
@@ -805,23 +823,16 @@ class MuSIC_Interpreter(MuSIC):
                         f"initial model did not use them."
                     )
 
-                send_key = f"norm_sum_sent_effect_potential_{ligand}_for_{target}_via_{receptor}"
                 receive_key = f"norm_sum_received_effect_potential_{ligand}_for_{target}_via_{receptor}"
                 # Check for already computed ligand-receptor effect potential, and if not existing, compute it:
-                if send_key not in self.adata.obsm_keys():
+                if receive_key not in self.adata.obs_keys():
                     self.logger.info(
                         f"Ligand-receptor effect potential for {target} via {ligand}-{receptor}. "
                         f"Computing effect potential now."
                     )
                     _, _, _ = self.get_effect_potential(
-                        ligand, receptor, spatial_weights=None, store_summed_potential=True
+                        target, ligand, receptor, spatial_weights=None, store_summed_potential=True
                     )
-
-                # Key for AnnData storage of the source signal:
-                if diff_sending_or_receiving == "sending":
-                    source_key = f"Sent potential {ligand}-via-{receptor}"
-                else:
-                    source_key = f"Received potential {ligand}-via-{receptor}"
 
             else:
                 if self.mod_type != "ligand":
@@ -831,22 +842,16 @@ class MuSIC_Interpreter(MuSIC):
                         f"receptors."
                     )
 
-                send_key = f"norm_sum_sent_effect_potential_{ligand}_for_{target}"
+                send_key = ligand
                 receive_key = f"norm_sum_received_effect_potential_from_{ligand}_for_{target}"
                 # Check for already computed ligand effect potential, and if not existing, compute it:
                 self.logger.info(
                     f"Ligand-receptor effect potential for {target} via {ligand}. " f"Computing effect potential now."
                 )
-                if send_key not in self.adata.obsm_keys():
+                if receive_key not in self.adata.obs_keys():
                     _, _, _ = self.get_effect_potential(
                         ligand, target, spatial_weights=None, store_summed_potential=True
                     )
-
-                # Key for AnnData storage of the source signal:
-                if diff_sending_or_receiving == "sending":
-                    source_key = f"Sent potential {ligand}"
-                else:
-                    source_key = f"Received potential {ligand}"
 
         elif sender_cell_type is not None:
             if self.mod_type != "niche":
@@ -854,33 +859,19 @@ class MuSIC_Interpreter(MuSIC):
                     f"Only sender_cell_type was provided to compute effect-associated DEGs, but the "
                     f"initial {self.mod_type} model does not use cell type identity."
                 )
+            send_key = sender_cell_type
 
             if receiver_cell_type is not None:
-                send_key = f"norm_sum_sent_{sender_cell_type}_effect_potential_to_{receiver_cell_type}_for_{target}"
                 receive_key = (
                     f"norm_sum_{receiver_cell_type}_received_effect_potential_from_{sender_cell_type}_for_" f"{target}"
                 )
-
-                # Key for AnnData storage of the source signal:
-                if diff_sending_or_receiving == "sending":
-                    source_key = f"Sent potential {sender_cell_type}"
-                else:
-                    source_key = f"Received potential {sender_cell_type}"
-
             else:
-                send_key = f"norm_sum_sent_effect_potential_{sender_cell_type}_for_{target}"
                 receive_key = f"norm_sum_received_effect_potential_from_{sender_cell_type}_for_{target}"
 
-                # Key for AnnData storage of the source signal:
-                if diff_sending_or_receiving == "sending":
-                    source_key = f"Sent potential {sender_cell_type}-via-{receiver_cell_type}"
-                else:
-                    source_key = f"Received potential {sender_cell_type}-via-{receiver_cell_type}"
-
         if diff_sending_or_receiving == "sending":
-            effect_potential = self.adata.obsm[send_key]
+            "filler"
         else:
-            effect_potential = self.adata.obsm[receive_key]
+            effect_potential = self.adata.obs[receive_key]
 
         # For sending analyses, restrict the differential analysis to transcription factors- these indicate ultimate
         # upstream regulators of the signaling:
@@ -909,31 +900,31 @@ class MuSIC_Interpreter(MuSIC):
             # Further subset list of TFs to those that are implicated in signaling patterns of interest and also
             # are expressed in at least n% of the cells that are nonzero for sending potential (use the user input
             # 'target_expr_threshold'):
-            nz_sending = np.any(effect_potential != 0, axis=1)
+            nz_sending = list(self.sample_names[effect_potential != 0])
             adata_subset = self.adata[nz_sending, :]
             n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
 
-            # Get TFs known to regulate the ligand/pathway of interest:
-            if pathway is not None:
-                lr_db_subset = lr_db[lr_db["pathway"] == pathway]
-                all_senders = list(set(lr_db_subset["from"]))
-
-                sender_regulators = list(grn.columns[grn.loc[all_senders].eq(1).any()])
-            elif ligand is not None:
-                sender_regulators = list(grn.columns[grn.loc[ligand].eq(1).any()])
-            else:
-                # Set sender regulators to all TFs:
-                sender_regulators = all_TFs
-
-            sender_regulators.extend(all_RBPs)
+            # # Get TFs known to regulate the ligand/pathway of interest:
+            # if pathway is not None:
+            #     lr_db_subset = lr_db[lr_db["pathway"] == pathway]
+            #     all_senders = list(set(lr_db_subset["from"]))
+            #
+            #     sender_regulators = list(grn.columns[grn.loc[all_senders].eq(1).any()])
+            # elif ligand is not None:
+            #     sender_regulators = list(grn.columns[grn.loc[ligand].eq(1).any()])
+            # else:
+            #     # Set sender regulators to all TFs:
+            #     sender_regulators = all_TFs
+            sender_regulators = all_TFs + all_RBPs
 
             if scipy.sparse.issparse(self.adata.X):
                 nnz_counts = np.array(adata_subset[:, sender_regulators].X.getnnz(axis=0)).flatten()
             else:
                 nnz_counts = np.array(self.adata[:, sender_regulators].X.getnnz(axis=0)).flatten()
 
-            to_keep = list(np.array(sender_regulators)[nnz_counts >= n_cells_threshold])
-            counts = self.adata[:, to_keep].X
+            genes_to_keep = list(np.array(sender_regulators)[nnz_counts >= n_cells_threshold])
+            self.logger.info(f"Testing {len(genes_to_keep)} TFs/RBPs for association with communication effects...")
+            counts = self.adata[:, genes_to_keep].X
 
         else:
             # For receiving analyses, identify gene expression signatures associated with the signaling effects:
@@ -953,6 +944,9 @@ class MuSIC_Interpreter(MuSIC):
                 nnz_counts = np.array(adata_subset.X.getnnz(axis=0)).flatten()
 
             genes_to_keep = list(np.array(adata_subset.var_names)[nnz_counts >= n_cells_threshold])
+            self.logger.info(
+                f"Testing {len(genes_to_keep)} genes for association with predicted communication " f"effects..."
+            )
 
             if no_cell_type_markers:
                 # Remove cell type markers (more likely to be reflective than responsive to signaling) using a series of
@@ -991,17 +985,17 @@ class MuSIC_Interpreter(MuSIC):
 
             counts = self.adata[:, genes_to_keep].X
 
+        # RECONFIGURE SO THAT VAR CAN BE EITHER POTENTIAL FOR RECEIVING SIGNAL OR COUNTS, AND COUNTS CAN BE EITHER
+        # COUNTS OR POTENTIAL
         GAM_adata, bs = fit_DE_GAM(
             counts,
-            var=effect_potential,
+            var=effect_potential.values,
             genes=genes_to_keep,
             cells=self.sample_names,
         )
 
-        GAM_adata.uns["predictor_key"] = source_key
-
         # Compute q-values for each gene:
-        GAM_adata = DE_GAM_test(GAM_adata, bs)
+        GAM_adata, bs = DE_GAM_test(GAM_adata, bs)
         return GAM_adata, bs
 
     def group_sender_receiver_effect_degs(
@@ -1161,6 +1155,10 @@ class MuSIC_Interpreter(MuSIC):
                 potential
         """
 
+        # Directory to save differential testing results:
+        parent_dir = os.path.dirname(self.output_path)
+        sig_de_path = os.path.join(parent_dir, "signaling_effect_degs")
+
         # Input checks- if not manually provided, check argparse inputs (make sure an input was given from somewhere,
         # though):
         if self.diff_sending_or_receiving is not None:
@@ -1178,23 +1176,26 @@ class MuSIC_Interpreter(MuSIC):
         if self.no_cell_type_markers is not None:
             no_cell_type_markers = self.no_cell_type_markers
 
-        if ligand is None and self.ligand_for_downstream is not None:
-            ligand = self.ligand_for_downstream
-        else:
-            if self.mod_type == "ligand" or self.mod_type == "lr":
-                raise ValueError("Must provide ligand for ligand models.")
+        if ligand is None:
+            if self.ligand_for_downstream is not None:
+                ligand = self.ligand_for_downstream
+            else:
+                if self.mod_type == "ligand" or self.mod_type == "lr":
+                    raise ValueError("Must provide ligand for ligand models.")
 
-        if receptor is None and self.receptor_for_downstream is not None:
-            receptor = self.receptor_for_downstream
-        else:
-            if self.mod_type == "lr":
-                raise ValueError("Must provide receptor for lr models.")
+        if receptor is None:
+            if self.receptor_for_downstream is not None:
+                receptor = self.receptor_for_downstream
+            else:
+                if self.mod_type == "lr":
+                    raise ValueError("Must provide receptor for lr models.")
 
-        if sender_cell_type is None and self.sender_ct_for_downstream is not None:
-            sender_cell_type = self.sender_ct_for_downstream
-        else:
-            if self.mod_type == "niche":
-                raise ValueError("Must provide sender cell type for niche models.")
+        if sender_cell_type is None:
+            if self.sender_ct_for_downstream is not None:
+                sender_cell_type = self.sender_ct_for_downstream
+            else:
+                if self.mod_type == "niche":
+                    raise ValueError("Must provide sender cell type for niche models.")
 
         if receiver_cell_type is None and self.receiver_ct_for_downstream is not None:
             receiver_cell_type = self.receiver_ct_for_downstream
@@ -1210,41 +1211,44 @@ class MuSIC_Interpreter(MuSIC):
             no_cell_type_markers=no_cell_type_markers,
         )
 
-        GAM_adata_subset = self.group_sender_receiver_effect_degs(
-            GAM_adata=GAM_adata,
-            bs_obj=bs_obj,
-            n_points=n_points,
-            num_pcs=num_pcs,
-            num_neighbors=num_neighbors,
-            leiden_resolution=leiden_resolution,
-            top_n_genes=top_n_genes,
-        )
+        # Only cluster when computing differential expression w/ respect to receiving effect potential (there are
+        # often not enough upstream factors to do this in the sending direction):
+        if diff_sending_or_receiving == "receiving":
+            GAM_adata = self.group_sender_receiver_effect_degs(
+                GAM_adata=GAM_adata,
+                bs_obj=bs_obj,
+                n_points=n_points,
+                num_pcs=num_pcs,
+                num_neighbors=num_neighbors,
+                leiden_resolution=leiden_resolution,
+                top_n_genes=top_n_genes,
+            )
 
         # Save final AnnData object- different naming convention depending on which signaling molecules or cell types
         # were supplied:
         if ligand is not None:
             if receptor is not None:
-                GAM_adata_subset.write_h5ad(
+                GAM_adata.write_h5ad(
                     os.path.join(os.path.dirname(self.adata_path), f"{ligand}-{receptor}_effect_on_{target}_deg.h5ad")
                 )
             else:
-                GAM_adata_subset.write_h5ad(
+                GAM_adata.write_h5ad(
                     os.path.join(os.path.dirname(self.adata_path), f"{ligand}_effect_on_{target}_deg.h5ad")
                 )
         elif pathway is not None:
-            GAM_adata_subset.write_h5ad(
+            GAM_adata.write_h5ad(
                 os.path.join(os.path.dirname(self.adata_path), f"{pathway}_effect_on_{target}_deg.h5ad")
             )
         elif sender_cell_type is not None:
             if receiver_cell_type is not None:
-                GAM_adata_subset.write_h5ad(
+                GAM_adata.write_h5ad(
                     os.path.join(
                         os.path.dirname(self.adata_path),
                         f"{sender_cell_type}_effect_on_{target}_in_{receiver_cell_type}_deg.h5ad",
                     )
                 )
             else:
-                GAM_adata_subset.write_h5ad(
+                GAM_adata.write_h5ad(
                     os.path.join(os.path.dirname(self.adata_path), f"{sender_cell_type}_effect_on_{target}_deg.h5ad")
                 )
 
@@ -1273,11 +1277,13 @@ class MuSIC_Interpreter(MuSIC):
 
         if self.effect_strength_threshold is not None:
             effect_strength_threshold = self.effect_strength_threshold
+            self.logger.info(
+                f"Computing cell type coupling for cells in which predicted sent/received effect score "
+                f"is higher than {effect_strength_threshold * 100}th percentile score."
+            )
 
         # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
-        spatial_weights = self._compute_all_wi(
-            self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True, verbose=False
-        ).toarray()
+        spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True, verbose=False)
 
         if not self.mod_type != "receptor":
             raise ValueError("Knowledge of the source is required to sent effect potential.")
@@ -1346,8 +1352,8 @@ class MuSIC_Interpreter(MuSIC):
         for i, target in enumerate(targets):
             for j, col in enumerate(cols):
                 if self.mod_type == "lr":
-                    ligand = col.split(":")[0]
-                    receptor = col.split(":")[1]
+                    ligand = col[0]
+                    receptor = col[1]
 
                     effect_potential, _, _ = self.get_effect_potential(
                         target=target, ligand=ligand, receptor=receptor, spatial_weights=spatial_weights

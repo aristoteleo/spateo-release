@@ -58,6 +58,8 @@ class MuSIC:
             pertinent to modeling.
         args_list: If parser is provided by function call, the arguments to parse must be provided as a separate
             list. It is recommended to use the return from :func `define_spateo_argparse()` for this.
+        verbose: Set True to print updates to screen. Will be set False when initializing downstream analysis object,
+            which inherits from this class but for which the information is generally not as useful.
 
     Attributes:
         mod_type: The type of model that will be employed- this dictates how the data will be processed and
@@ -146,12 +148,19 @@ class MuSIC:
         fit_intercept: Set True to include intercept in the model and False to exclude intercept
     """
 
-    def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
+    def __init__(
+        self,
+        comm: MPI.Comm,
+        parser: argparse.ArgumentParser,
+        args_list: Optional[List[str]] = None,
+        verbose: bool = True,
+    ):
         self.logger = lm.get_main_logger()
 
         self.comm = comm
         self.parser = parser
         self.args_list = args_list
+        self.verbose = verbose
 
         self.mod_type = None
         self.species = None
@@ -699,7 +708,18 @@ class MuSIC:
                     f"complex members."
                 )
 
+                # In the case of using this method to find candidate ligands, save list of ligands in the same directory
+                # as the AnnData file for later access:
+                self.logger.info(
+                    f"Saving list of manually found ligands to "
+                    f"{os.path.join(os.path.dirname(self.adata_path), 'ligands.txt')}"
+                )
+
+                with open(os.path.join(os.path.dirname(self.adata_path), "ligands.txt"), "w") as f:
+                    f.write("\n".join(ligands))
+
             ligands = [l for l in ligands if l in adata.var_names]
+
             self.ligands_expr = pd.DataFrame(
                 adata[:, ligands].X.A if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
                 index=adata.obs_names,
@@ -734,9 +754,9 @@ class MuSIC:
                     # dataframe columns
                     partial_components = [l for l in ligands if l in parts]
                     to_drop.extend(partial_components)
-                    if len(partial_components) > 0:
+                    if len(partial_components) > 0 and self.verbose:
                         self.logger.info(
-                            f"Not all components from the {element} heterocomplex could be found in the " f"dataset."
+                            f"Not all components from the {element} heterocomplex could be found in the dataset."
                         )
 
             # Drop any possible duplicate ligands alongside any other columns to be dropped:
@@ -817,6 +837,16 @@ class MuSIC:
                     f"complex members."
                 )
 
+                # In the case of using this method to find candidate receptors, save the list of receptors in the same
+                # directory as the AnnData object for later access:
+                self.logger.info(
+                    f"Saving list of manually found receptors to "
+                    f"{os.path.join(os.path.dirname(self.adata_path), 'receptors.txt')}"
+                )
+
+                with open(os.path.join(os.path.dirname(self.adata_path), "receptors.txt"), "w") as f:
+                    f.write("\n".join(receptors))
+
             receptors = [r for r in receptors if r in adata.var_names]
 
             self.receptors_expr = pd.DataFrame(
@@ -854,7 +884,7 @@ class MuSIC:
                         # dataframe columns
                         partial_components = [r for r in receptors if r in parts]
                         to_drop.extend(partial_components)
-                        if len(partial_components) > 0:
+                        if len(partial_components) > 0 and self.verbose:
                             self.logger.info(
                                 f"Not all components from the {element} heterocomplex could be found in the "
                                 f"dataset, so this complex was not included."
@@ -869,7 +899,10 @@ class MuSIC:
             # Ensure there is some degree of compatibility between the selected ligands and receptors if model uses
             # both ligands and receptors:
             if self.mod_type == "lr":
-                self.logger.info("Preparing data: finding matched pairs between the selected ligands and receptors.")
+                if self.verbose:
+                    self.logger.info(
+                        "Preparing data: finding matched pairs between the selected ligands and " "receptors."
+                    )
                 starting_n_ligands = len(self.ligands_expr.columns)
                 starting_n_receptors = len(self.receptors_expr.columns)
 
@@ -884,9 +917,10 @@ class MuSIC:
                 self.lr_pairs = [tuple(x) for x in zip(pairs["from"], pairs["to"])]
                 if len(self.lr_pairs) == 0:
                     raise RuntimeError(
-                        "No matched pairs between the selected ligands and receptors were found. If path to custom list of "
-                        "ligands and/or receptors was provided, ensure ligand-receptor pairings exist among these lists, "
-                        "or check data to make sure these ligands and/or receptors were measured and were not filtered out."
+                        "No matched pairs between the selected ligands and receptors were found. If path to custom "
+                        "list of ligands and/or receptors was provided, ensure ligand-receptor pairings exist among "
+                        "these lists, or check data to make sure these ligands and/or receptors were measured and "
+                        "were not filtered out."
                     )
 
                 pivoted_df = merged_df.pivot_table(values=["value_ligand", "value_receptor"], index=["from", "to"])
@@ -897,19 +931,21 @@ class MuSIC:
                 final_n_ligands = len(self.ligands_expr.columns)
                 final_n_receptors = len(self.receptors_expr.columns)
 
-                self.logger.info(
-                    f"Found {final_n_ligands} ligands and {final_n_receptors} receptors that have matched pairs. "
-                    f"{starting_n_ligands - final_n_ligands} ligands removed from the list and "
-                    f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the list due to not "
-                    f"having matched pairs among the corresponding set of receptors/ligands, respectively."
-                    f"Remaining ligands: {self.ligands_expr.columns.tolist()}."
-                    f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
-                )
+                if self.verbose:
+                    self.logger.info(
+                        f"Found {final_n_ligands} ligands and {final_n_receptors} receptors that have matched pairs. "
+                        f"{starting_n_ligands - final_n_ligands} ligands removed from the list and "
+                        f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the list due to "
+                        f"not having matched pairs among the corresponding set of receptors/ligands, respectively."
+                        f"Remaining ligands: {self.ligands_expr.columns.tolist()}."
+                        f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
+                    )
 
-                self.logger.info(f"Set of {len(self.lr_pairs)} ligand-receptor pairs: {self.lr_pairs}")
+                    self.logger.info(f"Set of {len(self.lr_pairs)} ligand-receptor pairs: {self.lr_pairs}")
 
         # Get gene targets:
-        self.logger.info("Preparing data: getting gene targets.")
+        if self.verbose:
+            self.logger.info("Preparing data: getting gene targets.")
         # For niche model and ligand model, targets must be manually provided:
         if (self.targets_path is None and self.custom_targets is None) and self.mod_type in ["niche", "ligand"]:
             raise ValueError(
@@ -1041,13 +1077,14 @@ class MuSIC:
             X_df = X_df.applymap(np.log1p)
 
             # Save design matrix:
-            if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix")):
-                os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix"))
-            X_df.to_csv(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"))
-            self.logger.info(
-                f"Saving design matrix to "
-                f"{os.path.join(os.path.splitext(self.output_path)[0], 'design_matrix', 'design_matrix.csv')}."
-            )
+            if self.verbose:
+                if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix")):
+                    os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix"))
+                X_df.to_csv(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"))
+                self.logger.info(
+                    f"Saving design matrix to "
+                    f"{os.path.join(os.path.splitext(self.output_path)[0], 'design_matrix', 'design_matrix.csv')}."
+                )
 
             self.X = X_df.values
             self.feature_names = [pair.split(":")[0] + ":" + pair.split(":")[1] for pair in X_df.columns]
@@ -1486,7 +1523,7 @@ class MuSIC:
                 clip=self.clip,
                 max_iter=self.max_iter,
                 spatial_weights=wi,
-                offset=self.offset,
+                # offset=self.offset,
                 link=None,
                 ridge_lambda=self.ridge_lambda,
                 mask=feature_mask,
@@ -1978,7 +2015,7 @@ class MuSIC:
                     distr="binomial",
                     tol=self.tolerance,
                     max_iter=self.max_iter,
-                    offset=self.offset,
+                    # offset=self.offset,
                     link=None,
                     ridge_lambda=self.ridge_lambda,
                 )
@@ -2049,6 +2086,11 @@ class MuSIC:
 
                 threshold = np.abs(correlations) < 0.1
                 feature_mask = np.where(threshold, np.abs(correlations), 1.0)
+                # Repression is more difficult to detect than activation, so the criterion for calling a relationship
+                # repressive need to be more stringent- enable negative coefficients only where the global
+                # correlation is negative:
+                global_negative_relationship = correlations < -0.1
+                feature_mask = np.where(global_negative_relationship, feature_mask, -1.0)
             else:
                 feature_mask = None
 

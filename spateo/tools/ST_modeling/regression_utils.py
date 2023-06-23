@@ -255,7 +255,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     betas = np.clip(betas, -clip, clip)
     # And set to zero with small offset for numerical overflow if the diagonal of the Gram matrix is below a certain
     # threshold:
-    betas[to_zero] = 1e-5
+    betas[to_zero] = 1e-6
 
     return betas, pseudoinverse, cov_inverse
 
@@ -268,6 +268,7 @@ def iwls(
     offset: Optional[np.ndarray] = None,
     tol: float = 1e-8,
     clip: float = 5.0,
+    threshold: float = 1e-3,
     max_iter: int = 200,
     spatial_weights: Optional[np.ndarray] = None,
     link: Optional[Link] = None,
@@ -290,6 +291,8 @@ def iwls(
             e.g. by differences in library size
         tol: Convergence tolerance
         clip: Sets magnitude of the upper and lower bound to constrain betas and prevent numerical overflow
+        threshold: Coefficients with absolute values below this threshold will be set to zero (as these are
+            insignificant)
         max_iter: Maximum number of iterations if convergence is not reached
         spatial_weights: Array of shape [n_samples, 1]; weights to transform observations from location i for a
             geographically-weighted regression
@@ -373,16 +376,24 @@ def iwls(
                 w_adjusted_predictor, wx, spatial_weights, ridge_lambda=ridge_lambda, clip=clip
             )
 
+        # Mask operations:
         if mask is not None:
-            new_betas = np.multiply(new_betas, mask.reshape(-1, 1)).astype(np.float32)
+            mask = mask.reshape(-1, 1)
+            neg_mask = (new_betas < 0) & (mask == -1.0) | (new_betas > 0)
+            new_betas[~neg_mask] = 1e-6
+            mask[mask == -1.0] = 1
+            new_betas = np.multiply(new_betas, mask).astype(np.float32)
 
         linear_predictor = sparse_dot(x, new_betas)
         y_hat = distr.predict(linear_predictor)
 
         difference = np.min(abs(new_betas - betas))
         betas = new_betas
+
     # Set zero coefficients to zero:
-    betas[betas == 1e-5] = 0.0
+    betas[betas == 1e-6] = 0.0
+    # Threshold coefficients where appropriate:
+    betas[np.abs(betas) < threshold] = 0.0
 
     if mod_distr == "gaussian":
         if spatial_weights is not None:
@@ -515,7 +526,7 @@ def golden_section_search(func: Callable, a: float, b: float, tol: float = 1e-5,
 # Differential testing functions
 # ---------------------------------------------------------------------------------------------------
 def fit_DE_GAM(
-    counts: Union[np.ndarray, scipy.sparse.spmatrix],
+    endog: Union[np.ndarray, scipy.sparse.spmatrix],
     var: np.ndarray,
     genes: List[str],
     cells: Optional[List[str]] = None,
@@ -527,15 +538,18 @@ def fit_DE_GAM(
     family: Literal["gaussian", "poisson", "nb"] = "nb",
     include_offset: bool = False,
     return_model_idx: Optional[Union[int, List[int]]] = None,
-) -> Union[Tuple[anndata.AnnData, Dict[str, statsmodels.gam.api.GLMGam], BSplines], Tuple[anndata.AnnData, BSplines]]:
+) -> Tuple[None, None]:
     """Fit generalized additive models for the purpose of differential expression testing from spatial
     transcriptomics data.
 
     Args:
-        counts: Matrix of gene expression counts, with cells as rows and genes as columns (so shape [n_samples,
-            n_genes])
+        endog: Matrix of dependent variables- for received effect DEGs, this is the gene expression counts,
+            with cells as rows and genes as columns (so shape [n_samples, n_genes]). For sent effect DEGs,
+            this is the sent effect potential.
         cat_cov: Optional design matrix for fixed effects (i.e. categorical covariates)
-        var: The continuous predictor variable (e.g. pseudotime) of shape [n_samples, ].
+        var: The continuous predictor variable(s). For received effect DEGs, this is the received effect potential.
+            For sent effect DEGs, this is the gene expression counts, cells as rows and genes as columns (so shape [
+            n_samples, n_genes]).
         genes: List of genes present in the counts matrix
         cells: Optional list of cell names
         weights: Optional sample weights of shape [n_samples, ] (or in the case of pseudotime, this can be [
@@ -547,8 +561,6 @@ def fit_DE_GAM(
             and "poisson" as other options.
         include_offset: If True, include offset to account for differences in library size in predictions. If True,
             will compute scaling factor using trimmed mean of M-value with singleton pairing (TMMswp).
-        return_model_idx: If not None, return the GAM model(s) corresponding to the specified index or indices. If
-            None, return all models. Defaults to None.
 
     Returns:
         sc_obj: AnnData object containing information gathered from fitting all GAM models
@@ -565,14 +577,14 @@ def fit_DE_GAM(
     )
 
     if weights is None:
-        weights = np.ones((counts.shape[0], var.shape[1]))
+        weights = np.ones((endog.shape[0], 1))
 
     if var.ndim == 1:
         var = var.reshape(-1, 1)
-    if weights.ndim == 1:
-        weights = weights.reshape(-1, 1)
-    if counts.ndim == 1:
-        counts = counts.reshape(-1, 1)
+    # if weights.ndim == 1:
+    #     weights = weights.reshape(-1, 1)
+    if endog.ndim == 1:
+        endog = endog.reshape(-1, 1)
 
     # Check non-negativity of counts:
     if scipy.sparse.issparse(counts):
@@ -844,7 +856,7 @@ def DE_GAM_test(
 
     Returns:
         GAM_adata: AnnData object with results of statistical testing added
-        bs:
+        bs: BSplines object containing information about the basis splines
     """
 
     design_matrix = GAM_adata.obsm["var"]
@@ -1139,8 +1151,10 @@ def wald_test_GAM(
     df = mod_contrast_matrix.shape[1]
     pval = 1 - scipy.stats.chi2.cdf(wald, df)
     # Convert to floating point:
-    wald = wald.item()
-    pval = pval.item()
+    if not np.isscalar(wald):
+        wald = wald.item()
+    if not np.isscalar(pval):
+        pval = pval.item()
 
     return wald, df, pval
 
