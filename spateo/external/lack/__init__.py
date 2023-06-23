@@ -2,5 +2,5 @@
 __version__ = "0.0.4"
 
 from .logger import Logger
-from .logger_manager import LoggerManager
 from .logger_interface import *
+from .logger_manager import LoggerManager
