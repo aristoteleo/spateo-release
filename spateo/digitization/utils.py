@@ -4,7 +4,6 @@
 import math
 from typing import List, Optional, Tuple, Union
 
-import cv2
 import numpy as np
 from anndata import AnnData
 from skimage import morphology
@@ -47,6 +46,12 @@ def fill_grid_label(
         column_grid_img: A numpy array that store the image of the columns and column grids.
     """
 
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     # mask image should be 2 pixels wider and higher, according to cv2.floodFill
     layer_grid_img = seg_grid_img.copy()
     layer_mask = np.zeros((layer_grid_img.shape[0] + 2, layer_grid_img.shape[1] + 2), dtype=np.uint8)
@@ -119,6 +124,12 @@ def order_borderline(
         ordered_bdl_img: A numpy aray that stores the image of the borderline segment.
 
     """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     lm.main_info(
         f"Reorder the coordinates along the borderline with the givien start {pt_start} and end {pt_end} " f"points."
     )
@@ -163,6 +174,12 @@ def draw_seg_grid(
         When `mode` is set to be `grid`, a matrix with the gridlines is created.
     """
 
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     seg_grid_img = np.zeros_like(borderline_img, dtype=np.uint8)
 
     if len(bdl_seg_coor_x) != len(bdl_seg_coor_y):
@@ -277,6 +294,12 @@ def extend_layer(
         extend_layer_bdl: The list of extended layer borderline.
     """
 
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     lm.main_info(f"Generating layer area.")
     extend_layer_mask = np.zeros_like(borderline_img, dtype=np.uint8)
     extend_layer_img = np.zeros_like(borderline_img, dtype=np.uint8)

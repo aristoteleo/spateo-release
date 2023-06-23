@@ -3,7 +3,6 @@
 import math
 from typing import Optional, Tuple, Union
 
-import cv2
 import numpy as np
 import pandas as pd
 from anndata import AnnData
@@ -81,6 +80,12 @@ def get_points_props(data: pd.DataFrame) -> pd.DataFrame:
     Returns:
         A dataframe with properties and contours indexed by label
     """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     rows = []
     for label, _df in data.drop_duplicates(subset=["label", "x", "y"]).groupby("label"):
         points = _df[["x", "y"]].values.astype(int)
@@ -121,6 +126,12 @@ def get_label_props(labels: np.ndarray) -> pd.DataFrame:
     Returns:
         A dataframe with properties and contours indexed by label
     """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
 
     def contour(mtx):
         """Get contours of a cell using `cv2.findContours`."""

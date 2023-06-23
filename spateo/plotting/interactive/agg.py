@@ -2,7 +2,6 @@
 """
 from typing import Dict, List, Optional, Tuple, Union
 
-import cv2
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,6 +32,12 @@ def contours(adata: AnnData, layer: str, colors: Optional[List] = None, scale: f
     Returns:
         A Plotly figure
     """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     if SKM.get_adata_type(adata) != SKM.ADATA_AGG_TYPE:
         raise PlottingError("Only `AGG` type AnnDatas are supported.")
     bins = SKM.select_layer_data(adata, layer)
@@ -103,6 +108,12 @@ def select_polygon(
             corresponding option of the theme.
         **kwargs: Additional keyword arguments are all passed to :func:`spateo.pl.imshow`.
     """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     from matplotlib import rcParams
     from matplotlib.colors import to_hex
 

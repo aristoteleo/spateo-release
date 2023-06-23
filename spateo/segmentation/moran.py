@@ -4,7 +4,6 @@ Adapted from code written by @HailinPan.
 """
 from typing import Optional, Tuple
 
-import cv2
 import numpy as np
 from anndata import AnnData
 from scipy import signal, stats
@@ -67,6 +66,12 @@ def run_moran(X: np.ndarray, k: int = 7, p_threshold: float = 0.05, mask: Option
     Returns:
         A 2D Numpy array indicating pixel scores
     """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     # Create Gaussian kernel
     kx = cv2.getGaussianKernel(k, 0)
     ky = cv2.getGaussianKernel(k, 0)
@@ -105,6 +110,12 @@ def run_moran_and_mask_pixels(
     Returns:
         A boolean mask.
     """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     # Create Gaussian kernel
     kx = cv2.getGaussianKernel(k, 0)
     ky = cv2.getGaussianKernel(k, 0)

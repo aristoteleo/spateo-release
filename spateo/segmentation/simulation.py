@@ -5,7 +5,6 @@ Adapted from code written by @HailinPan.
 from collections import deque
 from typing import Optional, Tuple
 
-import cv2
 import numpy as np
 from anndata import AnnData
 from scipy import stats
@@ -38,6 +37,12 @@ def _create_labels(
     Returns:
         New Numpy array containing cell labels.
     """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     n = xs.size
     if n != xs.size or n != axes1.size or n != axes2.size or n != angles.size:
         raise SegmentationError(f"All input arrays must have size {n}")

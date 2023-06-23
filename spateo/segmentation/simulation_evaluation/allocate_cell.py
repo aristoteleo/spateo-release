@@ -3,7 +3,6 @@ import os
 import pickle
 
 # from select import select
-import cv2
 import numpy as np
 import pandas as pd
 from anndata import AnnData
@@ -47,6 +46,12 @@ def get_cell_pos(area_df, ltos, cell_num=100, height=500, width=500, seed=1, max
 
 
 def shift_cells(cells, labels, max_iter, seed, shift_length=10):
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     cv2.ellipse(
         img=labels,
         center=cells[0].center,

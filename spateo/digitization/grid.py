@@ -54,6 +54,12 @@ def digitize(
         2. dgl_column_key: The key in `adata.obs` points to the values of column digital-heat (temperature).
     """
 
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     lm.main_info("Initialize the field of the spatial domain of interests.")
     empty_field = np.zeros((int(max(adata.obsm[spatial_key][:, 0])) + 1, int(max(adata.obsm[spatial_key][:, 1])) + 1))
 

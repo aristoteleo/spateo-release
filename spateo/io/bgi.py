@@ -5,7 +5,6 @@ import math
 import warnings
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
-import cv2
 import numpy as np
 import pandas as pd
 
@@ -142,6 +141,12 @@ def dataframe_to_filled_labels(df: pd.DataFrame, column: str, shape: Optional[Tu
     Returns:
         Labels matrix
     """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     shape = shape or (df["x"].max() + 1, df["y"].max() + 1)
     labels = np.zeros(shape, dtype=int)
     for label, _df in df.drop_duplicates(subset=[column, "x", "y"]).groupby(column):
@@ -193,6 +198,12 @@ def read_bgi_agg(
         `.layers['spliced']` and `.layers['unspliced']` respectively.
         The nuclei image is stored as a Numpy array in `.layers['nuclei']`.
     """
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     lm.main_debug(f"Reading data from {path}.")
     data = read_bgi_as_dataframe(path, label_column)
     x_min, y_min = data["x"].min(), data["y"].min()

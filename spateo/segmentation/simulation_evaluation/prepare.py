@@ -1,6 +1,5 @@
 import os
 
-import cv2
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +9,12 @@ mpl.rcParams["pdf.fonttype"] = 42
 
 
 def get_fb_dis(image_tif, labels_tif):
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     data = cv2.imread(image_tif, 2)
     labels = cv2.imread(labels_tif, 2)
     cell_sigs = np.bincount(data[labels > 0]) / np.sum(labels > 0)
@@ -34,6 +39,12 @@ def get_fb_dis(image_tif, labels_tif):
 
 
 def cell_area_dis(labels_tifs):
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     all_areas = []
     for labels_tif in labels_tifs:
         labels = cv2.imread(labels_tif, 2)
@@ -51,6 +62,12 @@ def cell_area_dis(labels_tifs):
 
 
 def c_to_a_ratio_dis(labels_tif):
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     labels = cv2.imread(labels_tif, 2)
     cell_labels = [i for i in np.unique(labels) if i > 0]
     ratios = []
@@ -65,6 +82,12 @@ def c_to_a_ratio_dis(labels_tif):
 
 
 def ltos_ratio_dis(labels_tifs):
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     ratios = []
     for labels_tif in labels_tifs:
         labels = cv2.imread(labels_tif, 2)
@@ -83,6 +106,12 @@ def ltos_ratio_dis(labels_tifs):
 
 
 def get_fb_dis_window(image_tif, labels_tif, win=200):
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     data = cv2.imread(image_tif, 2)
     labels = cv2.imread(labels_tif, 2)
     c = 0

@@ -1,6 +1,11 @@
 import sys
 
-import cv2 as cv
+try:
+    import cv2 as cv
+except ImportError:
+    raise ImportError(
+        "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+    )
 import numpy as np
 
 

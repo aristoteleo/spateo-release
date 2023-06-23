@@ -6,7 +6,6 @@ except ImportError:
     from typing_extensions import Literal
 
 import anndata
-import cv2
 from scipy.sparse import isspmatrix
 
 from ...configuration import SKM
@@ -64,6 +63,12 @@ def spagcn_pyg(
                                 The adjacent matrix used in spagcn algorithm is saved in `adata.uns["adj_spagcn"]`.
     """
 
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     if x_array is None:
         x_array = [i[0] for i in adata.obsm["X_spatial"]]
     else:

@@ -6,7 +6,6 @@ https://github.com/stardist/stardist
 import math
 from typing import Optional, Union
 
-import cv2
 import numpy as np
 from anndata import AnnData
 from csbdeep.data import Normalizer, PercentileNormalizer
@@ -99,6 +98,12 @@ def _sanitize_labels(labels: np.ndarray) -> np.ndarray:
         Sanitized labels.
     """
 
+    try:
+        import cv2
+    except ImportError:
+        raise ImportError(
+            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
+        )
     def components(mtx):
         mtx = mtx.astype(np.uint8)
         return cv2.connectedComponentsWithStats(mtx)
