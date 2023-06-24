@@ -526,34 +526,35 @@ def golden_section_search(func: Callable, a: float, b: float, tol: float = 1e-5,
 # Differential testing functions
 # ---------------------------------------------------------------------------------------------------
 def fit_DE_GAM(
+    diff_sending_or_receiving: Literal["sending", "receiving"],
     endog: Union[np.ndarray, scipy.sparse.spmatrix],
-    var: np.ndarray,
+    exog: Union[np.ndarray, scipy.sparse.spmatrix],
     genes: List[str],
-    cells: Optional[List[str]] = None,
-    cat_cov: Optional[np.ndarray] = None,
+    cells: Optional[np.ndarray] = None,
     weights: Optional[np.ndarray] = None,
     offset: Optional[np.ndarray] = None,
     n_df: int = 8,
     parallel: bool = True,
     family: Literal["gaussian", "poisson", "nb"] = "nb",
     include_offset: bool = False,
-    return_model_idx: Optional[Union[int, List[int]]] = None,
-) -> Tuple[None, None]:
+    label: Optional[str] = None,
+) -> Tuple[anndata.AnnData, Dict[str, BSplines]]:
     """Fit generalized additive models for the purpose of differential expression testing from spatial
     transcriptomics data.
 
     Args:
-        endog: Matrix of dependent variables- for received effect DEGs, this is the gene expression counts,
-            with cells as rows and genes as columns (so shape [n_samples, n_genes]). For sent effect DEGs,
-            this is the sent effect potential.
-        cat_cov: Optional design matrix for fixed effects (i.e. categorical covariates)
-        var: The continuous predictor variable(s). For received effect DEGs, this is the received effect potential.
+        diff_sending_or_receiving: Here, `genes` refers to either the labels for the endogenous variable array (as in
+            the case of "receiving", where we identify genes associated with the received effect) or for the exogenous
+            variable array (as in the case of "sending", where we identify genes associated with the expression of
+            particular ligand(s)). Note that for "sending", the endogenous array must be 1D.
+        endog: Matrix of dependent/target variables- for received effect DEGs, this is the gene expression counts,
+            with cells as rows and genes as columns (so shape [n_samples, n_genes]). This can also be 1D and
+            constitute expression of a particular ligand.
+        exog: The continuous predictor variable(s). For received effect DEGs, this is the received effect potential.
             For sent effect DEGs, this is the gene expression counts, cells as rows and genes as columns (so shape [
             n_samples, n_genes]).
-        genes: List of genes present in the counts matrix
+        genes: List of genes present in the gene expression array
         cells: Optional list of cell names
-        weights: Optional sample weights of shape [n_samples, ] (or in the case of pseudotime, this can be [
-            n_samples, n_lineages])
         offset: Optional offset term of shape [n_samples, ]
         n_df: The number of degrees of freedom to be used in the smoothing function. Defaults to 8.
         parallel: Whether to use parallel processing. Defaults to True.
@@ -561,271 +562,337 @@ def fit_DE_GAM(
             and "poisson" as other options.
         include_offset: If True, include offset to account for differences in library size in predictions. If True,
             will compute scaling factor using trimmed mean of M-value with singleton pairing (TMMswp).
+        label: Optional label for the AnnData object, will be used for downstream plotting purposes. This should
+            somehow describe the signal of interest (e.g. the ligand, downstream target of interest, etc.)
 
     Returns:
-        sc_obj: AnnData object containing information gathered from fitting all GAM models
-        bs: BSplines object containing information about the fitted splines
-        return_gams: Dictionary of GAM models, with keys corresponding to the target gene and values corresponding
-            to :class `statsmodels.GLMGam` objects
+        sc_obj: AnnData object containing information gathered from fitting all GAM models- this includes p-values,
+            Wald statistics, etc.
+        basis: Dictionary containing BSplines object with information about the fitted splines
     """
-
-    logger = lm.get_main_logger()
-    logger.info(
-        "Note that this function currently does not currently support fitting of multiple independent "
-        "variables, despite it being possible to pass 2D 'var'. To do this, it is recommended to fit to each "
-        "independent variable separately."
-    )
 
     if weights is None:
         weights = np.ones((endog.shape[0], 1))
 
-    if var.ndim == 1:
-        var = var.reshape(-1, 1)
-    # if weights.ndim == 1:
-    #     weights = weights.reshape(-1, 1)
+    if exog.ndim == 1:
+        exog = exog.reshape(-1, 1)
     if endog.ndim == 1:
         endog = endog.reshape(-1, 1)
 
-    # Check non-negativity of counts:
-    if scipy.sparse.issparse(counts):
-        if not (counts.data >= 0).all():
+    if diff_sending_or_receiving == "sending" and endog.shape[1] > 1:
+        raise ValueError(
+            "For this configuration, ('diff_sending_or_receiving' = 'sending'), dependent variable array must be 1D. "
+            "For multiple targets, run this function once for each target."
+        )
+    elif diff_sending_or_receiving == "receiving" and exog.shape[1] > 1:
+        raise ValueError(
+            "For this configuration, ('diff_sending_or_receiving' = 'receiving'), predictor variable array must be "
+            "1D. For multiple predictors, run this function once for each predictor."
+        )
+
+    targets = {}
+    predictors = {}
+    subsetted_cells = {}
+    # Measure converged and/or genes that had enough cells post-filtering to model:
+    fitted = {}
+    pvals = {}
+    wald_stats = {}
+    basis = {}
+    # For each independent-dependent relationship, subset to cells that have nonzero values for both- gene-level
+    # relationships can be multifaceted due to promiscuity and so presence or absence of gene expression can be
+    # misleading- we can use cells for which both signals are present to get a sense of the true context-independent
+    # effect of one on the other:
+
+    # Check non-negativity:
+    if scipy.sparse.issparse(endog):
+        if not (endog.data >= 0).all():
             raise ValueError("All values of the count matrix should be non-negative")
     else:
-        if (counts < 0).any():
+        if (endog < 0).any():
             raise ValueError("All values of the count matrix should be non-negative")
 
-    # Check that all vectors have the same shape:
-    if var.shape != weights.shape:
-        raise ValueError("var and weights must have identical dimensions.")
+    if scipy.sparse.issparse(exog):
+        if not (exog.data >= 0).all():
+            raise ValueError("All values of the count matrix should be non-negative")
+    else:
+        if (exog < 0).any():
+            raise ValueError("All values of the count matrix should be non-negative")
 
-    if cat_cov is not None and cat_cov.shape[0] != counts.shape[0]:
-        raise ValueError("The dimensions of cat_cov do not match those of counts.")
+    # In the case that differential expression is being done in the receiving cell, so there are multiple different
+    # targets:
+    if diff_sending_or_receiving == "receiving":
+        for idx in range(endog.shape[1]):
+            gene = genes[idx]
+            if scipy.sparse.issparse(endog):
+                # Independent variables can be multi-column in this case to use many pathway components
+                to_subset = np.nonzero(np.logical_and(np.any(exog != 0, axis=0), endog[:, idx].data != 0))[0]
+                # If the size of the subset is not large enough, set this gene to insignificant and set
+                # p-values and Wald stats to 1 and 0, respectively:
+                if len(to_subset) < 20:
+                    fitted[gene] = False
+                    pvals[gene] = 1
+                    wald_stats[gene] = 0
+                    continue
+                else:
+                    # Placeholders:
+                    fitted[gene] = True
+                    pvals[gene] = np.nan
+                    wald_stats[gene] = np.nan
 
-    if var.shape[0] != counts.shape[0]:
-        raise ValueError("variable matrix and count matrix must have the same number of cells.")
-    if weights.shape[0] != counts.shape[0]:
-        raise ValueError("weights matrix and count matrix must have the same number of cells.")
+                targets[gene] = endog[to_subset, idx].data
+            else:
+                to_subset = np.nonzero(np.logical_and(np.any(exog != 0, axis=0), endog[:, idx] != 0))[0]
+                # If the size of the subset is not large enough, set this gene to insignificant:
+                if len(to_subset) < 20:
+                    fitted[gene] = False
+                    pvals[gene] = 1
+                    wald_stats[gene] = 0
+                    continue
+                else:
+                    # Placeholders:
+                    fitted[gene] = True
+                    pvals[gene] = np.nan
+                    wald_stats[gene] = np.nan
+                targets[gene] = endog[to_subset, idx]
 
-    if np.isnan(var).any():
-        raise ValueError("Variable array contains NA values.")
+            # The independent variable(s) are shared, but subsetting differences may exist, so store the determined
+            # subset for each gene:
+            predictors[gene] = exog[to_subset, :]
+            # Store indices of subset:
+            subsetted_cells[gene] = to_subset
 
-    # Define separate variable for each lineage (if applicable):
-    for i in range(var.shape[1]):
-        locals()["v" + str(i + 1)] = var[:, i]
+    # In the case that differential expression is being done in the sending cell, so there are multiple different
+    # predictors for which models will be fit one-at-a-time:
+    elif diff_sending_or_receiving == "sending":
+        for idx in range(exog.shape[1]):
+            gene = genes[idx]
+            if scipy.sparse.issparse(exog):
+                to_subset = np.nonzero(np.logical_and(endog != 0, exog[:, idx].data != 0))[0]
+                # If the size of the subset is not large enough, set this gene to insignificant and set
+                # p-values and Wald stats to 1 and 0, respectively:
+                if len(to_subset) < 20:
+                    fitted[gene] = False
+                    pvals[gene] = 1
+                    wald_stats[gene] = 0
+                    continue
+                else:
+                    # Placeholders:
+                    fitted[gene] = True
+                    pvals[gene] = np.nan
+                    wald_stats[gene] = np.nan
 
-    # Get indicators for cells to use in smoothers
-    for i in range(var.shape[1]):
-        locals()["w" + str(i + 1)] = weights[:, i] == 1
+                predictors[gene] = exog[to_subset, idx].data
+            else:
+                to_subset = np.nonzero(np.logical_and(endog != 0, exog[:, idx] != 0))[0]
+                # If the size of the subset is not large enough, set this gene to insignificant and set
+                # p-values and Wald stats to 1 and 0, respectively:
+                if len(to_subset) < 20:
+                    fitted[gene] = False
+                    pvals[gene] = 1
+                    wald_stats[gene] = 0
+                    continue
+                else:
+                    # Placeholders:
+                    fitted[gene] = True
+                    pvals[gene] = np.nan
+                    wald_stats[gene] = np.nan
 
+                predictors[gene] = exog[to_subset, idx]
+
+            # The dependent variable(s) are shared, but subsetting differences may exist, so store the determined
+            # subset for each gene:
+            targets[gene] = endog[to_subset]
+            # Store indices of subset:
+            subsetted_cells[gene] = to_subset
+
+    else:
+        raise ValueError("The independent variable array must be 2D- one-to-one tests currently not supported.")
+
+    if np.isnan(exog).any():
+        raise ValueError("Predictors array contains NA values.")
+    if np.isnan(endog).any():
+        raise ValueError("Targets array contains NA values.")
+
+    counts = endog if diff_sending_or_receiving == "receiving" else exog
     if include_offset:
         # Get library scaling factors
         offset = library_scaling_factors(counts=counts, distr=family)
 
-    # Fixed effect design matrix:
-    # if cat_cov is None:
-    #     cat_cov = np.ones((var.shape[0], 1))
+    # Fit the GAMs:
+    # Define family based on provided input argument- first check if the dependent variable is binary- a logistic
+    # regression should be applied in this case. This will only happen in the case of a "sending" analysis where the
+    # dependent variable is the cell type:
+    binary_endog = False
+    if not scipy.sparse.issparse(endog):
+        if all(x in [0, 1] for x in endog):
+            binary_endog = True
+            family = sm.families.Binomial()
 
-    # Fit GAMs
-    # Define function to define formula and fit model:
-    converged = [True] * len(genes)
-    # Define family based on provided input argument:
-    if family == "gaussian":
-        family = sm.families.Gaussian()
-    elif family == "poisson":
-        family = sm.families.Poisson()
-    elif family == "nb":
-        family = sm.families.NegativeBinomial()
+    if not binary_endog:
+        if family == "gaussian":
+            family = sm.families.Gaussian()
+        elif family == "poisson":
+            family = sm.families.Poisson()
+        elif family == "nb":
+            family = sm.families.NegativeBinomial()
 
-    # Define cubic regression splines to use for data smoothing:
-    bs = BSplines(var, df=[n_df for _ in range(var.shape[1])], degree=[3 for _ in range(var.shape[1])])
+    # For each combination of predictor-target, define cubic regression splines:
+    for gene in targets.keys():
+        basis[gene] = BSplines(predictors[gene], df=[n_df], degree=[3], include_intercept=True)
 
+    # Valid genes:
+    genes_to_model = [gene for gene in genes if gene in targets.keys()]
     # Parallel processing:
     if parallel:
         args_list = [
-            (counts[:, i], genes[i], i, converged, weights, offset, var, bs, cat_cov, family)
-            for i in range(counts.shape[1])
+            (targets[gene], gene, weights, offset, predictors[gene], basis[gene], family) for gene in genes_to_model
         ]
         with mp.Pool(processes=mp.cpu_count()) as pool:
             gamList = pool.starmap(counts_to_Gam, args_list)
-
     else:
         gamList = [
-            counts_to_Gam(counts[:, i], genes[i], i, converged, weights, offset, var, bs, cat_cov, family)
-            for i in range(counts.shape[1])
+            counts_to_Gam(targets[gene], gene, weights, offset, predictors[gene], basis[gene], family)
+            for gene in genes_to_model
         ]
-
-    # Filter for genes that converged:
-    gamList = [gam for gam in gamList if gam is not None]
-    genelist = [gam.gene for gam in gamList]
-
-    # Get fitted coefficients to dataframe:
-    betaAll = []
-    SigmaAll = []
-
-    for i, m in enumerate(gamList):
-        # if isinstance(m, Exception):
-        #     beta = np.nan
-        # else:
-        #     # beta = np.matrix(stats.coef(m)).T
-        #     # beta = pd.DataFrame(beta, columns=[0])
-        beta = pd.DataFrame(m.params.values.reshape(1, -1), index=[genelist[i]], columns=m.params.index)
-        betaAll.append(beta)
-    betaAllDf = pd.DataFrame(np.concatenate(betaAll, axis=0), index=genelist, columns=m.params.index)
-
-    for m in gamList:
-        # Variance-covariance matrix:
-        if isinstance(m, Exception):
-            Sigma = None
-        else:
-            Sigma = m.cov_params()
-        # Convert to dataframe:
-        SigmaAll.append(Sigma)
-
-    # Store one design matrix (linear predictor) and knot points- these will be identical for all genes because they
-    # are defined based on the values of the predictors:
-    element = SigmaAll.index(next(filter(lambda x: x is not None, SigmaAll)))
-
-    m = gamList[element]
-    # Exclude the fixed effects from the design matrix:
-    lin_pred = m.model.exog
 
     # Store results in AnnData object:
     sc_obj = anndata.AnnData(X=counts)
     sc_obj.var_names = genes
     if cells is not None:
         sc_obj.obs_names = cells
-    sc_obj.obsm["var"] = var
-    sc_obj.obsm["weights"] = weights
-    sc_obj.var["converged"] = converged
-    sc_obj.obsm["lin_pred"] = lin_pred
-    sc_obj.uns["genes_converged"] = genelist
 
-    # Store list of variance-covariance matrices:
+    # Filter for genes that converged:
+    gamList = [gam for gam in gamList if gam.converged]
+    geneList = [gam.gene for gam in gamList]
+    # Store in format that can be accessed by gene labels:
+    gamList = {gam.gene: gam for gam in gamList}
+
+    # Get fitted coefficients to dataframe:
+    betaAll = []
+    SigmaAll = []
+
+    for i, m in enumerate(gamList):
+        beta = pd.DataFrame(m.params.values.reshape(1, -1), index=[geneList[i]], columns=m.params.index)
+        betaAll.append(beta)
+        # Variance-covariance matrix:
+        Sigma = m.cov_params()
+        # Convert to dataframe:
+        SigmaAll.append(Sigma)
+    betaAllDf = pd.DataFrame(np.concatenate(betaAll, axis=0), index=geneList, columns=m.params.index)
+
     df_list = []
     for sigma in SigmaAll:
         df_matrix = pd.DataFrame(sigma)
         df_list.append(df_matrix)
     # Concatenate:
-    df = pd.concat(df_list, keys=genelist, names=["Target gene"])
+    df = pd.concat(df_list, keys=geneList, names=["Target gene"])
     sc_obj.uns["Sigma"] = df
     sc_obj.uns["beta"] = betaAllDf
 
-    # Save knot points (for each column of the independent variable array, if applicable):
+    # To collect knot points:
     knotpoints = {}
-    if var.shape[1] == 1:
+
+    # Store design matrix (linear predictor) for each GAM model:
+    for gene in geneList:
+        gam_obj = gamList[gene]
+        sc_obj.obsm[f"lin_pred_{gene}"] = gam_obj.model.exog
+        sc_obj.uns[f"var_{gene}"] = predictors[gene]
+
+        # Get knot points:
         all_points = get_knots_bsplines(
-            var[:, 0],
+            predictors[gene],
             df=n_df,
             degree=3,
             spacing="quantile",
-            lower_bound=np.min(var[:, 0]),
-            upper_bound=np.max(var[:, 0]),
+            lower_bound=np.min(predictors[gene]),
+            upper_bound=np.max(predictors[gene]),
         )
-        knotpoints = list(set(all_points))
-    else:
-        for idx in range(var.shape[1]):
-            all_points = get_knots_bsplines(
-                var[:, idx],
-                df=n_df,
-                degree=3,
-                spacing="quantile",
-                lower_bound=np.min(var[:, idx]),
-                upper_bound=np.max(var[:, idx]),
-            )
-            knotpoints["v" + str(idx + 1)] = list(set(all_points))
+        knotpoints[gene] = list(set(all_points))
 
-    sc_obj.uns["knotpoints"] = knotpoints
-    sc_obj.uns["family"] = family
+    sc_obj.var["fitted"] = pd.Series(fitted)
+    sc_obj.var["knotpoints"] = pd.Series(knotpoints)
+    sc_obj.var["pvals"] = pd.Series(pvals)
+    sc_obj.var["wald_stats"] = pd.Series(wald_stats)
+    sc_obj.var["subsetted_cells"] = pd.Series(subsetted_cells)
+    if label is not None:
+        sc_obj.uns["label"] = label
 
-    # Return model of choice if specified:
-    if return_model_idx is not None:
-        models = genelist[return_model_idx]
-        if isinstance(return_model_idx, list):
-            return_gams = dict(zip(models, gamList[return_model_idx]))
-        else:
-            return_gams = {models: gamList[return_model_idx]}
-        return sc_obj, return_gams, bs
-    # Otherwise, don't return any models, only the object and the basis splines:
-    else:
-        # return_gams = dict(zip(genelist, gamList))
-        return sc_obj, bs
+    return sc_obj, basis
 
 
 def counts_to_Gam(
     y: Union[np.ndarray, scipy.sparse.spmatrix],
-    gene: str,
-    idx: int,
-    converged: List[bool],
+    label: str,
     weights: np.ndarray,
     offset: Optional[np.ndarray],
-    var: np.ndarray,
+    X: np.ndarray,
     bs: BSplines,
-    cat_cov: Optional[np.ndarray],
     family: sm.families.family.Family,
 ):
-    """Fitting function- fits a GAM model to a single gene.
+    """Fitting function- fits a GAM model to a single variable.
 
     Args:
-        y: Counts for a single gene
-        gene: Name of gene to fit
-        idx: Index of gene to fit
+        y: Continuous values for a single variable
+        label: Name of the variable being fit
         converged: Indicator for whether the fitting converged for this gene
         parallel: Whether parallel processing is being used
         n_df: Number of degrees of freedom to use for the cubic regression splines
         weights: Weights for each cell
         offset: Optional offset for each cell
-        var: Explanatory variables
+        X: Explanatory variables
         bs: Cubic regression splines corresponding to the independent variable(s)
-        cat_cov: Optional categorical covariates
         family: Family to use for the GLM
 
     Returns:
         gam_fit: Fitted GAM model
-        gene: Name of gene to fit
     """
+    data = pd.DataFrame(X, columns=[f"x{i}" for i in range(X.shape[1])])
+    data = data.sort_index(axis=1)
 
-    # Explanatory variables:
-    X = pd.DataFrame(var, columns=[f"x{i}" for i in range(var.shape[1])])
-    # Add fixed effects if necessary:
-    if cat_cov is not None:
-        X["cat_cov"] = cat_cov
-    X = X.sort_index(axis=1)
-
-    # Check if y is sparse:
     if scipy.sparse.issparse(y):
         y = y.toarray()
+    data["y"] = y
+
+    # Construct formula from dataframe columns:
+    colnames = data.columns.tolist()
+    colnames.remove("y")
+    # Fit without intercept
+    formula_string = "y ~ -1 + " + " + ".join(colnames)
 
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("error", category=ConvergenceWarning)
-            gam_model = GLMGam(y, X, smoother=bs, family=family, weights=weights, offset=offset)
+            gam_model = GLMGam.from_formula(
+                formula_string, data=data, smoother=bs, family=family, weights=weights, offset=offset
+            )
             gam_fit = gam_model.fit()
 
     except Exception:
-        print(f"\nConvergence not achieved for {gene}.")
-        converged[idx] = False
-        return
+        print(f"\nConvergence not achieved for {label}.")
+        converged = False
 
-    # Make sure correspondence is maintained to the correct gene:
-    gam_fit.gene = gene
+    # Keep track of the label and whether the model converged:
+    gam_fit.label = label
+    gam_fit.converged = converged
 
     return gam_fit
 
 
 def DE_GAM_test(
     GAM_adata: anndata.AnnData,
-    bs_obj: BSplines,
+    bs_obj: Dict[str, BSplines],
     lfc_thresh: float = 0.0,
     contrast_type: Literal["start", "end", "consecutive"] = "start",
     n_points: Optional[int] = None,
     inverse: Literal["cholesky", "qr", "generalized"] = "cholesky",
     fdr_method: str = "fdr_bh",
-) -> Tuple[anndata.AnnData, BSplines]:
+) -> Tuple[anndata.AnnData, Dict[str, BSplines]]:
     """Statistical testing for outputs from GAM model(s).
 
     Args:
         GAM_adata: AnnData object containing results of GAM models
-        bs_obj: BSplines object containing information about the basis functions used for the GAM models
+        bs_obj: Dictionary containing BSplines objects with information about the basis functions used for the
+            GAM models
         l2fc_thresh: The threshold for natural log fold change (default is 0)
         contrast_type: For use when constructing the contrast matrix, in this context to compare expression levels
             along the continuous predictor. Options:
@@ -858,73 +925,61 @@ def DE_GAM_test(
         GAM_adata: AnnData object with results of statistical testing added
         bs: BSplines object containing information about the basis splines
     """
-
-    design_matrix = GAM_adata.obsm["var"]
-    linear_predictor = GAM_adata.obsm["lin_pred"]
-
-    # Get knot points for each predictor:
-    knotpoints = GAM_adata.uns["knotpoints"]
-    if n_points is None:
-        n_points = 2 * len(knotpoints)
-
-    n_curves = design_matrix.shape[1]
-    # Max value for each predictor:
-    # max_vals = np.max(design_matrix, axis=0)
-    max_val = np.max(design_matrix)
-
-    # Construct individual contrast matrix:
-    if n_curves == 1:
-        contrast_matrix = pd.DataFrame(np.zeros((linear_predictor.shape[1], n_points - 1)))
-        # Set column names for L1 matrix
-        contrast_matrix.columns = ["point" + str(i) for i in range(1, n_points)]
-        # Get predictor matrix
-        contrastPoints = np.linspace(0, max_val, num=n_points).reshape(-1, 1)
-        # Compute linear predictor at the contrast points:
-        exog_smooth_interp = bs_obj.transform(contrastPoints)
-        exog_smooth_pred = np.hstack((contrastPoints, exog_smooth_interp))
-
-        # Fill in contrast matrix:
-        if contrast_type == "start":
-            for i in range(1, n_points):
-                contrast_matrix.iloc[:, i - 1] = exog_smooth_pred[i, :] - exog_smooth_pred[0, :]
-
-        elif contrast_type == "end":
-            for i in range(n_points - 1):
-                contrast_matrix.iloc[:, i] = exog_smooth_pred[i, :] - exog_smooth_pred[n_points - 1, :]
-
-        elif contrast_type == "consecutive":
-            for i in range(n_points - 1):
-                contrast_matrix.iloc[:, i] = exog_smooth_pred[i + 1, :] - exog_smooth_pred[i, :]
-
-    else:
-        raise RuntimeError("Operability with multiple predictors not yet implemented.")
-
-    # Statistical test for each model:
     betaAll = GAM_adata.uns["beta"]
     SigmaAll = GAM_adata.uns["Sigma"]
 
     # Wald test results for each fitted gene and store results in DataFrame:
-    all_wald_stats, all_df, all_pvals = [], [], []
     for gene in GAM_adata.var_names:
-        if GAM_adata.var["converged"][gene]:
+        if GAM_adata.var["fitted"][gene]:
+            # BSplines for this gene:
+            bs_obj_gene = bs_obj[gene]
+
+            # Design matrix and linear predictor for the fitted gene:
+            design_matrix = GAM_adata.uns[f"var_{gene}"]
+            linear_predictor = GAM_adata.obsm[f"lin_pred_{gene}"]
+
+            # Get knot points:
+            knot_points = GAM_adata.var["knotpoints"][gene]
+            if n_points is None:
+                n_points = 2 * len(knot_points)
+
+            # Construct the contrast matrix:
+            max_val = np.max(design_matrix)
+
+            contrast_matrix = pd.DataFrame(np.zeros((linear_predictor.shape[1], n_points - 1)))
+            # Set column names for L1 matrix
+            contrast_matrix.columns = ["point" + str(i) for i in range(1, n_points)]
+            # Get predictor matrix
+            contrastPoints = np.linspace(0, max_val, num=n_points).reshape(-1, 1)
+            # Compute linear predictor at the contrast points:
+            exog_smooth_interp = bs_obj_gene.transform(contrastPoints)
+            exog_smooth_pred = np.hstack((contrastPoints, exog_smooth_interp))
+
+            # Fill in contrast matrix:
+            if contrast_type == "start":
+                for i in range(1, n_points):
+                    contrast_matrix.iloc[:, i - 1] = exog_smooth_pred[i, :] - exog_smooth_pred[0, :]
+
+            elif contrast_type == "end":
+                for i in range(n_points - 1):
+                    contrast_matrix.iloc[:, i] = exog_smooth_pred[i, :] - exog_smooth_pred[n_points - 1, :]
+
+            elif contrast_type == "consecutive":
+                for i in range(n_points - 1):
+                    contrast_matrix.iloc[:, i] = exog_smooth_pred[i + 1, :] - exog_smooth_pred[i, :]
+
             Sigma_gene = SigmaAll.loc[gene].values
             beta_gene = betaAll.loc[gene].values
-            wald_stat_gene, df_gene, pval_gene = wald_test_GAM(
+
+            wald_stat_gene, _, pval_gene = wald_test_GAM(
                 beta_gene, Sigma_gene, contrast_matrix, lfc=lfc_thresh, inverse=inverse
             )
-            all_wald_stats.append(wald_stat_gene)
-            all_pvals.append(pval_gene)
-            all_df.append(df_gene)
-        else:
-            all_wald_stats.append(np.nan)
-            all_pvals.append(np.nan)
-            all_df.append(np.nan)
 
-    qvals = multitesting_correction(all_pvals, method=fdr_method)
+            # Store results in AnnData object:
+            GAM_adata.var["pvals"].loc[gene] = pval_gene
+            GAM_adata.var["wald_stats"].loc[gene] = wald_stat_gene
 
-    GAM_adata.var["pvals"] = all_pvals
-    GAM_adata.var["wald_stats"] = all_wald_stats
-    GAM_adata.var["df"] = all_df
+    qvals = multitesting_correction(GAM_adata.var["pvals"], method=fdr_method)
     GAM_adata.var["qvals"] = qvals
 
     return GAM_adata, bs_obj

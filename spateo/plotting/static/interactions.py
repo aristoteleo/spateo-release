@@ -506,7 +506,7 @@ def plot_receiver_coexpressed_degs(
         linewidths=0,
     )
     g.cax.set_position([0.1, 0.2, 0.03, 0.45])
-    g.fig.suptitle(f"Coexpression w/ {adata.uns['predictor_key'].lower()}")
+    g.fig.suptitle(f"Coexpression w/ {adata.uns['label'].lower()}")
 
     # Save, show or return figures:
     return save_return_show_fig_utils(

@@ -17,7 +17,7 @@ import re
 import sys
 from collections import Counter
 from multiprocessing import Pool
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import anndata
 import numpy as np
@@ -799,59 +799,93 @@ class MuSIC_Interpreter(MuSIC):
 
         if pathway is not None:
             # For sending analysis, use ligand expression as the dependent variable:
-            send_key = ligand
-            if self.mod_type == "lr":
-                receive_key = f"norm_sum_received_effect_potential_{pathway}_lr_for_{target}"
-            elif self.mod_type == "ligand":
-                receive_key = f"norm_sum_received_effect_potential_{pathway}_ligands_for_{target}"
-            else:
-                raise ValueError(f"No signaling effects with mod_type {self.mod_type}.")
+            if diff_sending_or_receiving == "sending":
+                # First, compute pathway score:
+                lr_db_subset = self.lr_db[self.lr_db["pathway"] == pathway]
+                all_senders = list(set(lr_db_subset["from"]))
+                all_senders = [lig for lig in all_senders if lig in self.adata.var_names]
 
-            # Check for already computed pathway effect potential, and if not existing, compute it:
-            if receive_key not in self.adata.obs_keys():
-                self.logger.info(
-                    f"Ligand-receptor effect potential for {target} via {pathway}. Computing effect potential now."
-                )
-                _, _, _ = self.get_pathway_potential(pathway, target, spatial_weights=None, store_summed_potential=True)
-
-        elif ligand is not None:
-            send_key = ligand
-            if receptor is not None:
-                if self.mod_type != "lr":
+                if len(all_senders) < 3:
                     raise ValueError(
-                        f"With mod_type {self.mod_type}, no receptors can be specified because the "
-                        f"initial model did not use them."
+                        f"Pathway effect potential computation for pathway {pathway} is unsuitable for this model, "
+                        f"since there are fewer than three valid ligand-receptor pairs in the pathway that were "
+                        f"incorporated in the initial model."
                     )
 
-                receive_key = f"norm_sum_received_effect_potential_{ligand}_for_{target}_via_{receptor}"
-                # Check for already computed ligand-receptor effect potential, and if not existing, compute it:
+                if scipy.sparse.issparse(self.adata.X):
+                    self.adata.obs[f"{pathway}_ligands"] = self.adata[:, all_senders].X.sum(axis=1)
+                else:
+                    self.adata.obs[f"{pathway}_ligands"] = np.sum(self.adata[:, all_senders].X, axis=1)
+                send_key = f"{pathway}_ligands"
+
+            # For receiving analysis, retrieve (or compute) received effect potential and use as the independent
+            # variable:
+            else:
+                if self.mod_type == "lr":
+                    receive_key = f"norm_sum_received_effect_potential_{pathway}_lr_for_{target}"
+                elif self.mod_type == "ligand":
+                    receive_key = f"norm_sum_received_effect_potential_{pathway}_ligands_for_{target}"
+                else:
+                    raise ValueError(f"No signaling effects with mod_type {self.mod_type}.")
+
+                # Check for already computed pathway effect potential, and if not existing, compute it:
                 if receive_key not in self.adata.obs_keys():
                     self.logger.info(
-                        f"Ligand-receptor effect potential for {target} via {ligand}-{receptor}. "
+                        f"Effect potential for {target} via {pathway} cannot currently be found in AnnData object. "
                         f"Computing effect potential now."
                     )
-                    _, _, _ = self.get_effect_potential(
-                        target, ligand, receptor, spatial_weights=None, store_summed_potential=True
+                    _, _, _ = self.get_pathway_potential(
+                        pathway, target, spatial_weights=None, store_summed_potential=True
                     )
 
-            else:
-                if self.mod_type != "ligand":
-                    raise ValueError(
-                        f"Only ligand was provided to compute effect-associated DEGs, but the initial "
-                        f"{self.mod_type} model did not use ligands or uses ligands in addition to "
-                        f"receptors."
-                    )
-
+        elif ligand is not None:
+            # For sending analysis, use ligand expression as the dependent variable:
+            if diff_sending_or_receiving == "sending":
                 send_key = ligand
-                receive_key = f"norm_sum_received_effect_potential_from_{ligand}_for_{target}"
-                # Check for already computed ligand effect potential, and if not existing, compute it:
-                self.logger.info(
-                    f"Ligand-receptor effect potential for {target} via {ligand}. " f"Computing effect potential now."
-                )
-                if receive_key not in self.adata.obs_keys():
-                    _, _, _ = self.get_effect_potential(
-                        ligand, target, spatial_weights=None, store_summed_potential=True
+
+            # For receiving analysis, retrieve (or compute) received effect potential and use as the independent
+            # variable:
+            else:
+                if receptor is not None:
+                    if self.mod_type != "lr":
+                        raise ValueError(
+                            f"With mod_type {self.mod_type}, no receptors can be specified because the "
+                            f"initial model did not use them."
+                        )
+
+                    receive_key = f"norm_sum_received_effect_potential_{ligand}_for_{target}_via_{receptor}"
+                    # Check for already computed ligand-receptor effect potential, and if not existing, compute it:
+                    if receive_key not in self.adata.obs_keys():
+                        self.logger.info(
+                            f"Effect potential for {target} via {ligand}-{receptor} cannot currently be found in "
+                            f"AnnData object. Computing effect potential now."
+                        )
+                        _, _, _ = self.get_effect_potential(
+                            target=target,
+                            ligand=ligand,
+                            receptor=receptor,
+                            spatial_weights=None,
+                            store_summed_potential=True,
+                        )
+
+                else:
+                    if self.mod_type != "ligand":
+                        raise ValueError(
+                            f"Only ligand was provided to compute effect-associated DEGs, but the initial "
+                            f"{self.mod_type} model did not use ligands or uses ligands in addition to "
+                            f"receptors."
+                        )
+
+                    receive_key = f"norm_sum_received_effect_potential_from_{ligand}_for_{target}"
+                    # Check for already computed ligand effect potential, and if not existing, compute it:
+                    self.logger.info(
+                        f"Effect potential for {target} via {ligand} cannot currently be found in AnnData object. "
+                        f"Computing effect potential now."
                     )
+                    if receive_key not in self.adata.obs_keys():
+                        _, _, _ = self.get_effect_potential(
+                            target=target, ligand=ligand, spatial_weights=None, store_summed_potential=True
+                        )
 
         elif sender_cell_type is not None:
             if self.mod_type != "niche":
@@ -859,19 +893,67 @@ class MuSIC_Interpreter(MuSIC):
                     f"Only sender_cell_type was provided to compute effect-associated DEGs, but the "
                     f"initial {self.mod_type} model does not use cell type identity."
                 )
-            send_key = sender_cell_type
 
-            if receiver_cell_type is not None:
-                receive_key = (
-                    f"norm_sum_{receiver_cell_type}_received_effect_potential_from_{sender_cell_type}_for_" f"{target}"
-                )
+            if diff_sending_or_receiving == "sending":
+                # For sending analysis, use cell type identity as the dependent variable:
+                send_key = sender_cell_type
+                # Check that the name of the sender cell type is provided in a recognizable format:
+                if send_key not in self.cell_categories.columns:
+                    send_key = re.sub(
+                        r"\b([a-zA-Z0-9])",
+                        lambda match: match.group(1).upper(),
+                        re.sub(r"[" r"^a-zA-Z0-9]+", "", send_key),
+                    )
+
             else:
-                receive_key = f"norm_sum_received_effect_potential_from_{sender_cell_type}_for_{target}"
+                # For receiving analysis, retrieve (or compute) received effect potential and use as the independent
+                # variable:
+                if receiver_cell_type is not None:
+                    receive_key = (
+                        f"norm_sum_{receiver_cell_type}_received_effect_potential_from_{sender_cell_type}_for_"
+                        f"{target}"
+                    )
+
+                    if receive_key not in self.adata.obs_keys():
+                        self.logger.info(
+                            f"Effect potential for {target} via {sender_cell_type} to {receiver_cell_type} cannot "
+                            f"currently be found in AnnData object. Computing effect potential now."
+                        )
+                        _, _, _ = self.get_effect_potential(
+                            target=target,
+                            sender_cell_type=sender_cell_type,
+                            receiver_cell_type=receiver_cell_type,
+                            spatial_weights=None,
+                            store_summed_potential=True,
+                        )
+                else:
+                    receive_key = f"norm_sum_received_effect_potential_from_{sender_cell_type}_for_{target}"
+
+                    if receive_key not in self.adata.obs_keys():
+                        self.logger.info(
+                            f"Effect potential for {target} via {sender_cell_type} cannot currently be found in "
+                            f"AnnData object. Computing effect potential now."
+                        )
+                        _, _, _ = self.get_effect_potential(
+                            target=target,
+                            sender_cell_type=sender_cell_type,
+                            spatial_weights=None,
+                            store_summed_potential=True,
+                        )
 
         if diff_sending_or_receiving == "sending":
-            "filler"
+            try:
+                # Sent signal from ligand
+                sent_signal = self.adata[:, send_key].X
+            except:
+                try:
+                    # Sent signal from pathway
+                    sent_signal = self.adata.obs[send_key]
+                except:
+                    # Sent signal from cell type
+                    sent_signal = self.cell_categories[send_key].values
         else:
-            effect_potential = self.adata.obs[receive_key]
+            received_signal = self.adata.obs[receive_key]
 
         # For sending analyses, restrict the differential analysis to transcription factors- these indicate ultimate
         # upstream regulators of the signaling:
@@ -882,14 +964,14 @@ class MuSIC_Interpreter(MuSIC):
             if self.species == "human":
                 grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
                 rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "human_RBP_db.csv"), index_col=0)
-                lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                # lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
             elif self.species == "mouse":
                 grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
                 rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_RBP_db.csv"), index_col=0)
-                lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+                # lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
 
             self.logger.info(
-                "Selecting transcription factors and RNA-binding proteins for analysis of differential " "expression."
+                "Selecting transcription factors and RNA-binding proteins for analysis of differential expression."
             )
             all_TFs = list(grn.columns)
             all_RBPs = list(rna_bp_db["Gene_Name"].values)
@@ -900,21 +982,10 @@ class MuSIC_Interpreter(MuSIC):
             # Further subset list of TFs to those that are implicated in signaling patterns of interest and also
             # are expressed in at least n% of the cells that are nonzero for sending potential (use the user input
             # 'target_expr_threshold'):
-            nz_sending = list(self.sample_names[effect_potential != 0])
+            nz_sending = list(self.sample_names[sent_signal != 0])
             adata_subset = self.adata[nz_sending, :]
             n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
 
-            # # Get TFs known to regulate the ligand/pathway of interest:
-            # if pathway is not None:
-            #     lr_db_subset = lr_db[lr_db["pathway"] == pathway]
-            #     all_senders = list(set(lr_db_subset["from"]))
-            #
-            #     sender_regulators = list(grn.columns[grn.loc[all_senders].eq(1).any()])
-            # elif ligand is not None:
-            #     sender_regulators = list(grn.columns[grn.loc[ligand].eq(1).any()])
-            # else:
-            #     # Set sender regulators to all TFs:
-            #     sender_regulators = all_TFs
             sender_regulators = all_TFs + all_RBPs
 
             if scipy.sparse.issparse(self.adata.X):
@@ -934,8 +1005,8 @@ class MuSIC_Interpreter(MuSIC):
             high_variance_genes_filter = list(self.adata.var.index[gene_counts_stats.high_var.values])
             adata_hvg = self.adata[:, high_variance_genes_filter]
 
-            nz_sending = np.any(effect_potential != 0, axis=1)
-            adata_subset = adata_hvg[nz_sending, :]
+            nz_receiving = np.any(received_signal != 0, axis=1)
+            adata_subset = adata_hvg[nz_receiving, :]
             n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
 
             if scipy.sparse.issparse(self.adata.X):
@@ -985,14 +1056,26 @@ class MuSIC_Interpreter(MuSIC):
 
             counts = self.adata[:, genes_to_keep].X
 
-        # RECONFIGURE SO THAT VAR CAN BE EITHER POTENTIAL FOR RECEIVING SIGNAL OR COUNTS, AND COUNTS CAN BE EITHER
-        # COUNTS OR POTENTIAL
-        GAM_adata, bs = fit_DE_GAM(
-            counts,
-            var=effect_potential.values,
-            genes=genes_to_keep,
-            cells=self.sample_names,
-        )
+        if diff_sending_or_receiving == "sending":
+            GAM_adata, bs = fit_DE_GAM(
+                diff_sending_or_receiving="sending",
+                endog=sent_signal,
+                exog=counts,
+                genes=genes_to_keep,
+                cells=self.sample_names,
+                family=self.distr,
+                label=send_key,
+            )
+        else:
+            GAM_adata, bs = fit_DE_GAM(
+                diff_sending_or_receiving="receiving",
+                endog=counts,
+                exog=received_signal,
+                genes=genes_to_keep,
+                cells=self.sample_names,
+                family=self.distr,
+                label=receive_key,
+            )
 
         # Compute q-values for each gene:
         GAM_adata, bs = DE_GAM_test(GAM_adata, bs)
@@ -1001,7 +1084,7 @@ class MuSIC_Interpreter(MuSIC):
     def group_sender_receiver_effect_degs(
         self,
         GAM_adata: anndata.AnnData,
-        bs_obj: BSplines,
+        bs_obj: Dict[str, BSplines],
         offset: Optional[np.ndarray] = None,
         n_points: int = 50,
         num_pcs: int = 10,
@@ -1032,46 +1115,32 @@ class MuSIC_Interpreter(MuSIC):
             GAM_adata: AnnData object where each entry in .var contains a gene that has been modeled, with Leiden
                 partitioning results added. Note that this may be a subset of the original AnnData object
         """
-        if "predictor_key" not in GAM_adata.uns_keys():
-            raise RuntimeError(
-                "Must run :func `sender_receiver_effect_deg_detection` before running :func "
-                "`group_sender_receiver_effect_degs`."
-            )
+        # Get subset that is below the p-value cutoff:
+        GAM_adata = GAM_adata[:, GAM_adata.var["qvals"] < q_val_cutoff]
+        scaled_yhat_df = pd.DataFrame(index=GAM_adata.obs_names, columns=GAM_adata.var_names)
 
-        design_matrix = GAM_adata.obsm["var"]
-
-        # Sample points for which to construct the linear predictor:
-        # Min and max values for predictor:
-        n_curves = design_matrix.shape[1]
-        min_val = np.min(design_matrix)
-        max_val = np.max(design_matrix)
-
-        if n_curves == 1:
-            data_points = np.linspace(min_val, max_val, num=n_points).reshape(-1, 1)
-            # Compute linear predictor at the selected points:
-            exog_smooth_interp = bs_obj.transform(data_points)
-            exog_smooth_pred = np.hstack((data_points, exog_smooth_interp))
-        else:
-            raise RuntimeError("Operability with multiple predictors not yet implemented.")
-
-        # Get genes that are below p-value cutoff:
-        adata_subset = GAM_adata[:, GAM_adata.var["qvals"] < q_val_cutoff]
-
-        # To predict expression given the linear predictor and the coefficients:
         betaAll = GAM_adata.uns["beta"]
 
-        scaled_yhat_df = pd.DataFrame(index=adata_subset.var_names, columns=adata_subset.obs_names)
+        # Construct the linear predictor:
+        for gene in GAM_adata.var_names:
+            design_matrix = GAM_adata.uns[f"var_{gene}"]
+            bs_obj_gene = bs_obj[gene]
 
-        for gene in adata_subset.var_names:
-            if GAM_adata.var["converged"][gene]:
-                beta_gene = betaAll.loc[gene].values
-                yhat = np.dot(exog_smooth_pred, beta_gene)
-                if GAM_adata.uns["family"] == "nb" or GAM_adata.uns["family"] == "poisson":
-                    yhat = np.exp(yhat)
-                if offset is not None:
-                    yhat += offset
+            # Sample points for which to construct the linear predictor:
+            min_val = np.min(design_matrix)
+            max_val = np.max(design_matrix)
+            data_points = np.linspace(min_val, max_val, num=n_points).reshape(-1, 1)
+            exog_smooth_interp = bs_obj_gene.transform(data_points)
+            exog_smooth_pred = np.hstack((data_points, exog_smooth_interp))
 
-                scaled_yhat_df[gene] = yhat
+            beta_gene = betaAll.loc[gene].values
+            yhat = np.dot(exog_smooth_pred, beta_gene)
+            if self.distr == "nb" or self.distr == "poisson":
+                yhat = np.exp(yhat)
+            if offset is not None:
+                yhat += offset
+
+            scaled_yhat_df[gene] = yhat
 
         # Scale the overall predicted expression values for PCA:
         scaler = StandardScaler()
@@ -1085,7 +1154,7 @@ class MuSIC_Interpreter(MuSIC):
 
             # Get top n genes by Wald statistic:
             top_n_genes = GAM_adata.var.sort_values("wald_stats").head(top_n_genes).index.tolist()
-            adata_subset = adata_subset[:, top_n_genes]
+            GAM_adata = GAM_adata[:, top_n_genes]
             scaled_yhat_df = scaled_yhat_df[top_n_genes]
         else:
             # Check if there are too many genes to easily represent on a plot:
@@ -1094,18 +1163,19 @@ class MuSIC_Interpreter(MuSIC):
 
                 # Get top n genes by Wald statistic:
                 top_n_genes = GAM_adata.var.sort_values("wald_stats").head(top_n_genes).index.tolist()
-                adata_subset = adata_subset[:, top_n_genes]
+                GAM_adata = GAM_adata[:, top_n_genes]
                 scaled_yhat_df = scaled_yhat_df[top_n_genes]
 
+        # Perform PCA:
         pca_obj = PCA(n_components=num_pcs, svd_solver="full")
         x_pca = pca_obj.fit_transform(scaled_yhat_df.values)
         cluster_labels = calculate_leiden_partition(
             x_pca, num_neighbors=num_neighbors, resolution=leiden_resolution, graph_type="distance"
         )
 
-        adata_subset.var["cluster"] = cluster_labels
-        adata_subset.uns["__type"] = "UMI"
-        return adata_subset
+        GAM_adata.var["cluster"] = cluster_labels
+        GAM_adata.uns["__type"] = "UMI"
+        return GAM_adata
 
     def calc_and_group_sender_receiver_effect_degs(
         self,
