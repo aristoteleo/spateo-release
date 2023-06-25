@@ -13,6 +13,7 @@ import argparse
 import itertools
 import math
 import os
+import pickle
 import re
 import sys
 from collections import Counter
@@ -752,11 +753,11 @@ class MuSIC_Interpreter(MuSIC):
 
     def sender_receiver_effect_deg_detection(
         self,
-        target: Optional[str] = None,
         diff_sending_or_receiving: Literal["sending", "receiving"] = "sending",
         ligand: Optional[str] = None,
         receptor: Optional[str] = None,
         pathway: Optional[str] = None,
+        target: Optional[str] = None,
         sender_cell_type: Optional[str] = None,
         receiver_cell_type: Optional[str] = None,
         no_cell_type_markers: bool = False,
@@ -765,7 +766,6 @@ class MuSIC_Interpreter(MuSIC):
         or differential expression of genes in cells with high or low received signaling effect potential.
 
         Args:
-            target: Target to use for differential expression analysis. If None, will use the first listed target.
             diff_sending_or_receiving: Whether to compute differential expression of genes in cells with high ligand
                 expression or high or low "receiving effect" potential (defined as predicted influence of an
                 interaction event on downstream expression).
@@ -774,6 +774,8 @@ class MuSIC_Interpreter(MuSIC):
             receptor: Optional receptor to use for differential expression analysis. Needed if
                 'diff_sending_or_receiving' is 'receiving'. Will take precedent over sender/receiver cell type if
                 also provided.
+            target: Only used if 'diff_sending_or_receiving' is "receiving"- target to use for differential expression
+                analysis. If None, will use the first listed target.
             pathway: Optional pathway to use for differential expression analysis. Will use ligands and receptors in
                 these pathways to collectively compute signaling potential score. Will take precedent over
                 ligand/receptor and sender/receiver cell type if provided.
@@ -812,10 +814,11 @@ class MuSIC_Interpreter(MuSIC):
                         f"incorporated in the initial model."
                     )
 
-                if scipy.sparse.issparse(self.adata.X):
-                    self.adata.obs[f"{pathway}_ligands"] = self.adata[:, all_senders].X.sum(axis=1)
-                else:
-                    self.adata.obs[f"{pathway}_ligands"] = np.sum(self.adata[:, all_senders].X, axis=1)
+                self.adata.obs[f"{pathway}_ligands"] = np.sum(self.ligands_expr[all_senders].values, axis=1)
+                # if scipy.sparse.issparse(self.adata.X):
+                #     #self.adata.obs[f"{pathway}_ligands"] = self.adata[:, all_senders].X.sum(axis=1)
+                # else:
+                #     #self.adata.obs[f"{pathway}_ligands"] = np.sum(self.adata[:, all_senders].X, axis=1)
                 send_key = f"{pathway}_ligands"
 
             # For receiving analysis, retrieve (or compute) received effect potential and use as the independent
@@ -944,7 +947,7 @@ class MuSIC_Interpreter(MuSIC):
         if diff_sending_or_receiving == "sending":
             try:
                 # Sent signal from ligand
-                sent_signal = self.adata[:, send_key].X
+                sent_signal = self.ligands_expr[send_key]
             except:
                 try:
                     # Sent signal from pathway
@@ -979,10 +982,10 @@ class MuSIC_Interpreter(MuSIC):
             all_TFs = [tf for tf in all_TFs if tf in self.adata.var_names]
             all_RBPs = [r for r in all_RBPs if r in self.adata.var_names]
 
-            # Further subset list of TFs to those that are implicated in signaling patterns of interest and also
-            # are expressed in at least n% of the cells that are nonzero for sending potential (use the user input
-            # 'target_expr_threshold'):
-            nz_sending = list(self.sample_names[sent_signal != 0])
+            # Further subset list of TFs to those that are expressed in at least n% of the cells that are nonzero
+            # for sending potential (use the user input 'target_expr_threshold'):
+            indices = sent_signal.toarray().reshape(-1) != 0
+            nz_sending = list(self.sample_names[indices])
             adata_subset = self.adata[nz_sending, :]
             n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
 
@@ -1005,7 +1008,7 @@ class MuSIC_Interpreter(MuSIC):
             high_variance_genes_filter = list(self.adata.var.index[gene_counts_stats.high_var.values])
             adata_hvg = self.adata[:, high_variance_genes_filter]
 
-            nz_receiving = np.any(received_signal != 0, axis=1)
+            nz_receiving = np.any(received_signal.toarray() != 0, axis=1)
             adata_subset = adata_hvg[nz_receiving, :]
             n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
 
@@ -1021,7 +1024,8 @@ class MuSIC_Interpreter(MuSIC):
 
             if no_cell_type_markers:
                 # Remove cell type markers (more likely to be reflective than responsive to signaling) using a series of
-                # binomial models- each column is the p-value for a particular cell type group compared to all other groups
+                # binomial models- each column is the p-value for a particular cell type group compared to all other
+                # groups
                 p_values = pd.DataFrame(
                     index=adata_hvg.var_names,
                     columns=[
@@ -1080,6 +1084,29 @@ class MuSIC_Interpreter(MuSIC):
         # Compute q-values for each gene:
         GAM_adata, bs = DE_GAM_test(GAM_adata, bs)
         return GAM_adata, bs
+
+    def calc_sender_degs_all_ligands(self):
+        """For all ligands in the AnnData object, identify predicted upstream regulatory factors."""
+        if self.no_cell_type_markers is not None:
+            no_cell_type_markers = self.no_cell_type_markers
+        else:
+            no_cell_type_markers = False
+
+        # Directory to save differential testing results:
+        parent_dir = os.path.dirname(self.output_path)
+        sig_de_path = os.path.join(parent_dir, "signaling_effect_degs")
+
+        ligands = self.ligands_expr.columns
+
+        for ligand in ligands:
+            GAM_adata, bs = self.sender_receiver_effect_deg_detection(
+                diff_sending_or_receiving="sending",
+                ligand=ligand,
+                no_cell_type_markers=no_cell_type_markers,
+            )
+            GAM_adata.write_h5ad(os.path.join(sig_de_path, f"{ligand}.h5ad"))
+            with open(os.path.join(sig_de_path, f"{ligand}_bs.pkl"), "wb") as f:
+                pickle.dump(bs, f)
 
     def group_sender_receiver_effect_degs(
         self,
@@ -1224,10 +1251,6 @@ class MuSIC_Interpreter(MuSIC):
                 the genes that are most positively and most negatively enriched in relation to signaling effect
                 potential
         """
-
-        # Directory to save differential testing results:
-        parent_dir = os.path.dirname(self.output_path)
-        sig_de_path = os.path.join(parent_dir, "signaling_effect_degs")
 
         # Input checks- if not manually provided, check argparse inputs (make sure an input was given from somewhere,
         # though):

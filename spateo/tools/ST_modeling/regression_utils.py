@@ -579,6 +579,11 @@ def fit_DE_GAM(
     if endog.ndim == 1:
         endog = endog.reshape(-1, 1)
 
+    if scipy.sparse.issparse(exog):
+        exog = exog.toarray()
+    if scipy.sparse.issparse(endog):
+        endog = endog.toarray()
+
     if diff_sending_or_receiving == "sending" and endog.shape[1] > 1:
         raise ValueError(
             "For this configuration, ('diff_sending_or_receiving' = 'sending'), dependent variable array must be 1D. "
@@ -593,6 +598,7 @@ def fit_DE_GAM(
     targets = {}
     predictors = {}
     subsetted_cells = {}
+    n_subset = {}
     # Measure converged and/or genes that had enough cells post-filtering to model:
     fitted = {}
     pvals = {}
@@ -603,107 +609,85 @@ def fit_DE_GAM(
     # misleading- we can use cells for which both signals are present to get a sense of the true context-independent
     # effect of one on the other:
 
-    # Check non-negativity:
-    if scipy.sparse.issparse(endog):
-        if not (endog.data >= 0).all():
-            raise ValueError("All values of the count matrix should be non-negative")
-    else:
-        if (endog < 0).any():
-            raise ValueError("All values of the count matrix should be non-negative")
-
-    if scipy.sparse.issparse(exog):
-        if not (exog.data >= 0).all():
-            raise ValueError("All values of the count matrix should be non-negative")
-    else:
+    if diff_sending_or_receiving == "receiving":
+        # Check non-negativity:
         if (exog < 0).any():
             raise ValueError("All values of the count matrix should be non-negative")
 
-    # In the case that differential expression is being done in the receiving cell, so there are multiple different
-    # targets:
-    if diff_sending_or_receiving == "receiving":
         for idx in range(endog.shape[1]):
             gene = genes[idx]
-            if scipy.sparse.issparse(endog):
-                # Independent variables can be multi-column in this case to use many pathway components
-                to_subset = np.nonzero(np.logical_and(np.any(exog != 0, axis=0), endog[:, idx].data != 0))[0]
-                # If the size of the subset is not large enough, set this gene to insignificant and set
-                # p-values and Wald stats to 1 and 0, respectively:
-                if len(to_subset) < 20:
-                    fitted[gene] = False
-                    pvals[gene] = 1
-                    wald_stats[gene] = 0
-                    continue
-                else:
-                    # Placeholders:
-                    fitted[gene] = True
-                    pvals[gene] = np.nan
-                    wald_stats[gene] = np.nan
+            to_subset = np.nonzero(np.logical_and(np.any(exog != 0, axis=1), endog[:, idx] != 0))[0]
+            # Outliers will obscure the true effect- remove them:
+            temp_endog = endog[to_subset, idx]
+            temp_exog = exog[to_subset, :]
+            z_scores_endog = (temp_endog - np.mean(temp_endog)) / np.std(temp_endog)
+            outliers_endog = np.where(np.abs(z_scores_endog) > 3)[0]
+            z_scores_exog = (temp_exog - np.mean(temp_exog)) / np.std(temp_exog)
+            outliers_exog = np.where(np.abs(z_scores_exog) > 3)[0]
+            outliers = np.union1d(outliers_endog, outliers_exog)
 
-                targets[gene] = endog[to_subset, idx].data
+            to_subset = np.setdiff1d(to_subset, outliers)
+
+            # If the size of the subset is not large enough, set this gene to insignificant and set p-values and Wald
+            # stats to 1 and 0, respectively:
+            if len(to_subset) < 20:
+                fitted[gene] = False
+                pvals[gene] = 1
+                wald_stats[gene] = 0
+                continue
             else:
-                to_subset = np.nonzero(np.logical_and(np.any(exog != 0, axis=0), endog[:, idx] != 0))[0]
-                # If the size of the subset is not large enough, set this gene to insignificant:
-                if len(to_subset) < 20:
-                    fitted[gene] = False
-                    pvals[gene] = 1
-                    wald_stats[gene] = 0
-                    continue
-                else:
-                    # Placeholders:
-                    fitted[gene] = True
-                    pvals[gene] = np.nan
-                    wald_stats[gene] = np.nan
-                targets[gene] = endog[to_subset, idx]
+                # Placeholders:
+                fitted[gene] = True
+                pvals[gene] = np.nan
+                wald_stats[gene] = np.nan
+            targets[gene] = endog[to_subset, idx]
 
             # The independent variable(s) are shared, but subsetting differences may exist, so store the determined
             # subset for each gene:
             predictors[gene] = exog[to_subset, :]
             # Store indices of subset:
             subsetted_cells[gene] = to_subset
+            n_subset[gene] = len(to_subset)
 
-    # In the case that differential expression is being done in the sending cell, so there are multiple different
-    # predictors for which models will be fit one-at-a-time:
     elif diff_sending_or_receiving == "sending":
+        # Check non-negativity:
+        if (endog < 0).any():
+            raise ValueError("All values of the count matrix should be non-negative")
+
         for idx in range(exog.shape[1]):
             gene = genes[idx]
-            if scipy.sparse.issparse(exog):
-                to_subset = np.nonzero(np.logical_and(endog != 0, exog[:, idx].data != 0))[0]
-                # If the size of the subset is not large enough, set this gene to insignificant and set
-                # p-values and Wald stats to 1 and 0, respectively:
-                if len(to_subset) < 20:
-                    fitted[gene] = False
-                    pvals[gene] = 1
-                    wald_stats[gene] = 0
-                    continue
-                else:
-                    # Placeholders:
-                    fitted[gene] = True
-                    pvals[gene] = np.nan
-                    wald_stats[gene] = np.nan
+            to_subset = np.nonzero(np.logical_and(np.any(endog != 0, axis=1), exog[:, idx] != 0))[0]
+            # Outliers will obscure the true effect- remove them:
+            temp_endog = endog[to_subset, :]
+            temp_exog = exog[to_subset, idx]
+            z_scores_endog = (temp_endog - np.mean(temp_endog)) / np.std(temp_endog)
+            outliers_endog = np.where(np.abs(z_scores_endog) > 3)[0]
+            z_scores_exog = (temp_exog - np.mean(temp_exog)) / np.std(temp_exog)
+            outliers_exog = np.where(np.abs(z_scores_exog) > 3)[0]
+            outliers = np.union1d(outliers_endog, outliers_exog)
 
-                predictors[gene] = exog[to_subset, idx].data
+            to_subset = np.setdiff1d(to_subset, outliers)
+
+            # If the size of the subset is not large enough, set this gene to insignificant and set p-values and Wald
+            # stats to 1 and 0, respectively:
+            if len(to_subset) < 20:
+                fitted[gene] = False
+                pvals[gene] = 1
+                wald_stats[gene] = 0
+                continue
             else:
-                to_subset = np.nonzero(np.logical_and(endog != 0, exog[:, idx] != 0))[0]
-                # If the size of the subset is not large enough, set this gene to insignificant and set
-                # p-values and Wald stats to 1 and 0, respectively:
-                if len(to_subset) < 20:
-                    fitted[gene] = False
-                    pvals[gene] = 1
-                    wald_stats[gene] = 0
-                    continue
-                else:
-                    # Placeholders:
-                    fitted[gene] = True
-                    pvals[gene] = np.nan
-                    wald_stats[gene] = np.nan
+                # Placeholders:
+                fitted[gene] = True
+                pvals[gene] = np.nan
+                wald_stats[gene] = np.nan
+            targets[gene] = exog[to_subset, idx]
 
-                predictors[gene] = exog[to_subset, idx]
-
-            # The dependent variable(s) are shared, but subsetting differences may exist, so store the determined
+            # The independent variable(s) are shared, but subsetting differences may exist, so store the determined
             # subset for each gene:
-            targets[gene] = endog[to_subset]
+            predictors[gene] = endog[to_subset, :]
             # Store indices of subset:
             subsetted_cells[gene] = to_subset
+            n_subset[gene] = len(to_subset)
 
     else:
         raise ValueError("The independent variable array must be 2D- one-to-one tests currently not supported.")
@@ -723,10 +707,9 @@ def fit_DE_GAM(
     # regression should be applied in this case. This will only happen in the case of a "sending" analysis where the
     # dependent variable is the cell type:
     binary_endog = False
-    if not scipy.sparse.issparse(endog):
-        if all(x in [0, 1] for x in endog):
-            binary_endog = True
-            family = sm.families.Binomial()
+    if all(x in [0, 1] for x in endog):
+        binary_endog = True
+        family = sm.families.Binomial()
 
     if not binary_endog:
         if family == "gaussian":
@@ -814,10 +797,19 @@ def fit_DE_GAM(
     sc_obj.var["pvals"] = pd.Series(pvals)
     sc_obj.var["wald_stats"] = pd.Series(wald_stats)
     sc_obj.var["subsetted_cells"] = pd.Series(subsetted_cells)
+    sc_obj.var["n_subset"] = pd.Series(n_subset)
     if label is not None:
         sc_obj.uns["label"] = label
 
     return sc_obj, basis
+
+
+class GAM_DummyModel:
+    """Dummy class to store whether model converged or not."""
+
+    def __init__(self, label: str, converged: bool = False):
+        self.label = label
+        self.converged = converged
 
 
 def counts_to_Gam(
@@ -859,6 +851,12 @@ def counts_to_Gam(
     # Fit without intercept
     formula_string = "y ~ -1 + " + " + ".join(colnames)
 
+    print(f"\n{label}")
+    print(f"\n{data.shape} for {label}")
+    from scipy.stats import pearsonr
+
+    r, _ = pearsonr(data["y"], data["x0"])
+    print(f"\nCorrelation between y and x0 for {label}: {r}")
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("error", category=ConvergenceWarning)
@@ -867,13 +865,13 @@ def counts_to_Gam(
             )
             gam_fit = gam_model.fit()
 
+            # Keep track of the label and whether the model converged:
+            gam_fit.label = label
+            gam_fit.converged = True
     except Exception:
         print(f"\nConvergence not achieved for {label}.")
-        converged = False
-
-    # Keep track of the label and whether the model converged:
-    gam_fit.label = label
-    gam_fit.converged = converged
+        # Dummy model to store results:
+        gam_fit = GAM_DummyModel(label, False)
 
     return gam_fit
 

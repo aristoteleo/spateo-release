@@ -42,8 +42,10 @@ def _normalize_data(X, counts, after=None, copy=False, rows=True, round=False):
     counts_greater_than_zero = counts[counts > 0]
 
     after = np.median(counts_greater_than_zero, axis=0) if after is None else after
+
     counts += counts == 0
     counts = counts / after
+
     if scipy.sparse.issparse(X):
         sparsefuncs.inplace_row_scale(X, 1 / counts)
     elif isinstance(counts, np.ndarray):
@@ -104,6 +106,7 @@ def normalize_total(
         Returns dictionary with normalized copies of `adata.X` and `adata.layers` or updates `adata` with normalized
         version of the original `adata.X` and `adata.layers`, depending on `inplace`.
     """
+
     logger = lm.get_main_logger()
 
     if copy:
@@ -134,7 +137,6 @@ def normalize_total(
         nearest_power = 10**power
         target_sum = nearest_power
 
-    gene_subset = None
     msg = "Normalizing counts per cell..."
     if exclude_highly_expressed:
         counts_per_cell = X.sum(axis=1)  # original counts per cell
@@ -153,8 +155,22 @@ def normalize_total(
         counts_per_cell = X.sum(axis=1)
 
     if norm_factor is not None:
+        # Scale counts by dividing by the found scaling factors:
         norm_factor = norm_factor.reshape(-1, 1)
-        counts_per_cell = np.multiply(counts_per_cell, norm_factor)
+        scale_factor = np.multiply(counts_per_cell, norm_factor)
+        scale_factor = np.ravel(scale_factor)
+
+        if issubclass(X.dtype.type, (int, np.integer)):
+            X = X.astype(np.float32)
+        if scipy.sparse.issparse(X):
+            sparsefuncs.inplace_row_scale(X, scale_factor)
+        elif isinstance(scale_factor, np.ndarray):
+            np.divide(X, scale_factor[:, None], out=X)
+        else:
+            X = np.divide(X, scale_factor[:, None])
+
+        # Get new counts per cell:
+        counts_per_cell = X.sum(axis=1)
 
     # logger.info(msg)
     counts_per_cell = np.ravel(counts_per_cell)
