@@ -48,7 +48,6 @@ class Logger:
     FORMAT = "%(message)s"
 
     def __init__(self, namespace="main", level=None):
-
         self.namespace = namespace
         self.logger = logging.getLogger(namespace)
         self.previous_timestamp = time.time()  # in seconds
