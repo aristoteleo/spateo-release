@@ -39,7 +39,9 @@ class TestBP(TestMixin, TestCase):
         try:
             np.testing.assert_allclose(
                 expected,
-                bp.run_bp(stats.nbinom(n=10, p=0.5).pmf(X), stats.nbinom(n=100, p=0.5).pmf(X), square=True, p=0.7, q=0.3),
+                bp.run_bp(
+                    stats.nbinom(n=10, p=0.5).pmf(X), stats.nbinom(n=100, p=0.5).pmf(X), square=True, p=0.7, q=0.3
+                ),
                 atol=1e-3,
             )
         except ImportError:
