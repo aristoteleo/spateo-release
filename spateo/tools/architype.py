@@ -127,7 +127,6 @@ def archetypes(
     num_clusters: int = 5,
     layer: Union[str, None] = None,
 ) -> np.ndarray:
-
     """Identify archetypes from the anndata object.
 
     Args:

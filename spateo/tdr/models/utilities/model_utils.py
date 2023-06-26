@@ -90,7 +90,6 @@ def _scale_model_by_distance(
     distance: Union[int, float, list, tuple] = 1,
     scale_center: Union[list, tuple] = None,
 ) -> DataSet:
-
     # Check the distance.
     distance = distance if isinstance(distance, (tuple, list)) else [distance] * 3
     if len(distance) != 3:
@@ -117,7 +116,6 @@ def _scale_model_by_scale_factor(
     scale_factor: Union[int, float, list, tuple] = 1,
     scale_center: Union[list, tuple] = None,
 ) -> DataSet:
-
     # Check the scaling factor.
     scale_factor = scale_factor if isinstance(scale_factor, (tuple, list)) else [scale_factor] * 3
     if len(scale_factor) != 3:

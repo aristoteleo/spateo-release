@@ -63,7 +63,6 @@ def shift_cells(cells, labels, max_iter, seed, shift_length=10):
     center_shifts = np.random.randint(-shift_length, shift_length + 1, 2 * max_iter + 2).reshape(-1, 2)
 
     while deal_list:
-
         c += 1
         one = deal_list.pop(0)
         labels_tmp = labels.copy()

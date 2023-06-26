@@ -16,7 +16,6 @@ class A(nn.Module):
         hidden_layers=1,
         activation_function=torch.nn.functional.leaky_relu,
     ):
-
         super(A, self).__init__()  # Call to the super-class is necessary
 
         self.f = activation_function
@@ -36,7 +35,6 @@ class A(nn.Module):
         # torch.nn.init.normal_(self.layer3.weight, std=.02)
 
     def forward(self, inp):
-
         out = self.f(self.layer1(inp), negative_slope=0.2)
         out = self.f(self.hidden_layers(out), negative_slope=0.2)
         out = self.outlayer(out)
@@ -57,7 +55,6 @@ class B(nn.Module):
         hidden_layers=3,
         activation_function=torch.nn.functional.leaky_relu,
     ):
-
         super(B, self).__init__()  # Call to the super-class is necessary
 
         self.f = activation_function
@@ -77,7 +74,6 @@ class B(nn.Module):
         # torch.nn.init.normal_(self.layer3.weight, std=.02)
 
     def forward(self, inp):
-
         out = self.f(self.layer1(inp), negative_slope=0.2)
         out = self.f(self.hidden_layers(out), negative_slope=0.2)
         out = self.outlayer(out)
@@ -183,7 +179,6 @@ class h(nn.Module):
             )
 
     def forward(self, inp):
-
         out = (
             self.f(self.first_omega_0 * self.layer1(inp))
             if self.sirens
@@ -197,7 +192,6 @@ class h(nn.Module):
 
 class MainFlow(torch.nn.Module):
     def __init__(self, h, A=None, B=None, enforce_positivity=False):
-
         super(MainFlow, self).__init__()
 
         self.A = A
@@ -206,7 +200,6 @@ class MainFlow(torch.nn.Module):
         self.enforce_positivity = enforce_positivity
 
     def forward(self, t, x, freeze=None):
-
         x_low = self.A(x) if self.A is not None else x
         e_low = self.h.forward(x_low)
         e_hat = self.B(e_low) if self.B is not None else e_low

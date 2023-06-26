@@ -105,7 +105,11 @@ def morpho_align(
             added_similarity=LabelSimMat,
             **kwargs,
         )
-        (_, _, modelB.obsm["Rigid_align_spatial"],) = BA_transform(
+        (
+            _,
+            _,
+            modelB.obsm["Rigid_align_spatial"],
+        ) = BA_transform(
             vecfld=modelB.uns[vecfld_key_added],
             quary_points=modelB.obsm[spatial_key],
             device=device,

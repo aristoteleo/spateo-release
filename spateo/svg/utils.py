@@ -211,7 +211,6 @@ def cal_euclidean_distance(
     min_dis_cutoff: float = np.inf,
     max_dis_cutoff: float = np.inf,
 ) -> AnnData:
-
     dyn.tl.neighbors(
         adata,
         X_data=adata.obsm[layer],

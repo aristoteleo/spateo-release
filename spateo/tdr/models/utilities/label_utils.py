@@ -46,7 +46,6 @@ def add_model_labels(
     labels = np.asarray(labels).flatten()
 
     if not np.issubdtype(labels.dtype, np.number):
-
         cu_arr = np.sort(np.unique(labels), axis=0).astype(object)
         raw_labels_hex = labels.copy().astype(object)
         raw_labels_alpha = labels.copy().astype(object)

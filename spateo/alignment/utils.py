@@ -54,7 +54,6 @@ def get_optimal_mapping_relationship(
     X_max_index = np.argwhere((pi.T == pi.T.max(axis=0)).T)
     Y_max_index = np.argwhere(pi == pi.max(axis=0))
     if not keep_all:
-
         values, counts = np.unique(X_max_index[:, 0], return_counts=True)
         x_index_unique, x_index_repeat = values[counts == 1], values[counts != 1]
         X_max_index_unique = X_max_index[np.isin(X_max_index[:, 0], x_index_unique)]

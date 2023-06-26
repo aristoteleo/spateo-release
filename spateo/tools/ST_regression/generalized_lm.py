@@ -419,7 +419,6 @@ class GLM(BaseEstimator):
         theta: float = 1.0,
         verbose: bool = True,
     ):
-
         self.logger = lm.get_main_logger()
         allowable_dists = ["gaussian", "poisson", "softplus", "neg-binomial", "gamma"]
         if distr not in allowable_dists:

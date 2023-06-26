@@ -71,7 +71,15 @@ def paste_pairwise_align(
     """
 
     # Preprocessing
-    (nx, type_as, new_samples, exp_matrices, spatial_coords, normalize_scale, normalize_mean_list,) = align_preprocess(
+    (
+        nx,
+        type_as,
+        new_samples,
+        exp_matrices,
+        spatial_coords,
+        normalize_scale,
+        normalize_mean_list,
+    ) = align_preprocess(
         samples=[sampleA, sampleB],
         genes=genes,
         spatial_key=spatial_key,
@@ -161,7 +169,6 @@ def paste_pairwise_align(
 
 
 def center_NMF(n_components, random_seed, dissimilarity="kl"):
-
     if dissimilarity.lower() == "euclidean" or dissimilarity.lower() == "euc":
         model = NMF(n_components=n_components, init="random", random_state=random_seed)
     else:

@@ -82,7 +82,6 @@ def procrustes(
     T = np.dot(V, U.T)
 
     if reflection != "best":
-
         # does the current solution use a reflection?
         have_reflection = np.linalg.det(T) < 0
 
@@ -95,7 +94,6 @@ def procrustes(
     traceTA = s.sum()
 
     if scaling:
-
         # optimum scaling of Y
         b = traceTA * normX / normY
 

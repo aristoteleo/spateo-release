@@ -49,7 +49,6 @@ def compute_pca_components(
 
     # Whether to save the image of PCA curve and inflection point.
     if save_curve_img is not None:
-
         kl.plot_knee()
         plt.tight_layout()
         plt.savefig(save_curve_img, dpi=100)

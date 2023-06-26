@@ -36,7 +36,6 @@ def multi_slices(
     save_kwargs: Optional[dict] = None,
     **kwargs,
 ):
-
     # Check slices object.
     if isinstance(slices, list):
         adatas = [s.copy() for s in slices]
