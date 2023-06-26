@@ -2,6 +2,7 @@
 """
 from typing import Optional, Tuple, Union
 
+import cv2
 import numpy as np
 from anndata import AnnData
 from kneed import KneeLocator
@@ -27,12 +28,6 @@ def circle(k: int) -> np.ndarray:
     Raises:
         ValueError: if `k` is even or less than 1
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     if k < 1 or k % 2 == 0:
         raise ValueError(f"`k` must be odd and greater than 0.")
 
@@ -83,12 +78,6 @@ def gaussian_blur(X: np.ndarray, k: int) -> np.ndarray:
     Returns:
         Blurred array
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     return cv2.GaussianBlur(src=X.astype(float), ksize=(k, k), sigmaX=0, sigmaY=0)
 
 
@@ -105,12 +94,6 @@ def median_blur(X: np.ndarray, k: int) -> np.ndarray:
     Returns:
         Blurred array
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     return cv2.medianBlur(src=X.astype(np.uint8), ksize=k)
 
 
@@ -200,12 +183,6 @@ def mclose_mopen(mask: np.ndarray, k: int, square: bool = False) -> np.ndarray:
     Raises:
         ValueError: if `k` is even or less than 1
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     if k < 1 or k % 2 == 0:
         raise ValueError(f"`k` must be odd and greater than 0.")
 
@@ -272,12 +249,6 @@ def safe_erode(
         ValueError: If `X` has floating point dtype but `float_threshold` is
             not provided
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     if X.dtype == np.dtype(bool):
         X = X.astype(np.uint8)
     is_float = np.issubdtype(X.dtype, np.floating)
@@ -364,12 +335,6 @@ def clahe(X: np.ndarray, clip_limit: float = 1.0, tile_grid: Tuple[int, int] = (
     Returns:
         Equalized image
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     return cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid).apply(X)
 
 

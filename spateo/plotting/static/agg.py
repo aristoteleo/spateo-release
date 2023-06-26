@@ -4,6 +4,7 @@ import math
 import warnings
 from typing import Dict, Optional, Tuple, Union
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from anndata import AnnData
@@ -78,12 +79,6 @@ def imshow(
     Returns:
         The figure and axis if `ax` is not provided.
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     from matplotlib import rcParams
     from matplotlib.colors import to_hex
 

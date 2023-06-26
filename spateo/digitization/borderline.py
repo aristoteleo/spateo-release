@@ -3,6 +3,7 @@
 
 from typing import List
 
+import cv2
 import numpy as np
 from anndata import AnnData
 
@@ -48,12 +49,6 @@ def get_borderline(
             information about whether the bucket is on the borderline.
     """
 
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     lm.main_info(f"Setting up source and target area.")
     adata_tmp = adata.copy()
     adata_tmp.obs["tmp_borderline"] = 0

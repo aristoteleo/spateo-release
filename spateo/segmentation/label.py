@@ -4,6 +4,7 @@ mask.
 import math
 from typing import Dict, Optional, Tuple
 
+import cv2
 import numpy as np
 from anndata import AnnData
 from joblib import Parallel, delayed
@@ -78,12 +79,6 @@ def _watershed(
     Returns:
         Watershed labels.
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     blur = utils.conv2d(X, k, mode="gauss")
     if markers.dtype == np.dtype(bool):
         lm.main_debug("Finding connected components.")
@@ -331,12 +326,6 @@ def _label_connected_components(
     Returns:
         New label array
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     components = cv2.connectedComponentsWithStats(X.astype(np.uint8))
     areas = components[2][:, cv2.CC_STAT_AREA]
     to_erode = np.zeros(X.shape, dtype=bool)
@@ -497,12 +486,6 @@ def find_peaks_from_mask(
         markers_layer: Layer to save identified peaks as markers. By default, uses
             `{layer}_markers`.
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     mask_layer = SKM.gen_new_layer_key(layer, SKM.MASK_SUFFIX)
     if mask_layer not in adata.layers:
         mask_layer = layer

@@ -3,6 +3,7 @@
 import math
 from typing import List, Optional, Union
 
+import cv2
 import numpy as np
 import torch
 import torch.nn as nn
@@ -191,12 +192,6 @@ def refine_alignment(
         transform_layers: Layers to transform and overwrite inplace.
         **kwargs: Additional keyword arguments to pass to the Pytorch module.
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     if mode not in MODULES.keys():
         raise SegmentationError('`mode` must be one of "rigid" and "non-rigid"')
     if adata.shape[0] * downscale > 10000 or adata.shape[1] * downscale > 10000:

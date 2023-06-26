@@ -4,6 +4,7 @@
 import random
 from typing import Any, List, Optional, Tuple, Union
 
+import cv2
 import numpy as np
 from anndata import AnnData
 from skimage import morphology
@@ -40,12 +41,6 @@ def gen_cluster_image(
             prepared from the designated cmap.
     """
 
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     import matplotlib.pyplot as plt
 
     if bin_size is None:
@@ -104,7 +99,7 @@ def extract_cluster_contours(
     bin_size: int,
     k_size: float = 2,
     min_area: float = 9,
-    close_kernel: Optional[int] = None,
+    close_kernel: int = cv2.MORPH_ELLIPSE,
     show: bool = True,
 ) -> Tuple[Tuple, np.ndarray, np.ndarray]:
     """Extract contour(s) for area(s) formed by buckets of the same spatial cluster.
@@ -125,15 +120,7 @@ def extract_cluster_contours(
         cluster_image_contour: The resultant image of the contour, generated from `cluster_image_close`.
     """
 
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     import matplotlib.pyplot as plt
-
-    close_kernel = cv2.MORPH_ELLIPSE if close_kernel is None else close_kernel
 
     k_size = int(k_size * bin_size)
     min_area = int(min_area * bin_size * bin_size)
@@ -206,12 +193,6 @@ def set_domains(
         Nothing but update the `adata_high_res` with the `domain` in `domain_key_prefix` + "_" + `cluster_key`.
     """
 
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     domain_key = domain_key_prefix + "_" + cluster_key
 
     if bin_size_high is None:

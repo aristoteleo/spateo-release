@@ -3,6 +3,7 @@
 
 from typing import Optional
 
+import cv2
 from anndata import AnnData
 
 from .image_utils import add_image_layer
@@ -31,12 +32,6 @@ def read_image(
         :attr:`~anndata.AnnData.uns`\\ `['spatial'][slice]['scalefactors'][img_layer]`
             The scale factor for the spots
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     img = cv2.imread(filename)
     if img is None:
         raise FileNotFoundError(f"Could not find '{filename}'")

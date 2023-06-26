@@ -2,6 +2,7 @@
 """
 from typing import Dict, Optional, Tuple, Union
 
+import cv2
 import numpy as np
 from anndata import AnnData
 
@@ -28,12 +29,6 @@ def spatial_domains(
         plot_size: figsize for showing the image.
         save_img: path to saving image file.
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     import matplotlib.pyplot as plt
     from numpngw import write_png
 

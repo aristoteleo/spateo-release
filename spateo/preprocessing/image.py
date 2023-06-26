@@ -2,6 +2,7 @@
 """
 from typing import Optional, Union
 
+import cv2
 import matplotlib.pyplot as plt
 from anndata import AnnData
 
@@ -37,12 +38,6 @@ def remove_background(
         :attr:`AnnData.uns`\\ `['spatial'][slice]['scalefactors'][return_img_layer]`
             The scale factor for the spots
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     if not inplace:
         adata = adata.copy()
 

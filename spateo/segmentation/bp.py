@@ -3,6 +3,7 @@ occupied by a cell.
 """
 from typing import Optional
 
+import cv2
 import numpy as np
 
 from ..configuration import config

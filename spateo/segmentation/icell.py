@@ -6,6 +6,7 @@ Original author @HailinPan, refactored by @Lioscro.
 from functools import partial
 from typing import Dict, Optional, Tuple, Union
 
+import cv2
 import numpy as np
 from anndata import AnnData
 from scipy.sparse import issparse, spmatrix
@@ -37,12 +38,6 @@ def _mask_nuclei_from_stain(
     """Create a boolean mask indicating nuclei from stained nuclei image.
     See :func:`mask_nuclei_from_stain` for arguments.
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     lm.main_debug("Filtering with Multi-otsu.")
     thresholds = filters.threshold_multiotsu(X, otsu_classes)
     background_mask = X < thresholds[otsu_index]

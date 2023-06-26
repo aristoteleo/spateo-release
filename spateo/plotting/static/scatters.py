@@ -6,6 +6,7 @@ from numbers import Number
 from typing import Dict, List, Optional, Union
 
 import anndata
+import cv2
 import matplotlib.cm
 import numpy as np
 import pandas as pd
@@ -532,12 +533,6 @@ def scatters(
         cur_l :
             current layer
         """
-        try:
-            import cv2
-        except ImportError:
-            raise ImportError(
-                "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-            )
         nonlocal adata, x, y, z, _background, cmap, color_out, labels, values, ax, sym_c, scatter_kwargs, ax_index
 
         if cur_l in ["acceleration", "curvature", "divergence", "velocity_S", "velocity_T"]:

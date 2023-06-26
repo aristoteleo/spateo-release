@@ -3,6 +3,7 @@
 from collections import Counter
 from typing import Dict, Optional, Tuple, Union
 
+import cv2
 import numpy as np
 from anndata import AnnData
 from kneed import KneeLocator
@@ -110,12 +111,6 @@ def _segment_densities(
         Clustering result as a Numpy array of same shape, where clusters are
         indicated by positive integers.
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     # Warn on too large array
     if X.size > 5e5:
         lm.main_warning(
@@ -198,12 +193,6 @@ def segment_densities(
             categorized as background. Set to False to turn off background detection.
         out_layer: Layer to put resulting bins. Defaults to `{layer}_bins`.
     """
-    try:
-        import cv2
-    except ImportError:
-        raise ImportError(
-            "You need to install the package `opencv-python`." "\nInstall via `pip install opencv-python`"
-        )
     X = SKM.select_layer_data(adata, layer, make_dense=binsize == 1)
     if binsize > 1:
         lm.main_debug(f"Binning matrix with binsize={binsize}.")
