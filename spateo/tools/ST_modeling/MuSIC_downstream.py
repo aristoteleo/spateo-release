@@ -1751,6 +1751,7 @@ class MuSIC_Interpreter(MuSIC):
 
         return pathway_coupling, pathway_coupling_significance
 
-
-# NOTE TO SELF: ADD WRAPPER FUNC HERE THAT ALLOWS FOR MULTIPLE TARGETS, LIGANDS/RECEPTORS, ETC. TO BE SPECIFIED,
-# AND THE DOWNSTREAM FUNCTION WILL RUN USING ALL OF THE PASSED VALUES
+    # ---------------------------------------------------------------------------------------------------
+    # Visualization functions
+    # ---------------------------------------------------------------------------------------------------
+    def plot

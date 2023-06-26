@@ -851,12 +851,6 @@ def counts_to_Gam(
     # Fit without intercept
     formula_string = "y ~ -1 + " + " + ".join(colnames)
 
-    print(f"\n{label}")
-    print(f"\n{data.shape} for {label}")
-    from scipy.stats import pearsonr
-
-    r, _ = pearsonr(data["y"], data["x0"])
-    print(f"\nCorrelation between y and x0 for {label}: {r}")
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("error", category=ConvergenceWarning)
