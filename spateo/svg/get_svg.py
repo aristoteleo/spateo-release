@@ -78,9 +78,7 @@ def svg_iden_reg(
     try:
         from loess.loess_1d import loess_1d
     except ImportError:
-        raise ImportError(
-            "You need to install the package `loess`." "\nInstall via `pip install loess`"
-        )
+        raise ImportError("You need to install the package `loess`." "\nInstall via `pip install loess`")
     w0 = cal_wass_dis_nobs(
         adata,
         bin_size=1,
