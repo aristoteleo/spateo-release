@@ -31,9 +31,9 @@ jobs:
     name: Test on Python ${{ matrix.python }}
     steps:
       - name: Checkout branch
-        uses: actions/checkout@master
+        uses: actions/checkout@v3
       - name: Setup python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python }}
           architecture: x64

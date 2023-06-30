@@ -2,6 +2,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from dynamo.tools.sampling import sample
 from pyvista import DataSet, MultiBlock, PolyData, UnstructuredGrid
 
 try:
@@ -238,6 +239,9 @@ def Principal_Curve(
         curve_pts[:, i] = curve_pts[:, i] + trans[i]
 
     nodes = curve_pts[:, :3] * scale_factor
+    sampling = sample(arr=np.asarray(range(nodes.shape[0])), n=NumNodes, method="trn", X=nodes)
+    sampling.sort()
+    nodes = nodes[sampling, :]
     n_nodes = nodes.shape[0]
     edges = np.asarray([np.arange(0, n_nodes, 1), np.arange(1, n_nodes + 1, 1)]).T
     edges[-1, 1] = n_nodes - 1

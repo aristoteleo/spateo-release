@@ -10,7 +10,6 @@ ipywidgets>=7.7.1
 kneed>=0.7.0
 kornia>=0.6.4
 loompy>=3.0.5
-logging-release>=0.0.4
 mapclassify>=2.4.2
 matplotlib<=3.5.3
 nbconvert

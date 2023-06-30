@@ -49,6 +49,7 @@ def find_cci_two_group(
     min_pairs_ratio: float = 0.01,
     num: int = 1000,
     pvalue: float = 0.05,
+    fdr: bool = False,
 ) -> dict:
     """Performing cell-cell transformation on an anndata object, while also
        limiting the nearest neighbor per cell to n_neighbors. This function returns
@@ -323,15 +324,14 @@ def find_cci_two_group(
         ).tolist()
         lr_network["is_significant"] = lr_network["lr_co_exp_ratio_pvalue"] < pvalue
 
-        # Multiple hypothesis testing correction:
-        qvalues = fdr_correct(pd.DataFrame(lr_network["lr_co_exp_ratio_pvalue"]), corr_method="fdr_bh")
-        lr_network["lr_co_exp_ratio_qvalues"] = qvalues
+        if fdr:
+            # Multiple hypothesis testing correction:
+            qvalues = fdr_correct(pd.DataFrame(lr_network["lr_co_exp_ratio_pvalue"]), corr_method="fdr_bh")
+            lr_network["lr_co_exp_ratio_qvalues"] = qvalues
 
-        # After multiple testing correction:
-        lr_network["is_significant_fdr"] = qvalues < pvalue
-        # lr_network = lr_network.loc[lr_network["lr_co_exp_ratio_pvalue"] < pvalue]
+            # After multiple testing correction:
+            lr_network["is_significant_fdr"] = qvalues < pvalue
         lr_network["sr_pair"] = sender_group + "-" + receiver_group
-
         res = {"cell_pair": cell_pair, "lr_pair": lr_network}
         return res
 
