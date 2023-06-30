@@ -759,10 +759,7 @@ def _datashade_points(
                     data["label"] == "other",
                 )
                 reorder_data = data.copy(deep=True)
-                (
-                    reorder_data.iloc[: sum(background_ids), :],
-                    reorder_data.iloc[sum(background_ids) :, :],
-                ) = (
+                (reorder_data.iloc[: sum(background_ids), :], reorder_data.iloc[sum(background_ids) :, :],) = (
                     data.iloc[background_ids, :],
                     data.iloc[highlight_ids, :],
                 )
