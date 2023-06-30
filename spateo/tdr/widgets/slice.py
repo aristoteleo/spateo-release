@@ -64,7 +64,6 @@ def find_model_outline_planes(model) -> dict:
 
 
 def find_intersection(model, vec, center, plane):
-
     # Normalize the vector
     normal = vec / np.linalg.norm(vec)
     normal_x, normal_y, normal_z = normal

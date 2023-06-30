@@ -161,7 +161,6 @@ def paste_pairwise_align(
 
 
 def center_NMF(n_components, random_seed, dissimilarity="kl"):
-
     if dissimilarity.lower() == "euclidean" or dissimilarity.lower() == "euc":
         model = NMF(n_components=n_components, init="random", random_state=random_seed)
     else:

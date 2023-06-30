@@ -724,7 +724,6 @@ def PCA_recover(
     V_new_basis: Union[np.ndarray, torch.Tensor],
     mean_data_mat: Union[np.ndarray, torch.Tensor],
 ) -> Union[np.ndarray, torch.Tensor]:
-
     nx = ot.backend.get_backend(projected_data)
     return nx.einsum("ij,jk->ik", projected_data, V_new_basis.t()) + mean_data_mat
 

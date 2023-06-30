@@ -31,7 +31,6 @@ def grid_deformation(
     dtype: str = "float64",
     device: str = "cpu",
 ):
-
     # Check the number of lines
     grid_num = np.asarray([20, 20]) if grid_num is None else grid_num
 

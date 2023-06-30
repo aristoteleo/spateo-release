@@ -52,7 +52,6 @@ class Lasso:
             sub_adata: subset of adata.
         """
         if group and group_color:
-
             df = pd.DataFrame()
             df["group_ID"] = self.adata.obs_names
             df["labels"] = self.adata.obs[group].values
@@ -96,7 +95,6 @@ class Lasso:
             )
 
             def selection_fn(trace, points, selector):
-
                 t.data[0].cells.values = [
                     df.loc[points.point_inds][col] for col in ["group_ID", "labels", "spatial_0", "spatial_1"]
                 ]

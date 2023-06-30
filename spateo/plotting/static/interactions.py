@@ -215,9 +215,7 @@ def plot_connections(
 
         for label_1 in range(spatial_connections.shape[0]):
             for label_2 in range(spatial_connections.shape[1]):
-
                 if label_1 <= label_2:
-
                     for triangle in [left_triangle, right_triangle]:
                         center = np.array((label_1, label_2))[np.newaxis, :]
                         scale_factor = spatial_connections[label_1, label_2] / spatial_connections_max
@@ -307,7 +305,6 @@ def plot_connections(
 
             for label_1 in range(expr_connections.shape[0]):
                 for label_2 in range(expr_connections.shape[1]):
-
                     if label_1 <= label_2:
                         for triangle in [left_triangle, right_triangle]:
                             center = np.array((label_1, label_2))[np.newaxis, :]

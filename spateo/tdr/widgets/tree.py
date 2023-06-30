@@ -165,7 +165,6 @@ def DDRTree(
     # main loop
     objs = []
     for iter in range(maxIter):
-
         # Kruskal method to find optimal B
         distsqMU = csr_matrix(sqdist(Y, Y)).toarray()
         stree = minimum_spanning_tree(np.tril(distsqMU)).toarray()
