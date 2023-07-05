@@ -21,12 +21,14 @@ from multiprocessing import Pool
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import anndata
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.sparse
+import seaborn as sns
 import xarray as xr
 from mpi4py import MPI
-from scipy.stats import pearsonr, zscore
+from scipy.stats import pearsonr, spearmanr, zscore
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, normalize
 from statsmodels.gam.smooth_basis import BSplines
@@ -34,12 +36,12 @@ from statsmodels.gam.smooth_basis import BSplines
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
-from spateo.configuration import SKM
-from spateo.tools.cluster.leiden import calculate_leiden_partition
-from spateo.tools.gene_expression_variance import (
-    compute_gene_groups_p_val,
-    get_highvar_genes_sparse,
-)
+# from spateo.configuration import SKM
+# from spateo.tools.cluster.leiden import calculate_leiden_partition
+# from spateo.tools.gene_expression_variance import (
+#     compute_gene_groups_p_val,
+#     get_highvar_genes_sparse,
+# )
 from spateo.tools.ST_modeling.MuSIC import MuSIC
 from spateo.tools.ST_modeling.regression_utils import (
     multitesting_correction,
@@ -189,6 +191,132 @@ class MuSIC_Interpreter(MuSIC):
                 p_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_p_values.csv"))
                 q_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_q_values.csv"))
                 is_significant_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"))
+
+    def compute_diagnostics(self):
+        """
+        For true and predicted gene expression, compute and generate plots of various diagnostics, including the
+        Pearson correlation, Spearman correlation and root mean-squared-error (RMSE).
+        """
+        # Plot title:
+        file_name = os.path.splitext(os.path.basename(self.adata_path))[0]
+
+        parent_dir = os.path.dirname(self.output_path)
+        pred_path = os.path.join(parent_dir, "predictions.csv")
+
+        predictions = pd.read_csv(pred_path, index_col=0)
+        all_genes = predictions.columns
+        width = 0.5 * len(all_genes)
+        pred_vals = predictions.values
+
+        # Note that the assumption is the same processing arguments (normalize, smooth, etc.) are given for
+        # downstream as would be given for model fitting itself, so these are not repeated here since they are
+        # handled at initialization.
+        def compute_rmse(predictions, targets):
+            # Calculate the square of differences between predictions and targets
+            squared_diff = (predictions - targets) ** 2
+
+            # Calculate the mean squared difference
+            mean_squared_diff = np.mean(squared_diff)
+
+            # Calculate the square root of the mean squared difference (RMSE)
+            rmse = np.sqrt(mean_squared_diff)
+            return rmse
+
+        pearson_dict = {}
+        spearman_dict = {}
+        rmse_dict = {}
+
+        for i, gene in enumerate(all_genes):
+            y = self.adata[:, gene].X.toarray().reshape(-1)
+            music_results_target = pred_vals[:, i]
+
+            # For cases where the values are relatively large (as is often the case in normalized gene expression
+            # data), the Pearson correlation can be disproportionately influenced by larger values. Therefore,
+            # we take the log transform:
+            y = np.log1p(y)
+            music_results_target = np.log1p(music_results_target)
+
+            # Remove indices of large predicted values that are observed zero (these are POTENTIALLY zero due to
+            # dropout and not biology):
+            z_scores = zscore(music_results_target)
+            outlier_indices = np.where((y == 0) & (z_scores > 2))[0]
+            music_results_target_to_plot = np.delete(music_results_target, outlier_indices)
+            y_plot = np.delete(y, outlier_indices)
+
+            rp, _ = pearsonr(y_plot, music_results_target_to_plot)
+            r, _ = spearmanr(y_plot, music_results_target_to_plot)
+            rmse = compute_rmse(music_results_target_to_plot, y_plot)
+
+            pearson_dict[gene] = rp
+            spearman_dict[gene] = r
+            rmse_dict[gene] = rmse
+
+        # Mean of diagnostic metrics:
+        mean_pearson = sum(pearson_dict.values()) / len(pearson_dict.values())
+        mean_spearman = sum(spearman_dict.values()) / len(spearman_dict.values())
+        mean_rmse = sum(rmse_dict.values()) / len(rmse_dict.values())
+
+        data = []
+        for gene in pearson_dict.keys():
+            data.append(
+                {
+                    "Gene": gene,
+                    "Pearson coefficient": pearson_dict[gene],
+                    "Spearman coefficient": spearman_dict[gene],
+                    "RMSE": rmse_dict[gene],
+                }
+            )
+        # Color palette:
+        colors = {"Pearson coefficient": "#FF7F00", "Spearmann coefficient": "#87CEEB", "RMSE": "#0BDA51"}
+        df = pd.DataFrame(data)
+
+        # Plot Pearson correlation barplot:
+        sns.set(font_scale=2)
+        sns.set_style("white")
+        plt.figure(figsize=(width, 6))
+        plt.xticks(rotation="vertical")
+        ax = sns.barplot(
+            data=df,
+            x="Gene",
+            y="Pearson coefficient",
+            hue="Model",
+            palette=colors["Pearson coefficient"],
+            edgecolor="black",
+            dodge=True,
+        )
+        plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+        plt.title(f"Pearson correlation {file_name}")
+        plt.show()
+
+        # Plot Spearman correlation barplot:
+        sns.set(font_scale=2)
+        sns.set_style("white")
+        plt.figure(figsize=(width, 6))
+        plt.xticks(rotation="vertical")
+        ax = sns.barplot(
+            data=df,
+            x="Gene",
+            y="Spearman coefficient",
+            hue="Model",
+            palette=colors["Spearman coefficient"],
+            edgecolor="black",
+            dodge=True,
+        )
+        plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+        plt.title(f"Spearman correlation {file_name}")
+        plt.show()
+
+        # Plot RMSE barplot:
+        sns.set(font_scale=2)
+        sns.set_style("white")
+        plt.figure(figsize=(width, 6))
+        plt.xticks(rotation="vertical")
+        ax = sns.barplot(
+            data=df, x="Gene", y="RMSE", hue="Model", palette=colors["RMSE"], edgecolor="black", dodge=True
+        )
+        plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+        plt.title(f"RMSE {file_name}")
+        plt.show()
 
     def get_effect_potential(
         self,
@@ -749,9 +877,205 @@ class MuSIC_Interpreter(MuSIC):
         self.adata.obsm[f"spatial_effect_sender_vf_{sig}_{target}"] = sending_vf
         self.adata.obsm[f"spatial_effect_receiver_vf_{sig}_{target}"] = receiving_vf
 
+    # ---------------------------------------------------------------------------------------------------
+    # Constructing gene regulatory networks
+    # ---------------------------------------------------------------------------------------------------
+    def CCI_sender_deg_detection(
+        self,
+        ligand: Optional[str] = None,
+        pathway: Optional[str] = None,
+        sender_cell_type: Optional[str] = None,
+    ):
+        """Computes differential expression signatures of cells with various levels of ligand expression.
 
+        Args:
+            ligand: Ligand to use for differential expression analysis. Will take precedent over sender/receiver cell
+                type if also provided.
+            target: Only used if 'diff_sending_or_receiving' is "receiving"- target to use for differential expression
+                analysis. If None, will use the first listed target.
+            pathway: Optional pathway to use for differential expression analysis. Will use ligands and receptors in
+                these pathways to collectively compute signaling potential score. Will take precedent over
+                ligand/receptor and sender/receiver cell type if provided.
+            sender_cell_type: Sender cell type to use for differential expression analysis.
+            no_cell_type_markers: Whether to consider cell type markers during differential expression testing,
+                as these are least likely to be interesting patterns. Defaults to False, and if True will first
+                perform differential expression testing for each cell type group, removing significant results.
 
+        Returns:
 
+        """
+
+        if pathway is None and ligand is None and sender_cell_type is None:
+            raise ValueError("Must provide at least one pathway, ligand, or sender_cell_type.")
+
+        if pathway is not None:
+            # For sending analysis, use ligand expression as the dependent variable:
+            # First, compute pathway score:
+            lr_db_subset = self.lr_db[self.lr_db["pathway"] == pathway]
+            all_senders = list(set(lr_db_subset["from"]))
+            all_senders = [lig for lig in all_senders if lig in self.adata.var_names]
+
+            if len(all_senders) < 3:
+                raise ValueError(
+                    f"Pathway effect potential computation for pathway {pathway} is unsuitable for this model, "
+                    f"since there are fewer than three valid ligand-receptor pairs in the pathway that were "
+                    f"incorporated in the initial model."
+                )
+
+            self.adata.obs[f"{pathway}_ligands"] = np.sum(self.ligands_expr[all_senders].values, axis=1)
+            send_key = f"{pathway}_ligands"
+
+        elif ligand is not None:
+            send_key = ligand
+
+        elif sender_cell_type is not None:
+            if self.mod_type != "niche":
+                raise ValueError(
+                    f"Only sender_cell_type was provided to compute effect-associated DEGs, but the "
+                    f"initial {self.mod_type} model does not use cell type identity."
+                )
+
+            send_key = sender_cell_type
+            # Check that the name of the sender cell type is provided in a recognizable format:
+            if send_key not in self.cell_categories.columns:
+                send_key = re.sub(
+                    r"\b([a-zA-Z0-9])",
+                    lambda match: match.group(1).upper(),
+                    re.sub(r"[" r"^a-zA-Z0-9]+", "", send_key),
+                )
+
+        try:
+            # Sent signal from ligand
+            sent_signal = self.ligands_expr[send_key]
+        except:
+            try:
+                # Sent signal from pathway
+                sent_signal = self.adata.obs[send_key]
+            except:
+                # Sent signal from cell type
+                sent_signal = self.cell_categories[send_key]
+
+        # Check if the array of additional molecules to query has already been created:
+        parent_dir = os.path.dirname(self.adata_path)
+        file_name = os.path.basename(self.adata_path).split(".")[0]
+        if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries.h5ad")):
+            if self.cci_dir is None:
+                raise ValueError("With 'diff_sending_or_receiving' set to 'sending', please provide :attr `cci_dir`.")
+
+            if self.species == "human":
+                grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
+                rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "human_RBP_db.csv"), index_col=0)
+                cof_db = pd.read_csv(os.path.join(self.cci_dir, "human_cofactors.csv"), index_col=0)
+                tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_TF_db.csv"), index_col=0)
+            elif self.species == "mouse":
+                grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
+                rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_RBP_db.csv"), index_col=0)
+                cof_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_cofactors.csv"), index_col=0)
+                tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_TF_db.csv"), index_col=0)
+
+            self.logger.info(
+                "Selecting transcription factors, cofactors and RNA-binding proteins for analysis of differential "
+                "expression."
+            )
+
+            # Further subset list of additional factors to those that are expressed in at least n% of the cells that are
+            # nonzero in sending cells (use the user input 'target_expr_threshold'):
+            indices = sent_signal.toarray().reshape(-1) != 0
+            nz_sending = list(self.sample_names[indices])
+            adata_subset = self.adata[nz_sending, :]
+            n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
+
+            all_TFs = list(grn.columns)
+            # Filter to TFs included in the dataset:
+            all_TFs = [tf for tf in all_TFs if tf in self.adata.var_names]
+            if scipy.sparse.issparse(self.adata.X):
+                nnz_counts = np.array(adata_subset[:, all_TFs].X.getnnz(axis=0)).flatten()
+            else:
+                nnz_counts = np.array(self.adata[:, all_TFs].X.getnnz(axis=0)).flatten()
+            all_TFs = [tf for tf, nnz in zip(all_TFs, nnz_counts) if nnz >= n_cells_threshold]
+
+            # Get the set of transcription cofactors that correspond to these transcription factors, in addition to
+            # interacting transcription factors that may not themselves have passed the threshold:
+            cof_subset = list(cof_db[(cof_db[all_TFs] == 1).any(axis=1)].columns)
+            cof_subset = [cof for cof in cof_subset if cof in self.adata.var_names]
+            intersecting_tf_subset = list(tf_tf_db[(tf_tf_db[all_TFs] == 1).any(axis=1)].columns)
+            intersecting_tf_subset = [tf for tf in intersecting_tf_subset if tf in self.adata.var_names]
+
+            # Subset to cofactors for which enough signal is present- filter to those expressed in at least n% of the
+            # cells that express at least one of the TFs associated with the cofactor:
+            all_cofactors = []
+            for cofactor in cof_subset.index:
+                cof_row = cof_db.loc[cofactor, :]
+                cof_TFs = cof_row[cof_row == 1].index
+                tfs_expr_subset_indices = np.where(self.adata[:, cof_TFs].X.sum(axis=1) > 0)[0]
+                tf_subset_cells = self.adata[tfs_expr_subset_indices, :]
+                n_cells_threshold = int(self.target_expr_threshold * tf_subset_cells.n_obs)
+                if scipy.sparse.issparse(self.adata.X):
+                    nnz_counts = np.array(tf_subset_cells[:, cofactor].X.getnnz(axis=0)).flatten()
+                else:
+                    nnz_counts = np.array(tf_subset_cells[:, cofactor].X.getnnz(axis=0)).flatten()
+
+                if nnz_counts >= n_cells_threshold:
+                    all_cofactors.append(cofactor)
+
+            # And extend the set of transcription factors using interacting pairs that may also be present in the same
+            # cells upstream transcription factors are:
+            all_interacting_tfs = []
+            for tf in intersecting_tf_subset:
+                tf_row = tf_tf_db.loc[tf, :]
+                tf_TFs = tf_row[tf_row == 1].index
+                tfs_expr_subset_indices = np.where(self.adata[:, tf_TFs].X.sum(axis=1) > 0)[0]
+                tf_subset_cells = self.adata[tfs_expr_subset_indices, :]
+                n_cells_threshold = int(self.target_expr_threshold * tf_subset_cells.n_obs)
+                if scipy.sparse.issparse(self.adata.X):
+                    nnz_counts = np.array(tf_subset_cells[:, tf].X.getnnz(axis=0)).flatten()
+                else:
+                    nnz_counts = np.array(tf_subset_cells[:, tf].X.getnnz(axis=0)).flatten()
+
+                if nnz_counts >= n_cells_threshold:
+                    all_interacting_tfs.append(tf)
+
+            all_TFs.extend(all_interacting_tfs)
+
+            # Do the same for RNA-binding proteins:
+            all_RBPs = list(rna_bp_db["Gene_Name"].values)
+            all_RBPs = [r for r in all_RBPs if r in self.adata.var_names]
+            if scipy.sparse.issparse(self.adata.X):
+                nnz_counts = np.array(adata_subset[:, all_RBPs].X.getnnz(axis=0)).flatten()
+            else:
+                nnz_counts = np.array(self.adata[:, all_RBPs].X.getnnz(axis=0)).flatten()
+            all_RBPs = [tf for tf, nnz in zip(all_RBPs, nnz_counts) if nnz >= n_cells_threshold]
+
+            # Get feature names for reference:
+            all_regulators = all_TFs + all_cofactors + all_RBPs
+
+            # Take subset of AnnData object corresponding to these regulators:
+            counts = self.adata[:, all_regulators].copy()
+            # Compute latent representation of this object:
+
+            # Collect information into .csv file:
+            if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection")):
+                os.makedirs(os.path.join(parent_dir, "cci_deg_detection"))
+
+            counts.write_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries.h5ad"))
+
+        # Load and process the file for the chosen ligand:
+        counts = anndata.read_h5ad(
+            os.path.join(parent_dir, "cci_deg_detection", f"{file_name}" f"_{send_key}_queries.h5ad")
+        )
+
+        # Stitch into dataframe, where the first 3 columns are coordinates in UMAP space and the fourth column is the
+        # sent signal:
+
+    # For downstream, construct interaction terms- get all TFs known to interact w/ target genes, compute indicator,
+    # multiply computed effect potential by the indicator
+
+    # Cluster the genes based on the zero/nonzero expression patterns of each gene- define this number of models for
+    # XGBoost
+
+    # ---------------------------------------------------------------------------------------------------
+    # Cell type coupling:
+    # ---------------------------------------------------------------------------------------------------
     def compute_cell_type_coupling(
         self,
         targets: Optional[Union[str, List[str]]] = None,
@@ -860,7 +1184,7 @@ class MuSIC_Interpreter(MuSIC):
                     )
 
                     # For each cell type pair, compute average effect potential across all cells of the sending and
-                    # receiving type:
+                    # receiving type for those cells that are sending + receiving signal:
                     for k, pair in enumerate(celltype_pairs):
                         sending_cell_type = pair.split("-")[0]
                         receiving_cell_type = pair.split("-")[1]
@@ -1161,4 +1485,3 @@ class MuSIC_Interpreter(MuSIC):
     # ---------------------------------------------------------------------------------------------------
     # Visualization functions
     # ---------------------------------------------------------------------------------------------------
-

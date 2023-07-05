@@ -48,6 +48,12 @@ def main():
     "values, in that order.",
 )
 @click.option(
+    "n_spatial_dim_csv",
+    default=2,
+    help="If csv_path is provided, this argument specifies the number of spatial dimensions (e.g. 2 for X-Y, "
+    "3 for X-Y-Z) in the data.",
+)
+@click.option(
     "subsample",
     default=False,
     is_flag=True,
@@ -283,6 +289,7 @@ def run(
     group_key,
     group_subset,
     csv_path,
+    n_spatial_dim_csv,
     multiscale,
     multiscale_params_only,
     mod_type,
@@ -333,12 +340,6 @@ def run(
     receiver_ct_for_downstream,
     no_cell_type_markers,
     compute_pathway_effect,
-    n_GAM_points,
-    num_leiden_pcs,
-    num_leiden_neighbors,
-    leiden_resolution,
-    top_n_DE_genes,
-    effect_strength_threshold,
     chunks,
 ):
     """Command line shortcut to run any STGWR models.
@@ -352,6 +353,8 @@ def run(
         csv_path: Can be used to provide a .csv file, containing gene expression data or any other kind of data.
             Assumes the first three columns contain x- and y-coordinates and then dependent variable values,
             in that order.
+        n_spatial_dim_csv: If csv_path is provided, this argument specifies the number of spatial dimensions (e.g. 2
+            for X-Y, 3 for X-Y-Z) in the data
         multiscale: If True, the MGWR model will be used
         multiscale_params_only: If True, will only fit parameters for MGWR model and no other metrics. Otherwise,
             the effective number of parameters and leverages will be returned.
@@ -443,24 +446,6 @@ def run(
             if True, will exclude cell type markers from the set of genes for which to compare to sent/received signal.
         compute_pathway_effect: For downstream analyses; used for :func `inferred_effect_direction`; if True,
             will summarize the effects of all ligands/ligand-receptor interactions in a pathway.
-        n_GAM_points: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
-            specifies the number of points to sample along the spline function when evaluating a fitted GAM model.
-        num_leiden_pcs: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
-            specifies the number of principal components to use when computing partitioning for the discovered
-            differentially expressed genes.
-        num_leiden_neighbors: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
-            specifies the number of neighbors to use when computing partitioning for the discovered differentially
-            expressed genes.
-        leiden_resolution: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
-            specifies the resolution parameter to use for Leiden partitioning.
-        top_n_DE_genes: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`; if
-            given, will restrict the number of genes that are clustered and displayed on the final plot. Note that
-            if there are more than 200 differentially expressed genes, the program will automatically use 200 for
-            this parameter.
-        effect_strength_threshold: For downstream analyses, used for :func `compute_cell_type_coupling`; specifies
-            the threshold percentile (should be between 0 and 1) to filter signaling effect potential before computing
-            the cell type coupling- essentially, this calculates sender and receiver cell type enrichment for cells
-            that strongly influence target gene expression.
     """
 
     mpi_path = os.path.dirname(fast_swr.__file__) + "/SWR_mpi.py"
@@ -499,6 +484,9 @@ def run(
         command += " -adata_path " + adata_path
     elif csv_path is not None:
         command += " -csv_path " + csv_path
+
+    if n_spatial_dim_csv is not None:
+        command += " -n_spatial_dim_csv " + str(n_spatial_dim_csv)
 
     if group_subset is not None:
         command += " -group_subset "
@@ -607,18 +595,6 @@ def run(
         command += " -no_cell_type_markers "
     if compute_pathway_effect:
         command += " -compute_pathway_effect "
-    if n_GAM_points is not None:
-        command += " -n_GAM_points " + str(n_GAM_points)
-    if num_leiden_pcs is not None:
-        command += " -num_leiden_pcs " + str(num_leiden_pcs)
-    if num_leiden_neighbors is not None:
-        command += " -num_leiden_neighbors " + str(num_leiden_neighbors)
-    if leiden_resolution is not None:
-        command += " -leiden_resolution " + str(leiden_resolution)
-    if top_n_DE_genes is not None:
-        command += " -top_n_DE_genes " + str(top_n_DE_genes)
-    if effect_strength_threshold is not None:
-        command += " -effect_strength_threshold " + str(effect_strength_threshold)
 
     os.system(command)
     pass

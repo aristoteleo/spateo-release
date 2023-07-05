@@ -32,6 +32,7 @@ def define_spateo_argparse(**kwargs):
         run_upstream: Flag to run the upstream target selection step. If True, will run the target selection step
         adata_path: Path to AnnData object containing gene expression data. This or 'csv_path' must be given to run.
         csv_path: Path to .csv file containing gene expression data. This or 'adata_path' must be given to run.
+        n_spatial_dim_csv: Number of spatial dimensions to the data provided to 'csv_path'. Defaults to 2.
         subsample: Flag to subsample the data. Recommended for large datasets (>5000 samples).
         multiscale: Flag to create multiscale models. Currently, it is recommended to only create multiscale models
             for Gaussian data.
@@ -206,8 +207,14 @@ def define_spateo_argparse(**kwargs):
         "-csv_path": {
             "type": str,
             "help": "Can be used to provide a .csv file, containing gene expression data or any other kind of data. "
-            "Assumes the first three columns contain x- and y-coordinates and then dependent variable "
-            "values, in that order.",
+            "Assumes the first few columns contain spatial coordinates (depending on input to 'n_spatial_dim_csv') and "
+            "then "
+            "dependent variable values, in that order.",
+        },
+        "-n_spatial_dim_csv": {
+            "type": int,
+            "default": 2,
+            "help": "If using a .csv file, specifies the number of spatial dimensions. Default is 2.",
         },
         "-subsample": {
             "action": "store_true",
@@ -536,6 +543,12 @@ if __name__ == "__main__":
         "values, in that order.",
     )
     parser.add_argument(
+        "-n_spatial_dim_csv",
+        type=int,
+        default=2,
+        help="If using a .csv file, specifies the number of spatial dimensions. Default is 2.",
+    )
+    parser.add_argument(
         "-subsample",
         action="store_true",
         help="Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
@@ -774,49 +787,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Used for :func `inferred_effect_direction`; if True, will summarize the effects of all "
         "ligands/ligand-receptor interactions in a pathway.",
-    )
-    parser.add_argument(
-        "-n_GAM_points",
-        default=50,
-        type=int,
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of points to sample "
-        "along the spline function when evaluating a fitted GAM model.",
-    )
-    parser.add_argument(
-        "-n_leiden_pcs",
-        default=10,
-        type=int,
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of principal "
-        "components to use when computing partitioning for the discovered differentially expressed genes.",
-    )
-    parser.add_argument(
-        "-n_leiden_neighbors",
-        default=5,
-        type=int,
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of neighbors to use "
-        "when computing partitioning for the discovered differentially expressed genes.",
-    )
-    parser.add_argument(
-        "-leiden_resolution",
-        default=0.5,
-        type=float,
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the resolution parameter to use "
-        "for Leiden partitioning.",
-    )
-    parser.add_argument(
-        "-top_n_DE_genes",
-        type=int,
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if given, will restrict the number of "
-        "genes that are clustered and displayed on the final plot. Note that if there are more than 200 "
-        "differentially expressed genes, the program will automatically use 200 for this parameter.",
-    )
-    parser.add_argument(
-        "-effect_strength_threshold",
-        type=float,
-        help="Used for downstream analyses, specifically for :func `compute_cell_type_coupling`; specifies the "
-        "threshold percentile to filter signaling effect potential before computing the cell type coupling- "
-        "essentially, this calculates sender and receiver cell type enrichment for cells that strongly influence "
-        "target gene expression.",
     )
 
     comm = MPI.COMM_WORLD

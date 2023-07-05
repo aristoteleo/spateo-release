@@ -275,7 +275,7 @@ def ecp_silhouette(
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
-def spatial_adj_dyn(
+def spatial_adj(
     adata: AnnData,
     spatial_key: str = "spatial",
     pca_key: str = "pca",
@@ -287,22 +287,21 @@ def spatial_adj_dyn(
     Calculate the adjacent matrix based on a neighborhood graph of gene expression space
     and a neighborhood graph of physical space.
     """
-    import dynamo as dyn
+    from spateo.tools.find_neighbors import neighbors
 
     # Compute a neighborhood graph of gene expression space.
-    dyn.tl.neighbors(adata, X_data=adata.obsm[pca_key], n_neighbors=e_neigh, n_pca_components=n_pca_components)
+    _, adata = neighbors(adata, n_neighbors=e_neigh, basis=pca_key, n_pca_components=n_pca_components)
 
     # Compute a neighborhood graph of physical space.
-    dyn.tl.neighbors(
+    _, adata = neighbors(
         adata,
-        X_data=adata.obsm[spatial_key],
         n_neighbors=s_neigh,
-        result_prefix="spatial",
+        basis=spatial_key,
         n_pca_components=n_pca_components,
     )
 
-    # Calculate the adjacent matrix.
-    conn = adata.obsp["connectivities"].copy()
+    # Calculate the adjacency matrix.
+    conn = adata.obsp["expression_connectivities"].copy()
     conn.data[conn.data > 0] = 1
     adj = conn + adata.obsp["spatial_connectivities"]
     adj.data[adj.data > 0] = 1

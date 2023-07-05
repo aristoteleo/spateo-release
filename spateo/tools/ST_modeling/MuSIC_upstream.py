@@ -27,7 +27,7 @@ sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main
 from spateo.logging import logger_manager as lm
 from spateo.preprocessing import log1p, normalize_total
 from spateo.preprocessing.normalize import factor_normalization
-from spateo.tools.find_neighbors import get_wi, transcriptomic_connectivity
+from spateo.tools.find_neighbors import get_wi, neighbors
 from spateo.tools.gene_expression_variance import get_highvar_genes_sparse
 from spateo.tools.ST_modeling.MuSIC import MuSIC
 from spateo.tools.ST_modeling.regression_utils import (

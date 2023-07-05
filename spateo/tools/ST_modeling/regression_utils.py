@@ -30,7 +30,7 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
-sys.path.insert(1, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
+sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
 
 from spateo.configuration import SKM
 from spateo.logging import logger_manager as lm
@@ -948,21 +948,121 @@ def mse(y_true, y_pred) -> float:
 # ---------------------------------------------------------------------------------------------------
 # Spatial smoothing
 # ---------------------------------------------------------------------------------------------------
-def smooth(X, W, normalize_W=True, return_discrete=False) -> Tuple[scipy.sparse.csr_matrix, Optional[np.ndarray]]:
+def smooth(
+    X: Union[np.ndarray, scipy.sparse.spmatrix],
+    W: Union[np.ndarray, scipy.sparse.spmatrix],
+    normalize_W: bool = True,
+    return_discrete: bool = False,
+    n_subsample: Optional[int] = None,
+) -> Tuple[scipy.sparse.csr_matrix, Optional[np.ndarray]]:
+    """Leverages neighborhood information to smooth gene expression.
+
+    Args:
+        X: Gene expression array or sparse matrix
+        W: Spatial weights matrix
+        normalize_W: Set True to scale the rows of the weights matrix to sum to 1. Use this to smooth by taking an
+            average over the entire neighborhood, including zeros. Set False to take the average over only the
+            nonzero elements in the neighborhood.
+        return_discrete: Set True to return
+        n_subsample: Optional, sets the number of random neighbor samples to use in the smoothing. If not given,
+            will use all neighbors (nonzero weights) for each cell.
+
+    Returns:
+        x_new: Smoothed gene expression array or sparse matrix
+        d: Only if normalize_W is True, returns the row sums of the weights matrix
+    """
+    # Subsample weights array if applicable:
+    if n_subsample is not None:
+        if scipy.sparse.issparse(W):
+            W = subsample_neighbors_sparse(W, n_subsample)
+        else:
+            W = subsample_neighbors_dense(W, n_subsample)
+
     if normalize_W:
         if type(W) == np.ndarray:
             d = np.sum(W, 1).flatten()
         else:
             d = np.sum(W, 1).A.flatten()
         W = scipy.sparse.diags(1 / d) @ W if scipy.sparse.issparse(W) else np.diag(1 / d) @ W
-        x_new = scipy.sparse.csr_matrix(W @ X)
+        # Note that W @ X already returns sparse in this scenario, csr_matrix is just used to convert to common format
+        x_new = scipy.sparse.csr_matrix(W @ X) if scipy.sparse.issparse(X) else W @ X
+
         if return_discrete:
-            x_new = x_new.todense()
-            x_new = scipy.sparse.csr_matrix(np.round(x_new)).astype(int)
+            if scipy.sparse.issparse(x_new):
+                data = x_new.data
+                data[:] = np.where((0 < data) & (data < 1), 1, np.round(data))
+            else:
+                x_new = np.where((0 < x_new) & (x_new < 1), 1, np.round(x_new))
         return x_new, d
     else:
-        x_new = W @ X
+        # Average of the nonzero elements:
+        mod = np.zeros_like(X)
+        for i in range(X.shape[1]):
+            feat = X[:, i].reshape(1, -1)
+            if scipy.sparse.issparse(X):
+                temp = W.multiply(feat)
+                count_nnz = np.diff(temp.indptr)
+                count_nnz[count_nnz == 0] = 1
+                mod[:, i] = count_nnz
+            else:
+                temp = np.multiply(W, feat)
+                count_nnz = np.count_nonzero(temp, axis=1)
+                count_nnz[count_nnz == 0] = 1
+                mod[:, i] = count_nnz
+
+        if scipy.sparse.issparse(X):
+            mod = scipy.sparse.csr_matrix(np.reciprocal(mod))
+
+        # Note that W @ X already returns sparse in this scenario, csr_matrix is just used to convert to common format
+        x_new = scipy.sparse.csr_matrix(W @ X) if scipy.sparse.issparse(X) else W @ X
+        x_new = x_new.multiply(mod) if scipy.sparse.issparse(x_new) else np.divide(x_new, mod)
         if return_discrete:
-            x_new = x_new.todense()
-            x_new = scipy.sparse.csr_matrix(np.round(x_new)).astype(int)
+            if scipy.sparse.issparse(x_new):
+                data = x_new.data
+                data[:] = np.round(data)
+            else:
+                x_new = np.round(x_new)
         return x_new
+
+
+def subsample_neighbors_dense(W, n):
+    """Given dense adjacency matrix W and number of random neighbors n to take, perform subsampling."""
+    logger = lm.get_main_logger()
+
+    W_new = W.copy()
+    for i in range(W_new.shape[0]):
+        nonzero_indices = np.nonzero(W_new[i])[0]
+        m = len(nonzero_indices)
+        if m > n:
+            np.random.shuffle(nonzero_indices)
+            indices_to_zero = nonzero_indices[: m - n]
+            W_new[i, indices_to_zero] = 0
+        else:
+            logger.warning(f"Cell {i} has fewer than {n} neighbors. Subsampling not performed.")
+    return W_new
+
+
+def subsample_neighbors_sparse(W, n):
+    """Given sparse adjacency matrix W and number of random neighbors n to take, perform subsampling."""
+    logger = lm.get_main_logger()
+
+    W_new = W.copy().tocoo()
+    rows, cols = W_new.nonzero()
+    unique_rows = np.unique(rows)
+    for row in unique_rows:
+        row_nonzero_cols = cols[rows == row]
+        m = len(row_nonzero_cols)
+        if m > n:
+            np.random.shuffle(row_nonzero_cols)
+            cols_to_zero = row_nonzero_cols[: m - n]
+            for col in cols_to_zero:
+                indices = (W_new.row == row) & (W_new.col == col)
+                W_new.data[indices] = 0
+        else:
+            logger.warning(f"Cell {row} has fewer than {n} neighbors. Subsampling not performed.")
+    return W_new.tocsr()
+
+
+# ---------------------------------------------------------------------------------------------------
+# Auxiliary functionality for upstream and downstream association testing
+# ---------------------------------------------------------------------------------------------------

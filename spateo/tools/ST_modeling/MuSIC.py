@@ -31,7 +31,7 @@ sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main
 from spateo.logging import logger_manager as lm
 from spateo.preprocessing.normalize import factor_normalization
 from spateo.preprocessing.transform import log1p
-from spateo.tools.find_neighbors import get_wi, transcriptomic_connectivity
+from spateo.tools.find_neighbors import get_wi, neighbors
 from spateo.tools.spatial_degs import moran_i
 from spateo.tools.ST_modeling.distributions import Gaussian, NegativeBinomial, Poisson
 from spateo.tools.ST_modeling.regression_utils import (
@@ -223,10 +223,23 @@ class MuSIC:
                     except IOError:
                         raise IOError(f"Error reading file at path {self.csv_path}.")
 
-                    self.coords = custom_data.iloc[:, :2].values
-                    self.target = pd.DataFrame(
-                        custom_data.iloc[:, 2], index=custom_data.index, columns=[custom_data.columns[2]]
-                    )
+                    self.coords = custom_data.iloc[:, : self.n_spatial_dim_csv].values
+                    # Check if the names of any columns have been given as targets:
+                    if self.custom_targets is None and self.targets_path is None:
+                        # It is assumed the (n + 1)th column of the .csv file is the target variable, where n is the
+                        # number of spatial dimensions (e.g. 2 for 2D samples, 3 for 3D, etc.):
+                        self.target = pd.DataFrame(
+                            custom_data.iloc[:, self.n_spatial_dim_csv],
+                            index=custom_data.index,
+                            columns=[custom_data.columns[2]],
+                        )
+                    elif self.custom_targets is not None:
+                        self.targets_expr = custom_data[self.custom_targets]
+                    else:
+                        with open(self.targets_path, "r") as f:
+                            targets = f.read().splitlines()
+                        self.targets_expr = custom_data[targets]
+
                     self.logger.info(f"Extracting target from column labeled '{custom_data.columns[2]}'.")
                     independent_variables = custom_data.iloc[:, 3:]
                     self.X_df = independent_variables
@@ -315,6 +328,7 @@ class MuSIC:
 
         self.adata_path = self.arg_retrieve.adata_path
         self.csv_path = self.arg_retrieve.csv_path
+        self.n_spatial_dim_csv = self.arg_retrieve.n_spatial_dim_csv
         self.cci_dir = self.arg_retrieve.cci_dir
         self.species = self.arg_retrieve.species
         self.output_path = self.arg_retrieve.output_path
@@ -535,19 +549,29 @@ class MuSIC:
         if self.smooth:
             # Compute connectivity matrix if not already existing:
             try:
-                conn = self.adata.obsp["expression_connectivities"]
+                conn = self.adata.obsp["spatial_connectivities"]
             except:
-                _, adata = transcriptomic_connectivity(self.adata, n_neighbors_method="ball_tree")
-                conn = adata.obsp["expression_connectivities"]
+                _, adata = neighbors(
+                    self.adata,
+                    n_neighbors=self.n_neighbors,
+                    basis="spatial",
+                    spatial_key=self.coords_key,
+                    n_neighbors_method="ball_tree",
+                )
+                conn = adata.obsp["spatial_connectivities"]
 
+            # Subsample half of the neighbors in the smoothing process:
+            n_subsample = int(self.n_neighbors / 2)
             if self.distr == "gaussian":
                 self.logger.info("Smoothing gene expression inplace...")
-                adata_smooth_norm, _ = smooth(self.adata.X, conn, normalize_W=True)
+                adata_smooth_norm, _ = smooth(self.adata.X, conn, normalize_W=False, n_subsample=n_subsample)
                 self.adata.X = adata_smooth_norm
 
             else:
                 self.logger.info("Smoothing gene expression and rounding nonintegers inplace...")
-                adata_smooth_norm, _ = smooth(self.adata.X, conn, normalize_W=True, return_discrete=True)
+                adata_smooth_norm, _ = smooth(
+                    self.adata.X, conn, normalize_W=False, n_subsample=n_subsample, return_discrete=True
+                )
                 self.adata.X = adata_smooth_norm
 
         if self.log_transform:
@@ -1538,6 +1562,7 @@ class MuSIC:
                 pred_y = y_hat[i]
                 # Adjustment for the pseudocount added in preprocessing:
                 pred_y[pred_y <= 1.2] -= 1
+                pred_y[pred_y < 0] = 0
 
             diagnostic = pred_y
             if isinstance(diagnostic, np.ndarray):
@@ -2036,13 +2061,16 @@ class MuSIC:
                     self.logger.info(f"For target {target}, precision: {precision:.3f}, specificity: {specificity:.3f}")
 
                     if precision >= 0.5 and specificity >= 0.5:
-                        if not os.path.exists(os.path.join(self.output_path, "logistic_predictions")):
-                            os.makedirs(os.path.join(self.output_path, "logistic_predictions"))
+                        if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "logistic_predictions")):
+                            os.makedirs(os.path.join(os.path.dirname(self.output_path), "logistic_predictions"))
                         to_save = np.hstack((y_binary, predictions, X))
                         cols = ["true y", "predictions"] + list(self.feature_names)
                         predictions_df = pd.DataFrame(to_save, columns=cols, index=self.sample_names[self.x_chunk])
                         predictions_df.to_csv(
-                            os.path.join(self.output_path, f"logistic_predictions/logistic_predictions_{target}.csv")
+                            os.path.join(
+                                os.path.dirname(self.output_path),
+                                f"logistic_predictions/logistic_predictions_{target}.csv",
+                            )
                         )
 
                         # Mask indices where variable is predicted to be nonzero but is actually zero (based on inferences,
@@ -2212,6 +2240,7 @@ class MuSIC:
                         # Subtract 1 from predictions for predictions that are close to 1- accounting for the
                         # pseudocount from model setup:
                         y_pred[y_pred <= 1.2] -= 1
+                        y_pred[y_pred < 0.0] = 0.0
 
                         # thresh = 1.01 if self.normalize else 0
                         # y_pred[y_pred <= thresh] = 0.0

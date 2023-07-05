@@ -10,8 +10,9 @@ import cv2
 from scipy.sparse import isspmatrix
 
 from ...configuration import SKM
+from .leiden import calculate_leiden_partition
 from .spagcn_utils import *
-from .utils import spatial_adj_dyn
+from .utils import spatial_adj
 
 # Convert sparse matrix to dense matrix.
 to_dense_matrix = lambda X: np.array(X.todense()) if isspmatrix(X) else X
@@ -191,9 +192,7 @@ def scc(
     pca_key: str = "pca",
     e_neigh: int = 30,
     s_neigh: int = 6,
-    cluster_method: Literal["leiden", "louvain"] = "leiden",
     resolution: Optional[float] = None,
-    copy: bool = False,
 ) -> Optional[anndata.AnnData]:
     """Spatially constrained clustering (scc) to identify continuous tissue domains.
 
@@ -209,22 +208,17 @@ def scc(
         adata: an Anndata object, after normalization.
         spatial_key: the key in `.obsm` that corresponds to the spatial coordinate of each bucket.
         key_added: adata.obs key under which to add the cluster labels.
-        pca_key: the key in `.obsm` that corresponds to the PCA result.
+        pca_key: label for the .obsm key containing PCA information (without the potential prefix "X_")
         e_neigh: the number of nearest neighbor in gene expression space.
         s_neigh: the number of nearest neighbor in physical space.
-        cluster_method: the method that will be used to cluster the cells.
         resolution: the resolution parameter of the louvain clustering algorithm.
-        copy: Whether to return a new deep copy of `adata` instead of updating `adata` object passed in arguments.
-            Defaults to False.
 
     Returns:
-        Depends on the argument `copy`, return either an `~anndata.AnnData` object with cluster info in "scc_e_{a}_s{b}"
-        or None.
+        adata: An `~anndata.AnnData` object with cluster info in .obs.
     """
-    import dynamo as dyn
 
     # Calculate the adjacent matrix.
-    adj = spatial_adj_dyn(
+    adj = spatial_adj(
         adata=adata,
         spatial_key=spatial_key,
         pca_key=pca_key,
@@ -232,12 +226,19 @@ def scc(
         s_neigh=s_neigh,
     )
 
-    # Perform clustering.
-    if cluster_method == "leiden":
-        # Leiden clustering.
-        dyn.tl.leiden(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
-    elif cluster_method == "louvain":
-        # Louvain clustering.
-        dyn.tl.louvain(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
+    # Perform Leiden clustering:
+    adata = calculate_leiden_partition(
+        adata=adata,
+        key_added=key_added,
+        adj=adj,
+        resolution=resolution,
+    )
 
-    return adata if copy else None
+    # if cluster_method == "leiden":
+    #     # Leiden clustering.
+    #     dyn.tl.leiden(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
+    # elif cluster_method == "louvain":
+    #     # Louvain clustering.
+    #     dyn.tl.louvain(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
+
+    return adata

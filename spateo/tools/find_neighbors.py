@@ -289,12 +289,15 @@ def construct_nn_graph(
     adata.obsp["adj"] = scipy.sparse.csr_matrix(adj)
 
 
-def transcriptomic_connectivity(
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def neighbors(
     adata: AnnData,
     nbr_object: NearestNeighbors = None,
     basis: str = "pca",
+    spatial_key: str = "spatial",
     n_neighbors_method: str = "ball_tree",
     n_pca_components: int = 30,
+    n_neighbors: int = 10,
 ) -> Tuple[NearestNeighbors, AnnData]:
     """Given an AnnData object, compute pairwise connectivity matrix in transcriptomic space
 
@@ -304,11 +307,15 @@ def transcriptomic_connectivity(
             object with custom functionality.
         basis: str, default 'pca'
             The space that will be used for nearest neighbor search. Valid names includes, for example, `pca`, `umap`,
-            or `X`
+            or `X` for gene expression neighbors, 'spatial' for neighbors in the physical space.
+        spatial_key: Optional, can be used to specify .obsm entry in adata that contains spatial coordinates. Only
+            used if basis is 'spatial'.
         n_neighbors_method: str, default 'ball_tree'
             Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
             "ball_tree" and "kd_tree".
-        n_pca_components: Only used if 'basis' is 'pca'. Sets number of principal components to compute.
+        n_pca_components: Only used if 'basis' is 'pca'. Sets number of principal components to compute (if PCA has
+            not already been computed for this dataset).
+        n_neighbors: Number of neighbors for kneighbors queries.
 
     Returns:
         nbrs : Object of class `sklearn.neighbors.NearestNeighbors`
@@ -332,15 +339,17 @@ def transcriptomic_connectivity(
 
     if basis == "X":
         X_data = adata.X
+    elif basis == "spatial":
+        X_data = adata.obsm[spatial_key]
     elif "X_" + basis in adata.obsm_keys():
         # Assume basis can be found in .obs under "X_{basis}":
         X_data = adata.obsm["X_" + basis]
     else:
-        logger.error("Invalid option given to 'basis'. Options: 'pca', 'umap' or 'X'.")
+        raise ValueError("Invalid option given to 'basis'. Options: 'pca', 'umap', 'spatial' or 'X'.")
 
     if nbr_object is None:
         # set up neighbour object
-        nbrs = NearestNeighbors(algorithm=n_neighbors_method).fit(X_data)
+        nbrs = NearestNeighbors(algorithm=n_neighbors_method, n_neighbors=n_neighbors, metric="euclidean").fit(X_data)
     else:  # use provided sklearn NN object
         nbrs = nbr_object
 
@@ -361,11 +370,18 @@ def transcriptomic_connectivity(
     distances.eliminate_zeros()
     connectivities.eliminate_zeros()
 
-    logger.info_insert_adata("expression_connectivities", adata_attr="obsp")
-    logger.info_insert_adata("expression_distances", adata_attr="obsp")
+    if basis != "spatial":
+        logger.info_insert_adata("expression_connectivities", adata_attr="obsp")
+        logger.info_insert_adata("expression_distances", adata_attr="obsp")
 
-    adata.obsp["expression_distances"] = distances
-    adata.obsp["expression_connectivities"] = connectivities
+        adata.obsp["expression_distances"] = distances
+        adata.obsp["expression_connectivities"] = connectivities
+    else:
+        logger.info_insert_adata("spatial_distances", adata_attr="obsp")
+        logger.info_insert_adata("spatial_connectivities", adata_attr="obsp")
+
+        adata.obsp["spatial_distances"] = distances
+        adata.obsp["spatial_connectivities"] = connectivities
 
     return nbrs, adata
 
