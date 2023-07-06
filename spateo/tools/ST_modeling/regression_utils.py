@@ -974,11 +974,12 @@ def smooth(
         else:
             W = subsample_neighbors_dense(W, n_subsample)
     # Threshold for smoothing (check that a sufficient number of neighbors express a given gene for increased
-    # confidence of biological signal):
-    threshold = int(np.ceil(n_subsample / 4))
+    # confidence of biological signal- must be greater than or equal to this threshold for smoothing):
+    # threshold = int(np.ceil(n_subsample / 4))
+    threshold = 2
 
     # Original nonzero entries (keep these around):
-    rows, cols = X.nonzero()
+    initial_nz_rows, initial_nz_cols = X.nonzero()
 
     if normalize_W:
         if type(W) == np.ndarray:
@@ -1001,20 +1002,21 @@ def smooth(
         processor_func = functools.partial(smooth_process_column, X=X, W=W, threshold=threshold)
         pool = Pool(cpu_count())
         mod = pool.map(processor_func, range(X.shape[1]))
-        mod = np.column_stack(mod)
+        mod = scipy.sparse.hstack(mod)
+        mod.data = 1.0 / mod.data
 
-        if scipy.sparse.issparse(X):
-            mod = scipy.sparse.csr_matrix(np.reciprocal(mod))
-        else:
-            mod = np.reciprocal(mod)
-        # Set any 1s to 0:
-        mod[mod == 1] = 0
+        mod_nz_rows, mod_nz_cols = mod.nonzero()
 
         # Note that W @ X already returns sparse in this scenario, csr_matrix is just used to convert to common format
-        x_new = scipy.sparse.csr_matrix(W @ X) if scipy.sparse.issparse(X) else W @ X
-        x_new = x_new.multiply(mod) if scipy.sparse.issparse(x_new) else np.multiply(x_new, mod)
+        product = scipy.sparse.csr_matrix(W @ X) if scipy.sparse.issparse(X) else W @ X
+        x_new = (
+            scipy.sparse.csr_matrix((X.shape[0], X.shape[1]), dtype=np.float32)
+            if scipy.sparse.issparse(X)
+            else np.zeros((X.shape[0], X.shape[1]), dtype=np.float32)
+        )
+        x_new[mod_nz_rows, mod_nz_cols] = product[mod_nz_rows, mod_nz_cols]
         # For any zeros introduced by this process that were initially nonzeros, set back to the original value:
-        x_new[rows, cols] = X[rows, cols]
+        x_new[initial_nz_rows, initial_nz_cols] = X[initial_nz_rows, initial_nz_cols]
 
         if return_discrete:
             if scipy.sparse.issparse(x_new):
@@ -1031,11 +1033,12 @@ def smooth_process_column(i, X, W, threshold):
     if scipy.sparse.issparse(X):
         temp = W.multiply(feat)
         count_nnz = np.diff(temp.indptr)
-        count_nnz[count_nnz <= threshold] = 1
+        count_nnz[count_nnz < threshold] = 0.0
     else:
         temp = np.multiply(W, feat)
         count_nnz = np.count_nonzero(temp, axis=1)
-        count_nnz[count_nnz <= threshold] = 1
+        count_nnz[count_nnz < threshold] = 0.0
+    count_nnz = scipy.sparse.csr_matrix(count_nnz.reshape(-1, 1))
 
     return count_nnz
 
@@ -1075,7 +1078,8 @@ def subsample_neighbors_sparse(W, n):
                 W_new.data[indices] = 0
         else:
             logger.warning(f"Cell {row} has fewer than {n} neighbors. Subsampling not performed.")
-    return W_new.tocsr()
+    W_new = W_new.tocsr()
+    return W_new
 
 
 # ---------------------------------------------------------------------------------------------------
