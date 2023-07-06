@@ -553,7 +553,7 @@ class MuSIC:
             except:
                 _, adata = neighbors(
                     self.adata,
-                    n_neighbors=self.n_neighbors,
+                    n_neighbors=self.n_neighbors * 2,
                     basis="spatial",
                     spatial_key=self.coords_key,
                     n_neighbors_method="ball_tree",
@@ -561,7 +561,7 @@ class MuSIC:
                 conn = adata.obsp["spatial_connectivities"]
 
             # Subsample half of the neighbors in the smoothing process:
-            n_subsample = int(self.n_neighbors / 2)
+            n_subsample = int(self.n_neighbors)
             if self.distr == "gaussian":
                 self.logger.info("Smoothing gene expression inplace...")
                 adata_smooth_norm, _ = smooth(self.adata.X, conn, normalize_W=False, n_subsample=n_subsample)

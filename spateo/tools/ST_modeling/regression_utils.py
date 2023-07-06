@@ -1,9 +1,8 @@
 """
 Auxiliary functions to aid in the interpretation functions for the spatial and spatially-lagged regression models.
 """
-import multiprocessing as mp
+import functools
 import sys
-import warnings
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from joblib import Parallel, delayed
@@ -13,21 +12,18 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+from multiprocessing import Pool, cpu_count
+
 import anndata
 import numpy as np
 import pandas as pd
 import scipy
-import statsmodels.api as sm
 import statsmodels.stats.multitest
 import tensorflow as tf
 from numpy import linalg
-from scipy.linalg import cholesky, solve_triangular
 from sklearn.metrics import confusion_matrix, recall_score
 from sklearn.preprocessing import MinMaxScaler
-from statsmodels.gam.api import BSplines, GLMGam
-from statsmodels.gam.smooth_basis import get_knots_bsplines
 from statsmodels.stats.outliers_influence import variance_inflation_factor
-from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
@@ -977,6 +973,12 @@ def smooth(
             W = subsample_neighbors_sparse(W, n_subsample)
         else:
             W = subsample_neighbors_dense(W, n_subsample)
+    # Threshold for smoothing (check that a sufficient number of neighbors express a given gene for increased
+    # confidence of biological signal):
+    threshold = int(np.ceil(n_subsample / 4))
+
+    # Original nonzero entries (keep these around):
+    rows, cols = X.nonzero()
 
     if normalize_W:
         if type(W) == np.ndarray:
@@ -996,26 +998,24 @@ def smooth(
         return x_new, d
     else:
         # Average of the nonzero elements:
-        mod = np.zeros_like(X)
-        for i in range(X.shape[1]):
-            feat = X[:, i].reshape(1, -1)
-            if scipy.sparse.issparse(X):
-                temp = W.multiply(feat)
-                count_nnz = np.diff(temp.indptr)
-                count_nnz[count_nnz == 0] = 1
-                mod[:, i] = count_nnz
-            else:
-                temp = np.multiply(W, feat)
-                count_nnz = np.count_nonzero(temp, axis=1)
-                count_nnz[count_nnz == 0] = 1
-                mod[:, i] = count_nnz
+        processor_func = functools.partial(smooth_process_column, X=X, W=W, threshold=threshold)
+        pool = Pool(cpu_count())
+        mod = pool.map(processor_func, range(X.shape[1]))
+        mod = np.column_stack(mod)
 
         if scipy.sparse.issparse(X):
             mod = scipy.sparse.csr_matrix(np.reciprocal(mod))
+        else:
+            mod = np.reciprocal(mod)
+        # Set any 1s to 0:
+        mod[mod == 1] = 0
 
         # Note that W @ X already returns sparse in this scenario, csr_matrix is just used to convert to common format
         x_new = scipy.sparse.csr_matrix(W @ X) if scipy.sparse.issparse(X) else W @ X
-        x_new = x_new.multiply(mod) if scipy.sparse.issparse(x_new) else np.divide(x_new, mod)
+        x_new = x_new.multiply(mod) if scipy.sparse.issparse(x_new) else np.multiply(x_new, mod)
+        # For any zeros introduced by this process that were initially nonzeros, set back to the original value:
+        x_new[rows, cols] = X[rows, cols]
+
         if return_discrete:
             if scipy.sparse.issparse(x_new):
                 data = x_new.data
@@ -1023,6 +1023,21 @@ def smooth(
             else:
                 x_new = np.round(x_new)
         return x_new
+
+
+def smooth_process_column(i, X, W, threshold):
+    """Helper function for parallelization of smoothing, see :func `smooth`."""
+    feat = X[:, i].reshape(1, -1)
+    if scipy.sparse.issparse(X):
+        temp = W.multiply(feat)
+        count_nnz = np.diff(temp.indptr)
+        count_nnz[count_nnz <= threshold] = 1
+    else:
+        temp = np.multiply(W, feat)
+        count_nnz = np.count_nonzero(temp, axis=1)
+        count_nnz[count_nnz <= threshold] = 1
+
+    return count_nnz
 
 
 def subsample_neighbors_dense(W, n):
