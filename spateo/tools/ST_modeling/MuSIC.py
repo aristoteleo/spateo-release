@@ -1034,9 +1034,17 @@ class MuSIC:
         if self.mod_type == "niche":
             # Compute spatial weights matrix- use n_neighbors and exclude_self from the argparse (defaults to 10).
             if "spatial_weights" not in locals():
-                spatial_weights = self._compute_all_wi(
-                    bw=self.n_neighbors, bw_fixed=False, exclude_self=True, kernel="bisquare"
-                )
+                # Check for pre-computed spatial weights:
+                if "spatial_weights" in self.adata.obsp.keys():
+                    self.logger.info("Spatial weights already found in AnnData object.")
+                    spatial_weights = self.adata.obsp["spatial_weights"]
+                else:
+                    spatial_weights = self._compute_all_wi(
+                        bw=self.n_neighbors, bw_fixed=False, exclude_self=True, kernel="bisquare"
+                    )
+                    # Save to AnnData object, and update AnnData object in path:
+                    self.adata.obsp["spatial_weights"] = spatial_weights
+                    self.adata.write_h5ad(self.adata_path)
 
             # Construct category adjacency matrix (n_samples x n_categories array that records how many neighbors of
             # each category are present within the neighborhood of each sample):

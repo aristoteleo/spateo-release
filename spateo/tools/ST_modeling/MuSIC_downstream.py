@@ -113,16 +113,10 @@ class MuSIC_Interpreter(MuSIC):
         self.receiver_ct_for_downstream = self.arg_retrieve.receiver_ct_for_downstream
 
         # Other downstream analysis-pertinent argparse arguments:
+        self.cci_degs_model_interactions = self.arg_retrieve.cci_degs_model_interactions
         self.no_cell_type_markers = self.arg_retrieve.no_cell_type_markers
         self.compute_pathway_effect = self.arg_retrieve.compute_pathway_effect
         self.diff_sending_or_receiving = self.arg_retrieve.diff_sending_or_receiving
-        self.no_cell_type_markers = self.arg_retrieve.no_cell_type_markers
-        self.n_GAM_points = self.arg_retrieve.n_GAM_points
-        self.n_leiden_pcs = self.arg_retrieve.n_leiden_pcs
-        self.n_leiden_neighbors = self.arg_retrieve.n_leiden_neighbors
-        self.leiden_resolution = self.arg_retrieve.leiden_resolution
-        self.top_n_DE_genes = self.arg_retrieve.top_n_DE_genes
-        self.effect_strength_threshold = self.arg_retrieve.effect_strength_threshold
 
     def compute_coeff_significance(self, method: str = "fdr_bh", significance_threshold: float = 0.05):
         """Computes local statistical significance for fitted coefficients.
@@ -284,8 +278,21 @@ class MuSIC_Interpreter(MuSIC):
             edgecolor="black",
             dodge=True,
         )
-        plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+
+        # Mean line:
+        line_style = "--"  # Specify the line style (e.g., "--" for dotted)
+        line_thickness = 2  # Specify the line thickness
+        ax.axhline(mean_pearson, color="black", linestyle=line_style, linewidth=line_thickness)
+
+        # Update legend:
+        legend_label = f"Mean: {mean_pearson}"
+        handles, labels = ax.get_legend_handles_labels()
+        handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+        labels.append(legend_label)
+        ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+
         plt.title(f"Pearson correlation {file_name}")
+        plt.tight_layout()
         plt.show()
 
         # Plot Spearman correlation barplot:
@@ -302,8 +309,21 @@ class MuSIC_Interpreter(MuSIC):
             edgecolor="black",
             dodge=True,
         )
-        plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+
+        # Mean line:
+        line_style = "--"  # Specify the line style (e.g., "--" for dotted)
+        line_thickness = 2  # Specify the line thickness
+        ax.axhline(mean_spearman, color="black", linestyle=line_style, linewidth=line_thickness)
+
+        # Update legend:
+        legend_label = f"Mean: {mean_spearman}"
+        handles, labels = ax.get_legend_handles_labels()
+        handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+        labels.append(legend_label)
+        ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+
         plt.title(f"Spearman correlation {file_name}")
+        plt.tight_layout()
         plt.show()
 
         # Plot RMSE barplot:
@@ -314,9 +334,29 @@ class MuSIC_Interpreter(MuSIC):
         ax = sns.barplot(
             data=df, x="Gene", y="RMSE", hue="Model", palette=colors["RMSE"], edgecolor="black", dodge=True
         )
-        plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+
+        # Mean line:
+        line_style = "--"  # Specify the line style (e.g., "--" for dotted)
+        line_thickness = 2  # Specify the line thickness
+        ax.axhline(mean_rmse, color="black", linestyle=line_style, linewidth=line_thickness)
+
+        # Update legend:
+        legend_label = f"Mean: {mean_rmse}"
+        handles, labels = ax.get_legend_handles_labels()
+        handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+        labels.append(legend_label)
+        ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+
         plt.title(f"RMSE {file_name}")
+        plt.tight_layout()
         plt.show()
+
+    def identify_enriched_interactions(
+        self,
+        target: Optional[str] = None,
+    ):
+        """Given the target gene of interest, identify interaction features that are differentially expressed where
+        the target gene is relatively higher- or lower-expressed."""
 
     def get_effect_potential(
         self,
@@ -880,7 +920,7 @@ class MuSIC_Interpreter(MuSIC):
     # ---------------------------------------------------------------------------------------------------
     # Constructing gene regulatory networks
     # ---------------------------------------------------------------------------------------------------
-    def CCI_sender_deg_detection(
+    def CCI_sender_deg_detection_setup(
         self,
         ligand: Optional[str] = None,
         pathway: Optional[str] = None,
@@ -896,7 +936,8 @@ class MuSIC_Interpreter(MuSIC):
             pathway: Optional pathway to use for differential expression analysis. Will use ligands and receptors in
                 these pathways to collectively compute signaling potential score. Will take precedent over
                 ligand/receptor and sender/receiver cell type if provided.
-            sender_cell_type: Sender cell type to use for differential expression analysis.
+            sender_cell_type: Sender cell type to use for differential expression analysis. If given,
+                this will essentially compute differential expression for the given cell type.
             no_cell_type_markers: Whether to consider cell type markers during differential expression testing,
                 as these are least likely to be interesting patterns. Defaults to False, and if True will first
                 perform differential expression testing for each cell type group, removing significant results.
@@ -952,7 +993,7 @@ class MuSIC_Interpreter(MuSIC):
                 # Sent signal from pathway
                 sent_signal = self.adata.obs[send_key]
             except:
-                # Sent signal from cell type
+                # Sent signal from cell type- in this case, will just look for differential expression in the cell type
                 sent_signal = self.cell_categories[send_key]
 
         # Check if the array of additional molecules to query has already been created:
@@ -973,6 +1014,11 @@ class MuSIC_Interpreter(MuSIC):
                 cof_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_cofactors.csv"), index_col=0)
                 tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_TF_db.csv"), index_col=0)
 
+            # Subset GRN and other databases to only include TFs that are in the adata object:
+            grn = grn[np.isin(self.adata.var_names, grn.columns)]
+            cof_db = cof_db[np.isin(self.adata.var_names, cof_db.columns)]
+            tf_tf_db = tf_tf_db[np.isin(self.adata.var_names, tf_tf_db.columns)]
+
             self.logger.info(
                 "Selecting transcription factors, cofactors and RNA-binding proteins for analysis of differential "
                 "expression."
@@ -980,35 +1026,34 @@ class MuSIC_Interpreter(MuSIC):
 
             # Further subset list of additional factors to those that are expressed in at least n% of the cells that are
             # nonzero in sending cells (use the user input 'target_expr_threshold'):
-            indices = sent_signal.toarray().reshape(-1) != 0
+            indices = sent_signal.values.reshape(-1) != 0
             nz_sending = list(self.sample_names[indices])
             adata_subset = self.adata[nz_sending, :]
             n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
 
             all_TFs = list(grn.columns)
-            # Filter to TFs included in the dataset:
-            all_TFs = [tf for tf in all_TFs if tf in self.adata.var_names]
+            all_TFs = [tf for tf in all_TFs if tf in cof_db.columns and tf in tf_tf_db.columns]
             if scipy.sparse.issparse(self.adata.X):
                 nnz_counts = np.array(adata_subset[:, all_TFs].X.getnnz(axis=0)).flatten()
             else:
-                nnz_counts = np.array(self.adata[:, all_TFs].X.getnnz(axis=0)).flatten()
+                nnz_counts = np.array(adata_subset[:, all_TFs].X.getnnz(axis=0)).flatten()
             all_TFs = [tf for tf, nnz in zip(all_TFs, nnz_counts) if nnz >= n_cells_threshold]
 
             # Get the set of transcription cofactors that correspond to these transcription factors, in addition to
             # interacting transcription factors that may not themselves have passed the threshold:
-            cof_subset = list(cof_db[(cof_db[all_TFs] == 1).any(axis=1)].columns)
-            cof_subset = [cof for cof in cof_subset if cof in self.adata.var_names]
-            intersecting_tf_subset = list(tf_tf_db[(tf_tf_db[all_TFs] == 1).any(axis=1)].columns)
-            intersecting_tf_subset = [tf for tf in intersecting_tf_subset if tf in self.adata.var_names]
+            cof_subset = list(cof_db[(cof_db[all_TFs] == 1).any(axis=1)].index)
+            cof_subset = [cof for cof in cof_subset if cof in self.feature_names]
+            intersecting_tf_subset = list(tf_tf_db[(tf_tf_db[all_TFs] == 1).any(axis=1)].index)
+            intersecting_tf_subset = [tf for tf in intersecting_tf_subset if tf in self.feature_names]
 
             # Subset to cofactors for which enough signal is present- filter to those expressed in at least n% of the
             # cells that express at least one of the TFs associated with the cofactor:
             all_cofactors = []
-            for cofactor in cof_subset.index:
+            for cofactor in cof_subset:
                 cof_row = cof_db.loc[cofactor, :]
                 cof_TFs = cof_row[cof_row == 1].index
-                tfs_expr_subset_indices = np.where(self.adata[:, cof_TFs].X.sum(axis=1) > 0)[0]
-                tf_subset_cells = self.adata[tfs_expr_subset_indices, :]
+                tfs_expr_subset_indices = np.where(adata_subset[:, cof_TFs].X.sum(axis=1) > 0)[0]
+                tf_subset_cells = adata_subset[tfs_expr_subset_indices, :]
                 n_cells_threshold = int(self.target_expr_threshold * tf_subset_cells.n_obs)
                 if scipy.sparse.issparse(self.adata.X):
                     nnz_counts = np.array(tf_subset_cells[:, cofactor].X.getnnz(axis=0)).flatten()
@@ -1024,8 +1069,8 @@ class MuSIC_Interpreter(MuSIC):
             for tf in intersecting_tf_subset:
                 tf_row = tf_tf_db.loc[tf, :]
                 tf_TFs = tf_row[tf_row == 1].index
-                tfs_expr_subset_indices = np.where(self.adata[:, tf_TFs].X.sum(axis=1) > 0)[0]
-                tf_subset_cells = self.adata[tfs_expr_subset_indices, :]
+                tfs_expr_subset_indices = np.where(adata_subset[:, tf_TFs].X.sum(axis=1) > 0)[0]
+                tf_subset_cells = adata_subset[tfs_expr_subset_indices, :]
                 n_cells_threshold = int(self.target_expr_threshold * tf_subset_cells.n_obs)
                 if scipy.sparse.issparse(self.adata.X):
                     nnz_counts = np.array(tf_subset_cells[:, tf].X.getnnz(axis=0)).flatten()
@@ -1035,33 +1080,110 @@ class MuSIC_Interpreter(MuSIC):
                 if nnz_counts >= n_cells_threshold:
                     all_interacting_tfs.append(tf)
 
-            all_TFs.extend(all_interacting_tfs)
+            if self.cci_degs_model_interactions:
+                # Transcription factor-cofactor combinatorial pairs:
+                tf_cof_pairs = {}
+                for tf in all_TFs:
+                    tf_cofactors = cof_db.loc[all_cofactors, tf]
+                    # Find elements that are equal to 1:
+                    tf_cofactors = tf_cofactors[tf_cofactors == 1].index.tolist()
+                    tf_cof_pairs[tf] = tf_cofactors
+
+                # Transcription factor interactions:
+                tf_tf_pairs = {}
+                for tf in all_TFs:
+                    tf_tf = tf_tf_db.loc[all_interacting_tfs, tf]
+                    # Find elements that are equal to 1:
+                    tf_tf = tf_tf[tf_tf == 1].index.tolist()
+                    tf_tf_pairs[tf] = tf_tf
 
             # Do the same for RNA-binding proteins:
             all_RBPs = list(rna_bp_db["Gene_Name"].values)
-            all_RBPs = [r for r in all_RBPs if r in self.adata.var_names]
-            if scipy.sparse.issparse(self.adata.X):
-                nnz_counts = np.array(adata_subset[:, all_RBPs].X.getnnz(axis=0)).flatten()
-            else:
-                nnz_counts = np.array(self.adata[:, all_RBPs].X.getnnz(axis=0)).flatten()
-            all_RBPs = [tf for tf, nnz in zip(all_RBPs, nnz_counts) if nnz >= n_cells_threshold]
+            all_RBPs = [r for r in all_RBPs if r in self.feature_names]
+            if len(all_RBPs) > 0:
+                if scipy.sparse.issparse(self.adata.X):
+                    nnz_counts = np.array(adata_subset[:, all_RBPs].X.getnnz(axis=0)).flatten()
+                else:
+                    nnz_counts = np.array(adata_subset[:, all_RBPs].X.getnnz(axis=0)).flatten()
+                all_RBPs = [tf for tf, nnz in zip(all_RBPs, nnz_counts) if nnz >= n_cells_threshold]
+                # Remove RBPs if any happen to be TFs or cofactors:
+                all_RBPs = [
+                    r for r in all_RBPs if r not in all_TFs and r not in all_interacting_tfs and r not in all_cofactors
+                ]
 
-            # Get feature names for reference:
-            all_regulators = all_TFs + all_cofactors + all_RBPs
+            self.logger.info(f"For this dataset, marked {len(all_TFs)} of interest.")
+            self.logger.info(f"For this dataset, marked {len(all_cofactors)} transcriptional cofactors of interest.")
+            if len(all_RBPs) > 0:
+                self.logger.info(f"For this dataset, marked {len(all_RBPs)} RNA-binding proteins of interest.")
+
+            if not self.cci_degs_model_interactions:
+                # Get feature names- for the singleton factors:
+                regulator_features = all_TFs + all_interacting_tfs + all_cofactors + all_RBPs
+            else:
+                # Get feature names- for the interaction factors:
+                interacting_pairs = []
+                regulator_features = []
+                for key, value in tf_cof_pairs.items():
+                    if value:
+                        interacting_pairs.extend([f"{key}_{val}" for val in value])
+                    regulator_features.append(key)
+                    regulator_features.extend(value)
+                for key, value in tf_tf_pairs.items():
+                    if value:
+                        interacting_pairs.extend([f"{key}_{val}" for val in value])
+                    regulator_features.append(key)
+                    regulator_features.extend(value)
 
             # Take subset of AnnData object corresponding to these regulators:
-            counts = self.adata[:, all_regulators].copy()
-            # Compute latent representation of this object:
+            counts = self.adata[:, regulator_features].copy()
+            self.sender_deg_predictors = pd.DataFrame(
+                counts.X.A if scipy.sparse.issparse(counts.X) else counts.X,
+                index=counts.obs_names,
+                columns=regulator_features,
+            )
+            # Scale independent variables to reduce the impact of large values:
+            self.sender_deg_predictors = self.sender_deg_predictors.applymap(np.log1p)
+
+            if self.cci_degs_model_interactions:
+                # Combine columns that are part of interactions- eventually the individual columns should be dropped,
+                # but store them in a temporary list to do so later because some may contribute to multiple complexes
+                to_drop = []
+                for element in interacting_pairs:
+                    if "_" in element:
+                        parts = element.split("_")
+                        # Combine the columns into a new column with the name of the hyphenated element- here we
+                        # will compute the geometric mean of the expression values of the interacting pair:
+                        self.sender_deg_predictors[element] = self.sender_deg_predictors[parts].apply(
+                            lambda x: x.prod() ** (1 / len(parts)), axis=1
+                        )
+                        to_drop.extend(parts)
+
+                # Drop any possible duplicate ligands alongside any other columns to be dropped:
+                to_drop = list(set(to_drop))
+                self.sender_deg_predictors.drop(to_drop, axis=1, inplace=True)
+                first_occurrences = self.sender_deg_predictors.columns.duplicated(keep="first")
+                self.sender_deg_predictors = self.sender_deg_predictors.loc[:, ~first_occurrences]
+
+            # Compute latent representation of the AnnData subset ("counts"):
+
+            #
 
             # Collect information into .csv file:
             if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection")):
                 os.makedirs(os.path.join(parent_dir, "cci_deg_detection"))
 
-            counts.write_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries.h5ad"))
+            self.logger.info(
+                "'CCI_sender_deg_detection'- saving regulatory molecules to test as .h5ad file to the "
+                "directory of the original AnnData object..."
+            )
+            counts.write_h5ad(
+                os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries_singleton.h5ad")
+            )
 
+    def CCI_sender_deg_detection(self):
         # Load and process the file for the chosen ligand:
         counts = anndata.read_h5ad(
-            os.path.join(parent_dir, "cci_deg_detection", f"{file_name}" f"_{send_key}_queries.h5ad")
+            os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries.h5ad")
         )
 
         # Stitch into dataframe, where the first 3 columns are coordinates in UMAP space and the fourth column is the

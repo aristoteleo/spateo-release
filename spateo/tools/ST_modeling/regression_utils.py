@@ -975,8 +975,7 @@ def smooth(
             W = subsample_neighbors_dense(W, n_subsample)
     # Threshold for smoothing (check that a sufficient number of neighbors express a given gene for increased
     # confidence of biological signal- must be greater than or equal to this threshold for smoothing):
-    # threshold = int(np.ceil(n_subsample / 4))
-    threshold = 2
+    threshold = int(np.ceil(n_subsample / 4))
 
     # Original nonzero entries (keep these around):
     initial_nz_rows, initial_nz_cols = X.nonzero()
@@ -1009,6 +1008,7 @@ def smooth(
 
         # Note that W @ X already returns sparse in this scenario, csr_matrix is just used to convert to common format
         product = scipy.sparse.csr_matrix(W @ X) if scipy.sparse.issparse(X) else W @ X
+        product = product.multiply(mod)
         x_new = (
             scipy.sparse.csr_matrix((X.shape[0], X.shape[1]), dtype=np.float32)
             if scipy.sparse.issparse(X)

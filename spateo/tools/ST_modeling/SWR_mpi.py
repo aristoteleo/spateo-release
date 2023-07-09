@@ -166,24 +166,13 @@ def define_spateo_argparse(**kwargs):
             `calc_and_group_sender_receiver_effect_degs`, used to specify the cell type to consider as a sender.
         receiver_ct_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
             `calc_and_group_sender_receiver_effect_degs`, used to specify the cell type to consider as a receiver.
-        no_cell_type_markers: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
-            if True, will exclude cell type markers from the set of genes for which to compare to sent/received signal.
-        compute_pathway_effect: For downstream analyses; used for :func `inferred_effect_direction`; if True,
-            will summarize the effects of all ligands/ligand-receptor interactions in a pathway.
-        n_GAM_points: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
-            specifies the number of points to sample along the spline function when evaluating a fitted GAM model.
-        n_leiden_pcs: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
-            specifies the number of principal components to use when computing partitioning for the discovered
-            differentially expressed genes.
-        n_leiden_neighbors: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
-            specifies the number of neighbors to use when computing partitioning for the discovered differentially
-            expressed genes.
-        leiden_resolution: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
-            specifies the resolution parameter to use for Leiden partitioning.
-        top_n_DE_genes: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`; if
-            given, will restrict the number of genes that are clustered and displayed on the final plot. Note that
-            if there are more than 200 differentially expressed genes, the program will automatically use 200 for
-            this parameter.
+        cci_degs_model_interactions: Used for :func `CCI_sender_deg_detection`; if True, will consider transcription
+            factor interactions with cofactors and other transcription factors, with these interactions combined into
+            features. If False, will use each cofactor independently in the prediction.
+        no_cell_type_markers: Used for :func `CCI_receiver_deg_detection`; if True, will exclude cell type markers
+            from the set of genes for which to compare to sent/received signal.
+        compute_pathway_effect: Used for :func `inferred_effect_direction`; if True, will summarize the effects of all
+            ligands/ligand-receptor interactions in a pathway.
 
     Returns:
         comm: MPI comm object for parallel processing
@@ -282,7 +271,7 @@ def define_spateo_argparse(**kwargs):
             "find signaling effects that may be mediated by rarer signals.",
         },
         "-target_expr_threshold": {
-            "default": 0.05,
+            "default": 0.1,
             "type": float,
             "help": "For automated selection, the threshold proportion of cells for which transcript "
             "needs to be expressed in to be selected as a target of interest. Not used if 'targets_path' is not None.",
@@ -421,52 +410,21 @@ def define_spateo_argparse(**kwargs):
             "help": "Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
             "used to specify the cell type to consider as a receiver.",
         },
+        "-cci_degs_model_interactions": {
+            "action": "store_true",
+            "help": "Used for :func `CCI_sender_deg_detection`; if True, will consider transcription factor "
+            "interactions with cofactors and other transcription factors, with these interactions combined into "
+            "features. If False, will use each cofactor independently in the prediction.",
+        },
         "-no_cell_type_markers": {
             "action": "store_true",
-            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; if True, will exclude cell type "
+            "help": "Used for :func `CCI_receiver_deg_detection`; if True, will exclude cell type "
             "markers from the set of genes for which to compare to sent/received signal.",
         },
         "-compute_pathway_effect": {
             "action": "store_true",
             "help": "Used for :func `inferred_effect_direction`; if True, will summarize the effects of all "
             "ligands/ligand-receptor interactions in a pathway.",
-        },
-        "-n_GAM_points": {
-            "default": 50,
-            "type": int,
-            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of points to "
-            "sample along the spline function when evaluating a fitted GAM model.",
-        },
-        "-n_leiden_pcs": {
-            "default": 10,
-            "type": int,
-            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of principal "
-            "components to use when computing partitioning for the discovered differentially expressed genes.",
-        },
-        "-n_leiden_neighbors": {
-            "default": 5,
-            "type": int,
-            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of neighbors to "
-            "use when computing partitioning for the discovered differentially expressed genes.",
-        },
-        "-leiden_resolution": {
-            "default": 0.5,
-            "type": float,
-            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the resolution parameter to"
-            "use for Leiden partitioning.",
-        },
-        "-top_n_DE_genes": {
-            "type": int,
-            "help": "Used for :func `calc_and_group_sender_receiver_effect_degs`; if given, will restrict the number "
-            "of genes that are clustered and displayed on the final plot. Note that if there are more than 200 "
-            "differentially expressed genes, the program will automatically use 200 for this parameter.",
-        },
-        "-effect_strength_threshold": {
-            "type": float,
-            "help": "Used for downstream analyses, specifically for :func `compute_cell_type_coupling`; specifies the "
-            "threshold percentile to filter signaling effect potential before computing the cell type coupling- "
-            "essentially, this calculates sender and receiver cell type enrichment for cells that strongly influence "
-            "target gene expression.",
         },
     }
 
@@ -777,9 +735,16 @@ if __name__ == "__main__":
         "used to specify the cell type to consider as a receiver.",
     )
     parser.add_argument(
+        "-cci_degs_model_interactions",
+        type=bool,
+        help="Used for :func `CCI_sender_deg_detection`; if True, will consider transcription factor "
+        "interactions with cofactors and other transcription factors. If False, will use only "
+        "transcription factor expression for prediction.",
+    )
+    parser.add_argument(
         "-no_cell_type_markers",
         action="store_true",
-        help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if True, will exclude cell type markers "
+        help="Used for :func `CCI_receiver_deg_detection`; if True, will exclude cell type markers "
         "from the set of genes for which to compare to sent/received signal.",
     )
     parser.add_argument(

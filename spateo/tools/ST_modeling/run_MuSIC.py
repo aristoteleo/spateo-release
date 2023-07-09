@@ -231,11 +231,19 @@ def main():
     "used to specify the cell type to consider as a receiver.",
 )
 @click.option(
+    "-cci_degs_model_interactions",
+    default=False,
+    is_flag=True,
+    help="Used for :func `CCI_sender_deg_detection`; if True, will consider transcription factor "
+    "interactions with cofactors and other transcription factors. If False, will use only "
+    "transcription factor expression for prediction.",
+)
+@click.option(
     "-no_cell_type_markers",
     default=False,
     is_flag=True,
-    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if True, will exclude cell type markers "
-    "from the set of genes for which to compare to sent/received signal.",
+    help="Used for :func `CCI_receiver_deg_detection`; if True, will exclude cell type markers from the set of "
+    "genes for which to compare to sent/received signal.",
 )
 @click.option(
     "-compute_pathway_effect",
@@ -243,44 +251,6 @@ def main():
     is_flag=True,
     help="Used for :func `inferred_effect_direction`; if True, will summarize the effects of all "
     "ligands/ligand-receptor interactions in a pathway.",
-)
-@click.option(
-    "-n_GAM_points",
-    default=50,
-    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of points to sample "
-    "along the spline function when evaluating a fitted GAM model.",
-)
-@click.option(
-    "-num_leiden_pcs",
-    default=10,
-    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of principal "
-    "components to use when computing partitioning for the discovered differentially expressed genes.",
-)
-@click.option(
-    "-num_leiden_neighbors",
-    default=5,
-    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the number of neighbors to use "
-    "when computing partitioning for the discovered differentially expressed genes.",
-)
-@click.option(
-    "-leiden_resolution",
-    default=0.5,
-    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; specifies the resolution parameter to use "
-    "for Leiden partitioning.",
-)
-@click.option(
-    "-top_n_DE_genes",
-    required=False,
-    help="Used for :func `calc_and_group_sender_receiver_effect_degs`; if given, will restrict the number of "
-    "genes that are clustered and displayed on the final plot. Note that if there are more than 200 "
-    "differentially expressed genes, the program will automatically use 200 for this parameter.",
-)
-@click.option(
-    "-effect_strength_threshold",
-    default=0.1,
-    help="Used for for :func `compute_cell_type_coupling`; specifies the threshold percentile to filter signaling "
-    "effect potential before computing the cell type coupling- essentially, this calculates sender and "
-    "receiver cell type enrichment for cells that strongly influence target gene expression.",
 )
 def run(
     np,
@@ -338,6 +308,7 @@ def run(
     pathway_for_downstream,
     sender_ct_for_downstream,
     receiver_ct_for_downstream,
+    cci_degs_model_interactions,
     no_cell_type_markers,
     compute_pathway_effect,
     chunks,
@@ -442,6 +413,9 @@ def run(
             `calc_and_group_sender_receiver_effect_degs`, used to specify the cell type to consider as a sender.
         receiver_ct_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
             `calc_and_group_sender_receiver_effect_degs`, used to specify the cell type to consider as a receiver.
+        cci_degs_model_interactions: Used for :func `CCI_sender_deg_detection`; if True, will consider
+            transcription factor interactions with cofactors and other transcription factors. If False, will use only
+            transcription factor expression for prediction.
         no_cell_type_markers: For downstream analyses; used for :func `calc_and_group_sender_receiver_effect_degs`;
             if True, will exclude cell type markers from the set of genes for which to compare to sent/received signal.
         compute_pathway_effect: For downstream analyses; used for :func `inferred_effect_direction`; if True,
@@ -591,6 +565,8 @@ def run(
         command += " -sender_ct " + sender_ct_for_downstream
     if receiver_ct_for_downstream is not None:
         command += " -receiver_ct " + receiver_ct_for_downstream
+    if cci_degs_model_interactions:
+        command += " -cci_degs_model_interactions "
     if no_cell_type_markers:
         command += " -no_cell_type_markers "
     if compute_pathway_effect:
