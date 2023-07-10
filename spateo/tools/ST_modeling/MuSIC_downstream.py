@@ -927,6 +927,7 @@ class MuSIC_Interpreter(MuSIC):
         ligand: Optional[str] = None,
         pathway: Optional[str] = None,
         sender_cell_type: Optional[str] = None,
+        perform_dimensionality_reduction: bool = False,
     ):
         """Computes differential expression signatures of cells with various levels of ligand expression.
 
@@ -940,9 +941,8 @@ class MuSIC_Interpreter(MuSIC):
                 ligand/receptor and sender/receiver cell type if provided.
             sender_cell_type: Sender cell type to use for differential expression analysis. If given,
                 this will essentially compute differential expression for the given cell type.
-            no_cell_type_markers: Whether to consider cell type markers during differential expression testing,
-                as these are least likely to be interesting patterns. Defaults to False, and if True will first
-                perform differential expression testing for each cell type group, removing significant results.
+            perform_dimensionality_reduction: Set True to perform dimensionality reduction on the array of
+                predictors. If False,
 
         Returns:
 
@@ -1003,10 +1003,18 @@ class MuSIC_Interpreter(MuSIC):
         parent_dir = os.path.dirname(self.adata_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
 
+        # For saving/loading purposes:
+        if pathway is not None:
+            file_name = f"design_matrix_sent_signal_{pathway}.csv"
+        elif ligand is not None:
+            file_name = f"design_matrix_sent_signal_{ligand}.csv"
+        else:
+            file_name = f"design_matrix_sent_signal_{sender_cell_type}.csv"
+
         if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection")):
             os.makedirs(os.path.join(parent_dir, "cci_deg_detection"))
 
-        if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries.h5ad")):
+        if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection", file_name)):
             if self.cci_dir is None:
                 raise ValueError("With 'diff_sending_or_receiving' set to 'sending', please provide :attr `cci_dir`.")
 
@@ -1171,6 +1179,15 @@ class MuSIC_Interpreter(MuSIC):
                 first_occurrences = self.sender_deg_predictors.columns.duplicated(keep="first")
                 self.sender_deg_predictors = self.sender_deg_predictors.loc[:, ~first_occurrences]
 
+            # Save independent variable array:
+            self.sender_deg_predictors.to_csv(os.path.join(parent_dir, "cci_deg_detection", file_name))
+        else:
+            logger.info(f"Existing data found at {file_name}, using this for further analysis.")
+            self.sender_deg_predictors = pd.read_csv(
+                os.path.join(parent_dir, "cci_deg_detection", file_name), index_col=0
+            )
+
+        if perform_dimensionality_reduction:
             # Compute latent representation of the AnnData subset ("counts"):
             # Minmax scale interaction features for the purpose of dimensionality reduction:
             sender_deg_predictors_scaled = self.sender_deg_predictors.apply(
@@ -1180,14 +1197,15 @@ class MuSIC_Interpreter(MuSIC):
             # Compute the ideal number of principal components to use- use half the number of features as the max
             # possible number of components:
             logger.info("Computing optimal number of principal components ...")
-            n_components = find_optimal_pca_components(
+            n_pca_components = find_optimal_pca_components(
                 sender_deg_predictors_scaled.values, pca_func=PCA, max_components=None, drop_ratio=0.25
             )
-            logger.info(f"Optimal number of PCs: {n_components}")
+            logger.info(f"Optimal number of PCs: {n_pca_components}")
 
             # Using the ideal number of components, compute the ideal number of UMAP components using the silhouette
             # score after calculating Leiden partitioning:
-
+            logger.info("Computing optimal number of UMAP components ...")
+            n_umap_components = "filler"
 
             # Collect information into .csv file:
             self.logger.info(
@@ -1208,11 +1226,7 @@ class MuSIC_Interpreter(MuSIC):
         # Stitch into dataframe, where the first 3 columns are coordinates in UMAP space and the fourth column is the
         # sent signal:
 
-    # For downstream, construct interaction terms- get all TFs known to interact w/ target genes, compute indicator,
-    # multiply computed effect potential by the indicator
-
-    # Cluster the genes based on the zero/nonzero expression patterns of each gene- define this number of models for
-    # XGBoost
+        # Perform logistic regression if using sender cell type as the query
 
     # ---------------------------------------------------------------------------------------------------
     # Cell type coupling:

@@ -1385,7 +1385,7 @@ class MuSIC:
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
                 if self.maxbw is None:
-                    self.maxbw = 12
+                    self.maxbw = 15
 
                 if self.minbw is None:
                     self.minbw = 3

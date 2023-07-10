@@ -344,36 +344,7 @@ class MuSIC_target_selector:
                 all_receptors.extend(components)
                 all_receptors.remove(rec)
 
-        if self.mod_type == "ligand" or self.mod_type == "lr":
-            # Subset to ligands that are expressed in > threshold number of cells:
-            if scipy.sparse.issparse(self.adata.X):
-                lig_expr_percentage = np.array((self.adata[subset_indices, all_ligands].X > 0).sum(axis=0) / n_obs)[0]
-            else:
-                lig_expr_percentage = np.count_nonzero(self.adata[subset_indices, all_ligands].X, axis=0) / n_obs
-            ligands = list(np.array(all_ligands)[lig_expr_percentage > threshold])
-
-            # Recombine complex components if all components passed the thresholding:
-            complex_members = [
-                lig for lig in ligands for complex_string in l_complexes if lig == complex_string.split("_")[0]
-            ]
-            complex_associated = [
-                complex_string.split("_")[1:]
-                for lig in complex_members
-                for complex_string in l_complexes
-                if lig == complex_string.split("_")[0]
-            ]
-            complex_associated = [item for sublist in complex_associated for item in sublist]
-            combined_complex = [
-                f"{comp}-{'_'.join(other_comps)}" for comp, other_comps in zip(complex_members, complex_associated)
-            ]
-            # Drop the individual components if they are not standalone ligands as well (i.e. also in the set
-            # of possible receptors by themselves):
-            for comp in complex_members + complex_associated:
-                if comp not in set_ligands:
-                    all_ligands.remove(comp)
-            all_ligands.extend(combined_complex)
-
-        elif self.mod_type == "receptor" or self.mod_type == "lr":
+        if self.mod_type == "receptor" or self.mod_type == "lr":
             # Subset to receptors that are expressed in > threshold number of cells:
             if scipy.sparse.issparse(self.adata.X):
                 rec_expr_percentage = np.array(
@@ -404,6 +375,10 @@ class MuSIC_target_selector:
                 if comp not in set_receptors:
                     all_receptors.remove(comp)
             all_receptors.extend(combined_complex)
+
+        if self.mod_type == "ligand" or self.mod_type == "lr":
+            # Subset to ligands that are known to interact with any of the receptors:
+            "filler"
 
         if self.mod_type == "ligand":
             regulators = all_ligands

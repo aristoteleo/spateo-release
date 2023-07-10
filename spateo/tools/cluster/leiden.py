@@ -58,10 +58,7 @@ def adj_to_igraph(adj: np.ndarray):
     return G
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def calculate_leiden_partition(
-    adata: anndata.AnnData,
-    key_added: str = "leiden",
     adj: Optional[Union[scipy.sparse.spmatrix, np.ndarray]] = None,
     input_mat: Optional[np.ndarray] = None,
     num_neighbors: int = 10,
@@ -72,8 +69,6 @@ def calculate_leiden_partition(
     """Performs Leiden clustering on a given dataset.
 
     Args:
-        adata: AnnData object for which the Leiden clustering information will be stored
-        key_added: Name of the column in `adata.obs` where the cluster assignments will be stored
         adj: Optional precomputed adjacency matrix
         input_mat: Optional, will be used only if 'adj' is not given. The input data, will be interepreted as either a
             distance matrix (if :param `graph_type` is "distance" or an embedding matrix (if :param `graph_type` is
@@ -105,5 +100,4 @@ def calculate_leiden_partition(
 
     partition = leidenalg.find_partition(G, leidenalg.RBConfigurationVertexPartition, **partition_kwargs)
     clusters = np.array(partition.membership, dtype=int)
-    adata.obs[key_added] = clusters
-    return adata
+    return clusters

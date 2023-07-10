@@ -227,12 +227,12 @@ def scc(
     )
 
     # Perform Leiden clustering:
-    adata = calculate_leiden_partition(
-        adata=adata,
-        key_added=key_added,
+    clusters = calculate_leiden_partition(
         adj=adj,
         resolution=resolution,
     )
+
+    adata.obs[key_added] = clusters
 
     # if cluster_method == "leiden":
     #     # Leiden clustering.

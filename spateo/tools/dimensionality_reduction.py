@@ -11,7 +11,7 @@ import scipy
 from anndata import AnnData
 from scipy.sparse.linalg import LinearOperator, svds
 from sklearn.decomposition import PCA, IncrementalPCA, TruncatedSVD
-from sklearn.metrics import pairwise_distances
+from sklearn.metrics import pairwise_distances, silhouette_score
 from sklearn.utils import check_random_state
 from sklearn.utils.extmath import svd_flip
 from sklearn.utils.sparsefuncs import mean_variance_axis
@@ -26,6 +26,7 @@ from umap.umap_ import (
 from ..configuration import SKM
 from ..logging import logger_manager as lm
 from ..preprocessing.transform import log1p
+from ..tools.cluster.leiden import calculate_leiden_partition
 from ..tools.find_neighbors import adj_to_knn
 
 
@@ -82,7 +83,8 @@ def perform_dimensionality_reduction(
         cores: The number of cores used for calculation. Used only when tSNE reduction_method is used. Defaults to 1.
         copy: Whether to return a copy of the AnnData object or update the object in place. Defaults to False.
         kwargs: Other kwargs that will be passed to umap.UMAP. One notable variable is "densmap",
-            for a density-preserving dimensionality reduction.
+            for a density-preserving dimensionality reduction. There is also "min_dist", which provides the minimum
+            distance apart that points are allowed to be in the low dimensional representation.
 
     Returns:
         adata: An updated AnnData object updated with reduced dimension data for data from different layers,
@@ -462,6 +464,41 @@ def umap_conn_indices_dist_embedding(
         return graph, knn_indices, knn_dists, embedding_
 
 
+def find_optimal_n_umap_components(X_data: np.ndarray, max_n_components: Optional[int] = None, **umap_params):
+    """Determine the optimal number of UMAP components by maximizing the silhouette score for the Leiden partitioning.
+
+    Args:
+        X_data: Input data to UMAP
+        max_n_components: Maximum number of UMAP components to test. If not given, will use half the number of
+            features (half the number of columns of the input array).
+        **umap_params: Parameters to pass to the UMAP function. Should not include 'n_components', which will be
+            added by this function.
+
+    Returns:
+        best_n_components: Number of components resulting in the highest silhouette score for the Leiden partitioning
+    """
+    best_score = -1
+    best_n_components = None
+    # A few important keyword arguments to set:
+    umap_params["return_mapper"] = False
+    umap_params["min_dist"] = 0.5
+
+    for n_components in range(2, max_n_components + 1):
+        umap_params["n_components"] = n_components
+        _, _, _, embedding = umap_conn_indices_dist_embedding(X_data, **umap_params)
+        clusters = calculate_leiden_partition(input_mat=embedding, num_neighbors=20, graph_type="embedding")
+
+        # Compute silhouette score:
+        score = silhouette_score(embedding, clusters)
+
+        # if this score is better than the current best, update best score and components
+        if score > best_score:
+            best_score = score
+            best_n_components = n_components
+
+    return best_n_components
+
+
 # ---------------------------------------------------------------------------------------------------
 # PCA
 # ---------------------------------------------------------------------------------------------------
@@ -726,7 +763,7 @@ def find_optimal_pca_components(
         max_components = X.shape[1] // 2
 
     explained_variances = []
-    for n_components in range(1, max_components + 1):
+    for n_components in range(2, max_components + 1):
         fit, _ = pca_fit(X, pca_func, n_components=n_components, **kwargs)
         explained_variances.append(fit.explained_variance_ratio_.sum())
     explained_variances = np.array(explained_variances)
