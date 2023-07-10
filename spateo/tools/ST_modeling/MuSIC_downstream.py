@@ -42,6 +42,8 @@ sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main
 #     compute_gene_groups_p_val,
 #     get_highvar_genes_sparse,
 # )
+from spateo.logging import logger_manager as lm
+from spateo.tools.dimensionality_reduction import find_optimal_pca_components, pca_fit
 from spateo.tools.ST_modeling.MuSIC import MuSIC
 from spateo.tools.ST_modeling.regression_utils import (
     multitesting_correction,
@@ -945,6 +947,7 @@ class MuSIC_Interpreter(MuSIC):
         Returns:
 
         """
+        logger = lm.get_main_logger()
 
         if pathway is None and ligand is None and sender_cell_type is None:
             raise ValueError("Must provide at least one pathway, ligand, or sender_cell_type.")
@@ -999,6 +1002,10 @@ class MuSIC_Interpreter(MuSIC):
         # Check if the array of additional molecules to query has already been created:
         parent_dir = os.path.dirname(self.adata_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
+
+        if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection")):
+            os.makedirs(os.path.join(parent_dir, "cci_deg_detection"))
+
         if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries.h5ad")):
             if self.cci_dir is None:
                 raise ValueError("With 'diff_sending_or_receiving' set to 'sending', please provide :attr `cci_dir`.")
@@ -1165,13 +1172,24 @@ class MuSIC_Interpreter(MuSIC):
                 self.sender_deg_predictors = self.sender_deg_predictors.loc[:, ~first_occurrences]
 
             # Compute latent representation of the AnnData subset ("counts"):
+            # Minmax scale interaction features for the purpose of dimensionality reduction:
+            sender_deg_predictors_scaled = self.sender_deg_predictors.apply(
+                lambda column: (column - column.min()) / (column.max() - column.min())
+            )
 
-            #
+            # Compute the ideal number of principal components to use- use half the number of features as the max
+            # possible number of components:
+            logger.info("Computing optimal number of principal components ...")
+            n_components = find_optimal_pca_components(
+                sender_deg_predictors_scaled.values, pca_func=PCA, max_components=None, drop_ratio=0.25
+            )
+            logger.info(f"Optimal number of PCs: {n_components}")
+
+            # Using the ideal number of components, compute the ideal number of UMAP components using the silhouette
+            # score after calculating Leiden partitioning:
+
 
             # Collect information into .csv file:
-            if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection")):
-                os.makedirs(os.path.join(parent_dir, "cci_deg_detection"))
-
             self.logger.info(
                 "'CCI_sender_deg_detection'- saving regulatory molecules to test as .h5ad file to the "
                 "directory of the original AnnData object..."
@@ -1182,9 +1200,10 @@ class MuSIC_Interpreter(MuSIC):
 
     def CCI_sender_deg_detection(self):
         # Load and process the file for the chosen ligand:
-        counts = anndata.read_h5ad(
-            os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries.h5ad")
-        )
+        # counts = anndata.read_h5ad(
+        #     os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries.h5ad")
+        # )
+        "filler"
 
         # Stitch into dataframe, where the first 3 columns are coordinates in UMAP space and the fourth column is the
         # sent signal:

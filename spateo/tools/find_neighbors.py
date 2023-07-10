@@ -66,6 +66,100 @@ def normalize_adj(adj: np.ndarray, exclude_self: bool = True) -> np.ndarray:
     return adj_proc
 
 
+def adj_to_knn(adj: np.ndarray, n_neighbors: int = 15) -> Tuple[np.ndarray, np.ndarray]:
+    """Given an adjacency matrix, convert to KNN graph.
+
+    Args:
+        adj: Adjacency matrix of shape (n_samples, n_samples)
+        n_neighbors: Number of nearest neighbors to include in the KNN graph
+
+    Returns:
+        indices: Array (n_samples x n_neighbors) storing the indices for each node's nearest neighbors in the
+            knn graph.
+        weights: Array (n_samples x n_neighbors) storing the edge weights for each node's nearest neighbors in
+            the knn graph.
+    """
+    n_obs = adj.shape[0]
+    indices = np.zeros((n_obs, n_neighbors), dtype=int)
+    weights = np.zeros((n_obs, n_neighbors), dtype=float)
+
+    for i in range(n_obs):
+        neighbors = adj[i, :].nonzero()
+        # Set self as nearest neighbor
+        indices[i, :] = i
+        weights[i, :] = 0.0
+
+        # there could be more or less than n_neighbors because of an approximate search
+        n_neighbors = len(neighbors[1])
+
+        if n_neighbors > n_neighbors - 1:
+            sorted_indices = np.argsort(adj[i][:, neighbors[1]].A)[0][: (n_neighbors - 1)]
+            indices[i, 1:] = neighbors[1][sorted_indices]
+            weights[i, 1:] = adj[i][0, neighbors[1][sorted_indices]].A
+        else:
+            idx_ = np.arange(1, (n_neighbors + 1))
+            indices[i, idx_] = neighbors[1]
+            weights[i, idx_] = adj[i][:, neighbors[1]].A
+
+    return indices, weights
+
+
+def knn_to_adj(knn_indices: np.ndarray, knn_weights: np.ndarray) -> scipy.sparse.csr_matrix:
+    """Given the indices and weights of a KNN graph, convert to adjacency matrix.
+
+    Args:
+        knn_indices: Array (n_samples x n_neighbors) storing the indices for each node's nearest neighbors in the
+            knn graph.
+        knn_weights: Array (n_samples x n_neighbors) storing the edge weights for each node's nearest neighbors in
+            the knn graph.
+
+    Returns:
+        adj: The adjacency matrix corresponding to the KNN graph
+    """
+    adj = scipy.sparse.csr_matrix(
+        (
+            knn_weights.flatten(),
+            (
+                np.repeat(knn_indices[:, 0], knn_indices.shape[1]),
+                knn_indices.flatten(),
+            ),
+        )
+    )
+    adj.eliminate_zeros()
+    return adj
+
+
+def compute_distances_and_connectivities(
+    knn_indices: np.ndarray, distances: np.ndarray
+) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
+    """Computes connectivity and sparse distance matrices
+
+    Args:
+        knn_indices: Array of shape (n_samples, n_samples) containing the indices of the nearest neighbors for each
+            sample.
+        distances: The distances to the n_neighbors the closest points in knn graph
+
+    Returns:
+        distances: Sparse distance matrix
+        connectivities: Sparse connectivity matrix
+    """
+    n_obs, n_neighbors = knn_indices.shape
+    distances = scipy.sparse.csr_matrix(
+        (
+            distances.flatten(),
+            (np.repeat(np.arange(n_obs), n_neighbors), knn_indices.flatten()),
+        ),
+        shape=(n_obs, n_obs),
+    )
+    connectivities = distances.copy()
+    connectivities.data[connectivities.data > 0] = 1
+
+    distances.eliminate_zeros()
+    connectivities.eliminate_zeros()
+
+    return distances, connectivities
+
+
 # ---------------------------------------------------------------------------------------------------
 # Kernel functions
 # ---------------------------------------------------------------------------------------------------
@@ -356,19 +450,7 @@ def neighbors(
     # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
     # NearestNeighbors run:
     distances, knn = nbrs.kneighbors(X_data)
-    n_obs, n_neighbors = knn.shape
-    distances = scipy.sparse.csr_matrix(
-        (
-            distances.flatten(),
-            (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
-        ),
-        shape=(n_obs, n_obs),
-    )
-    connectivities = distances.copy()
-    connectivities.data[connectivities.data > 0] = 1
-
-    distances.eliminate_zeros()
-    connectivities.eliminate_zeros()
+    distances, connectivities = compute_distances_and_connectivities(knn, distances)
 
     if basis != "spatial":
         logger.info_insert_adata("expression_connectivities", adata_attr="obsp")

@@ -166,6 +166,8 @@ def define_spateo_argparse(**kwargs):
             `calc_and_group_sender_receiver_effect_degs`, used to specify the cell type to consider as a sender.
         receiver_ct_for_downstream: For downstream analyses; used for :func `get_effect_potential` and :func
             `calc_and_group_sender_receiver_effect_degs`, used to specify the cell type to consider as a receiver.
+        n_components: Used for :func `CCI_sender_deg_detection` and :func `CCI_receiver_deg_detection`;
+            determines the dimensionality of the space to embed into using UMAP.
         cci_degs_model_interactions: Used for :func `CCI_sender_deg_detection`; if True, will consider transcription
             factor interactions with cofactors and other transcription factors, with these interactions combined into
             features. If False, will use each cofactor independently in the prediction.
@@ -286,9 +288,8 @@ def define_spateo_argparse(**kwargs):
         "-group_key": {
             "default": "cell_type",
             "type": str,
-            "help": "Key to entry in .obs containing cell type "
-            "or other category labels. Required if "
-            "'mod_type' is 'niche' or 'slice'.",
+            "help": "Key to entry in .obs containing cell type or other category labels. Required if 'mod_type' is "
+            "'niche' or 'slice'.",
         },
         "-group_subset": {
             "nargs": "+",
@@ -409,6 +410,12 @@ def define_spateo_argparse(**kwargs):
             "type": str,
             "help": "Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
             "used to specify the cell type to consider as a receiver.",
+        },
+        "-n_components": {
+            "default": 20,
+            "type": int,
+            "help": "Used for :func `CCI_sender_deg_detection` and :func `CCI_receiver_deg_detection`; determines the "
+            "dimensionality of the space to embed into using UMAP.",
         },
         "-cci_degs_model_interactions": {
             "action": "store_true",
@@ -733,6 +740,12 @@ if __name__ == "__main__":
         type=str,
         help="Used for :func `get_effect_potential` and :func `calc_and_group_sender_receiver_effect_degs`, "
         "used to specify the cell type to consider as a receiver.",
+    )
+    parser.add_argument(
+        "-n_components",
+        type=int,
+        help="Used for :func `CCI_sender_deg_detection` and :func `CCI_receiver_deg_detection`; determines the "
+        "dimensionality of the space to embed into using UMAP.",
     )
     parser.add_argument(
         "-cci_degs_model_interactions",

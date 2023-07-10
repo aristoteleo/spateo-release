@@ -21,6 +21,7 @@ from tqdm import tqdm
 from spateo.configuration import SKM
 from spateo.logging import logger_manager as lm
 from spateo.tools.find_neighbors import construct_nn_graph, normalize_adj
+
 from .impute_model import Encoder
 
 
