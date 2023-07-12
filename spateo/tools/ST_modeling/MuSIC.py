@@ -25,16 +25,13 @@ from scipy.spatial.distance import cdist
 from scipy.stats import pearsonr
 from sklearn.cluster import KMeans
 
-# For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
-sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
-
-from spateo.logging import logger_manager as lm
-from spateo.preprocessing.normalize import factor_normalization
-from spateo.preprocessing.transform import log1p
-from spateo.tools.find_neighbors import get_wi, neighbors
-from spateo.tools.spatial_degs import moran_i
-from spateo.tools.ST_modeling.distributions import Gaussian, NegativeBinomial, Poisson
-from spateo.tools.ST_modeling.regression_utils import (
+from ...logging import logger_manager as lm
+from ...preprocessing.normalize import factor_normalization
+from ...preprocessing.transform import log1p
+from ..find_neighbors import get_wi, neighbors
+from ..spatial_degs import moran_i
+from .distributions import Gaussian, NegativeBinomial, Poisson
+from .regression_utils import (
     compute_betas_local,
     golden_section_search,
     iwls,
@@ -127,6 +124,8 @@ class MuSIC:
 
         coords_key: Key in .obsm of the AnnData object that contains the coordinates of the cells
         group_key: Key in .obs of the AnnData object that contains the category grouping for each cell
+        group_subset: Subset of cell types to include in the model (provided as a whitespace-separated list in
+            command line). If given, will consider only cells of these types in modeling. Defaults to all cell types.
         covariate_keys: Can be used to optionally provide any number of keys in .obs or .var containing a continuous
             covariate (e.g. expression of a particular TF, avg. distance from a perturbed cell, etc.)
 
@@ -141,6 +140,13 @@ class MuSIC:
         distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb"
         kernel: Type of kernel function used to weight observations; one of "bisquare", "exponential", "gaussian",
             "quadratic", "triangular" or "uniform".
+        n_neighbors_membrane_bound: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the
+            neighboring cells- this defines the number of cells to use for membrane-bound ligands.
+        n_neighbors_secreted: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the
+            neighboring cells- this defines the number of cells to use for secreted or ECM ligands.
+        use_expression_neighbors_only: The default for finding spatial neighborhoods for the modeling process is to
+            use neighbors in physical space, and turn to expression space if there is not enough signal in the physical
+            neighborhood. If this argument is provided, only expression will be used to find neighbors.
 
 
         bw_fixed: Set True for distance-based kernel function and False for nearest neighbor-based kernel function
@@ -367,7 +373,11 @@ class MuSIC:
         self.multiscale_flag = self.arg_retrieve.multiscale
         self.multiscale_params_only = self.arg_retrieve.multiscale_params_only
         self.bw_fixed = self.arg_retrieve.bw_fixed
-        self.n_neighbors = self.arg_retrieve.n_neighbors
+        self.n_neighbors_membrane_bound = self.arg_retrieve.n_neighbors_membrane_bound
+        self.n_neighbors_secreted = self.arg_retrieve.n_neighbors_secreted
+        self.use_expression_neighbors_only = self.arg_retrieve.use_expression_neighbors_only
+        # Also use the number of neighbors for secreted signaling for niche modeling
+        self.n_neighbors_niche = self.n_neighbors_secreted
         self.exclude_self = self.arg_retrieve.exclude_self
         self.distr = self.arg_retrieve.distr
         # Get appropriate distribution family based on specified distribution:
@@ -487,6 +497,7 @@ class MuSIC:
                 bw=self.n_neighbors,
                 threshold=0.01,
                 sparse_array=True,
+                normalize_weights=True,
             )
 
             with Pool() as pool:
@@ -604,569 +615,666 @@ class MuSIC:
         if adata is None:
             adata = self.adata.copy()
 
-        # One-hot cell type array (or other category):
-        if self.mod_type == "niche":
-            group_name = adata.obs[self.group_key]
-            # db = pd.DataFrame({"group": group_name})
-            db = pd.DataFrame({"group": group_name})
-            categories = np.array(group_name.unique().tolist())
-            # db["group"] = pd.Categorical(db["group"], categories=categories)
-            db["group"] = pd.Categorical(db["group"], categories=categories)
-
-            self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
-            X = pd.get_dummies(data=db, drop_first=False)
-            # Ensure columns are in order:
-            self.cell_categories = X.reindex(sorted(X.columns), axis=1)
-            # Ensure each category is one word with no spaces or special characters:
-            self.cell_categories.columns = [
-                re.sub(r"\b([a-zA-Z0-9])", lambda match: match.group(1).upper(), re.sub(r"[^a-zA-Z0-9]+", "", s))
-                for s in self.cell_categories.columns
-            ]
-
-        # Ligand-receptor expression arrays:
-        elif self.mod_type in ["lr", "ligand", "receptor"]:
-            if self.species == "human":
-                try:
-                    self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
-                except FileNotFoundError:
-                    raise FileNotFoundError(
-                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
-                    )
-                except IOError:
-                    raise IOError(
-                        "Issue reading L:R database. Files can be downloaded from "
-                        "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
-                    )
-
-                r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
-                tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_target_db.csv"), index_col=0)
-            elif self.species == "mouse":
-                try:
-                    self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
-                except FileNotFoundError:
-                    raise FileNotFoundError(
-                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
-                    )
-                except IOError:
-                    raise IOError(
-                        "Issue reading L:R database. Files can be downloaded from "
-                        "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
-                    )
-
-                r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
-                tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_target_db.csv"), index_col=0)
-            else:
-                raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
-
-            database_pathways = set(self.lr_db["pathway"])
-
-        if self.mod_type == "lr" or self.mod_type == "ligand":
-            database_ligands = set(self.lr_db["from"])
-
-            if self.custom_ligands_path is not None or self.custom_ligands is not None:
-                if self.custom_ligands_path is not None:
-                    with open(self.custom_ligands_path, "r") as f:
-                        ligands = f.read().splitlines()
-                else:
-                    ligands = self.custom_ligands
-                ligands = [l for l in ligands if l in database_ligands]
-                l_complexes = [elem for elem in ligands if "_" in elem]
-                # Get individual components if any complexes are included in this list:
-                ligands = [l for item in ligands for l in item.split("_")]
-
-            elif self.custom_pathways_path is not None or self.custom_pathways is not None:
-                if self.custom_pathways_path is not None:
-                    with open(self.custom_pathways_path, "r") as f:
-                        pathways = f.read().splitlines()
-
-                else:
-                    pathways = self.custom_pathways
-
-                pathways = [p for p in pathways if p in database_pathways]
-                # Get all ligands associated with these pathway(s):
-                lr_db_subset = self.lr_db[self.lr_db["pathway"].isin(pathways)]
-                ligands = list(set(lr_db_subset["from"]))
-                l_complexes = [elem for elem in ligands if "_" in elem]
-                # Get individual components if any complexes are included in this list:
-                ligands = [r for item in ligands for r in item.split("_")]
-
-            else:
-                # List of possible complexes to search through:
-                l_complexes = [elem for elem in database_ligands if "_" in elem]
-                # And all possible ligand molecules:
-                all_ligands = [l for item in database_ligands for l in item.split("_")]
-
-                # Get list of ligands from among the most highly spatially-variable genes, indicative of potentially
-                # interesting spatially-enriched signal:
-                self.logger.info(
-                    "Preparing data: no specific ligands provided- getting list of ligands from among the most highly "
-                    "spatially-variable genes."
-                )
-                m_degs = moran_i(adata)
-                m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
-                ligands = [g for g in m_filter_genes if g in all_ligands]
-
-                # If no significant spatially-variable ligands are found, use the top 10 most spatially-variable
-                # ligands:
-                if len(ligands) == 0:
-                    self.logger.info(
-                        "No significant spatially-variable ligands found. Using top 10 most "
-                        "spatially-variable ligands."
-                    )
-                    m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
-                    ligands = [g for g in m_filter_genes if g in all_ligands][:10]
-
-                # If any ligands are part of complexes, add all complex components to this list:
-                for element in l_complexes:
-                    if "_" in element:
-                        complex_members = element.split("_")
-                        for member in complex_members:
-                            if member in ligands:
-                                other_members = [m for m in complex_members if m != member]
-                                for member in other_members:
-                                    ligands.append(member)
-                ligands = list(set(ligands))
-
-                self.logger.info(
-                    f"Found {len(ligands)} among significantly spatially-variable genes and associated "
-                    f"complex members."
-                )
-
-                # In the case of using this method to find candidate ligands, save list of ligands in the same directory
-                # as the AnnData file for later access:
-                self.logger.info(
-                    f"Saving list of manually found ligands to "
-                    f"{os.path.join(os.path.dirname(self.adata_path), 'ligands.txt')}"
-                )
-
-                with open(os.path.join(os.path.dirname(self.adata_path), "ligands.txt"), "w") as f:
-                    f.write("\n".join(ligands))
-
-            ligands = [l for l in ligands if l in adata.var_names]
-
-            self.ligands_expr = pd.DataFrame(
-                adata[:, ligands].X.A if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
-                index=adata.obs_names,
-                columns=ligands,
+        # Check for existing design matrix:
+        if os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv")):
+            self.logger.info(
+                f"Found existing independent variable matrix, loading from"
+                f" {os.path.join(self.output_path, 'design_matrix', 'design_matrix.csv')}."
+            )
+            X_df = pd.read_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
+            )
+            self.targets_expr = pd.read_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
             )
 
-            # Log-scale ligand expression- to reduce the impact of very large values:
-            self.ligands_expr = self.ligands_expr.applymap(np.log1p)
-
-            if self.normalize_signaling:
-                # Normalize ligand expression to be between 0 and 1:
-                self.ligands_expr = self.ligands_expr.apply(
-                    lambda column: (column - column.min()) / (column.max() - column.min())
+            if self.mod_type == "ligand" or self.mod_type == "lr":
+                self.ligands_expr = pd.read_csv(
+                    os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "ligands_expr.csv"),
+                    index_col=0,
+                )
+                self.ligands_expr_nonlag = pd.read_csv(
+                    os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "ligands_expr_nonlag.csv"),
+                    index_col=0,
+                )
+            if self.mod_type == "receptor" or self.mod_type == "lr":
+                self.receptors_expr = pd.read_csv(
+                    os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "receptors_expr.csv"),
+                    index_col=0,
+                )
+            if self.mod_type == "niche":
+                self.cell_categories = pd.read_csv(
+                    os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "cell_categories.csv"),
+                    index_col=0,
                 )
 
-            # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
-            # but store them in a temporary list to do so later because some may contribute to multiple complexes:
-            to_drop = []
-            for element in l_complexes:
-                parts = element.split("_")
-                if all(part in self.ligands_expr.columns for part in parts):
-                    # Combine the columns into a new column with the name of the hyphenated element- here we will
-                    # compute the geometric mean of the expression values of the complex components:
-                    self.ligands_expr[element] = self.ligands_expr[parts].apply(
-                        lambda x: x.prod() ** (1 / len(parts)), axis=1
-                    )
-                    # Mark the individual components for removal if the individual components cannot also be
-                    # found as ligands:
-                    to_drop.extend([part for part in parts if part not in database_ligands])
-                else:
-                    # Drop the hyphenated element from the dataframe if all components are not found in the
-                    # dataframe columns
-                    partial_components = [l for l in ligands if l in parts]
-                    to_drop.extend(partial_components)
-                    if len(partial_components) > 0 and self.verbose:
-                        self.logger.info(
-                            f"Not all components from the {element} heterocomplex could be found in the dataset."
+        else:
+            # One-hot cell type array (or other category):
+            if self.mod_type == "niche":
+                group_name = adata.obs[self.group_key]
+                # db = pd.DataFrame({"group": group_name})
+                db = pd.DataFrame({"group": group_name})
+                categories = np.array(group_name.unique().tolist())
+                # db["group"] = pd.Categorical(db["group"], categories=categories)
+                db["group"] = pd.Categorical(db["group"], categories=categories)
+
+                self.logger.info("Preparing data: converting categories to one-hot labels for all samples.")
+                X = pd.get_dummies(data=db, drop_first=False)
+                # Ensure columns are in order:
+                self.cell_categories = X.reindex(sorted(X.columns), axis=1)
+                # Ensure each category is one word with no spaces or special characters:
+                self.cell_categories.columns = [
+                    re.sub(r"\b([a-zA-Z0-9])", lambda match: match.group(1).upper(), re.sub(r"[^a-zA-Z0-9]+", "", s))
+                    for s in self.cell_categories.columns
+                ]
+
+            # Ligand-receptor expression arrays:
+            elif self.mod_type in ["lr", "ligand", "receptor"]:
+                if self.species == "human":
+                    try:
+                        self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                    except FileNotFoundError:
+                        raise FileNotFoundError(
+                            f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                        )
+                    except IOError:
+                        raise IOError(
+                            "Issue reading L:R database. Files can be downloaded from "
+                            "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
                         )
 
-            # Drop any possible duplicate ligands alongside any other columns to be dropped:
-            to_drop = list(set(to_drop))
-            self.ligands_expr.drop(to_drop, axis=1, inplace=True)
-            first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
-            self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
-            # Save copy of non-lagged ligand expression array:
-            self.ligands_expr_nonlag = self.ligands_expr.copy()
+                    r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
+                    tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_target_db.csv"), index_col=0)
+                elif self.species == "mouse":
+                    try:
+                        self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+                    except FileNotFoundError:
+                        raise FileNotFoundError(
+                            f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                        )
+                    except IOError:
+                        raise IOError(
+                            "Issue reading L:R database. Files can be downloaded from "
+                            "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
+                        )
 
-        if self.mod_type == "lr" or self.mod_type == "receptor":
-            database_receptors = set(self.lr_db["to"])
-
-            if self.custom_receptors_path is not None or self.custom_receptors is not None:
-                if self.custom_receptors_path is not None:
-                    with open(self.custom_receptors_path, "r") as f:
-                        receptors = f.read().splitlines()
+                    r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
+                    tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_target_db.csv"), index_col=0)
                 else:
-                    receptors = self.custom_receptors
-                receptors = [r for r in receptors if r in database_receptors]
-                r_complexes = [elem for elem in receptors if "_" in elem]
-                # Get individual components if any complexes are included in this list:
-                receptors = [r for item in receptors for r in item.split("_")]
+                    raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
 
-            elif self.custom_pathways_path is not None or self.custom_pathways is not None:
-                if self.custom_pathways_path is not None:
-                    with open(self.custom_pathways_path, "r") as f:
-                        pathways = f.read().splitlines()
+                database_pathways = set(self.lr_db["pathway"])
+
+            if self.mod_type == "lr" or self.mod_type == "ligand":
+                database_ligands = set(self.lr_db["from"])
+
+                if self.custom_ligands_path is not None or self.custom_ligands is not None:
+                    if self.custom_ligands_path is not None:
+                        with open(self.custom_ligands_path, "r") as f:
+                            ligands = f.read().splitlines()
+                    else:
+                        ligands = self.custom_ligands
+                    ligands = [l for l in ligands if l in database_ligands]
+                    l_complexes = [elem for elem in ligands if "_" in elem]
+                    # Get individual components if any complexes are included in this list:
+                    ligands = [l for item in ligands for l in item.split("_")]
+
+                elif self.custom_pathways_path is not None or self.custom_pathways is not None:
+                    if self.custom_pathways_path is not None:
+                        with open(self.custom_pathways_path, "r") as f:
+                            pathways = f.read().splitlines()
+
+                    else:
+                        pathways = self.custom_pathways
+
+                    pathways = [p for p in pathways if p in database_pathways]
+                    # Get all ligands associated with these pathway(s):
+                    lr_db_subset = self.lr_db[self.lr_db["pathway"].isin(pathways)]
+                    ligands = list(set(lr_db_subset["from"]))
+                    l_complexes = [elem for elem in ligands if "_" in elem]
+                    # Get individual components if any complexes are included in this list:
+                    ligands = [r for item in ligands for r in item.split("_")]
+
                 else:
-                    pathways = self.custom_pathways
-                pathways = [p for p in pathways if p in database_pathways]
-                # Get all receptors associated with these pathway(s):
-                lr_db_subset = self.lr_db[self.lr_db["pathway"].isin(pathways)]
-                receptors = list(set(lr_db_subset["to"]))
-                r_complexes = [elem for elem in receptors if "_" in elem]
-                # Get all individual components if any complexes are included in this list:
-                receptors = [r for item in receptors for r in item.split("_")]
+                    # List of possible complexes to search through:
+                    l_complexes = [elem for elem in database_ligands if "_" in elem]
+                    # And all possible ligand molecules:
+                    all_ligands = [l for item in database_ligands for l in item.split("_")]
 
-            else:
-                # List of possible complexes to search through:
-                r_complexes = [elem for elem in database_receptors if "_" in elem]
-                # And all possible receptor molecules:
-                all_receptors = [r for item in database_receptors for r in item.split("_")]
-
-                # Get list of receptors from among the most highly spatially-variable genes, indicative of
-                # potentially interesting spatially-enriched signal:
-                self.logger.info(
-                    "Preparing data: no specific receptors or pathways provided- getting list of receptors from among "
-                    "the most highly spatially-variable genes."
-                )
-                m_degs = moran_i(adata)
-                m_filter_genes = m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
-                receptors = [g for g in m_filter_genes if g in all_receptors]
-
-                # If no significant spatially-variable receptors are found, use the top 10 most spatially-variable
-                # receptors:
-                if len(receptors) == 0:
+                    # Get list of ligands from among the most highly spatially-variable genes, indicative of potentially
+                    # interesting spatially-enriched signal:
                     self.logger.info(
-                        "No significant spatially-variable receptors found. Using top 10 most "
-                        "spatially-variable receptors."
+                        "Preparing data: no specific ligands provided- getting list of ligands from among the most "
+                        "highly spatially-variable genes."
                     )
-                    m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
-                    receptors = [g for g in m_filter_genes if g in all_receptors][:10]
+                    m_degs = moran_i(adata)
+                    m_filter_genes = (
+                        m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
+                    )
+                    ligands = [g for g in m_filter_genes if g in all_ligands]
 
-                # If any receptors are part of complexes, add all complex components to this list:
-                for element in r_complexes:
-                    if "_" in element:
-                        complex_members = element.split("_")
-                        for member in complex_members:
-                            if member in receptors:
-                                other_members = [m for m in complex_members if m != member]
-                                for member in other_members:
-                                    receptors.append(member)
-                receptors = list(set(receptors))
+                    # If no significant spatially-variable ligands are found, use the top 10 most spatially-variable
+                    # ligands:
+                    if len(ligands) == 0:
+                        self.logger.info(
+                            "No significant spatially-variable ligands found. Using top 10 most "
+                            "spatially-variable ligands."
+                        )
+                        m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
+                        ligands = [g for g in m_filter_genes if g in all_ligands][:10]
 
-                self.logger.info(
-                    f"Found {len(receptors)} among significantly spatially-variable genes and associated "
-                    f"complex members."
+                    # If any ligands are part of complexes, add all complex components to this list:
+                    for element in l_complexes:
+                        if "_" in element:
+                            complex_members = element.split("_")
+                            for member in complex_members:
+                                if member in ligands:
+                                    other_members = [m for m in complex_members if m != member]
+                                    for member in other_members:
+                                        ligands.append(member)
+                    ligands = list(set(ligands))
+
+                    self.logger.info(
+                        f"Found {len(ligands)} among significantly spatially-variable genes and associated "
+                        f"complex members."
+                    )
+
+                    # In the case of using this method to find candidate ligands, save list of ligands in the same directory
+                    # as the AnnData file for later access:
+                    self.logger.info(
+                        f"Saving list of manually found ligands to "
+                        f"{os.path.join(os.path.dirname(self.adata_path), 'ligands.txt')}"
+                    )
+
+                    with open(os.path.join(os.path.dirname(self.adata_path), "ligands.txt"), "w") as f:
+                        f.write("\n".join(ligands))
+
+                ligands = [l for l in ligands if l in adata.var_names]
+
+                self.ligands_expr = pd.DataFrame(
+                    adata[:, ligands].X.A if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
+                    index=adata.obs_names,
+                    columns=ligands,
                 )
 
-                # In the case of using this method to find candidate receptors, save the list of receptors in the same
-                # directory as the AnnData object for later access:
-                self.logger.info(
-                    f"Saving list of manually found receptors to "
-                    f"{os.path.join(os.path.dirname(self.adata_path), 'receptors.txt')}"
-                )
+                # Log-scale ligand expression- to reduce the impact of very large values:
+                self.ligands_expr = self.ligands_expr.applymap(np.log1p)
 
-                with open(os.path.join(os.path.dirname(self.adata_path), "receptors.txt"), "w") as f:
-                    f.write("\n".join(receptors))
+                # Normalize ligand expression to be between 0 and 1:
+                if self.normalize_signaling:
+                    self.ligands_expr = self.ligands_expr.apply(
+                        lambda column: (column - column.min()) / (column.max() - column.min())
+                    )
 
-            receptors = [r for r in receptors if r in adata.var_names]
-
-            self.receptors_expr = pd.DataFrame(
-                adata[:, receptors].X.A if scipy.sparse.issparse(adata.X) else adata[:, receptors].X,
-                index=adata.obs_names,
-                columns=receptors,
-            )
-
-            # Log-scale receptor expression (to reduce the impact of very large values):
-            self.receptors_expr = self.receptors_expr.applymap(np.log1p)
-
-            if self.normalize_signaling:
-                # Normalize receptor expression to be between 0 and 1:
-                self.receptors_expr = self.receptors_expr.apply(
-                    lambda column: (column - column.min()) / (column.max() - column.min())
-                )
-
-            # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
-            # but store them in a temporary list to do so later because some may contribute to multiple complexes:
-            to_drop = []
-            for element in r_complexes:
-                if "_" in element:
+                # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
+                # but store them in a temporary list to do so later because some may contribute to multiple complexes:
+                to_drop = []
+                for element in l_complexes:
                     parts = element.split("_")
-                    if all(part in self.receptors_expr.columns for part in parts):
+                    if all(part in self.ligands_expr.columns for part in parts):
                         # Combine the columns into a new column with the name of the hyphenated element- here we will
                         # compute the geometric mean of the expression values of the complex components:
-                        self.receptors_expr[element] = self.receptors_expr[parts].apply(
+                        self.ligands_expr[element] = self.ligands_expr[parts].apply(
                             lambda x: x.prod() ** (1 / len(parts)), axis=1
                         )
                         # Mark the individual components for removal if the individual components cannot also be
-                        # found as receptors:
-                        to_drop.extend([part for part in parts if part not in database_receptors])
+                        # found as ligands:
+                        to_drop.extend([part for part in parts if part not in database_ligands])
                     else:
                         # Drop the hyphenated element from the dataframe if all components are not found in the
                         # dataframe columns
-                        partial_components = [r for r in receptors if r in parts]
+                        partial_components = [l for l in ligands if l in parts]
                         to_drop.extend(partial_components)
                         if len(partial_components) > 0 and self.verbose:
                             self.logger.info(
-                                f"Not all components from the {element} heterocomplex could be found in the "
-                                f"dataset, so this complex was not included."
+                                f"Not all components from the {element} heterocomplex could be found in the dataset."
                             )
 
-            # Drop any possible duplicate ligands alongside any other columns to be dropped:
-            to_drop = list(set(to_drop))
-            self.receptors_expr.drop(to_drop, axis=1, inplace=True)
-            first_occurrences = self.receptors_expr.columns.duplicated(keep="first")
-            self.receptors_expr = self.receptors_expr.loc[:, ~first_occurrences]
+                # Drop any possible duplicate ligands alongside any other columns to be dropped:
+                to_drop = list(set(to_drop))
+                self.ligands_expr.drop(to_drop, axis=1, inplace=True)
+                first_occurrences = self.ligands_expr.columns.duplicated(keep="first")
+                self.ligands_expr = self.ligands_expr.loc[:, ~first_occurrences]
+                # Save copy of non-lagged ligand expression array:
+                self.ligands_expr_nonlag = self.ligands_expr.copy()
 
-            # Ensure there is some degree of compatibility between the selected ligands and receptors if model uses
-            # both ligands and receptors:
-            if self.mod_type == "lr":
-                if self.verbose:
-                    self.logger.info(
-                        "Preparing data: finding matched pairs between the selected ligands and " "receptors."
-                    )
-                starting_n_ligands = len(self.ligands_expr.columns)
-                starting_n_receptors = len(self.receptors_expr.columns)
+            if self.mod_type == "lr" or self.mod_type == "receptor":
+                database_receptors = set(self.lr_db["to"])
 
-                lr_ref = self.lr_db[["from", "to"]]
-                # Don't need entire dataframe, just take the first two rows of each:
-                lig_melt = self.ligands_expr.iloc[[0, 1], :].melt(var_name="from", value_name="value_ligand")
-                rec_melt = self.receptors_expr.iloc[[0, 1], :].melt(var_name="to", value_name="value_receptor")
+                if self.custom_receptors_path is not None or self.custom_receptors is not None:
+                    if self.custom_receptors_path is not None:
+                        with open(self.custom_receptors_path, "r") as f:
+                            receptors = f.read().splitlines()
+                    else:
+                        receptors = self.custom_receptors
+                    receptors = [r for r in receptors if r in database_receptors]
+                    r_complexes = [elem for elem in receptors if "_" in elem]
+                    # Get individual components if any complexes are included in this list:
+                    receptors = [r for item in receptors for r in item.split("_")]
 
-                merged_df = pd.merge(lr_ref, rec_melt, on="to")
-                merged_df = pd.merge(merged_df, lig_melt, on="from")
-                pairs = merged_df[["from", "to"]].drop_duplicates(keep="first")
-                self.lr_pairs = [tuple(x) for x in zip(pairs["from"], pairs["to"])]
-                if len(self.lr_pairs) == 0:
-                    raise RuntimeError(
-                        "No matched pairs between the selected ligands and receptors were found. If path to custom "
-                        "list of ligands and/or receptors was provided, ensure ligand-receptor pairings exist among "
-                        "these lists, or check data to make sure these ligands and/or receptors were measured and "
-                        "were not filtered out."
-                    )
+                elif self.custom_pathways_path is not None or self.custom_pathways is not None:
+                    if self.custom_pathways_path is not None:
+                        with open(self.custom_pathways_path, "r") as f:
+                            pathways = f.read().splitlines()
+                    else:
+                        pathways = self.custom_pathways
+                    pathways = [p for p in pathways if p in database_pathways]
+                    # Get all receptors associated with these pathway(s):
+                    lr_db_subset = self.lr_db[self.lr_db["pathway"].isin(pathways)]
+                    receptors = list(set(lr_db_subset["to"]))
+                    r_complexes = [elem for elem in receptors if "_" in elem]
+                    # Get all individual components if any complexes are included in this list:
+                    receptors = [r for item in receptors for r in item.split("_")]
 
-                pivoted_df = merged_df.pivot_table(values=["value_ligand", "value_receptor"], index=["from", "to"])
-                filtered_df = pivoted_df[pivoted_df.notna().all(axis=1)]
-                # Filter ligand and receptor expression to those that have a matched pair:
-                self.ligands_expr = self.ligands_expr[filtered_df.index.get_level_values("from").unique()]
-                self.receptors_expr = self.receptors_expr[filtered_df.index.get_level_values("to").unique()]
-                final_n_ligands = len(self.ligands_expr.columns)
-                final_n_receptors = len(self.receptors_expr.columns)
-
-                if self.verbose:
-                    self.logger.info(
-                        f"Found {final_n_ligands} ligands and {final_n_receptors} receptors that have matched pairs. "
-                        f"{starting_n_ligands - final_n_ligands} ligands removed from the list and "
-                        f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the list due to "
-                        f"not having matched pairs among the corresponding set of receptors/ligands, respectively."
-                        f"Remaining ligands: {self.ligands_expr.columns.tolist()}."
-                        f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
-                    )
-
-                    self.logger.info(f"Set of {len(self.lr_pairs)} ligand-receptor pairs: {self.lr_pairs}")
-
-        # Get gene targets:
-        if self.verbose:
-            self.logger.info("Preparing data: getting gene targets.")
-        # For niche model and ligand model, targets must be manually provided:
-        if (self.targets_path is None and self.custom_targets is None) and self.mod_type in ["niche", "ligand"]:
-            raise ValueError(
-                "For niche model and ligand model, `targets_path` must be provided. For L:R models, targets can be "
-                "automatically inferred, but receptor information does not exist for the other models."
-            )
-
-        if self.targets_path is not None or self.custom_targets is not None:
-            if self.targets_path is not None:
-                with open(self.targets_path, "r") as f:
-                    targets = f.read().splitlines()
-            else:
-                targets = self.custom_targets
-            targets = [t for t in targets if t in adata.var_names]
-
-        # Else get targets by connecting to the targets of the L:R-downstream transcription factors:
-        else:
-            # Get the targets of the L:R-downstream transcription factors:
-            tf_subset = r_tf_db[r_tf_db["receptor"].isin(self.receptors_expr.columns)]
-            tfs = set(tf_subset["tf"])
-            tfs = [tf for tf in tfs if tf in adata.var_names]
-            # Subset to TFs that are expressed in > threshold number of cells:
-            if scipy.sparse.issparse(adata.X):
-                tf_expr_percentage = np.array((adata[:, tfs].X > 0).sum(axis=0) / adata.n_obs)[0]
-            else:
-                tf_expr_percentage = np.count_nonzero(adata[:, tfs].X, axis=0) / adata.n_obs
-            tfs = np.array(tfs)[tf_expr_percentage > self.target_expr_threshold]
-
-            targets_subset = tf_target_db[tf_target_db["TF"].isin(tfs)]
-            targets = list(set(targets_subset["target"]))
-            targets = [target for target in targets if target in adata.var_names]
-            # Subset to targets that are expressed in > threshold number of cells:
-            if scipy.sparse.issparse(adata.X):
-                target_expr_percentage = np.array((adata[:, targets].X > 0).sum(axis=0) / adata.n_obs)[0]
-            else:
-                target_expr_percentage = np.count_nonzero(adata[:, targets].X, axis=0) / adata.n_obs
-            targets = np.array(targets)[target_expr_percentage > self.target_expr_threshold]
-
-        self.targets_expr = pd.DataFrame(
-            adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
-            index=adata.obs_names,
-            columns=targets,
-        )
-
-        # Compute spatial lag of ligand expression- exclude self because there are many ligands for which
-        # autocrine signaling is not possible:
-        if self.mod_type == "lr" or self.mod_type == "ligand":
-            if "spatial_weights" not in locals():
-                spatial_weights = self._compute_all_wi(
-                    bw=self.n_neighbors, bw_fixed=False, exclude_self=True, verbose=False
-                )
-
-            lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
-            for i, ligand in enumerate(self.ligands_expr.columns):
-                expr = self.ligands_expr[ligand]
-                expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
-                lagged_expr = spatial_weights.dot(expr_sparse).A.flatten()
-                lagged_expr_mat[:, i] = lagged_expr
-            self.ligands_expr = pd.DataFrame(lagged_expr_mat, index=adata.obs_names, columns=self.ligands_expr.columns)
-
-        # Set dependent variable array based on input given as "mod_type":
-        if self.mod_type == "niche":
-            # Compute spatial weights matrix- use n_neighbors and exclude_self from the argparse (defaults to 10).
-            if "spatial_weights" not in locals():
-                # Check for pre-computed spatial weights:
-                if "spatial_weights" in self.adata.obsp.keys():
-                    self.logger.info("Spatial weights already found in AnnData object.")
-                    spatial_weights = self.adata.obsp["spatial_weights"]
                 else:
-                    spatial_weights = self._compute_all_wi(
-                        bw=self.n_neighbors, bw_fixed=False, exclude_self=True, kernel="bisquare"
+                    # List of possible complexes to search through:
+                    r_complexes = [elem for elem in database_receptors if "_" in elem]
+                    # And all possible receptor molecules:
+                    all_receptors = [r for item in database_receptors for r in item.split("_")]
+
+                    # Get list of receptors from among the most highly spatially-variable genes, indicative of
+                    # potentially interesting spatially-enriched signal:
+                    self.logger.info(
+                        "Preparing data: no specific receptors or pathways provided- getting list of receptors from "
+                        "among the most highly spatially-variable genes."
                     )
-                    # Save to AnnData object, and update AnnData object in path:
-                    self.adata.obsp["spatial_weights"] = spatial_weights
-                    self.adata.write_h5ad(self.adata_path)
+                    m_degs = moran_i(adata)
+                    m_filter_genes = (
+                        m_degs[m_degs.moran_q_val < 0.05].sort_values(by=["moran_i"], ascending=False).index
+                    )
+                    receptors = [g for g in m_filter_genes if g in all_receptors]
 
-            # Construct category adjacency matrix (n_samples x n_categories array that records how many neighbors of
-            # each category are present within the neighborhood of each sample):
-            dmat_neighbors = (spatial_weights > 0).astype("int").dot(self.cell_categories.values)
-            # If the number of cell types is low enough, incorporate the identity of each cell itself to fully encode
-            # the niche:
-            if len(self.cell_categories.columns) <= 10:
-                connections_data = {"categories": self.cell_categories, "dmat_neighbors": dmat_neighbors}
-                connections = np.asarray(dmatrix("categories:dmat_neighbors-1", connections_data))
-                connections[connections > 1] = 1
-                # Add categorical array indicating the cell type of each cell:
-                niche_array = np.hstack((self.cell_categories.values, connections))
+                    # If no significant spatially-variable receptors are found, use the top 10 most spatially-variable
+                    # receptors:
+                    if len(receptors) == 0:
+                        self.logger.info(
+                            "No significant spatially-variable receptors found. Using top 10 most "
+                            "spatially-variable receptors."
+                        )
+                        m_filter_genes = m_degs.sort_values(by=["moran_i"], ascending=False).index
+                        receptors = [g for g in m_filter_genes if g in all_receptors][:10]
 
-                connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
-                connections_cols.sort(key=lambda x: x[1])
-                connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
-                self.X = niche_array
-                self.feature_names = list(self.cell_categories.columns) + connections_cols
+                    # If any receptors are part of complexes, add all complex components to this list:
+                    for element in r_complexes:
+                        if "_" in element:
+                            complex_members = element.split("_")
+                            for member in complex_members:
+                                if member in receptors:
+                                    other_members = [m for m in complex_members if m != member]
+                                    for member in other_members:
+                                        receptors.append(member)
+                    receptors = list(set(receptors))
+
+                    self.logger.info(
+                        f"Found {len(receptors)} among significantly spatially-variable genes and associated "
+                        f"complex members."
+                    )
+
+                    # In the case of using this method to find candidate receptors, save the list of receptors in the
+                    # same directory as the AnnData object for later access:
+                    self.logger.info(
+                        f"Saving list of manually found receptors to "
+                        f"{os.path.join(os.path.dirname(self.adata_path), 'receptors.txt')}"
+                    )
+
+                    with open(os.path.join(os.path.dirname(self.adata_path), "receptors.txt"), "w") as f:
+                        f.write("\n".join(receptors))
+
+                receptors = [r for r in receptors if r in adata.var_names]
+
+                self.receptors_expr = pd.DataFrame(
+                    adata[:, receptors].X.A if scipy.sparse.issparse(adata.X) else adata[:, receptors].X,
+                    index=adata.obs_names,
+                    columns=receptors,
+                )
+
+                # Log-scale receptor expression (to reduce the impact of very large values):
+                self.receptors_expr = self.receptors_expr.applymap(np.log1p)
+
+                # Normalize receptor expression if applicable:
+                if self.normalize_signaling:
+                    self.receptors_expr = self.receptors_expr.apply(
+                        lambda column: (column - column.min()) / (column.max() - column.min())
+                    )
+                # elif self.ridge_lambda is None:
+                #     self.receptors_expr = (self.receptors_expr - self.receptors_expr.min().min()) / (
+                #             self.receptors_expr.max().max() - self.receptors_expr.min().min())
+
+                # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
+                # but store them in a temporary list to do so later because some may contribute to multiple complexes:
+                to_drop = []
+                for element in r_complexes:
+                    if "_" in element:
+                        parts = element.split("_")
+                        if all(part in self.receptors_expr.columns for part in parts):
+                            # Combine the columns into a new column with the name of the hyphenated element- here we
+                            # will compute the geometric mean of the expression values of the complex components:
+                            self.receptors_expr[element] = self.receptors_expr[parts].apply(
+                                lambda x: x.prod() ** (1 / len(parts)), axis=1
+                            )
+                            # Mark the individual components for removal if the individual components cannot also be
+                            # found as receptors:
+                            to_drop.extend([part for part in parts if part not in database_receptors])
+                        else:
+                            # Drop the hyphenated element from the dataframe if all components are not found in the
+                            # dataframe columns
+                            partial_components = [r for r in receptors if r in parts]
+                            to_drop.extend(partial_components)
+                            if len(partial_components) > 0 and self.verbose:
+                                self.logger.info(
+                                    f"Not all components from the {element} heterocomplex could be found in the "
+                                    f"dataset, so this complex was not included."
+                                )
+
+                # Drop any possible duplicate ligands alongside any other columns to be dropped:
+                to_drop = list(set(to_drop))
+                self.receptors_expr.drop(to_drop, axis=1, inplace=True)
+                first_occurrences = self.receptors_expr.columns.duplicated(keep="first")
+                self.receptors_expr = self.receptors_expr.loc[:, ~first_occurrences]
+
+                # Ensure there is some degree of compatibility between the selected ligands and receptors if model uses
+                # both ligands and receptors:
+                if self.mod_type == "lr":
+                    if self.verbose:
+                        self.logger.info(
+                            "Preparing data: finding matched pairs between the selected ligands and " "receptors."
+                        )
+                    starting_n_ligands = len(self.ligands_expr.columns)
+                    starting_n_receptors = len(self.receptors_expr.columns)
+
+                    lr_ref = self.lr_db[["from", "to"]]
+                    # Don't need entire dataframe, just take the first two rows of each:
+                    lig_melt = self.ligands_expr.iloc[[0, 1], :].melt(var_name="from", value_name="value_ligand")
+                    rec_melt = self.receptors_expr.iloc[[0, 1], :].melt(var_name="to", value_name="value_receptor")
+
+                    merged_df = pd.merge(lr_ref, rec_melt, on="to")
+                    merged_df = pd.merge(merged_df, lig_melt, on="from")
+                    pairs = merged_df[["from", "to"]].drop_duplicates(keep="first")
+                    self.lr_pairs = [tuple(x) for x in zip(pairs["from"], pairs["to"])]
+                    if len(self.lr_pairs) == 0:
+                        raise RuntimeError(
+                            "No matched pairs between the selected ligands and receptors were found. If path to "
+                            "custom list of ligands and/or receptors was provided, ensure ligand-receptor pairings "
+                            "exist among these lists, or check data to make sure these ligands and/or receptors "
+                            "were measured and were not filtered out."
+                        )
+
+                    pivoted_df = merged_df.pivot_table(values=["value_ligand", "value_receptor"], index=["from", "to"])
+                    filtered_df = pivoted_df[pivoted_df.notna().all(axis=1)]
+                    # Filter ligand and receptor expression to those that have a matched pair:
+                    self.ligands_expr = self.ligands_expr[filtered_df.index.get_level_values("from").unique()]
+                    self.receptors_expr = self.receptors_expr[filtered_df.index.get_level_values("to").unique()]
+                    final_n_ligands = len(self.ligands_expr.columns)
+                    final_n_receptors = len(self.receptors_expr.columns)
+
+                    if self.verbose:
+                        self.logger.info(
+                            f"Found {final_n_ligands} ligands and {final_n_receptors} receptors that have matched "
+                            f"pairs. {starting_n_ligands - final_n_ligands} ligands removed from the list and "
+                            f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the list due "
+                            f"to not having matched pairs among the corresponding set of receptors/ligands, "
+                            f"respectively."
+                            f"Remaining ligands: {self.ligands_expr.columns.tolist()}."
+                            f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
+                        )
+
+                        self.logger.info(f"Set of {len(self.lr_pairs)} ligand-receptor pairs: {self.lr_pairs}")
+
+            # ---------------------------------------------------------------------------------------------------
+            # Get gene targets
+            # ---------------------------------------------------------------------------------------------------
+            if self.verbose:
+                self.logger.info("Preparing data: getting gene targets.")
+            # For niche model and ligand model, targets must be manually provided:
+            if (self.targets_path is None and self.custom_targets is None) and self.mod_type in ["niche", "ligand"]:
+                raise ValueError(
+                    "For niche model and ligand model, `targets_path` must be provided. For L:R models, targets can be "
+                    "automatically inferred, but receptor information does not exist for the other models."
+                )
+
+            if self.targets_path is not None or self.custom_targets is not None:
+                if self.targets_path is not None:
+                    with open(self.targets_path, "r") as f:
+                        targets = f.read().splitlines()
+                else:
+                    targets = self.custom_targets
+                targets = [t for t in targets if t in adata.var_names]
+
+            # Else get targets by connecting to the targets of the L:R-downstream transcription factors:
             else:
-                # row_sums = dmat_neighbors.sum(axis=1)
-                # dmat_neighbors = dmat_neighbors / row_sums[:, np.newaxis]
-                # dmat_neighbors[dmat_neighbors > 1] = np.log(dmat_neighbors[dmat_neighbors > 1])
-                dmat_neighbors[dmat_neighbors > 1] = 1
-                # niche_array = np.hstack((self.cell_categories.values, dmat_neighbors))
-                self.X = dmat_neighbors
-                # self.X = niche_array
+                # Get the targets of the L:R-downstream transcription factors:
+                tf_subset = r_tf_db[r_tf_db["receptor"].isin(self.receptors_expr.columns)]
+                tfs = set(tf_subset["tf"])
+                tfs = [tf for tf in tfs if tf in adata.var_names]
+                # Subset to TFs that are expressed in > threshold number of cells:
+                if scipy.sparse.issparse(adata.X):
+                    tf_expr_percentage = np.array((adata[:, tfs].X > 0).sum(axis=0) / adata.n_obs)[0]
+                else:
+                    tf_expr_percentage = np.count_nonzero(adata[:, tfs].X, axis=0) / adata.n_obs
+                tfs = np.array(tfs)[tf_expr_percentage > self.target_expr_threshold]
 
-                neighbors_cols = [col.replace("Group", "Proxim") for col in self.cell_categories.columns]
-                # self.feature_names = list(self.cell_categories.columns) + neighbors_cols
-                self.feature_names = neighbors_cols
+                targets_subset = tf_target_db[tf_target_db["TF"].isin(tfs)]
+                targets = list(set(targets_subset["target"]))
+                targets = [target for target in targets if target in adata.var_names]
+                # Subset to targets that are expressed in > threshold number of cells:
+                if scipy.sparse.issparse(adata.X):
+                    target_expr_percentage = np.array((adata[:, targets].X > 0).sum(axis=0) / adata.n_obs)[0]
+                else:
+                    target_expr_percentage = np.count_nonzero(adata[:, targets].X, axis=0) / adata.n_obs
+                targets = np.array(targets)[target_expr_percentage > self.target_expr_threshold]
 
-        elif self.mod_type == "lr":
-            # Use the ligand expression array and receptor expression array to compute the ligand-receptor pairing
-            # array across all cells in the sample:
-            X_df = pd.DataFrame(
-                np.zeros((self.n_samples, len(self.lr_pairs))),
-                columns=[f"{lr_pair[0]}:{lr_pair[1]}" for lr_pair in self.lr_pairs],
-                index=self.adata.obs_names,
+            self.targets_expr = pd.DataFrame(
+                adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
+                index=adata.obs_names,
+                columns=targets,
             )
 
-            for lr_pair in self.lr_pairs:
-                lig, rec = lr_pair[0], lr_pair[1]
-                lig_expr_values = self.ligands_expr[lig].values.reshape(-1, 1)
-                rec_expr_values = self.receptors_expr[rec].values.reshape(-1, 1)
+            # Compute spatial lag of ligand expression- exclude self for membrane-bound because autocrine signaling
+            # is very difficult in principle:
+            if self.mod_type == "lr" or self.mod_type == "ligand":
+                # Compute separate set of spatial weights for membrane-bound and secreted ligands:
+                if "spatial_weights_membrane_bound" not in locals():
+                    spatial_weights_membrane_bound = self._compute_all_wi(
+                        bw=self.n_neighbors_membrane_bound, bw_fixed=False, exclude_self=True, verbose=False
+                    )
+                if "spatial_weights_secreted" not in locals():
+                    # Autocrine signaling is much easier with secreted signals:
+                    spatial_weights_secreted = self._compute_all_wi(
+                        bw=self.n_neighbors_secreted, bw_fixed=False, exclude_self=False, verbose=False
+                    )
 
-                # Communication signature b/w receptor in target and ligand in neighbors:
-                X_df[f"{lig}:{rec}"] = lig_expr_values * rec_expr_values
-
-            # If applicable, drop all-zero columns:
-            X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
-            if len(self.lr_pairs) != X_df.shape[1]:
-                self.logger.info(
-                    f"Dropped all-zero columns from cell type-specific signaling array, from "
-                    f"{len(self.lr_pairs)} to {X_df.shape[1]}."
+                lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
+                for i, ligand in enumerate(self.ligands_expr.columns):
+                    expr = self.ligands_expr[ligand]
+                    expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
+                    matching_rows = self.lr_db[self.lr_db["from"] == ligand]
+                    if (
+                        matching_rows["type"].str.contains("Secreted Signaling").any()
+                        or matching_rows["type"].str.contains("ECM-Receptor").any()
+                    ):
+                        lagged_expr = spatial_weights_secreted.dot(expr_sparse).A.flatten()
+                    else:
+                        lagged_expr = spatial_weights_membrane_bound.dot(expr_sparse).A.flatten()
+                    lagged_expr_mat[:, i] = lagged_expr
+                self.ligands_expr = pd.DataFrame(
+                    lagged_expr_mat, index=adata.obs_names, columns=self.ligands_expr.columns
                 )
 
-            # If applicable, check for multicollinearity:
-            if self.multicollinear_threshold is not None:
-                X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+            # Set independent variable array based on input given as "mod_type":
+            if self.mod_type == "niche":
+                # Compute spatial weights matrix- use n_neighbors and exclude_self from the argparse (defaults to 10).
+                if "spatial_weights_niche" not in locals():
+                    # Check for pre-computed spatial weights:
+                    if "spatial_weights" in self.adata.obsp.keys():
+                        self.logger.info("Spatial weights already found in AnnData object.")
+                        spatial_weights_niche = self.adata.obsp["spatial_weights"]
+                    else:
+                        spatial_weights_niche = self._compute_all_wi(
+                            bw=self.n_neighbors_niche, bw_fixed=False, exclude_self=False, kernel="bisquare"
+                        )
+                        # Save to AnnData object, and update AnnData object in path:
+                        self.adata.obsp["spatial_weights"] = spatial_weights_niche
+                        self.adata.write_h5ad(self.adata_path)
 
-            # Log-scale to reduce the impact of cells with higher expression:
-            X_df = X_df.applymap(np.log1p)
+                # Construct category adjacency matrix (n_samples x n_categories array that records how many neighbors of
+                # each category are present within the neighborhood of each sample):
+                dmat_neighbors = (spatial_weights_niche > 0).astype("int").dot(self.cell_categories.values)
+                # If the number of cell types is low enough, incorporate the identity of each cell itself to fully
+                # encode the niche:
+                if len(self.cell_categories.columns) <= 10:
+                    connections_data = {"categories": self.cell_categories, "dmat_neighbors": dmat_neighbors}
+                    connections = np.asarray(dmatrix("categories:dmat_neighbors-1", connections_data))
+                    connections[connections > 1] = 1
+                    # Add categorical array indicating the cell type of each cell:
+                    niche_array = np.hstack((self.cell_categories.values, connections))
 
-            # Save design matrix:
-            if self.verbose:
-                if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix")):
-                    os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix"))
-                X_df.to_csv(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"))
-                self.logger.info(
-                    f"Saving design matrix to "
-                    f"{os.path.join(os.path.splitext(self.output_path)[0], 'design_matrix', 'design_matrix.csv')}."
+                    connections_cols = list(product(self.cell_categories.columns, self.cell_categories.columns))
+                    connections_cols.sort(key=lambda x: x[1])
+                    connections_cols = [f"{i[0]}-{i[1]}" for i in connections_cols]
+                    feature_names = list(self.cell_categories.columns) + connections_cols
+                    X_df = pd.DataFrame(niche_array, index=self.adata.obs_names, columns=feature_names)
+                else:
+                    dmat_neighbors[dmat_neighbors > 1] = 1
+
+                    neighbors_cols = [col.replace("Group", "Proxim") for col in self.cell_categories.columns]
+                    # self.feature_names = list(self.cell_categories.columns) + neighbors_cols
+                    feature_names = neighbors_cols
+                    X_df = pd.DataFrame(dmat_neighbors, index=self.adata.obs_names, columns=feature_names)
+
+            elif self.mod_type == "lr":
+                # Use the ligand expression array and receptor expression array to compute the ligand-receptor pairing
+                # array across all cells in the sample:
+                X_df = pd.DataFrame(
+                    np.zeros((self.n_samples, len(self.lr_pairs))),
+                    columns=[f"{lr_pair[0]}:{lr_pair[1]}" for lr_pair in self.lr_pairs],
+                    index=self.adata.obs_names,
                 )
 
-            self.X = X_df.values
+                for lr_pair in self.lr_pairs:
+                    lig, rec = lr_pair[0], lr_pair[1]
+                    lig_expr_values = self.ligands_expr[lig].values.reshape(-1, 1)
+                    rec_expr_values = self.receptors_expr[rec].values.reshape(-1, 1)
+
+                    # Communication signature b/w receptor in target and ligand in neighbors:
+                    X_df[f"{lig}:{rec}"] = lig_expr_values * rec_expr_values
+
+                # If applicable, drop all-zero columns:
+                X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
+                if len(self.lr_pairs) != X_df.shape[1]:
+                    self.logger.info(
+                        f"Dropped all-zero columns from cell type-specific signaling array, from "
+                        f"{len(self.lr_pairs)} to {X_df.shape[1]}."
+                    )
+
+                # If applicable, check for multicollinearity:
+                if self.multicollinear_threshold is not None:
+                    X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+
+                # Log-scale to reduce the impact of "denser" neighborhoods:
+                X_df = X_df.applymap(np.log1p)
+                # Normalize the data to prevent numerical overflow:
+                X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
+
+            elif self.mod_type == "ligand" or self.mod_type == "receptor":
+                if self.mod_type == "ligand":
+                    X_df = self.ligands_expr
+                elif self.mod_type == "receptor":
+                    X_df = self.receptors_expr
+
+                # If applicable, drop all-zero columns:
+                X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
+
+                if self.mod_type == "ligand":
+                    self.logger.info(
+                        f"Dropped all-zero columns from ligand expression array, from "
+                        f"{self.ligands_expr.shape[1]} to {X_df.shape[1]}."
+                    )
+                elif self.mod_type == "receptor":
+                    self.logger.info(
+                        f"Dropped all-zero columns from receptor expression array, from "
+                        f"{self.receptors_expr.shape[1]} to {X_df.shape[1]}."
+                    )
+
+                # If applicable, check for multicollinearity:
+                if self.multicollinear_threshold is not None:
+                    X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+
+                # Normalize the data to prevent numerical overflow:
+                X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
+
+                # Save design matrix:
+                if not os.path.exists(os.path.join(self.output_path, "design_matrix")):
+                    os.makedirs(os.path.join(self.output_path, "design_matrix"))
+                X_df.to_csv(os.path.join(self.output_path, "design_matrix", "design_matrix.csv"))
+                self.logger.info(
+                    f"Saving design matrix to {os.path.join(self.output_path, 'design_matrix', 'design_matrix.csv')}."
+                )
+
+            else:
+                raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
+
+        # Save design matrix and component dataframes:
+        if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix")):
+            os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix"))
+        if not os.path.exists(
+            os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv")
+        ):
+            self.logger.info(
+                f"Saving design matrix to "
+                f"{os.path.join(os.path.splitext(self.output_path)[0], 'design_matrix', 'design_matrix.csv')}."
+            )
+            X_df.to_csv(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"))
+
+            if self.mod_type == "ligand" or self.mod_type == "lr":
+                self.logger.info(
+                    f"Saving ligand expression matrix to "
+                    f"{os.path.join(os.path.splitext(self.output_path)[0], 'design_matrix', 'ligands_expr.csv')}"
+                )
+                self.ligands_expr.to_csv(
+                    os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "ligands_expr.csv")
+                )
+                self.ligands_expr_nonlag.to_csv(
+                    os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "ligands_expr_nonlag.csv")
+                )
+            if self.mod_type == "receptor" or self.mod_type == "lr":
+                self.logger.info(
+                    f"Saving receptor expression matrix to "
+                    f"{os.path.join(os.path.splitext(self.output_path)[0], 'design_matrix', 'receptors_expr.csv')}"
+                )
+                self.receptors_expr.to_csv(
+                    os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "receptors_expr.csv")
+                )
+            if self.mod_type == "niche":
+                self.logger.info(
+                    f"Saving cell categories to "
+                    f"{os.path.join(os.path.splitext(self.output_path)[0], 'design_matrix', 'cell_categories.csv')}"
+                )
+                self.cell_categories.to_csv(
+                    os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "cell_categories.csv")
+                )
+
+            self.logger.info(
+                f"Saving targets array to "
+                f"{os.path.join(os.path.splitext(self.output_path)[0], 'design_matrix', 'targets.csv')}"
+            )
+            self.targets_expr.to_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv")
+            )
+
+        self.X = X_df.values
+        if self.mod_type == "lr":
             self.feature_names = [pair.split(":")[0] + ":" + pair.split(":")[1] for pair in X_df.columns]
-
+        else:
+            self.feature_names = X_df.columns
+        # (For interpretability in downstream analyses) update ligand names/receptor names to reflect the final
+        # molecules used:
+        if self.mod_type == "ligand":
+            self.ligands = self.feature_names
+        elif self.mod_type == "receptor":
+            self.receptors = self.feature_names
+        elif self.mod_type == "lr":
             # Update :attr `lr_pairs` to reflect the final L:R pairs used:
             self.lr_pairs = [tuple((pair.split(":")[0], pair.split(":")[1])) for pair in self.feature_names]
-
-        elif self.mod_type == "ligand" or self.mod_type == "receptor":
-            if self.mod_type == "ligand":
-                X_df = self.ligands_expr
-            elif self.mod_type == "receptor":
-                X_df = self.receptors_expr
-
-            # If applicable, drop all-zero columns:
-            X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
-
-            if self.mod_type == "ligand":
-                self.logger.info(
-                    f"Dropped all-zero columns from ligand expression array, from "
-                    f"{self.ligands_expr.shape[1]} to {X_df.shape[1]}."
-                )
-            elif self.mod_type == "receptor":
-                self.logger.info(
-                    f"Dropped all-zero columns from receptor expression array, from "
-                    f"{self.receptors_expr.shape[1]} to {X_df.shape[1]}."
-                )
-
-            # If applicable, check for multicollinearity:
-            if self.multicollinear_threshold is not None:
-                X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
-
-            # Save design matrix:
-            if not os.path.exists(os.path.join(self.output_path, "design_matrix")):
-                os.makedirs(os.path.join(self.output_path, "design_matrix"))
-            X_df.to_csv(os.path.join(self.output_path, "design_matrix", "design_matrix.csv"))
-            self.logger.info(
-                f"Saving design matrix to {os.path.join(self.output_path, 'design_matrix', 'design_matrix.csv')}."
-            )
-
-            self.X = X_df.values
-            self.feature_names = X_df.columns
-            # (For interpretability in downstream analyses) update ligand names/receptor names to reflect the final
-            # molecules used:
-            if self.mod_type == "ligand":
-                self.ligands = self.feature_names
-            elif self.mod_type == "receptor":
-                self.receptors = self.feature_names
-
-        else:
-            raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
 
         # If applicable, add covariates:
         if self.covariate_keys is not None:
@@ -1207,6 +1315,12 @@ class MuSIC:
 
         self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
         self.X_df = self.comm.bcast(self.X_df, root=0)
+
+        # Compute distance in "signaling space":
+        if self.mod_type != "niche":
+            # Binarize design matrix to encode presence/absence of signaling pairs:
+            self.feature_distance = np.where(self.X > 0, 1, 0)
+            self.feature_distance = self.comm.bcast(self.feature_distance, root=0)
 
     def run_subsample(self, y: Optional[pd.DataFrame] = None):
         """To combat computational intensiveness of this regressive protocol, subsampling will be performed in cases
@@ -1445,6 +1559,7 @@ class MuSIC:
             bw=bw,
             threshold=0.01,
             sparse_array=True,
+            normalize_weights=True,
         )
 
         with Pool() as pool:
@@ -1519,9 +1634,26 @@ class MuSIC:
         else:
             init_betas = None
 
-        wi = get_wi(i, n_samples=len(X), coords=coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw).reshape(
-            -1, 1
-        )
+        if self.mod_type == "niche" or self.subsampled:
+            cov = None
+        else:
+            # Distance in "signaling space", conditioned on target expression (matched zero/nonzero with the point in
+            # question):
+            if y[i] > 0:
+                cov = np.where(y > 0, 1, 0).reshape(-1)
+            else:
+                cov = np.where(y == 0, 1, 0).reshape(-1)
+        wi = get_wi(
+            i,
+            n_samples=len(X),
+            cov=cov,
+            coords=coords,
+            expr_mat=self.feature_distance,
+            fixed_bw=self.bw_fixed,
+            kernel=self.kernel,
+            bw=bw,
+            use_expr_neighbors_only=self.use_expr_neighbors_only,
+        ).reshape(-1, 1)
 
         if mask_indices is not None:
             wi[mask_indices] = 0.0
@@ -2039,61 +2171,8 @@ class MuSIC:
                 self.x_chunk = indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
                 self.x_chunk = self.comm.bcast(self.x_chunk, root=0)
 
-            # Zero-inflated local logistic model:
-            if not self.no_hurdle:
-                y_binary = np.where(y > 0, 1, 0).reshape(-1, 1).astype(np.float32)
-                betas, y_hat, _, _ = iwls(
-                    y_binary,
-                    X,
-                    distr="binomial",
-                    tol=self.tolerance,
-                    max_iter=self.max_iter,
-                    # offset=self.offset,
-                    link=None,
-                    ridge_lambda=self.ridge_lambda,
-                )
-
-                # Search for optimal threshold based on correct classification of zero/nonzero dependent values:
-                if not all(element == 0.0 for element in y_binary):
-                    obj_function = lambda threshold: logistic_objective(
-                        threshold=threshold, proba=y_hat, y_true=y_binary
-                    )
-
-                    optimal_threshold = golden_section_search(obj_function, a=0.0, b=1.0, tol=self.tolerance)
-                    predictions = (y_hat >= optimal_threshold).astype(int)
-                    tp = np.sum((predictions == 1) & (y_binary == 1))
-                    tn = np.sum((predictions == 0) & (y_binary == 0))
-                    fp = np.sum((predictions == 1) & (y_binary == 0))
-                    precision = tp / (tp + fp)
-                    specificity = tn / (tn + fp)
-                    self.logger.info(f"For target {target}, precision: {precision:.3f}, specificity: {specificity:.3f}")
-
-                    if precision >= 0.5 and specificity >= 0.5:
-                        if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "logistic_predictions")):
-                            os.makedirs(os.path.join(os.path.dirname(self.output_path), "logistic_predictions"))
-                        to_save = np.hstack((y_binary, predictions, X))
-                        cols = ["true y", "predictions"] + list(self.feature_names)
-                        predictions_df = pd.DataFrame(to_save, columns=cols, index=self.sample_names[self.x_chunk])
-                        predictions_df.to_csv(
-                            os.path.join(
-                                os.path.dirname(self.output_path),
-                                f"logistic_predictions/logistic_predictions_{target}.csv",
-                            )
-                        )
-
-                        # Mask indices where variable is predicted to be nonzero but is actually zero (based on inferences,
-                        # these will result in likely underestimation of the effect)- we infer that the effect of the
-                        # independent variables is similar for these observations (and the zero is either technical or due to
-                        # an external factor):
-                        mask_indices = np.where((predictions != 0) & (y == 0))[0]
-                    else:
-                        # Find indices where y is zero but x is nonzero:
-                        mask_indices = np.where(
-                            (y == 0).reshape(-1, 1) & (np.all(np.abs(X) > 1e-3, axis=1)).reshape(-1, 1)
-                        )[0]
-            else:
-                # Find indices where y is zero but x is nonzero:
-                mask_indices = np.where((y == 0).reshape(-1, 1) & (np.all(np.abs(X) > 1e-3, axis=1)).reshape(-1, 1))[0]
+            # Find indices where y is zero but x is nonzero:
+            mask_indices = np.where((y == 0).reshape(-1, 1) & (np.all(np.abs(X) > 1e-3, axis=1)).reshape(-1, 1))[0]
 
             # Global relationship regularization (only for non-niche models):
             if self.mod_type != "niche":

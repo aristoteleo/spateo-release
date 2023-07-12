@@ -33,23 +33,10 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, normalize
 from statsmodels.gam.smooth_basis import BSplines
 
-# For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
-sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
-
-# from spateo.configuration import SKM
-# from spateo.tools.cluster.leiden import calculate_leiden_partition
-# from spateo.tools.gene_expression_variance import (
-#     compute_gene_groups_p_val,
-#     get_highvar_genes_sparse,
-# )
-from spateo.logging import logger_manager as lm
-from spateo.tools.dimensionality_reduction import find_optimal_pca_components, pca_fit
-from spateo.tools.ST_modeling.MuSIC import MuSIC
-from spateo.tools.ST_modeling.regression_utils import (
-    multitesting_correction,
-    permutation_testing,
-    wald_test,
-)
+from ...logging import logger_manager as lm
+from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
+from .MuSIC import MuSIC
+from .regression_utils import multitesting_correction, permutation_testing, wald_test
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -1201,6 +1188,8 @@ class MuSIC_Interpreter(MuSIC):
                 sender_deg_predictors_scaled.values, pca_func=PCA, max_components=None, drop_ratio=0.25
             )
             logger.info(f"Optimal number of PCs: {n_pca_components}")
+
+            # Perform PCA reduction with the chosen number of components:
 
             # Using the ideal number of components, compute the ideal number of UMAP components using the silhouette
             # score after calculating Leiden partitioning:

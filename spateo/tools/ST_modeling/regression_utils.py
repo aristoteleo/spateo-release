@@ -25,20 +25,11 @@ from sklearn.metrics import confusion_matrix, recall_score
 from sklearn.preprocessing import MinMaxScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-# For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
-sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
-
-from spateo.configuration import SKM
-from spateo.logging import logger_manager as lm
-from spateo.preprocessing.normalize import calcNormFactors
-from spateo.preprocessing.transform import log1p
-from spateo.tools.ST_modeling.distributions import (
-    Binomial,
-    Gaussian,
-    Link,
-    NegativeBinomial,
-    Poisson,
-)
+from ...configuration import SKM
+from ...logging import logger_manager as lm
+from ...preprocessing.normalize import calcNormFactors
+from ...preprocessing.transform import log1p
+from .distributions import Binomial, Gaussian, Link, NegativeBinomial, Poisson
 
 # from ...configuration import SKM
 # from ...logging import logger_manager as lm
@@ -243,7 +234,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     yw = (y * w).reshape(-1, 1)
     all_zeros = np.all(yw == 0)
     if all_zeros:
-        betas = np.full((x.shape[1], 1), 1e-5)
+        betas = np.full((x.shape[1], 1), 1e-20)
         return betas, pseudoinverse, cov_inverse
 
     betas = np.dot(xtx_inv_xt, y)
@@ -251,7 +242,7 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     betas = np.clip(betas, -clip, clip)
     # And set to zero with small offset for numerical overflow if the diagonal of the Gram matrix is below a certain
     # threshold:
-    betas[to_zero] = 1e-6
+    betas[to_zero] = 1e-20
 
     return betas, pseudoinverse, cov_inverse
 
@@ -264,7 +255,7 @@ def iwls(
     offset: Optional[np.ndarray] = None,
     tol: float = 1e-8,
     clip: float = 5.0,
-    threshold: float = 1e-3,
+    threshold: float = 1e-4,
     max_iter: int = 200,
     spatial_weights: Optional[np.ndarray] = None,
     link: Optional[Link] = None,
@@ -314,7 +305,24 @@ def iwls(
         inv: Array of shape [n_samples, n_samples]; the inverse covariance matrix (for Gaussian modeling) or the
             inverse Fisher matrix (for GLM models).
     """
-    logger = lm.get_main_logger()
+    # If y is all zeros, return all zeros:
+    if spatial_weights is None:
+        if np.all(y == 0):
+            betas = np.zeros((x.shape[1], 1))
+            y_hat = np.zeros((x.shape[0], 1))
+            return betas, y_hat, None, None
+    else:
+        yw = (y * spatial_weights).reshape(-1, 1)
+        if np.all(yw == 0):
+            betas = np.zeros((x.shape[1], 1))
+            y_hat = np.zeros_like(y)
+            n_iter = 0
+            w_final = np.zeros_like(y)
+            linear_predictor = np.zeros_like(y)
+            adjusted_predictor = np.zeros_like(y)
+            pseudoinverse = np.zeros((x.shape[0], x.shape[0]))
+            inv = np.zeros((x.shape[0], x.shape[0]))
+            return betas, y_hat, n_iter, w_final, linear_predictor, adjusted_predictor, pseudoinverse, inv
 
     # Initialization:
     n_iter = 0
@@ -613,11 +621,10 @@ def multicollinearity_check(X: pd.DataFrame, thresh: float = 5.0, logger: Option
         while dropped:
             dropped = False
             vif = [variance_inflation_factor(X.iloc[:, variables].values, ix) for ix in variables]
-            print(vif)
             maxloc = vif.index(max(vif))
             if max(vif) > thresh:
                 logger.info("Dropping '" + X.iloc[:, variables].columns[maxloc] + "' at index: " + str(maxloc))
-                X.drop(X.columns[variables[maxloc]], 1, inplace=True)
+                X.drop(X.columns[variables[maxloc]], axis=1, inplace=True)
                 variables = list(range(X.shape[1]))
                 dropped = True
 

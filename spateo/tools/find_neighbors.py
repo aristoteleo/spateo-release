@@ -172,6 +172,13 @@ class Kernel(object):
         data: Array of shape (n_samples, n_features) representing the data. If aiming to derive weights from spatial
             distance, this should be the array of spatial positions.
         bw: Bandwidth parameter for the kernel density estimation
+        cov: Optional array of shape (n_samples, ). Can be used to adjust the distance calculation to look only at
+            samples of interest, which is determined from nonzero values in this vector. This can be, e.g. a one-hot
+            vector for a particular cell type.
+        expr_mat: Can be used together with 'cov' (so will only be used if 'cov' is not None)- if the spatial neighbors
+            are not consistent with the sample in question (determined by assessing similarity by "cov"),
+            there may be different mechanisms at play. In this case, will instead search for nearest neighbors in
+            the gene expression space if given.
         fixed: If True, `bw` is treated as a fixed bandwidth parameter. Otherwise, it is treated as the number
             of nearest neighbors to include in the bandwidth estimation.
         exclude_self: If True, ignore each sample itself when computing the kernel density estimation
@@ -204,6 +211,8 @@ class Kernel(object):
             will be set to zero.
         eps: Error-correcting factor to avoid division by zero
         sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
+        normalize_weights: If True, the weights will be normalized to sum to 1.
+        use_expression_neighbors_only: If True, will only use the expression matrix to find nearest neighbors.
     """
 
     def __init__(
@@ -211,16 +220,46 @@ class Kernel(object):
         i: int,
         data: Union[np.ndarray, scipy.sparse.spmatrix],
         bw: Union[int, float],
+        cov: Optional[np.ndarray] = None,
+        expr_mat: Optional[np.ndarray] = None,
         fixed: bool = True,
         exclude_self: bool = False,
         function: str = "triangular",
         threshold: float = 1e-5,
         eps: float = 1.0000001,
         sparse_array: bool = False,
+        normalize_weights: bool = False,
+        use_expression_neighbors_only: bool = False,
     ):
 
-        self.dist_vector = local_dist(data[i], data).reshape(-1)
-        self.function = function.lower()
+        if use_expression_neighbors_only:
+            self.dist_vector = local_dist(expr_mat[i], expr_mat).reshape(-1)
+            self.function = function.lower()
+            if cov is not None:
+                max_dist = np.max(self.dist_vector)
+                self.dist_vector[cov == 0] = max_dist
+        else:
+            self.dist_vector = local_dist(data[i], data).reshape(-1)
+            self.function = function.lower()
+            if cov is not None:
+                max_dist = np.max(self.dist_vector)
+                self.dist_vector[cov == 0] = max_dist
+
+                # Indices of nearest neighbors- if fewer than 1/3 of the neighbors (given by bw for not "fixed" and
+                # using the ten nearest neighbors for "fixed") are consistent with "cov" of the sample in question,
+                # will instead search for nearest neighbors in the gene expression space:
+                n = 10 if fixed else int(bw)
+                neighbor_dist_vector = self.dist_vector[self.dist_vector > 0]
+                neighbor_dists = np.argpartition(neighbor_dist_vector, n)[:n]
+                neighbor_indices = np.where(np.isin(self.dist_vector, neighbor_dist_vector[neighbor_dists]))[0]
+                n_neighbor_threshold = 3 if fixed else int(n / 3)
+                if np.sum(cov[neighbor_indices]) < n_neighbor_threshold and expr_mat is not None:
+                    self.dist_vector = local_dist(expr_mat[i], expr_mat).reshape(-1)
+                    if cov is not None:
+                        max_dist = np.max(self.dist_vector)
+                        self.dist_vector[cov == 0] = max_dist
+                    # Set kernel to uniform for expression neighbors:
+                    self.function = "uniform"
 
         if fixed:
             self.bandwidth = float(bw)
@@ -242,6 +281,10 @@ class Kernel(object):
 
         # Set density to zero if below threshold:
         self.kernel[self.kernel < threshold] = 0
+
+        # Normalize the kernel by the number of non-zero neighbors, if applicable:
+        if normalize_weights:
+            self.kernel = self.kernel / np.count_nonzero(self.kernel)
 
         if sparse_array:
             self.kernel = scipy.sparse.csr_matrix(self.kernel)
@@ -272,12 +315,16 @@ def get_wi(
     i: int,
     n_samples: int,
     coords: np.ndarray,
+    cov: Optional[np.ndarray] = None,
+    expr_mat: Optional[np.ndarray] = None,
     fixed_bw: bool = True,
     exclude_self: bool = False,
     kernel: str = "gaussian",
     bw: Union[float, int] = 100,
     threshold: float = 1e-5,
     sparse_array: bool = False,
+    normalize_weights: bool = False,
+    use_expression_neighbors_only: bool = False,
 ) -> scipy.sparse.csr_matrix:
     """Get spatial weights for an individual sample, given the coordinates of all samples in space.
 
@@ -285,6 +332,12 @@ def get_wi(
         i: Index of sample for which weights are to be calculated to all other samples in the dataset
         n_samples: Total number of samples in the dataset
         coords: Array of shape (n_samples, 2) or (n_samples, 3) representing the spatial coordinates of each sample
+        cov: Optional array of shape (n_samples, ). Can be used to adjust the distance calculation to look only at
+            samples of interest, which is determined from nonzero values in this vector. This can be, e.g. a one-hot
+            vector for a particular cell type.
+        expr_mat: Can be used together with 'cov'- if the spatial neighbors are not consistent with the sample in
+            question (determined by assessing similarity by "cov"), there may be different mechanisms at play. In this
+            case, will instead search for nearest neighbors in the gene expression space if given.
         fixed_bw: If True, `bw` is treated as a spatial distance for computing spatial weights. Otherwise,
             it is treated as the number of neighbors.
         exclude_self: If True, ignore each sample itself when computing the kernel density estimation
@@ -294,6 +347,8 @@ def get_wi(
         threshold: Threshold for the kernel density estimation. If the density is below this threshold, the density
             will be set to zero.
         sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
+        normalize_weights: If True, the weights will be normalized to sum to 1.
+        use_expression_neighbors_only: If True, will only use expression neighbors to determine the bandwidth.
 
     Returns:
         wi: Array of weights for sample of interest
@@ -307,11 +362,15 @@ def get_wi(
         i,
         coords,
         bw,
+        cov=cov,
+        expr_mat=expr_mat,
         fixed=fixed_bw,
         exclude_self=exclude_self,
         function=kernel,
         threshold=threshold,
         sparse_array=sparse_array,
+        normalize_weights=normalize_weights,
+        use_expression_neighbors_only=use_expression_neighbors_only,
     ).kernel
 
     return wi

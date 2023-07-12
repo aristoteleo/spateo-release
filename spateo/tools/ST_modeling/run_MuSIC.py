@@ -8,8 +8,8 @@ import sys
 import click
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
-sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
-import spateo.tools.ST_modeling as fast_swr
+# sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
+from ...tools import ST_modeling as fast_swr
 
 
 @click.group()
@@ -20,69 +20,69 @@ def main():
 
 @main.command()
 @click.option(
-    "np",
+    "-np",
     default=2,
     help="Number of processes to use. Note the max number of processes is " "determined by the number of CPUs.",
     required=True,
 )
-@click.option("adata_path")
-@click.option("coords_key", default="spatial")
+@click.option("-adata_path")
+@click.option("-coords_key", default="spatial")
 @click.option(
-    "group_key",
+    "-group_key",
     default="cell_type",
     help="Key to entry in .obs containing cell type "
     "or other category labels. Required if "
     "'mod_type' is 'niche' or 'slice'.",
 )
 @click.option(
-    "group_subset",
+    "-group_subset",
     required=False,
     multiple=True,
     help="If provided, only cells with labels that correspond to these group(s) will be used as prediction targets.",
 )
 @click.option(
-    "csv_path",
+    "-csv_path",
     required=False,
     help="Can be used to provide a .csv file, containing gene expression data or any other kind of data. "
     "Assumes the first three columns contain x- and y-coordinates and then dependent variable "
     "values, in that order.",
 )
 @click.option(
-    "n_spatial_dim_csv",
+    "-n_spatial_dim_csv",
     default=2,
     help="If csv_path is provided, this argument specifies the number of spatial dimensions (e.g. 2 for X-Y, "
     "3 for X-Y-Z) in the data.",
 )
 @click.option(
-    "subsample",
+    "-subsample",
     default=False,
     is_flag=True,
     help="Recommended for large datasets (>5000 samples), " "otherwise model fitting is quite slow.",
 )
-@click.option("multiscale", default=False, is_flag=True)
+@click.option("-multiscale", default=False, is_flag=True)
 @click.option(
-    "mod_type",
+    "-mod_type",
     default="niche",
     help="If adata_path is provided, one of the STGWR models " "will be used. Options: 'niche', 'lr', 'slice'.",
 )
-@click.option("grn", default=False, is_flag=True)
-@click.option("cci_dir", required=True)
-@click.option("species", default="human")
+@click.option("-grn", default=False, is_flag=True)
+@click.option("-cci_dir", required=True)
+@click.option("-species", default="human")
 @click.option(
-    "output_path",
+    "-output_path",
     default="./output/stgwr_results.csv",
     help="Path to output file. Make sure the parent " "directory is empty- any existing files will " "be deleted.",
 )
-@click.option("custom_lig_path", required=False)
-@click.option("ligand", required=False, multiple=True)
-@click.option("custom_rec_path", required=False)
-@click.option("receptor", required=False, multiple=True)
-@click.option("custom_pathways_path", required=False)
-@click.option("pathway", required=False, multiple=True)
-@click.option("targets_path", required=False)
-@click.option("target", required=False, multiple=True)
+@click.option("-custom_lig_path", required=False)
+@click.option("-ligand", required=False, multiple=True)
+@click.option("-custom_rec_path", required=False)
+@click.option("-receptor", required=False, multiple=True)
+@click.option("-custom_pathways_path", required=False)
+@click.option("-pathway", required=False, multiple=True)
+@click.option("-targets_path", required=False)
+@click.option("-target", required=False, multiple=True)
 @click.option(
-    "target_expr_threshold",
+    "-target_expr_threshold",
     default=0.2,
     help="For automated selection, the threshold "
     "proportion of cells for which transcript "
@@ -90,18 +90,18 @@ def main():
     "Not used if 'targets_path' is not None.",
 )
 @click.option(
-    "multicollinear_threshold",
+    "-multicollinear_threshold",
     required=False,
     help="Used only if `mod_type` is 'slice'. If this argument is provided, independent variables that are highly "
     "correlated will be filtered out based on variance inflation factor threshold. A value of 5 or 10 is "
     "recommended. This can be useful in reducing computation time.",
 )
-@click.option("init_betas_path", required=False)
-@click.option("normalize", default=False, is_flag=True)
-@click.option("smooth", default=False, is_flag=True)
-@click.option("log_transform", default=False, is_flag=True)
+@click.option("-init_betas_path", required=False)
+@click.option("-normalize", default=False, is_flag=True)
+@click.option("-smooth", default=False, is_flag=True)
+@click.option("-log_transform", default=False, is_flag=True)
 @click.option(
-    "normalize_signaling",
+    "-normalize_signaling",
     default=False,
     is_flag=True,
     help="For ligand, receptor or L:R models, "
@@ -110,7 +110,7 @@ def main():
     "may be mediated by rarer signals.",
 )
 @click.option(
-    "covariate_keys",
+    "-covariate_keys",
     required=False,
     multiple=True,
     help="Any number of keys to entry in .obs or "
@@ -118,11 +118,11 @@ def main():
     "AnnData object. Values here will be added to"
     "the model as covariates.",
 )
-@click.option("bw", required=False)
-@click.option("minbw", required=False)
-@click.option("maxbw", required=False)
+@click.option("-bw", required=False)
+@click.option("-minbw", required=False)
+@click.option("-maxbw", required=False)
 @click.option(
-    "bw_fixed",
+    "-bw_fixed",
     default=False,
     is_flag=True,
     help="If this argument is provided, the bandwidth will be "
@@ -130,7 +130,7 @@ def main():
     "as the number of nearest neighbors.",
 )
 @click.option(
-    "exclude_self",
+    "-exclude_self",
     default=False,
     is_flag=True,
     help="When computing spatial weights, do not count the "
@@ -138,12 +138,21 @@ def main():
     "True for the CCI models because the independent "
     "variable array is also spatially-dependent.",
 )
-@click.option("kernel", default="bisquare")
-@click.option("distr", default="gaussian")
-@click.option("n_neighbors", default=10)
-@click.option("fit_intercept", default=False, is_flag=True)
+@click.option("-kernel", default="bisquare")
+@click.option("-distr", default="gaussian")
+@click.option("-n_neighbors_membrane_bound", default=8)
+@click.option("-n_neighbors_secreted", default=25)
 @click.option(
-    "include_offset",
+    "-use_expression_neighbors_only",
+    default=False,
+    is_flag=True,
+    help="The default for finding spatial neighborhoods for the modeling process is to use neighbors in "
+    "physical space, and turn to expression space if there is not enough signal in the physical "
+    "neighborhood. If this argument is provided, only expression will be used to find neighbors.",
+)
+@click.option("-fit_intercept", default=False, is_flag=True)
+@click.option(
+    "-include_offset",
     default=False,
     is_flag=True,
     help="Set True to include offset to account for "
@@ -151,41 +160,41 @@ def main():
     "True, will compute scaling factor using trimmed "
     "mean of M-value with singleton pairing (TMMswp).",
 )
-@click.option("no_hurdle", default=False, is_flag=True)
-@click.option("tolerance", default=1e-3)
-@click.option("max_iter", default=1000)
+@click.option("-no_hurdle", default=False, is_flag=True)
+@click.option("-tolerance", default=1e-3)
+@click.option("-max_iter", default=1000)
 @click.option(
-    "patience",
+    "-patience",
     default=5,
     help="Number of iterations to wait before stopping if parameters have "
     "stabilized. Only used if `multiscale` is True.",
 )
-@click.option("ridge_lambda", required=False)
+@click.option("-ridge_lambda", required=False)
 
 # Downstream analysis arguments
-@click.option("search_bw", default=10)
+@click.option("-search_bw", default=10)
 @click.option(
-    "top_k_receivers",
+    "-top_k_receivers",
     default=10,
     help="Used for :func `infer_effect_direction`; specifies the number of top "
     "senders/receivers to consider for each cell.",
 )
 @click.option(
-    "filter_targets",
+    "-filter_targets",
     default=False,
     is_flag=True,
     help="Used for :func `infer_effect_direction`; if True, will subset to only "
     "the targets that were predicted well by the model.",
 )
 @click.option(
-    "filter_target_threshold",
+    "-filter_target_threshold",
     default=0.65,
     help="Used for :func `infer_effect_direction`; specifies the "
     "threshold "
     "Pearson coefficient for target subsetting. Only used if `filter_targets` is True.",
 )
 @click.option(
-    "diff_sending_or_receiving",
+    "-diff_sending_or_receiving",
     default="sending",
     help="Used for :func `sender_receiver_effect_deg_detection`; specifies "
     "whether to compute differential expression of genes in cells with high or low sending effect potential "
@@ -288,7 +297,9 @@ def run(
     bw_fixed,
     exclude_self,
     kernel,
-    n_neighbors,
+    n_neighbors_membrane_bound,
+    n_neighbors_secreted,
+    use_expression_neighbors_only,
     distr,
     fit_intercept,
     include_offset,
@@ -368,8 +379,14 @@ def run(
             set to True for the CCI models because the independent variable array is also spatially-dependent.
         kernel: Kernel to use for spatial weights. Options: 'bisquare', 'quadratic', 'gaussian', 'triangular',
             'uniform', 'exponential'.
-        n_neighbors: Only used if `mod_type` is 'niche', to define the number of neighbors  to consider for each
-            cell when defining the independent variable array
+        n_neighbors_membrane_bound: Only used if `mod_type` is 'niche', to define the number of neighbors  to consider
+            for each cell when defining the independent variable array; used for membrane-bound ligands. Defaults to 8.
+        n_neighbors_secreted: Only used if `mod_type` is 'niche', to define the number of neighbors  to consider
+            for each cell when defining the independent variable array; used for secreted and ECM ligands. Defaults
+            to 25.
+        use_expression_neighbors_only: The default for finding spatial neighborhoods for the modeling process is to
+            use neighbors in physical space, and turn to expression space if there is not enough signal in the physical
+            neighborhood. If this argument is provided, only expression will be used to find neighbors.
         distr: Distribution to use for spatial weights. Options: 'gaussian', 'poisson', 'nb'.
         fit_intercept: If True, will include intercept in model
         include_offset: If True, include offset to account for differences in library size in predictions. If True,
@@ -385,7 +402,7 @@ def run(
 
 
         search_bw: Used for downstream analyses; specifies the bandwidth to search for senders/receivers.
-            Recommended to set equal to the `n_neighbors` argument given during model fitting.
+            Recommended to set equal to the `n_neighbors_membrane_bound` argument given during model fitting.
         top_k_receivers: Used for downstream analyses, specifically :func `infer_effect_direction`; if True,
             will subset to only the targets that were predicted well by the model.
         filter_targets: Used for downstream analyses, specifically :func `infer_effect_direction`; if True,
@@ -526,8 +543,12 @@ def run(
         command += " -maxbw " + str(maxbw)
     if bw_fixed:
         command += " -bw_fixed "
-    if n_neighbors is not None:
-        command += "-n_neighbors"
+    if n_neighbors_membrane_bound is not None:
+        command += "-n_neighbors_membrane_bound " + str(n_neighbors_membrane_bound)
+    if n_neighbors_secreted is not None:
+        command += "-n_neighbors_secreted " + str(n_neighbors_secreted)
+    if use_expression_neighbors_only:
+        command += " -use_expression_neighbors_only "
     if exclude_self:
         command += " -exclude_self "
     if fit_intercept:

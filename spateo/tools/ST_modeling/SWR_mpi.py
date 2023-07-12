@@ -7,15 +7,9 @@ from typing import List, Set, Tuple
 import numpy as np
 from mpi4py import MPI
 
-# For testing:
-# For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
-sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
-
-from spateo.logging import logger_manager as lm
-from spateo.plotting.static.space import plot_cell_signaling
-from spateo.tools.ST_modeling.MuSIC import MuSIC, VMuSIC
-from spateo.tools.ST_modeling.MuSIC_downstream import MuSIC_Interpreter
-from spateo.tools.ST_modeling.MuSIC_upstream import MuSIC_target_selector
+from ...logging import logger_manager as lm
+from .MuSIC import MuSIC, VMuSIC
+from .MuSIC_upstream import MuSIC_target_selector
 
 np.random.seed(888)
 random.seed(888)
@@ -118,15 +112,12 @@ def define_spateo_argparse(**kwargs):
 
         kernel: Type of kernel function used to weight observations; one of "bisquare", "exponential", "gaussian",
             "quadratic", "triangular" or "uniform".
-        n_neighbors: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the neighboring
-            cells- this defines the number of cells to use. A value of 10 should typically capture the region where
-            the majority of the signaling is sourced from.
+        n_neighbors_membrane_bound: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the
+            neighboring cells- this defines the number of cells to use for membrane-bound ligands. Defaults to 8.
+        n_neighbors_secreted: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the
+            neighboring cells- this defines the number of cells to use for secreted or ECM ligands.
         distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb"
-
-
         fit_intercept: Flag to fit an intercept term in the model. Will be set to True if provided.
-        no_hurdle: By default, a hurdle model will be used to account for the zero-inflated nature of single-cell
-            data. To skip this step, set this flag.
 
 
         tolerance: Convergence tolerance for IWLS
@@ -324,19 +315,26 @@ def define_spateo_argparse(**kwargs):
             "True for the CCI models because the independent variable array is also spatially-dependent.",
         },
         "-kernel": {"default": "bisquare", "type": str},
-        "-n_neighbors": {
-            "default": 10,
+        "-use_expression_neighbors_only": {
+            "action": "store_true",
+            "help": "The default for finding spatial neighborhoods for the modeling process is to use neighbors in "
+            "physical space, and turn to expression space if there is not enough signal in the physical "
+            "neighborhood. If this argument is provided, only expression will be used to find neighbors.",
+        },
+        "-n_neighbors_membrane_bound": {
+            "default": 8,
             "type": int,
             "help": "Only used if `mod_type` is 'niche', to define the number of neighbors to consider for each "
-            "cell when defining the independent variable array.",
+            "cell when defining the independent variable array for membrane-bound ligands.",
+        },
+        "-n_neighbors_secreted": {
+            "default": 25,
+            "type": int,
+            "help": "Only used if `mod_type` is 'niche', to define the number of neighbors to consider for each "
+            "cell when defining the independent variable array for secreted or ECM ligands.",
         },
         "-distr": {"default": "gaussian", "type": str},
         "-fit_intercept": {"action": "store_true"},
-        "-no_hurdle": {
-            "action": "store_true",
-            "help": "If True, do not implement spatially-weighted hurdle model- will only perform generalized linear "
-            "modeling.",
-        },
         "-tolerance": {"default": 1e-3, "type": float},
         "-max_iter": {"default": 500, "type": int},
         "-patience": {"default": 5, "type": int},
@@ -638,11 +636,27 @@ if __name__ == "__main__":
     )
     parser.add_argument("-kernel", default="bisquare", type=str)
     parser.add_argument(
-        "-n_neighbors",
-        default=10,
+        "-n_neighbors_membrane_bound",
+        default=8,
         type=int,
         help="Only used if `mod_type` is 'niche', to define the number of neighbors "
-        "to consider for each cell when defining the independent variable array.",
+        "to consider for each cell when defining the independent variable array for "
+        "membrane-bound ligands.",
+    )
+    parser.add_argument(
+        "-n_neighbors_secreted",
+        default=25,
+        type=int,
+        help="Only used if `mod_type` is 'niche', to define the number of neighbors "
+        "to consider for each cell when defining the independent variable array for "
+        "secreted or ECM ligands.",
+    )
+    parser.add_argument(
+        "-use_expression_neighbors_only",
+        action="store_true",
+        help="The default for finding spatial neighborhoods for the modeling process is to use neighbors in "
+        "physical space, and turn to expression space if there is not enough signal in the physical "
+        "neighborhood. If this argument is provided, only expression will be used to find neighbors.",
     )
 
     parser.add_argument("-distr", default="gaussian", type=str)

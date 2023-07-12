@@ -486,7 +486,7 @@ def find_optimal_n_umap_components(X_data: np.ndarray, max_n_components: Optiona
     for n_components in range(2, max_n_components + 1):
         umap_params["n_components"] = n_components
         _, _, _, embedding = umap_conn_indices_dist_embedding(X_data, **umap_params)
-        clusters = calculate_leiden_partition(input_mat=embedding, num_neighbors=20, graph_type="embedding")
+        clusters = calculate_leiden_partition(input_mat=embedding, num_neighbors=10, graph_type="embedding")
 
         # Compute silhouette score:
         score = silhouette_score(embedding, clusters)

@@ -21,20 +21,13 @@ from sklearn.inspection import permutation_importance
 from sklearn.metrics import r2_score
 from sklearn.utils import check_random_state
 
-# For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
-sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
-
-from spateo.logging import logger_manager as lm
-from spateo.preprocessing import log1p, normalize_total
-from spateo.preprocessing.normalize import factor_normalization
-from spateo.tools.find_neighbors import get_wi, neighbors
-from spateo.tools.gene_expression_variance import get_highvar_genes_sparse
-from spateo.tools.ST_modeling.MuSIC import MuSIC
-from spateo.tools.ST_modeling.regression_utils import (
-    multicollinearity_check,
-    multitesting_correction,
-    smooth,
-)
+from ...logging import logger_manager as lm
+from ...preprocessing import log1p, normalize_total
+from ...preprocessing.normalize import factor_normalization
+from ..find_neighbors import get_wi, neighbors
+from ..gene_expression_variance import get_highvar_genes_sparse
+from .MuSIC import MuSIC
+from .regression_utils import multicollinearity_check, multitesting_correction, smooth
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -379,6 +372,8 @@ class MuSIC_target_selector:
         if self.mod_type == "ligand" or self.mod_type == "lr":
             # Subset to ligands that are known to interact with any of the receptors:
             "filler"
+
+        # Filter out receptors that do not have corresponding ligands that were measured in the dataset
 
         if self.mod_type == "ligand":
             regulators = all_ligands
