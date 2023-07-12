@@ -1652,7 +1652,7 @@ class MuSIC:
             fixed_bw=self.bw_fixed,
             kernel=self.kernel,
             bw=bw,
-            use_expr_neighbors_only=self.use_expr_neighbors_only,
+            use_expression_neighbors_only=self.use_expression_neighbors_only,
         ).reshape(-1, 1)
 
         if mask_indices is not None:
