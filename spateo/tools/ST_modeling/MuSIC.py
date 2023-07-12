@@ -615,6 +615,49 @@ class MuSIC:
         if adata is None:
             adata = self.adata.copy()
 
+        # Load databases if applicable:
+        if self.mod_type in ["lr", "ligand", "receptor"]:
+            if self.species == "human":
+                try:
+                    self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                except FileNotFoundError:
+                    raise FileNotFoundError(
+                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                    )
+                except IOError:
+                    raise IOError(
+                        "Issue reading L:R database. Files can be downloaded from "
+                        "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
+                    )
+
+                self.r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
+                tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_target_db.csv"), index_col=0)
+                self.grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
+            elif self.species == "mouse":
+                try:
+                    self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+                except FileNotFoundError:
+                    raise FileNotFoundError(
+                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                    )
+                except IOError:
+                    raise IOError(
+                        "Issue reading L:R database. Files can be downloaded from "
+                        "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
+                    )
+
+                self.r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
+                tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_target_db.csv"), index_col=0)
+                self.grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
+            else:
+                raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
+
+            self.grn = self.comm.bcast(self.grn, root=0)
+            self.r_tf_db = self.comm.bcast(self.r_tf_db, root=0)
+            self.lr_db = self.comm.bcast(self.lr_db, root=0)
+
+            database_pathways = set(self.lr_db["pathway"])
+
         # Check for existing design matrix:
         if os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv")):
             self.logger.info(
@@ -669,42 +712,6 @@ class MuSIC:
                 ]
 
             # Ligand-receptor expression arrays:
-            elif self.mod_type in ["lr", "ligand", "receptor"]:
-                if self.species == "human":
-                    try:
-                        self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
-                    except FileNotFoundError:
-                        raise FileNotFoundError(
-                            f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
-                        )
-                    except IOError:
-                        raise IOError(
-                            "Issue reading L:R database. Files can be downloaded from "
-                            "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
-                        )
-
-                    r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
-                    tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_target_db.csv"), index_col=0)
-                elif self.species == "mouse":
-                    try:
-                        self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
-                    except FileNotFoundError:
-                        raise FileNotFoundError(
-                            f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
-                        )
-                    except IOError:
-                        raise IOError(
-                            "Issue reading L:R database. Files can be downloaded from "
-                            "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
-                        )
-
-                    r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
-                    tf_target_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_target_db.csv"), index_col=0)
-                else:
-                    raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
-
-                database_pathways = set(self.lr_db["pathway"])
-
             if self.mod_type == "lr" or self.mod_type == "ligand":
                 database_ligands = set(self.lr_db["from"])
 
@@ -1043,7 +1050,7 @@ class MuSIC:
             # Else get targets by connecting to the targets of the L:R-downstream transcription factors:
             else:
                 # Get the targets of the L:R-downstream transcription factors:
-                tf_subset = r_tf_db[r_tf_db["receptor"].isin(self.receptors_expr.columns)]
+                tf_subset = self.r_tf_db[self.r_tf_db["receptor"].isin(self.receptors_expr.columns)]
                 tfs = set(tf_subset["tf"])
                 tfs = [tf for tf in tfs if tf in adata.var_names]
                 # Subset to TFs that are expressed in > threshold number of cells:
@@ -1170,6 +1177,32 @@ class MuSIC:
                 if self.multicollinear_threshold is not None:
                     X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
+                # For L:R models only- for each receptor, keep its features independent only if there is low overlap
+                # between the features (all coexpressed in < 33% of the cells spanned by the interaction set). For
+                # those which the overlap is high, combine all ligands into a single feature by taking the geometric
+                # mean:
+                ligand_receptor = X_df.columns.str.split(":", expand=True)
+                ligand_receptor.columns = ["ligand", "receptor"]
+                # Unique receptors:
+                unique_receptors = ligand_receptor["receptor"].unique()
+
+                # For each receptor, compute the fraction of cells in which each cognate ligand is coupled to the
+                # receptor:
+                for receptor in unique_receptors:
+                    receptor_cols = ligand_receptor.loc[ligand_receptor["receptor"] == receptor].index
+                    # Calculate overlap
+                    overlap = (X_df[receptor_cols] != 0).all(axis=1).mean()
+                    # If overlap is less than 33%, combine columns
+                    if overlap < 0.33:
+                        combined_ligand = "/".join(ligand_receptor.loc[receptor_cols, "ligand"])
+                        combined_col = f"{combined_ligand}:{receptor}"
+                        # Geometric mean of all relevant columns:
+                        X_df[combined_col] = X_df[receptor_cols].apply(lambda x: x.prod() ** (1 / len(parts)), axis=1)
+                        # Drop the original columns:
+                        X_df.drop(receptor_cols, axis=1, inplace=True)
+
+                self.logger.info(f"\n\nAfter final processing, final set of L:R features:\n {list(X_df.columns)}")
+
                 # Log-scale to reduce the impact of "denser" neighborhoods:
                 X_df = X_df.applymap(np.log1p)
                 # Normalize the data to prevent numerical overflow:
@@ -1265,7 +1298,7 @@ class MuSIC:
         if self.mod_type == "lr":
             self.feature_names = [pair.split(":")[0] + ":" + pair.split(":")[1] for pair in X_df.columns]
         else:
-            self.feature_names = X_df.columns
+            self.feature_names = list(X_df.columns)
         # (For interpretability in downstream analyses) update ligand names/receptor names to reflect the final
         # molecules used:
         if self.mod_type == "ligand":
@@ -1864,6 +1897,7 @@ class MuSIC:
         self,
         y: Optional[np.ndarray],
         X: Optional[np.ndarray],
+        X_labels: Optional[List[str]],
         y_label: str,
         bw: Union[float, int],
         coords: Optional[np.ndarray] = None,
@@ -1879,6 +1913,8 @@ class MuSIC:
             y: Response variable
             X: Independent variable array- if not given, will default to :attr `X`. Note that if object was initialized
                 using an AnnData object, this will be overridden with :attr `X` even if a different array is given.
+            X_labels: Optional list of labels for the features in the X array. Needed if :attr `X` passed to the
+                function is not identical to the dependent variable array compiled in preprocessing.
             y_label: Used to provide a unique ID for the dependent variable for saving purposes and to query keys
                 from various dictionaries
             bw: Bandwidth for the spatial kernel
@@ -1895,8 +1931,11 @@ class MuSIC:
         if X.shape[1] != self.n_features:
             n_features = X.shape[1]
             n_features = self.comm.bcast(n_features, root=0)
+            X_labels = X_labels
+            X_labels = self.comm.bcast(X_labels, root=0)
         else:
             n_features = self.n_features
+            X_labels = self.feature_names
         n_samples = X.shape[0]
 
         if final:
@@ -1967,7 +2006,7 @@ class MuSIC:
                     header = "index,residual,influence,"
                     deviance = None
 
-                    varNames = self.feature_names
+                    varNames = X_labels
                     # Columns for the possible intercept, coefficients and squared canonical coefficients:
                     for x in varNames:
                         header += "b_" + x + ","
@@ -1991,9 +2030,9 @@ class MuSIC:
                     ll = self.distr_obj.log_likelihood(y, all_fit_outputs[:, 1].reshape(-1, 1))
                     # ENP:
                     if self.fit_intercept:
-                        ENP = self.n_features + 1
+                        ENP = n_features + 1
                     else:
-                        ENP = self.n_features
+                        ENP = n_features
 
                     # Corrected Akaike Information Criterion:
                     aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
@@ -2004,7 +2043,7 @@ class MuSIC:
                     header = "index,prediction,influence,"
                     r_squared = None
 
-                    varNames = self.feature_names
+                    varNames = X_labels
                     # Columns for the possible intercept, coefficients and squared canonical coefficients:
                     for x in varNames:
                         header += "b_" + x + ","
@@ -2162,6 +2201,20 @@ class MuSIC:
             if y.ndim == 1:
                 y = y.reshape(-1, 1)
 
+            # If model is based on ligands/receptors: filter X based on the prior knowledge network:
+            if self.mod_type in ["lr", "receptor"]:
+                target_row = self.grn.loc[target]
+                target_TFs = target_row[target_row == 1].index.tolist()
+                temp = self.r_tf_db[self.r_tf_db["tf"].isin(target_TFs)]
+                target_receptors = temp["receptor"].unique().tolist()
+
+                # Keep only the columns of X that contain any of the receptors for this target:
+                keep_indices = [
+                    i for i, feat in enumerate(self.feature_names) if any(r in feat for r in target_receptors)
+                ]
+                X_labels = [self.feature_names[idx] for idx in keep_indices]
+                X = X[:, keep_indices]
+
             # If subsampled, define the appropriate chunk of the right subsampled array for this process:
             if self.subsampled:
                 n_samples = self.n_samples_subsampled[target]
@@ -2225,6 +2278,7 @@ class MuSIC:
                 self.mpi_fit(
                     y,
                     X,
+                    X_labels=X_labels,
                     y_label=target,
                     bw=self.bw,
                     coords=self.coords,

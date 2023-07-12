@@ -234,7 +234,7 @@ class Kernel(object):
 
         if use_expression_neighbors_only:
             self.dist_vector = local_dist(expr_mat[i], expr_mat).reshape(-1)
-            self.function = function.lower()
+            self.function = "uniform"
             if cov is not None:
                 max_dist = np.max(self.dist_vector)
                 self.dist_vector[cov == 0] = max_dist

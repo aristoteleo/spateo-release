@@ -320,8 +320,8 @@ def iwls(
             w_final = np.zeros_like(y)
             linear_predictor = np.zeros_like(y)
             adjusted_predictor = np.zeros_like(y)
-            pseudoinverse = np.zeros((x.shape[0], x.shape[0]))
-            inv = np.zeros((x.shape[0], x.shape[0]))
+            pseudoinverse = np.zeros((x.shape[1], x.shape[0]))
+            inv = np.zeros((x.shape[1], x.shape[1]))
             return betas, y_hat, n_iter, w_final, linear_predictor, adjusted_predictor, pseudoinverse, inv
 
     # Initialization:
