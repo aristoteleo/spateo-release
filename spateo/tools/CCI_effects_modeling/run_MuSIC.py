@@ -9,7 +9,7 @@ import click
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 # sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
-from ...tools import ST_modeling as fast_swr
+from ...tools import CCI_effects_modeling as fast_swr
 
 
 @click.group()

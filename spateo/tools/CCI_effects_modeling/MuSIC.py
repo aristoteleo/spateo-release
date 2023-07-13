@@ -807,12 +807,6 @@ class MuSIC:
                 # Log-scale ligand expression- to reduce the impact of very large values:
                 self.ligands_expr = self.ligands_expr.applymap(np.log1p)
 
-                # Normalize ligand expression to be between 0 and 1:
-                if self.normalize_signaling:
-                    self.ligands_expr = self.ligands_expr.apply(
-                        lambda column: (column - column.min()) / (column.max() - column.min())
-                    )
-
                 # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
                 # but store them in a temporary list to do so later because some may contribute to multiple complexes:
                 to_drop = []
@@ -940,12 +934,11 @@ class MuSIC:
 
                 # Normalize receptor expression if applicable:
                 if self.normalize_signaling:
-                    self.receptors_expr = self.receptors_expr.apply(
-                        lambda column: (column - column.min()) / (column.max() - column.min())
-                    )
-                # elif self.ridge_lambda is None:
-                #     self.receptors_expr = (self.receptors_expr - self.receptors_expr.min().min()) / (
-                #             self.receptors_expr.max().max() - self.receptors_expr.min().min())
+                    # self.receptors_expr = self.receptors_expr.apply(
+                    #     lambda column: (column - column.min()) / (column.max() - column.min())
+                    # )
+                    self.receptors_expr = (self.receptors_expr - self.receptors_expr.min().min()) / (
+                            self.receptors_expr.max().max() - self.receptors_expr.min().min())
 
                 # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
                 # but store them in a temporary list to do so later because some may contribute to multiple complexes:
@@ -1107,6 +1100,14 @@ class MuSIC:
                     lagged_expr_mat, index=adata.obs_names, columns=self.ligands_expr.columns
                 )
 
+                # Normalize ligand expression to be between 0 and 1:
+                if self.normalize_signaling:
+                    # self.ligands_expr = self.ligands_expr.apply(
+                    #     lambda column: (column - column.min()) / (column.max() - column.min())
+                    # )
+                    self.ligands_expr = (self.ligands_expr - self.ligands_expr.min().min()) / (
+                            self.ligands_expr.max().max() - self.ligands_expr.min().min())
+
             # Set independent variable array based on input given as "mod_type":
             if self.mod_type == "niche":
                 # Compute spatial weights matrix- use n_neighbors and exclude_self from the argparse (defaults to 10).
@@ -1184,17 +1185,19 @@ class MuSIC:
                 ligand_receptor = X_df.columns.str.split(":", expand=True)
                 ligand_receptor.columns = ["ligand", "receptor"]
                 # Unique receptors:
-                unique_receptors = ligand_receptor["receptor"].unique()
+                unique_receptors = ligand_receptor.get_level_values(1).unique()
 
                 # For each receptor, compute the fraction of cells in which each cognate ligand is coupled to the
                 # receptor:
                 for receptor in unique_receptors:
-                    receptor_cols = ligand_receptor.loc[ligand_receptor["receptor"] == receptor].index
+                    receptor_rows = [idx for idx in ligand_receptor if idx[1] == receptor]
+                    receptor_cols = [f"{row[0]}:{row[1]}" for row in receptor_rows]
+                    ligands = [row[0] for row in receptor_rows]
                     # Calculate overlap
                     overlap = (X_df[receptor_cols] != 0).all(axis=1).mean()
                     # If overlap is less than 33%, combine columns
-                    if overlap < 0.33:
-                        combined_ligand = "/".join(ligand_receptor.loc[receptor_cols, "ligand"])
+                    if len(receptor_cols) > 1 and overlap < 0.33:
+                        combined_ligand = "/".join(ligands)
                         combined_col = f"{combined_ligand}:{receptor}"
                         # Geometric mean of all relevant columns:
                         X_df[combined_col] = X_df[receptor_cols].apply(lambda x: x.prod() ** (1 / len(parts)), axis=1)
@@ -1206,7 +1209,10 @@ class MuSIC:
                 # Log-scale to reduce the impact of "denser" neighborhoods:
                 X_df = X_df.applymap(np.log1p)
                 # Normalize the data to prevent numerical overflow:
-                X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
+                #X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
+                X_df = X_df.apply(
+                    lambda column: (column - column.min()) / (column.max() - column.min())
+                )
 
             elif self.mod_type == "ligand" or self.mod_type == "receptor":
                 if self.mod_type == "ligand":
@@ -1897,7 +1903,7 @@ class MuSIC:
         self,
         y: Optional[np.ndarray],
         X: Optional[np.ndarray],
-        X_labels: Optional[List[str]],
+        X_labels: List[str],
         y_label: str,
         bw: Union[float, int],
         coords: Optional[np.ndarray] = None,
@@ -2214,6 +2220,8 @@ class MuSIC:
                 ]
                 X_labels = [self.feature_names[idx] for idx in keep_indices]
                 X = X[:, keep_indices]
+            else:
+                X_labels = self.feature_names
 
             # If subsampled, define the appropriate chunk of the right subsampled array for this process:
             if self.subsampled:
@@ -2305,6 +2313,7 @@ class MuSIC:
                 y,
                 X,
                 y_label=target,
+                X_labels=X_labels,
                 bw=bw,
                 coords=self.coords,
                 mask_indices=mask_indices,
@@ -2325,6 +2334,7 @@ class MuSIC:
                 y,
                 X,
                 y_label=target,
+                X_labels=X_labels,
                 bw=optimal_bw,
                 coords=self.coords,
                 mask_indices=mask_indices,

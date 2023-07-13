@@ -4,7 +4,7 @@ import scipy.stats as stats
 import statsmodels.api as sm
 from scipy import special
 
-from spateo.tools.ST_modeling.distributions import NegativeBinomial, Poisson
+from spateo.tools.CCI_effects_modeling.distributions import NegativeBinomial, Poisson
 
 """
 a = np.random.randint(1, 5, (10,))
