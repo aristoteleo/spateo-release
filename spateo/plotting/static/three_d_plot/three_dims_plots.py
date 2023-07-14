@@ -743,6 +743,7 @@ def merge_animations(
     mp4_files: Optional[list] = None,
     mp4_folder: Optional[list] = None,
     filename: str = "merged_animation.mp4",
+    fps: int = 25,
 ):
     """
     Use MoviePy to compose a new animation and play multiple animations together in the new animation.
@@ -751,6 +752,7 @@ def merge_animations(
         mp4_files: A list containing absolute paths to mp4 files that need to be played together.
         mp4_folder: Absolute path to the folder containing all mp4 files that need to be played together. If ``mp4_files`` is provided, ``mp4_folder`` cannot also be provided.
         filename: Absolute path to save the newly composed animation.
+        fps: Number of frames per second in the resulting video file. If None is provided, and the clip has an fps attribute, this fps will be used.
 
     Examples:
         st.pl.merge_animations(mp4_files=["animation1.mp4", "animation2.mp4"], filename=f"merged_animation.mp4")
@@ -784,4 +786,4 @@ def merge_animations(
         raise ValueError("One of ``mp4_files`` and ``mp4_folder`` must be None.")
 
     final_clip = concatenate_videoclips(clips)
-    final_clip.write_videofile(filename)
+    final_clip.write_videofile(filename, fps=fps)
