@@ -24,10 +24,10 @@ def morpho_align(
     mode: Literal["SN-N", "SN-S"] = "SN-S",
     dissimilarity: str = "kl",
     max_iter: int = 100,
+    SVI_mode: bool = True,
     dtype: str = "float64",
     device: str = "cpu",
     verbose: bool = True,
-    SVI_mode: bool = False,
     **kwargs,
 ) -> Tuple[List[AnnData], List[np.ndarray], List[np.ndarray]]:
     """
@@ -41,9 +41,13 @@ def morpho_align(
         key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         iter_key_added: ``.uns`` key under which to add the result of each iteration of the iterative process. If ``iter_key_added``  is None, the results are not saved.
         vecfld_key_added: The key that will be used for the vector field key in ``.uns``. If ``vecfld_key_added`` is None, the results are not saved.
-        mode: The method of alignment. Available ``mode`` are: ``'SN-N'``, and ``'SN-S'``. ``'SN-N'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a non-rigid aligned result; ``'SN-S'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a rigid aligned result. The non-rigid is used here to solve the optimal mapping, thus returning a more accurate rigid transformation. The default is ``'SN-S'``.
+        mode: The method of alignment. Available ``mode`` are: ``'SN-N'``, and ``'SN-S'``.
+
+                * ``'SN-N'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a non-rigid aligned result;
+                * ``'SN-S'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a rigid aligned result. The non-rigid is used here to solve the optimal mapping, thus returning a more accurate rigid transformation. The default is ``'SN-S'``.
         dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
         max_iter: Max number of iterations for morpho alignment.
+        SVI_mode: Whether to use stochastic variational inferential (SVI) optimization strategy.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
         device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
         verbose: If ``True``, print progress updates.
@@ -77,13 +81,13 @@ def morpho_align(
             iter_key_added=iter_key_added,
             vecfld_key_added=vecfld_key_added,
             layer=layer,
-            # mode=mode,
             dissimilarity=dissimilarity,
             max_iter=max_iter,
             dtype=dtype,
             device=device,
             inplace=True,
             verbose=verbose,
+            SVI_mode=SVI_mode,
             **kwargs,
         )
         if mode == "SN-S":
@@ -111,6 +115,7 @@ def morpho_align_ref(
     mode: Literal["SN-N", "SN-S"] = "SN-S",
     dissimilarity: str = "kl",
     max_iter: int = 100,
+    SVI_mode: bool = True,
     return_full_assignment: bool = True,
     dtype: str = "float64",
     device: str = "cpu",
@@ -131,9 +136,13 @@ def morpho_align_ref(
         key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         iter_key_added: ``.uns`` key under which to add the result of each iteration of the iterative process. If ``iter_key_added``  is None, the results are not saved.
         vecfld_key_added: The key that will be used for the vector field key in ``.uns``. If ``vecfld_key_added`` is None, the results are not saved.
-        mode: The method of alignment. Available ``mode`` are: ``'SN-N'``, and ``'SN-S'``. ``'SN-N'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a non-rigid aligned result; ``'SN-S'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a rigid aligned result. The non-rigid is used here to solve the optimal mapping, thus returning a more accurate rigid transformation. The default is ``'SN-S'``.
+        mode: The method of alignment. Available ``mode`` are: ``'SN-N'``, and ``'SN-S'``.
+
+                * ``'SN-N'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a non-rigid aligned result;
+                * ``'SN-S'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a rigid aligned result. The non-rigid is used here to solve the optimal mapping, thus returning a more accurate rigid transformation. The default is ``'SN-S'``.
         dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
         max_iter: Max number of iterations for morpho alignment.
+        SVI_mode: Whether to use stochastic variational inferential (SVI) optimization strategy.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
         device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
         verbose: If ``True``, print progress updates.
@@ -177,9 +186,9 @@ def morpho_align_ref(
             iter_key_added=iter_key_added,
             vecfld_key_added=vecfld_key_added,
             layer=layer,
-            # mode=mode,
             dissimilarity=dissimilarity,
             max_iter=max_iter,
+            SVI_mode=SVI_mode,
             dtype=dtype,
             device=device,
             inplace=True,

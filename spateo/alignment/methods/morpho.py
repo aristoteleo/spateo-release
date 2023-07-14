@@ -222,13 +222,11 @@ def BA_align(
     iter_key_added: Optional[str] = "iter_spatial",
     vecfld_key_added: Optional[str] = "VecFld_morpho",
     layer: str = "X",
-    mode: Literal["S", "N", "SN", "NS"] = "SN",
     dissimilarity: str = "kl",
     keep_size: bool = False,
     max_iter: int = 200,
     lambdaVF: Union[int, float] = 1e2,
     beta: Union[int, float] = 0.01,
-    beta2: Optional[Union[int, float]] = None,
     K: Union[int, float] = 15,
     normalize_c: bool = True,
     normalize_g: bool = True,
@@ -253,13 +251,11 @@ def BA_align(
         iter_key_added: ``.uns`` key under which to add the result of each iteration of the iterative process. If ``iter_key_added`` is None, the results are not saved.
         vecfld_key_added: The key that will be used for the vector field key in ``.uns``. If ``vecfld_key_added`` is None, the results are not saved.
         layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
-        mode: The method of alignment. Available ``mode`` are: ``'S'``, ``'N'`` and ``'SN'``.
         dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
         small_variance: When approximating the assignment matrix, if True, we use small sigma2 (0.001) rather than the infered sigma2
         max_iter: Max number of iterations for morpho alignment.
         lambdaVF : Hyperparameter that controls the non-rigid distortion degree. Smaller means more flexibility.
         beta: The length-scale of the SE kernel. Higher means more flexibility.
-        beta2:
         K: The number of sparse inducing points used for Nystr ̈om approximation. Smaller means faster but less accurate.
         normalize_c: Whether to normalize spatial coordinates.
         normalize_g: Whether to normalize gene expression. If ``dissimilarity`` == ``'kl'``, ``normalize_g`` must be False.
@@ -275,15 +271,6 @@ def BA_align(
         partial_robust_level: The robust level of partial alignment. The larger the value, the more robust the alignment to partial cases is. Recommended setting from 1 to 50.
     """
     empty_cache(device=device)
-    # Check the method of alignment.
-    assert mode in [
-        "S",
-        "N",
-        "SN",
-    ], "``mode`` value is wrong. Available ``mode`` are: ``'S'``, ``'N'`` and ``'SN'``."
-    if mode == "NS":
-        mode = "SN"
-
     # Preprocessing
     normalize_g = False if dissimilarity == "kl" else normalize_g
     sampleA, sampleB = (sampleA, sampleB) if inplace else (sampleA.copy(), sampleB.copy())
@@ -299,8 +286,7 @@ def BA_align(
         device=device,
         verbose=verbose,
     )
-    if added_similarity is not None:
-        added_similarity = _data(nx, added_similarity, type_as)
+
     coordsA, coordsB = spatial_coords[1], spatial_coords[0]
     X_A, X_B = exp_matrices[1], exp_matrices[0]
     del spatial_coords, exp_matrices
@@ -394,7 +380,7 @@ def BA_align(
     R = _identity(nx, D, type_as)
     minGeneDistMat = nx.min(GeneDistMat, 1)
     # Automatically determine the value of beta2
-    beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 5 if beta2 is None else beta2
+    beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 5
     beta2_end = nx.max(minGeneDistMat) / 5
     del minGeneDistMat
     if sub_sample:
@@ -504,103 +490,90 @@ def BA_align(
         alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
 
         # Update VnA
-        if mode == "N":
-            term1 = _dot(nx)(
-                _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
-                U.T,
-            )
-            SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
-            Coff = _dot(nx)(term1, (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)))
-            VnA = _dot(nx)(
-                U,
-                Coff,
-            )
-        elif mode == "SN":
-            if (sigma2 < 0.015 and s > 0.95) or (iter > 80):
-                if SVI_mode:
-                    SigmaInv = (
-                        step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
-                        + (1 - step_size) * SigmaInv
-                    )
-                    term1 = _dot(nx)(_pinv(nx)(SigmaInv), U.T)
-                    PXB_term = (
-                        step_size * (_dot(nx)(P, randcoordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
-                        + (1 - step_size) * PXB_term
-                    )
-                    Coff = _dot(nx)(term1, PXB_term)
-                    VnA = _dot(nx)(
-                        U,
-                        Coff,
-                    )
-                    SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
-                else:
-                    term1 = _dot(nx)(
-                        _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
-                        U.T,
-                    )
-                    SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
-                    Coff = _dot(nx)(term1, (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)))
-                    VnA = _dot(nx)(
-                        U,
-                        Coff,
-                    )
+        if (sigma2 < 0.015 and s > 0.95) or (iter > 80):
+            if SVI_mode:
+                SigmaInv = (
+                    step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
+                    + (1 - step_size) * SigmaInv
+                )
+                term1 = _dot(nx)(_pinv(nx)(SigmaInv), U.T)
+                PXB_term = (
+                    step_size * (_dot(nx)(P, randcoordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
+                    + (1 - step_size) * PXB_term
+                )
+                Coff = _dot(nx)(term1, PXB_term)
+                VnA = _dot(nx)(
+                    U,
+                    Coff,
+                )
+                SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
+            else:
+                term1 = _dot(nx)(
+                    _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
+                    U.T,
+                )
+                SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
+                Coff = _dot(nx)(term1, (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)))
+                VnA = _dot(nx)(
+                    U,
+                    Coff,
+                )
 
         # Update R()
-        if mode == "S" or mode == "SN":
-            lambdaReg = 1e0 * Sp / nx.sum(inlier_P)
-            if SVI_mode:
-                PXA, PVA, PXB = (
-                    _dot(nx)(K_NA, coordsA)[None, :],
-                    _dot(nx)(K_NA, VnA)[None, :],
-                    _dot(nx)(K_NB, randcoordsB)[None, :],
+        lambdaReg = 1e0 * Sp / nx.sum(inlier_P)
+        if SVI_mode:
+            PXA, PVA, PXB = (
+                _dot(nx)(K_NA, coordsA)[None, :],
+                _dot(nx)(K_NA, VnA)[None, :],
+                _dot(nx)(K_NB, randcoordsB)[None, :],
+            )
+        else:
+            PXA, PVA, PXB = (
+                _dot(nx)(K_NA, coordsA)[None, :],
+                _dot(nx)(K_NA, VnA)[None, :],
+                _dot(nx)(K_NB, coordsB)[None, :],
+            )
+        PCYC, PCXC = _dot(nx)(inlier_P.T, inlier_B), _dot(nx)(inlier_P.T, inlier_A)
+        if SVI_mode and iter > 1:
+            t = (
+                step_size
+                * (
+                    ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T)))
+                    / (Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P))
                 )
-            else:
-                PXA, PVA, PXB = (
-                    _dot(nx)(K_NA, coordsA)[None, :],
-                    _dot(nx)(K_NA, VnA)[None, :],
-                    _dot(nx)(K_NB, coordsB)[None, :],
-                )
-            PCYC, PCXC = _dot(nx)(inlier_P.T, inlier_B), _dot(nx)(inlier_P.T, inlier_A)
-            if SVI_mode and iter > 1:
-                t = (
-                    step_size
-                    * (
-                        ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T)))
-                        / (Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P))
-                    )
-                    + (1 - step_size) * t
-                )
-            else:
-                t = ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T))) / (
-                    Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P)
-                )
-            if SVI_mode:
-                A = -(
-                    _dot(nx)(PXA.T, t)
-                    + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, randcoordsB))
-                    + 2
-                    * lambdaReg
-                    * sigma2
-                    * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
-                ).T
-            else:
-                A = -(
-                    _dot(nx)(PXA.T, t)
-                    + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, coordsB))
-                    + 2
-                    * lambdaReg
-                    * sigma2
-                    * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
-                ).T
+                + (1 - step_size) * t
+            )
+        else:
+            t = ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T))) / (
+                Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P)
+            )
+        if SVI_mode:
+            A = -(
+                _dot(nx)(PXA.T, t)
+                + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, randcoordsB))
+                + 2
+                * lambdaReg
+                * sigma2
+                * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
+            ).T
+        else:
+            A = -(
+                _dot(nx)(PXA.T, t)
+                + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, coordsB))
+                + 2
+                * lambdaReg
+                * sigma2
+                * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
+            ).T
 
-            svdU, svdS, svdV = _linalg(nx).svd(A)
-            C = _identity(nx, D, type_as)
-            C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
-            if SVI_mode and iter > 1:
-                R = step_size * (_dot(nx)(_dot(nx)(svdU, C), svdV)) + (1 - step_size) * R
-            else:
-                R = _dot(nx)(_dot(nx)(svdU, C), svdV)
-            RnA = s * _dot(nx)(coordsA, R.T) + t
+        svdU, svdS, svdV = _linalg(nx).svd(A)
+        C = _identity(nx, D, type_as)
+        C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
+        if SVI_mode and iter > 1:
+            R = step_size * (_dot(nx)(_dot(nx)(svdU, C), svdV)) + (1 - step_size) * R
+        else:
+            R = _dot(nx)(_dot(nx)(svdU, C), svdV)
+        RnA = s * _dot(nx)(coordsA, R.T) + t
         XAHat = RnA + VnA
 
         # Update sigma2 and beta2
