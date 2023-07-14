@@ -20,6 +20,7 @@ numpy>=1.18.1
 opencv-python>=4.5.4.60
 pandana
 pandas>=0.25.1
+paste-bio>=1.4.0
 plotly>=5.1.0
 POT>=0.8.1
 pynndescent>=0.4.8
@@ -37,6 +38,8 @@ statsmodels>=0.9.0
 tensorflow
 tqdm>=4.62.3
 torch
+trame>=2.2.5
+trame-server>=2.7.0
 typing_extensions>=4.0.1
 umap-learn>=0.5.1
 vtk==9.2.2

@@ -21,13 +21,13 @@ def morpho_align(
     key_added: str = "align_spatial",
     iter_key_added: Optional[str] = "iter_spatial",
     vecfld_key_added: str = "VecFld_morpho",
-    mode: Literal["S", "N", "SN"] = "SN",
+    mode: Literal["SN-N", "SN-S"] = "SN-S",
     dissimilarity: str = "kl",
     max_iter: int = 100,
-    label_key: Optional[str] = None,
     dtype: str = "float64",
     device: str = "cpu",
     verbose: bool = True,
+    SVI_mode: bool = False,
     **kwargs,
 ) -> Tuple[List[AnnData], List[np.ndarray], List[np.ndarray]]:
     """
@@ -41,7 +41,7 @@ def morpho_align(
         key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         iter_key_added: ``.uns`` key under which to add the result of each iteration of the iterative process. If ``iter_key_added``  is None, the results are not saved.
         vecfld_key_added: The key that will be used for the vector field key in ``.uns``. If ``vecfld_key_added`` is None, the results are not saved.
-        mode: The method of alignment. Available ``mode`` are: ``'S'``, ``'N'`` and ``'SN'``.
+        mode: The method of alignment. Available ``mode`` are: ``'SN-N'``, and ``'SN-S'``. ``'SN-N'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a non-rigid aligned result; ``'SN-S'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a rigid aligned result. The non-rigid is used here to solve the optimal mapping, thus returning a more accurate rigid transformation. The default is ``'SN-S'``.
         dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
         max_iter: Max number of iterations for morpho alignment.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
@@ -54,63 +54,42 @@ def morpho_align(
         pis: List of pi matrices.
         sigma2s: List of sigma2.
     """
-    for m in models:
+
+    align_models = [model.copy() for model in models]
+    for m in align_models:
         m.obsm[key_added] = m.obsm[spatial_key]
-    for m in models:
-        m.obsm["Rigid_3d_align_spatial"] = m.obsm[spatial_key]
-    for m in models:
-        m.obsm["Coarse_alignment"] = m.obsm[spatial_key]
-    for m in models:
-        m.obsm["optimal_RnA"] = m.obsm[spatial_key]
+    for m in align_models:
+        m.obsm["Rigid_align_spatial"] = m.obsm[spatial_key]
+    for m in align_models:
+        m.obsm["Nonrigid_align_spatial"] = m.obsm[spatial_key]
 
     pis, sigma2s = [], []
-    align_models = [model.copy() for model in models]
     progress_name = f"Models alignment based on morpho, mode: {mode}."
     for i in _iteration(n=len(align_models) - 1, progress_name=progress_name, verbose=True):
         modelA = align_models[i]
         modelB = align_models[i + 1]
-        if label_key is not None:
-            # calculate label similarity
-            catA = modelA.obs[label_key]
-            catB = modelB.obs[label_key]
-            UnionCategories = np.union1d(catA.cat.categories, catB.cat.categories)
-            catACode, catBCode = np.zeros(catA.shape, dtype=int), np.zeros(catB.shape, dtype=int)
-            for code, cat in enumerate(UnionCategories):
-                if cat == "unknown":
-                    code = -1
-                catACode[catA == cat] = code
-                catBCode[catB == cat] = code
-            LabelSimMat = np.zeros((catA.shape[0], catB.shape[0]))
-            for index in range(catB.shape[0]):
-                LabelSimMat[:, index] = catACode != catBCode[i]
-            LabelSimMat = LabelSimMat.T
-        else:
-            LabelSimMat = None
         _, P, sigma2 = BA_align(
             sampleA=modelA,
             sampleB=modelB,
             genes=genes,
-            spatial_key="optimal_RnA",
+            spatial_key=key_added,
             key_added=key_added,
             iter_key_added=iter_key_added,
             vecfld_key_added=vecfld_key_added,
             layer=layer,
-            mode=mode,
+            # mode=mode,
             dissimilarity=dissimilarity,
             max_iter=max_iter,
             dtype=dtype,
             device=device,
             inplace=True,
             verbose=verbose,
-            added_similarity=LabelSimMat,
             **kwargs,
         )
-        (_, _, modelB.obsm["Rigid_align_spatial"],) = BA_transform(
-            vecfld=modelB.uns[vecfld_key_added],
-            quary_points=modelB.obsm[spatial_key],
-            device=device,
-            dtype=dtype,
-        )
+        if mode == "SN-S":
+            modelB.obsm[key_added] = modelB.obsm["Rigid_align_spatial"]
+        elif mode == "SN-N":
+            modelB.obsm[key_added] = modelB.obsm["Nonrigid_align_spatial"]
         pis.append(P)
         sigma2s.append(sigma2)
         empty_cache(device=device)
@@ -129,7 +108,7 @@ def morpho_align_ref(
     key_added: str = "align_spatial",
     iter_key_added: Optional[str] = "iter_spatial",
     vecfld_key_added: Optional[str] = "VecFld_morpho",
-    mode: Literal["S", "N", "SN"] = "SN",
+    mode: Literal["SN-N", "SN-S"] = "SN-S",
     dissimilarity: str = "kl",
     max_iter: int = 100,
     return_full_assignment: bool = True,
@@ -152,7 +131,7 @@ def morpho_align_ref(
         key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
         iter_key_added: ``.uns`` key under which to add the result of each iteration of the iterative process. If ``iter_key_added``  is None, the results are not saved.
         vecfld_key_added: The key that will be used for the vector field key in ``.uns``. If ``vecfld_key_added`` is None, the results are not saved.
-        mode: The method of alignment. Available ``mode`` are: ``'S'``, ``'N'`` and ``'SN'``.
+        mode: The method of alignment. Available ``mode`` are: ``'SN-N'``, and ``'SN-S'``. ``'SN-N'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a non-rigid aligned result; ``'SN-S'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a rigid aligned result. The non-rigid is used here to solve the optimal mapping, thus returning a more accurate rigid transformation. The default is ``'SN-S'``.
         dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
         max_iter: Max number of iterations for morpho alignment.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
@@ -198,7 +177,7 @@ def morpho_align_ref(
             iter_key_added=iter_key_added,
             vecfld_key_added=vecfld_key_added,
             layer=layer,
-            mode=mode,
+            # mode=mode,
             dissimilarity=dissimilarity,
             max_iter=max_iter,
             dtype=dtype,
@@ -207,6 +186,10 @@ def morpho_align_ref(
             verbose=verbose,
             **kwargs,
         )
+        if mode == "SN-S":
+            modelB_ref.obsm[key_added] = modelB_ref.obsm["Rigid_align_spatial"]
+        elif mode == "SN-N":
+            modelB_ref.obsm[key_added] = modelB_ref.obsm["Nonrigid_align_spatial"]
         align_models_ref[i + 1] = modelB_ref
         pis_ref.append(P)
         sigma2s.append(sigma2)
@@ -214,24 +197,32 @@ def morpho_align_ref(
         modelA, modelB = align_models[i], align_models[i + 1]
         modelB.uns[vecfld_key_added] = modelB_ref.uns[vecfld_key_added]
         if return_full_assignment:
-            P, modelB.obsm[key_added] = BA_transform_and_assignment(
+            (
+                modelB.obsm["Nonrigid_align_spatial"],
+                _,
+                modelB.obsm["Rigid_align_spatial"],
+                P,
+            ) = BA_transform_and_assignment(
                 samples=[modelB, modelA],
                 vecfld=modelB_ref.uns[vecfld_key_added],
                 genes=genes,
                 layer=layer,
-                small_variance=True,
                 spatial_key=spatial_key,
                 device=device,
                 dtype=dtype,
                 **kwargs,
             )
         else:
-            modelB.obsm[key_added], _, modelB.obsm["Rigid_align_spatial"] = BA_transform(
+            modelB.obsm["Nonrigid_align_spatial"], _, modelB.obsm["Rigid_align_spatial"] = BA_transform(
                 vecfld=modelB_ref.uns[vecfld_key_added],
                 quary_points=modelB.obsm[spatial_key],
                 device=device,
                 dtype=dtype,
             )
+        if mode == "SN-S":
+            modelB.obsm[key_added] = modelB.obsm["Rigid_align_spatial"]
+        elif mode == "SN-N":
+            modelB.obsm[key_added] = modelB.obsm["Nonrigid_align_spatial"]
 
         pis.append(P)
 

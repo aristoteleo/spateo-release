@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -29,6 +29,8 @@ def downsampling(
     sampling_models = []
     for m in models:
         sampling_model = m.copy()
+        if n_sampling > sampling_model.shape[0]:
+            n_sampling = sampling_model.shape[0]
         sampling = sample(
             arr=np.asarray(sampling_model.obs_names),
             n=n_sampling,

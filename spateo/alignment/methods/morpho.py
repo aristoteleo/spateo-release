@@ -68,7 +68,7 @@ def con_K(
 ############
 # BioAlign #
 ############
-def get_P_debug_v2(
+def get_P(
     XnAHat: Union[np.ndarray, torch.Tensor],
     XnB: Union[np.ndarray, torch.Tensor],
     sigma2: Union[int, float, np.ndarray, torch.Tensor],
@@ -94,7 +94,6 @@ def get_P_debug_v2(
         GeneDistMat: The gene expression distance matrix between sample A and sample B. Shape: N x M.
         SpatialDistMat: The spatial coordinate distance matrix between sample A and sample B. Shape: N x M.
         samples_s: The space size of each sample. Area size for 2D samples and volume size for 3D samples.
-        outlier_g: The outlier distribution output space volume attributed to gene expression.
     Returns:
         P: Generating probability matrix P. Shape: N x M.
     """
@@ -226,11 +225,10 @@ def BA_align(
     mode: Literal["S", "N", "SN", "NS"] = "SN",
     dissimilarity: str = "kl",
     keep_size: bool = False,
-    max_iter: int = 100,
+    max_iter: int = 200,
     lambdaVF: Union[int, float] = 1e2,
     beta: Union[int, float] = 0.01,
     beta2: Optional[Union[int, float]] = None,
-    outlier_g: Optional[Union[int, float]] = None,
     K: Union[int, float] = 15,
     normalize_c: bool = True,
     normalize_g: bool = True,
@@ -239,14 +237,10 @@ def BA_align(
     device: str = "cpu",
     inplace: bool = True,
     verbose: bool = True,
-    added_similarity: Optional[Union[torch.Tensor, np.ndarray]] = None,
-    added_scale: Optional[float] = 0.5,
-    partial_alignment: bool = False,
-    proliferation_prior: Optional[Union[torch.Tensor, np.ndarray]] = None,
-    proliferation_prior_weight: float = 1.0,
     nn_init: bool = True,
     SVI_mode: bool = False,
     batch_size: int = 1000,
+    partial_robust_level: float = 25,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
     """_summary_
 
@@ -275,9 +269,10 @@ def BA_align(
         device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
         inplace: Whether to copy adata or modify it inplace.
         verbose: If ``True``, print progress updates.
-        added_similarity: The similarity matrix of the added other modality with shape n x m.
-        added_scale: The scale of the added similarity matrix. Interval from 0 to 1.
-        partial_alignment: Whether to use partial alignment. Note that setting to True does not affect the alignment of two very similar samples. If you are aligning two samples with very different morphology, e.g., across time, you can set to False.
+        nn_init: If ``True``, use nearest neighbor matching to initialize the alignment.
+        SVI_mode: Whether to use stochastic variational inferential (SVI) optimization strategy.
+        batch_size: The size of the mini-batch of SVI. If set smaller, the calculation will be faster, but it will affect the accuracy, and vice versa. If not set, it is automatically set to one-tenth of the data size.
+        partial_robust_level: The robust level of partial alignment. The larger the value, the more robust the alignment to partial cases is. Recommended setting from 1 to 50.
     """
     empty_cache(device=device)
     # Check the method of alignment.
@@ -288,10 +283,6 @@ def BA_align(
     ], "``mode`` value is wrong. Available ``mode`` are: ``'S'``, ``'N'`` and ``'SN'``."
     if mode == "NS":
         mode = "SN"
-    if proliferation_prior is not None:
-        assert (
-            proliferation_prior.shape[0] == sampleB.shape[0]
-        ), "the length of proliferation_prior should match the length of sample B"
 
     # Preprocessing
     normalize_g = False if dissimilarity == "kl" else normalize_g
@@ -336,9 +327,6 @@ def BA_align(
         sub_sample = True
     else:
         GeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B, dissimilarity=dissimilarity)
-    if added_similarity is not None:
-        GeneDistMat = GeneDistMat + added_scale * added_similarity
-        del added_similarity
     area = _prod(nx)(nx.max(coordsA, axis=0) - nx.min(coordsA, axis=0))
 
     if nn_init:
@@ -378,13 +366,7 @@ def BA_align(
     # construct the kernel
     GammaSparse = con_K(ctrl_pts, ctrl_pts, beta)
     U = con_K(coordsA, ctrl_pts, beta)
-
-    # initialize parameters
-    if proliferation_prior is None:
-        kappa = nx.ones((NA), type_as=type_as)
-    else:
-        kappa = _data(nx, proliferation_prior, type_as)
-    kappa = proliferation_prior_weight * kappa
+    kappa = nx.ones((NA), type_as=type_as)
     alpha = nx.ones((NA), type_as=type_as)
     VnA = nx.zeros(coordsA.shape, type_as=type_as)
     Coff = nx.zeros(ctrl_pts.shape, type_as=type_as)
@@ -412,32 +394,18 @@ def BA_align(
     R = _identity(nx, D, type_as)
     minGeneDistMat = nx.min(GeneDistMat, 1)
     # Automatically determine the value of beta2
-    if partial_alignment:
-        beta2 = (
-            minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] * 2 if beta2 is None else beta2
-        )
-        beta2_end = nx.maximum(
-            minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.1)]] / 40,
-            _data(nx, 0.01, type_as),
-        )
-    else:
-        beta2 = (
-            minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 5 if beta2 is None else beta2
-        )
-        beta2_end = nx.max(minGeneDistMat) / 5
+    beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 5 if beta2 is None else beta2
+    beta2_end = nx.max(minGeneDistMat) / 5
     del minGeneDistMat
     if sub_sample:
         del sub_X_A, sub_X_B, GeneDistMat
     # The value of beta2 becomes progressively larger
     beta2 = nx.maximum(beta2, _data(nx, 1e-2, type_as))
-    # print(beta2)
     beta2_decrease = _power(nx)(beta2_end / beta2, 1 / (50))
-    if verbose:
-        lm.main_info("{:0>2f} --> {:0>2f}".format(beta2, beta2_end))
 
-    # If partial alignment, use smaller spatial variance to reduce tails
+    # Use smaller spatial variance to reduce tails
     outlier_variance = 1
-    max_outlier_variance = 50  # 20
+    max_outlier_variance = partial_robust_level  # 20
     outlier_variance_decrease = _power(nx)(_data(nx, max_outlier_variance, type_as), 1 / (max_iter / 2))
 
     if SVI_mode:
@@ -477,7 +445,7 @@ def BA_align(
             sampleB.uns[iter_key_added]["scale"][iter] = nx.to_numpy(s)
         if SVI_mode:
             step_size = nx.minimum(_data(nx, 1.0, type_as), SVI_deacy / (iter + 1.0))
-            P, spatial_P, sigma2_P = get_P_debug_v2(
+            P, spatial_P, sigma2_P = get_P(
                 XnAHat=XAHat,
                 XnB=randcoordsB,
                 sigma2=sigma2,
@@ -490,7 +458,7 @@ def BA_align(
                 outlier_variance=outlier_variance,
             )
         else:
-            P, spatial_P, sigma2_P = get_P_debug_v2(
+            P, spatial_P, sigma2_P = get_P(
                 XnAHat=XAHat,
                 XnB=coordsB,
                 sigma2=sigma2,
@@ -533,11 +501,7 @@ def BA_align(
         gamma = _data(nx, 0.01, type_as) if gamma < 0.01 else gamma
 
         # Update alpha
-        if partial_alignment or (proliferation_prior is not None):
-            alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
-            alpha = alpha * kappa
-        else:
-            alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
+        alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
 
         # Update VnA
         if mode == "N":
@@ -702,14 +666,10 @@ def BA_align(
         coarse_alignment = coarse_alignment * normalize_scale + normalize_mean_list[0]
 
     # Save aligned coordinates
-    sampleA.obsm[key_added] = sampleA.obsm[spatial_key]
-    sampleB.obsm[key_added] = nx.to_numpy(XAHat).copy()
-    sampleB.obsm["Rigid_3d_align_spatial"] = nx.to_numpy(RnA).copy()
-    sampleB.obsm["optimal_RnA"] = nx.to_numpy(optimal_RnA).copy()
-    sampleB.obsm["Coarse_alignment"] = nx.to_numpy(coarse_alignment).copy()
-    sampleB.obsm["alpha"] = nx.to_numpy(alpha).copy()
+    sampleB.obsm["Nonrigid_align_spatial"] = nx.to_numpy(XAHat).copy()
+    sampleB.obsm["Rigid_align_spatial"] = nx.to_numpy(optimal_RnA).copy()
 
-    # save vector field
+    # save vector field and other parameters
     if not (vecfld_key_added is None):
         sampleB.uns[vecfld_key_added] = {
             "s": nx.to_numpy(s),
@@ -732,6 +692,7 @@ def BA_align(
             "sigma2": nx.to_numpy(sigma2),
             "gamma": nx.to_numpy(gamma),
             "NA": NA,
+            "outlier_variance": nx.to_numpy(outlier_variance),
         }
     empty_cache(device=device)
     return (
