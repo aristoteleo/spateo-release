@@ -938,7 +938,8 @@ class MuSIC:
                     #     lambda column: (column - column.min()) / (column.max() - column.min())
                     # )
                     self.receptors_expr = (self.receptors_expr - self.receptors_expr.min().min()) / (
-                            self.receptors_expr.max().max() - self.receptors_expr.min().min())
+                        self.receptors_expr.max().max() - self.receptors_expr.min().min()
+                    )
 
                 # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
                 # but store them in a temporary list to do so later because some may contribute to multiple complexes:
@@ -1106,7 +1107,8 @@ class MuSIC:
                     #     lambda column: (column - column.min()) / (column.max() - column.min())
                     # )
                     self.ligands_expr = (self.ligands_expr - self.ligands_expr.min().min()) / (
-                            self.ligands_expr.max().max() - self.ligands_expr.min().min())
+                        self.ligands_expr.max().max() - self.ligands_expr.min().min()
+                    )
 
             # Set independent variable array based on input given as "mod_type":
             if self.mod_type == "niche":
@@ -1209,10 +1211,8 @@ class MuSIC:
                 # Log-scale to reduce the impact of "denser" neighborhoods:
                 X_df = X_df.applymap(np.log1p)
                 # Normalize the data to prevent numerical overflow:
-                #X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
-                X_df = X_df.apply(
-                    lambda column: (column - column.min()) / (column.max() - column.min())
-                )
+                # X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
+                X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
 
             elif self.mod_type == "ligand" or self.mod_type == "receptor":
                 if self.mod_type == "ligand":
@@ -2208,17 +2208,30 @@ class MuSIC:
                 y = y.reshape(-1, 1)
 
             # If model is based on ligands/receptors: filter X based on the prior knowledge network:
-            if self.mod_type in ["lr", "receptor"]:
+            if self.mod_type in ["lr", "receptor", "ligand"]:
                 target_row = self.grn.loc[target]
                 target_TFs = target_row[target_row == 1].index.tolist()
                 temp = self.r_tf_db[self.r_tf_db["tf"].isin(target_TFs)]
                 target_receptors = temp["receptor"].unique().tolist()
 
-                # Keep only the columns of X that contain any of the receptors for this target:
-                keep_indices = [
-                    i for i, feat in enumerate(self.feature_names) if any(r in feat for r in target_receptors)
-                ]
-                X_labels = [self.feature_names[idx] for idx in keep_indices]
+                if self.mod_type == "lr" or self.mod_type == "receptor":
+                    # Keep only the columns of X that contain any of the receptors for this target:
+                    keep_indices = [
+                        i for i, feat in enumerate(self.feature_names) if any(r in feat for r in target_receptors)
+                    ]
+                    X_labels = [self.feature_names[idx] for idx in keep_indices]
+                elif self.mod_type == "ligand":
+                    # Ligands that bind to the receptors for this target:
+                    target_ligands = []
+                    for receptor in target_receptors:
+                        filtered_df = self.lr_db[self.lr_db["to"] == receptor]
+                        ligands = list(set(filtered_df["from"]))
+                        target_ligands.extend(ligands)
+                    keep_indices = [
+                        i for i, feat in enumerate(self.feature_names) if any(l in feat for l in target_ligands)
+                    ]
+                    X_labels = [self.feature_names[idx] for idx in keep_indices]
+
                 X = X[:, keep_indices]
             else:
                 X_labels = self.feature_names
@@ -2741,6 +2754,38 @@ class VMuSIC(MuSIC):
             y = y_arr[target].to_frame()
             y_label = target
 
+            # Find features with associations with the target- do not need to subset because the fitting function
+            # will take care of this, but do this to get the correct feature names:
+            # If model is based on ligands/receptors: filter X based on the prior knowledge network:
+            if self.mod_type in ["lr", "receptor", "ligand"]:
+                target_row = self.grn.loc[target]
+                target_TFs = target_row[target_row == 1].index.tolist()
+                temp = self.r_tf_db[self.r_tf_db["tf"].isin(target_TFs)]
+                target_receptors = temp["receptor"].unique().tolist()
+
+                if self.mod_type == "lr" or self.mod_type == "receptor":
+                    # Keep only the columns of X that contain any of the receptors for this target:
+                    keep_indices = [
+                        i for i, feat in enumerate(self.feature_names) if any(r in feat for r in target_receptors)
+                    ]
+                    self.X_labels = [self.feature_names[idx] for idx in keep_indices]
+                elif self.mod_type == "ligand":
+                    # Ligands that bind to the receptors for this target:
+                    target_ligands = []
+                    for receptor in target_receptors:
+                        filtered_df = self.lr_db[self.lr_db["to"] == receptor]
+                        ligands = list(set(filtered_df["from"]))
+                        target_ligands.extend(ligands)
+                    keep_indices = [
+                        i for i, feat in enumerate(self.feature_names) if any(l in feat for l in target_ligands)
+                    ]
+                    self.X_labels = [self.feature_names[idx] for idx in keep_indices]
+            else:
+                self.X_labels = self.feature_names
+                keep_indices = np.arange(self.n_features)
+            n_features = len(keep_indices)
+            self.X_labels = self.comm.bcast(self.X_labels, root=0)
+
             if self.subsampled:
                 n_samples = self.n_samples_subsampled[target]
                 indices = self.subsampled_indices[y_label] if self.group_subset is None else self.subsampled_indices
@@ -2761,7 +2806,7 @@ class VMuSIC(MuSIC):
 
             # Initial values- multiply input by the array corresponding to the correct target- note that this is
             # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
-            y_pred_init = X * all_betas[target]
+            y_pred_init = X[:, keep_indices] * all_betas[target]
             all_y_pred = np.sum(y_pred_init, axis=1)
 
             if self.distr != "gaussian":
@@ -2778,7 +2823,7 @@ class VMuSIC(MuSIC):
                 error[error < -1] = 0
             # error = np.zeros(y.values.shape[0])
 
-            bws = [None] * self.n_features
+            bws = [None] * n_features
             bw_plateau_counter = 0
             bw_history = []
             error_history = []
@@ -2790,7 +2835,7 @@ class VMuSIC(MuSIC):
                 new_ys = np.empty(y_pred_init.shape, dtype=np.float64)
                 new_betas = np.empty(y_pred_init.shape, dtype=np.float64)
 
-                for n_feat in range(self.n_features):
+                for n_feat in range(n_features):
                     # Use each individual feature to predict the response- note y is set up as a DataFrame because in
                     # other cases column names/target names are taken from y:
                     y_mod = y_pred_init[:, n_feat] + error
@@ -2813,6 +2858,7 @@ class VMuSIC(MuSIC):
                         betas = self.mpi_fit(
                             temp_y.values,
                             temp_X,
+                            X_labels=self.X_labels,
                             y_label=target,
                             bw=bw,
                             coords=coords,
@@ -2925,7 +2971,7 @@ class VMuSIC(MuSIC):
 
             # Save results without standard errors or influence measures:
             if self.comm.rank == 0 and self.multiscale_params_only:
-                varNames = self.feature_names
+                varNames = self.X_labels
                 # Save intercept and parameter estimates:
                 for x in varNames:
                     header += "b_" + x + ","
@@ -2937,6 +2983,7 @@ class VMuSIC(MuSIC):
 
     def chunk_compute_metrics(
         self,
+        y: np.ndarray,
         X: Optional[np.ndarray] = None,
         chunk_id: int = 0,
         target_label: Optional[str] = None,
@@ -2952,6 +2999,7 @@ class VMuSIC(MuSIC):
                 None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
                 Must be the same X array as was used to fit the model (i.e. the same X given to :func
                 `multiscale_backfitting`).
+            y: Dependent variable array directly to the fit function.
             chunk_id: Numerical index of the partition to be computed
             target_label: Name of the target variable to compute. Must be one of the keys of the :attr `all_bws_init`
                 dictionary.
@@ -2975,24 +3023,42 @@ class VMuSIC(MuSIC):
 
         chunk_size = int(np.ceil(float(self.n_samples / self.n_chunks)))
         # Vector storing ENP for each predictor:
-        ENP_chunk = np.zeros(self.n_features)
+        ENP_chunk = np.zeros(X.shape[1])
         # Array storing leverages for each predictor if the model is Gaussian (for each sample because of the
         # spatially-weighted nature of the regression):
         if self.distr == "gaussian":
-            lvg_chunk = np.zeros((self.n_samples, self.n_features))
+            lvg_chunk = np.zeros((self.n_samples, X.shape[1]))
 
         chunk_index = np.arange(self.n_samples)[chunk_id * chunk_size : (chunk_id + 1) * chunk_size]
 
         # Partial hat matrix:
         init_partial_hat = np.zeros((self.n_samples, len(chunk_index)))
         init_partial_hat[chunk_index, :] = np.eye(len(chunk_index))
-        partial_hat = np.zeros((self.n_samples, len(chunk_index), self.n_features))
+        partial_hat = np.zeros((self.n_samples, len(chunk_index), X.shape[1]))
 
         # Compute coefficients for each chunk:
         for i in range(self.n_samples):
             index = self.indices[i]
+
+            if self.mod_type == "niche" or self.subsampled:
+                cov = None
+            else:
+                # Distance in "signaling space", conditioned on target expression (matched zero/nonzero with the point in
+                # question):
+                if y[i] > 0:
+                    cov = np.where(y > 0, 1, 0).reshape(-1)
+                else:
+                    cov = np.where(y == 0, 1, 0).reshape(-1)
             wi = get_wi(
-                index, n_samples=self.n_samples, coords=coords, fixed_bw=self.bw_fixed, kernel=self.kernel, bw=bw
+                index,
+                n_samples=len(X),
+                cov=cov,
+                coords=coords,
+                expr_mat=self.feature_distance,
+                fixed_bw=self.bw_fixed,
+                kernel=self.kernel,
+                bw=bw,
+                use_expression_neighbors_only=self.use_expression_neighbors_only,
             ).reshape(-1, 1)
 
             wi[mask_indices] = 0.0
@@ -3008,7 +3074,7 @@ class VMuSIC(MuSIC):
         error = init_partial_hat - np.sum(partial_hat, axis=2)
 
         for i in range(bw_history.shape[0]):
-            for j in range(self.n_features):
+            for j in range(X.shape[1]):
                 proj_j_old = partial_hat[:, :, j] + error
                 X_j = X[:, j]
                 chunk_size_j = int(np.ceil(float(self.n_samples / self.n_chunks)))
@@ -3019,15 +3085,27 @@ class VMuSIC(MuSIC):
                     # Compute the hat matrix for the current chunk:
                     for k in range(len(chunk_index_temp)):
                         index = chunk_index_temp[k]
+
+                        if self.mod_type == "niche" or self.subsampled:
+                            cov = None
+                        else:
+                            # Distance in "signaling space", conditioned on target expression (matched zero/nonzero with the point in
+                            # question):
+                            if y[i] > 0:
+                                cov = np.where(y > 0, 1, 0).reshape(-1)
+                            else:
+                                cov = np.where(y == 0, 1, 0).reshape(-1)
                         wi = get_wi(
                             index,
-                            n_samples=self.n_samples,
+                            n_samples=len(X),
+                            cov=cov,
                             coords=coords,
+                            expr_mat=self.feature_distance,
                             fixed_bw=self.bw_fixed,
                             kernel=self.kernel,
-                            # Use the bandwidth from the ith iteration for the jth independent variable:
-                            bw=bw_history[i, j],
-                        ).reshape(-1)
+                            bw=bw,
+                            use_expression_neighbors_only=self.use_expression_neighbors_only,
+                        ).reshape(-1, 1)
 
                         wi[mask_indices] = 0.0
 
@@ -3044,7 +3122,7 @@ class VMuSIC(MuSIC):
         for i in range(len(chunk_index)):
             ENP_chunk += partial_hat[chunk_index[i], i, :]
         if self.distr == "gaussian":
-            for j in range(self.n_features):
+            for j in range(X.shape[1]):
                 lvg_chunk[:, j] += ((partial_hat[:, :, j] / X[:, j].reshape(-1, 1)) ** 2).sum(axis=1)
 
             return ENP_chunk, lvg_chunk
@@ -3094,6 +3172,36 @@ class VMuSIC(MuSIC):
             errors = self.errors_all_targets[target_label]
             y_label = target_label
 
+            # If model is based on ligands/receptors: filter X based on the prior knowledge network:
+            if self.mod_type in ["lr", "receptor", "ligand"]:
+                target_row = self.grn.loc[target_label]
+                target_TFs = target_row[target_row == 1].index.tolist()
+                temp = self.r_tf_db[self.r_tf_db["tf"].isin(target_TFs)]
+                target_receptors = temp["receptor"].unique().tolist()
+
+                if self.mod_type == "lr" or self.mod_type == "receptor":
+                    # Keep only the columns of X that contain any of the receptors for this target:
+                    keep_indices = [
+                        i for i, feat in enumerate(self.feature_names) if any(r in feat for r in target_receptors)
+                    ]
+                    self.X_labels = [self.feature_names[idx] for idx in keep_indices]
+                elif self.mod_type == "ligand":
+                    # Ligands that bind to the receptors for this target:
+                    target_ligands = []
+                    for receptor in target_receptors:
+                        filtered_df = self.lr_db[self.lr_db["to"] == receptor]
+                        ligands = list(set(filtered_df["from"]))
+                        target_ligands.extend(ligands)
+                    keep_indices = [
+                        i for i, feat in enumerate(self.feature_names) if any(l in feat for l in target_ligands)
+                    ]
+                    self.X_labels = [self.feature_names[idx] for idx in keep_indices]
+            else:
+                self.X_labels = self.feature_names
+                keep_indices = np.arange(self.n_features)
+
+            self.X_labels = self.comm.bcast(self.X_labels, root=0)
+
             # If subsampling was done, check for the number of fitted samples for the right target:
             if self.subsampled:
                 self.n_samples = self.n_samples_subsampled[target_label]
@@ -3107,7 +3215,7 @@ class VMuSIC(MuSIC):
                 self.indices = np.arange(self.n_samples)
                 coords = self.coords
 
-            X = X[self.indices, :]
+            X = X[self.indices, self.X_labels]
             mask_indices = np.where(
                 (y_arr[target_label].iloc[self.indices].values == 0) & np.all(np.abs(X) > 1e-3, axis=1)
             )[0]
@@ -3161,7 +3269,7 @@ class VMuSIC(MuSIC):
                     header = "index,residual,"
                     outputs = np.hstack([self.indices, errors.reshape(-1, 1), parameters, standard_error])
 
-                    varNames = self.feature_names
+                    varNames = self.X_labels
                     # Save intercept and parameter estimates:
                     for x in varNames:
                         header += "b_" + x + ","
@@ -3182,7 +3290,7 @@ class VMuSIC(MuSIC):
                     header = "index,prediction,"
                     outputs = np.hstack([self.indices.reshape(-1, 1), predictions.reshape(-1, 1), parameters])
 
-                    varNames = self.feature_names
+                    varNames = self.X_labels
                     # Save intercept and parameter estimates:
                     for x in varNames:
                         header += "b_" + x + ","

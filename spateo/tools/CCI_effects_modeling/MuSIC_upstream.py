@@ -201,7 +201,7 @@ class MuSIC_target_selector:
             all_predictors = []
             for target in high_variance_genes_filter:
                 data = self.adata[:, target].X
-                predictors_for_target = self.parse_predictors(data)
+                predictors_for_target = self.parse_predictors(target=target, data=data)
                 all_predictors.extend(predictors_for_target)
 
             all_predictors = list(set(all_predictors))
@@ -244,7 +244,7 @@ class MuSIC_target_selector:
             all_predictors = []
             for target in self.custom_targets:
                 data = self.adata[:, target].X
-                predictors_for_target = self.parse_predictors(data)
+                predictors_for_target = self.parse_predictors(target=target, data=data)
                 all_predictors.extend(predictors_for_target)
 
             all_predictors = list(set(all_predictors))
@@ -265,7 +265,7 @@ class MuSIC_target_selector:
                 "Automatically selecting highly-variable targets."
             )
 
-            # Automatically select targets- choose between the top 3000 and the top 50% of genes by variance,
+            # Automatically select targets- choose between the top 100 and the top 10% of genes by variance,
             # depending on the breadth of the dataset:
             # First filter AnnData to genes that are expressed above target threshold (5% of cells by default):
             if scipy.sparse.issparse(self.adata.X):
@@ -275,7 +275,7 @@ class MuSIC_target_selector:
             valid = list(np.array(self.adata.var_names)[expr_percentage > self.target_expr_threshold])
             self.adata = self.adata[:, valid]
 
-            n_genes = min(3000, int(self.adata.n_vars / 2))
+            n_genes = min(100, int(self.adata.n_vars / 10))
             (gene_counts_stats, gene_fano_params) = get_highvar_genes_sparse(self.adata.X, numgenes=n_genes)
             high_variance_genes_filter = list(self.adata.var.index[gene_counts_stats.high_var.values])
 
@@ -286,26 +286,36 @@ class MuSIC_target_selector:
                 f.write("\n".join(high_variance_genes_filter))
             self.logger.info(f"Check {targets_path} for the list of targets.")
 
-    def parse_predictors(self, data: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None):
+    def parse_predictors(
+        self, target: str, data: Optional[Union[np.ndarray, scipy.sparse.spmatrix, anndata.AnnData]] = None
+    ):
         """Unbiased identification of appropriate signaling molecules and/or target genes for modeling with
             heuristical methods.
 
         Args:
-            data: Optional 1D array containing gene expression values. If given, will be queried to find cells that
-                express the target genes, which can then be used to find appropriate predictors. If not given,
-                will use :attr `adata`.
+            target: Name of the target gene
+            data: Optional AnnData object or 1D array containing gene expression values. If given, will be queried to
+                find cells that express the target genes, which can then be used to find appropriate predictors. If
+                not given, will use :attr `adata`.
         """
 
         if data is not None:
             # Get the indices to search over- where the target is nonzero:
+            if isinstance(data, anndata.AnnData):
+                adata = data.copy()
+                data = data[:, target].X
+            else:
+                adata = self.adata.copy()
+
             if isinstance(data, np.ndarray):
                 indices = np.nonzero(data)[0]
             elif isinstance(data, scipy.sparse.spmatrix):
                 indices = data.nonzero()[0]
-            subset_indices = self.adata.obs_names[indices]
+            subset_indices = adata.obs_names[indices]
             n_obs = indices.shape[0]
         else:
             # All cells will be queried:
+            adata = self.adata.copy()
             subset_indices = self.adata.obs_names
             n_obs = self.adata.n_obs
 
@@ -339,14 +349,12 @@ class MuSIC_target_selector:
 
         if self.mod_type == "receptor" or self.mod_type == "lr":
             # Subset to receptors that are expressed in > threshold number of cells:
-            if scipy.sparse.issparse(self.adata.X):
-                rec_expr_percentage = np.array(
-                    (self.adata[subset_indices, all_receptors].X > 0).sum(axis=0) / self.adata.n_obs
-                )[0]
+            if scipy.sparse.issparse(adata.X):
+                rec_expr_percentage = np.array((adata[subset_indices, all_receptors].X > 0).sum(axis=0) / adata.n_obs)[
+                    0
+                ]
             else:
-                rec_expr_percentage = (
-                    np.count_nonzero(self.adata[subset_indices, all_receptors].X, axis=0) / self.adata.n_obs
-                )
+                rec_expr_percentage = np.count_nonzero(adata[subset_indices, all_receptors].X, axis=0) / adata.n_obs
             receptors = list(np.array(all_receptors)[rec_expr_percentage > threshold])
 
             # Recombine complex components if all components passed the thresholding:

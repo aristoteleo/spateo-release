@@ -33,6 +33,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, normalize
 from statsmodels.gam.smooth_basis import BSplines
 
+from ...configuration import config_spateo_rcParams, shiftedColorMap
 from ...logging import logger_manager as lm
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
 from .MuSIC import MuSIC
@@ -150,7 +151,10 @@ class MuSIC_Interpreter(MuSIC):
             # Compute p-values for local observations and features
             for i, obs_index in enumerate(self.x_chunk):
                 for j in range(self.n_features):
-                    local_p_values_all[i, j] = wald_test(coef.iloc[obs_index, j], se.iloc[obs_index, j])
+                    if se.iloc[obs_index, j] == 0:
+                        local_p_values_all[i, j] = 1
+                    else:
+                        local_p_values_all[i, j] = wald_test(coef.iloc[obs_index, j], se.iloc[obs_index, j])
 
             # Collate p-values from all processes:
             p_values_all = self.comm.gather(local_p_values_all, root=0)
@@ -191,23 +195,8 @@ class MuSIC_Interpreter(MuSIC):
         width = 0.5 * len(all_genes)
         pred_vals = predictions.values
 
-        # Note that the assumption is the same processing arguments (normalize, smooth, etc.) are given for
-        # downstream as would be given for model fitting itself, so these are not repeated here since they are
-        # handled at initialization.
-        def compute_rmse(predictions, targets):
-            # Calculate the square of differences between predictions and targets
-            squared_diff = (predictions - targets) ** 2
-
-            # Calculate the mean squared difference
-            mean_squared_diff = np.mean(squared_diff)
-
-            # Calculate the square root of the mean squared difference (RMSE)
-            rmse = np.sqrt(mean_squared_diff)
-            return rmse
-
         pearson_dict = {}
         spearman_dict = {}
-        rmse_dict = {}
 
         for i, gene in enumerate(all_genes):
             y = self.adata[:, gene].X.toarray().reshape(-1)
@@ -228,16 +217,13 @@ class MuSIC_Interpreter(MuSIC):
 
             rp, _ = pearsonr(y_plot, music_results_target_to_plot)
             r, _ = spearmanr(y_plot, music_results_target_to_plot)
-            rmse = compute_rmse(music_results_target_to_plot, y_plot)
 
             pearson_dict[gene] = rp
             spearman_dict[gene] = r
-            rmse_dict[gene] = rmse
 
         # Mean of diagnostic metrics:
         mean_pearson = sum(pearson_dict.values()) / len(pearson_dict.values())
         mean_spearman = sum(spearman_dict.values()) / len(spearman_dict.values())
-        mean_rmse = sum(rmse_dict.values()) / len(rmse_dict.values())
 
         data = []
         for gene in pearson_dict.keys():
@@ -246,7 +232,6 @@ class MuSIC_Interpreter(MuSIC):
                     "Gene": gene,
                     "Pearson coefficient": pearson_dict[gene],
                     "Spearman coefficient": spearman_dict[gene],
-                    "RMSE": rmse_dict[gene],
                 }
             )
         # Color palette:
@@ -315,37 +300,69 @@ class MuSIC_Interpreter(MuSIC):
         plt.tight_layout()
         plt.show()
 
-        # Plot RMSE barplot:
-        sns.set(font_scale=2)
-        sns.set_style("white")
-        plt.figure(figsize=(width, 6))
-        plt.xticks(rotation="vertical")
-        ax = sns.barplot(
-            data=df, x="Gene", y="RMSE", hue="Model", palette=colors["RMSE"], edgecolor="black", dodge=True
-        )
-
-        # Mean line:
-        line_style = "--"  # Specify the line style (e.g., "--" for dotted)
-        line_thickness = 2  # Specify the line thickness
-        ax.axhline(mean_rmse, color="black", linestyle=line_style, linewidth=line_thickness)
-
-        # Update legend:
-        legend_label = f"Mean: {mean_rmse}"
-        handles, labels = ax.get_legend_handles_labels()
-        handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
-        labels.append(legend_label)
-        ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
-
-        plt.title(f"RMSE {file_name}")
-        plt.tight_layout()
-        plt.show()
-
-    def identify_enriched_interactions(
+    def visualize_enriched_interactions(
         self,
-        target: Optional[str] = None,
+        target_subset: Optional[List[str]] = None,
+        metric: Literal["proportion", "significant", "specificity", "mean"] = "proportion",
+        plot_significant: bool = False,
+        metric_threshold: float = 0.2,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = "reds",
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
     ):
-        """Given the target gene of interest, identify interaction features that are differentially expressed where
-        the target gene is relatively higher- or lower-expressed."""
+        """Given the target gene of interest, identify interaction features that are enriched for particular targets.
+        Visualized in heatmap form.
+
+        Args:
+            target_subset: List of targets to consider. If None, will use all targets used in model fitting.
+            metric: Metric to display on plot. For all plot variants, the color will be determined by a combination
+            of the size & magnitude of the effect. Options:
+                - "proportion": Percentage of interactions predicted to have nonzero effect over the number of cells
+                that express each target.
+                - "significant": Percentage of interactions predicted to have significant effect on each target over
+                the number of cells that express each target.
+                - "specificity": Number of target-expressing cells for which a particular interaction is predicted to
+                have nonzero effect over the total number of cells for which a particular target is predicted to have a
+                nonzero effect (including target-expressing and non-expressing cells).
+                - "mean": Average effect size over all target-expressing cells.
+            plot_significant: Whether to include only significant predicted interactions in the plot and metric
+                calculation.
+            metric_threshold: Optional threshold for 'metric' used to filter plot elements. Any interactions below
+                this threshold will not be color coded. Will use 0.2 by default.
+            fontsize: Size of font for x and y labels.
+            figsize: Size of figure.
+            cmap: Colormap to use for heatmap.
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+        """
+        logger = lm.get_main_logger()
+        config_spateo_rcParams()
+
+        # Check inputs:
+        if metric not in ["proportion", "significant", "specificity", "mean"]:
+            raise ValueError(f"Unrecognized metric {metric}. Options are 'proportion', 'significant', 'specificity', "
+                             f"or 'mean'.")
+
+        df = pd.DataFrame()
+
+        for target in self.coeffs.keys():
+            # Get coefficients for this key
+            coef = self.coeffs[target]
+            feats = [col.split("_")[1] for col in coef.columns if col.startswith("b_") and "intercept" not in col]
+
+    def visualize_combinatorial_effects(
+        self
+    ):
+        """For future work!"""
+
 
     def get_effect_potential(
         self,
