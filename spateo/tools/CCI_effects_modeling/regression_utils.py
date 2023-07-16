@@ -200,6 +200,13 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
         pseudoinverse: Array of shape [n_samples, n_samples]; Moore-Penrose pseudoinverse of the X matrix
         cov_inverse: Array of shape [n_samples, n_samples]; inverse of the covariance matrix
     """
+    yw = (y * w).reshape(-1, 1)
+    if np.all(yw == 0):
+        betas = np.full((x.shape[1], 1), 1e-20)
+        pseudoinverse = np.zeros((x.shape[1], x.shape[0]))
+        cov_inverse = np.zeros((x.shape[1], x.shape[1]))
+        return betas, pseudoinverse, cov_inverse
+
     xT = (x * w).T
     xtx = np.dot(xT, x)
 
@@ -229,13 +236,6 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     except:
         xtx_inv_xt = np.dot(linalg.pinv(xtx), xT)
     pseudoinverse = xtx_inv_xt
-
-    # Avoid issues with all zero dependent variable values in spatial regions:
-    yw = (y * w).reshape(-1, 1)
-    all_zeros = np.all(yw == 0)
-    if all_zeros:
-        betas = np.full((x.shape[1], 1), 1e-20)
-        return betas, pseudoinverse, cov_inverse
 
     betas = np.dot(xtx_inv_xt, y)
     # Upper and lower bound to constrain betas and prevent numerical overflow:
@@ -327,6 +327,7 @@ def iwls(
     # Initialization:
     n_iter = 0
     difference = 1.0e6
+    init_clip = clip
 
     # Get appropriate distribution family based on specified:
     mod_distr = distr  # string specifying distribution assumption of the model
@@ -390,6 +391,9 @@ def iwls(
 
         linear_predictor = sparse_dot(x, new_betas)
         y_hat = distr.predict(linear_predictor)
+        # Update clip based on the new betas- set based on the number of nonzero coefficients:
+        nnz_betas = np.count_nonzero(new_betas)
+        clip = init_clip / nnz_betas
 
         difference = np.min(abs(new_betas - betas))
         betas = new_betas
@@ -671,87 +675,6 @@ def wald_test(
     wald_statistic = np.abs(np.divide(theta_mle - theta0, theta_sd))
     pvals = 2 * (1 - scipy.stats.norm.cdf(np.abs(wald_statistic)))  # two-sided
     return pvals
-
-
-def wald_test_GAM(
-    beta: np.ndarray,
-    Sigma: np.ndarray,
-    contrast_mat: Union[np.ndarray, pd.DataFrame],
-    lfc: float = 0.0,
-    inverse: str = "QR",
-) -> Tuple[float, int, float]:
-    """Variant of the Wald test function for generalized additive models, computes Wald statistic and p-value
-        considering each independent variable alongside all of its spline bases.
-
-    Args:
-        beta: Vector of regression coefficients
-        Sigma: Variance-covariance matrix for beta
-        contrast_mat: Contrast matrix
-        lfc: Natural log fold change threshold. Default is 0.
-        inverse: Method to use for inverting Sigma. Options are "cholesky" (for Cholesky decomposition),
-            "qr" (for QR decomposition), or "generalized" (for inverse using the Moore-Penrose pseudoinverse).
-
-    Returns:
-        wald: The Wald statistic for this feature (i.e. for this beta vector/sigma array)
-        df: Degrees of freedom for this feature
-        pval: p-value for this feature
-    """
-    # If contrast matrix is given in another form:
-    if isinstance(contrast_mat, pd.DataFrame):
-        contrast_mat = contrast_mat.values
-
-    # Contrast matrix for multivariate Wald test:
-    # R = upper triangular matrix, P = permutation matrix (mapping between the permuted matrix and the original
-    # matrix- needed if pivoting is done for numerical stability)
-    _, R, P = scipy.linalg.qr(contrast_mat, pivoting=True)
-    rank = np.linalg.matrix_rank(R)
-    mod_contrast_matrix = contrast_mat[:, P[:rank]]
-
-    # Invert Sigma
-    if inverse == "cholesky":
-        try:
-            sigmaInv = np.linalg.inv(np.linalg.cholesky(mod_contrast_matrix.T @ Sigma @ mod_contrast_matrix))
-        except np.linalg.LinAlgError:
-            return np.nan, np.nan, np.nan
-
-    elif inverse == "qr":
-        try:
-            sigmaInv = np.linalg.lstsq(
-                mod_contrast_matrix.T @ Sigma @ mod_contrast_matrix, np.eye(mod_contrast_matrix.shape[1]), rcond=None
-            )[0]
-        except np.linalg.LinAlgError:
-            return np.nan, np.nan, np.nan
-
-    elif inverse == "generalized":
-        try:
-            sigmaInv = np.linalg.pinv(mod_contrast_matrix.T @ Sigma @ mod_contrast_matrix)
-        except np.linalg.LinAlgError:
-            return np.nan, np.nan, np.nan
-
-    else:
-        raise ValueError(f"Invalid value for 'inverse' argument: {inverse}. Options: 'cholesky', 'qr', 'generalized'.")
-
-    # Differential testing with a likelihood ratio test:
-    # Estimated log-fold change:
-    est_fc = mod_contrast_matrix.T @ beta
-    # Do not consider features with absolute log-fold change below threshold (will not do anything if lfc is the
-    # default of 0):
-    est = np.sign(est_fc) * np.maximum(0, np.abs(est_fc) - lfc)
-    est = np.reshape(est, (1, est.shape[0]))
-
-    # Wald statistic and p-value:
-    wald = np.matmul(np.matmul(est, sigmaInv), est.T)
-    if wald < 0:
-        wald = 0
-    df = mod_contrast_matrix.shape[1]
-    pval = 1 - scipy.stats.chi2.cdf(wald, df)
-    # Convert to floating point:
-    if not np.isscalar(wald):
-        wald = wald.item()
-    if not np.isscalar(pval):
-        pval = pval.item()
-
-    return wald, df, pval
 
 
 def multitesting_correction(

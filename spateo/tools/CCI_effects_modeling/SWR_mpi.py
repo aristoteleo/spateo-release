@@ -322,16 +322,18 @@ def define_spateo_argparse(**kwargs):
             "neighborhood. If this argument is provided, only expression will be used to find neighbors.",
         },
         "-n_neighbors_membrane_bound": {
-            "default": 8,
+            "default": 6,
             "type": int,
             "help": "Only used if `mod_type` is 'niche', to define the number of neighbors to consider for each "
-            "cell when defining the independent variable array for membrane-bound ligands.",
+            "cell when defining the independent variable array for membrane-bound ligands. Will also be used to "
+            "define the number of neighbors to consider for lagged ligand expression.",
         },
         "-n_neighbors_secreted": {
             "default": 25,
             "type": int,
             "help": "Only used if `mod_type` is 'niche', to define the number of neighbors to consider for each "
-            "cell when defining the independent variable array for secreted or ECM ligands.",
+            "cell when defining the independent variable array for secreted or ECM ligands. Will also be used to "
+            "define the number of neighbors to consider for lagged ligand expression.",
         },
         "-distr": {"default": "gaussian", "type": str},
         "-fit_intercept": {"action": "store_true"},

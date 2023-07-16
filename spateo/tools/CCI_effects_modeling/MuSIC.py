@@ -1073,16 +1073,39 @@ class MuSIC:
             # Compute spatial lag of ligand expression- exclude self for membrane-bound because autocrine signaling
             # is very difficult in principle:
             if self.mod_type == "lr" or self.mod_type == "ligand":
+                # Path for saving spatial weights matrices:
+                if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "spatial_weights")):
+                    os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "spatial_weights"))
+
+                # For checking for pre-computed spatial weights:
+                membrane_bound_path = os.path.join(
+                    os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_membrane_bound.npz"
+                )
+                secreted_path = os.path.join(
+                    os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_secreted.npz"
+                )
+
                 # Compute separate set of spatial weights for membrane-bound and secreted ligands:
                 if "spatial_weights_membrane_bound" not in locals():
-                    spatial_weights_membrane_bound = self._compute_all_wi(
-                        bw=self.n_neighbors_membrane_bound, bw_fixed=False, exclude_self=True, verbose=False
-                    )
+                    try:
+                        spatial_weights_membrane_bound = scipy.sparse.load_npz(membrane_bound_path)
+                    except:
+                        spatial_weights_membrane_bound = self._compute_all_wi(
+                            bw=self.n_neighbors_membrane_bound, bw_fixed=False, exclude_self=True, verbose=False
+                        )
+                        self.logger.info(f"Saving spatial weights for membrane-bound ligands to {membrane_bound_path}.")
+                        scipy.sparse.save_npz(membrane_bound_path, spatial_weights_membrane_bound)
+
                 if "spatial_weights_secreted" not in locals():
-                    # Autocrine signaling is much easier with secreted signals:
-                    spatial_weights_secreted = self._compute_all_wi(
-                        bw=self.n_neighbors_secreted, bw_fixed=False, exclude_self=False, verbose=False
-                    )
+                    try:
+                        spatial_weights_secreted = scipy.sparse.load_npz(secreted_path)
+                    except:
+                        # Autocrine signaling is much easier with secreted signals:
+                        spatial_weights_secreted = self._compute_all_wi(
+                            bw=self.n_neighbors_secreted, bw_fixed=False, exclude_self=False, verbose=False
+                        )
+                        self.logger.info(f"Saving spatial weights for secreted ligands to {secreted_path}.")
+                        scipy.sparse.save_npz(secreted_path, spatial_weights_secreted)
 
                 lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
                 for i, ligand in enumerate(self.ligands_expr.columns):
@@ -1112,6 +1135,15 @@ class MuSIC:
 
             # Set independent variable array based on input given as "mod_type":
             if self.mod_type == "niche":
+                # Path for saving spatial weights matrices:
+                if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "spatial_weights")):
+                    os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "spatial_weights"))
+
+                # For checking for pre-computed spatial weights:
+                membrane_bound_path = os.path.join(
+                    os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_niche.npz"
+                )
+
                 # Compute spatial weights matrix- use n_neighbors and exclude_self from the argparse (defaults to 10).
                 if "spatial_weights_niche" not in locals():
                     # Check for pre-computed spatial weights:
@@ -1360,6 +1392,8 @@ class MuSIC:
             # Binarize design matrix to encode presence/absence of signaling pairs:
             self.feature_distance = np.where(self.X > 0, 1, 0)
             self.feature_distance = self.comm.bcast(self.feature_distance, root=0)
+        else:
+            self.feature_distance = None
 
     def run_subsample(self, y: Optional[pd.DataFrame] = None):
         """To combat computational intensiveness of this regressive protocol, subsampling will be performed in cases
@@ -1538,10 +1572,10 @@ class MuSIC:
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
                 if self.maxbw is None:
-                    self.maxbw = 15
+                    self.maxbw = 20
 
                 if self.minbw is None:
-                    self.minbw = 3
+                    self.minbw = 8
 
         if self.minbw >= self.maxbw:
             raise ValueError(
@@ -1673,8 +1707,12 @@ class MuSIC:
         else:
             init_betas = None
 
-        if self.mod_type == "niche" or self.subsampled:
-            cov = None
+        if self.mod_type == "niche" or self.subsampled or hasattr(self, "target"):
+            if y[i] > 0:
+                cov = np.where(y > 0, 1, 0).reshape(-1)
+            else:
+                cov = np.where(y == 0, 1, 0).reshape(-1)
+            expr_mat = None
         else:
             # Distance in "signaling space", conditioned on target expression (matched zero/nonzero with the point in
             # question):
@@ -1682,12 +1720,13 @@ class MuSIC:
                 cov = np.where(y > 0, 1, 0).reshape(-1)
             else:
                 cov = np.where(y == 0, 1, 0).reshape(-1)
+            expr_mat = self.feature_distance
         wi = get_wi(
             i,
             n_samples=len(X),
             cov=cov,
             coords=coords,
-            expr_mat=self.feature_distance,
+            expr_mat=expr_mat,
             fixed_bw=self.bw_fixed,
             kernel=self.kernel,
             bw=bw,
@@ -2283,7 +2322,7 @@ class MuSIC:
             else:
                 feature_mask = None
 
-            # Use y to find the appropriate upper and lower bounds for coefficients:
+            # Use y to find the initial appropriate upper and lower bounds for coefficients:
             if self.distr != "gaussian":
                 lim = np.log(np.abs(y + 1e-6))
                 # To avoid the influence of outliers:
@@ -2370,7 +2409,7 @@ class MuSIC:
         return all_data, all_bws
 
     def predict(
-        self, input: Optional[np.ndarray] = None, coeffs: Optional[Union[np.ndarray, Dict[str, pd.DataFrame]]] = None
+        self, input: Optional[pd.DataFrame] = None, coeffs: Optional[Union[np.ndarray, Dict[str, pd.DataFrame]]] = None
     ) -> pd.DataFrame:
         """Given input data and learned coefficients, predict the dependent variables.
 
@@ -2380,46 +2419,67 @@ class MuSIC:
                 in the fitting process from file.
         """
         if input is None:
-            input = self.X
+            input = self.X_df
+
         # else:
         #     input_all = input
 
         if coeffs is None:
             coeffs, _ = self.return_outputs()
-            # If dictionary, compute outputs for the multiple dependent variables and concatenate together:
-            if isinstance(coeffs, Dict):
-                all_y_pred = pd.DataFrame(index=self.sample_names)
-                for target in coeffs:
-                    if input.shape[0] != coeffs[target].shape[0]:
-                        raise ValueError(
-                            f"Input data has {input.shape[0]} samples but coefficients for target {target} have "
-                            f"{coeffs[target].shape[0]} samples."
-                        )
-                    y_pred = np.sum(input * coeffs[target], axis=1)
-                    if self.distr != "gaussian":
-                        # Subtract 1 because in the case that all coefficients are zero, np.exp(linear predictor)
-                        # will be 1 at minimum, though it should be zero.
-                        y_pred = self.distr_obj.predict(y_pred)
 
-                        # Subtract 1 from predictions for predictions that are close to 1- accounting for the
-                        # pseudocount from model setup:
-                        y_pred[y_pred <= 1.2] -= 1
-                        y_pred[y_pred < 0.0] = 0.0
+        # If dictionary, compute outputs for the multiple dependent variables and concatenate together:
+        if isinstance(coeffs, Dict):
+            all_y_pred = pd.DataFrame(index=self.sample_names)
+            for target in coeffs:
+                if input.shape[0] != coeffs[target].shape[0]:
+                    raise ValueError(
+                        f"Input data has {input.shape[0]} samples but coefficients for target {target} have "
+                        f"{coeffs[target].shape[0]} samples."
+                    )
 
-                        # thresh = 1.01 if self.normalize else 0
-                        # y_pred[y_pred <= thresh] = 0.0
-                    y_pred = pd.DataFrame(y_pred, index=self.sample_names, columns=[target])
-                    all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
-                return all_y_pred
+                # Subset to the specific features that were used for this dependent variable:
+                feats = [
+                    col.split("_")[1]
+                    for col in coeffs[target].columns
+                    if col.startswith("b_") and "intercept" not in col
+                ]
 
+                y_pred = np.sum(input.loc[:, feats].values * coeffs[target], axis=1)
+                if self.distr != "gaussian":
+                    # Subtract 1 because in the case that all coefficients are zero, np.exp(linear predictor)
+                    # will be 1 at minimum, though it should be zero.
+                    y_pred = self.distr_obj.predict(y_pred)
+
+                    # Subtract 1 from predictions for predictions that are close to 1- accounting for the
+                    # pseudocount from model setup:
+                    y_pred[y_pred <= 1.2] -= 1
+                    y_pred[y_pred < 0.0] = 0.0
+
+                    # thresh = 1.01 if self.normalize else 0
+                    # y_pred[y_pred <= thresh] = 0.0
+
+                # Remove predicted nonzero values that are observed to be zero- there is no signal here so it is
+                # impossible to know whether derived insights are potential false positives:
+                true_y = self.adata[:, target].X.toarray().reshape(-1)
+                idxs_zero = np.where((true_y == 0) & (y_pred > 0))[0]
+                y_pred = pd.DataFrame(y_pred, index=self.sample_names, columns=[target])
+                all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
+            return all_y_pred
+
+        # If coeffs not given as a dictionary:
+        else:
+            # Subset to the specific features that were used for the dependent variable for which "coeffs" are
+            # passed:
+            feats = [col.split("_")[1] for col in coeffs.columns if col.startswith("b_") and "intercept" not in col]
+            input = input.loc[:, feats]
+
+            if self.distr == "gaussian":
+                y_pred_all = input * coeffs
             else:
-                if self.distr == "gaussian":
-                    y_pred_all = input * coeffs
-                else:
-                    y_pred_all_nontransformed = input * coeffs
-                    y_pred_all = self.distr_obj.predict(y_pred_all_nontransformed)
-                y_pred = pd.DataFrame(np.sum(y_pred_all, axis=1), index=self.sample_names, columns=["y_pred"])
-                return y_pred
+                y_pred_all_nontransformed = input * coeffs
+                y_pred_all = self.distr_obj.predict(y_pred_all_nontransformed)
+            y_pred = pd.DataFrame(np.sum(y_pred_all, axis=1), index=self.sample_names, columns=["y_pred"])
+            return y_pred
 
     # ---------------------------------------------------------------------------------------------------
     # Diagnostics

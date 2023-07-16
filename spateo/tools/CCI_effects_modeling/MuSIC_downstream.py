@@ -348,21 +348,21 @@ class MuSIC_Interpreter(MuSIC):
 
         # Check inputs:
         if metric not in ["proportion", "significant", "specificity", "mean"]:
-            raise ValueError(f"Unrecognized metric {metric}. Options are 'proportion', 'significant', 'specificity', "
-                             f"or 'mean'.")
+            raise ValueError(
+                f"Unrecognized metric {metric}. Options are 'proportion', 'significant', 'specificity', " f"or 'mean'."
+            )
 
-        df = pd.DataFrame()
+        all_targets = list(self.coeffs.keys())
+        targets = all_targets if target_subset is None else target_subset
+        df = pd.DataFrame(index=self.feature_names, columns=targets)
 
         for target in self.coeffs.keys():
             # Get coefficients for this key
             coef = self.coeffs[target]
             feats = [col.split("_")[1] for col in coef.columns if col.startswith("b_") and "intercept" not in col]
 
-    def visualize_combinatorial_effects(
-        self
-    ):
+    def visualize_combinatorial_effects(self):
         """For future work!"""
-
 
     def get_effect_potential(
         self,
@@ -371,7 +371,9 @@ class MuSIC_Interpreter(MuSIC):
         receptor: Optional[str] = None,
         sender_cell_type: Optional[str] = None,
         receiver_cell_type: Optional[str] = None,
-        spatial_weights: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
+        spatial_weights_membrane_bound: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
+        spatial_weights_secreted: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
+        spatial_weights_niche: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
         store_summed_potential: bool = True,
     ) -> Tuple[scipy.sparse.spmatrix, np.ndarray, np.ndarray]:
         """For each cell, computes the 'signaling effect potential', interpreted as a quantification of the strength of
@@ -390,7 +392,7 @@ class MuSIC_Interpreter(MuSIC):
             sender_cell_type: Can optionally be used to select cell type from among the cell types used to fit the model
                 to compute sent potential. Must be given if :attr `mod_type` is 'niche'.
             receiver_cell_type: Can optionally be used to condition sent potential on receiver cell type.
-            spatial_weights: Optional pairwise spatial weights matrix. If not given, will compute at runtime.
+
             store_summed_potential: If True, will store both sent and received signaling potential as entries in
                 .obs of the AnnData object.
 
@@ -440,11 +442,29 @@ class MuSIC_Interpreter(MuSIC):
         if receiver_cell_type is None and self.receiver_ct_for_downstream is not None:
             receiver_cell_type = self.receiver_ct_for_downstream
 
-        if spatial_weights is None:
-            # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver.
-            # Note: as the default (if bw is not otherwise provided), the n nearest neighbors will be used for the
-            # bandwidth:
-            spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True)
+        if spatial_weights_membrane_bound is None:
+            # Try to load spatial weights, else re-compute them:
+            membrane_bound_path = os.path.join(
+                os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_membrane_bound.npz"
+            )
+            try:
+                spatial_weights_membrane_bound = scipy.sparse.load_npz(membrane_bound_path)
+            except:
+                # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver.
+                # Note: this is the same process used in model setup.
+                spatial_weights_membrane_bound = self._compute_all_wi(
+                    self.n_neighbors_membrane_bound, bw_fixed=False, exclude_self=True, verbose=False
+                )
+        if spatial_weights_secreted is None:
+            secreted_path = os.path.join(
+                os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_secreted.npz"
+            )
+            try:
+                spatial_weights_secreted = scipy.sparse.load_npz(secreted_path)
+            except:
+                spatial_weights_secreted = self._compute_all_wi(
+                    self.n_neighbors_secreted, bw_fixed=False, exclude_self=True, verbose=False
+                )
 
         # Testing: compare both ways:
         coeffs = self.coeffs[target]
@@ -470,6 +490,16 @@ class MuSIC_Interpreter(MuSIC):
                         "Invalid ligand-receptor pair given. Check that input to 'lr_pair' is given in "
                         "the form of a tuple."
                     )
+
+            # Check if ligand is membrane-bound or secreted:
+            matching_rows = self.lr_db[self.lr_db["from"] == ligand]
+            if (
+                matching_rows["type"].str.contains("Secreted Signaling").any()
+                or matching_rows["type"].str.contains("ECM-Receptor").any()
+            ):
+                spatial_weights = spatial_weights_secreted
+            else:
+                spatial_weights = spatial_weights_membrane_bound
 
             # Use the non-lagged ligand expression to construct ligand indicator array:
             ligand_expr = self.ligands_expr_nonlag[ligand].values.reshape(-1, 1)
@@ -504,9 +534,20 @@ class MuSIC_Interpreter(MuSIC):
             if sender_cell_type is None:
                 raise ValueError("Must provide sending cell type name for niche models.")
 
+            if spatial_weights_niche is None:
+                niche_weights_path = os.path.join(
+                    os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_niche.npz"
+                )
+                try:
+                    spatial_weights_niche = scipy.sparse.load_npz(niche_weights_path)
+                except:
+                    spatial_weights_niche = self._compute_all_wi(
+                        self.n_neighbors_secreted, bw_fixed=False, exclude_self=True, verbose=False
+                    )
+
             sender_cell_type = self.cell_categories[sender_cell_type].values.reshape(-1, 1)
             # Get sending cells only of the specified type:
-            sent_potential = spatial_weights.multiply(sender_cell_type)
+            sent_potential = spatial_weights_niche.multiply(sender_cell_type)
             sent_potential.eliminate_zeros()
 
             # Check whether to condition on receiver cell type:
