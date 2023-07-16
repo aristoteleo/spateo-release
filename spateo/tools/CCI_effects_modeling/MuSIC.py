@@ -601,6 +601,7 @@ class MuSIC:
         # not 1- expression of 1 indicates some interaction has a positive effect, but the linear predictor that
         # corresponds to this is 0, indicating no net effect:
         if self.distr in ["poisson", "nb"]:
+            self.adata.layers["original_counts"] = self.adata.X.copy()
             if scipy.sparse.issparse(self.adata.X):
                 self.adata.X.data += 1
             else:
@@ -1559,14 +1560,14 @@ class MuSIC:
 
         if self.minbw is None:
             if self.bw_fixed:
-                # Set minimum bandwidth to the distance to 3x the smallest distance between neighboring points:
+                # Set minimum bandwidth to the distance to the smallest distance between neighboring points:
                 min_dist = np.min(
                     np.array(
                         [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
                     )
                 )
                 # Arbitrarily chosen limits:
-                self.minbw = min_dist * 2
+                self.minbw = min_dist
                 self.maxbw = min_dist * 6
 
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
@@ -1708,18 +1709,18 @@ class MuSIC:
             init_betas = None
 
         if self.mod_type == "niche" or self.subsampled or hasattr(self, "target"):
-            if y[i] > 0:
-                cov = np.where(y > 0, 1, 0).reshape(-1)
-            else:
+            if y[i] == 0:
                 cov = np.where(y == 0, 1, 0).reshape(-1)
+            else:
+                cov = None
             expr_mat = None
         else:
             # Distance in "signaling space", conditioned on target expression (matched zero/nonzero with the point in
             # question):
-            if y[i] > 0:
-                cov = np.where(y > 0, 1, 0).reshape(-1)
-            else:
+            if y[i] == 0:
                 cov = np.where(y == 0, 1, 0).reshape(-1)
+            else:
+                cov = None
             expr_mat = self.feature_distance
         wi = get_wi(
             i,
@@ -1779,7 +1780,7 @@ class MuSIC:
             else:
                 pred_y = y_hat[i]
                 # Adjustment for the pseudocount added in preprocessing:
-                pred_y[pred_y <= 1.2] -= 1
+                pred_y -= 1
                 pred_y[pred_y < 0] = 0
 
             diagnostic = pred_y
@@ -2450,18 +2451,13 @@ class MuSIC:
                     # will be 1 at minimum, though it should be zero.
                     y_pred = self.distr_obj.predict(y_pred)
 
-                    # Subtract 1 from predictions for predictions that are close to 1- accounting for the
-                    # pseudocount from model setup:
-                    y_pred[y_pred <= 1.2] -= 1
+                    # Subtract 1 from predictions for predictions to account for the pseudocount from model setup:
+                    y_pred -= 1
                     y_pred[y_pred < 0.0] = 0.0
 
                     # thresh = 1.01 if self.normalize else 0
                     # y_pred[y_pred <= thresh] = 0.0
 
-                # Remove predicted nonzero values that are observed to be zero- there is no signal here so it is
-                # impossible to know whether derived insights are potential false positives:
-                true_y = self.adata[:, target].X.toarray().reshape(-1)
-                idxs_zero = np.where((true_y == 0) & (y_pred > 0))[0]
                 y_pred = pd.DataFrame(y_pred, index=self.sample_names, columns=[target])
                 all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
             return all_y_pred

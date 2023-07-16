@@ -248,7 +248,7 @@ class Kernel(object):
                 # Indices of nearest neighbors- if fewer than 1/3 of the neighbors (given by bw for not "fixed" and
                 # using the ten nearest neighbors for "fixed") are consistent with "cov" of the sample in question,
                 # will instead search for nearest neighbors in the gene expression space if "expr_mat" is given. If
-                # not, will set all distances to zero:
+                # "expr_mat" is not given, will set all distances to zero:
                 n = 10 if fixed else int(bw)
                 neighbor_dist_vector = self.dist_vector[self.dist_vector > 0]
                 neighbor_dists = np.argpartition(neighbor_dist_vector, n)[:n]
