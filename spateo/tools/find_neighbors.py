@@ -4,12 +4,11 @@ spatial transcriptomics data.
 """
 import os
 import sys
-from typing import Iterable, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import scipy
-import sklearn
 from anndata import AnnData
 from scipy.spatial.distance import pdist, squareform
 from sklearn.decomposition import PCA
@@ -43,6 +42,22 @@ def local_dist(coords_i: np.ndarray, coords: np.ndarray):
     """
     distances = np.sqrt(np.sum((coords_i - coords) ** 2, axis=1))
     return distances
+
+
+def jaccard_index(row_i: np.ndarray, array: np.ndarray):
+    """Compute the Jaccard index between a row of a binary array and all other rows.
+
+    Args:
+        row_i: 1D binary array representing the row for which to compute the Jaccard index.
+        array: 2D binary array containing the rows to compare against.
+
+    Returns:
+        jaccard_indices: 1D array of Jaccard indices between `row_i` and each row in `array`.
+    """
+    intersect = np.logical_and(row_i, array)
+    union = np.logical_or(row_i, array)
+    jaccard_scores = np.sum(intersect, axis=1) / np.sum(union, axis=1)
+    return jaccard_scores
 
 
 def normalize_adj(adj: np.ndarray, exclude_self: bool = True) -> np.ndarray:
@@ -213,6 +228,8 @@ class Kernel(object):
         sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
         normalize_weights: If True, the weights will be normalized to sum to 1.
         use_expression_neighbors_only: If True, will only use the expression matrix to find nearest neighbors.
+        jaccard_threshold: Only used if "expr_mat" is not None. Sets the threshold for the Jaccard index to determine
+            whether any two given cells are similar enough to be considered neighbors.
     """
 
     def __init__(
@@ -230,6 +247,7 @@ class Kernel(object):
         sparse_array: bool = False,
         normalize_weights: bool = False,
         use_expression_neighbors_only: bool = False,
+        jaccard_threshold: float = 0.2,
     ):
 
         if use_expression_neighbors_only:
@@ -255,6 +273,26 @@ class Kernel(object):
                 neighbor_indices = np.where(np.isin(self.dist_vector, neighbor_dist_vector[neighbor_dists]))[0]
                 n_neighbor_threshold = 3 if fixed else int(n / 3)
                 if np.sum(cov[neighbor_indices]) < n_neighbor_threshold and expr_mat is not None:
+                    # The rest of this function will proceed by finding the n nearest points, no matter the true
+                    # distance between them and the query. For each neighboring index, check that the neighboring
+                    # sample is truly proximal by computing Jaccard similarity in the feature space:
+                    n_expr_neighbor_threshold = 10 if fixed else int(bw)
+                    if not np.all(np.logical_or(expr_mat == 0, expr_mat == 1)):
+                        expr_mat = (expr_mat > 0).astype(int)
+                        jaccard_indices = jaccard_index(expr_mat[i], expr_mat)
+                        jaccard_indices = jaccard_indices[jaccard_indices > jaccard_threshold]
+                        # If there are no longer a sufficient number of neighboring indices in transcriptional space,
+                        # there are effectively no samples that are close in feature profile to the sample in question,
+                        # and thus not enough signal to draw conclusions from about feature relationships. All
+                        # distances will be set to zero. Otherwise adjust the bandwidth for this sample based on the
+                        # number of samples that passed (if greater than the initially provided bandwidth, use that,
+                        # but if not use the number of samples that passed the Jaccard threshold):
+                        if len(jaccard_indices) < n_expr_neighbor_threshold:
+                            self.dist_vector = np.zeros(len(self.dist_vector))
+                        elif len(jaccard_indices) < bw:
+                            fixed = True
+                            bw = len(jaccard_indices)
+
                     self.dist_vector = local_dist(expr_mat[i], expr_mat).reshape(-1)
                     if cov is not None:
                         max_dist = np.max(self.dist_vector)
@@ -328,6 +366,7 @@ def get_wi(
     sparse_array: bool = False,
     normalize_weights: bool = False,
     use_expression_neighbors_only: bool = False,
+    jaccard_threshold: float = 0.2,
 ) -> scipy.sparse.csr_matrix:
     """Get spatial weights for an individual sample, given the coordinates of all samples in space.
 
@@ -352,6 +391,8 @@ def get_wi(
         sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
         normalize_weights: If True, the weights will be normalized to sum to 1.
         use_expression_neighbors_only: If True, will only use expression neighbors to determine the bandwidth.
+        jaccard_threshold: Only used if "expr_mat" is not None. Sets the threshold for the Jaccard index to determine
+            whether any two given cells are similar enough to be considered neighbors.
 
     Returns:
         wi: Array of weights for sample of interest
@@ -374,6 +415,7 @@ def get_wi(
         sparse_array=sparse_array,
         normalize_weights=normalize_weights,
         use_expression_neighbors_only=use_expression_neighbors_only,
+        jaccard_threshold=jaccard_threshold,
     ).kernel
 
     return wi

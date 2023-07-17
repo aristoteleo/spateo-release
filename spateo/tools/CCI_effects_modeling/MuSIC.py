@@ -1732,6 +1732,7 @@ class MuSIC:
             kernel=self.kernel,
             bw=bw,
             use_expression_neighbors_only=self.use_expression_neighbors_only,
+            jaccard_threshold=self.target_expr_threshold,
         ).reshape(-1, 1)
 
         if mask_indices is not None:
@@ -3115,6 +3116,7 @@ class VMuSIC(MuSIC):
                 kernel=self.kernel,
                 bw=bw,
                 use_expression_neighbors_only=self.use_expression_neighbors_only,
+                jaccard_threshold=self.target_expr_threshold,
             ).reshape(-1, 1)
 
             wi[mask_indices] = 0.0
@@ -3161,6 +3163,7 @@ class VMuSIC(MuSIC):
                             kernel=self.kernel,
                             bw=bw,
                             use_expression_neighbors_only=self.use_expression_neighbors_only,
+                            jaccard_threshold=self.target_expr_threshold,
                         ).reshape(-1, 1)
 
                         wi[mask_indices] = 0.0
