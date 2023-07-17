@@ -340,7 +340,7 @@ def define_spateo_argparse(**kwargs):
         "-tolerance": {"default": 1e-3, "type": float},
         "-max_iter": {"default": 500, "type": int},
         "-patience": {"default": 5, "type": int},
-        "-ridge_lambda": {"type": float},
+        "-ridge_lambda": {"default": 0.2, "type": float},
         "-chunks": {
             "default": 1,
             "type": int,
@@ -673,7 +673,7 @@ if __name__ == "__main__":
     parser.add_argument("-tolerance", default=1e-3, type=float)
     parser.add_argument("-max_iter", default=500, type=int)
     parser.add_argument("-patience", default=5, type=int)
-    parser.add_argument("-ridge_lambda", type=float)
+    parser.add_argument("-ridge_lambda", default=0.2, type=float)
 
     parser.add_argument(
         "-chunks",

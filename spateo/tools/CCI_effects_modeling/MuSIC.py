@@ -31,15 +31,7 @@ from ...preprocessing.transform import log1p
 from ..find_neighbors import get_wi, neighbors
 from ..spatial_degs import moran_i
 from .distributions import Gaussian, NegativeBinomial, Poisson
-from .regression_utils import (
-    compute_betas_local,
-    golden_section_search,
-    iwls,
-    library_scaling_factors,
-    logistic_objective,
-    multicollinearity_check,
-    smooth,
-)
+from .regression_utils import compute_betas_local, iwls, multicollinearity_check, smooth
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -806,7 +798,7 @@ class MuSIC:
                 )
 
                 # Log-scale ligand expression- to reduce the impact of very large values:
-                self.ligands_expr = self.ligands_expr.applymap(np.log1p)
+                # self.ligands_expr = self.ligands_expr.applymap(np.log1p)
 
                 # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
                 # but store them in a temporary list to do so later because some may contribute to multiple complexes:
@@ -1271,6 +1263,8 @@ class MuSIC:
                 if self.multicollinear_threshold is not None:
                     X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
+                # Log-scale to reduce the impact of "denser" features:
+                X_df = X_df.applymap(np.log1p)
                 # Normalize the data to prevent numerical overflow:
                 X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
 
@@ -1767,6 +1761,7 @@ class MuSIC:
                 clip=self.clip,
                 max_iter=self.max_iter,
                 spatial_weights=wi,
+                i=i,
                 # offset=self.offset,
                 link=None,
                 ridge_lambda=self.ridge_lambda,
@@ -2327,7 +2322,6 @@ class MuSIC:
             # Use y to find the initial appropriate upper and lower bounds for coefficients:
             if self.distr != "gaussian":
                 lim = np.log(np.abs(y + 1e-6))
-                # To avoid the influence of outliers:
                 self.clip = np.percentile(lim, 99.7)
             else:
                 self.clip = np.percentile(y, 99.7)
@@ -2441,7 +2435,7 @@ class MuSIC:
 
                 # Subset to the specific features that were used for this dependent variable:
                 feats = [
-                    col.split("_")[1]
+                    col.split("b_")[1]
                     for col in coeffs[target].columns
                     if col.startswith("b_") and "intercept" not in col
                 ]

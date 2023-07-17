@@ -179,7 +179,9 @@ def compute_betas(
     return betas
 
 
-def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambda: float = 0.0, clip: float = 5.0):
+def compute_betas_local(
+    y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambda: float = 0.0, clip: Optional[float] = None
+):
     """Maximum likelihood estimation procedure, to be used in iteratively weighted least squares to compute the
     regression coefficients for a given set of dependent and independent variables while accounting for spatial
     heterogeneity in the dependent variable.
@@ -238,8 +240,9 @@ def compute_betas_local(y: np.ndarray, x: np.ndarray, w: np.ndarray, ridge_lambd
     pseudoinverse = xtx_inv_xt
 
     betas = np.dot(xtx_inv_xt, y)
-    # Upper and lower bound to constrain betas and prevent numerical overflow:
-    betas = np.clip(betas, -clip, clip)
+    if clip is not None:
+        # Upper and lower bound to constrain betas and prevent numerical overflow:
+        betas = np.clip(betas, -clip, clip)
     # And set to zero with small offset for numerical overflow if the diagonal of the Gram matrix is below a certain
     # threshold:
     betas[to_zero] = 1e-20
@@ -254,10 +257,11 @@ def iwls(
     init_betas: Optional[np.ndarray] = None,
     offset: Optional[np.ndarray] = None,
     tol: float = 1e-8,
-    clip: float = 5.0,
+    clip: Optional[Union[float, np.ndarray]] = None,
     threshold: float = 1e-4,
     max_iter: int = 200,
     spatial_weights: Optional[np.ndarray] = None,
+    i: Optional[int] = None,
     link: Optional[Link] = None,
     ridge_lambda: Optional[float] = None,
     mask: Optional[np.ndarray] = None,
@@ -277,12 +281,15 @@ def iwls(
             meant to deal with differences in scale that are not caused by the predictor variables,
             e.g. by differences in library size
         tol: Convergence tolerance
-        clip: Sets magnitude of the upper and lower bound to constrain betas and prevent numerical overflow
+        clip: Sets magnitude of the upper and lower bound to constrain betas and prevent numerical overflow. Either
+            one floating point value or an array for sample-specific clipping.
         threshold: Coefficients with absolute values below this threshold will be set to zero (as these are
             insignificant)
         max_iter: Maximum number of iterations if convergence is not reached
         spatial_weights: Array of shape [n_samples, 1]; weights to transform observations from location i for a
             geographically-weighted regression
+        i: Optional integer; index of the observation to be used as the center of the geographically-weighted
+            regression. Required if "clip" is an array.
         link: Link function for the distribution family. If None, will default to the default value for the specified
             distribution family.
         variance: Variance function for the distribution family. If None, will default to the default value for the
@@ -327,7 +334,10 @@ def iwls(
     # Initialization:
     n_iter = 0
     difference = 1.0e6
-    init_clip = clip
+
+    if isinstance(clip, np.ndarray):
+        assert i is not None, "If clip is an array, i must be specified."
+        clip = clip[i]
 
     # Get appropriate distribution family based on specified:
     mod_distr = distr  # string specifying distribution assumption of the model
@@ -391,9 +401,6 @@ def iwls(
 
         linear_predictor = sparse_dot(x, new_betas)
         y_hat = distr.predict(linear_predictor)
-        # Update clip based on the new betas- set based on the number of nonzero coefficients:
-        nnz_betas = np.count_nonzero(new_betas)
-        clip = init_clip / nnz_betas
 
         difference = np.min(abs(new_betas - betas))
         betas = new_betas

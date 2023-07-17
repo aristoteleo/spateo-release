@@ -169,7 +169,7 @@ def main():
     help="Number of iterations to wait before stopping if parameters have "
     "stabilized. Only used if `multiscale` is True.",
 )
-@click.option("-ridge_lambda", required=False)
+@click.option("-ridge_lambda", default=0.2)
 
 # Downstream analysis arguments
 @click.option("-search_bw", default=10)
