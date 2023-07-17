@@ -143,17 +143,17 @@ def BA_transform_and_assignment(
     s = vecfld["s"]
     R = vecfld["R"]
     t = vecfld["t"]
-    optimal_R = _data(nx, vecfld["optimal_R"], type_as)
-    optimal_t = _data(nx, vecfld["optimal_t"], type_as)
-    init_R = _data(nx, vecfld["init_R"], type_as)
-    init_t = _data(nx, vecfld["init_t"], type_as)
-    XA = _dot(nx)(XA, init_R.T) + init_t
+    optimal_R = vecfld["optimal_R"]
+    optimal_t = vecfld["optimal_t"]
+    init_R = vecfld["init_R"]
+    init_t = vecfld["init_t"]
+    XA = cal_dot(XA, init_R.T, use_chunk=True) + init_t
 
     beta = vecfld["beta"]
     quary_kernel = con_K(XA, ctrl_pts, beta, True)
     quary_velocities = cal_dot(quary_kernel, Coff, use_chunk=True)
     quary_similarity = s * cal_dot(XA, R.T, use_chunk=True) + t
-    quary_optimal_similarity = _dot(nx)(XA, optimal_R.T) + optimal_t
+    quary_optimal_similarity = cal_dot(XA, optimal_R.T, use_chunk=True) + optimal_t
     XAHat = quary_velocities + quary_similarity
     XAHat = nx.from_numpy(XAHat)
 
@@ -195,8 +195,6 @@ def BA_transform_and_assignment(
         quary_velocities = quary_velocities * normalize_scale
         quary_optimal_similarity = quary_optimal_similarity * normalize_scale + normalize_mean_ref
     XAHat = nx.to_numpy(XAHat)
-    quary_velocities = nx.to_numpy(quary_velocities)
-    quary_optimal_similarity = nx.to_numpy(quary_optimal_similarity)
     return XAHat, quary_velocities, quary_optimal_similarity, P.T
 
 
@@ -268,6 +266,5 @@ def get_P_chunk(
         P = term1 / (_unsqueeze(nx)(nx.einsum("ij->j", term1), 0) + 1e-8)
         P = nx.einsum("j,ij->ij", spatial_inlier, P)
         Ps.append(nx.to_numpy(P))
-    # P = nx.concatenate(Ps, axis=1)
     P = np.concatenate(Ps, axis=1)
     return P

@@ -622,32 +622,26 @@ def get_optimal_R(
     """
     nx = ot.backend.get_backend(coordsA, coordsB, P, R_init)
     NA, NB, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
-    used_gpu = False
-    if nx_torch(nx) and coordsA.is_cuda:
-        coordsA = coordsA.cpu()
-        coordsB = coordsB.cpu()
-        R_init = R_init.cpu()
-        used_gpu = True
-    if nx_torch(nx) and P.is_cuda:
-        P = P.cpu()
     Sp = nx.einsum("ij->", P)
     K_NA = nx.einsum("ij->i", P)
     K_NB = nx.einsum("ij->j", P)
-    # get the optimal rotation matrix R
-    PXA, PXB = _dot(nx)(K_NA, coordsA)[None, :], _dot(nx)(K_NB, coordsB)[None, :]
-    t = ((PXB - _dot(nx)(PXA, R_init.T))) / (Sp)
-    A = -(_dot(nx)(PXA.T, t) - _dot(nx)(coordsA.T, _dot(nx)(P, coordsB))).T
+    VnA = nx.zeros(coordsA.shape, type_as=coordsA[0, 0])
+    mu_XnA, mu_VnA, mu_XnB = (
+        _dot(nx)(K_NA, coordsA) / Sp,
+        _dot(nx)(K_NA, VnA) / Sp,
+        _dot(nx)(K_NB, coordsB) / Sp,
+    )
+    XnABar, VnABar, XnBBar = coordsA - mu_XnA, VnA - mu_VnA, coordsB - mu_XnB
+    A = -_dot(nx)(nx.einsum("ij,i->ij", VnABar, K_NA).T - _dot(nx)(P, XnBBar).T, XnABar)
 
+    # get the optimal rotation matrix R
     svdU, svdS, svdV = _linalg(nx).svd(A)
     C = _identity(nx, D, type_as=coordsA[0, 0])
     C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
     R = _dot(nx)(_dot(nx)(svdU, C), svdV)
+    t = mu_XnB - mu_VnA - _dot(nx)(mu_XnA, R.T)
     optimal_RnA = _dot(nx)(coordsA, R.T) + t
-    # print(R)
-    if used_gpu:
-        return optimal_RnA.cuda(), R.cuda(), t.cuda()
-    else:
-        return optimal_RnA, R, t
+    return optimal_RnA, R, t
 
 
 ###############################

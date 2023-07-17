@@ -208,7 +208,7 @@ def get_P_chunk(
         )
         P = term1 / (_unsqueeze(nx)(nx.einsum("ij->j", term1), 0) + 1e-8)
         P = nx.einsum("j,ij->ij", spatial_inlier, P)
-        Ps.append(P.cpu())
+        Ps.append(P)
     P = nx.concatenate(Ps, axis=1)
     return P
 
@@ -231,12 +231,12 @@ def BA_align(
     normalize_c: bool = True,
     normalize_g: bool = True,
     select_high_exp_genes: Union[bool, float, int] = False,
-    dtype: str = "float64",
+    dtype: str = "float32",
     device: str = "cpu",
     inplace: bool = True,
     verbose: bool = True,
     nn_init: bool = True,
-    SVI_mode: bool = False,
+    SVI_mode: bool = True,
     batch_size: int = 1000,
     partial_robust_level: float = 25,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
@@ -293,16 +293,17 @@ def BA_align(
 
     NA, NB, D, G = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1], X_A.shape[1]
     sub_sample = False
-    if SVI_mode and (NA > 20000 or NB > 20000):
-        if NA > 15000:
-            sub_idx_A = np.random.choice(NA, 10000, replace=False)
+    sub_sample_num = 15000
+    if SVI_mode and (NA > sub_sample_num or NB > sub_sample_num):
+        if NA > sub_sample_num:
+            sub_idx_A = np.random.choice(NA, sub_sample_num, replace=False)
             sub_coordsA = coordsA[sub_idx_A, :]
             sub_X_A = X_A[sub_idx_A, :]
         else:
             sub_coordsA = coordsA
             sub_X_A = X_A
-        if NB > 15000:
-            sub_idx_B = np.random.choice(NB, 10000, replace=False)
+        if NB > sub_sample_num:
+            sub_idx_B = np.random.choice(NB, sub_sample_num, replace=False)
             sub_coordsB = coordsB[sub_idx_B, :]
             sub_X_B = X_B[sub_idx_B, :]
         else:
