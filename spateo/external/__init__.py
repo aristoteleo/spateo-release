@@ -1,1 +1,1 @@
-import lack
+from . import lack
