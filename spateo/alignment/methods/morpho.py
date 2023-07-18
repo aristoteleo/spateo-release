@@ -68,7 +68,7 @@ def con_K(
 ############
 # BioAlign #
 ############
-def get_P_debug_v2(
+def get_P(
     XnAHat: Union[np.ndarray, torch.Tensor],
     XnB: Union[np.ndarray, torch.Tensor],
     sigma2: Union[int, float, np.ndarray, torch.Tensor],
@@ -94,7 +94,6 @@ def get_P_debug_v2(
         GeneDistMat: The gene expression distance matrix between sample A and sample B. Shape: N x M.
         SpatialDistMat: The spatial coordinate distance matrix between sample A and sample B. Shape: N x M.
         samples_s: The space size of each sample. Area size for 2D samples and volume size for 3D samples.
-        outlier_g: The outlier distribution output space volume attributed to gene expression.
     Returns:
         P: Generating probability matrix P. Shape: N x M.
     """
@@ -209,7 +208,7 @@ def get_P_chunk(
         )
         P = term1 / (_unsqueeze(nx)(nx.einsum("ij->j", term1), 0) + 1e-8)
         P = nx.einsum("j,ij->ij", spatial_inlier, P)
-        Ps.append(P.cpu())
+        Ps.append(P)
     P = nx.concatenate(Ps, axis=1)
     return P
 
@@ -223,30 +222,23 @@ def BA_align(
     iter_key_added: Optional[str] = "iter_spatial",
     vecfld_key_added: Optional[str] = "VecFld_morpho",
     layer: str = "X",
-    mode: Literal["S", "N", "SN", "NS"] = "SN",
     dissimilarity: str = "kl",
     keep_size: bool = False,
-    max_iter: int = 100,
+    max_iter: int = 200,
     lambdaVF: Union[int, float] = 1e2,
     beta: Union[int, float] = 0.01,
-    beta2: Optional[Union[int, float]] = None,
-    outlier_g: Optional[Union[int, float]] = None,
     K: Union[int, float] = 15,
     normalize_c: bool = True,
     normalize_g: bool = True,
     select_high_exp_genes: Union[bool, float, int] = False,
-    dtype: str = "float64",
+    dtype: str = "float32",
     device: str = "cpu",
     inplace: bool = True,
     verbose: bool = True,
-    added_similarity: Optional[Union[torch.Tensor, np.ndarray]] = None,
-    added_scale: Optional[float] = 0.5,
-    partial_alignment: bool = False,
-    proliferation_prior: Optional[Union[torch.Tensor, np.ndarray]] = None,
-    proliferation_prior_weight: float = 1.0,
     nn_init: bool = True,
-    SVI_mode: bool = False,
+    SVI_mode: bool = True,
     batch_size: int = 1000,
+    partial_robust_level: float = 25,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
     """_summary_
 
@@ -259,13 +251,11 @@ def BA_align(
         iter_key_added: ``.uns`` key under which to add the result of each iteration of the iterative process. If ``iter_key_added`` is None, the results are not saved.
         vecfld_key_added: The key that will be used for the vector field key in ``.uns``. If ``vecfld_key_added`` is None, the results are not saved.
         layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
-        mode: The method of alignment. Available ``mode`` are: ``'S'``, ``'N'`` and ``'SN'``.
         dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
         small_variance: When approximating the assignment matrix, if True, we use small sigma2 (0.001) rather than the infered sigma2
         max_iter: Max number of iterations for morpho alignment.
         lambdaVF : Hyperparameter that controls the non-rigid distortion degree. Smaller means more flexibility.
         beta: The length-scale of the SE kernel. Higher means more flexibility.
-        beta2:
         K: The number of sparse inducing points used for Nystr ̈om approximation. Smaller means faster but less accurate.
         normalize_c: Whether to normalize spatial coordinates.
         normalize_g: Whether to normalize gene expression. If ``dissimilarity`` == ``'kl'``, ``normalize_g`` must be False.
@@ -275,24 +265,12 @@ def BA_align(
         device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
         inplace: Whether to copy adata or modify it inplace.
         verbose: If ``True``, print progress updates.
-        added_similarity: The similarity matrix of the added other modality with shape n x m.
-        added_scale: The scale of the added similarity matrix. Interval from 0 to 1.
-        partial_alignment: Whether to use partial alignment. Note that setting to True does not affect the alignment of two very similar samples. If you are aligning two samples with very different morphology, e.g., across time, you can set to False.
+        nn_init: If ``True``, use nearest neighbor matching to initialize the alignment.
+        SVI_mode: Whether to use stochastic variational inferential (SVI) optimization strategy.
+        batch_size: The size of the mini-batch of SVI. If set smaller, the calculation will be faster, but it will affect the accuracy, and vice versa. If not set, it is automatically set to one-tenth of the data size.
+        partial_robust_level: The robust level of partial alignment. The larger the value, the more robust the alignment to partial cases is. Recommended setting from 1 to 50.
     """
     empty_cache(device=device)
-    # Check the method of alignment.
-    assert mode in [
-        "S",
-        "N",
-        "SN",
-    ], "``mode`` value is wrong. Available ``mode`` are: ``'S'``, ``'N'`` and ``'SN'``."
-    if mode == "NS":
-        mode = "SN"
-    if proliferation_prior is not None:
-        assert (
-            proliferation_prior.shape[0] == sampleB.shape[0]
-        ), "the length of proliferation_prior should match the length of sample B"
-
     # Preprocessing
     normalize_g = False if dissimilarity == "kl" else normalize_g
     sampleA, sampleB = (sampleA, sampleB) if inplace else (sampleA.copy(), sampleB.copy())
@@ -308,24 +286,24 @@ def BA_align(
         device=device,
         verbose=verbose,
     )
-    if added_similarity is not None:
-        added_similarity = _data(nx, added_similarity, type_as)
+
     coordsA, coordsB = spatial_coords[1], spatial_coords[0]
     X_A, X_B = exp_matrices[1], exp_matrices[0]
     del spatial_coords, exp_matrices
 
     NA, NB, D, G = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1], X_A.shape[1]
     sub_sample = False
-    if SVI_mode and (NA > 20000 or NB > 20000):
-        if NA > 15000:
-            sub_idx_A = np.random.choice(NA, 10000, replace=False)
+    sub_sample_num = 15000
+    if SVI_mode and (NA > sub_sample_num or NB > sub_sample_num):
+        if NA > sub_sample_num:
+            sub_idx_A = np.random.choice(NA, sub_sample_num, replace=False)
             sub_coordsA = coordsA[sub_idx_A, :]
             sub_X_A = X_A[sub_idx_A, :]
         else:
             sub_coordsA = coordsA
             sub_X_A = X_A
-        if NB > 15000:
-            sub_idx_B = np.random.choice(NB, 10000, replace=False)
+        if NB > sub_sample_num:
+            sub_idx_B = np.random.choice(NB, sub_sample_num, replace=False)
             sub_coordsB = coordsB[sub_idx_B, :]
             sub_X_B = X_B[sub_idx_B, :]
         else:
@@ -336,9 +314,6 @@ def BA_align(
         sub_sample = True
     else:
         GeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B, dissimilarity=dissimilarity)
-    if added_similarity is not None:
-        GeneDistMat = GeneDistMat + added_scale * added_similarity
-        del added_similarity
     area = _prod(nx)(nx.max(coordsA, axis=0) - nx.min(coordsA, axis=0))
 
     if nn_init:
@@ -378,13 +353,7 @@ def BA_align(
     # construct the kernel
     GammaSparse = con_K(ctrl_pts, ctrl_pts, beta)
     U = con_K(coordsA, ctrl_pts, beta)
-
-    # initialize parameters
-    if proliferation_prior is None:
-        kappa = nx.ones((NA), type_as=type_as)
-    else:
-        kappa = _data(nx, proliferation_prior, type_as)
-    kappa = proliferation_prior_weight * kappa
+    kappa = nx.ones((NA), type_as=type_as)
     alpha = nx.ones((NA), type_as=type_as)
     VnA = nx.zeros(coordsA.shape, type_as=type_as)
     Coff = nx.zeros(ctrl_pts.shape, type_as=type_as)
@@ -412,32 +381,18 @@ def BA_align(
     R = _identity(nx, D, type_as)
     minGeneDistMat = nx.min(GeneDistMat, 1)
     # Automatically determine the value of beta2
-    if partial_alignment:
-        beta2 = (
-            minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] * 2 if beta2 is None else beta2
-        )
-        beta2_end = nx.maximum(
-            minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.1)]] / 40,
-            _data(nx, 0.01, type_as),
-        )
-    else:
-        beta2 = (
-            minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 5 if beta2 is None else beta2
-        )
-        beta2_end = nx.max(minGeneDistMat) / 5
+    beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 5
+    beta2_end = nx.max(minGeneDistMat) / 5
     del minGeneDistMat
     if sub_sample:
         del sub_X_A, sub_X_B, GeneDistMat
     # The value of beta2 becomes progressively larger
     beta2 = nx.maximum(beta2, _data(nx, 1e-2, type_as))
-    # print(beta2)
     beta2_decrease = _power(nx)(beta2_end / beta2, 1 / (50))
-    if verbose:
-        lm.main_info("{:0>2f} --> {:0>2f}".format(beta2, beta2_end))
 
-    # If partial alignment, use smaller spatial variance to reduce tails
+    # Use smaller spatial variance to reduce tails
     outlier_variance = 1
-    max_outlier_variance = 50  # 20
+    max_outlier_variance = partial_robust_level  # 20
     outlier_variance_decrease = _power(nx)(_data(nx, max_outlier_variance, type_as), 1 / (max_iter / 2))
 
     if SVI_mode:
@@ -477,7 +432,7 @@ def BA_align(
             sampleB.uns[iter_key_added]["scale"][iter] = nx.to_numpy(s)
         if SVI_mode:
             step_size = nx.minimum(_data(nx, 1.0, type_as), SVI_deacy / (iter + 1.0))
-            P, spatial_P, sigma2_P = get_P_debug_v2(
+            P, spatial_P, sigma2_P = get_P(
                 XnAHat=XAHat,
                 XnB=randcoordsB,
                 sigma2=sigma2,
@@ -490,7 +445,7 @@ def BA_align(
                 outlier_variance=outlier_variance,
             )
         else:
-            P, spatial_P, sigma2_P = get_P_debug_v2(
+            P, spatial_P, sigma2_P = get_P(
                 XnAHat=XAHat,
                 XnB=coordsB,
                 sigma2=sigma2,
@@ -533,110 +488,93 @@ def BA_align(
         gamma = _data(nx, 0.01, type_as) if gamma < 0.01 else gamma
 
         # Update alpha
-        if partial_alignment or (proliferation_prior is not None):
-            alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
-            alpha = alpha * kappa
-        else:
-            alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
+        alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
 
         # Update VnA
-        if mode == "N":
-            term1 = _dot(nx)(
-                _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
-                U.T,
-            )
-            SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
-            Coff = _dot(nx)(term1, (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)))
-            VnA = _dot(nx)(
-                U,
-                Coff,
-            )
-        elif mode == "SN":
-            if (sigma2 < 0.015 and s > 0.95) or (iter > 80):
-                if SVI_mode:
-                    SigmaInv = (
-                        step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
-                        + (1 - step_size) * SigmaInv
-                    )
-                    term1 = _dot(nx)(_pinv(nx)(SigmaInv), U.T)
-                    PXB_term = (
-                        step_size * (_dot(nx)(P, randcoordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
-                        + (1 - step_size) * PXB_term
-                    )
-                    Coff = _dot(nx)(term1, PXB_term)
-                    VnA = _dot(nx)(
-                        U,
-                        Coff,
-                    )
-                    SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
-                else:
-                    term1 = _dot(nx)(
-                        _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
-                        U.T,
-                    )
-                    SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
-                    Coff = _dot(nx)(term1, (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)))
-                    VnA = _dot(nx)(
-                        U,
-                        Coff,
-                    )
+        if (sigma2 < 0.015 and s > 0.95) or (iter > 80):
+            if SVI_mode:
+                SigmaInv = (
+                    step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
+                    + (1 - step_size) * SigmaInv
+                )
+                term1 = _dot(nx)(_pinv(nx)(SigmaInv), U.T)
+                PXB_term = (
+                    step_size * (_dot(nx)(P, randcoordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
+                    + (1 - step_size) * PXB_term
+                )
+                Coff = _dot(nx)(term1, PXB_term)
+                VnA = _dot(nx)(
+                    U,
+                    Coff,
+                )
+                SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
+            else:
+                term1 = _dot(nx)(
+                    _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
+                    U.T,
+                )
+                SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
+                Coff = _dot(nx)(term1, (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)))
+                VnA = _dot(nx)(
+                    U,
+                    Coff,
+                )
 
         # Update R()
-        if mode == "S" or mode == "SN":
-            lambdaReg = 1e0 * Sp / nx.sum(inlier_P)
-            if SVI_mode:
-                PXA, PVA, PXB = (
-                    _dot(nx)(K_NA, coordsA)[None, :],
-                    _dot(nx)(K_NA, VnA)[None, :],
-                    _dot(nx)(K_NB, randcoordsB)[None, :],
+        lambdaReg = 1e0 * Sp / nx.sum(inlier_P)
+        if SVI_mode:
+            PXA, PVA, PXB = (
+                _dot(nx)(K_NA, coordsA)[None, :],
+                _dot(nx)(K_NA, VnA)[None, :],
+                _dot(nx)(K_NB, randcoordsB)[None, :],
+            )
+        else:
+            PXA, PVA, PXB = (
+                _dot(nx)(K_NA, coordsA)[None, :],
+                _dot(nx)(K_NA, VnA)[None, :],
+                _dot(nx)(K_NB, coordsB)[None, :],
+            )
+        PCYC, PCXC = _dot(nx)(inlier_P.T, inlier_B), _dot(nx)(inlier_P.T, inlier_A)
+        if SVI_mode and iter > 1:
+            t = (
+                step_size
+                * (
+                    ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T)))
+                    / (Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P))
                 )
-            else:
-                PXA, PVA, PXB = (
-                    _dot(nx)(K_NA, coordsA)[None, :],
-                    _dot(nx)(K_NA, VnA)[None, :],
-                    _dot(nx)(K_NB, coordsB)[None, :],
-                )
-            PCYC, PCXC = _dot(nx)(inlier_P.T, inlier_B), _dot(nx)(inlier_P.T, inlier_A)
-            if SVI_mode and iter > 1:
-                t = (
-                    step_size
-                    * (
-                        ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T)))
-                        / (Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P))
-                    )
-                    + (1 - step_size) * t
-                )
-            else:
-                t = ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T))) / (
-                    Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P)
-                )
-            if SVI_mode:
-                A = -(
-                    _dot(nx)(PXA.T, t)
-                    + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, randcoordsB))
-                    + 2
-                    * lambdaReg
-                    * sigma2
-                    * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
-                ).T
-            else:
-                A = -(
-                    _dot(nx)(PXA.T, t)
-                    + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, coordsB))
-                    + 2
-                    * lambdaReg
-                    * sigma2
-                    * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
-                ).T
+                + (1 - step_size) * t
+            )
+        else:
+            t = ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T))) / (
+                Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P)
+            )
+        if SVI_mode:
+            A = -(
+                _dot(nx)(PXA.T, t)
+                + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, randcoordsB))
+                + 2
+                * lambdaReg
+                * sigma2
+                * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
+            ).T
+        else:
+            A = -(
+                _dot(nx)(PXA.T, t)
+                + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, coordsB))
+                + 2
+                * lambdaReg
+                * sigma2
+                * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
+            ).T
 
-            svdU, svdS, svdV = _linalg(nx).svd(A)
-            C = _identity(nx, D, type_as)
-            C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
-            if SVI_mode and iter > 1:
-                R = step_size * (_dot(nx)(_dot(nx)(svdU, C), svdV)) + (1 - step_size) * R
-            else:
-                R = _dot(nx)(_dot(nx)(svdU, C), svdV)
-            RnA = s * _dot(nx)(coordsA, R.T) + t
+        svdU, svdS, svdV = _linalg(nx).svd(A)
+        C = _identity(nx, D, type_as)
+        C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
+        if SVI_mode and iter > 1:
+            R = step_size * (_dot(nx)(_dot(nx)(svdU, C), svdV)) + (1 - step_size) * R
+        else:
+            R = _dot(nx)(_dot(nx)(svdU, C), svdV)
+        RnA = s * _dot(nx)(coordsA, R.T) + t
         XAHat = RnA + VnA
 
         # Update sigma2 and beta2
@@ -702,14 +640,10 @@ def BA_align(
         coarse_alignment = coarse_alignment * normalize_scale + normalize_mean_list[0]
 
     # Save aligned coordinates
-    sampleA.obsm[key_added] = sampleA.obsm[spatial_key]
-    sampleB.obsm[key_added] = nx.to_numpy(XAHat).copy()
-    sampleB.obsm["Rigid_3d_align_spatial"] = nx.to_numpy(RnA).copy()
-    sampleB.obsm["optimal_RnA"] = nx.to_numpy(optimal_RnA).copy()
-    sampleB.obsm["Coarse_alignment"] = nx.to_numpy(coarse_alignment).copy()
-    sampleB.obsm["alpha"] = nx.to_numpy(alpha).copy()
+    sampleB.obsm["Nonrigid_align_spatial"] = nx.to_numpy(XAHat).copy()
+    sampleB.obsm["Rigid_align_spatial"] = nx.to_numpy(optimal_RnA).copy()
 
-    # save vector field
+    # save vector field and other parameters
     if not (vecfld_key_added is None):
         sampleB.uns[vecfld_key_added] = {
             "s": nx.to_numpy(s),
@@ -732,6 +666,7 @@ def BA_align(
             "sigma2": nx.to_numpy(sigma2),
             "gamma": nx.to_numpy(gamma),
             "NA": NA,
+            "outlier_variance": nx.to_numpy(outlier_variance),
         }
     empty_cache(device=device)
     return (
