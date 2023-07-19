@@ -3,6 +3,7 @@ Modeling cell-cell communication using a regression model that is considerate of
 the context-dependency of the relationships of) the response variable.
 """
 import argparse
+import itertools
 import json
 import math
 import os
@@ -923,7 +924,7 @@ class MuSIC:
                 )
 
                 # Log-scale receptor expression (to reduce the impact of very large values):
-                self.receptors_expr = self.receptors_expr.applymap(np.log1p)
+                # self.receptors_expr = self.receptors_expr.applymap(np.log1p)
 
                 # Normalize receptor expression if applicable:
                 if self.normalize_signaling:
@@ -952,7 +953,7 @@ class MuSIC:
                         else:
                             # Drop the hyphenated element from the dataframe if all components are not found in the
                             # dataframe columns
-                            partial_components = [r for r in receptors if r in parts]
+                            partial_components = [r for r in receptors if r in parts and r not in database_receptors]
                             to_drop.extend(partial_components)
                             if len(partial_components) > 0 and self.verbose:
                                 self.logger.info(
@@ -1008,7 +1009,7 @@ class MuSIC:
                             f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the list due "
                             f"to not having matched pairs among the corresponding set of receptors/ligands, "
                             f"respectively."
-                            f"Remaining ligands: {self.ligands_expr.columns.tolist()}."
+                            f"Remaining ligands: {self.ligands_expr.columns.tolist()}.\n"
                             f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
                         )
 
@@ -1084,7 +1085,10 @@ class MuSIC:
                         spatial_weights_membrane_bound = scipy.sparse.load_npz(membrane_bound_path)
                     except:
                         spatial_weights_membrane_bound = self._compute_all_wi(
-                            bw=self.n_neighbors_membrane_bound, bw_fixed=False, exclude_self=True, verbose=False
+                            bw=self.n_neighbors_membrane_bound,
+                            bw_fixed=False,
+                            exclude_self=True,
+                            verbose=False,
                         )
                         self.logger.info(f"Saving spatial weights for membrane-bound ligands to {membrane_bound_path}.")
                         scipy.sparse.save_npz(membrane_bound_path, spatial_weights_membrane_bound)
@@ -1095,12 +1099,15 @@ class MuSIC:
                     except:
                         # Autocrine signaling is much easier with secreted signals:
                         spatial_weights_secreted = self._compute_all_wi(
-                            bw=self.n_neighbors_secreted, bw_fixed=False, exclude_self=False, verbose=False
+                            bw=self.n_neighbors_secreted,
+                            bw_fixed=False,
+                            exclude_self=False,
+                            verbose=False,
                         )
                         self.logger.info(f"Saving spatial weights for secreted ligands to {secreted_path}.")
                         scipy.sparse.save_npz(secreted_path, spatial_weights_secreted)
 
-                lagged_expr_mat = np.zeros_like(self.ligands_expr.values)
+                lagged_expr_mat = np.zeros_like(self.ligands_expr.values, dtype=float)
                 for i, ligand in enumerate(self.ligands_expr.columns):
                     expr = self.ligands_expr[ligand]
                     expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
@@ -1197,8 +1204,7 @@ class MuSIC:
                 X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
                 if len(self.lr_pairs) != X_df.shape[1]:
                     self.logger.info(
-                        f"Dropped all-zero columns from cell type-specific signaling array, from "
-                        f"{len(self.lr_pairs)} to {X_df.shape[1]}."
+                        f"Dropped all-zero columns from signaling array, from {len(self.lr_pairs)} to {X_df.shape[1]}."
                     )
 
                 # If applicable, check for multicollinearity:
@@ -1217,21 +1223,101 @@ class MuSIC:
                 # For each receptor, compute the fraction of cells in which each cognate ligand is coupled to the
                 # receptor:
                 for receptor in unique_receptors:
+                    # Find all rows that correspond to this particular receptor
                     receptor_rows = [idx for idx in ligand_receptor if idx[1] == receptor]
                     receptor_cols = [f"{row[0]}:{row[1]}" for row in receptor_rows]
                     ligands = [row[0] for row in receptor_rows]
+                    # Get relevant subset for this receptor- all cells that have evidence of any of the chosen
+                    # interaction features:
+                    receptor_df = X_df[(X_df[receptor_cols] != 0).any(axis=1)]
                     # Calculate overlap
-                    overlap = (X_df[receptor_cols] != 0).all(axis=1).mean()
-                    # If overlap is less than 33%, combine columns
-                    if len(receptor_cols) > 1 and overlap < 0.33:
+                    overlap = (receptor_df[receptor_cols] != 0).all(axis=1).mean()
+                    # Set threshold based on the length of receptor_cols
+                    threshold = (
+                        0.67
+                        if len(receptor_cols) == 2
+                        else 0.5
+                        if len(receptor_cols) == 3
+                        else 0.4
+                        if len(receptor_cols) == 4
+                        else 0.33
+                        if len(receptor_cols) >= 5
+                        else 1
+                    )
+                    # If overlap is greater than 1/2 of cells, combine columns
+                    if len(receptor_cols) > 1 and overlap > threshold:
                         combined_ligand = "/".join(ligands)
                         combined_col = f"{combined_ligand}:{receptor}"
-                        # Geometric mean of all relevant columns:
-                        X_df[combined_col] = X_df[receptor_cols].apply(lambda x: x.prod() ** (1 / len(parts)), axis=1)
+                        # Compute arithmetic mean:
+                        X_df[combined_col] = X_df[receptor_cols].mean(axis=1)
+                        # X_df[combined_col] = X_df[receptor_cols].apply(lambda x: x.prod() ** (1 / len(parts)), axis=1)
                         # Drop the original columns:
                         X_df.drop(receptor_cols, axis=1, inplace=True)
+                    else:
+                        # If overlap is not greater than threshold for all ligands, check pairwise overlaps
+                        # Calculate overlap for each pair of ligands and store them in a dictionary
+                        overlaps = {}
+                        ligand_combinations = list(itertools.combinations(ligands, 2))
+                        for ligand1, ligand2 in ligand_combinations:
+                            overlap = (
+                                (receptor_df[[f"{ligand1}:{receptor}", f"{ligand2}:{receptor}"]] != 0)
+                                .all(axis=1)
+                                .mean()
+                            )
+                            overlaps[(ligand1, ligand2)] = overlap
 
-                self.logger.info(f"\n\nAfter final processing, final set of L:R features:\n {list(X_df.columns)}")
+                        # For each ligand, check if it has more than one other ligand that it exceeds the threshold
+                        # with.
+                        # If so, combine them into a single feature:
+                        cols_to_drop = set()
+                        for ligand in ligands:
+                            exceeding_ligands = [
+                                pair for pair in overlaps.keys() if ligand in pair and overlaps[pair] > 0.67
+                            ]
+                            if len(exceeding_ligands) > 1:
+                                combined_ligands = set(
+                                    itertools.chain(*exceeding_ligands)
+                                )  # Get unique ligands in exceeding_ligands
+                                combined_cols = [f"{l}:{receptor}" for l in combined_ligands]
+                                # Set threshold based on the length of combined_cols
+                                threshold = (
+                                    0.67
+                                    if len(combined_cols) == 2
+                                    else 0.5
+                                    if len(combined_cols) == 3
+                                    else 0.4
+                                    if len(combined_cols) == 4
+                                    else 0.33
+                                    if len(combined_cols) >= 5
+                                    else 1
+                                )
+                                combined_receptor_df = receptor_df[(receptor_df[combined_cols] != 0).any(axis=1)]
+                                # Calculate overlap for combined ligands
+                                combined_overlap = (combined_receptor_df[combined_cols] != 0).all(axis=1).mean()
+                                if combined_overlap > threshold:
+                                    # If the combined overlap exceeds the threshold, combine all of them
+                                    combined_ligand = "/".join(combined_ligands)
+                                    combined_col = f"{combined_ligand}:{receptor}"
+                                    # Geometric mean:
+                                    X_df[combined_col] = X_df[combined_cols].mean(axis=1)
+                                    cols_to_drop.update(combined_cols)
+                                else:
+                                    # If the combined overlap doesn't exceed the threshold, combine the ligand with
+                                    # each of the other ligands separately
+                                    for ligand_pair in exceeding_ligands:
+                                        other_ligand = ligand_pair[0] if ligand_pair[1] == ligand else ligand_pair[1]
+                                        combined_ligand = f"{ligand}/{other_ligand}"
+                                        combined_col = f"{combined_ligand}:{receptor}"
+                                        # Geometric mean:
+                                        X_df[combined_col] = X_df[
+                                            [f"{ligand}:{receptor}", f"{other_ligand}:{receptor}"]
+                                        ].mean(axis=1)
+                                        cols_to_drop.update([f"{ligand}:{receptor}", f"{other_ligand}:{receptor}"])
+
+                        # Drop all columns at once
+                        X_df.drop(list(cols_to_drop), axis=1, inplace=True)
+
+                # self.logger.info(f"\n\nAfter final processing, final set of L:R features:\n {list(X_df.columns)}")
 
                 # Log-scale to reduce the impact of "denser" neighborhoods:
                 X_df = X_df.applymap(np.log1p)
@@ -1336,11 +1422,19 @@ class MuSIC:
         # molecules used:
         if self.mod_type == "ligand":
             self.ligands = self.feature_names
+            self.feature_indicator = (self.ligands_expr != 0).astype(int)
         elif self.mod_type == "receptor":
             self.receptors = self.feature_names
+            self.feature_indicator = (self.receptors_expr != 0).astype(int)
         elif self.mod_type == "lr":
             # Update :attr `lr_pairs` to reflect the final L:R pairs used:
             self.lr_pairs = [tuple((pair.split(":")[0], pair.split(":")[1])) for pair in self.feature_names]
+            receptors = [p[1] for p in self.lr_pairs]
+            self.feature_indicator = pd.DataFrame(0, index=self.sample_names, columns=self.feature_names)
+            for r in receptors:
+                self.feature_indicator.loc[self.receptors_expr[r] != 0, r] = 1
+        else:
+            self.feature_indicator = None
 
         # If applicable, add covariates:
         if self.covariate_keys is not None:
@@ -1367,6 +1461,9 @@ class MuSIC:
         if self.fit_intercept:
             self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
             self.feature_names = ["intercept"] + self.feature_names
+            if self.feature_indicator is not None:
+                intercept_indicator = pd.DataFrame(1, index=self.sample_names, columns=["intercept"])
+                self.feature_indicator = pd.concat([intercept_indicator, self.feature_indicator], axis=1)
 
         # Add small amount to expression to prevent issues during regression:
         zero_rows = np.where(np.all(self.X == 0, axis=1))[0]
@@ -1375,6 +1472,7 @@ class MuSIC:
 
         # Broadcast independent variables and feature names:
         self.X = self.comm.bcast(self.X, root=0)
+        self.feature_indicator = self.comm.bcast(self.feature_indicator, root=0)
         self.feature_names = self.comm.bcast(self.feature_names, root=0)
         self.n_features = self.X.shape[1]
         self.n_features = self.comm.bcast(self.n_features, root=0)
@@ -1562,15 +1660,18 @@ class MuSIC:
                 )
                 # Arbitrarily chosen limits:
                 self.minbw = min_dist
-                self.maxbw = min_dist * 6
+                self.maxbw = min_dist * 10
 
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
                 if self.maxbw is None:
-                    self.maxbw = 20
+                    # If kernel decays with distance, larger bandwidth to capture more neighbors:
+                    self.maxbw = (
+                        self.n_neighbors_secreted * 2 if self.kernel != "uniform" else self.n_neighbors_secreted
+                    )
 
                 if self.minbw is None:
-                    self.minbw = 8
+                    self.minbw = self.n_neighbors_membrane_bound
 
         if self.minbw >= self.maxbw:
             raise ValueError(
@@ -1617,6 +1718,8 @@ class MuSIC:
         if kernel is None:
             kernel = self.kernel
 
+        normalize_weights = True if self.normalize else False
+
         get_wi_partial = partial(
             get_wi,
             n_samples=self.n_samples,
@@ -1627,7 +1730,7 @@ class MuSIC:
             bw=bw,
             threshold=0.01,
             sparse_array=True,
-            normalize_weights=True,
+            normalize_weights=normalize_weights,
         )
 
         with Pool() as pool:
@@ -1702,7 +1805,7 @@ class MuSIC:
         else:
             init_betas = None
 
-        if self.mod_type == "niche" or self.subsampled or hasattr(self, "target"):
+        if self.mod_type == "niche" or hasattr(self, "target"):
             if y[i] == 0:
                 cov = np.where(y == 0, 1, 0).reshape(-1)
             else:
@@ -1907,7 +2010,8 @@ class MuSIC:
                         patience = 0
                     if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.5:
                         self.logger.info(
-                            "Plateau detected- exiting optimization and returning optimum score up to this point."
+                            "Plateau detected (optimum score was reached at last iteration- exiting optimization and "
+                            "returning optimum score up to this point."
                         )
                         self.logger.info(f"Score from last iteration: {optimum_score_history[-2]}")
                         self.logger.info(f"Score from current iteration: {optimum_score_history[-1]}")
@@ -1979,6 +2083,7 @@ class MuSIC:
             n_features = self.n_features
             X_labels = self.feature_names
         n_samples = X.shape[0]
+        chunk_sample_names = self.sample_names[self.x_chunk]
 
         if final:
             if multiscale:
@@ -2044,6 +2149,21 @@ class MuSIC:
                     # Standard errors of the predictor:
                     all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * sigma_squared)
 
+                    # Multiply coefficients and standard errors by an indicator array wherever receptor expression is
+                    # zero (this captures the true effects from the data)- this won't effect prediction because the
+                    # zero values are not affected by coefficient size either way. If needed, find the names of
+                    # indices that can be found in x_chunk (in the case of subsampling):
+                    if self.feature_indicator is not None:
+                        if self.subsampled:
+                            indicator = self.feature_indicator.loc[chunk_sample_names]
+                        else:
+                            indicator = self.feature_indicator
+                        indicator = indicator[X_labels]
+                        all_fit_outputs[:, 3 : n_features + 3] = (
+                            all_fit_outputs[:, 3 : n_features + 3] * indicator.values
+                        )
+                        all_fit_outputs[:, -n_features:] = all_fit_outputs[:, -n_features:] * indicator.values
+
                     # For saving/showing outputs:
                     header = "index,residual,influence,"
                     deviance = None
@@ -2080,6 +2200,21 @@ class MuSIC:
                     aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
                     # Standard errors of the predictor:
                     all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:])
+
+                    # Multiply coefficients and standard errors by an indicator array wherever receptor expression is
+                    # zero (this captures the true effects from the data)- this won't effect prediction because the
+                    # zero values are not affected by coefficient size either way. If needed, find the names of
+                    # indices that can be found in x_chunk (in the case of subsampling):
+                    if self.feature_indicator is not None:
+                        if self.subsampled:
+                            indicator = self.feature_indicator.loc[chunk_sample_names]
+                        else:
+                            indicator = self.feature_indicator
+                        indicator = indicator[X_labels]
+                        all_fit_outputs[:, 3 : n_features + 3] = (
+                            all_fit_outputs[:, 3 : n_features + 3] * indicator.values
+                        )
+                        all_fit_outputs[:, -n_features:] = all_fit_outputs[:, -n_features:] * indicator.values
 
                     # For saving/showing outputs:
                     header = "index,prediction,influence,"
@@ -2224,7 +2359,9 @@ class MuSIC:
             y_arr = self.comm.bcast(y_arr, root=0)
 
         if X is None:
-            X = self.X
+            X_orig = self.X
+        else:
+            X_orig = X
 
         # # Compute offset if included:
         # if self.include_offset:
@@ -2256,6 +2393,10 @@ class MuSIC:
                         i for i, feat in enumerate(self.feature_names) if any(r in feat for r in target_receptors)
                     ]
                     X_labels = [self.feature_names[idx] for idx in keep_indices]
+                    self.logger.info(
+                        f"For target {target}, from {len(self.feature_names)} features, "
+                        f"kept {len(keep_indices)} to fit model."
+                    )
                 elif self.mod_type == "ligand":
                     # Ligands that bind to the receptors for this target:
                     target_ligands = []
@@ -2268,7 +2409,7 @@ class MuSIC:
                     ]
                     X_labels = [self.feature_names[idx] for idx in keep_indices]
 
-                X = X[:, keep_indices]
+                X = X_orig[:, keep_indices]
             else:
                 X_labels = self.feature_names
 
@@ -2405,7 +2546,10 @@ class MuSIC:
         return all_data, all_bws
 
     def predict(
-        self, input: Optional[pd.DataFrame] = None, coeffs: Optional[Union[np.ndarray, Dict[str, pd.DataFrame]]] = None
+        self,
+        input: Optional[pd.DataFrame] = None,
+        coeffs: Optional[Union[np.ndarray, Dict[str, pd.DataFrame]]] = None,
+        cell_types: Optional[Union[str, List[str]]] = None,
     ) -> pd.DataFrame:
         """Given input data and learned coefficients, predict the dependent variables.
 
@@ -2413,6 +2557,7 @@ class MuSIC:
             input: Input data to be predicted on.
             coeffs: Coefficients to be used in the prediction. If None, will attempt to load the coefficients learned
                 in the fitting process from file.
+            cell_types: Can be used to optionally provide cell types to constrain
         """
         if input is None:
             input = self.X_df
@@ -2440,7 +2585,7 @@ class MuSIC:
                     if col.startswith("b_") and "intercept" not in col
                 ]
 
-                y_pred = np.sum(input.loc[:, feats].values * coeffs[target], axis=1)
+                y_pred = np.sum(input.loc[:, feats].values * coeffs[target].values, axis=1)
                 if self.distr != "gaussian":
                     # Subtract 1 because in the case that all coefficients are zero, np.exp(linear predictor)
                     # will be 1 at minimum, though it should be zero.
@@ -2619,6 +2764,10 @@ class MuSIC:
                         for nonsampled_idx in nonsampled_idxs:
                             betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
                             standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
+
+                # Convolve betas and standard errors with the indicator array:
+                betas = betas * self.feature_indicator
+                standard_errors = standard_errors * self.feature_indicator
 
                 # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas

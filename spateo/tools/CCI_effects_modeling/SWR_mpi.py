@@ -110,8 +110,8 @@ def define_spateo_argparse(**kwargs):
             neighbors you want to include.
 
 
-        kernel: Type of kernel function used to weight observations; one of "bisquare", "exponential", "gaussian",
-            "quadratic", "triangular" or "uniform".
+        kernel: Type of kernel function used to weight observations when computing spatial weights and fitting the
+            model; one of "bisquare", "exponential", "gaussian", "quadratic", "triangular" or "uniform".
         n_neighbors_membrane_bound: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the
             neighboring cells- this defines the number of cells to use for membrane-bound ligands. Defaults to 8.
         n_neighbors_secreted: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the
@@ -314,7 +314,11 @@ def define_spateo_argparse(**kwargs):
             "help": "When computing spatial weights, do not count the cell itself as a neighbor. Recommended to set to "
             "True for the CCI models because the independent variable array is also spatially-dependent.",
         },
-        "-kernel": {"default": "bisquare", "type": str},
+        "-kernel": {
+            "default": "bisquare",
+            "type": str,
+            "help": "Kernel to use when computing spatial weights and when fitting the model.",
+        },
         "-use_expression_neighbors_only": {
             "action": "store_true",
             "help": "The default for finding spatial neighborhoods for the modeling process is to use neighbors in "
@@ -340,7 +344,7 @@ def define_spateo_argparse(**kwargs):
         "-tolerance": {"default": 1e-3, "type": float},
         "-max_iter": {"default": 500, "type": int},
         "-patience": {"default": 5, "type": int},
-        "-ridge_lambda": {"default": 0.2, "type": float},
+        "-ridge_lambda": {"default": 0.3, "type": float},
         "-chunks": {
             "default": 1,
             "type": int,
@@ -636,7 +640,12 @@ if __name__ == "__main__":
         "True for the CCI models because the independent "
         "variable array is also spatially-dependent.",
     )
-    parser.add_argument("-kernel", default="bisquare", type=str)
+    parser.add_argument(
+        "-kernel",
+        default="bisquare",
+        type=str,
+        help="Kernel to use when computing spatial weights and fitting the model.",
+    )
     parser.add_argument(
         "-n_neighbors_membrane_bound",
         default=8,
@@ -673,7 +682,7 @@ if __name__ == "__main__":
     parser.add_argument("-tolerance", default=1e-3, type=float)
     parser.add_argument("-max_iter", default=500, type=int)
     parser.add_argument("-patience", default=5, type=int)
-    parser.add_argument("-ridge_lambda", default=0.2, type=float)
+    parser.add_argument("-ridge_lambda", default=0.3, type=float)
 
     parser.add_argument(
         "-chunks",

@@ -320,12 +320,15 @@ class MuSIC_Interpreter(MuSIC):
             metric: Metric to display on plot. For all plot variants, the color will be determined by a combination
             of the size & magnitude of the effect. Options:
                 - "proportion": Percentage of interactions predicted to have nonzero effect over the number of cells
-                that express each target.
+                    that express each target.
                 - "significant": Percentage of interactions predicted to have significant effect on each target over
-                the number of cells that express each target.
+                    the number of cells that express each target (essentially "proportion", but with a more stringent
+                    requirement).
                 - "specificity": Number of target-expressing cells for which a particular interaction is predicted to
-                have nonzero effect over the total number of cells for which a particular target is predicted to have a
-                nonzero effect (including target-expressing and non-expressing cells).
+                    have nonzero effect over the total number of cells for which a particular interaction is
+                    predicted to have a nonzero effect (including target-expressing and non-expressing cells).
+                    Essentially, measures the degree to which an interaction can exclusively be found in & around
+                    target-expressing cells.
                 - "mean": Average effect size over all target-expressing cells.
             plot_significant: Whether to include only significant predicted interactions in the plot and metric
                 calculation.
@@ -354,12 +357,82 @@ class MuSIC_Interpreter(MuSIC):
 
         all_targets = list(self.coeffs.keys())
         targets = all_targets if target_subset is None else target_subset
-        df = pd.DataFrame(index=self.feature_names, columns=targets)
+        feature_names = [feat for feat in self.feature_names if feat != "intercept"]
+        df = pd.DataFrame(0, index=feature_names, columns=targets)
 
         for target in self.coeffs.keys():
             # Get coefficients for this key
             coef = self.coeffs[target]
             feats = [col.split("_")[1] for col in coef.columns if col.startswith("b_") and "intercept" not in col]
+
+            if metric == "proportion" or metric == "significant":
+                # Compute total number of target-expressing cells:
+                n_target_expr_cells = self.adata[:, target].X.nnz
+                if metric == "significant":
+                    # Try to load significance matrix, and if not found, compute it:
+                    try:
+                        parent_dir = os.path.dirname(self.output_path)
+                        is_significant_df = pd.read_csv(
+                            os.path.join(parent_dir, "significance", f"{target}_is_significant.csv")
+                        )
+                    except:
+                        self.logger.info(
+                            "Could not find significance matrix. Computing it now with the "
+                            "Benjamini-Hochberg correction and significance threshold of 0.05..."
+                        )
+                        self.compute_coeff_significance()
+                        parent_dir = os.path.dirname(self.output_path)
+                        is_significant_df = pd.read_csv(
+                            os.path.join(parent_dir, "significance", f"{target}_is_significant.csv")
+                        )
+                    # Convolve coefficients with significance matrix:
+                    coef = coef * is_significant_df.values
+
+                # Compute number of nonzero interactions for each feature:
+
+    def moran_i_signaling_effects(self, targets: Optional[str, List[str]] = None) -> Union[pd.DataFrame, pd.DataFrame]:
+        """Computes spatial enrichment of signaling effects.
+
+        Args:
+            targets: Can optionally specify a subset of the targets to compute this on. If not given, will use all
+                targets that were specified in model fitting.
+
+        Returns:
+            signaling_moran_df: DataFrame with Moran's I scores for each target.
+            signaling_moran_pvals: DataFrame with p-values for each Moran's I score.
+        """
+        logger = lm.get_main_logger()
+        config_spateo_rcParams()
+
+        # Check inputs:
+        if targets is not None:
+            if isinstance(targets, str):
+                targets = [targets]
+            elif not isinstance(targets, list):
+                raise ValueError(f"targets must be a list or string, not {type(targets)}.")
+
+        # Get Moran's I scores for each target:
+        signaling_moran_df = pd.DataFrame(index=self.feature_names, columns=targets)
+        signaling_moran_pvals = pd.DataFrame(index=self.feature_names, columns=targets)
+        for target in targets:
+            # Get coefficients for this key
+            coef = self.coeffs[target]
+            feats = [col.split("_")[1] for col in coef.columns if col.startswith("b_") and "intercept" not in col]
+
+            # Compute Moran's I:
+            moran_i, moran_pval = moran_i(
+                self.adata,
+                coef,
+                feats,
+                target,
+                spatial_weights_membrane_bound=self.spatial_weights_membrane_bound,
+                spatial_weights_secreted=self.spatial_weights_secreted,
+                spatial_weights_niche=self.spatial_weights_niche,
+            )
+            signaling_moran_df.loc[feats, target] = moran_i
+            signaling_moran_pvals.loc[feats, target] = moran_pval
+
+        return signaling_moran_df, signaling_moran_pvals
 
     def visualize_combinatorial_effects(self):
         """For future work!"""

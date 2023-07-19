@@ -483,6 +483,7 @@ def find_optimal_n_umap_components(X_data: np.ndarray, max_n_components: Optiona
     umap_params["return_mapper"] = False
     umap_params["min_dist"] = 0.5
 
+    scores = []
     for n_components in range(2, max_n_components + 1):
         umap_params["n_components"] = n_components
         _, _, _, embedding = umap_conn_indices_dist_embedding(X_data, **umap_params)
@@ -490,11 +491,20 @@ def find_optimal_n_umap_components(X_data: np.ndarray, max_n_components: Optiona
 
         # Compute silhouette score:
         score = silhouette_score(embedding, clusters)
+        scores.append(score)
 
         # if this score is better than the current best, update best score and components
         if score > best_score:
             best_score = score
             best_n_components = n_components
+
+    # Plot the sihouette score as a function of the number of components
+    plt.figure(figsize=(6, 4))
+    plt.plot(range(2, max_n_components + 1), scores, "bo-", linewidth=2)
+    plt.xlabel("Number of components")
+    plt.ylabel("Total explained variance")
+    plt.title("Elbow plot for PCA")
+    plt.show()
 
     return best_n_components
 
@@ -770,7 +780,7 @@ def find_optimal_pca_components(
 
     # Plot the explained variance as a function of the number of components
     plt.figure(figsize=(10, 5))
-    plt.plot(range(1, max_components + 1), explained_variances, "bo-", linewidth=2)
+    plt.plot(range(2, max_components + 1), explained_variances, "bo-", linewidth=2)
     plt.xlabel("Number of components")
     plt.ylabel("Total explained variance")
     plt.title("Elbow plot for PCA")

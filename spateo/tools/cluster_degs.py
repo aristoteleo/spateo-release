@@ -209,6 +209,7 @@ def find_cluster_degs(
     de = []
     for i_gene, gene in tqdm(enumerate(genes), desc="identifying top markers for each group"):
         all_vals = X_data[:, i_gene].A if sparse else X_data[:, i_gene]
+        all_vals = all_vals.reshape(-1)
         test_vals = all_vals[test_cells]
         control_vals = all_vals[control_cells]
         test_mean = test_vals.mean() + 1e-9

@@ -234,11 +234,4 @@ def scc(
 
     adata.obs[key_added] = clusters
 
-    # if cluster_method == "leiden":
-    #     # Leiden clustering.
-    #     dyn.tl.leiden(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
-    # elif cluster_method == "louvain":
-    #     # Louvain clustering.
-    #     dyn.tl.louvain(adata, adj_matrix=adj, resolution=resolution, result_key=key_added)
-
     return adata

@@ -138,7 +138,11 @@ def main():
     "True for the CCI models because the independent "
     "variable array is also spatially-dependent.",
 )
-@click.option("-kernel", default="bisquare")
+@click.option(
+    "-kernel",
+    default="bisquare",
+    help="Type of kernel function used to weight observations when computing " "spatial weights and fitting the model.",
+)
 @click.option("-distr", default="gaussian")
 @click.option("-n_neighbors_membrane_bound", default=8)
 @click.option("-n_neighbors_secreted", default=25)
@@ -169,7 +173,7 @@ def main():
     help="Number of iterations to wait before stopping if parameters have "
     "stabilized. Only used if `multiscale` is True.",
 )
-@click.option("-ridge_lambda", default=0.2)
+@click.option("-ridge_lambda", default=0.3)
 
 # Downstream analysis arguments
 @click.option("-search_bw", default=10)
@@ -377,8 +381,8 @@ def run(
             operations. If not, it will be interpreted as the number of nearest neighbors.
         exclude_self: When computing spatial weights, do not count the cell itself as a neighbor. Recommended to
             set to True for the CCI models because the independent variable array is also spatially-dependent.
-        kernel: Kernel to use for spatial weights. Options: 'bisquare', 'quadratic', 'gaussian', 'triangular',
-            'uniform', 'exponential'.
+        kernel: Type of kernel function used to weight observations when computing spatial weights and fitting the
+            model; one of "bisquare", "exponential", "gaussian", "quadratic", "triangular" or "uniform".
         n_neighbors_membrane_bound: Only used if `mod_type` is 'niche', to define the number of neighbors  to consider
             for each cell when defining the independent variable array; used for membrane-bound ligands. Defaults to 8.
         n_neighbors_secreted: Only used if `mod_type` is 'niche', to define the number of neighbors  to consider
