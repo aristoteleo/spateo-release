@@ -390,7 +390,9 @@ class MuSIC_Interpreter(MuSIC):
 
                 # Compute number of nonzero interactions for each feature:
 
-    def moran_i_signaling_effects(self, targets: Optional[str, List[str]] = None) -> Union[pd.DataFrame, pd.DataFrame]:
+    def moran_i_signaling_effects(
+        self, targets: Optional[Union[str, List[str]]] = None
+    ) -> Union[pd.DataFrame, pd.DataFrame]:
         """Computes spatial enrichment of signaling effects.
 
         Args:

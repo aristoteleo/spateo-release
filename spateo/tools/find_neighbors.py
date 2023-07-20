@@ -4,6 +4,7 @@ spatial transcriptomics data.
 """
 import os
 import sys
+from functools import partial
 from typing import Optional, Tuple, Union
 
 import anndata
@@ -194,6 +195,7 @@ def find_bw_for_n_neighbors(
     adata: anndata.AnnData,
     coords_key: str = "spatial",
     target_n_neighbors: int = 6,
+    initial_bw: Optional[float] = None,
     chunk_size: int = 1000,
     exclude_self: bool = False,
 ) -> int:
@@ -203,6 +205,7 @@ def find_bw_for_n_neighbors(
         adata: AnnData object containing coordinates for all cells
         coords_key: Key in adata.obsm where the spatial coordinates are stored
         target_n_neighbors: Target average number of neighbors per cell
+        initial_bw: Can optionally be used to set the starting distance for the bandwidth search
         chunk_size: Number of cells to compute pairwise distance for at once
         exclude_self: Whether to exclude self from the list of neighbors
     """
@@ -211,12 +214,14 @@ def find_bw_for_n_neighbors(
     # Compute distances in chunks
     chunks = [coords[i : i + chunk_size] for i in range(0, coords.shape[0], chunk_size)]
     # Calculate pairwise distances for each chunk in parallel
-    distances = Parallel(n_jobs=-1)(delayed(calculate_distances_chunk)(chunk) for chunk in chunks)
+    partial_func = partial(calculate_distances_chunk, coords=coords)
+    distances = Parallel(n_jobs=-1)(delayed(partial_func)(chunk) for chunk in chunks)
     # Concatenate the results to get the full pairwise distance matrix
     distances = np.concatenate(distances, axis=0)
 
     # Initialize bandwidth:
-    bandwidth = np.median(distances)
+    bandwidth = 88 if initial_bw is None else initial_bw
+    print(f"Initial bandwidth: {bandwidth}")
 
     # Iteratively adjust bandwidth:
     while True:
@@ -228,14 +233,16 @@ def find_bw_for_n_neighbors(
 
         # Check if the average number of neighbors is close to the target
         avg_neighbors = np.mean(neighbor_counts)
+        print(f"For bandwidth {bandwidth}, found {avg_neighbors} neighbors on average.")
         if np.round(avg_neighbors) == target_n_neighbors:
             break
 
         # Adjust bandwidth if needed
-        if avg_neighbors < 6:
-            bandwidth *= 0.9  # decrease bandwidth
+        if avg_neighbors > target_n_neighbors:
+            bandwidth *= 0.8  # decrease bandwidth
         else:
-            bandwidth *= 1.1  # increase bandwidth
+            bandwidth *= 1.2  # increase bandwidth
+        print(f"New bandwidth: {bandwidth}")
 
     return bandwidth
 

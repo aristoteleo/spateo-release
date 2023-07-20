@@ -151,7 +151,7 @@ def main():
     "provided, will take priority over 'n_neighbors_membrane_bound'.",
 )
 @click.option(
-    "distance_secreted",
+    "-distance_secreted",
     required=False,
     help="In model setup, distance threshold to consider cells as neighbors for secreted or ECM ligands. If"
     "provided, will take priority over 'n_neighbors_secreted'.",

@@ -1665,15 +1665,19 @@ class MuSIC:
 
         if self.minbw is None:
             if self.bw_fixed:
-                # Set minimum bandwidth to the distance to the smallest distance between neighboring points:
-                min_dist = np.min(
-                    np.array(
-                        [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
+                if self.distance_membrane_bound is not None and self.distance_secreted is not None:
+                    self.minbw = self.distance_membrane_bound
+                    self.maxbw = self.distance_secreted * 1.5 if self.kernel != "uniform" else self.distance_secreted
+                else:
+                    # Set minimum bandwidth to the distance to the smallest distance between neighboring points:
+                    min_dist = np.min(
+                        np.array(
+                            [np.min(np.delete(cdist(self.coords[[i]], self.coords), i)) for i in range(self.n_samples)]
+                        )
                     )
-                )
-                # Arbitrarily chosen limits:
-                self.minbw = min_dist
-                self.maxbw = min_dist * 10
+                    # Arbitrarily chosen limits:
+                    self.minbw = min_dist
+                    self.maxbw = min_dist * 10
 
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
@@ -2021,7 +2025,7 @@ class MuSIC:
                         patience += 1
                     else:
                         patience = 0
-                    if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.5:
+                    if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.01 * most_optimum_score:
                         self.logger.info(
                             "Plateau detected (optimum score was reached at last iteration- exiting optimization and "
                             "returning optimum score up to this point."
