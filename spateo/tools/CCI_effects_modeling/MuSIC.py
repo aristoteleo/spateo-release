@@ -2782,9 +2782,10 @@ class MuSIC:
                             betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
                             standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
 
-                # Convolve betas and standard errors with the indicator array:
-                betas = betas * self.feature_indicator
-                standard_errors = standard_errors * self.feature_indicator
+                    # Convolve betas and standard errors with the indicator array:
+                    feature_subset = [c.replace("b_", "") for c in betas.columns]
+                    betas = betas * self.feature_indicator[feature_subset]
+                    standard_errors = standard_errors * self.feature_indicator[feature_subset]
 
                 # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas
