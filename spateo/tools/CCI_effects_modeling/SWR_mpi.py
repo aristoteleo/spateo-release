@@ -112,6 +112,10 @@ def define_spateo_argparse(**kwargs):
 
         kernel: Type of kernel function used to weight observations when computing spatial weights and fitting the
             model; one of "bisquare", "exponential", "gaussian", "quadratic", "triangular" or "uniform".
+        distance_membrane_bound: In model setup, distance threshold to consider cells as neighbors for membrane-bound
+            ligands. If provided, will take priority over :attr 'n_neighbors_membrane_bound'.
+        distance_secreted: In model setup, distance threshold to consider cells as neighbors for secreted or ECM
+            ligands. If provided, will take priority over :attr 'n_neighbors_secreted'.
         n_neighbors_membrane_bound: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the
             neighboring cells- this defines the number of cells to use for membrane-bound ligands. Defaults to 8.
         n_neighbors_secreted: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the
@@ -324,6 +328,16 @@ def define_spateo_argparse(**kwargs):
             "help": "The default for finding spatial neighborhoods for the modeling process is to use neighbors in "
             "physical space, and turn to expression space if there is not enough signal in the physical "
             "neighborhood. If this argument is provided, only expression will be used to find neighbors.",
+        },
+        "-distance_membrane_bound": {
+            "type": float,
+            "help": "In model setup, distance threshold to consider cells as neighbors for membrane-bound ligands. If"
+            "provided, will take priority over 'n_neighbors_membrane_bound'.",
+        },
+        "-distance_secreted": {
+            "type": float,
+            "help": "In model setup, distance threshold to consider cells as neighbors for secreted or ECM ligands. If"
+            "provided, will take priority over 'n_neighbors_secreted'.",
         },
         "-n_neighbors_membrane_bound": {
             "default": 6,
@@ -645,6 +659,18 @@ if __name__ == "__main__":
         default="bisquare",
         type=str,
         help="Kernel to use when computing spatial weights and fitting the model.",
+    )
+    parser.add_argument(
+        "-distance_membrane_bound",
+        type=float,
+        help="In model setup, distance threshold to consider cells as neighbors for membrane-bound ligands. If"
+        "provided, will take priority over 'n_neighbors_membrane_bound'.",
+    )
+    parser.add_argument(
+        "-distance_secreted",
+        type=float,
+        help="In model setup, distance threshold to consider cells as neighbors for secreted or ECM ligands. If"
+        "provided, will take priority over 'n_neighbors_secreted'.",
     )
     parser.add_argument(
         "-n_neighbors_membrane_bound",

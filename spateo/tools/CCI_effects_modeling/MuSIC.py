@@ -7,7 +7,6 @@ import itertools
 import json
 import math
 import os
-import random
 import re
 import sys
 from copy import deepcopy
@@ -366,6 +365,8 @@ class MuSIC:
         self.multiscale_flag = self.arg_retrieve.multiscale
         self.multiscale_params_only = self.arg_retrieve.multiscale_params_only
         self.bw_fixed = self.arg_retrieve.bw_fixed
+        self.distance_membrane_bound = self.arg_retrieve.distance_membrane_bound
+        self.distance_secreted = self.arg_retrieve.distance_secreted
         self.n_neighbors_membrane_bound = self.arg_retrieve.n_neighbors_membrane_bound
         self.n_neighbors_secreted = self.arg_retrieve.n_neighbors_secreted
         self.use_expression_neighbors_only = self.arg_retrieve.use_expression_neighbors_only
@@ -487,7 +488,7 @@ class MuSIC:
                 fixed_bw=False,
                 exclude_self=True,
                 kernel="bisquare",
-                bw=self.n_neighbors,
+                bw=self.n_neighbors_secreted,
                 threshold=0.01,
                 sparse_array=True,
                 normalize_weights=True,
@@ -557,7 +558,7 @@ class MuSIC:
             except:
                 _, adata = neighbors(
                     self.adata,
-                    n_neighbors=self.n_neighbors * 2,
+                    n_neighbors=self.n_neighbors_membrane_bound * 2,
                     basis="spatial",
                     spatial_key=self.coords_key,
                     n_neighbors_method="ball_tree",
@@ -565,7 +566,7 @@ class MuSIC:
                 conn = adata.obsp["spatial_connectivities"]
 
             # Subsample half of the neighbors in the smoothing process:
-            n_subsample = int(self.n_neighbors)
+            n_subsample = int(self.n_neighbors_membrane_bound)
             if self.distr == "gaussian":
                 self.logger.info("Smoothing gene expression inplace...")
                 adata_smooth_norm, _ = smooth(self.adata.X, conn, normalize_W=False, n_subsample=n_subsample)
@@ -1084,9 +1085,15 @@ class MuSIC:
                     try:
                         spatial_weights_membrane_bound = scipy.sparse.load_npz(membrane_bound_path)
                     except:
+                        bw = (
+                            self.n_neighbors_membrane_bound
+                            if self.distance_membrane_bound is None
+                            else self.distance_membrane_bound
+                        )
+                        bw_fixed = True if self.distance_membrane_bound is not None else False
                         spatial_weights_membrane_bound = self._compute_all_wi(
-                            bw=self.n_neighbors_membrane_bound,
-                            bw_fixed=False,
+                            bw=bw,
+                            bw_fixed=bw_fixed,
                             exclude_self=True,
                             verbose=False,
                         )
@@ -1097,10 +1104,16 @@ class MuSIC:
                     try:
                         spatial_weights_secreted = scipy.sparse.load_npz(secreted_path)
                     except:
+                        bw = (
+                            self.n_neighbors_membrane_bound
+                            if self.distance_secreted is None
+                            else self.distance_secreted
+                        )
+                        bw_fixed = True if self.distance_secreted is not None else False
                         # Autocrine signaling is much easier with secreted signals:
                         spatial_weights_secreted = self._compute_all_wi(
-                            bw=self.n_neighbors_secreted,
-                            bw_fixed=False,
+                            bw=bw,
+                            bw_fixed=bw_fixed,
                             exclude_self=False,
                             verbose=False,
                         )
@@ -1431,8 +1444,8 @@ class MuSIC:
             self.lr_pairs = [tuple((pair.split(":")[0], pair.split(":")[1])) for pair in self.feature_names]
             receptors = [p[1] for p in self.lr_pairs]
             self.feature_indicator = pd.DataFrame(0, index=self.sample_names, columns=self.feature_names)
-            for r in receptors:
-                self.feature_indicator.loc[self.receptors_expr[r] != 0, r] = 1
+            for i, r in enumerate(receptors):
+                self.feature_indicator.loc[self.receptors_expr[r] != 0, self.feature_names[i]] = 1
         else:
             self.feature_indicator = None
 

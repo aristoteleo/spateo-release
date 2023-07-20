@@ -144,6 +144,18 @@ def main():
     help="Type of kernel function used to weight observations when computing " "spatial weights and fitting the model.",
 )
 @click.option("-distr", default="gaussian")
+@click.option(
+    "-distance_membrane_bound",
+    required=False,
+    help="In model setup, distance threshold to consider cells as neighbors for membrane-bound ligands. If"
+    "provided, will take priority over 'n_neighbors_membrane_bound'.",
+)
+@click.option(
+    "distance_secreted",
+    required=False,
+    help="In model setup, distance threshold to consider cells as neighbors for secreted or ECM ligands. If"
+    "provided, will take priority over 'n_neighbors_secreted'.",
+)
 @click.option("-n_neighbors_membrane_bound", default=8)
 @click.option("-n_neighbors_secreted", default=25)
 @click.option(
@@ -301,6 +313,8 @@ def run(
     bw_fixed,
     exclude_self,
     kernel,
+    distance_membrane_bound,
+    distance_secreted,
     n_neighbors_membrane_bound,
     n_neighbors_secreted,
     use_expression_neighbors_only,
@@ -383,6 +397,10 @@ def run(
             set to True for the CCI models because the independent variable array is also spatially-dependent.
         kernel: Type of kernel function used to weight observations when computing spatial weights and fitting the
             model; one of "bisquare", "exponential", "gaussian", "quadratic", "triangular" or "uniform".
+        distance_membrane_bound: In model setup, distance threshold to consider cells as neighbors for membrane-bound
+            ligands. If provided, will take priority over 'n_neighbors_membrane_bound'.
+        distance_secreted: In model setup, distance threshold to consider cells as neighbors for secreted and ECM
+            ligands. If provided, will take priority over 'n_neighbors_secreted'.
         n_neighbors_membrane_bound: Only used if `mod_type` is 'niche', to define the number of neighbors  to consider
             for each cell when defining the independent variable array; used for membrane-bound ligands. Defaults to 8.
         n_neighbors_secreted: Only used if `mod_type` is 'niche', to define the number of neighbors  to consider
@@ -547,6 +565,10 @@ def run(
         command += " -maxbw " + str(maxbw)
     if bw_fixed:
         command += " -bw_fixed "
+    if distance_membrane_bound is not None:
+        command += " -distance_membrane_bound " + str(distance_membrane_bound)
+    if distance_secreted is not None:
+        command += " -distance_secreted " + str(distance_secreted)
     if n_neighbors_membrane_bound is not None:
         command += "-n_neighbors_membrane_bound " + str(n_neighbors_membrane_bound)
     if n_neighbors_secreted is not None:

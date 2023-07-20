@@ -6,12 +6,15 @@ import os
 import sys
 from typing import Optional, Tuple, Union
 
+import anndata
 import numpy as np
 import pandas as pd
 import scipy
 from anndata import AnnData
+from joblib import Parallel, delayed
 from scipy.spatial.distance import pdist, squareform
 from sklearn.decomposition import PCA
+from sklearn.metrics import pairwise_distances
 from sklearn.neighbors import NearestNeighbors
 
 from ..configuration import SKM
@@ -173,6 +176,68 @@ def compute_distances_and_connectivities(
     connectivities.eliminate_zeros()
 
     return distances, connectivities
+
+
+def calculate_distances_chunk(coords_chunk: np.ndarray, coords: np.ndarray) -> np.ndarray:
+    """Pairwise distance computation, coupled with :func `find_bw`.
+
+    Args:
+        coords_chunk: Array of shape (n_samples_chunk, n_features) containing coordinates of the chunk of interest.
+        coords: Array of shape (n_samples, n_features) containing the coordinates of all points.
+    """
+    distances_chunk = pairwise_distances(coords_chunk, coords, metric="euclidean")
+    return distances_chunk
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def find_bw_for_n_neighbors(
+    adata: anndata.AnnData,
+    coords_key: str = "spatial",
+    target_n_neighbors: int = 6,
+    chunk_size: int = 1000,
+    exclude_self: bool = False,
+) -> int:
+    """Finds the bandwidth such that on average, cells in the sample have n neighbors.
+
+    Args:
+        adata: AnnData object containing coordinates for all cells
+        coords_key: Key in adata.obsm where the spatial coordinates are stored
+        target_n_neighbors: Target average number of neighbors per cell
+        chunk_size: Number of cells to compute pairwise distance for at once
+        exclude_self: Whether to exclude self from the list of neighbors
+    """
+    coords = adata.obsm[coords_key]
+
+    # Compute distances in chunks
+    chunks = [coords[i : i + chunk_size] for i in range(0, coords.shape[0], chunk_size)]
+    # Calculate pairwise distances for each chunk in parallel
+    distances = Parallel(n_jobs=-1)(delayed(calculate_distances_chunk)(chunk) for chunk in chunks)
+    # Concatenate the results to get the full pairwise distance matrix
+    distances = np.concatenate(distances, axis=0)
+
+    # Initialize bandwidth:
+    bandwidth = np.median(distances)
+
+    # Iteratively adjust bandwidth:
+    while True:
+        bw_dist = distances / bandwidth
+        if exclude_self:
+            neighbor_counts = np.sum(bw_dist <= 1, axis=1) - 1
+        else:
+            neighbor_counts = np.sum(bw_dist <= 1, axis=1)
+
+        # Check if the average number of neighbors is close to the target
+        avg_neighbors = np.mean(neighbor_counts)
+        if np.round(avg_neighbors) == target_n_neighbors:
+            break
+
+        # Adjust bandwidth if needed
+        if avg_neighbors < 6:
+            bandwidth *= 0.9  # decrease bandwidth
+        else:
+            bandwidth *= 1.1  # increase bandwidth
+
+    return bandwidth
 
 
 # ---------------------------------------------------------------------------------------------------
