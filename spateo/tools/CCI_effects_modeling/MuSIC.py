@@ -601,8 +601,17 @@ class MuSIC:
             else:
                 self.adata.X += 1
 
-        # Construct initial arrays for CCI modeling:
-        self.define_sig_inputs()
+        if self.mod_type == "downstream":
+            # For finding upstream associations with ligand
+
+        elif self.mod_type in ["ligand", "receptor", "lr"]:
+            # Construct initial arrays for CCI modeling:
+            self.define_sig_inputs()
+
+    def setup_downstream(self):
+        """Setup for downstream tasks- namely, models for inferring signaling-associated differential expression."""
+
+        # NOTE: for receiver analyses, self.targets_expr will be defined from .obs:
 
     def define_sig_inputs(self, adata: Optional[anndata.AnnData] = None):
         """For signaling-relevant models, define necessary quantities that will later be used to define the independent

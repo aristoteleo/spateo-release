@@ -13,28 +13,26 @@ import argparse
 import itertools
 import math
 import os
-import pickle
 import re
-import sys
 from collections import Counter
-from multiprocessing import Pool
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple, Union
 
-import anndata
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.sparse
+import scipy.stats
 import seaborn as sns
 import xarray as xr
+from matplotlib import rcParams
 from mpi4py import MPI
 from scipy.stats import pearsonr, spearmanr, zscore
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler, normalize
-from statsmodels.gam.smooth_basis import BSplines
+from sklearn.preprocessing import normalize
 
 from ...configuration import config_spateo_rcParams, shiftedColorMap
 from ...logging import logger_manager as lm
+from ...plotting.static.utils import save_return_show_fig_utils
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
 from .MuSIC import MuSIC
 from .regression_utils import multitesting_correction, permutation_testing, wald_test
@@ -303,12 +301,15 @@ class MuSIC_Interpreter(MuSIC):
     def visualize_enriched_interactions(
         self,
         target_subset: Optional[List[str]] = None,
-        metric: Literal["proportion", "significant", "specificity", "mean"] = "proportion",
+        cell_types: Optional[List[str]] = None,
+        metric: Literal["number", "proportion", "specificity", "mean", "fc", "fc_qvals"] = "fc",
+        normalize: bool = True,
         plot_significant: bool = False,
-        metric_threshold: float = 0.2,
+        metric_threshold: float = 0.05,
+        cut_pvals: float = -5,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
-        cmap: str = "reds",
+        cmap: str = "Reds",
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
     ):
@@ -317,26 +318,36 @@ class MuSIC_Interpreter(MuSIC):
 
         Args:
             target_subset: List of targets to consider. If None, will use all targets used in model fitting.
+            cell_types: Can be used to restrict the enrichment analysis to only cells of a particular type. If given,
+                will search for cell types in "group_key" attribute from model initialization.
             metric: Metric to display on plot. For all plot variants, the color will be determined by a combination
             of the size & magnitude of the effect. Options:
+                - "number": Number of cells for which the interaction is predicted to have nonzero effect
                 - "proportion": Percentage of interactions predicted to have nonzero effect over the number of cells
                     that express each target.
-                - "significant": Percentage of interactions predicted to have significant effect on each target over
-                    the number of cells that express each target (essentially "proportion", but with a more stringent
-                    requirement).
                 - "specificity": Number of target-expressing cells for which a particular interaction is predicted to
                     have nonzero effect over the total number of cells for which a particular interaction is
-                    predicted to have a nonzero effect (including target-expressing and non-expressing cells).
-                    Essentially, measures the degree to which an interaction can exclusively be found in & around
-                    target-expressing cells.
+                    present in (including target-expressing and non-expressing cells). Essentially, measures the
+                    degree to which an interaction is coupled to a particular target.
                 - "mean": Average effect size over all target-expressing cells.
+                - "fc": Fold change in mean expression of target-expressing cells with and without each specified
+                    interaction. Way of inferring that interaction may actually be repressive rather than activatory.
+                - "fc_qvals": Log-transformed significance of the fold change.
+            normalize: Whether to minmax scale the metric values. If True, will apply this scaling over all elements
+                of the array.
             plot_significant: Whether to include only significant predicted interactions in the plot and metric
                 calculation.
             metric_threshold: Optional threshold for 'metric' used to filter plot elements. Any interactions below
-                this threshold will not be color coded. Will use 0.2 by default.
+                this threshold will not be color coded. Will use 0.05 by default. Should be between 0 and 1. For
+                'metric' = "fc", this threshold will be interpreted as a distance from a fold-change of 1.
+            cut_pvals: For metric = "fc_qvals", the q-values are log-transformed. Any log10-transformed q-value that is
+                below this will be clipped to this value.
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
-            cmap: Colormap to use for heatmap.
+            cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
+                the range is 0. It is recommended to use a sequential colormap (e.g. "Reds", "Blues", "Viridis",
+                etc.). For metric = "fc", if a divergent colormap is not provided, "seismic" will automatically be
+                used.
             save_show_or_return: Whether to save, show or return the figure.
                 If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
                 displayed and the associated axis and other object will be return.
@@ -348,47 +359,285 @@ class MuSIC_Interpreter(MuSIC):
         """
         logger = lm.get_main_logger()
         config_spateo_rcParams()
+        # But set display DPI to 300:
+        plt.rcParams["figure.dpi"] = 300
 
         # Check inputs:
-        if metric not in ["proportion", "significant", "specificity", "mean"]:
+        if metric not in ["number", "proportion", "specificity", "mean", "fc", "fc_qvals"]:
             raise ValueError(
-                f"Unrecognized metric {metric}. Options are 'proportion', 'significant', 'specificity', " f"or 'mean'."
+                f"Unrecognized metric {metric}. Options are 'number', 'proportion', 'specificity', 'mean', "
+                f"'fc' or 'fc_qvals'."
             )
+
+        if cell_types is None:
+            adata = self.adata.copy()
+        else:
+            adata = self.adata[self.adata.obs[self.group_key].isin(cell_types)].copy()
 
         all_targets = list(self.coeffs.keys())
         targets = all_targets if target_subset is None else target_subset
         feature_names = [feat for feat in self.feature_names if feat != "intercept"]
         df = pd.DataFrame(0, index=feature_names, columns=targets)
+        # For metric = fold change, significance of the fold-change:
+        if metric == "fc" or metric == "fc_qvals":
+            df_pvals = pd.DataFrame(0, index=feature_names, columns=targets)
+            # For fold-change, colormap should be divergent-
+            if metric == "fc":
+                diverging_colormaps = [
+                    "PiYG",
+                    "PRGn",
+                    "BrBG",
+                    "PuOr",
+                    "RdGy",
+                    "RdBu",
+                    "RdYlBu",
+                    "RdYlGn",
+                    "Spectral",
+                    "coolwarm",
+                    "bwr",
+                    "seismic",
+                ]
+                if cmap not in diverging_colormaps:
+                    logger.info("For metric fold-change, colormap should be divergent: using 'seismic'.")
+                    cmap = "seismic"
+        if metric != "fc":
+            sequential_colormaps = [
+                "Blues",
+                "BuGn",
+                "BuPu",
+                "GnBu",
+                "Greens",
+                "Greys",
+                "Oranges",
+                "OrRd",
+                "PuBu",
+                "PuBuGn",
+                "PuRd",
+                "Purples",
+                "RdPu",
+                "Reds",
+                "YlGn",
+                "YlGnBu",
+                "YlOrBr",
+                "YlOrRd",
+                "afmhot",
+                "autumn",
+                "bone",
+                "cool",
+                "copper",
+                "gist_heat",
+                "gray",
+                "hot",
+                "pink",
+                "spring",
+                "summer",
+                "winter",
+                "viridis",
+                "plasma",
+                "inferno",
+                "magma",
+                "cividis",
+            ]
+            if cmap not in sequential_colormaps:
+                logger.info(f"For metric {metric}, colormap should be sequential: using 'viridis'.")
+                cmap = "viridis"
+
+        if fontsize is None:
+            fontsize = rcParams.get("font.size")
+        if figsize is None:
+            # Set figure size based on the number of interaction features and targets:
+            m = len(feature_names) * 40 / 300
+            n = len(targets) * 40 / 300
+            figsize = (n, m)
 
         for target in self.coeffs.keys():
             # Get coefficients for this key
             coef = self.coeffs[target]
             feats = [col.split("_")[1] for col in coef.columns if col.startswith("b_") and "intercept" not in col]
 
-            if metric == "proportion" or metric == "significant":
-                # Compute total number of target-expressing cells:
-                n_target_expr_cells = self.adata[:, target].X.nnz
-                if metric == "significant":
-                    # Try to load significance matrix, and if not found, compute it:
-                    try:
-                        parent_dir = os.path.dirname(self.output_path)
-                        is_significant_df = pd.read_csv(
-                            os.path.join(parent_dir, "significance", f"{target}_is_significant.csv")
-                        )
-                    except:
-                        self.logger.info(
-                            "Could not find significance matrix. Computing it now with the "
-                            "Benjamini-Hochberg correction and significance threshold of 0.05..."
-                        )
-                        self.compute_coeff_significance()
-                        parent_dir = os.path.dirname(self.output_path)
-                        is_significant_df = pd.read_csv(
-                            os.path.join(parent_dir, "significance", f"{target}_is_significant.csv")
-                        )
-                    # Convolve coefficients with significance matrix:
-                    coef = coef * is_significant_df.values
+            # For fold-change, significance will be incorporated post-calculation:
+            if plot_significant and metric != "fc":
+                # Adjust coefficients array to include only the significant coefficients:
+                # Try to load significance matrix, and if not found, compute it:
+                try:
+                    parent_dir = os.path.dirname(self.output_path)
+                    is_significant_df = pd.read_csv(
+                        os.path.join(parent_dir, "significance", f"{target}_is_significant.csv")
+                    )
+                except:
+                    self.logger.info(
+                        "Could not find significance matrix. Computing it now with the "
+                        "Benjamini-Hochberg correction and significance threshold of 0.05..."
+                    )
+                    self.compute_coeff_significance()
+                    parent_dir = os.path.dirname(self.output_path)
+                    is_significant_df = pd.read_csv(
+                        os.path.join(parent_dir, "significance", f"{target}_is_significant.csv")
+                    )
+                # Convolve coefficients with significance matrix:
+                coef = coef * is_significant_df.values
 
+            if metric == "number":
                 # Compute number of nonzero interactions for each feature:
+                n_nonzero_interactions = np.sum(coef != 0, axis=0)
+                # Compute proportion:
+                df.loc[:, target] = n_nonzero_interactions
+            elif metric == "proportion":
+                # Compute total number of target-expressing cells, and the indices of target-expressing cells:
+                target_expr_cells_indices = np.where(adata[:, target].X.toarray() != 0)[0]
+                # Compute total number of target-expressing cells:
+                n_target_expr_cells = len(target_expr_cells_indices)
+                # Extract only the rows of coef that correspond to target-expressing cells:
+                coef_target_expr = coef.iloc[target_expr_cells_indices, :]
+                # Compute number of cells for which each interaction is inferred to be present from among the
+                # target-expressing cells:
+                n_nonzero_interactions = np.sum(coef_target_expr != 0, axis=0)
+                # Compute proportion:
+                df.loc[:, target] = n_nonzero_interactions / n_target_expr_cells
+            elif metric == "specificity":
+                # Compute total number of target-expressing cells, and the indices of target-expressing cells:
+                target_expr_cells_indices = np.where(adata[:, target].X.toarray() != 0)[0]
+                # Intersection of each interaction w/ target-expressing cells to determine the numerator for the
+                # proportion:
+                intersections = {}
+                for col in coef.columns:
+                    nz_indices = np.where(coef[col].values != 0)[0]
+                    intersections[col] = np.intersect1d(target_expr_cells_indices, nz_indices)
+                intersections = np.array(list(intersections.values()))
+
+                # Compute number of cells for which each interaction is inferred to be present to determine the
+                # denominator for the proportion:
+                n_nonzero_interactions = np.sum(coef != 0, axis=0)
+
+                # Ratio of intersections to total number of nonzero values:
+                df.loc[:, target] = intersections / n_nonzero_interactions
+            elif metric == "mean":
+                df.loc[:, target] = np.mean(coef, axis=0)
+            elif metric == "fc":
+                # Get indices of zero effect and predicted positive effect:
+                for col in coef.columns:
+                    nz_effect_indices = np.where(coef[col].values != 0)[0]
+                    zero_effect_indices = np.where(coef[col].values == 0)[0]
+
+                    # Compute mean target expression for both subsets:
+                    mean_target_nonzero = adata[nz_effect_indices, target].X.mean()
+                    mean_target_zero = adata[zero_effect_indices, target].X.mean()
+
+                    # Compute fold-change:
+                    df.loc[col, target] = mean_target_nonzero / mean_target_zero
+                    # Compute p-value:
+                    _, pval = scipy.stats.ranksums(
+                        adata[nz_effect_indices, target].X.toarray(), adata[zero_effect_indices, target].X.toarray()
+                    )
+                    df_pvals.loc[col, target] = pval
+
+        # For metric = fold change, significance of the fold-change:
+        if metric == "fc":
+            # Multiple testing correction for each target using the Benjamin-Hochberg method:
+            for col in df_pvals.columns:
+                df_pvals[col] = multitesting_correction(df_pvals[col], method="fdr_bh")
+
+            # Optionally, for plotting, retain fold-changes w/ significant corrected p-values:
+            if plot_significant:
+                df[df_pvals > 0.05] = 0.0
+
+        # Plot preprocessing:
+        # For metric = fold change q-values, compute the log-transformed fold change:
+        if metric == "fc_qvals":
+            df_log = np.log10(df_pvals.values)
+            df_log[df_log < cut_pvals] = cut_pvals
+            df_pvals = pd.DataFrame(df_log, index=df_pvals.index, columns=df_pvals.columns)
+            # Adjust cmap such that the value typically corresponding to the minimum is the max- the max p-value is
+            # the least significant:
+            cmap = f"{cmap}_r"
+            label = "$\log_{10}$ FDR-corrected pvalues"
+            title = "Significance of target gene expression fold-change for each interaction"
+        elif metric == "fc":
+            # Set values below cutoff to 1 (no fold-change):
+            df[(df < metric_threshold + 1) & (df > 1 - metric_threshold)] = 1.0
+            vmax = np.max(np.abs(df.values))
+            vmin = -vmax
+            label = "Fold-change"
+            title = "Target gene expression fold-change for each interaction"
+        elif metric == "mean":
+            df[np.abs(df) < metric_threshold] = 0.0
+            vmax = np.max(df.values)
+            vmin = np.min(df.values)
+            label = "Mean effect size"
+            title = "Mean effect size for each interaction on each target"
+        elif metric in ["number", "proportion", "specificity"]:
+            df[df < metric_threshold] = 0.0
+            vmax = np.max(np.abs(df.values))
+            vmin = 0
+            if metric == "number":
+                label = "Number of cells"
+                title = "Number of cells w/ predicted effect on target for each interaction"
+            elif metric == "proportion":
+                label = "Proportion of cells"
+                title = "Proportion of cells w/ predicted effect on target for each interaction"
+            elif metric == "specificity":
+                label = "Specificity"
+                title = "Exclusivity of predicted effect on target for each interaction"
+
+        # Plot heatmap:
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+        if metric == "fc_qvals":
+            qv = sns.heatmap(
+                df_pvals,
+                square=True,
+                linecolor="grey",
+                linewidths=0.3,
+                cbar_kws={"label": label, "location": "top"},
+                cmap=cmap,
+                vmin=cut_pvals,
+                vmax=0,
+                ax=ax,
+            )
+
+            # Outer frame:
+            for _, spine in qv.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
+        else:
+            m = sns.heatmap(
+                df,
+                square=True,
+                linecolor="grey",
+                linewidths=0.3,
+                cbar_kws={"label": label, "location": "top"},
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+                ax=ax,
+            )
+
+            # Outer frame:
+            for _, spine in m.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
+
+        plt.xlabel("Target gene", fontsize=fontsize)
+        plt.ylabel("Interaction", fontsize=fontsize)
+        plt.title(title, fontsize=fontsize + 4)
+        plt.tight_layout()
+
+        # Use the saved name for the AnnData object to define part of the name of the saved file:
+        base_name = os.path.basename(self.adata_path)
+        adata_id = os.path.splitext(base_name)[0]
+        prefix = f"{adata_id}_{metric}"
+        # Save figure:
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=True,
+            background="white",
+            prefix=prefix,
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None,
+        )
 
     def moran_i_signaling_effects(
         self, targets: Optional[Union[str, List[str]]] = None
@@ -1349,6 +1598,9 @@ class MuSIC_Interpreter(MuSIC):
         # sent signal:
 
         # Perform logistic regression if using sender cell type as the query
+
+    # NOTE TO SELF: FOR RECEIVER DEG DETECTION, JUST COMPUTE DIFFERENTIAL EXPRESSION IN CELLS W/ NONZERO PREDICTED
+    # EFFECT
 
     # ---------------------------------------------------------------------------------------------------
     # Cell type coupling:
