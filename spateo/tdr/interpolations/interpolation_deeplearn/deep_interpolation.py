@@ -15,7 +15,6 @@ from torch import tensor
 from .nn_losses import weighted_mse
 
 torch.manual_seed(0)
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 
 class DeepInterpolation:

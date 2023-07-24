@@ -12,7 +12,7 @@ except ImportError:
 from spateo.alignment import get_optimal_mapping_relationship
 from spateo.alignment.methods import paste_pairwise_align
 from spateo.logging import logger_manager as lm
-from spateo.tdr.widgets.interpolations import get_X_Y_grid
+from spateo.tdr.interpolations import get_X_Y_grid
 
 
 def cell_directions(

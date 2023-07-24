@@ -6,6 +6,7 @@ descartes
 dynamo-release>=1.3.0
 folium>=0.12.1
 geopandas>=0.10.2
+gpytorch
 ipywidgets>=7.7.1
 kneed>=0.7.0
 kornia>=0.6.4

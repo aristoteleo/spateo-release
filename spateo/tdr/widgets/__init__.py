@@ -9,10 +9,6 @@ from .changes import (
     map_points_to_branch,
 )
 from .clip import interactive_box_clip, interactive_rectangle_clip
-from .deep_interpolation import DataSampler, DeepInterpolation
-from .interpolation_nn import *
-from .interpolations import deep_intepretation, get_X_Y_grid, kernel_interpolation
-from .nn_losses import *
 from .pick import (
     interactive_pick,
     overlap_mesh_pick,
@@ -22,4 +18,3 @@ from .pick import (
 )
 from .slice import interactive_slice, three_d_slice
 from .tree import NLPCA, DDRTree, cal_ncenter
-from .vtk_interpolate import interpolate_model
