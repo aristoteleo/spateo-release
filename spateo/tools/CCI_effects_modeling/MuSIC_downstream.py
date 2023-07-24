@@ -334,7 +334,7 @@ class MuSIC_Interpreter(MuSIC):
                     interaction. Way of inferring that interaction may actually be repressive rather than activatory.
                 - "fc_qvals": Log-transformed significance of the fold change.
             normalize: Whether to minmax scale the metric values. If True, will apply this scaling over all elements
-                of the array.
+                of the array. Only used for 'metric' = "number", "proportion" or "specificity".
             plot_significant: Whether to include only significant predicted interactions in the plot and metric
                 calculation.
             metric_threshold: Optional threshold for 'metric' used to filter plot elements. Any interactions below
@@ -453,7 +453,7 @@ class MuSIC_Interpreter(MuSIC):
         for target in self.coeffs.keys():
             # Get coefficients for this key
             coef = self.coeffs[target]
-            feats = [col.split("_")[1] for col in coef.columns if col.startswith("b_") and "intercept" not in col]
+            columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
 
             # For fold-change, significance will be incorporated post-calculation:
             if plot_significant and metric != "fc":
@@ -500,7 +500,7 @@ class MuSIC_Interpreter(MuSIC):
                 # Intersection of each interaction w/ target-expressing cells to determine the numerator for the
                 # proportion:
                 intersections = {}
-                for col in coef.columns:
+                for col in columns:
                     nz_indices = np.where(coef[col].values != 0)[0]
                     intersections[col] = np.intersect1d(target_expr_cells_indices, nz_indices)
                 intersections = np.array(list(intersections.values()))
@@ -515,7 +515,8 @@ class MuSIC_Interpreter(MuSIC):
                 df.loc[:, target] = np.mean(coef, axis=0)
             elif metric == "fc":
                 # Get indices of zero effect and predicted positive effect:
-                for col in coef.columns:
+                for col in columns:
+                    feat = col.split("_")[1]
                     nz_effect_indices = np.where(coef[col].values != 0)[0]
                     zero_effect_indices = np.where(coef[col].values == 0)[0]
 
@@ -524,12 +525,12 @@ class MuSIC_Interpreter(MuSIC):
                     mean_target_zero = adata[zero_effect_indices, target].X.mean()
 
                     # Compute fold-change:
-                    df.loc[col, target] = mean_target_nonzero / mean_target_zero
+                    df.loc[feat, target] = mean_target_nonzero / mean_target_zero
                     # Compute p-value:
                     _, pval = scipy.stats.ranksums(
                         adata[nz_effect_indices, target].X.toarray(), adata[zero_effect_indices, target].X.toarray()
                     )
-                    df_pvals.loc[col, target] = pval
+                    df_pvals.loc[feat, target] = pval
 
         # For metric = fold change, significance of the fold-change:
         if metric == "fc":
@@ -566,6 +567,8 @@ class MuSIC_Interpreter(MuSIC):
             label = "Mean effect size"
             title = "Mean effect size for each interaction on each target"
         elif metric in ["number", "proportion", "specificity"]:
+            if normalize:
+                df = (df - df.min()) / (df.max() - df.min() + 1e-8)
             df[df < metric_threshold] = 0.0
             vmax = np.max(np.abs(df.values))
             vmin = 0

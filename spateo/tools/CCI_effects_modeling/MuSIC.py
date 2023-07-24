@@ -603,6 +603,7 @@ class MuSIC:
 
         if self.mod_type == "downstream":
             # For finding upstream associations with ligand
+            "filler"
 
         elif self.mod_type in ["ligand", "receptor", "lr"]:
             # Construct initial arrays for CCI modeling:
