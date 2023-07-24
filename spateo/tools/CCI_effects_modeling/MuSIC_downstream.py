@@ -24,8 +24,10 @@ import scipy.sparse
 import scipy.stats
 import seaborn as sns
 import xarray as xr
+from joblib import Parallel, delayed
 from matplotlib import rcParams
 from mpi4py import MPI
+from pysal import explore, lib
 from scipy.stats import pearsonr, spearmanr, zscore
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import normalize
@@ -56,10 +58,6 @@ class MuSIC_Interpreter(MuSIC):
     def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
         super().__init__(comm, parser, args_list, verbose=False)
 
-        self.search_bw = self.arg_retrieve.search_bw
-        if self.search_bw is None:
-            self.search_bw = self.n_neighbors
-            self.bw_fixed = False
         self.k = self.arg_retrieve.top_k_receivers
 
         # Coefficients:
@@ -139,6 +137,8 @@ class MuSIC_Interpreter(MuSIC):
         for target in self.coeffs.keys():
             # Get coefficients and standard errors for this key
             coef = self.coeffs[target]
+            columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
+            coef = coef[[columns]]
             coef = self.comm.bcast(coef, root=0)
             se = self.standard_errors[target]
             se = self.comm.bcast(se, root=0)
@@ -159,14 +159,14 @@ class MuSIC_Interpreter(MuSIC):
 
             if self.comm.rank == 0:
                 p_values_all = np.concatenate(p_values_all, axis=0)
-                p_values_df = pd.DataFrame(p_values_all, index=self.sample_names, columns=self.feature_names)
+                p_values_df = pd.DataFrame(p_values_all, index=self.sample_names, columns=columns)
                 # Multiple testing correction for each observation:
                 qvals = np.zeros_like(p_values_all)
                 for i in range(p_values_all.shape[0]):
                     qvals[i, :] = multitesting_correction(
                         p_values_all[i, :], method=method, alpha=significance_threshold
                     )
-                q_values_df = pd.DataFrame(qvals, index=self.sample_names, columns=self.feature_names)
+                q_values_df = pd.DataFrame(qvals, index=self.sample_names, columns=columns)
 
                 # Significance:
                 is_significant_df = q_values_df < significance_threshold
@@ -380,7 +380,7 @@ class MuSIC_Interpreter(MuSIC):
         df = pd.DataFrame(0, index=feature_names, columns=targets)
         # For metric = fold change, significance of the fold-change:
         if metric == "fc" or metric == "fc_qvals":
-            df_pvals = pd.DataFrame(0, index=feature_names, columns=targets)
+            df_pvals = pd.DataFrame(1, index=feature_names, columns=targets)
             # For fold-change, colormap should be divergent-
             if metric == "fc":
                 diverging_colormaps = [
@@ -454,6 +454,7 @@ class MuSIC_Interpreter(MuSIC):
             # Get coefficients for this key
             coef = self.coeffs[target]
             columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
+            feat_names_target = [col.split("_")[1] for col in columns]
 
             # For fold-change, significance will be incorporated post-calculation:
             if plot_significant and metric != "fc":
@@ -481,7 +482,7 @@ class MuSIC_Interpreter(MuSIC):
                 # Compute number of nonzero interactions for each feature:
                 n_nonzero_interactions = np.sum(coef != 0, axis=0)
                 # Compute proportion:
-                df.loc[:, target] = n_nonzero_interactions
+                df.loc[feat_names_target, target] = n_nonzero_interactions
             elif metric == "proportion":
                 # Compute total number of target-expressing cells, and the indices of target-expressing cells:
                 target_expr_cells_indices = np.where(adata[:, target].X.toarray() != 0)[0]
@@ -493,7 +494,7 @@ class MuSIC_Interpreter(MuSIC):
                 # target-expressing cells:
                 n_nonzero_interactions = np.sum(coef_target_expr != 0, axis=0)
                 # Compute proportion:
-                df.loc[:, target] = n_nonzero_interactions / n_target_expr_cells
+                df.loc[feat_names_target, target] = n_nonzero_interactions / n_target_expr_cells
             elif metric == "specificity":
                 # Compute total number of target-expressing cells, and the indices of target-expressing cells:
                 target_expr_cells_indices = np.where(adata[:, target].X.toarray() != 0)[0]
@@ -510,7 +511,7 @@ class MuSIC_Interpreter(MuSIC):
                 n_nonzero_interactions = np.sum(coef != 0, axis=0)
 
                 # Ratio of intersections to total number of nonzero values:
-                df.loc[:, target] = intersections / n_nonzero_interactions
+                df.loc[feat_names_target, target] = intersections / n_nonzero_interactions
             elif metric == "mean":
                 df.loc[:, target] = np.mean(coef, axis=0)
             elif metric == "fc":
@@ -643,20 +644,30 @@ class MuSIC_Interpreter(MuSIC):
         )
 
     def moran_i_signaling_effects(
-        self, targets: Optional[Union[str, List[str]]] = None
-    ) -> Union[pd.DataFrame, pd.DataFrame]:
+        self,
+        targets: Optional[Union[str, List[str]]] = None,
+        k: int = 10,
+        weighted: Literal["kernel", "knn"] = "knn",
+        permutations: int = 1000,
+        n_jobs: int = 1,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Computes spatial enrichment of signaling effects.
 
         Args:
             targets: Can optionally specify a subset of the targets to compute this on. If not given, will use all
                 targets that were specified in model fitting.
+            k: Number of k-nearest neighbors to use for Moran's I computation
+            weighted: Whether to use a kernel-weighted or k-nearest neighbors approach to calculate spatial weights
+            permutations: Number of random permutations for calculation of pseudo-p_values.
+            n_jobs: Number of jobs to use for parallelization. If -1, all available CPUs are used. If 1 is given,
+                no parallel computing code is used at all.
 
         Returns:
             signaling_moran_df: DataFrame with Moran's I scores for each target.
             signaling_moran_pvals: DataFrame with p-values for each Moran's I score.
         """
-        logger = lm.get_main_logger()
-        config_spateo_rcParams()
+        if weighted != "kernel" and weighted != "knn":
+            raise ValueError("Invalid argument given to 'weighted' parameter. Must be 'kernel' or 'knn'.")
 
         # Check inputs:
         if targets is not None:
@@ -666,25 +677,39 @@ class MuSIC_Interpreter(MuSIC):
                 raise ValueError(f"targets must be a list or string, not {type(targets)}.")
 
         # Get Moran's I scores for each target:
-        signaling_moran_df = pd.DataFrame(index=self.feature_names, columns=targets)
-        signaling_moran_pvals = pd.DataFrame(index=self.feature_names, columns=targets)
+        feat_names = [feat for feat in self.feature_names if feat != "intercept"]
+        signaling_moran_df = pd.DataFrame(0, index=feat_names, columns=targets)
+        signaling_moran_pvals = pd.DataFrame(1, index=feat_names, columns=targets)
+        coords = self.coords
+        if weighted == "kernel":
+            kw = lib.weights.Kernel(coords, k, function="gaussian")
+            W = lib.weights.W(kw.neighbors, kw.weights)
+        else:
+            kd = lib.cg.KDTree(coords)
+            nw = lib.weights.KNN(kd, k)
+            W = lib.weights.W(nw.neighbors, nw.weights)
+
+        # Moran I for a single interaction:
+        def _single(interaction, X_df, W, permutations):
+            cur_X = X_df[interaction].values
+            mbi = explore.esda.moran.Moran(cur_X, W, permutations=permutations, two_tailed=False)
+            Moran_I = mbi.I
+            p_value = mbi.p_sim
+            statistics = mbi.z_sim
+            return [Moran_I, p_value, statistics]
+
         for target in targets:
             # Get coefficients for this key
             coef = self.coeffs[target]
-            feats = [col.split("_")[1] for col in coef.columns if col.startswith("b_") and "intercept" not in col]
+            effects = coef[[col for col in coef.columns if col.startswith("b_") and "intercept" not in col]]
+            effects.columns = [col.split("_")[1] for col in effects.columns]
 
-            # Compute Moran's I:
-            moran_i, moran_pval = moran_i(
-                self.adata,
-                coef,
-                feats,
-                target,
-                spatial_weights_membrane_bound=self.spatial_weights_membrane_bound,
-                spatial_weights_secreted=self.spatial_weights_secreted,
-                spatial_weights_niche=self.spatial_weights_niche,
-            )
-            signaling_moran_df.loc[feats, target] = moran_i
-            signaling_moran_pvals.loc[feats, target] = moran_pval
+            # Parallel computation of Moran's I for all interactions for this target:
+            res = Parallel(n_jobs)(delayed(_single)(interaction, effects, W, permutations) for interaction in effects)
+            res = pd.DataFrame(res, columns=["moran_i", "moran_p_val", "moran_z"], index=effects.columns)
+            res["moran_q_val"] = multitesting_correction(res["moran_p_val"], method="fdr_bh")
+            signaling_moran_df.loc[effects.columns, target] = res["moran_i"]
+            signaling_moran_pvals.loc[effects.columns, target] = res["moran_q_val"]
 
         return signaling_moran_df, signaling_moran_pvals
 
@@ -957,7 +982,8 @@ class MuSIC_Interpreter(MuSIC):
         self,
         pathway: Optional[str] = None,
         target: Optional[str] = None,
-        spatial_weights: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
+        spatial_weights_secreted: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
+        spatial_weights_membrane_bound: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
         store_summed_potential: bool = True,
     ):
         """For each cell, computes the 'pathway effect potential', which is an aggregation of the effect potentials
@@ -968,7 +994,8 @@ class MuSIC_Interpreter(MuSIC):
             target: Optional string to select target from among the genes used to fit the model to compute signaling
                 effects for. Note that this function takes only one target at a time. If not given, will take the
                 first name from among all targets.
-            spatial_weights: Optional pairwise spatial weights matrix. If not given, will compute at runtime.
+            spatial_weights_secreted: Optional pairwise spatial weights matrix for secreted factors
+            spatial_weights_membrane_bound: Optional pairwise spatial weights matrix for membrane-bound factors
             store_summed_potential: If True, will store both sent and received signaling potential as entries in
                 .obs of the AnnData object.
 
@@ -1028,7 +1055,8 @@ class MuSIC_Interpreter(MuSIC):
                     target=target,
                     ligand=ligand,
                     receptor=receptor,
-                    spatial_weights=spatial_weights,
+                    spatial_weights_secreted=spatial_weights_secreted,
+                    spatial_weights_membrane_bound=spatial_weights_membrane_bound,
                     store_summed_potential=False,
                 )
                 all_pathway_member_effects[f"effect_potential_{ligand}_{receptor}_on_{target}"] = effect_potential
@@ -1044,7 +1072,8 @@ class MuSIC_Interpreter(MuSIC):
                 effect_potential, _, _ = self.get_effect_potential(
                     target=target,
                     ligand=ligand,
-                    spatial_weights=spatial_weights,
+                    spatial_weights_secreted=spatial_weights_secreted,
+                    spatial_weights_membrane_bound=spatial_weights_membrane_bound,
                     store_summed_potential=False,
                 )
                 all_pathway_member_effects[f"effect_potential_{ligand}_on_{target}"] = effect_potential
@@ -1115,9 +1144,44 @@ class MuSIC_Interpreter(MuSIC):
             targets = self.target_for_downstream
 
         # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
-        # Note: as the default (if bw is not otherwise provided), the n nearest neighbors will be used for the
-        # bandwidth:
-        spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True)
+        # Try to load spatial weights for membrane-bound and secreted ligands, compute if not found:
+        membrane_bound_path = os.path.join(
+            os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_membrane_bound.npz"
+        )
+        secreted_path = os.path.join(
+            os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_secreted.npz"
+        )
+
+        try:
+            spatial_weights_membrane_bound = scipy.sparse.load_npz(membrane_bound_path)
+            spatial_weights_secreted = scipy.sparse.load_npz(secreted_path)
+        except:
+            bw_mb = (
+                self.n_neighbors_membrane_bound
+                if self.distance_membrane_bound is None
+                else self.distance_membrane_bound
+            )
+            bw_fixed = True if self.distance_membrane_bound is not None else False
+            spatial_weights_membrane_bound = self._compute_all_wi(
+                bw=bw_mb,
+                bw_fixed=bw_fixed,
+                exclude_self=True,
+                verbose=False,
+            )
+            self.logger.info(f"Saving spatial weights for membrane-bound ligands to {membrane_bound_path}.")
+            scipy.sparse.save_npz(membrane_bound_path, spatial_weights_membrane_bound)
+
+            bw_s = self.n_neighbors_membrane_bound if self.distance_secreted is None else self.distance_secreted
+            bw_fixed = True if self.distance_secreted is not None else False
+            # Autocrine signaling is much easier with secreted signals:
+            spatial_weights_secreted = self._compute_all_wi(
+                bw=bw_s,
+                bw_fixed=bw_fixed,
+                exclude_self=False,
+                verbose=False,
+            )
+            self.logger.info(f"Saving spatial weights for secreted ligands to {secreted_path}.")
+            scipy.sparse.save_npz(secreted_path, spatial_weights_secreted)
 
         # Columns consist of the spatial weights of each observation- convolve with expression of each ligand to
         # get proxy of ligand signal "sent", weight by the local coefficient value to get a proxy of the "signal
@@ -1155,13 +1219,15 @@ class MuSIC_Interpreter(MuSIC):
                     ligand = query.split(":")[0]
                     receptor = query.split(":")[1]
                     col_pathways = list(
-                        self.lr_db.loc[
-                            (self.lr_db["from"] == ligand) & (self.lr_db["to"] == receptor), "pathway"
-                        ].values
+                        set(
+                            self.lr_db.loc[
+                                (self.lr_db["from"] == ligand) & (self.lr_db["to"] == receptor), "pathway"
+                            ].values
+                        )
                     )
                     pathways.extend(col_pathways)
                 elif self.mod_type == "ligand":
-                    col_pathways = list(self.lr_db.loc[self.lr_db["from"] == query, "pathway"].values)
+                    col_pathways = list(set(self.lr_db.loc[self.lr_db["from"] == query, "pathway"].values))
                     pathways.extend(col_pathways)
             # Before taking the set of pathways, count number of occurrences of each pathway in the list- remove
             # pathways for which there are fewer than three ligands or ligand-receptor pairs- these are not enough to
@@ -1179,7 +1245,12 @@ class MuSIC_Interpreter(MuSIC):
                             effect_potential,
                             normalized_effect_potential_sum_sender,
                             normalized_effect_potential_sum_receiver,
-                        ) = self.get_pathway_potential(target=target, pathway=query, spatial_weights=spatial_weights)
+                        ) = self.get_pathway_potential(
+                            target=target,
+                            pathway=query,
+                            spatial_weights_secreted=spatial_weights_secreted,
+                            spatial_weights_membrane_bound=spatial_weights_membrane_bound,
+                        )
                     else:
                         ligand = query.split(":")[0]
                         receptor = query.split(":")[1]
@@ -1188,7 +1259,11 @@ class MuSIC_Interpreter(MuSIC):
                             normalized_effect_potential_sum_sender,
                             normalized_effect_potential_sum_receiver,
                         ) = self.get_effect_potential(
-                            target=target, ligand=ligand, receptor=receptor, spatial_weights=spatial_weights
+                            target=target,
+                            ligand=ligand,
+                            receptor=receptor,
+                            spatial_weights_secreted=spatial_weights_secreted,
+                            spatial_weights_membrane_bound=spatial_weights_membrane_bound,
                         )
                 else:
                     if compute_pathway_effect:
@@ -1196,13 +1271,23 @@ class MuSIC_Interpreter(MuSIC):
                             effect_potential,
                             normalized_effect_potential_sum_sender,
                             normalized_effect_potential_sum_receiver,
-                        ) = self.get_pathway_potential(target=target, pathway=query, spatial_weights=spatial_weights)
+                        ) = self.get_pathway_potential(
+                            target=target,
+                            pathway=query,
+                            spatial_weights_secreted=spatial_weights_secreted,
+                            spatial_weights_membrane_bound=spatial_weights_membrane_bound,
+                        )
                     else:
                         (
                             effect_potential,
                             normalized_effect_potential_sum_sender,
                             normalized_effect_potential_sum_receiver,
-                        ) = self.get_effect_potential(target=target, ligand=query, spatial_weights=spatial_weights)
+                        ) = self.get_effect_potential(
+                            target=target,
+                            ligand=query,
+                            spatial_weights_secreted=spatial_weights_secreted,
+                            spatial_weights_membrane_bound=spatial_weights_membrane_bound,
+                        )
 
                 # Compute vector field:
                 self.define_effect_vf(
