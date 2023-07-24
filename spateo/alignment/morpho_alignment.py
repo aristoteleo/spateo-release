@@ -167,11 +167,17 @@ def morpho_align_ref(
         )
 
     pis, pis_ref, sigma2s = [], [], []
+
     align_models = [model.copy() for model in models]
+    for model in align_models:
+        model.obsm[key_added] = model.obsm[spatial_key]
+        model.obsm["Rigid_align_spatial"] = model.obsm[spatial_key]
+        model.obsm["Nonrigid_align_spatial"] = model.obsm[spatial_key]
     align_models_ref = [model.copy() for model in models_ref]
     for model in align_models_ref:
         model.obsm[key_added] = model.obsm[spatial_key]
-    align_models[0].obsm[key_added] = align_models[0].obsm[spatial_key]
+        model.obsm["Rigid_align_spatial"] = model.obsm[spatial_key]
+        model.obsm["Nonrigid_align_spatial"] = model.obsm[spatial_key]
     progress_name = f"Models alignment with ref-models based on morpho, mode: {mode}."
     for i in _iteration(n=len(align_models) - 1, progress_name=progress_name, verbose=True):
         modelA_ref = align_models_ref[i]

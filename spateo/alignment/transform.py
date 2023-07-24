@@ -51,7 +51,7 @@ def paste_transform(
     R = adata_ref.uns[mapping_key]["R"]
 
     adata_coords = adata.obsm[spatial_key].copy() - tY
-    adata.obsm[key_added] = R.dot(adata_coords.T).T + tX
+    adata.obsm[key_added] = R.dot(adata_coords.T).T
     return adata
 
 

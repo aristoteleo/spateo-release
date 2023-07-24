@@ -82,7 +82,10 @@ def paste_align(
             X=modelA.obsm[key_added], Y=modelB.obsm[key_added], pi=pi
         )
 
-        modelA.obsm[key_added] = modelA_coords
+        if i == 0:
+            modelA.obsm[key_added] = modelA_coords
+            modelA.uns[mapping_key_added] = mapping_dict
+
         modelB.obsm[key_added] = modelB_coords
         modelB.uns[mapping_key_added] = mapping_dict
 
@@ -139,6 +142,9 @@ def paste_align_ref(
         pis: The list of pi matrices from align_models_ref.
     """
 
+    for m in models:
+        m.obsm[key_added] = m.obsm[spatial_key]
+
     # Downsampling
     if models_ref is None:
         models_sampling = [model.copy() for model in models]
@@ -167,7 +173,8 @@ def paste_align_ref(
     for i, (align_model_ref, model) in enumerate(zip(align_models_ref, models)):
         align_model = model.copy()
         if i == 0:
-            align_model.obsm[key_added] = align_model.obsm[spatial_key]
+            tX = align_model_ref.uns[mapping_key_added]["tX"]
+            align_model.obsm[key_added] = align_model.obsm[spatial_key] - tX
         else:
             align_model = paste_transform(
                 adata=align_model,
@@ -176,8 +183,7 @@ def paste_align_ref(
                 key_added=key_added,
                 mapping_key=mapping_key_added,
             )
-            align_model.uns[mapping_key_added] = align_model_ref.uns[mapping_key_added]
-
+        align_model.uns[mapping_key_added] = align_model_ref.uns[mapping_key_added]
         align_models.append(align_model)
 
     return align_models, align_models_ref, pis
