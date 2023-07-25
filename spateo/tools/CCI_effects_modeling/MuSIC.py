@@ -636,6 +636,9 @@ class MuSIC:
             if self.species == "human":
                 try:
                     self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                    self.cof_db = pd.read_csv(os.path.join(self.cci_dir, "human_cofactors.csv"), index_col=0)
+                    self.tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_TF_db.csv"), index_col=0)
+                    self.grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
                 except FileNotFoundError:
                     raise FileNotFoundError(
                         f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
@@ -649,6 +652,9 @@ class MuSIC:
             elif self.species == "mouse":
                 try:
                     self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+                    self.cof_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_cofactors.csv"), index_col=0)
+                    self.tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_TF_db.csv"), index_col=0)
+                    self.grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
                 except FileNotFoundError:
                     raise FileNotFoundError(
                         f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
@@ -659,6 +665,10 @@ class MuSIC:
                         "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
                     )
 
+            self.lr_db = self.comm.bcast(self.lr_db, root=0)
+            self.cof_db = self.comm.bcast(self.cof_db, root=0)
+            self.tf_tf_db = self.comm.bcast(self.tf_tf_db, root=0)
+            self.grn = self.comm.bcast(self.grn, root=0)
             database_ligands = set(self.lr_db["from"])
 
             if self.custom_ligands_path is not None or self.custom_ligands is not None:
@@ -678,8 +688,40 @@ class MuSIC:
                 )
 
             # Define ligand expression array:
-
+            ligands_expr = pd.DataFrame(
+                adata[:, ligands].X.A if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
+                index=adata.obs_names,
+                columns=ligands,
+            )
             # Subset adata to exclude ligands (all contents aside from ligands will be used as explanatory variables):
+            adata = adata[:, ~adata.var_names.isin(ligands)].copy()
+            # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
+            # but store them in a temporary list to do so later because some may contribute to multiple complexes:
+            to_drop = []
+            for element in l_complexes:
+                parts = element.split("_")
+                if all(part in ligands_expr.columns for part in parts):
+                    # Combine the columns into a new column with the name of the hyphenated element- here we will
+                    # compute the geometric mean of the expression values of the complex components:
+                    ligands_expr[element] = ligands_expr[parts].apply(lambda x: x.prod() ** (1 / len(parts)), axis=1)
+                    # Mark the individual components for removal if the individual components cannot also be
+                    # found as ligands:
+                    to_drop.extend([part for part in parts if part not in database_ligands])
+                else:
+                    # Drop the hyphenated element from the dataframe if all components are not found in the
+                    # dataframe columns
+                    partial_components = [l for l in ligands if l in parts]
+                    to_drop.extend(partial_components)
+                    if len(partial_components) > 0 and self.verbose:
+                        self.logger.info(
+                            f"Not all components from the {element} heterocomplex could be found in the dataset."
+                        )
+
+            # Drop any possible duplicate ligands alongside any other columns to be dropped:
+            to_drop = list(set(to_drop))
+            ligands_expr.drop(to_drop, axis=1, inplace=True)
+            first_occurrences = ligands_expr.columns.duplicated(keep="first")
+            self.targets_expr = ligands_expr.loc[:, ~first_occurrences]
 
             X_df = pd.DataFrame(
                 adata.X.A if scipy.sparse.issparse(adata.X) else adata.X,
@@ -692,9 +734,83 @@ class MuSIC:
                 X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
             # Normalize the data to prevent numerical overflow:
-            X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
+            X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
+
+            # Save design matrix and component dataframes (here, target ligands dataframe):
+            if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix")):
+                os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix"))
+            if not os.path.exists(
+                os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix", "design_matrix.csv")
+            ):
+                self.logger.info(
+                    f"Saving design matrix to directory "
+                    f"{os.path.join(os.path.splitext(self.output_path)[0], 'downstream_design_matrix')}."
+                )
+                X_df.to_csv(
+                    os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix", "design_matrix.csv")
+                )
+
+            self.logger.info(
+                f"Saving targets array to "
+                f"{os.path.join(os.path.splitext(self.output_path)[0], 'downstream_design_matrix', 'targets.csv')}"
+            )
+            self.targets_expr.to_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix", "targets.csv")
+            )
 
         self.X = X_df.values
+        self.feature_names = list(X_df.columns)
+
+        # If applicable, add covariates:
+        if self.covariate_keys is not None:
+            matched_obs = []
+            matched_var_names = []
+            for key in self.covariate_keys:
+                if key in self.adata.obs:
+                    matched_obs.append(key)
+                elif key in self.adata.var_names:
+                    matched_var_names.append(key)
+                else:
+                    self.logger.info(
+                        f"Specified covariate key '{key}' not found in adata.obs. Not adding this "
+                        f"covariate to the X matrix."
+                    )
+            matched_obs_matrix = self.adata.obs[matched_obs].to_numpy()
+            matched_var_matrix = self.adata[:, matched_var_names].X.A
+            cov_names = matched_obs + matched_var_names
+            concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
+            self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
+            self.feature_names += cov_names
+
+        # Add intercept if applicable:
+        if self.fit_intercept:
+            self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
+            self.feature_names = ["intercept"] + self.feature_names
+            if self.feature_indicator is not None:
+                intercept_indicator = pd.DataFrame(1, index=self.sample_names, columns=["intercept"])
+                self.feature_indicator = pd.concat([intercept_indicator, self.feature_indicator], axis=1)
+
+        # Add small amount to expression to prevent issues during regression:
+        zero_rows = np.where(np.all(self.X == 0, axis=1))[0]
+        for row in zero_rows:
+            self.X[row, 0] += 1e-6
+
+        # Broadcast independent variables and feature names:
+        self.X = self.comm.bcast(self.X, root=0)
+        self.feature_names = self.comm.bcast(self.feature_names, root=0)
+        self.n_features = self.X.shape[1]
+        self.n_features = self.comm.bcast(self.n_features, root=0)
+
+        self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
+        self.X_df = self.comm.bcast(self.X_df, root=0)
+
+        # Compute distance in "signaling space":
+        # Binarize design matrix to encode presence/absence of signaling pairs:
+        self.feature_distance = np.where(self.X > 0, 1, 0)
+        self.feature_distance = self.comm.bcast(self.feature_distance, root=0)
+
+        # Use neighbors in expression space:
+        self.use_expression_neighbors_only = True
 
     def define_sig_inputs(self, adata: Optional[anndata.AnnData] = None):
         """For signaling-relevant models, define necessary quantities that will later be used to define the independent
@@ -1463,15 +1579,7 @@ class MuSIC:
                 if self.mod_type == "ligand":
                     X_df = X_df.applymap(np.log1p)
                 # Normalize the data to prevent numerical overflow:
-                X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
-
-                # Save design matrix:
-                if not os.path.exists(os.path.join(self.output_path, "design_matrix")):
-                    os.makedirs(os.path.join(self.output_path, "design_matrix"))
-                X_df.to_csv(os.path.join(self.output_path, "design_matrix", "design_matrix.csv"))
-                self.logger.info(
-                    f"Saving design matrix to {os.path.join(self.output_path, 'design_matrix', 'design_matrix.csv')}."
-                )
+                X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
 
             else:
                 raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
@@ -2527,7 +2635,18 @@ class MuSIC:
                 X = X_orig[:, keep_indices]
             # If downstream analysis model, filter X based on known protein-protein interactions:
             elif self.mod_type == "downstream":
-                "filler"
+                # Transcription factors that have binding sites proximal to this target:
+                target_row = self.grn.loc[target]
+                target_TFs = target_row[target_row == 1].index.tolist()
+                # Cofactors for these transcription factors:
+                cof_subset = list(self.cof_db[(self.cof_db[target_TFs] == 1).any(axis=1)].index)
+                # Other TFs that interact with these transcription factors:
+                intersecting_tf_subset = list(self.tf_tf_db[(self.tf_tf_db[target_TFs] == 1).any(axis=1)].index)
+                target_regulators = target_TFs + cof_subset + intersecting_tf_subset
+
+                keep_indices = [i for i, feat in enumerate(self.feature_names) if feat in target_regulators]
+                X_labels = [self.feature_names[idx] for idx in keep_indices]
+                X = X_orig[:, keep_indices]
             else:
                 X_labels = self.feature_names
 
@@ -2818,9 +2937,19 @@ class MuSIC:
             betas: Model coefficients
         """
         # Check if output_path was left as the default:
-        if os.path.dirname(self.output_path) == "./output":
-            if not os.path.exists("./output"):
-                os.makedirs("./output")
+        if not os.path.exists(os.path.dirname(self.output_path)):
+            os.makedirs(os.path.dirname(self.output_path))
+
+        directory_path, filename = os.path.split(self.output_path)
+
+        if self.mod_type == "downstream" and "downstream" not in directory_path:
+            new_containing_dir = "downstream"
+            new_directory_path = os.path.join(directory_path, new_containing_dir)
+            # Set new output path:
+            self.output_path = os.path.join(new_directory_path, filename)
+
+            if not os.path.exists(new_directory_path):
+                os.makedirs(new_directory_path)
 
         # If output path already has files in it, clear them:
         # output_dir = os.path.dirname(self.output_path)
