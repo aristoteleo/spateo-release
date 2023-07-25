@@ -1666,7 +1666,8 @@ class MuSIC_Interpreter(MuSIC):
             logger.info("Computing optimal number of UMAP components ...")
             n_umap_components = "filler"
 
-            # Collect information into .csv file:
+            # NOTE: FINISH LATER
+            # Write information to .h5ad file (containing regulators and ligands):
             self.logger.info(
                 "'CCI_sender_deg_detection'- saving regulatory molecules to test as .h5ad file to the "
                 "directory of the original AnnData object..."
@@ -1716,18 +1717,69 @@ class MuSIC_Interpreter(MuSIC):
                 downstream expression
         """
 
-        if self.effect_strength_threshold is not None:
-            effect_strength_threshold = self.effect_strength_threshold
+        if effect_strength_threshold is not None:
+            effect_strength_threshold = 0.2
             self.logger.info(
                 f"Computing cell type coupling for cells in which predicted sent/received effect score "
                 f"is higher than {effect_strength_threshold * 100}th percentile score."
             )
 
-        # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
-        spatial_weights = self._compute_all_wi(self.search_bw, bw_fixed=self.bw_fixed, exclude_self=True, verbose=False)
-
         if not self.mod_type != "receptor":
             raise ValueError("Knowledge of the source is required to sent effect potential.")
+
+        if self.mod_type in ["lr", "ligand"]:
+            # Get spatial weights given bandwidth value- each row corresponds to a sender, each column to a receiver:
+            # Try to load spatial weights for membrane-bound and secreted ligands, compute if not found:
+            membrane_bound_path = os.path.join(
+                os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_membrane_bound.npz"
+            )
+            secreted_path = os.path.join(
+                os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_secreted.npz"
+            )
+
+            try:
+                spatial_weights_membrane_bound = scipy.sparse.load_npz(membrane_bound_path)
+                spatial_weights_secreted = scipy.sparse.load_npz(secreted_path)
+            except:
+                bw_mb = (
+                    self.n_neighbors_membrane_bound
+                    if self.distance_membrane_bound is None
+                    else self.distance_membrane_bound
+                )
+                bw_fixed = True if self.distance_membrane_bound is not None else False
+                spatial_weights_membrane_bound = self._compute_all_wi(
+                    bw=bw_mb,
+                    bw_fixed=bw_fixed,
+                    exclude_self=True,
+                    verbose=False,
+                )
+                self.logger.info(f"Saving spatial weights for membrane-bound ligands to {membrane_bound_path}.")
+                scipy.sparse.save_npz(membrane_bound_path, spatial_weights_membrane_bound)
+
+                bw_s = self.n_neighbors_membrane_bound if self.distance_secreted is None else self.distance_secreted
+                bw_fixed = True if self.distance_secreted is not None else False
+                # Autocrine signaling is much easier with secreted signals:
+                spatial_weights_secreted = self._compute_all_wi(
+                    bw=bw_s,
+                    bw_fixed=bw_fixed,
+                    exclude_self=False,
+                    verbose=False,
+                )
+                self.logger.info(f"Saving spatial weights for secreted ligands to {secreted_path}.")
+                scipy.sparse.save_npz(secreted_path, spatial_weights_secreted)
+        else:
+            niche_path = os.path.join(
+                os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_niche.npz"
+            )
+
+            try:
+                spatial_weights_niche = scipy.sparse.load_npz(niche_path)
+            except:
+                spatial_weights_niche = self._compute_all_wi(
+                    bw=self.n_neighbors_niche, bw_fixed=False, exclude_self=False, kernel="bisquare"
+                )
+                self.logger.info(f"Saving spatial weights for niche to {niche_path}.")
+                scipy.sparse.save_npz(niche_path, spatial_weights_niche)
 
         # Compute signaling potential for each target (mediated by each of the possible signaling patterns-
         # ligand/receptor or cell type/cell type pair):
@@ -1797,7 +1849,11 @@ class MuSIC_Interpreter(MuSIC):
                     receptor = col[1]
 
                     effect_potential, _, _ = self.get_effect_potential(
-                        target=target, ligand=ligand, receptor=receptor, spatial_weights=spatial_weights
+                        target=target,
+                        ligand=ligand,
+                        receptor=receptor,
+                        spatial_weights_membrane_bound=spatial_weights_membrane_bound,
+                        spatial_weights_secreted=spatial_weights_secreted,
                     )
 
                     # For each cell type pair, compute average effect potential across all cells of the sending and
@@ -1845,7 +1901,10 @@ class MuSIC_Interpreter(MuSIC):
 
                 elif self.mod_type == "ligand":
                     effect_potential, _, _ = self.get_effect_potential(
-                        target=target, ligand=col, spatial_weights=spatial_weights
+                        target=target,
+                        ligand=col,
+                        spatial_weights_membrane_bound=spatial_weights_membrane_bound,
+                        spatial_weights_secreted=spatial_weights_secreted,
                     )
 
                     # For each cell type pair, compute average effect potential across all cells of the sending and
@@ -1876,7 +1935,7 @@ class MuSIC_Interpreter(MuSIC):
                         target=target,
                         sender_cell_type=sending_cell_type,
                         receiver_cell_type=receiving_cell_type,
-                        spatial_weights=spatial_weights,
+                        spatial_weights_niche=spatial_weights_niche,
                     )
 
                     # Directly compute the average- the processing steps when providing sender and receiver cell

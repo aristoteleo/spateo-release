@@ -63,7 +63,9 @@ def main():
 @click.option(
     "-mod_type",
     default="niche",
-    help="If adata_path is provided, one of the STGWR models " "will be used. Options: 'niche', 'lr', 'slice'.",
+    help="If adata_path is provided, one of the STGWR models "
+    "will be used. Options: 'niche', 'lr', 'ligand', "
+    "'receptor', 'downstream'.",
 )
 @click.option("-grn", default=False, is_flag=True)
 @click.option("-cci_dir", required=True)
@@ -359,7 +361,7 @@ def run(
         multiscale_params_only: If True, will only fit parameters for MGWR model and no other metrics. Otherwise,
             the effective number of parameters and leverages will be returned.
         mod_type: If adata_path is provided, one of the SWR models will be used. Options: 'niche', 'lr', 'ligand',
-            'receptor'.
+            'receptor', 'downstream'.
 
 
         cci_dir: Path to directory containing CCI files

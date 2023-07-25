@@ -40,6 +40,8 @@ def define_spateo_argparse(**kwargs):
                 - "ligand": Spatially-aware, essentially uses ligand expression in the neighboring cells as
                     independent variables.
                 - "receptor": Uses receptor expression in the "target" cell as independent variables.
+                - "downstream": For the purposes of downstream analysis, used to model ligand expression as a
+                    function of upstream regulators
         cci_dir: Path to directory containing cell-cell interaction databases
         species: Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
                 "human", "mouse".

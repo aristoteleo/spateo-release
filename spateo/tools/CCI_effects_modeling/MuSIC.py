@@ -603,16 +603,98 @@ class MuSIC:
 
         if self.mod_type == "downstream":
             # For finding upstream associations with ligand
-            "filler"
+            self.setup_downstream()
 
         elif self.mod_type in ["ligand", "receptor", "lr"]:
             # Construct initial arrays for CCI modeling:
             self.define_sig_inputs()
 
-    def setup_downstream(self):
+    def setup_downstream(self, adata: Optional[anndata.AnnData] = None):
         """Setup for downstream tasks- namely, models for inferring signaling-associated differential expression."""
+        if adata is None:
+            adata = self.adata.copy()
 
-        # NOTE: for receiver analyses, self.targets_expr will be defined from .obs:
+        if os.path.exists(
+            os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix", "design_matrix.csv")
+        ):
+            self.logger.info(
+                f"Found existing independent variable matrix, loading from"
+                f" {os.path.join(self.output_path, 'downstream_design_matrix', 'design_matrix.csv')}."
+            )
+            X_df = pd.read_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix", "design_matrix.csv"),
+                index_col=0,
+            )
+            self.targets_expr = pd.read_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix", "targets.csv"),
+                index_col=0,
+            )
+
+        # For downstream analysis entire AnnData object except for the ligands will be used for independent variable
+        # array:
+        else:
+            if self.species == "human":
+                try:
+                    self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                except FileNotFoundError:
+                    raise FileNotFoundError(
+                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                    )
+                except IOError:
+                    raise IOError(
+                        "Issue reading L:R database. Files can be downloaded from "
+                        "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
+                    )
+
+            elif self.species == "mouse":
+                try:
+                    self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+                except FileNotFoundError:
+                    raise FileNotFoundError(
+                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                    )
+                except IOError:
+                    raise IOError(
+                        "Issue reading L:R database. Files can be downloaded from "
+                        "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
+                    )
+
+            database_ligands = set(self.lr_db["from"])
+
+            if self.custom_ligands_path is not None or self.custom_ligands is not None:
+                if self.custom_ligands_path is not None:
+                    with open(self.custom_ligands_path, "r") as f:
+                        ligands = f.read().splitlines()
+                else:
+                    ligands = self.custom_ligands
+                ligands = [l for l in ligands if l in database_ligands]
+                l_complexes = [elem for elem in ligands if "_" in elem]
+                # Get individual components if any complexes are included in this list:
+                ligands = [l for item in ligands for l in item.split("_")]
+            else:
+                raise FileNotFoundError(
+                    "For 'mod_type' = 'downstream', ligandas must be provided using either "
+                    "'custom_lig_path' or 'ligand' arguments."
+                )
+
+            # Define ligand expression array:
+
+            # Subset adata to exclude ligands (all contents aside from ligands will be used as explanatory variables):
+
+            X_df = pd.DataFrame(
+                adata.X.A if scipy.sparse.issparse(adata.X) else adata.X,
+                index=adata.obs_names,
+                columns=adata.var_names,
+            )
+
+            # If applicable, check for multicollinearity:
+            if self.multicollinear_threshold is not None:
+                X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
+
+            # Normalize the data to prevent numerical overflow:
+            X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
+
+        self.X = X_df.values
 
     def define_sig_inputs(self, adata: Optional[anndata.AnnData] = None):
         """For signaling-relevant models, define necessary quantities that will later be used to define the independent
@@ -1163,7 +1245,7 @@ class MuSIC:
                     os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "spatial_weights"))
 
                 # For checking for pre-computed spatial weights:
-                membrane_bound_path = os.path.join(
+                niche_path = os.path.join(
                     os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_niche.npz"
                 )
 
@@ -1174,9 +1256,14 @@ class MuSIC:
                         self.logger.info("Spatial weights already found in AnnData object.")
                         spatial_weights_niche = self.adata.obsp["spatial_weights"]
                     else:
-                        spatial_weights_niche = self._compute_all_wi(
-                            bw=self.n_neighbors_niche, bw_fixed=False, exclude_self=False, kernel="bisquare"
-                        )
+                        try:
+                            spatial_weights_niche = scipy.sparse.load_npz(niche_path)
+                        except:
+                            spatial_weights_niche = self._compute_all_wi(
+                                bw=self.n_neighbors_niche, bw_fixed=False, exclude_self=False, kernel="bisquare"
+                            )
+                            self.logger.info(f"Saving spatial weights for niche to {niche_path}.")
+                            scipy.sparse.save_npz(niche_path, spatial_weights_niche)
                         # Save to AnnData object, and update AnnData object in path:
                         self.adata.obsp["spatial_weights"] = spatial_weights_niche
                         self.adata.write_h5ad(self.adata_path)
@@ -1372,8 +1459,9 @@ class MuSIC:
                 if self.multicollinear_threshold is not None:
                     X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
-                # Log-scale to reduce the impact of "denser" features:
-                X_df = X_df.applymap(np.log1p)
+                # Log-scale to reduce the impact of "denser" neighborhoods:
+                if self.mod_type == "ligand":
+                    X_df = X_df.applymap(np.log1p)
                 # Normalize the data to prevent numerical overflow:
                 X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
 
@@ -2437,6 +2525,9 @@ class MuSIC:
                     X_labels = [self.feature_names[idx] for idx in keep_indices]
 
                 X = X_orig[:, keep_indices]
+            # If downstream analysis model, filter X based on known protein-protein interactions:
+            elif self.mod_type == "downstream":
+                "filler"
             else:
                 X_labels = self.feature_names
 
