@@ -235,11 +235,12 @@ nbsphinx_prolog = r"""
     version=str(tutorials_repo.head.commit), docname="{{ docname|e }}"
 )
 nbsphinx_thumbnails = {
-    "tutorials/notebooks/cell_segmentation": "_static/tutorials/cell_segmentation.png",
-    "tutorials/notebooks/cluster_digitization": "_static/tutorials/cluster_digitization.png",
-    "tutorials/notebooks/cci": "_static/tutorials/cci.png",
-    "tutorials/notebooks/tdr": "_static/tutorials/tdr.png",
-    "tutorials/notebooks/morphogenesis": "_static/tutorials/morphogenesis.png",
-    "tutorials/notebooks/interactive": "_static/tutorials/interactive.png",
-    "tutorials/notebooks/svg_identification": "_static/tutorials/svg_tutorial.png",
+    "tutorials/notebooks/1_cell_segmentation": "_static/tutorials/1_cell_segmentation.png",
+    "tutorials/notebooks/2_cluster_digitization": "_static/tutorials/2_cluster_digitization.png",
+    "tutorials/notebooks/3_cci": "_static/tutorials/3_cci.png",
+    "tutorials/notebooks/4_alignment": "_static/tutorials/4_alignment.png",
+    "tutorials/notebooks/5_tdr": "_static/tutorials/5_tdr.png",
+    "tutorials/notebooks/6_morphogenesis": "_static/tutorials/6_morphogenesis.png",
+    "tutorials/notebooks/7_interactive": "_static/tutorials/7_interactive.png",
+    "tutorials/notebooks/8_svg_identification": "_static/tutorials/8_svg_identification.png",
 }

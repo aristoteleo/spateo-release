@@ -5,11 +5,12 @@ This page provides links to handy step-by-step tutorials for key features of *sp
 ```{eval-rst}
 .. nbgallery::
 
-   notebooks/cell_segmentation
-   notebooks/cluster_digitization
-   notebooks/cci
-   notebooks/tdr
-   notebooks/morphogenesis
-   notebooks/interactive
-   notebooks/svg_identification
+   notebooks/1_cell_segmentation
+   notebooks/2_cluster_digitization
+   notebooks/3_cci
+   notebooks/4_alignment
+   notebooks/5_tdr
+   notebooks/6_morphogenesis
+   notebooks/7_interactive
+   notebooks/8_svg_identification
 ```
