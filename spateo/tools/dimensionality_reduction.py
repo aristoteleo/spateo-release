@@ -483,8 +483,12 @@ def find_optimal_n_umap_components(X_data: np.ndarray, max_n_components: Optiona
     umap_params["return_mapper"] = False
     umap_params["min_dist"] = 0.5
 
+    if max_n_components is None:
+        max_n_components = int(X_data.shape[1] // 2)
+
     scores = []
-    for n_components in range(2, max_n_components + 1):
+    # Minimum of 5 components:
+    for n_components in range(5, max_n_components + 1):
         umap_params["n_components"] = n_components
         _, _, _, embedding = umap_conn_indices_dist_embedding(X_data, **umap_params)
         clusters = calculate_leiden_partition(input_mat=embedding, num_neighbors=10, graph_type="embedding")
@@ -770,7 +774,7 @@ def find_optimal_pca_components(
         n: Optimal number of components
     """
     if max_components is None:
-        max_components = X.shape[1] // 2
+        max_components = int(X.shape[1] // 2)
 
     explained_variances = []
     for n_components in range(2, max_components + 1):

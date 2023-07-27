@@ -17,6 +17,7 @@ import re
 from collections import Counter
 from typing import List, Literal, Optional, Tuple, Union
 
+import anndata
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -35,7 +36,10 @@ from sklearn.preprocessing import normalize
 from ...configuration import config_spateo_rcParams, shiftedColorMap
 from ...logging import logger_manager as lm
 from ...plotting.static.utils import save_return_show_fig_utils
-from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
+from ..dimensionality_reduction import (
+    find_optimal_n_umap_components,
+    umap_conn_indices_dist_embedding,
+)
 from .MuSIC import MuSIC
 from .regression_utils import multitesting_correction, permutation_testing, wald_test
 
@@ -1381,115 +1385,113 @@ class MuSIC_Interpreter(MuSIC):
     # ---------------------------------------------------------------------------------------------------
     def CCI_sender_deg_detection_setup(
         self,
-        ligand: Optional[str] = None,
-        pathway: Optional[str] = None,
-        sender_cell_type: Optional[str] = None,
+        use_ligands: bool = True,
+        use_pathways: bool = False,
+        use_cell_types: bool = False,
         perform_dimensionality_reduction: bool = False,
     ):
         """Computes differential expression signatures of cells with various levels of ligand expression.
 
         Args:
-            ligand: Ligand to use for differential expression analysis. Will take precedent over sender/receiver cell
-                type if also provided.
-            target: Only used if 'diff_sending_or_receiving' is "receiving"- target to use for differential expression
-                analysis. If None, will use the first listed target.
-            pathway: Optional pathway to use for differential expression analysis. Will use ligands and receptors in
-                these pathways to collectively compute signaling potential score. Will take precedent over
-                ligand/receptor and sender/receiver cell type if provided.
-            sender_cell_type: Sender cell type to use for differential expression analysis. If given,
-                this will essentially compute differential expression for the given cell type.
+            use_ligands: Use ligand array for differential expression analysis. Will take precedent over
+                sender/receiver cell type if also provided.
+            use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
+                to collectively compute signaling potential score. Will take precedent over ligands and sender cell
+                types if also provided.
+            use_cell_types: Use cell types to use for differential expression analysis. If given, will compute
+                differential expression for the given cell type.
             perform_dimensionality_reduction: Set True to perform dimensionality reduction on the array of
-                predictors. If False,
+                predictors. If False, will use the raw expression (in the case of 'use_ligands' or 'use_pathways').
 
         Returns:
 
         """
         logger = lm.get_main_logger()
 
-        if pathway is None and ligand is None and sender_cell_type is None:
-            raise ValueError("Must provide at least one pathway, ligand, or sender_cell_type.")
-
-        if pathway is not None:
-            # For sending analysis, use ligand expression as the dependent variable:
-            # First, compute pathway score:
-            lr_db_subset = self.lr_db[self.lr_db["pathway"] == pathway]
-            all_senders = list(set(lr_db_subset["from"]))
-            all_senders = [lig for lig in all_senders if lig in self.adata.var_names]
-
-            if len(all_senders) < 3:
-                raise ValueError(
-                    f"Pathway effect potential computation for pathway {pathway} is unsuitable for this model, "
-                    f"since there are fewer than three valid ligand-receptor pairs in the pathway that were "
-                    f"incorporated in the initial model."
-                )
-
-            self.adata.obs[f"{pathway}_ligands"] = np.sum(self.ligands_expr[all_senders].values, axis=1)
-            send_key = f"{pathway}_ligands"
-
-        elif ligand is not None:
-            send_key = ligand
-
-        elif sender_cell_type is not None:
-            if self.mod_type != "niche":
-                raise ValueError(
-                    f"Only sender_cell_type was provided to compute effect-associated DEGs, but the "
-                    f"initial {self.mod_type} model does not use cell type identity."
-                )
-
-            send_key = sender_cell_type
-            # Check that the name of the sender cell type is provided in a recognizable format:
-            if send_key not in self.cell_categories.columns:
-                send_key = re.sub(
-                    r"\b([a-zA-Z0-9])",
-                    lambda match: match.group(1).upper(),
-                    re.sub(r"[" r"^a-zA-Z0-9]+", "", send_key),
-                )
-
-        try:
-            # Sent signal from ligand
-            sent_signal = self.ligands_expr[send_key]
-        except:
-            try:
-                # Sent signal from pathway
-                sent_signal = self.adata.obs[send_key]
-            except:
-                # Sent signal from cell type- in this case, will just look for differential expression in the cell type
-                sent_signal = self.cell_categories[send_key]
-
         # Check if the array of additional molecules to query has already been created:
         parent_dir = os.path.dirname(self.adata_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
-
-        # For saving/loading purposes:
-        if pathway is not None:
-            file_name = f"design_matrix_sent_signal_{pathway}.csv"
-        elif ligand is not None:
-            file_name = f"design_matrix_sent_signal_{ligand}.csv"
-        else:
-            file_name = f"design_matrix_sent_signal_{sender_cell_type}.csv"
+        if use_ligands:
+            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_ligands.txt")
+        elif use_pathways:
+            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_pathways.txt")
+        elif use_cell_types:
+            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_cell_types.csv")
 
         if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection")):
             os.makedirs(os.path.join(parent_dir, "cci_deg_detection"))
 
-        if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection", file_name)):
-            if self.cci_dir is None:
-                raise ValueError("With 'diff_sending_or_receiving' set to 'sending', please provide :attr `cci_dir`.")
+        # Check for existing processed downstream-task AnnData object:
+        try:
+            # Load files in case they are already existent:
+            counts_plus = anndata.read_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}.h5ad"))
+            if use_ligands or use_pathways:
+                with open(targets_path, "r") as file:
+                    targets = file.readlines()
+            else:
+                targets = pd.read_csv(targets_path, index_col=0)
+            logger.info(
+                "Found existing files for downstream analysis- skipping processing. Can proceed by running "
+                ":func ~`self.CCI_sender_deg_detection()`."
+            )
+        except:
+            logger.info("Generating and saving AnnData object for downstream analysis...")
+            if not use_ligands and not use_pathways:
+                if self.cci_dir is None:
+                    raise ValueError("Please provide :attr `cci_dir`.")
 
-            if self.species == "human":
-                grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
-                rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "human_RBP_db.csv"), index_col=0)
-                cof_db = pd.read_csv(os.path.join(self.cci_dir, "human_cofactors.csv"), index_col=0)
-                tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_TF_db.csv"), index_col=0)
-            elif self.species == "mouse":
-                grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
-                rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_RBP_db.csv"), index_col=0)
-                cof_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_cofactors.csv"), index_col=0)
-                tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_TF_db.csv"), index_col=0)
+                if self.species == "human":
+                    grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
+                    rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "human_RBP_db.csv"), index_col=0)
+                    cof_db = pd.read_csv(os.path.join(self.cci_dir, "human_cofactors.csv"), index_col=0)
+                    tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_TF_db.csv"), index_col=0)
+                    lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                elif self.species == "mouse":
+                    grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
+                    rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_RBP_db.csv"), index_col=0)
+                    cof_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_cofactors.csv"), index_col=0)
+                    tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_TF_db.csv"), index_col=0)
+                    lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
 
-            # Subset GRN and other databases to only include TFs that are in the adata object:
-            grn = grn[np.isin(self.adata.var_names, grn.columns)]
-            cof_db = cof_db[np.isin(self.adata.var_names, cof_db.columns)]
-            tf_tf_db = tf_tf_db[np.isin(self.adata.var_names, tf_tf_db.columns)]
+                # Subset GRN and other databases to only include TFs that are in the adata object:
+                grn = grn[np.isin(self.adata.var_names, grn.columns)]
+                cof_db = cof_db[np.isin(self.adata.var_names, cof_db.columns)]
+                tf_tf_db = tf_tf_db[np.isin(self.adata.var_names, tf_tf_db.columns)]
+
+            if use_ligands:
+                if self.mod_type != "ligand" and self.mod_type != "lr":
+                    raise ValueError(
+                        "Sent signal from ligands cannot be used because the original specified 'mod_type' "
+                        "does not use ligand expression."
+                    )
+                # Sent signal from ligand- use non-lagged version b/c the upstream factor effects on ligand expression
+                # are an intrinsic property:
+                sent_signal = self.ligands_expr_nonlag
+            elif use_pathways:
+                if self.mod_type != "ligand" and self.mod_type != "lr":
+                    raise ValueError(
+                        "Sent signal from ligands cannot be used because the original specified 'mod_type' "
+                        "does not use ligand expression."
+                    )
+                # Groupby pathways and take the arithmetic mean of the ligands/interactions in each relevant pathway:
+                lig_to_pathway_map = lr_db.set_index("from")["pathway"].drop_duplicates().to_dict()
+                mapped_ligands = self.ligands_expr_nonlag.copy()
+                mapped_ligands.columns = self.ligands_expr_nonlag.columns.map(lig_to_pathway_map)
+                sent_signal = mapped_ligands.groupby(by=mapped_ligands.columns, axis=1).sum()
+            elif use_cell_types:
+                if self.mod_type != "niche":
+                    raise ValueError(
+                        "Cell categories cannot be used because the original specified 'mod_type' does not "
+                        "consider cell type. Change 'mod_type' to 'niche' if desired."
+                    )
+                sent_signal = self.cell_categories
+            else:
+                raise ValueError(
+                    "All of 'use_ligands', 'use_pathways', and 'use_cell_types' are False. Please set at "
+                    "least one to True."
+                )
+
+            sent_signal_values = sent_signal.values
 
             self.logger.info(
                 "Selecting transcription factors, cofactors and RNA-binding proteins for analysis of differential "
@@ -1498,7 +1500,7 @@ class MuSIC_Interpreter(MuSIC):
 
             # Further subset list of additional factors to those that are expressed in at least n% of the cells that are
             # nonzero in sending cells (use the user input 'target_expr_threshold'):
-            indices = sent_signal.values.reshape(-1) != 0
+            indices = np.any(sent_signal_values != 0, axis=0).nonzero()[0]
             nz_sending = list(self.sample_names[indices])
             adata_subset = self.adata[nz_sending, :]
             n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
@@ -1535,8 +1537,8 @@ class MuSIC_Interpreter(MuSIC):
                 if nnz_counts >= n_cells_threshold:
                     all_cofactors.append(cofactor)
 
-            # And extend the set of transcription factors using interacting pairs that may also be present in the same
-            # cells upstream transcription factors are:
+            # And extend the set of transcription factors using interacting pairs that may also be present in the
+            # same cells upstream transcription factors are:
             all_interacting_tfs = []
             for tf in intersecting_tf_subset:
                 tf_row = tf_tf_db.loc[tf, :]
@@ -1584,7 +1586,9 @@ class MuSIC_Interpreter(MuSIC):
                 ]
 
             self.logger.info(f"For this dataset, marked {len(all_TFs)} of interest.")
-            self.logger.info(f"For this dataset, marked {len(all_cofactors)} transcriptional cofactors of interest.")
+            self.logger.info(
+                f"For this dataset, marked {len(all_cofactors)} transcriptional cofactors of " f"interest."
+            )
             if len(all_RBPs) > 0:
                 self.logger.info(f"For this dataset, marked {len(all_RBPs)} RNA-binding proteins of interest.")
 
@@ -1608,73 +1612,49 @@ class MuSIC_Interpreter(MuSIC):
 
             # Take subset of AnnData object corresponding to these regulators:
             counts = self.adata[:, regulator_features].copy()
-            self.sender_deg_predictors = pd.DataFrame(
-                counts.X.A if scipy.sparse.issparse(counts.X) else counts.X,
-                index=counts.obs_names,
-                columns=regulator_features,
-            )
-            # Scale independent variables to reduce the impact of large values:
-            self.sender_deg_predictors = self.sender_deg_predictors.applymap(np.log1p)
+            # Convert to dataframe, append "sent_signal":
+            counts_df = pd.DataFrame(counts.X.toarray(), index=counts.obs_names, columns=counts.var_names)
+            combined_df = pd.concat([counts_df, sent_signal], axis=1)
 
-            if self.cci_degs_model_interactions:
-                # Combine columns that are part of interactions- eventually the individual columns should be dropped,
-                # but store them in a temporary list to do so later because some may contribute to multiple complexes
-                to_drop = []
-                for element in interacting_pairs:
-                    if "_" in element:
-                        parts = element.split("_")
-                        # Combine the columns into a new column with the name of the hyphenated element- here we
-                        # will compute the geometric mean of the expression values of the interacting pair:
-                        self.sender_deg_predictors[element] = self.sender_deg_predictors[parts].apply(
-                            lambda x: x.prod() ** (1 / len(parts)), axis=1
-                        )
-                        to_drop.extend(parts)
+            # Convert back to AnnData object, save to file path:
+            counts_plus = anndata.AnnData(combined_df.values)
+            counts_plus.obs_names = combined_df.index
+            counts_plus.var_names = combined_df.columns
 
-                # Drop any possible duplicate ligands alongside any other columns to be dropped:
-                to_drop = list(set(to_drop))
-                self.sender_deg_predictors.drop(to_drop, axis=1, inplace=True)
-                first_occurrences = self.sender_deg_predictors.columns.duplicated(keep="first")
-                self.sender_deg_predictors = self.sender_deg_predictors.loc[:, ~first_occurrences]
+            if use_ligands or use_pathways:
+                # Optionally, can use dimensionality reduction to aid in computing the nearest neighbors for the model (
+                # cells that are nearby in dimensionally-reduced TF space )
+                if perform_dimensionality_reduction:
+                    # Compute latent representation of the AnnData subset ("counts"):
+                    # Minmax scale interaction features for the purpose of dimensionality reduction:
+                    sender_deg_predictors_scaled = counts_df.apply(
+                        lambda column: (column - column.min()) / (column.max() - column.min())
+                    )
 
-            # Save independent variable array:
-            self.sender_deg_predictors.to_csv(os.path.join(parent_dir, "cci_deg_detection", file_name))
-        else:
-            logger.info(f"Existing data found at {file_name}, using this for further analysis.")
-            self.sender_deg_predictors = pd.read_csv(
-                os.path.join(parent_dir, "cci_deg_detection", file_name), index_col=0
-            )
+                    # Compute the ideal number of UMAP components to use- use half the number of features as the
+                    # max possible number of components:
+                    logger.info("Computing optimal number of UMAP components ...")
+                    n_umap_components = find_optimal_n_umap_components(sender_deg_predictors_scaled)
 
-        if perform_dimensionality_reduction:
-            # Compute latent representation of the AnnData subset ("counts"):
-            # Minmax scale interaction features for the purpose of dimensionality reduction:
-            sender_deg_predictors_scaled = self.sender_deg_predictors.apply(
-                lambda column: (column - column.min()) / (column.max() - column.min())
-            )
+                    # Perform UMAP reduction with the chosen number of components, store in AnnData object:
+                    _, _, _, _, X_umap = umap_conn_indices_dist_embedding(
+                        sender_deg_predictors_scaled, n_neighbors=30, n_components=n_umap_components
+                    )
+                    counts_plus.obsm["X_umap"] = X_umap
 
-            # Compute the ideal number of principal components to use- use half the number of features as the max
-            # possible number of components:
-            logger.info("Computing optimal number of principal components ...")
-            n_pca_components = find_optimal_pca_components(
-                sender_deg_predictors_scaled.values, pca_func=PCA, max_components=None, drop_ratio=0.25
-            )
-            logger.info(f"Optimal number of PCs: {n_pca_components}")
+                targets = sent_signal.columns
+                # Save to .txt file:
+                with open(targets_path, "w") as file:
+                    for t in targets:
+                        file.write(t + "\n")
+            else:
+                sent_signal.to_csv(targets_path)
 
-            # Perform PCA reduction with the chosen number of components:
-
-            # Using the ideal number of components, compute the ideal number of UMAP components using the silhouette
-            # score after calculating Leiden partitioning:
-            logger.info("Computing optimal number of UMAP components ...")
-            n_umap_components = "filler"
-
-            # NOTE: FINISH LATER
-            # Write information to .h5ad file (containing regulators and ligands):
             self.logger.info(
                 "'CCI_sender_deg_detection'- saving regulatory molecules to test as .h5ad file to the "
                 "directory of the original AnnData object..."
             )
-            counts.write_h5ad(
-                os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries_singleton.h5ad")
-            )
+            counts_plus.write_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}.h5ad"))
 
     def CCI_sender_deg_detection(self):
         # Load and process the file for the chosen ligand:

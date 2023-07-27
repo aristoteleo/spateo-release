@@ -28,7 +28,7 @@ from sklearn.cluster import KMeans
 from ...logging import logger_manager as lm
 from ...preprocessing.normalize import factor_normalization
 from ...preprocessing.transform import log1p
-from ..find_neighbors import get_wi, neighbors
+from ..find_neighbors import find_bw_for_n_neighbors, get_wi, neighbors
 from ..spatial_degs import moran_i
 from .distributions import Gaussian, NegativeBinomial, Poisson
 from .regression_utils import compute_betas_local, iwls, multicollinearity_check, smooth
@@ -671,57 +671,41 @@ class MuSIC:
             self.grn = self.comm.bcast(self.grn, root=0)
             database_ligands = set(self.lr_db["from"])
 
+            # Targets = ligands
             if self.custom_ligands_path is not None or self.custom_ligands is not None:
                 if self.custom_ligands_path is not None:
                     with open(self.custom_ligands_path, "r") as f:
-                        ligands = f.read().splitlines()
+                        targets = f.read().splitlines()
                 else:
-                    ligands = self.custom_ligands
-                ligands = [l for l in ligands if l in database_ligands]
-                l_complexes = [elem for elem in ligands if "_" in elem]
-                # Get individual components if any complexes are included in this list:
-                ligands = [l for item in ligands for l in item.split("_")]
+                    targets = self.custom_ligands
+                # Check that all ligands can be found in the source AnnData object:
+                targets = [t for t in targets if t in adata.var_names]
+
+            # Else: targets = pathways:
+            if self.custom_pathways_path is not None or self.custom_pathways is not None:
+                if self.custom_pathways_path is not None:
+                    with open(self.custom_pathways_path, "r") as f:
+                        targets = f.read().splitlines()
+                else:
+                    targets = self.custom_pathways
+                # Check that all pathways can be found in the source AnnData object:
+                targets = [t for t in targets if t in adata.var_names]
+
             else:
                 raise FileNotFoundError(
-                    "For 'mod_type' = 'downstream', ligandas must be provided using either "
+                    "For 'mod_type' = 'downstream', ligands must be provided using either "
                     "'custom_lig_path' or 'ligand' arguments."
                 )
 
-            # Define ligand expression array:
-            ligands_expr = pd.DataFrame(
-                adata[:, ligands].X.A if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
+            # Define ligand/pathway expression array:
+            self.targets_expr = pd.DataFrame(
+                adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
                 index=adata.obs_names,
-                columns=ligands,
+                columns=targets,
             )
-            # Subset adata to exclude ligands (all contents aside from ligands will be used as explanatory variables):
-            adata = adata[:, ~adata.var_names.isin(ligands)].copy()
-            # Combine columns if they are part of a complex- eventually the individual columns should be dropped,
-            # but store them in a temporary list to do so later because some may contribute to multiple complexes:
-            to_drop = []
-            for element in l_complexes:
-                parts = element.split("_")
-                if all(part in ligands_expr.columns for part in parts):
-                    # Combine the columns into a new column with the name of the hyphenated element- here we will
-                    # compute the geometric mean of the expression values of the complex components:
-                    ligands_expr[element] = ligands_expr[parts].apply(lambda x: x.prod() ** (1 / len(parts)), axis=1)
-                    # Mark the individual components for removal if the individual components cannot also be
-                    # found as ligands:
-                    to_drop.extend([part for part in parts if part not in database_ligands])
-                else:
-                    # Drop the hyphenated element from the dataframe if all components are not found in the
-                    # dataframe columns
-                    partial_components = [l for l in ligands if l in parts]
-                    to_drop.extend(partial_components)
-                    if len(partial_components) > 0 and self.verbose:
-                        self.logger.info(
-                            f"Not all components from the {element} heterocomplex could be found in the dataset."
-                        )
-
-            # Drop any possible duplicate ligands alongside any other columns to be dropped:
-            to_drop = list(set(to_drop))
-            ligands_expr.drop(to_drop, axis=1, inplace=True)
-            first_occurrences = ligands_expr.columns.duplicated(keep="first")
-            self.targets_expr = ligands_expr.loc[:, ~first_occurrences]
+            # Subset adata to exclude ligands/pathways (all contents aside from ligands will be used as explanatory
+            # variables):
+            adata = adata[:, ~adata.var_names.isin(targets)].copy()
 
             X_df = pd.DataFrame(
                 adata.X.A if scipy.sparse.issparse(adata.X) else adata.X,
@@ -805,9 +789,14 @@ class MuSIC:
         self.X_df = self.comm.bcast(self.X_df, root=0)
 
         # Compute distance in "signaling space":
-        # Binarize design matrix to encode presence/absence of signaling pairs:
-        self.feature_distance = np.where(self.X > 0, 1, 0)
-        self.feature_distance = self.comm.bcast(self.feature_distance, root=0)
+        # Check for dimensionality reduction in the source AnnData object
+        try:
+            self.feature_distance = self.adata.obsm["X_sig_umap"]
+            self.bw_fixed = True
+        except:
+            # Binarize design matrix to encode presence/absence of signaling pairs:
+            self.feature_distance = np.where(self.X > 0, 1, 0)
+            self.feature_distance = self.comm.bcast(self.feature_distance, root=0)
 
         # Use neighbors in expression space:
         self.use_expression_neighbors_only = True
@@ -1871,6 +1860,13 @@ class MuSIC:
 
         if self.minbw is None:
             if self.bw_fixed:
+                if self.mod_type == "downstream":
+                    # Check over the 20-50 nearest neighbors- compute distances such that each cell has this number
+                    # on average:
+                    self.minbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=20)
+
+                    self.maxbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=50)
+
                 if self.distance_membrane_bound is not None and self.distance_secreted is not None:
                     self.minbw = self.distance_membrane_bound
                     self.maxbw = self.distance_secreted * 1.5 if self.kernel != "uniform" else self.distance_secreted
@@ -1887,6 +1883,12 @@ class MuSIC:
 
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
+                if self.mod_type == "downstream":
+                    # Check over the 20-50 nearest neighbors- compute distances such that each cell has this number
+                    # on average:
+                    self.minbw = 20
+                    self.maxbw = 50
+
                 if self.maxbw is None:
                     # If kernel decays with distance, larger bandwidth to capture more neighbors:
                     self.maxbw = (
