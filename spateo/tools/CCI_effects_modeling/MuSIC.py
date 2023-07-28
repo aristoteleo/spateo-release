@@ -435,6 +435,7 @@ class MuSIC:
                 self.logger.info(f"Loading AnnData object from: {self.adata_path}")
             elif self.csv_path is not None:
                 self.logger.info(f"Loading CSV file from: {self.csv_path}")
+
             if self.mod_type is not None:
                 self.logger.info(f"Model type: {self.mod_type}")
                 if self.mod_type in ["lr", "ligand", "receptor"]:
@@ -475,6 +476,18 @@ class MuSIC:
             )
 
         self.adata.uns["__type"] = "UMI"
+
+        # For downstream, modify some of the parameters:
+        if self.mod_type == "downstream":
+            # Use neighbors in expression space:
+            self.use_expression_neighbors_only = True
+            # Pathways can be used as targets, which often violates the count assumption of the other distributions-
+            # redefine the model type in this case:
+            if self.adata.uns["target_type"] == "pathway":
+                self.distr = "gaussian"
+                link = Gaussian.__init__.__defaults__[0]
+                self.distr_obj = Gaussian(link)
+
         # If group_subset is given, subset the AnnData object to contain the specified groups as well as neighboring
         # cells:
         if self.group_subset is not None:
@@ -500,7 +513,7 @@ class MuSIC:
             rows, cols = w_subset.nonzero()
             unique_indices = list(set(cols))
             names_all_neighbors = self.sample_names[unique_indices]
-            self.adata = self.adata[self.adata.obs_names.isin(names_all_neighbors)]
+            self.adata = self.adata[self.adata.obs_names.isin(names_all_neighbors)].copy()
 
         self.sample_names = self.adata.obs_names
         self.coords = self.adata.obsm[self.coords_key]
@@ -669,7 +682,6 @@ class MuSIC:
             self.cof_db = self.comm.bcast(self.cof_db, root=0)
             self.tf_tf_db = self.comm.bcast(self.tf_tf_db, root=0)
             self.grn = self.comm.bcast(self.grn, root=0)
-            database_ligands = set(self.lr_db["from"])
 
             # Targets = ligands
             if self.custom_ligands_path is not None or self.custom_ligands is not None:
@@ -682,7 +694,7 @@ class MuSIC:
                 targets = [t for t in targets if t in adata.var_names]
 
             # Else: targets = pathways:
-            if self.custom_pathways_path is not None or self.custom_pathways is not None:
+            elif self.custom_pathways_path is not None or self.custom_pathways is not None:
                 if self.custom_pathways_path is not None:
                     with open(self.custom_pathways_path, "r") as f:
                         targets = f.read().splitlines()
@@ -797,9 +809,6 @@ class MuSIC:
             # Binarize design matrix to encode presence/absence of signaling pairs:
             self.feature_distance = np.where(self.X > 0, 1, 0)
             self.feature_distance = self.comm.bcast(self.feature_distance, root=0)
-
-        # Use neighbors in expression space:
-        self.use_expression_neighbors_only = True
 
     def define_sig_inputs(self, adata: Optional[anndata.AnnData] = None):
         """For signaling-relevant models, define necessary quantities that will later be used to define the independent
@@ -2637,9 +2646,17 @@ class MuSIC:
                 X = X_orig[:, keep_indices]
             # If downstream analysis model, filter X based on known protein-protein interactions:
             elif self.mod_type == "downstream":
+                # If target is a complex, or a pathway, look at all rows corresponding to components of the
+                # multi-component target:
+                if self.adata.uns["type"] == "pathway" or "_" in target:
+                    gene_query = self.lr_db[self.lr_db["pathway"] == target]["from"].unique().tolist()
+                    gene_query = [g for element in gene_query for g in element.split("_")]
+                else:
+                    gene_query = target
+
                 # Transcription factors that have binding sites proximal to this target:
-                target_row = self.grn.loc[target]
-                target_TFs = target_row[target_row == 1].index.tolist()
+                target_rows = self.grn.loc[gene_query]
+                target_TFs = target_rows.columns[(target_rows == 1).any()].tolist()
                 # Cofactors for these transcription factors:
                 cof_subset = list(self.cof_db[(self.cof_db[target_TFs] == 1).any(axis=1)].index)
                 # Other TFs that interact with these transcription factors:

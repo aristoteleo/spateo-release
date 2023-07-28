@@ -87,7 +87,7 @@ def define_spateo_argparse(**kwargs):
             associate downstream expression with rarer/less prevalent signaling mechanisms.
         target_expr_threshold: Only used when automatically selecting targets- finds the L:R-downstream TFs and their
             targets and searches for expression above a threshold proportion of cells to filter to a subset of
-            candidate target genes. This argument sets that proportion, and defaults to 0.2.
+            candidate target genes. This argument sets that proportion, and defaults to 0.05.
         multicollinear_threshold: Variance inflation factor threshold used to filter out multicollinear features. A
             value of 5 or 10 is recommended.
 
@@ -270,7 +270,7 @@ def define_spateo_argparse(**kwargs):
             "find signaling effects that may be mediated by rarer signals.",
         },
         "-target_expr_threshold": {
-            "default": 0.1,
+            "default": 0.05,
             "type": float,
             "help": "For automated selection, the threshold proportion of cells for which transcript "
             "needs to be expressed in to be selected as a target of interest. Not used if 'targets_path' is not None.",

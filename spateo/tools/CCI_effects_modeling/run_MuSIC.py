@@ -85,7 +85,7 @@ def main():
 @click.option("-target", required=False, multiple=True)
 @click.option(
     "-target_expr_threshold",
-    default=0.2,
+    default=0.05,
     help="For automated selection, the threshold "
     "proportion of cells for which transcript "
     "needs to be expressed in to be selected as a target of interest. "

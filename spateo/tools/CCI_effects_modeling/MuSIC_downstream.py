@@ -10,6 +10,7 @@ These include:
     of the predicted influence of the ligand on downstream expression.
 """
 import argparse
+import glob
 import itertools
 import math
 import os
@@ -42,6 +43,7 @@ from ..dimensionality_reduction import (
 )
 from .MuSIC import MuSIC
 from .regression_utils import multitesting_correction, permutation_testing, wald_test
+from .SWR_mpi import define_spateo_argparse
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -204,18 +206,10 @@ class MuSIC_Interpreter(MuSIC):
             y = self.adata[:, gene].X.toarray().reshape(-1)
             music_results_target = pred_vals[:, i]
 
-            # For cases where the values are relatively large (as is often the case in normalized gene expression
-            # data), the Pearson correlation can be disproportionately influenced by larger values. Therefore,
-            # we take the log transform:
-            y = np.log1p(y)
-            music_results_target = np.log1p(music_results_target)
-
-            # Remove indices of large predicted values that are observed zero (these are POTENTIALLY zero due to
-            # dropout and not biology):
-            z_scores = zscore(music_results_target)
-            outlier_indices = np.where((y == 0) & (z_scores > 2))[0]
-            music_results_target_to_plot = np.delete(music_results_target, outlier_indices)
-            y_plot = np.delete(y, outlier_indices)
+            # Remove index of the largest predicted value (to mitigate sensitivity of these metrics to outliers):
+            outlier_index = np.where(np.max(music_results_target))[0]
+            music_results_target_to_plot = np.delete(music_results_target, outlier_index)
+            y_plot = np.delete(y, outlier_index)
 
             rp, _ = pearsonr(y_plot, music_results_target_to_plot)
             r, _ = spearmanr(y_plot, music_results_target_to_plot)
@@ -1396,8 +1390,8 @@ class MuSIC_Interpreter(MuSIC):
             use_ligands: Use ligand array for differential expression analysis. Will take precedent over
                 sender/receiver cell type if also provided.
             use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
-                to collectively compute signaling potential score. Will take precedent over ligands and sender cell
-                types if also provided.
+                to collectively compute signaling potential score. Will take precedent over sender cell types if
+                also provided.
             use_cell_types: Use cell types to use for differential expression analysis. If given, will compute
                 differential expression for the given cell type.
             perform_dimensionality_reduction: Set True to perform dimensionality reduction on the array of
@@ -1416,7 +1410,7 @@ class MuSIC_Interpreter(MuSIC):
         elif use_pathways:
             targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_pathways.txt")
         elif use_cell_types:
-            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_cell_types.csv")
+            targets_folder = os.path.join(parent_dir, "cci_deg_detection")
 
         if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection")):
             os.makedirs(os.path.join(parent_dir, "cci_deg_detection"))
@@ -1436,27 +1430,36 @@ class MuSIC_Interpreter(MuSIC):
             )
         except:
             logger.info("Generating and saving AnnData object for downstream analysis...")
-            if not use_ligands and not use_pathways:
-                if self.cci_dir is None:
-                    raise ValueError("Please provide :attr `cci_dir`.")
+            if self.cci_dir is None:
+                raise ValueError("Please provide :attr `cci_dir`.")
 
-                if self.species == "human":
-                    grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
-                    rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "human_RBP_db.csv"), index_col=0)
-                    cof_db = pd.read_csv(os.path.join(self.cci_dir, "human_cofactors.csv"), index_col=0)
-                    tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_TF_db.csv"), index_col=0)
-                    lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
-                elif self.species == "mouse":
-                    grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
-                    rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_RBP_db.csv"), index_col=0)
-                    cof_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_cofactors.csv"), index_col=0)
-                    tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_TF_db.csv"), index_col=0)
-                    lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+            if self.species == "human":
+                grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
+                rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "human_RBP_db.csv"), index_col=0)
+                cof_db = pd.read_csv(os.path.join(self.cci_dir, "human_cofactors.csv"), index_col=0)
+                tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_TF_db.csv"), index_col=0)
+                lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+            elif self.species == "mouse":
+                grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
+                rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_RBP_db.csv"), index_col=0)
+                cof_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_cofactors.csv"), index_col=0)
+                tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_TF_db.csv"), index_col=0)
+                lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
 
-                # Subset GRN and other databases to only include TFs that are in the adata object:
-                grn = grn[np.isin(self.adata.var_names, grn.columns)]
-                cof_db = cof_db[np.isin(self.adata.var_names, cof_db.columns)]
-                tf_tf_db = tf_tf_db[np.isin(self.adata.var_names, tf_tf_db.columns)]
+            # Subset GRN and other databases to only include TFs that are in the adata object:
+            grn = grn[np.isin(self.adata.var_names, grn.columns)]
+            cof_db = cof_db[np.isin(self.adata.var_names, cof_db.columns)]
+            tf_tf_db = tf_tf_db[np.isin(self.adata.var_names, tf_tf_db.columns)]
+            # For use if 'use_cell_types':
+            if use_cell_types:
+                database_ligands = list(set(lr_db["from"]))
+                l_complexes = [elem for elem in database_ligands if "_" in elem]
+                # Get individual components if any complexes are included in this list:
+                ligand_set = [l for item in database_ligands for l in item.split("_")]
+                ligand_set = [l for l in ligand_set if l not in self.adata.var_names]
+
+            sent_signal = {}
+            subsets = {}
 
             if use_ligands:
                 if self.mod_type != "ligand" and self.mod_type != "lr":
@@ -1466,7 +1469,8 @@ class MuSIC_Interpreter(MuSIC):
                     )
                 # Sent signal from ligand- use non-lagged version b/c the upstream factor effects on ligand expression
                 # are an intrinsic property:
-                sent_signal = self.ligands_expr_nonlag
+                sent_signal["all"] = self.ligands_expr_nonlag
+                subsets["all"] = self.adata
             elif use_pathways:
                 if self.mod_type != "ligand" and self.mod_type != "lr":
                     raise ValueError(
@@ -1477,199 +1481,353 @@ class MuSIC_Interpreter(MuSIC):
                 lig_to_pathway_map = lr_db.set_index("from")["pathway"].drop_duplicates().to_dict()
                 mapped_ligands = self.ligands_expr_nonlag.copy()
                 mapped_ligands.columns = self.ligands_expr_nonlag.columns.map(lig_to_pathway_map)
-                sent_signal = mapped_ligands.groupby(by=mapped_ligands.columns, axis=1).sum()
+                sent_signal["all"] = mapped_ligands.groupby(by=mapped_ligands.columns, axis=1).sum()
+                subsets["all"] = self.adata
             elif use_cell_types:
                 if self.mod_type != "niche":
                     raise ValueError(
                         "Cell categories cannot be used because the original specified 'mod_type' does not "
                         "consider cell type. Change 'mod_type' to 'niche' if desired."
                     )
-                sent_signal = self.cell_categories
+
+                # For downstream analysis through the lens of cell type, we can aid users in creating a downstream
+                # effects model for each cell type:
+                for cell_type in self.cell_categories.columns:
+                    ct_subset = self.adata[self.adata.obs[self.group_key] == cell_type, :].copy()
+                    subsets[cell_type] = ct_subset
+                    ct_ligands = ct_subset[:, ligand_set].copy()
+                    # Find the set of ligands that are expressed in at least n% of the cells of this cell type
+                    lig_expr_percentage = np.array((ct_ligands.X > 0).sum(axis=0)).squeeze() / ct_ligands.shape[0] * 100
+                    ct_ligands = ct_ligands.var.index[lig_expr_percentage > self.target_expr_threshold]
+
+                    ligands_expr = pd.DataFrame(
+                        self.adata[:, ct_ligands].X.A
+                        if scipy.sparse.issparse(self.adata.X)
+                        else self.adata[:, ct_ligands].X,
+                        index=self.sample_names,
+                        columns=ct_ligands,
+                    )
+
+                    # Combine columns if they are part of a complex- eventually the individual columns should be
+                    # dropped, but store them in a temporary list to do so later because some may contribute to
+                    # multiple complexes:
+                    to_drop = []
+                    for element in l_complexes:
+                        parts = element.split("_")
+                        if all(part in ligands_expr.columns for part in parts):
+                            # Combine the columns into a new column with the name of the hyphenated element- here we
+                            # will compute the geometric mean of the expression values of the complex components:
+                            ligands_expr[element] = self.ligands_expr[parts].apply(
+                                lambda x: x.prod() ** (1 / len(parts)), axis=1
+                            )
+                            # Mark the individual components for removal if the individual components cannot also be
+                            # found as ligands:
+                            to_drop.extend([part for part in parts if part not in database_ligands])
+                        else:
+                            # Drop the hyphenated element from the dataframe if all components are not found in the
+                            # dataframe columns
+                            partial_components = [l for l in ligand_set if l in parts]
+                            to_drop.extend(partial_components)
+                            if len(partial_components) > 0 and self.verbose:
+                                self.logger.info(
+                                    f"Not all components from the {element} heterocomplex could be found in the dataset."
+                                )
+
+                            # Drop any possible duplicate ligands alongside any other columns to be dropped:
+                        to_drop = list(set(to_drop))
+                        ligands_expr.drop(to_drop, axis=1, inplace=True)
+                        first_occurrences = ligands_expr.columns.duplicated(keep="first")
+                        ligands_expr = ligands_expr.loc[:, ~first_occurrences]
+
+                    sent_signal[cell_type] = ligands_expr
+
             else:
                 raise ValueError(
                     "All of 'use_ligands', 'use_pathways', and 'use_cell_types' are False. Please set at "
                     "least one to True."
                 )
 
-            sent_signal_values = sent_signal.values
+            for subset_key in sent_signal.keys():
+                sent_signal_values = sent_signal[subset_key].values
+                adata = subsets[subset_key]
 
-            self.logger.info(
-                "Selecting transcription factors, cofactors and RNA-binding proteins for analysis of differential "
-                "expression."
-            )
+                self.logger.info(
+                    "Selecting transcription factors, cofactors and RNA-binding proteins for analysis of differential "
+                    "expression."
+                )
 
-            # Further subset list of additional factors to those that are expressed in at least n% of the cells that are
-            # nonzero in sending cells (use the user input 'target_expr_threshold'):
-            indices = np.any(sent_signal_values != 0, axis=0).nonzero()[0]
-            nz_sending = list(self.sample_names[indices])
-            adata_subset = self.adata[nz_sending, :]
-            n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
+                # Further subset list of additional factors to those that are expressed in at least n% of the cells
+                # that are nonzero in sending cells (use the user input 'target_expr_threshold'):
+                indices = np.any(sent_signal_values != 0, axis=0).nonzero()[0]
+                nz_sending = list(self.sample_names[indices])
+                adata_subset = adata[nz_sending, :]
+                n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
 
-            all_TFs = list(grn.columns)
-            all_TFs = [tf for tf in all_TFs if tf in cof_db.columns and tf in tf_tf_db.columns]
-            if scipy.sparse.issparse(self.adata.X):
-                nnz_counts = np.array(adata_subset[:, all_TFs].X.getnnz(axis=0)).flatten()
-            else:
-                nnz_counts = np.array(adata_subset[:, all_TFs].X.getnnz(axis=0)).flatten()
-            all_TFs = [tf for tf, nnz in zip(all_TFs, nnz_counts) if nnz >= n_cells_threshold]
-
-            # Get the set of transcription cofactors that correspond to these transcription factors, in addition to
-            # interacting transcription factors that may not themselves have passed the threshold:
-            cof_subset = list(cof_db[(cof_db[all_TFs] == 1).any(axis=1)].index)
-            cof_subset = [cof for cof in cof_subset if cof in self.feature_names]
-            intersecting_tf_subset = list(tf_tf_db[(tf_tf_db[all_TFs] == 1).any(axis=1)].index)
-            intersecting_tf_subset = [tf for tf in intersecting_tf_subset if tf in self.feature_names]
-
-            # Subset to cofactors for which enough signal is present- filter to those expressed in at least n% of the
-            # cells that express at least one of the TFs associated with the cofactor:
-            all_cofactors = []
-            for cofactor in cof_subset:
-                cof_row = cof_db.loc[cofactor, :]
-                cof_TFs = cof_row[cof_row == 1].index
-                tfs_expr_subset_indices = np.where(adata_subset[:, cof_TFs].X.sum(axis=1) > 0)[0]
-                tf_subset_cells = adata_subset[tfs_expr_subset_indices, :]
-                n_cells_threshold = int(self.target_expr_threshold * tf_subset_cells.n_obs)
-                if scipy.sparse.issparse(self.adata.X):
-                    nnz_counts = np.array(tf_subset_cells[:, cofactor].X.getnnz(axis=0)).flatten()
+                all_TFs = list(grn.columns)
+                all_TFs = [tf for tf in all_TFs if tf in cof_db.columns and tf in tf_tf_db.columns]
+                if scipy.sparse.issparse(adata.X):
+                    nnz_counts = np.array(adata_subset[:, all_TFs].X.getnnz(axis=0)).flatten()
                 else:
-                    nnz_counts = np.array(tf_subset_cells[:, cofactor].X.getnnz(axis=0)).flatten()
+                    nnz_counts = np.array(adata_subset[:, all_TFs].X.getnnz(axis=0)).flatten()
+                all_TFs = [tf for tf, nnz in zip(all_TFs, nnz_counts) if nnz >= n_cells_threshold]
 
-                if nnz_counts >= n_cells_threshold:
-                    all_cofactors.append(cofactor)
+                # Get the set of transcription cofactors that correspond to these transcription factors, in addition to
+                # interacting transcription factors that may not themselves have passed the threshold:
+                cof_subset = list(cof_db[(cof_db[all_TFs] == 1).any(axis=1)].index)
+                cof_subset = [cof for cof in cof_subset if cof in self.feature_names]
+                intersecting_tf_subset = list(tf_tf_db[(tf_tf_db[all_TFs] == 1).any(axis=1)].index)
+                intersecting_tf_subset = [tf for tf in intersecting_tf_subset if tf in self.feature_names]
 
-            # And extend the set of transcription factors using interacting pairs that may also be present in the
-            # same cells upstream transcription factors are:
-            all_interacting_tfs = []
-            for tf in intersecting_tf_subset:
-                tf_row = tf_tf_db.loc[tf, :]
-                tf_TFs = tf_row[tf_row == 1].index
-                tfs_expr_subset_indices = np.where(adata_subset[:, tf_TFs].X.sum(axis=1) > 0)[0]
-                tf_subset_cells = adata_subset[tfs_expr_subset_indices, :]
-                n_cells_threshold = int(self.target_expr_threshold * tf_subset_cells.n_obs)
-                if scipy.sparse.issparse(self.adata.X):
-                    nnz_counts = np.array(tf_subset_cells[:, tf].X.getnnz(axis=0)).flatten()
+                # Subset to cofactors for which enough signal is present- filter to those expressed in at least n% of
+                # the cells that express at least one of the TFs associated with the cofactor:
+                all_cofactors = []
+                for cofactor in cof_subset:
+                    cof_row = cof_db.loc[cofactor, :]
+                    cof_TFs = cof_row[cof_row == 1].index
+                    tfs_expr_subset_indices = np.where(adata_subset[:, cof_TFs].X.sum(axis=1) > 0)[0]
+                    tf_subset_cells = adata_subset[tfs_expr_subset_indices, :]
+                    n_cells_threshold = int(self.target_expr_threshold * tf_subset_cells.n_obs)
+                    if scipy.sparse.issparse(adata.X):
+                        nnz_counts = np.array(tf_subset_cells[:, cofactor].X.getnnz(axis=0)).flatten()
+                    else:
+                        nnz_counts = np.array(tf_subset_cells[:, cofactor].X.getnnz(axis=0)).flatten()
+
+                    if nnz_counts >= n_cells_threshold:
+                        all_cofactors.append(cofactor)
+
+                # And extend the set of transcription factors using interacting pairs that may also be present in the
+                # same cells upstream transcription factors are:
+                all_interacting_tfs = []
+                for tf in intersecting_tf_subset:
+                    tf_row = tf_tf_db.loc[tf, :]
+                    tf_TFs = tf_row[tf_row == 1].index
+                    tfs_expr_subset_indices = np.where(adata_subset[:, tf_TFs].X.sum(axis=1) > 0)[0]
+                    tf_subset_cells = adata_subset[tfs_expr_subset_indices, :]
+                    n_cells_threshold = int(self.target_expr_threshold * tf_subset_cells.n_obs)
+                    if scipy.sparse.issparse(adata.X):
+                        nnz_counts = np.array(tf_subset_cells[:, tf].X.getnnz(axis=0)).flatten()
+                    else:
+                        nnz_counts = np.array(tf_subset_cells[:, tf].X.getnnz(axis=0)).flatten()
+
+                    if nnz_counts >= n_cells_threshold:
+                        all_interacting_tfs.append(tf)
+
+                if self.cci_degs_model_interactions:
+                    # Transcription factor-cofactor combinatorial pairs:
+                    tf_cof_pairs = {}
+                    for tf in all_TFs:
+                        tf_cofactors = cof_db.loc[all_cofactors, tf]
+                        # Find elements that are equal to 1:
+                        tf_cofactors = tf_cofactors[tf_cofactors == 1].index.tolist()
+                        tf_cof_pairs[tf] = tf_cofactors
+
+                    # Transcription factor interactions:
+                    tf_tf_pairs = {}
+                    for tf in all_TFs:
+                        tf_tf = tf_tf_db.loc[all_interacting_tfs, tf]
+                        # Find elements that are equal to 1:
+                        tf_tf = tf_tf[tf_tf == 1].index.tolist()
+                        tf_tf_pairs[tf] = tf_tf
+
+                # Do the same for RNA-binding proteins:
+                all_RBPs = list(rna_bp_db["Gene_Name"].values)
+                all_RBPs = [r for r in all_RBPs if r in self.feature_names]
+                if len(all_RBPs) > 0:
+                    if scipy.sparse.issparse(adata.X):
+                        nnz_counts = np.array(adata_subset[:, all_RBPs].X.getnnz(axis=0)).flatten()
+                    else:
+                        nnz_counts = np.array(adata_subset[:, all_RBPs].X.getnnz(axis=0)).flatten()
+                    all_RBPs = [tf for tf, nnz in zip(all_RBPs, nnz_counts) if nnz >= n_cells_threshold]
+                    # Remove RBPs if any happen to be TFs or cofactors:
+                    all_RBPs = [
+                        r
+                        for r in all_RBPs
+                        if r not in all_TFs and r not in all_interacting_tfs and r not in all_cofactors
+                    ]
+
+                self.logger.info(f"For this dataset, marked {len(all_TFs)} of interest.")
+                self.logger.info(
+                    f"For this dataset, marked {len(all_cofactors)} transcriptional cofactors of " f"interest."
+                )
+                if len(all_RBPs) > 0:
+                    self.logger.info(f"For this dataset, marked {len(all_RBPs)} RNA-binding proteins of interest.")
+
+                if not self.cci_degs_model_interactions:
+                    # Get feature names- for the singleton factors:
+                    regulator_features = all_TFs + all_interacting_tfs + all_cofactors + all_RBPs
                 else:
-                    nnz_counts = np.array(tf_subset_cells[:, tf].X.getnnz(axis=0)).flatten()
+                    # Get feature names- for the interaction factors:
+                    interacting_pairs = []
+                    regulator_features = []
+                    for key, value in tf_cof_pairs.items():
+                        if value:
+                            interacting_pairs.extend([f"{key}_{val}" for val in value])
+                        regulator_features.append(key)
+                        regulator_features.extend(value)
+                    for key, value in tf_tf_pairs.items():
+                        if value:
+                            interacting_pairs.extend([f"{key}_{val}" for val in value])
+                        regulator_features.append(key)
+                        regulator_features.extend(value)
 
-                if nnz_counts >= n_cells_threshold:
-                    all_interacting_tfs.append(tf)
+                # Take subset of AnnData object corresponding to these regulators:
+                counts = adata[:, regulator_features].copy()
 
-            if self.cci_degs_model_interactions:
-                # Transcription factor-cofactor combinatorial pairs:
-                tf_cof_pairs = {}
-                for tf in all_TFs:
-                    tf_cofactors = cof_db.loc[all_cofactors, tf]
-                    # Find elements that are equal to 1:
-                    tf_cofactors = tf_cofactors[tf_cofactors == 1].index.tolist()
-                    tf_cof_pairs[tf] = tf_cofactors
+                # Convert to dataframe, append "sent_signal":
+                counts_df = pd.DataFrame(counts.X.toarray(), index=counts.obs_names, columns=counts.var_names)
+                combined_df = pd.concat([counts_df, sent_signal[subset_key]], axis=1)
 
-                # Transcription factor interactions:
-                tf_tf_pairs = {}
-                for tf in all_TFs:
-                    tf_tf = tf_tf_db.loc[all_interacting_tfs, tf]
-                    # Find elements that are equal to 1:
-                    tf_tf = tf_tf[tf_tf == 1].index.tolist()
-                    tf_tf_pairs[tf] = tf_tf
-
-            # Do the same for RNA-binding proteins:
-            all_RBPs = list(rna_bp_db["Gene_Name"].values)
-            all_RBPs = [r for r in all_RBPs if r in self.feature_names]
-            if len(all_RBPs) > 0:
-                if scipy.sparse.issparse(self.adata.X):
-                    nnz_counts = np.array(adata_subset[:, all_RBPs].X.getnnz(axis=0)).flatten()
+                # Convert back to AnnData object, save to file path:
+                counts_plus = anndata.AnnData(combined_df.values)
+                counts_plus.obs_names = combined_df.index
+                counts_plus.var_names = combined_df.columns
+                # Make note that certain columns are pathways and not individual molecules that can be found in the
+                # AnnData object:
+                if use_pathways:
+                    counts_plus.uns["target_type"] = "pathway"
                 else:
-                    nnz_counts = np.array(adata_subset[:, all_RBPs].X.getnnz(axis=0)).flatten()
-                all_RBPs = [tf for tf, nnz in zip(all_RBPs, nnz_counts) if nnz >= n_cells_threshold]
-                # Remove RBPs if any happen to be TFs or cofactors:
-                all_RBPs = [
-                    r for r in all_RBPs if r not in all_TFs and r not in all_interacting_tfs and r not in all_cofactors
-                ]
+                    counts_plus.uns["target_type"] = "ligands"
 
-            self.logger.info(f"For this dataset, marked {len(all_TFs)} of interest.")
-            self.logger.info(
-                f"For this dataset, marked {len(all_cofactors)} transcriptional cofactors of " f"interest."
-            )
-            if len(all_RBPs) > 0:
-                self.logger.info(f"For this dataset, marked {len(all_RBPs)} RNA-binding proteins of interest.")
-
-            if not self.cci_degs_model_interactions:
-                # Get feature names- for the singleton factors:
-                regulator_features = all_TFs + all_interacting_tfs + all_cofactors + all_RBPs
-            else:
-                # Get feature names- for the interaction factors:
-                interacting_pairs = []
-                regulator_features = []
-                for key, value in tf_cof_pairs.items():
-                    if value:
-                        interacting_pairs.extend([f"{key}_{val}" for val in value])
-                    regulator_features.append(key)
-                    regulator_features.extend(value)
-                for key, value in tf_tf_pairs.items():
-                    if value:
-                        interacting_pairs.extend([f"{key}_{val}" for val in value])
-                    regulator_features.append(key)
-                    regulator_features.extend(value)
-
-            # Take subset of AnnData object corresponding to these regulators:
-            counts = self.adata[:, regulator_features].copy()
-            # Convert to dataframe, append "sent_signal":
-            counts_df = pd.DataFrame(counts.X.toarray(), index=counts.obs_names, columns=counts.var_names)
-            combined_df = pd.concat([counts_df, sent_signal], axis=1)
-
-            # Convert back to AnnData object, save to file path:
-            counts_plus = anndata.AnnData(combined_df.values)
-            counts_plus.obs_names = combined_df.index
-            counts_plus.var_names = combined_df.columns
-
-            if use_ligands or use_pathways:
                 # Optionally, can use dimensionality reduction to aid in computing the nearest neighbors for the model (
-                # cells that are nearby in dimensionally-reduced TF space )
-                if perform_dimensionality_reduction:
-                    # Compute latent representation of the AnnData subset ("counts"):
-                    # Minmax scale interaction features for the purpose of dimensionality reduction:
-                    sender_deg_predictors_scaled = counts_df.apply(
-                        lambda column: (column - column.min()) / (column.max() - column.min())
-                    )
+                # cells that are nearby in dimensionally-reduced TF space will be neighbors in this scenario)
+                # Compute latent representation of the AnnData subset ("counts"):
+                # Minmax scale interaction features for the purpose of dimensionality reduction:
+                sender_deg_predictors_scaled = counts_df.apply(
+                    lambda column: (column - column.min()) / (column.max() - column.min())
+                )
 
-                    # Compute the ideal number of UMAP components to use- use half the number of features as the
-                    # max possible number of components:
-                    logger.info("Computing optimal number of UMAP components ...")
-                    n_umap_components = find_optimal_n_umap_components(sender_deg_predictors_scaled)
+                # Compute the ideal number of UMAP components to use- use half the number of features as the
+                # max possible number of components:
+                logger.info("Computing optimal number of UMAP components ...")
+                n_umap_components = find_optimal_n_umap_components(sender_deg_predictors_scaled)
 
-                    # Perform UMAP reduction with the chosen number of components, store in AnnData object:
-                    _, _, _, _, X_umap = umap_conn_indices_dist_embedding(
-                        sender_deg_predictors_scaled, n_neighbors=30, n_components=n_umap_components
-                    )
-                    counts_plus.obsm["X_umap"] = X_umap
+                # Perform UMAP reduction with the chosen number of components, store in AnnData object:
+                _, _, _, _, X_umap = umap_conn_indices_dist_embedding(
+                    sender_deg_predictors_scaled, n_neighbors=30, n_components=n_umap_components
+                )
+                counts_plus.obsm["X_umap"] = X_umap
 
-                targets = sent_signal.columns
-                # Save to .txt file:
-                with open(targets_path, "w") as file:
-                    for t in targets:
-                        file.write(t + "\n")
-            else:
-                sent_signal.to_csv(targets_path)
+                targets = sent_signal[subset_key].columns
+                if "targets_path" in locals():
+                    # Save to .txt file:
+                    with open(targets_path, "w") as file:
+                        for t in targets:
+                            file.write(t + "\n")
+                else:
+                    targets_path = os.path.join(targets_folder, f"{file_name}_{subset_key}_ligands.txt")
+                    with open(targets_path, "w") as file:
+                        for t in targets:
+                            file.write(t + "\n")
 
-            self.logger.info(
-                "'CCI_sender_deg_detection'- saving regulatory molecules to test as .h5ad file to the "
-                "directory of the original AnnData object..."
+                self.logger.info(
+                    "'CCI_sender_deg_detection'- saving regulatory molecules to test as .h5ad file to the "
+                    "directory of the original AnnData object..."
+                )
+                counts_plus.write_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{subset_key}.h5ad"))
+
+    def CCI_sender_deg_detection(
+        self,
+        cci_dir_path: str,
+        use_ligands: bool = True,
+        use_pathways: bool = False,
+        cell_type: Optional[str] = None,
+        **kwargs,
+    ) -> MuSIC:
+        """Downstream method that when called, creates a separate instance of :class `MuSIC` specifically designed
+        for the downstream task of detecting differentially expressed genes associated w/ ligand expression.
+
+        Args:
+            cci_dir_path: Path to directory containing all Spateo databases
+            use_ligands: Use ligand array for differential expression analysis. Will take precedent over
+                sender/receiver cell type if also provided. Should match the input to :func
+                `CCI_sender_deg_detection_setup`.
+            use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
+                to collectively compute signaling potential score. Will take precedent over sender cell types if also
+                provided. Should match the input to :func `CCI_sender_deg_detection_setup`.
+            cell_type: Cell type to use to use for differential expression analysis. If given, will use the ligand
+                subset obtained from :func ~`CCI_sender_deg_detection_setup` and sender cell type cells in the model.
+            kwargs: Keyword arguments for any of the Spateo argparse arguments. Should not include 'adata_path',
+                'custom_ligands_path' & 'ligand' or 'custom_pathways_path' & 'pathway' (depending on whether ligands or
+                pathways are being used for the analysis), and should not include 'output_path' (which will be
+                determined by the output path used for the main model). Should also not include any of the other
+                arguments for this function
+
+        Returns:
+            downstream_model: Fitted model instance that can be used for further downstream applications
+        """
+        logger = lm.get_main_logger()
+
+        kwargs["mod_type"] = "downstream"
+        kwargs["cci_dir_path"] = cci_dir_path
+        # Use the same output directory as the main model, add folder demarcating results from downstream task:
+        output_dir = os.path.dirname(self.output_path)
+        output_file_name = os.path.basename(self.output_path)
+        if not os.path.exists(os.path.join(output_dir, "cci_deg_detection")):
+            os.makedirs(os.path.join(output_dir, "cci_deg_detection"))
+        if not os.path.exists(os.path.join(output_dir, "cci_deg_detection", "outputs")):
+            os.makedirs(os.path.join(output_dir, "cci_deg_detection", "outputs"))
+
+        if use_ligands or use_pathways:
+            parent_dir = os.path.dirname(self.adata_path)
+            file_name = os.path.basename(self.adata_path).split(".")[0]
+            output_path = os.path.join(output_dir, "cci_deg_detection", "outputs", output_file_name)
+            kwargs["output_path"] = output_path
+
+            logger.info(
+                f"Using AnnData object stored at "
+                f"{os.path.join(parent_dir, 'cci_deg_detection', f'{file_name}_all.h5ad')}."
             )
-            counts_plus.write_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}.h5ad"))
+            kwargs["adata_path"] = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_all.h5ad")
+            if use_ligands:
+                kwargs["custom_ligands_path"] = os.path.join(
+                    parent_dir, "cci_deg_detection", f"{file_name}_ligands.txt"
+                )
+                logger.info(f"Using ligands stored at {kwargs['custom_ligands_path']}.")
+            elif use_pathways:
+                kwargs["custom_pathways_path"] = os.path.join(
+                    parent_dir, "cci_deg_detection", f"{file_name}_pathways.txt"
+                )
+                logger.info(f"Using pathways stored at {kwargs['custom_pathways_path']}.")
 
-    def CCI_sender_deg_detection(self):
-        # Load and process the file for the chosen ligand:
-        # counts = anndata.read_h5ad(
-        #     os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{send_key}_queries.h5ad")
-        # )
-        "filler"
+            # Create new instance of MuSIC:
+            comm, parser, args_list = define_spateo_argparse(**kwargs)
+            downstream_model = MuSIC(comm, parser)
+            downstream_model._set_up_model()
+            downstream_model.fit()
+            downstream_model.predict_and_save()
 
-        # Stitch into dataframe, where the first 3 columns are coordinates in UMAP space and the fourth column is the
-        # sent signal:
+        elif cell_type is not None:
+            # For each cell type, fit a different model:
+            parent_dir = os.path.dirname(self.adata_path)
+            file_name = os.path.basename(self.adata_path).split(".")[0]
 
-        # Perform logistic regression if using sender cell type as the query
+            # create output sub-directory for this model:
+            subset_output_dir = os.path.join(output_dir, "cci_deg_detection", "outputs", cell_type)
+            # Check if directory already exists, if not create it
+            if not os.path.exists(subset_output_dir):
+                self.logger.info(f"Output folder for cell type {cell_type} does not exist, creating it now.")
+                os.makedirs(subset_output_dir)
+            output_path = os.path.join(subset_output_dir, output_file_name)
+            kwargs["output_path"] = output_path
 
-    # NOTE TO SELF: FOR RECEIVER DEG DETECTION, JUST COMPUTE DIFFERENTIAL EXPRESSION IN CELLS W/ NONZERO PREDICTED
-    # EFFECT
+            kwargs["adata_path"] = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}.h5ad")
+            logger.info(f"Using AnnData object stored at {kwargs['adata_path']}.")
+            kwargs["custom_ligands_path"] = os.path.join(
+                parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt"
+            )
+            logger.info(f"Using ligands stored at {kwargs['custom_ligands_path']}.")
+
+            # Create new instance of MuSIC:
+            comm, parser, args_list = define_spateo_argparse(**kwargs)
+            downstream_model = MuSIC(comm, parser)
+            downstream_model._set_up_model()
+            downstream_model.fit()
+            downstream_model.predict_and_save()
+
+        else:
+            raise ValueError("'use_ligands' and 'use_pathways' are both False, and 'cell_type' was not given.")
+
+        return downstream_model
 
     # ---------------------------------------------------------------------------------------------------
     # Cell type coupling:
@@ -1763,7 +1921,6 @@ class MuSIC_Interpreter(MuSIC):
 
         # Compute signaling potential for each target (mediated by each of the possible signaling patterns-
         # ligand/receptor or cell type/cell type pair):
-
         # Columns consist of the spatial weights of each observation- convolve with expression of each ligand to
         # get proxy of ligand signal "sent", weight by the local coefficient value to get a proxy of the "signal
         # functionally received" in generating the downstream effect and store in .obsp.
@@ -1772,18 +1929,17 @@ class MuSIC_Interpreter(MuSIC):
         elif isinstance(targets, str):
             targets = [targets]
 
+        # Can optionally restrict to targets that are well-predicted by the model
         if self.filter_targets:
             pearson_dict = {}
             for target in targets:
                 observed = self.adata[:, target].X.toarray().reshape(-1, 1)
                 predicted = self.predictions[target].reshape(-1, 1)
 
-                # Ignore large predicted values that are actually zero- these have a high likelihood of being
-                # dropouts rather than biological zeros:
-                z_scores = zscore(predicted)
-                outlier_indices = np.where((observed == 0) & (z_scores > 2))[0]
-                predicted = np.delete(predicted, outlier_indices)
-                observed = np.delete(observed, outlier_indices)
+                # Remove index of the largest predicted value (to mitigate sensitivity of these metrics to outliers):
+                outlier_index = np.where(np.max(predicted))[0]
+                predicted = np.delete(predicted, outlier_index)
+                observed = np.delete(observed, outlier_index)
 
                 rp, _ = pearsonr(observed, predicted)
                 pearson_dict[target] = rp
