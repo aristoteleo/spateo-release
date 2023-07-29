@@ -136,9 +136,9 @@ class MuSIC:
             neighboring cells- this defines the number of cells to use for membrane-bound ligands.
         n_neighbors_secreted: For :attr:`mod_type` "ligand" or "lr"- ligand expression will be taken from the
             neighboring cells- this defines the number of cells to use for secreted or ECM ligands.
-        use_expression_neighbors_only: The default for finding spatial neighborhoods for the modeling process is to
-            use neighbors in physical space, and turn to expression space if there is not enough signal in the physical
-            neighborhood. If this argument is provided, only expression will be used to find neighbors.
+        use_expression_neighbors: The default for finding spatial neighborhoods for the modeling process is to
+            use neighbors in physical space. If this argument is provided, expression will instead be used to find
+            neighbors.
 
 
         bw_fixed: Set True for distance-based kernel function and False for nearest neighbor-based kernel function
@@ -369,7 +369,7 @@ class MuSIC:
         self.distance_secreted = self.arg_retrieve.distance_secreted
         self.n_neighbors_membrane_bound = self.arg_retrieve.n_neighbors_membrane_bound
         self.n_neighbors_secreted = self.arg_retrieve.n_neighbors_secreted
-        self.use_expression_neighbors_only = self.arg_retrieve.use_expression_neighbors_only
+        self.use_expression_neighbors = self.arg_retrieve.use_expression_neighbors
         # Also use the number of neighbors for secreted signaling for niche modeling
         self.n_neighbors_niche = self.n_neighbors_secreted
         self.exclude_self = self.arg_retrieve.exclude_self
@@ -480,7 +480,7 @@ class MuSIC:
         # For downstream, modify some of the parameters:
         if self.mod_type == "downstream":
             # Use neighbors in expression space:
-            self.use_expression_neighbors_only = True
+            self.use_expression_neighbors = True
             # Pathways can be used as targets, which often violates the count assumption of the other distributions-
             # redefine the model type in this case:
             if self.adata.uns["target_type"] == "pathway":
@@ -1877,8 +1877,10 @@ class MuSIC:
                     self.maxbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=50)
 
                 if self.distance_membrane_bound is not None and self.distance_secreted is not None:
-                    self.minbw = self.distance_membrane_bound
-                    self.maxbw = self.distance_secreted * 1.5 if self.kernel != "uniform" else self.distance_secreted
+                    self.minbw = (
+                        self.distance_membrane_bound * 1.5 if self.kernel != "uniform" else self.distance_membrane_bound
+                    )
+                    self.maxbw = self.distance_secreted * 2 if self.kernel != "uniform" else self.distance_secreted
                 else:
                     # Set minimum bandwidth to the distance to the smallest distance between neighboring points:
                     min_dist = np.min(
@@ -2045,25 +2047,27 @@ class MuSIC:
             else:
                 cov = None
             expr_mat = None
+            ct = None
         else:
-            # Distance in "signaling space", conditioned on target expression (matched zero/nonzero with the point in
-            # question):
+            # Distance in "signaling space", conditioned on target expression and cell type:
             if y[i] == 0:
                 cov = np.where(y == 0, 1, 0).reshape(-1)
             else:
                 cov = None
             expr_mat = self.feature_distance
+            celltype_i = self.ct_vec[i]
+            ct = np.where(self.ct_vec == celltype_i, 1, 0).reshape(-1)
         wi = get_wi(
             i,
             n_samples=len(X),
             cov=cov,
+            ct=ct,
             coords=coords,
             expr_mat=expr_mat,
             fixed_bw=self.bw_fixed,
             kernel=self.kernel,
             bw=bw,
-            use_expression_neighbors_only=self.use_expression_neighbors_only,
-            jaccard_threshold=self.target_expr_threshold,
+            use_expression_neighbors=self.use_expression_neighbors,
         ).reshape(-1, 1)
 
         if mask_indices is not None:
@@ -2597,6 +2601,12 @@ class MuSIC:
         else:
             X_orig = X
 
+        # Cell type indicator:
+        cell_types = self.adata.obs[self.group_key]
+        cat_to_num = {k: v + 1 for v, k in enumerate(cell_types.unique())}
+        self.ct_vec = cell_types.map(cat_to_num).values
+        self.ct_vec = self.comm.bcast(self.ct_vec, root=0)
+
         # # Compute offset if included:
         # if self.include_offset:
         #     self.offset = library_scaling_factors(counts=self.adata.X, distr=self.distr)
@@ -2616,7 +2626,12 @@ class MuSIC:
 
             # If model is based on ligands/receptors: filter X based on the prior knowledge network:
             if self.mod_type in ["lr", "receptor", "ligand"]:
-                target_row = self.grn.loc[target]
+                if "_" in target:
+                    # Presume the gene name is first in the string:
+                    gene_query = target.split("_")[0]
+                else:
+                    gene_query = target
+                target_row = self.grn.loc[gene_query]
                 target_TFs = target_row[target_row == 1].index.tolist()
                 temp = self.r_tf_db[self.r_tf_db["tf"].isin(target_TFs)]
                 target_receptors = temp["receptor"].unique().tolist()
@@ -2678,9 +2693,6 @@ class MuSIC:
                 self.x_chunk = indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
                 self.x_chunk = self.comm.bcast(self.x_chunk, root=0)
 
-            # Find indices where y is zero but x is nonzero:
-            mask_indices = np.where((y == 0).reshape(-1, 1) & (np.all(np.abs(X) > 1e-3, axis=1)).reshape(-1, 1))[0]
-
             # Global relationship regularization (only for non-niche models):
             if self.mod_type != "niche":
                 correlations = []
@@ -2735,7 +2747,6 @@ class MuSIC:
                     y_label=target,
                     bw=self.bw,
                     coords=self.coords,
-                    mask_indices=mask_indices,
                     feature_mask=feature_mask,
                     final=True,
                 )
@@ -2761,7 +2772,6 @@ class MuSIC:
                 X_labels=X_labels,
                 bw=bw,
                 coords=self.coords,
-                mask_indices=mask_indices,
                 feature_mask=feature_mask,
                 final=False,
                 multiscale=multiscale,
@@ -2782,7 +2792,6 @@ class MuSIC:
                 X_labels=X_labels,
                 bw=optimal_bw,
                 coords=self.coords,
-                mask_indices=mask_indices,
                 feature_mask=feature_mask,
                 final=True,
                 multiscale=multiscale,
@@ -3513,7 +3522,7 @@ class VMuSIC(MuSIC):
                 # Distance in "signaling space", conditioned on target expression (matched zero/nonzero with the point in
                 # question):
                 if y[i] > 0:
-                    cov = np.where(y > 0, 1, 0).reshape(-1)
+                    cov = None
                 else:
                     cov = np.where(y == 0, 1, 0).reshape(-1)
             wi = get_wi(
@@ -3525,7 +3534,7 @@ class VMuSIC(MuSIC):
                 fixed_bw=self.bw_fixed,
                 kernel=self.kernel,
                 bw=bw,
-                use_expression_neighbors_only=self.use_expression_neighbors_only,
+                use_expression_neighbors=self.use_expression_neighbors,
                 jaccard_threshold=self.target_expr_threshold,
             ).reshape(-1, 1)
 
@@ -3572,7 +3581,7 @@ class VMuSIC(MuSIC):
                             fixed_bw=self.bw_fixed,
                             kernel=self.kernel,
                             bw=bw,
-                            use_expression_neighbors_only=self.use_expression_neighbors_only,
+                            use_expression_neighbors=self.use_expression_neighbors,
                             jaccard_threshold=self.target_expr_threshold,
                         ).reshape(-1, 1)
 

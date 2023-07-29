@@ -260,8 +260,12 @@ class Kernel(object):
             distance, this should be the array of spatial positions.
         bw: Bandwidth parameter for the kernel density estimation
         cov: Optional array of shape (n_samples, ). Can be used to adjust the distance calculation to look only at
-            samples of interest, which is determined from nonzero values in this vector. This can be, e.g. a one-hot
-            vector for a particular cell type.
+            samples of interest vs. samples not of interest, which is determined from nonzero values in this vector.
+            This can be used to modify the modeling process based on factors thought to reflect biological differences,
+            for example, to condition on histological classification, passing a distance threshold, etc. If 'ct' is
+            also given, will look for samples of interest that are also of the same cell type.
+        ct: Optional array of shape (n_samples, ), containing vector where cell types are encoded as integers. Can be
+            used to condition nearest neighbor finding on cell type or other category.
         expr_mat: Can be used together with 'cov' (so will only be used if 'cov' is not None)- if the spatial neighbors
             are not consistent with the sample in question (determined by assessing similarity by "cov"),
             there may be different mechanisms at play. In this case, will instead search for nearest neighbors in
@@ -299,9 +303,7 @@ class Kernel(object):
         eps: Error-correcting factor to avoid division by zero
         sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
         normalize_weights: If True, the weights will be normalized to sum to 1.
-        use_expression_neighbors_only: If True, will only use the expression matrix to find nearest neighbors.
-        jaccard_threshold: Only used if "expr_mat" is not None. Sets the threshold for the Jaccard index to determine
-            whether any two given cells are similar enough to be considered neighbors.
+        use_expression_neighbors: If True, will only use the expression matrix to find nearest neighbors.
     """
 
     def __init__(
@@ -310,6 +312,7 @@ class Kernel(object):
         data: Union[np.ndarray, scipy.sparse.spmatrix],
         bw: Union[int, float],
         cov: Optional[np.ndarray] = None,
+        ct: Optional[np.ndarray] = None,
         expr_mat: Optional[np.ndarray] = None,
         fixed: bool = True,
         exclude_self: bool = False,
@@ -318,61 +321,27 @@ class Kernel(object):
         eps: float = 1.0000001,
         sparse_array: bool = False,
         normalize_weights: bool = False,
-        use_expression_neighbors_only: bool = False,
-        jaccard_threshold: float = 0.2,
+        use_expression_neighbors: bool = False,
     ):
 
-        if use_expression_neighbors_only:
+        if use_expression_neighbors:
             self.dist_vector = local_dist(expr_mat[i], expr_mat).reshape(-1)
             self.function = "uniform"
-            if cov is not None:
-                max_dist = np.max(self.dist_vector)
-                self.dist_vector[cov == 0] = max_dist
         else:
             self.dist_vector = local_dist(data[i], data).reshape(-1)
             self.function = function.lower()
-            if cov is not None:
-                max_dist = np.max(self.dist_vector)
-                self.dist_vector[cov == 0] = max_dist
 
-                # Indices of nearest neighbors- if fewer than 1/3 of the neighbors (given by bw for not "fixed" and
-                # using the ten nearest neighbors for "fixed") are consistent with "cov" of the sample in question,
-                # will instead search for nearest neighbors in the gene expression space if "expr_mat" is given. If
-                # "expr_mat" is not given, will set all distances to zero:
-                n = 10 if fixed else int(bw)
-                neighbor_dist_vector = self.dist_vector[self.dist_vector > 0]
-                neighbor_dists = np.argpartition(neighbor_dist_vector, n)[:n]
-                neighbor_indices = np.where(np.isin(self.dist_vector, neighbor_dist_vector[neighbor_dists]))[0]
-                n_neighbor_threshold = 3 if fixed else int(n / 3)
-                if np.sum(cov[neighbor_indices]) < n_neighbor_threshold and expr_mat is not None:
-                    # The rest of this function will proceed by finding the n nearest points, no matter the true
-                    # distance between them and the query. For each neighboring index, check that the neighboring
-                    # sample is truly proximal by computing Jaccard similarity in the feature space:
-                    n_expr_neighbor_threshold = 10 if fixed else int(bw)
-                    if not np.all(np.logical_or(expr_mat == 0, expr_mat == 1)):
-                        expr_mat = (expr_mat > 0).astype(int)
-                        jaccard_indices = jaccard_index(expr_mat[i], expr_mat)
-                        jaccard_indices = jaccard_indices[jaccard_indices > jaccard_threshold]
-                        # If there are no longer a sufficient number of neighboring indices in transcriptional space,
-                        # there are effectively no samples that are close in feature profile to the sample in question,
-                        # and thus not enough signal to draw conclusions from about feature relationships. All
-                        # distances will be set to zero. Otherwise adjust the bandwidth for this sample based on the
-                        # number of samples that passed (if greater than the initially provided bandwidth, use that,
-                        # but if not use the number of samples that passed the Jaccard threshold):
-                        if len(jaccard_indices) < n_expr_neighbor_threshold:
-                            self.dist_vector = np.zeros(len(self.dist_vector))
-                        elif len(jaccard_indices) < bw:
-                            fixed = True
-                            bw = len(jaccard_indices)
-
-                    self.dist_vector = local_dist(expr_mat[i], expr_mat).reshape(-1)
-                    if cov is not None:
-                        max_dist = np.max(self.dist_vector)
-                        self.dist_vector[cov == 0] = max_dist
-                    # Set kernel to uniform for expression neighbors:
-                    self.function = "uniform"
-                elif np.sum(cov[neighbor_indices]) < n_neighbor_threshold and expr_mat is None:
-                    self.dist_vector = np.zeros(len(self.dist_vector))
+        max_dist = np.max(self.dist_vector)
+        if cov is not None and ct is not None:
+            # If condition is met, compare to samples of the same cell type if they also meet this condition:
+            if cov[i] == 1:
+                self.dist_vector[ct != ct[i]] = max_dist
+        elif cov is not None and ct is not None:
+            # Ignore samples that do not meet the condition:
+            self.dist_vector[cov == 0] = max_dist
+        elif ct is not None:
+            # Compare to samples of the same cell type:
+            self.dist_vector[ct != ct[i]] = max_dist
 
         if fixed:
             self.bandwidth = float(bw)
@@ -429,6 +398,7 @@ def get_wi(
     n_samples: int,
     coords: np.ndarray,
     cov: Optional[np.ndarray] = None,
+    ct: Optional[np.ndarray] = None,
     expr_mat: Optional[np.ndarray] = None,
     fixed_bw: bool = True,
     exclude_self: bool = False,
@@ -437,8 +407,7 @@ def get_wi(
     threshold: float = 1e-5,
     sparse_array: bool = False,
     normalize_weights: bool = False,
-    use_expression_neighbors_only: bool = False,
-    jaccard_threshold: float = 0.2,
+    use_expression_neighbors: bool = False,
 ) -> scipy.sparse.csr_matrix:
     """Get spatial weights for an individual sample, given the coordinates of all samples in space.
 
@@ -447,8 +416,12 @@ def get_wi(
         n_samples: Total number of samples in the dataset
         coords: Array of shape (n_samples, 2) or (n_samples, 3) representing the spatial coordinates of each sample
         cov: Optional array of shape (n_samples, ). Can be used to adjust the distance calculation to look only at
-            samples of interest, which is determined from nonzero values in this vector. This can be, e.g. a one-hot
-            vector for a particular cell type.
+            samples of interest vs. samples not of interest, which is determined from nonzero values in this vector.
+            This can be used to modify the modeling process based on factors thought to reflect biological differences,
+            for example, to condition on histological classification, passing a distance threshold, etc. If 'ct' is
+            also given, will look for samples of interest that are also of the same cell type.
+        ct: Optional array of shape (n_samples, ), containing vector where cell types are encoded as integers. Can be
+            used to condition nearest neighbor finding on cell type or other category.
         expr_mat: Can be used together with 'cov'- if the spatial neighbors are not consistent with the sample in
             question (determined by assessing similarity by "cov"), there may be different mechanisms at play. In this
             case, will instead search for nearest neighbors in the gene expression space if given.
@@ -462,9 +435,7 @@ def get_wi(
             will be set to zero.
         sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
         normalize_weights: If True, the weights will be normalized to sum to 1.
-        use_expression_neighbors_only: If True, will only use expression neighbors to determine the bandwidth.
-        jaccard_threshold: Only used if "expr_mat" is not None. Sets the threshold for the Jaccard index to determine
-            whether any two given cells are similar enough to be considered neighbors.
+        use_expression_neighbors: If True, will only use expression neighbors to determine the bandwidth.
 
     Returns:
         wi: Array of weights for sample of interest
@@ -479,6 +450,7 @@ def get_wi(
         coords,
         bw,
         cov=cov,
+        ct=ct,
         expr_mat=expr_mat,
         fixed=fixed_bw,
         exclude_self=exclude_self,
@@ -486,8 +458,7 @@ def get_wi(
         threshold=threshold,
         sparse_array=sparse_array,
         normalize_weights=normalize_weights,
-        use_expression_neighbors_only=use_expression_neighbors_only,
-        jaccard_threshold=jaccard_threshold,
+        use_expression_neighbors=use_expression_neighbors,
     ).kernel
 
     return wi

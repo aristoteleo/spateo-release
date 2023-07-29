@@ -325,11 +325,10 @@ def define_spateo_argparse(**kwargs):
             "type": str,
             "help": "Kernel to use when computing spatial weights and when fitting the model.",
         },
-        "-use_expression_neighbors_only": {
+        "-use_expression_neighbors": {
             "action": "store_true",
             "help": "The default for finding spatial neighborhoods for the modeling process is to use neighbors in "
-            "physical space, and turn to expression space if there is not enough signal in the physical "
-            "neighborhood. If this argument is provided, only expression will be used to find neighbors.",
+            "physical space. If this argument is provided, expression will instead be used to find neighbors.",
         },
         "-distance_membrane_bound": {
             "type": float,
@@ -691,11 +690,10 @@ if __name__ == "__main__":
         "secreted or ECM ligands.",
     )
     parser.add_argument(
-        "-use_expression_neighbors_only",
+        "-use_expression_neighbors",
         action="store_true",
         help="The default for finding spatial neighborhoods for the modeling process is to use neighbors in "
-        "physical space, and turn to expression space if there is not enough signal in the physical "
-        "neighborhood. If this argument is provided, only expression will be used to find neighbors.",
+        "physical space. If this argument is provided, expression will be used instead to find neighbors.",
     )
 
     parser.add_argument("-distr", default="gaussian", type=str)

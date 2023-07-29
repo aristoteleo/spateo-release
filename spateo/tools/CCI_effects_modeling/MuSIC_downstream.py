@@ -1377,9 +1377,11 @@ class MuSIC_Interpreter(MuSIC):
     # ---------------------------------------------------------------------------------------------------
     # Constructing gene regulatory networks
     # ---------------------------------------------------------------------------------------------------
-    def CCI_sender_deg_detection_setup(
+    def CCI_deg_detection_setup(
         self,
+        sender_or_receiver_degs: Literal["sender", "receiver"] = "sender",
         use_ligands: bool = True,
+        use_receptors: bool = False,
         use_pathways: bool = False,
         use_cell_types: bool = False,
         perform_dimensionality_reduction: bool = False,
@@ -1387,18 +1389,22 @@ class MuSIC_Interpreter(MuSIC):
         """Computes differential expression signatures of cells with various levels of ligand expression.
 
         Args:
+            sender_or_receiver_degs: Whether to compute DEGs for sender or receiver cells. Note that 'use_ligands' is
+                only an option if this is set to 'sender', whereas 'use_receptors' is only an option if this is set to
+                'receiver'. If 'use_pathways' is True, the value of this argument will determine whether ligands or
+                receptors are used to define the pathway.
             use_ligands: Use ligand array for differential expression analysis. Will take precedent over
                 sender/receiver cell type if also provided.
             use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
                 to collectively compute signaling potential score. Will take precedent over sender cell types if
                 also provided.
-            use_cell_types: Use cell types to use for differential expression analysis. If given, will compute
-                differential expression for the given cell type.
+            use_cell_types: Use cell types to use for differential expression analysis. If given,
+                will preprocess/construct the necessary components to initialize cell type-specific models.
             perform_dimensionality_reduction: Set True to perform dimensionality reduction on the array of
                 predictors. If False, will use the raw expression (in the case of 'use_ligands' or 'use_pathways').
 
         Returns:
-
+            None
         """
         logger = lm.get_main_logger()
 
@@ -1407,6 +1413,8 @@ class MuSIC_Interpreter(MuSIC):
         file_name = os.path.basename(self.adata_path).split(".")[0]
         if use_ligands:
             targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_ligands.txt")
+        elif use_receptors:
+            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_receptors.txt")
         elif use_pathways:
             targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_pathways.txt")
         elif use_cell_types:
@@ -1419,7 +1427,7 @@ class MuSIC_Interpreter(MuSIC):
         try:
             # Load files in case they are already existent:
             counts_plus = anndata.read_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}.h5ad"))
-            if use_ligands or use_pathways:
+            if use_ligands or use_pathways or use_receptors:
                 with open(targets_path, "r") as file:
                     targets = file.readlines()
             else:
@@ -1452,13 +1460,20 @@ class MuSIC_Interpreter(MuSIC):
             tf_tf_db = tf_tf_db[np.isin(self.adata.var_names, tf_tf_db.columns)]
             # For use if 'use_cell_types':
             if use_cell_types:
-                database_ligands = list(set(lr_db["from"]))
-                l_complexes = [elem for elem in database_ligands if "_" in elem]
-                # Get individual components if any complexes are included in this list:
-                ligand_set = [l for item in database_ligands for l in item.split("_")]
-                ligand_set = [l for l in ligand_set if l not in self.adata.var_names]
+                if sender_or_receiver_degs == "sender":
+                    database_ligands = list(set(lr_db["from"]))
+                    l_complexes = [elem for elem in database_ligands if "_" in elem]
+                    # Get individual components if any complexes are included in this list:
+                    ligand_set = [l for item in database_ligands for l in item.split("_")]
+                    ligand_set = [l for l in ligand_set if l not in self.adata.var_names]
+                else:
+                    database_receptors = list(set(lr_db["to"]))
+                    r_complexes = [elem for elem in database_receptors if "_" in elem]
+                    # Get individual components if any complexes are included in this list:
+                    receptor_set = [r for item in database_receptors for r in item.split("_")]
+                    receptor_set = [r for r in receptor_set if r not in self.adata.var_names]
 
-            sent_signal = {}
+            signal = {}
             subsets = {}
 
             if use_ligands:
@@ -1469,9 +1484,18 @@ class MuSIC_Interpreter(MuSIC):
                     )
                 # Sent signal from ligand- use non-lagged version b/c the upstream factor effects on ligand expression
                 # are an intrinsic property:
-                sent_signal["all"] = self.ligands_expr_nonlag
+                signal["all"] = self.ligands_expr_nonlag
                 subsets["all"] = self.adata
-            elif use_pathways:
+            elif use_receptors:
+                if self.mod_type != "receptor" and self.mod_type != "lr":
+                    raise ValueError(
+                        "Sent signal from receptors cannot be used because the original specified 'mod_type' "
+                        "does not use receptor expression."
+                    )
+                # Received signal from receptor:
+                signal["all"] = self.receptors_expr
+                subsets["all"] = self.adata
+            elif use_pathways and sender_or_receiver_degs == "sender":
                 if self.mod_type != "ligand" and self.mod_type != "lr":
                     raise ValueError(
                         "Sent signal from ligands cannot be used because the original specified 'mod_type' "
@@ -1481,7 +1505,19 @@ class MuSIC_Interpreter(MuSIC):
                 lig_to_pathway_map = lr_db.set_index("from")["pathway"].drop_duplicates().to_dict()
                 mapped_ligands = self.ligands_expr_nonlag.copy()
                 mapped_ligands.columns = self.ligands_expr_nonlag.columns.map(lig_to_pathway_map)
-                sent_signal["all"] = mapped_ligands.groupby(by=mapped_ligands.columns, axis=1).sum()
+                signal["all"] = mapped_ligands.groupby(by=mapped_ligands.columns, axis=1).sum()
+                subsets["all"] = self.adata
+            elif use_pathways and sender_or_receiver_degs == "receiver":
+                if self.mod_type != "receptor" and self.mod_type != "lr":
+                    raise ValueError(
+                        "Received signal from receptors cannot be used because the original specified 'mod_type' "
+                        "does not use receptor expression."
+                    )
+                # Groupby pathways and take the arithmetic mean of the receptors/interactions in each relevant pathway:
+                rec_to_pathway_map = lr_db.set_index("to")["pathway"].drop_duplicates().to_dict()
+                mapped_receptors = self.receptors_expr.copy()
+                mapped_receptors.columns = self.receptors_expr.columns.map(rec_to_pathway_map)
+                signal["all"] = mapped_receptors.groupby(by=mapped_receptors.columns, axis=1).sum()
                 subsets["all"] = self.adata
             elif use_cell_types:
                 if self.mod_type != "niche":
@@ -1495,60 +1531,70 @@ class MuSIC_Interpreter(MuSIC):
                 for cell_type in self.cell_categories.columns:
                     ct_subset = self.adata[self.adata.obs[self.group_key] == cell_type, :].copy()
                     subsets[cell_type] = ct_subset
-                    ct_ligands = ct_subset[:, ligand_set].copy()
-                    # Find the set of ligands that are expressed in at least n% of the cells of this cell type
-                    lig_expr_percentage = np.array((ct_ligands.X > 0).sum(axis=0)).squeeze() / ct_ligands.shape[0] * 100
-                    ct_ligands = ct_ligands.var.index[lig_expr_percentage > self.target_expr_threshold]
 
-                    ligands_expr = pd.DataFrame(
-                        self.adata[:, ct_ligands].X.A
+                    mols = ligand_set if sender_or_receiver_degs == "sender" else receptor_set
+                    ct_signaling = ct_subset[:, mols].copy()
+                    # Find the set of ligands/receptors that are expressed in at least n% of the cells of this cell type
+                    sig_expr_percentage = (
+                        np.array((ct_signaling.X > 0).sum(axis=0)).squeeze() / ct_signaling.shape[0] * 100
+                    )
+                    ct_signaling = ct_signaling.var.index[sig_expr_percentage > self.target_expr_threshold]
+
+                    sig_expr = pd.DataFrame(
+                        self.adata[:, ct_signaling].X.A
                         if scipy.sparse.issparse(self.adata.X)
-                        else self.adata[:, ct_ligands].X,
+                        else self.adata[:, ct_signaling].X,
                         index=self.sample_names,
-                        columns=ct_ligands,
+                        columns=ct_signaling,
                     )
 
                     # Combine columns if they are part of a complex- eventually the individual columns should be
                     # dropped, but store them in a temporary list to do so later because some may contribute to
                     # multiple complexes:
                     to_drop = []
-                    for element in l_complexes:
+                    if sender_or_receiver_degs == "sender":
+                        complexes = l_complexes
+                        db_set = database_ligands
+                    else:
+                        complexes = r_complexes
+                        db_set = database_receptors
+
+                    for element in complexes:
                         parts = element.split("_")
-                        if all(part in ligands_expr.columns for part in parts):
+                        if all(part in sig_expr.columns for part in parts):
                             # Combine the columns into a new column with the name of the hyphenated element- here we
                             # will compute the geometric mean of the expression values of the complex components:
-                            ligands_expr[element] = self.ligands_expr[parts].apply(
-                                lambda x: x.prod() ** (1 / len(parts)), axis=1
-                            )
+                            sig_expr[element] = sig_expr[parts].apply(lambda x: x.prod() ** (1 / len(parts)), axis=1)
                             # Mark the individual components for removal if the individual components cannot also be
                             # found as ligands:
-                            to_drop.extend([part for part in parts if part not in database_ligands])
+                            to_drop.extend([part for part in parts if part not in db_set])
                         else:
                             # Drop the hyphenated element from the dataframe if all components are not found in the
                             # dataframe columns
-                            partial_components = [l for l in ligand_set if l in parts]
+                            partial_components = [item for item in db_set if item in parts]
                             to_drop.extend(partial_components)
                             if len(partial_components) > 0 and self.verbose:
                                 self.logger.info(
-                                    f"Not all components from the {element} heterocomplex could be found in the dataset."
+                                    f"Not all components from the {element} heterocomplex could be found in the "
+                                    f"dataset."
                                 )
 
                             # Drop any possible duplicate ligands alongside any other columns to be dropped:
                         to_drop = list(set(to_drop))
-                        ligands_expr.drop(to_drop, axis=1, inplace=True)
-                        first_occurrences = ligands_expr.columns.duplicated(keep="first")
-                        ligands_expr = ligands_expr.loc[:, ~first_occurrences]
+                        sig_expr.drop(to_drop, axis=1, inplace=True)
+                        first_occurrences = sig_expr.columns.duplicated(keep="first")
+                        sig_expr = sig_expr.loc[:, ~first_occurrences]
 
-                    sent_signal[cell_type] = ligands_expr
+                    signal[cell_type] = sig_expr
 
             else:
                 raise ValueError(
-                    "All of 'use_ligands', 'use_pathways', and 'use_cell_types' are False. Please set at "
-                    "least one to True."
+                    "All of 'use_ligands', 'use_receptors', 'use_pathways', and 'use_cell_types' are False. Please set "
+                    "at least one to True."
                 )
 
-            for subset_key in sent_signal.keys():
-                sent_signal_values = sent_signal[subset_key].values
+            for subset_key in signal.keys():
+                signal_values = signal[subset_key].values
                 adata = subsets[subset_key]
 
                 self.logger.info(
@@ -1558,9 +1604,9 @@ class MuSIC_Interpreter(MuSIC):
 
                 # Further subset list of additional factors to those that are expressed in at least n% of the cells
                 # that are nonzero in sending cells (use the user input 'target_expr_threshold'):
-                indices = np.any(sent_signal_values != 0, axis=0).nonzero()[0]
-                nz_sending = list(self.sample_names[indices])
-                adata_subset = adata[nz_sending, :]
+                indices = np.any(signal_values != 0, axis=0).nonzero()[0]
+                nz_signal = list(self.sample_names[indices])
+                adata_subset = adata[nz_signal, :]
                 n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
 
                 all_TFs = list(grn.columns)
@@ -1612,23 +1658,6 @@ class MuSIC_Interpreter(MuSIC):
                     if nnz_counts >= n_cells_threshold:
                         all_interacting_tfs.append(tf)
 
-                if self.cci_degs_model_interactions:
-                    # Transcription factor-cofactor combinatorial pairs:
-                    tf_cof_pairs = {}
-                    for tf in all_TFs:
-                        tf_cofactors = cof_db.loc[all_cofactors, tf]
-                        # Find elements that are equal to 1:
-                        tf_cofactors = tf_cofactors[tf_cofactors == 1].index.tolist()
-                        tf_cof_pairs[tf] = tf_cofactors
-
-                    # Transcription factor interactions:
-                    tf_tf_pairs = {}
-                    for tf in all_TFs:
-                        tf_tf = tf_tf_db.loc[all_interacting_tfs, tf]
-                        # Find elements that are equal to 1:
-                        tf_tf = tf_tf[tf_tf == 1].index.tolist()
-                        tf_tf_pairs[tf] = tf_tf
-
                 # Do the same for RNA-binding proteins:
                 all_RBPs = list(rna_bp_db["Gene_Name"].values)
                 all_RBPs = [r for r in all_RBPs if r in self.feature_names]
@@ -1652,30 +1681,15 @@ class MuSIC_Interpreter(MuSIC):
                 if len(all_RBPs) > 0:
                     self.logger.info(f"For this dataset, marked {len(all_RBPs)} RNA-binding proteins of interest.")
 
-                if not self.cci_degs_model_interactions:
-                    # Get feature names- for the singleton factors:
-                    regulator_features = all_TFs + all_interacting_tfs + all_cofactors + all_RBPs
-                else:
-                    # Get feature names- for the interaction factors:
-                    interacting_pairs = []
-                    regulator_features = []
-                    for key, value in tf_cof_pairs.items():
-                        if value:
-                            interacting_pairs.extend([f"{key}_{val}" for val in value])
-                        regulator_features.append(key)
-                        regulator_features.extend(value)
-                    for key, value in tf_tf_pairs.items():
-                        if value:
-                            interacting_pairs.extend([f"{key}_{val}" for val in value])
-                        regulator_features.append(key)
-                        regulator_features.extend(value)
+                # Get feature names- for the singleton factors:
+                regulator_features = all_TFs + all_interacting_tfs + all_cofactors + all_RBPs
 
                 # Take subset of AnnData object corresponding to these regulators:
                 counts = adata[:, regulator_features].copy()
 
-                # Convert to dataframe, append "sent_signal":
+                # Convert to dataframe, append signal (ligand/receptor) dataframe:
                 counts_df = pd.DataFrame(counts.X.toarray(), index=counts.obs_names, columns=counts.var_names)
-                combined_df = pd.concat([counts_df, sent_signal[subset_key]], axis=1)
+                combined_df = pd.concat([counts_df, signal[subset_key]], axis=1)
 
                 # Convert back to AnnData object, save to file path:
                 counts_plus = anndata.AnnData(combined_df.values)
@@ -1707,7 +1721,7 @@ class MuSIC_Interpreter(MuSIC):
                 )
                 counts_plus.obsm["X_umap"] = X_umap
 
-                targets = sent_signal[subset_key].columns
+                targets = signal[subset_key].columns
                 if "targets_path" in locals():
                     # Save to .txt file:
                     with open(targets_path, "w") as file:
@@ -1725,10 +1739,12 @@ class MuSIC_Interpreter(MuSIC):
                 )
                 counts_plus.write_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{subset_key}.h5ad"))
 
-    def CCI_sender_deg_detection(
+    def CCI_deg_detection(
         self,
         cci_dir_path: str,
+        sender_or_receiver_degs: Literal["sender", "receiver"] = "sender",
         use_ligands: bool = True,
+        use_receptors: bool = False,
         use_pathways: bool = False,
         cell_type: Optional[str] = None,
         **kwargs,
@@ -1738,9 +1754,14 @@ class MuSIC_Interpreter(MuSIC):
 
         Args:
             cci_dir_path: Path to directory containing all Spateo databases
+            sender_or_receiver_degs: Whether to compute DEGs for sender or receiver cells. Note that 'use_ligands' is
+                only an option if this is set to 'sender', whereas 'use_receptors' is only an option if this is set to
+                'receiver'. If 'use_pathways' is True, the value of this argument will determine whether ligands or
+                receptors are used to define the pathway.
             use_ligands: Use ligand array for differential expression analysis. Will take precedent over
                 sender/receiver cell type if also provided. Should match the input to :func
                 `CCI_sender_deg_detection_setup`.
+
             use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
                 to collectively compute signaling potential score. Will take precedent over sender cell types if also
                 provided. Should match the input to :func `CCI_sender_deg_detection_setup`.
@@ -1828,6 +1849,32 @@ class MuSIC_Interpreter(MuSIC):
             raise ValueError("'use_ligands' and 'use_pathways' are both False, and 'cell_type' was not given.")
 
         return downstream_model
+
+    # ---------------------------------------------------------------------------------------------------
+    # In silico perturbation of signaling effects
+    # ---------------------------------------------------------------------------------------------------
+    def predict_perturbation_effect(
+        self,
+        ligand: Optional[str] = None,
+        receptor: Optional[str] = None,
+        regulator: Optional[str] = None,
+        cell_type: Optional[str] = None,
+    ):
+        """Basic & theoretical in silico perturbation, to depict the effect of changing expression level of a given
+        signaling molecule or upstream regulator. In silico perturbation will set the level of the specified
+        regulator to 0.
+
+        Args:
+            ligand: Expression of this ligand will be set to 0
+            receptor: Expression of this receptor will be set to 0
+            regulator: Expression of this regulator will be set to 0. Examples of "regulators" are transcription
+                factors or cofactors, anything that comprises the independent variable array found by :func `
+            cell_type:
+
+        Returns:
+
+        """
+        # For ligand or L:R models, recompute neighborhood ligand level:
 
     # ---------------------------------------------------------------------------------------------------
     # Cell type coupling:

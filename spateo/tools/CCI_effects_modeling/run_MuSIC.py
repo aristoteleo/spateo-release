@@ -9,7 +9,7 @@ import click
 
 # For now, add Spateo working directory to sys path so compiler doesn't look in the installed packages:
 # sys.path.insert(0, "/mnt/c/Users/danie/Desktop/Github/Github/spateo-release-main")
-from ...tools import CCI_effects_modeling as fast_swr
+from ...tools import CCI_effects_modeling as music
 
 
 @click.group()
@@ -161,12 +161,11 @@ def main():
 @click.option("-n_neighbors_membrane_bound", default=8)
 @click.option("-n_neighbors_secreted", default=25)
 @click.option(
-    "-use_expression_neighbors_only",
+    "-use_expression_neighbors",
     default=False,
     is_flag=True,
     help="The default for finding spatial neighborhoods for the modeling process is to use neighbors in "
-    "physical space, and turn to expression space if there is not enough signal in the physical "
-    "neighborhood. If this argument is provided, only expression will be used to find neighbors.",
+    "physical space. If this argument is provided, expression will instead be used to find neighbors.",
 )
 @click.option("-fit_intercept", default=False, is_flag=True)
 @click.option(
@@ -319,7 +318,7 @@ def run(
     distance_secreted,
     n_neighbors_membrane_bound,
     n_neighbors_secreted,
-    use_expression_neighbors_only,
+    use_expression_neighbors,
     distr,
     fit_intercept,
     include_offset,
@@ -408,9 +407,9 @@ def run(
         n_neighbors_secreted: Only used if `mod_type` is 'niche', to define the number of neighbors  to consider
             for each cell when defining the independent variable array; used for secreted and ECM ligands. Defaults
             to 25.
-        use_expression_neighbors_only: The default for finding spatial neighborhoods for the modeling process is to
-            use neighbors in physical space, and turn to expression space if there is not enough signal in the physical
-            neighborhood. If this argument is provided, only expression will be used to find neighbors.
+        use_expression_neighbors: The default for finding spatial neighborhoods for the modeling process is to
+            use neighbors in physical space. If this argument is provided, expression will instead be used to find
+            neighbors.
         distr: Distribution to use for spatial weights. Options: 'gaussian', 'poisson', 'nb'.
         fit_intercept: If True, will include intercept in model
         include_offset: If True, include offset to account for differences in library size in predictions. If True,
@@ -463,7 +462,7 @@ def run(
             will summarize the effects of all ligands/ligand-receptor interactions in a pathway.
     """
 
-    mpi_path = os.path.dirname(fast_swr.__file__) + "/SWR_mpi.py"
+    mpi_path = os.path.dirname(music.__file__) + "/SWR_mpi.py"
 
     command = (
         "mpiexec "
@@ -575,8 +574,8 @@ def run(
         command += "-n_neighbors_membrane_bound " + str(n_neighbors_membrane_bound)
     if n_neighbors_secreted is not None:
         command += "-n_neighbors_secreted " + str(n_neighbors_secreted)
-    if use_expression_neighbors_only:
-        command += " -use_expression_neighbors_only "
+    if use_expression_neighbors:
+        command += " -use_expression_neighbors "
     if exclude_self:
         command += " -exclude_self "
     if fit_intercept:
