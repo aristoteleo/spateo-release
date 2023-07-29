@@ -2047,7 +2047,8 @@ class MuSIC:
             else:
                 cov = None
             expr_mat = None
-            ct = None
+            celltype_i = self.ct_vec[i]
+            ct = np.where(self.ct_vec == celltype_i, 1, 0).reshape(-1)
         else:
             # Distance in "signaling space", conditioned on target expression and cell type:
             if y[i] == 0:
