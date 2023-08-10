@@ -199,8 +199,12 @@ class MuSIC_Interpreter(MuSIC):
         width = 0.5 * len(all_genes)
         pred_vals = predictions.values
 
+        # Pearson and Spearman dictionary for all cells:
         pearson_dict = {}
         spearman_dict = {}
+        # Pearson and Spearman dictionary for only the expressing subset of cells:
+        nz_pearson_dict = {}
+        nz_spearman_dict = {}
 
         for i, gene in enumerate(all_genes):
             y = self.adata[:, gene].X.toarray().reshape(-1)
@@ -211,15 +215,25 @@ class MuSIC_Interpreter(MuSIC):
             music_results_target_to_plot = np.delete(music_results_target, outlier_index)
             y_plot = np.delete(y, outlier_index)
 
+            # Indices where target is nonzero:
+            nonzero_indices = y_plot != 0
+
             rp, _ = pearsonr(y_plot, music_results_target_to_plot)
             r, _ = spearmanr(y_plot, music_results_target_to_plot)
 
+            rp_nz, _ = pearsonr(y_plot[nonzero_indices], music_results_target_to_plot[nonzero_indices])
+            r_nz, _ = spearmanr(y_plot[nonzero_indices], music_results_target_to_plot[nonzero_indices])
+
             pearson_dict[gene] = rp
             spearman_dict[gene] = r
+            nz_pearson_dict[gene] = rp_nz
+            nz_spearman_dict[gene] = r_nz
 
         # Mean of diagnostic metrics:
         mean_pearson = sum(pearson_dict.values()) / len(pearson_dict.values())
         mean_spearman = sum(spearman_dict.values()) / len(spearman_dict.values())
+        mean_nz_pearson = sum(nz_pearson_dict.values()) / len(nz_pearson_dict.values())
+        mean_nz_spearman = sum(nz_spearman_dict.values()) / len(nz_spearman_dict.values())
 
         data = []
         for gene in pearson_dict.keys():
@@ -228,10 +242,17 @@ class MuSIC_Interpreter(MuSIC):
                     "Gene": gene,
                     "Pearson coefficient": pearson_dict[gene],
                     "Spearman coefficient": spearman_dict[gene],
+                    "Pearson coefficient (expressing cells)": nz_pearson_dict[gene],
+                    "Spearman coefficient (expressing cells)": nz_spearman_dict[gene],
                 }
             )
         # Color palette:
-        colors = {"Pearson coefficient": "#FF7F00", "Spearmann coefficient": "#87CEEB", "RMSE": "#0BDA51"}
+        colors = {
+            "Pearson coefficient": "#FF7F00",
+            "Spearmann coefficient": "#87CEEB",
+            "Pearson coefficient (expressing cells)": "#0BDA51",
+            "Spearmann coefficient (expressing cells)": "#FF6961",
+        }
         df = pd.DataFrame(data)
 
         # Plot Pearson correlation barplot:
@@ -243,7 +264,6 @@ class MuSIC_Interpreter(MuSIC):
             data=df,
             x="Gene",
             y="Pearson coefficient",
-            hue="Model",
             palette=colors["Pearson coefficient"],
             edgecolor="black",
             dodge=True,
@@ -266,23 +286,18 @@ class MuSIC_Interpreter(MuSIC):
         plt.show()
 
         # Plot Spearman correlation barplot:
-        sns.set(font_scale=2)
-        sns.set_style("white")
         plt.figure(figsize=(width, 6))
         plt.xticks(rotation="vertical")
         ax = sns.barplot(
             data=df,
             x="Gene",
             y="Spearman coefficient",
-            hue="Model",
             palette=colors["Spearman coefficient"],
             edgecolor="black",
             dodge=True,
         )
 
         # Mean line:
-        line_style = "--"  # Specify the line style (e.g., "--" for dotted)
-        line_thickness = 2  # Specify the line thickness
         ax.axhline(mean_spearman, color="black", linestyle=line_style, linewidth=line_thickness)
 
         # Update legend:
@@ -293,6 +308,58 @@ class MuSIC_Interpreter(MuSIC):
         ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
 
         plt.title(f"Spearman correlation {file_name}")
+        plt.tight_layout()
+        plt.show()
+
+        # Plot Pearson correlation barplot (expressing cells):
+        plt.figure(figsize=(width, 6))
+        plt.xticks(rotation="vertical")
+        ax = sns.barplot(
+            data=df,
+            x="Gene",
+            y="Pearson coefficient (expressing cells)",
+            palette=colors["Pearson coefficient (expressing cells)"],
+            edgecolor="black",
+            dodge=True,
+        )
+
+        # Mean line:
+        ax.axhline(mean_nz_pearson, color="black", linestyle=line_style, linewidth=line_thickness)
+
+        # Update legend:
+        legend_label = f"Mean: {mean_nz_pearson}"
+        handles, labels = ax.get_legend_handles_labels()
+        handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+        labels.append(legend_label)
+        ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+
+        plt.title(f"Pearson correlation (expressing cells) {file_name}")
+        plt.tight_layout()
+        plt.show()
+
+        # Plot Spearman correlation barplot (expressing cells):
+        plt.figure(figsize=(width, 6))
+        plt.xticks(rotation="vertical")
+        ax = sns.barplot(
+            data=df,
+            x="Gene",
+            y="Spearman coefficient (expressing cells)",
+            palette=colors["Spearman coefficient (expressing cells)"],
+            edgecolor="black",
+            dodge=True,
+        )
+
+        # Mean line:
+        ax.axhline(mean_nz_spearman, color="black", linestyle=line_style, linewidth=line_thickness)
+
+        # Update legend:
+        legend_label = f"Mean: {mean_nz_spearman}"
+        handles, labels = ax.get_legend_handles_labels()
+        handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+        labels.append(legend_label)
+        ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+
+        plt.title(f"Spearman correlation (expressing cells) {file_name}")
         plt.tight_layout()
         plt.show()
 
@@ -1412,11 +1479,11 @@ class MuSIC_Interpreter(MuSIC):
         parent_dir = os.path.dirname(self.adata_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
         if use_ligands:
-            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_ligands.txt")
+            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt")
         elif use_receptors:
-            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_receptors.txt")
+            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt")
         elif use_pathways:
-            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_pathways.txt")
+            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
         elif use_cell_types:
             targets_folder = os.path.join(parent_dir, "cci_deg_detection")
 
@@ -1484,7 +1551,20 @@ class MuSIC_Interpreter(MuSIC):
                     )
                 # Sent signal from ligand- use non-lagged version b/c the upstream factor effects on ligand expression
                 # are an intrinsic property:
-                signal["all"] = self.ligands_expr_nonlag
+                # Some of the columns in the ligands dataframe may be complexes- identify the single genes that
+                # compose these complexes:
+                sig_df = self.ligands_expr_nonlag
+                for col in sig_df.columns:
+                    if col in l_complexes:
+                        sig_df = sig_df.drop(col, axis=1)
+                        for l in col.split("_"):
+                            if scipy.sparse.issparse(self.adata.X):
+                                gene_expr = self.adata[:, l].X.A
+                            else:
+                                gene_expr = self.adata[:, l].X
+                            sig_df[l] = gene_expr
+
+                signal["all"] = sig_df
                 subsets["all"] = self.adata
             elif use_receptors:
                 if self.mod_type != "receptor" and self.mod_type != "lr":
@@ -1493,7 +1573,20 @@ class MuSIC_Interpreter(MuSIC):
                         "does not use receptor expression."
                     )
                 # Received signal from receptor:
-                signal["all"] = self.receptors_expr
+                # Some of the columns in the receptors dataframe may be complexes- identify the single genes that
+                # compose these complexes:
+                sig_df = self.receptors_expr
+                for col in sig_df.columns:
+                    if col in r_complexes:
+                        sig_df = sig_df.drop(col, axis=1)
+                        for r in col.split("_"):
+                            if scipy.sparse.issparse(self.adata.X):
+                                gene_expr = self.adata[:, r].X.A
+                            else:
+                                gene_expr = self.adata[:, r].X
+                            sig_df[r] = gene_expr
+
+                signal["all"] = sig_df
                 subsets["all"] = self.adata
             elif use_pathways and sender_or_receiver_degs == "sender":
                 if self.mod_type != "ligand" and self.mod_type != "lr":
@@ -1547,44 +1640,6 @@ class MuSIC_Interpreter(MuSIC):
                         index=self.sample_names,
                         columns=ct_signaling,
                     )
-
-                    # Combine columns if they are part of a complex- eventually the individual columns should be
-                    # dropped, but store them in a temporary list to do so later because some may contribute to
-                    # multiple complexes:
-                    to_drop = []
-                    if sender_or_receiver_degs == "sender":
-                        complexes = l_complexes
-                        db_set = database_ligands
-                    else:
-                        complexes = r_complexes
-                        db_set = database_receptors
-
-                    for element in complexes:
-                        parts = element.split("_")
-                        if all(part in sig_expr.columns for part in parts):
-                            # Combine the columns into a new column with the name of the hyphenated element- here we
-                            # will compute the geometric mean of the expression values of the complex components:
-                            sig_expr[element] = sig_expr[parts].apply(lambda x: x.prod() ** (1 / len(parts)), axis=1)
-                            # Mark the individual components for removal if the individual components cannot also be
-                            # found as ligands:
-                            to_drop.extend([part for part in parts if part not in db_set])
-                        else:
-                            # Drop the hyphenated element from the dataframe if all components are not found in the
-                            # dataframe columns
-                            partial_components = [item for item in db_set if item in parts]
-                            to_drop.extend(partial_components)
-                            if len(partial_components) > 0 and self.verbose:
-                                self.logger.info(
-                                    f"Not all components from the {element} heterocomplex could be found in the "
-                                    f"dataset."
-                                )
-
-                            # Drop any possible duplicate ligands alongside any other columns to be dropped:
-                        to_drop = list(set(to_drop))
-                        sig_expr.drop(to_drop, axis=1, inplace=True)
-                        first_occurrences = sig_expr.columns.duplicated(keep="first")
-                        sig_expr = sig_expr.loc[:, ~first_occurrences]
-
                     signal[cell_type] = sig_expr
 
             else:
@@ -1699,8 +1754,10 @@ class MuSIC_Interpreter(MuSIC):
                 # AnnData object:
                 if use_pathways:
                     counts_plus.uns["target_type"] = "pathway"
-                else:
+                elif use_ligands:
                     counts_plus.uns["target_type"] = "ligands"
+                elif use_receptors:
+                    counts_plus.uns["target_type"] = "receptors"
 
                 # Optionally, can use dimensionality reduction to aid in computing the nearest neighbors for the model (
                 # cells that are nearby in dimensionally-reduced TF space will be neighbors in this scenario)
@@ -1728,7 +1785,12 @@ class MuSIC_Interpreter(MuSIC):
                         for t in targets:
                             file.write(t + "\n")
                 else:
-                    targets_path = os.path.join(targets_folder, f"{file_name}_{subset_key}_ligands.txt")
+                    if use_ligands or (use_cell_types and sender_or_receiver_degs == "sender"):
+                        targets_path = os.path.join(targets_folder, f"{file_name}_{subset_key}_ligands.txt")
+                    elif use_receptors or (use_cell_types and sender_or_receiver_degs == "receiver"):
+                        targets_path = os.path.join(targets_folder, f"{file_name}_{subset_key}_receptors.txt")
+                    elif use_pathways:
+                        targets_path = os.path.join(targets_folder, f"{file_name}_{subset_key}_pathways.txt")
                     with open(targets_path, "w") as file:
                         for t in targets:
                             file.write(t + "\n")
@@ -1765,8 +1827,9 @@ class MuSIC_Interpreter(MuSIC):
             use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
                 to collectively compute signaling potential score. Will take precedent over sender cell types if also
                 provided. Should match the input to :func `CCI_sender_deg_detection_setup`.
-            cell_type: Cell type to use to use for differential expression analysis. If given, will use the ligand
-                subset obtained from :func ~`CCI_sender_deg_detection_setup` and sender cell type cells in the model.
+            cell_type: Cell type to use to use for differential expression analysis. If given, will use the
+                ligand/receptor subset obtained from :func ~`CCI_sender_deg_detection_setup` and cells of the chosen
+                cell type in the model.
             kwargs: Keyword arguments for any of the Spateo argparse arguments. Should not include 'adata_path',
                 'custom_ligands_path' & 'ligand' or 'custom_pathways_path' & 'pathway' (depending on whether ligands or
                 pathways are being used for the analysis), and should not include 'output_path' (which will be
@@ -1785,13 +1848,11 @@ class MuSIC_Interpreter(MuSIC):
         output_file_name = os.path.basename(self.output_path)
         if not os.path.exists(os.path.join(output_dir, "cci_deg_detection")):
             os.makedirs(os.path.join(output_dir, "cci_deg_detection"))
-        if not os.path.exists(os.path.join(output_dir, "cci_deg_detection", "outputs")):
-            os.makedirs(os.path.join(output_dir, "cci_deg_detection", "outputs"))
 
-        if use_ligands or use_pathways:
+        if use_ligands or use_receptors or use_pathways:
             parent_dir = os.path.dirname(self.adata_path)
             file_name = os.path.basename(self.adata_path).split(".")[0]
-            output_path = os.path.join(output_dir, "cci_deg_detection", "outputs", output_file_name)
+            output_path = os.path.join(output_dir, "cci_deg_detection", output_file_name)
             kwargs["output_path"] = output_path
 
             logger.info(
@@ -1804,11 +1865,17 @@ class MuSIC_Interpreter(MuSIC):
                     parent_dir, "cci_deg_detection", f"{file_name}_ligands.txt"
                 )
                 logger.info(f"Using ligands stored at {kwargs['custom_ligands_path']}.")
+            elif use_receptors:
+                kwargs["custom_receptors_path"] = os.path.join(
+                    parent_dir, "cci_deg_detection", f"{file_name}_receptors.txt"
+                )
             elif use_pathways:
                 kwargs["custom_pathways_path"] = os.path.join(
                     parent_dir, "cci_deg_detection", f"{file_name}_pathways.txt"
                 )
                 logger.info(f"Using pathways stored at {kwargs['custom_pathways_path']}.")
+            else:
+                raise ValueError("One of 'use_ligands', 'use_receptors' or 'use_pathways' must be True.")
 
             # Create new instance of MuSIC:
             comm, parser, args_list = define_spateo_argparse(**kwargs)
@@ -1823,7 +1890,7 @@ class MuSIC_Interpreter(MuSIC):
             file_name = os.path.basename(self.adata_path).split(".")[0]
 
             # create output sub-directory for this model:
-            subset_output_dir = os.path.join(output_dir, "cci_deg_detection", "outputs", cell_type)
+            subset_output_dir = os.path.join(output_dir, "cci_deg_detection", cell_type)
             # Check if directory already exists, if not create it
             if not os.path.exists(subset_output_dir):
                 self.logger.info(f"Output folder for cell type {cell_type} does not exist, creating it now.")
@@ -1833,10 +1900,16 @@ class MuSIC_Interpreter(MuSIC):
 
             kwargs["adata_path"] = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}.h5ad")
             logger.info(f"Using AnnData object stored at {kwargs['adata_path']}.")
-            kwargs["custom_ligands_path"] = os.path.join(
-                parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt"
-            )
-            logger.info(f"Using ligands stored at {kwargs['custom_ligands_path']}.")
+            if sender_or_receiver_degs == "sender":
+                kwargs["custom_ligands_path"] = os.path.join(
+                    parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt"
+                )
+                logger.info(f"Using ligands stored at {kwargs['custom_ligands_path']}.")
+            elif sender_or_receiver_degs == "receiver":
+                kwargs["custom_receptors_path"] = os.path.join(
+                    parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}_receptors.txt"
+                )
+                logger.info(f"Using receptors stored at {kwargs['custom_receptors_path']}.")
 
             # Create new instance of MuSIC:
             comm, parser, args_list = define_spateo_argparse(**kwargs)
@@ -1849,6 +1922,75 @@ class MuSIC_Interpreter(MuSIC):
             raise ValueError("'use_ligands' and 'use_pathways' are both False, and 'cell_type' was not given.")
 
         return downstream_model
+
+    # ---------------------------------------------------------------------------------------------------
+    # Permutation testing
+    # ---------------------------------------------------------------------------------------------------
+    def permutation_test(self, gene: str, n_permutations: int = 100, **kwargs):
+        """Sets up permutation test for determination of statistical significance of model diagnostics. Can be used
+        to identify true/the strongest signal-responsive expression patterns.
+
+        Args:
+            gene: Target gene to perform permutation test on.
+            n_permutations: Number of permutations of the gene expression to perform. Default is 100.
+            kwargs: Keyword arguments for any of the Spateo argparse arguments. Should not include 'adata_path',
+                and should not include 'output_path' (which will be determined by the output path used for the main
+                model).
+        """
+        logger = lm.get_main_logger()
+
+        try:
+            labels = self.adata.obs[self.group_key]
+        except:
+            raise ValueError("Please provide grouping key for cell types (or other groups of interest).")
+
+        # Set up storage folder:
+        # Check if the array of additional molecules to query has already been created:
+        parent_dir = os.path.dirname(self.adata_path)
+        file_name = os.path.basename(self.adata_path).split(".")[0]
+
+        if not os.path.exists(os.path.join(parent_dir, "permutation_test")):
+            os.makedirs(os.path.join(parent_dir, "permutation_test"))
+        if not os.path.exists(os.path.join(parent_dir, "permutation_test_outputs")):
+            os.makedirs(os.path.join(parent_dir, "permutation_test_outputs"))
+
+        gene_idx = self.adata.var_names.tolist().index(gene)
+        gene_data = np.array(self.adata.X[:, gene_idx].todense())
+
+        permuted_data_list = [gene_data]
+        perm_names = [f'{gene}_nonpermuted']
+
+        for i in range(n_permutations):
+            perm_name = f'{gene}_permuted_{i}'
+            permuted_data = np.random.permutation(gene_data)
+            # Convert to sparse matrix
+            permuted_data_sparse = scipy.sparse.csr_matrix(permuted_data)
+
+            # 5. Store back in the AnnData object
+            permuted_data_list.append(permuted_data_sparse)
+            perm_names.append(perm_name)
+
+        # Concatenate the original and permuted data:
+        all_data_sparse = scipy.sparse.hstack([self.adata.X] + permuted_data_list)
+        all_data_sparse = all_data_sparse.tocsr()
+        all_names = list(self.adata.var_names.tolist() + perm_names)
+
+        # Create new AnnData object, keeping the cell type annotations, original "__type" entry, and all .obsm
+        # entries (including spatial coordinates):
+        adata_permuted = anndata.AnnData(X=all_data_sparse)
+        adata_permuted.obs_names = self.adata.obs_names
+        adata_permuted.var_names = all_names
+        adata_permuted.obsm = self.adata.obsm
+        adata_permuted.obs[self.group_key] = self.adata.obs[self.group_key]
+        adata_permuted.obs["__type"] = self.adata.obs["__type"]
+
+        # Save the permuted AnnData object:
+        adata_permuted.write(os.path.join(parent_dir, "permutation_test", f"{file_name}_permuted.h5ad"))
+
+        # Fitting permutation model:
+        kwargs["adata_path"] = os.path.join(parent_dir, "permutation_test", f"{file_name}_permuted.h5ad")
+        kwargs["output_path"] = os.path.join(parent_dir, "permutation_test_outputs", f"{file_name}_permuted.csv")
+
 
     # ---------------------------------------------------------------------------------------------------
     # In silico perturbation of signaling effects
@@ -1874,7 +2016,9 @@ class MuSIC_Interpreter(MuSIC):
         Returns:
 
         """
-        # For ligand or L:R models, recompute neighborhood ligand level:
+        # For ligand or L:R models, recompute neighborhood ligand level if perturbing a ligand:
+        if ligand is not None and self.mod_type in ["ligand", "lr"]:
+
 
     # ---------------------------------------------------------------------------------------------------
     # Cell type coupling:

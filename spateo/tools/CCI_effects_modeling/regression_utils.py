@@ -210,6 +210,12 @@ def compute_betas_local(
         return betas, pseudoinverse, cov_inverse
 
     xT = (x * w).T
+    if np.all(xT == 0):
+        betas = np.full((x.shape[1], 1), 1e-20)
+        pseudoinverse = np.zeros((x.shape[1], x.shape[0]))
+        cov_inverse = np.zeros((x.shape[1], x.shape[1]))
+        return betas, pseudoinverse, cov_inverse
+
     xtx = np.dot(xT, x)
 
     # Ridge regularization:
@@ -222,16 +228,6 @@ def compute_betas_local(
     except:
         cov_inverse = linalg.pinv(xtx)
 
-    # Diagonals of the Gram matrix- used as additional diagnostic- for each feature, this is the sum of squared
-    # values- if this is sufficiently low, the coefficient should be zero- theoretically it can take on nearly any
-    # value with little impact on the residuals, but it is most likely to be zero:
-    diag = np.diag(xtx)
-    below_limit = np.abs(diag) < 1e-3
-    # Robustness to outlier points:
-    n_nonzeros = np.count_nonzero(xT, axis=1)
-
-    to_zero = np.concatenate((np.where(below_limit)[0], np.where(n_nonzeros <= 2)[0]))
-
     try:
         xtx_inv_xt = np.dot(linalg.inv(xtx), xT)
         # xtx_inv_xt = linalg.solve(xtx, xT)
@@ -243,9 +239,6 @@ def compute_betas_local(
     if clip is not None:
         # Upper and lower bound to constrain betas and prevent numerical overflow:
         betas = np.clip(betas, -clip, clip)
-    # And set to zero with small offset for numerical overflow if the diagonal of the Gram matrix is below a certain
-    # threshold:
-    betas[to_zero] = 1e-20
 
     return betas, pseudoinverse, cov_inverse
 
@@ -295,7 +288,6 @@ def iwls(
         variance: Variance function for the distribution family. If None, will default to the default value for the
             specified distribution family.
         ridge_lambda: Ridge regularization parameter.
-        mask: Optional array of shape [n_features,]; if provided, final coefficients will be multiplied by mask values
 
     Returns:
         betas: Array of shape [n_features, 1]; regression coefficients
@@ -312,15 +304,16 @@ def iwls(
         inv: Array of shape [n_samples, n_samples]; the inverse covariance matrix (for Gaussian modeling) or the
             inverse Fisher matrix (for GLM models).
     """
-    # If y is all zeros, return all zeros:
+    # If y or x is all zeros, return all zeros:
     if spatial_weights is None:
-        if np.all(y == 0):
+        if np.all(y == 0) or np.all(x == 0):
             betas = np.zeros((x.shape[1], 1))
             y_hat = np.zeros((x.shape[0], 1))
             return betas, y_hat, None, None
     else:
+        xw = (x * spatial_weights).reshape(-1, 1)
         yw = (y * spatial_weights).reshape(-1, 1)
-        if np.all(yw == 0):
+        if np.all(yw == 0) or np.all(xw == 0):
             betas = np.zeros((x.shape[1], 1))
             y_hat = np.zeros_like(y)
             n_iter = 0
@@ -409,6 +402,7 @@ def iwls(
     betas[betas == 1e-6] = 0.0
     # Threshold coefficients where appropriate:
     betas[np.abs(betas) < threshold] = 0.0
+    # For robustness, more than one feature is required to
 
     if mod_distr == "gaussian":
         if spatial_weights is not None:

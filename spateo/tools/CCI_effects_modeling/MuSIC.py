@@ -22,7 +22,7 @@ import scipy
 from mpi4py import MPI
 from patsy import dmatrix
 from scipy.spatial.distance import cdist
-from scipy.stats import pearsonr
+from scipy.stats import spearmanr
 from sklearn.cluster import KMeans
 
 from ...logging import logger_manager as lm
@@ -618,7 +618,7 @@ class MuSIC:
             # For finding upstream associations with ligand
             self.setup_downstream()
 
-        elif self.mod_type in ["ligand", "receptor", "lr"]:
+        elif self.mod_type in ["ligand", "receptor", "lr", "niche"]:
             # Construct initial arrays for CCI modeling:
             self.define_sig_inputs()
 
@@ -693,6 +693,16 @@ class MuSIC:
                 # Check that all ligands can be found in the source AnnData object:
                 targets = [t for t in targets if t in adata.var_names]
 
+            # Else: targets = receptors:
+            elif self.custom_receptors_path is not None or self.custom_receptors is not None:
+                if self.custom_receptors_path is not None:
+                    with open(self.custom_receptors_path, "r") as f:
+                        targets = f.read().splitlines()
+                else:
+                    targets = self.custom_receptors
+                # Check that all receptors can be found in the source AnnData object:
+                targets = [t for t in targets if t in adata.var_names]
+
             # Else: targets = pathways:
             elif self.custom_pathways_path is not None or self.custom_pathways is not None:
                 if self.custom_pathways_path is not None:
@@ -709,7 +719,7 @@ class MuSIC:
                     "'custom_lig_path' or 'ligand' arguments."
                 )
 
-            # Define ligand/pathway expression array:
+            # Define ligand/receptor/pathway expression array:
             self.targets_expr = pd.DataFrame(
                 adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
                 index=adata.obs_names,
@@ -810,9 +820,13 @@ class MuSIC:
             self.feature_distance = np.where(self.X > 0, 1, 0)
             self.feature_distance = self.comm.bcast(self.feature_distance, root=0)
 
-    def define_sig_inputs(self, adata: Optional[anndata.AnnData] = None):
+    def define_sig_inputs(self, adata: Optional[anndata.AnnData] = None, recompute: bool = False):
         """For signaling-relevant models, define necessary quantities that will later be used to define the independent
-        variable array- the one-hot cell-type array, the ligand expression array and the receptor expression array."""
+        variable array- the one-hot cell-type array, the ligand expression array and the receptor expression array.
+
+        Args:
+            recompute: Re-calculate all quantities and re-save even if already-existing file can be found in path
+        """
         if adata is None:
             adata = self.adata.copy()
 
@@ -860,7 +874,10 @@ class MuSIC:
             database_pathways = set(self.lr_db["pathway"])
 
         # Check for existing design matrix:
-        if os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv")):
+        if (
+            os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"))
+            and not recompute
+        ):
             self.logger.info(
                 f"Found existing independent variable matrix, loading from"
                 f" {os.path.join(self.output_path, 'design_matrix', 'design_matrix.csv')}."
@@ -1540,6 +1557,28 @@ class MuSIC:
 
                         # Drop all columns at once
                         X_df.drop(list(cols_to_drop), axis=1, inplace=True)
+                        # Final check: if multiple columns have high degree of overlap in their ligand/receptor
+                        # combination, keep the most comprehensive one:
+                        # Split each column into left and right parts
+                        elements_left = [set(col.split(":")[0].split("/")) for col in X_df.columns]
+                        elements_right = [col.split(":")[1] for col in X_df.columns]
+
+                        cols_to_keep = []
+                        for i, col in enumerate(X_df.columns):
+                            # Keep column until proven otherwise:
+                            keep = True
+                            for j, other_col in enumerate(X_df.columns):
+                                if (
+                                    i != j
+                                    and elements_left[i].issubset(elements_left[j])
+                                    and elements_right[i] == elements_right[j]
+                                ):
+                                    keep = False
+                                    break
+                            if keep:
+                                cols_to_keep.append(col)
+
+                        X_df = X_df[cols_to_keep]
 
                 # self.logger.info(f"\n\nAfter final processing, final set of L:R features:\n {list(X_df.columns)}")
 
@@ -1877,10 +1916,8 @@ class MuSIC:
                     self.maxbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=50)
 
                 if self.distance_membrane_bound is not None and self.distance_secreted is not None:
-                    self.minbw = (
-                        self.distance_membrane_bound * 1.5 if self.kernel != "uniform" else self.distance_membrane_bound
-                    )
-                    self.maxbw = self.distance_secreted * 2 if self.kernel != "uniform" else self.distance_secreted
+                    self.minbw = self.distance_membrane_bound
+                    self.maxbw = self.distance_secreted * 1.5 if self.kernel != "uniform" else self.distance_secreted
                 else:
                     # Set minimum bandwidth to the distance to the smallest distance between neighboring points:
                     min_dist = np.min(
@@ -1895,9 +1932,9 @@ class MuSIC:
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
                 if self.mod_type == "downstream":
-                    # Check over the 20-50 nearest neighbors- compute distances such that each cell has this number
+                    # Check over the 10-50 nearest neighbors- compute distances such that each cell has this number
                     # on average:
-                    self.minbw = 20
+                    self.minbw = 10
                     self.maxbw = 50
 
                 if self.maxbw is None:
@@ -2044,20 +2081,23 @@ class MuSIC:
         if self.mod_type == "niche" or hasattr(self, "target"):
             if y[i] == 0:
                 cov = np.where(y == 0, 1, 0).reshape(-1)
+                celltype_i = self.ct_vec[i]
+                ct = np.where(self.ct_vec == celltype_i, 1, 0).reshape(-1)
             else:
                 cov = None
+                celltype_i = self.ct_vec[i]
+                ct = np.where(self.ct_vec == celltype_i, 1, 0).reshape(-1)
             expr_mat = None
-            celltype_i = self.ct_vec[i]
-            ct = np.where(self.ct_vec == celltype_i, 1, 0).reshape(-1)
         else:
             # Distance in "signaling space", conditioned on target expression and cell type:
             if y[i] == 0:
                 cov = np.where(y == 0, 1, 0).reshape(-1)
+                celltype_i = self.ct_vec[i]
+                ct = np.where(self.ct_vec == celltype_i, 1, 0).reshape(-1)
             else:
                 cov = None
+                ct = None
             expr_mat = self.feature_distance
-            celltype_i = self.ct_vec[i]
-            ct = np.where(self.ct_vec == celltype_i, 1, 0).reshape(-1)
         wi = get_wi(
             i,
             n_samples=len(X),
@@ -2603,17 +2643,13 @@ class MuSIC:
             X_orig = X
 
         # Cell type indicator:
-        cell_types = self.adata.obs[self.group_key]
+        if self.group_key is not None:
+            cell_types = self.adata.obs[self.group_key]
+        else:
+            cell_types = pd.Series(["NA"] * len(self.adata.obs), index=self.adata.obs.index)
         cat_to_num = {k: v + 1 for v, k in enumerate(cell_types.unique())}
         self.ct_vec = cell_types.map(cat_to_num).values
         self.ct_vec = self.comm.bcast(self.ct_vec, root=0)
-
-        # # Compute offset if included:
-        # if self.include_offset:
-        #     self.offset = library_scaling_factors(counts=self.adata.X, distr=self.distr)
-        # else:
-        #     self.offset = None
-        # self.offset = self.comm.bcast(self.offset, root=0)
 
         # Compute fit for each column of the dependent variable array individually- store each output array (if
         # applicable, i.e. if :param `multiscale` is True) and optimal bandwidth (also if applicable, i.e. if :param
@@ -2684,6 +2720,7 @@ class MuSIC:
                 X = X_orig[:, keep_indices]
             else:
                 X_labels = self.feature_names
+                X = X_orig.copy()
 
             # If subsampled, define the appropriate chunk of the right subsampled array for this process:
             if self.subsampled:
@@ -2711,7 +2748,7 @@ class MuSIC:
                     else:
                         # Compute the Pearson correlation coefficient for the subset
                         if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
-                            correlation = pearsonr(X_subset, y_subset)[0]
+                            correlation = spearmanr(X_subset, y_subset)[0]
                         else:
                             correlation = np.nan  # Not enough data points to compute correlation
 
@@ -2823,7 +2860,7 @@ class MuSIC:
             input: Input data to be predicted on.
             coeffs: Coefficients to be used in the prediction. If None, will attempt to load the coefficients learned
                 in the fitting process from file.
-            cell_types: Can be used to optionally provide cell types to constrain
+            cell_types: Can be used to optionally provide cell types to constrain prediction to
         """
         if input is None:
             input = self.X_df
@@ -2859,7 +2896,7 @@ class MuSIC:
 
                     # Subtract 1 from predictions for predictions to account for the pseudocount from model setup:
                     y_pred -= 1
-                    y_pred[y_pred < 0.0] = 0.0
+                    y_pred[y_pred < 1] = 0.0
 
                     # thresh = 1.01 if self.normalize else 0
                     # y_pred[y_pred <= thresh] = 0.0
@@ -3071,707 +3108,3 @@ class MuSIC:
                 all_intercepts = intercepts
 
         return all_intercepts
-
-
-# Variable-scale MuSIC:
-class VMuSIC(MuSIC):
-    """Modified version of the spatially weighted regression on spatial omics data with parallel processing,
-    enabling each feature to have its own distinct spatial scale (hence "Variable MuSIC"). Runs after being called from
-    the command line. NOTE: it is currently recommended to use this for Gaussian modeling only.
-
-    Args:
-        comm: MPI communicator object initialized with mpi4py, to control parallel processing operations
-        parser: ArgumentParser object initialized with argparse, to parse command line arguments for arguments
-            pertinent to modeling.
-
-    Attributes:
-        mod_type: The type of model that will be employed- this dictates how the data will be processed and
-            prepared. Options:
-                - "niche": Spatially-aware, uses categorical cell type labels as independent variables.
-                - "lr": Spatially-aware, essentially uses the combination of receptor expression in the "target" cell
-                    and spatially lagged ligand expression in the neighboring cells as independent variables.
-                - "ligand": Spatially-aware, essentially uses ligand expression in the neighboring cells as
-                    independent variables.
-                - "receptor": Uses receptor expression in the "target" cell as independent variables.
-
-
-        adata_path: Path to the AnnData object from which to extract data for modeling
-        csv_path: Can also be used to specify path to non-AnnData .csv object. Assumes the first three columns
-            contain x- and y-coordinates and then dependent variable values, in that order, with all subsequent
-            columns containing independent variable values.
-        normalize: Set True to perform library size normalization, to set total counts in each cell to the same
-            number (adjust for cell size).
-        smooth: Set True to correct for dropout effects by leveraging gene expression neighborhoods to smooth
-            expression. It is advisable not to do this if performing Poisson or negative binomial regression.
-        log_transform: Set True if log-transformation should be applied to expression. It is advisable not to do
-            this if performing Poisson or negative binomial regression.
-        normalize_signaling: Set True to minmax scale the final ligand expression array (for :attr `mod_type` =
-            "ligand"), or the final ligand-receptor array (for :attr `mod_type` = "lr"). This is recommended to
-            associate downstream expression with rarer/less prevalent signaling mechanisms.
-        target_expr_threshold: Only used if :param `mod_type` is "lr" or "ligand" and :param `targets_path` is not
-            given. When manually selecting targets, expression above a threshold percentage of cells will be used to
-            filter to a smaller subset of interesting genes. Defaults to 0.2.
-        multicollinear_threshold: Variance inflation factor threshold used to filter out multicollinear features. A
-            value of 5 or 10 is recommended.
-
-
-        custom_lig_path: Optional path to a .txt file containing a list of ligands for the model, separated by
-            newlines. Only used if :attr `mod_type` is "lr" or "ligand" (and thus uses ligand expression directly in
-            the inference). If not provided, will select ligands using a threshold based on expression
-            levels in the data.
-        custom_ligands: Optional list of ligands for the model, can be used as an alternative to :attr
-            `custom_lig_path`. Only used if :attr `mod_type` is "lr" or "ligand".
-        custom_rec_path: Optional path to a .txt file containing a list of receptors for the model, separated by
-            newlines. Only used if :attr `mod_type` is "lr" (and thus uses receptor expression directly in the
-            inference). If not provided, will select receptors using a threshold based on expression
-            levels in the data.
-        custom_receptors: Optional list of receptors for the model, can be used as an alternative to :attr
-            `custom_rec_path`. Only used if :attr `mod_type` is "lr".
-        custom_pathways_path: Rather than providing a list of receptors, can provide a list of signaling pathways-
-            all receptors with annotations in this pathway will be included in the model. Only used if :attr `mod_type`
-            is "lr".
-        custom_pathways: Optional list of signaling pathways for the model, can be used as an alternative to :attr
-            `custom_pathways_path`. Only used if :attr `mod_type` is "lr".
-        targets_path: Optional path to a .txt file containing a list of prediction target genes for the model,
-            separated by newlines. If not provided, targets will be strategically selected from the given receptors.
-        custom_targets: Optional list of prediction target genes for the model, can be used as an alternative to
-            :attr `targets_path`.
-        init_betas_path: Optional path to a .json file or .csv file containing initial coefficient values for the model
-            for each target variable. If encoded in .json, keys should be target gene names, values should be numpy
-            arrays containing coefficients. If encoded in .csv, columns should be target gene names. Initial
-            coefficients should have shape [n_features, ].
-
-
-        cci_dir: Full path to the directory containing cell-cell communication databases
-        species: Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
-                "human", "mouse".
-        output_path: Full path name for the .csv file in which results will be saved
-
-
-        coords_key: Key in .obsm of the AnnData object that contains the coordinates of the cells
-        group_key: Key in .obs of the AnnData object that contains the category grouping for each cell
-        covariate_keys: Can be used to optionally provide any number of keys in .obs or .var containing a continuous
-            covariate (e.g. expression of a particular TF, avg. distance from a perturbed cell, etc.)
-
-
-        bw: Used to provide previously obtained bandwidth for the spatial kernel. Consists of either a distance
-            value or N for the number of nearest neighbors. Pass "np.inf" if all other points should have the same
-            spatial weight.
-        minbw: For use in automated bandwidth selection- the lower-bound bandwidth to test.
-        maxbw: For use in automated bandwidth selection- the upper-bound bandwidth to test.
-
-
-        distr: Distribution family for the dependent variable; one of "gaussian", "poisson", "nb"
-        kernel: Type of kernel function used to weight observations; one of "bisquare", "exponential", "gaussian",
-            "quadratic", "triangular" or "uniform".
-
-
-        bw_fixed: Set True for distance-based kernel function and False for nearest neighbor-based kernel function
-        exclude_self: If True, ignore each sample itself when computing the kernel density estimation
-        fit_intercept: Set True to include intercept in the model and False to exclude intercept
-    """
-
-    def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser):
-        super().__init__(comm, parser)
-
-    def multiscale_backfitting(
-        self,
-        y: Optional[pd.DataFrame] = None,
-        X: Optional[np.ndarray] = None,
-    ):
-        """
-        Backfitting algorithm for MGWR, obtains parameter estimates and variate-specific bandwidths by iterating one
-        predictor while holding all others constant. Run before :func `fit` to obtain initial covariate-specific
-        bandwidths.
-
-        Reference: Fotheringham et al. 2017. Annals of AAG.
-
-        Args:
-            y: Optional dataframe, can be used to provide dependent variable array directly to the fit function. If
-                None, will use :attr `targets_expr` computed using the given AnnData object to create this (each
-                individual column will serve as an independent variable). Needed to be given as a dataframe so that
-                column(s) are labeled, so each result can be associated with a labeled dependent variable.
-            X: Optional array, can be used to provide dependent variable array directly to the fit function. If
-                None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
-        """
-        if self.comm.rank == 0:
-            self.logger.info("Multiscale Backfitting...")
-
-        if not self.set_up:
-            self.logger.info("Model has not yet been set up to run, running :func `SWR._set_up_model()` now...")
-            self._set_up_model()
-
-        if self.comm.rank == 0:
-            self.logger.info("Initialization complete.")
-
-        self.all_bws_history = {}
-        self.params_all_targets = {}
-        self.errors_all_targets = {}
-        self.predictions_all_targets = {}
-        # For linear models:
-        self.all_RSS = {}
-        self.all_TSS = {}
-
-        # For GLM models:
-        self.all_deviances = {}
-        self.all_log_likelihoods = {}
-
-        if y is None:
-            y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
-        else:
-            y_arr = y
-            y_arr = self.comm.bcast(y_arr, root=0)
-
-        if X is None:
-            X = self.X
-        else:
-            X = self.comm.bcast(X, root=0)
-
-        for target in y_arr.columns:
-            y = y_arr[target].to_frame()
-            y_label = target
-
-            # Find features with associations with the target- do not need to subset because the fitting function
-            # will take care of this, but do this to get the correct feature names:
-            # If model is based on ligands/receptors: filter X based on the prior knowledge network:
-            if self.mod_type in ["lr", "receptor", "ligand"]:
-                target_row = self.grn.loc[target]
-                target_TFs = target_row[target_row == 1].index.tolist()
-                temp = self.r_tf_db[self.r_tf_db["tf"].isin(target_TFs)]
-                target_receptors = temp["receptor"].unique().tolist()
-
-                if self.mod_type == "lr" or self.mod_type == "receptor":
-                    # Keep only the columns of X that contain any of the receptors for this target:
-                    keep_indices = [
-                        i for i, feat in enumerate(self.feature_names) if any(r in feat for r in target_receptors)
-                    ]
-                    self.X_labels = [self.feature_names[idx] for idx in keep_indices]
-                elif self.mod_type == "ligand":
-                    # Ligands that bind to the receptors for this target:
-                    target_ligands = []
-                    for receptor in target_receptors:
-                        filtered_df = self.lr_db[self.lr_db["to"] == receptor]
-                        ligands = list(set(filtered_df["from"]))
-                        target_ligands.extend(ligands)
-                    keep_indices = [
-                        i for i, feat in enumerate(self.feature_names) if any(l in feat for l in target_ligands)
-                    ]
-                    self.X_labels = [self.feature_names[idx] for idx in keep_indices]
-            else:
-                self.X_labels = self.feature_names
-                keep_indices = np.arange(self.n_features)
-            n_features = len(keep_indices)
-            self.X_labels = self.comm.bcast(self.X_labels, root=0)
-
-            if self.subsampled:
-                n_samples = self.n_samples_subsampled[target]
-                indices = self.subsampled_indices[y_label] if self.group_subset is None else self.subsampled_indices
-            elif self.subset:
-                n_samples = self.n_samples_subset
-            else:
-                n_samples = self.n_samples
-                indices = np.arange(self.n_samples)
-
-            X = X[indices, :]
-            y = y.iloc[indices, :]
-            coords = self.coords[indices, :]
-
-            # Initialize parameters, with a uniform initial bandwidth for all features- set fit_predictor False to
-            # fit model under the assumption that y is a Poisson-distributed dependent variable:
-            self.logger.info(f"Finding uniform initial bandwidth for all features for target {target}...")
-            all_betas, self.all_bws_init = self.fit(y, X, multiscale=True, fit_predictor=False, verbose=False)
-
-            # Initial values- multiply input by the array corresponding to the correct target- note that this is
-            # denoted as the predicted dependent variable, but is actually the linear predictor in the case of GLMs:
-            y_pred_init = X[:, keep_indices] * all_betas[target]
-            all_y_pred = np.sum(y_pred_init, axis=1)
-
-            if self.distr != "gaussian":
-                y_true = self.distr_obj.get_predictors(y.values).reshape(-1)
-            else:
-                y_true = y.values.reshape(-1)
-
-            error = y_true - all_y_pred.reshape(-1)
-            self.logger.info(f"Initial RSS: {np.sum(error ** 2):.3f}")
-            if self.distr != "gaussian":
-                # Small errors <-> large negatives in log space, but in reality these are negligible- set these to 0:
-                error[error < 0] = 0
-                error = self.distr_obj.get_predictors(error)
-                error[error < -1] = 0
-            # error = np.zeros(y.values.shape[0])
-
-            bws = [None] * n_features
-            bw_plateau_counter = 0
-            bw_history = []
-            error_history = []
-            y_pred_history = []
-            score_history = []
-
-            n_iters = max(200, self.max_iter)
-            for iter in range(1, n_iters + 1):
-                new_ys = np.empty(y_pred_init.shape, dtype=np.float64)
-                new_betas = np.empty(y_pred_init.shape, dtype=np.float64)
-
-                for n_feat in range(n_features):
-                    # Use each individual feature to predict the response- note y is set up as a DataFrame because in
-                    # other cases column names/target names are taken from y:
-                    y_mod = y_pred_init[:, n_feat] + error
-                    temp_y = pd.DataFrame(y_mod.reshape(-1, 1), columns=[target])
-                    temp_X = (X[:, n_feat]).reshape(-1, 1)
-
-                    # Check if the bandwidth has plateaued for all features in this iteration:
-                    if bw_plateau_counter > self.patience:
-                        # If applicable, i.e. if model if one of the signaling models for which the X array varies with
-                        # bandwidth, update X with the up-to-date version that leverages the most recent bandwidth
-                        # estimations:
-                        if X is None:
-                            temp_X = (self.X[:, n_feat]).reshape(-1, 1)
-                        else:
-                            temp_X = X[:, n_feat].reshape(-1, 1)
-                        # Use the bandwidths from the previous iteration before plateau was determined to have been
-                        # reached:
-                        bw = bws[n_feat]
-                        mask_indices = np.where((temp_y == 0) & np.all(np.abs(temp_X) > 1e-3, axis=1))[0]
-                        betas = self.mpi_fit(
-                            temp_y.values,
-                            temp_X,
-                            X_labels=self.X_labels,
-                            y_label=target,
-                            bw=bw,
-                            coords=coords,
-                            mask_indices=mask_indices,
-                            final=True,
-                            fit_predictor=True,
-                            multiscale=True,
-                        )
-                    else:
-                        betas, bw_dict = self.fit(
-                            temp_y,
-                            temp_X,
-                            multiscale=True,
-                            fit_predictor=True,
-                            verbose=False,
-                        )
-                        # Get coefficients for this particular target:
-                        betas = betas[target]
-
-                    # Update the dependent prediction (again not for GLMs, this quantity is instead the linear
-                    # predictor) and betas:
-                    new_y = (temp_X * betas).reshape(-1)
-                    error = y_mod - new_y
-                    new_ys[:, n_feat] = new_y
-                    new_betas[:, n_feat] = betas.reshape(-1)
-                    # Update running list of bandwidths for this feature:
-                    bws[n_feat] = bw_dict[target]
-
-                # Check if ALL bandwidths remain the same between iterations:
-                if (iter > 1) and np.all(bw_history[-1] == bws):
-                    bw_plateau_counter += 1
-                else:
-                    bw_plateau_counter = 0
-
-                # Compute normalized sum-of-squared-errors-of-prediction using the updated predicted values:
-                bw_history.append(deepcopy(bws))
-                error_history.append(deepcopy(error))
-                y_pred_history.append(deepcopy(new_ys))
-                SSE = np.sum((new_ys - y_pred_init) ** 2) / n_samples
-                TSS = np.sum(np.sum(new_ys, axis=1) ** 2)
-                rmse = (SSE / TSS) ** 0.5
-                score_history.append(rmse)
-
-                if self.comm.rank == 0:
-                    self.logger.info(f"Target: {target}, Iteration: {iter}, Score: {rmse:.5f}")
-                    self.logger.info(f"Bandwidths: {bws}")
-
-                if rmse < self.tolerance:
-                    self.logger.info(f"For target {target}, multiscale optimization converged after {iter} iterations.")
-                    break
-
-                # Check for local minimum:
-                if iter > 2:
-                    if score_history[-3] >= score_history[-2] and score_history[-1] >= score_history[-2]:
-                        self.logger.info(f"Local minimum reached for target {target} after {iter} iterations.")
-                        new_ys = y_pred_history[-2]
-                        error = error_history[-2]
-                        bw_history = bw_history[:-1]
-                        rmse = score_history[-2]
-                        self.logger.info(f"Target: {target}, Iteration: {iter-1}, Score: {rmse:.5f}")
-                        break
-
-                # Use the new predicted values as the initial values for the next iteration:
-                y_pred_init = new_ys
-
-            # Final estimated values:
-            y_pred = new_ys
-            y_pred = y_pred.sum(axis=1)
-
-            bw_history = np.array(bw_history)
-            self.all_bws_history[target] = bw_history
-
-            # Compute diagnostics for current target using the final errors:
-            if self.distr == "gaussian":
-                RSS = np.sum(error**2)
-                self.all_RSS[target] = RSS
-                # Total sum of squares:
-                TSS = np.sum((y.values - np.mean(y.values)) ** 2)
-                self.all_TSS[target] = TSS
-                r_squared = 1 - RSS / TSS
-
-                # For saving outputs:
-                header = "index,residual,"
-            else:
-                r_squared = None
-
-            if self.distr == "poisson" or self.distr == "nb":
-                # Map linear predictors to the response variable:
-                y_pred = self.distr_obj.predict(y_pred)
-                error = y.values.reshape(-1) - y_pred
-                self.logger.info(f"Final RSS: {np.sum(error ** 2):.3f}")
-
-                # Deviance:
-                deviance = self.distr_obj.deviance(y.values.reshape(-1), y_pred)
-                self.all_deviances[target] = deviance
-                ll = self.distr_obj.log_likelihood(y.values.reshape(-1), y_pred)
-                # Reshape if necessary:
-                if self.n_features > 1:
-                    ll = ll.reshape(-1, 1)
-                self.all_log_likelihoods[target] = ll
-
-                # For saving outputs:
-                header = "index,deviance,"
-            else:
-                deviance = None
-            # Store some of the final values of interest:
-            self.params_all_targets[target] = new_betas
-            self.errors_all_targets[target] = error
-            self.predictions_all_targets[target] = y_pred
-
-            # Save results without standard errors or influence measures:
-            if self.comm.rank == 0 and self.multiscale_params_only:
-                varNames = self.X_labels
-                # Save intercept and parameter estimates:
-                for x in varNames:
-                    header += "b_" + x + ","
-
-                # Return output diagnostics and save result:
-                self.output_diagnostics(None, None, r_squared, deviance)
-                output = np.hstack([indices.reshape(-1, 1), error.reshape(-1, 1), self.params_all_targets[target]])
-                self.save_results(header, output, label=y_label)
-
-    def chunk_compute_metrics(
-        self,
-        y: np.ndarray,
-        X: Optional[np.ndarray] = None,
-        chunk_id: int = 0,
-        target_label: Optional[str] = None,
-        coords: Optional[np.ndarray] = None,
-        mask_indices: Optional[np.ndarray] = None,
-    ):
-        """Compute multiscale inference by chunks to reduce memory footprint- used to calculate metrics to estimate
-        the importance of each feature to the variance in the data.
-        Reference: Li and Fotheringham, 2020. IJGIS and Yu et al., 2019. GA.
-
-        Args:
-            X: Optional array, can be used to provide dependent variable array directly to the fit function. If
-                None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
-                Must be the same X array as was used to fit the model (i.e. the same X given to :func
-                `multiscale_backfitting`).
-            y: Dependent variable array directly to the fit function.
-            chunk_id: Numerical index of the partition to be computed
-            target_label: Name of the target variable to compute. Must be one of the keys of the :attr `all_bws_init`
-                dictionary.
-            coords: Coordinates of each point in the X array
-            mask_indices: Optional array used to specify indices to ignore in the fitting process
-
-
-        Returns:
-            ENP_chunk: Effective number of parameters for the desired chunk
-            lvg_chunk: Only returned if model is a Gaussian regression model- leverage values b/w the predicted values
-                and the response variable for the desired chunk
-            cov_chunk: Only returned if model is a GLM- covariance matrix for the desired chunk
-        """
-
-        if X is None:
-            X = self.X
-
-        # Start from the initial bandwidth, constant across features:
-        bw = self.all_bws_init[target_label]
-        bw_history = self.all_bws_history[target_label]
-
-        chunk_size = int(np.ceil(float(self.n_samples / self.n_chunks)))
-        # Vector storing ENP for each predictor:
-        ENP_chunk = np.zeros(X.shape[1])
-        # Array storing leverages for each predictor if the model is Gaussian (for each sample because of the
-        # spatially-weighted nature of the regression):
-        if self.distr == "gaussian":
-            lvg_chunk = np.zeros((self.n_samples, X.shape[1]))
-
-        chunk_index = np.arange(self.n_samples)[chunk_id * chunk_size : (chunk_id + 1) * chunk_size]
-
-        # Partial hat matrix:
-        init_partial_hat = np.zeros((self.n_samples, len(chunk_index)))
-        init_partial_hat[chunk_index, :] = np.eye(len(chunk_index))
-        partial_hat = np.zeros((self.n_samples, len(chunk_index), X.shape[1]))
-
-        # Compute coefficients for each chunk:
-        for i in range(self.n_samples):
-            index = self.indices[i]
-
-            if self.mod_type == "niche" or self.subsampled:
-                cov = None
-            else:
-                # Distance in "signaling space", conditioned on target expression (matched zero/nonzero with the point in
-                # question):
-                if y[i] > 0:
-                    cov = None
-                else:
-                    cov = np.where(y == 0, 1, 0).reshape(-1)
-            wi = get_wi(
-                index,
-                n_samples=len(X),
-                cov=cov,
-                coords=coords,
-                expr_mat=self.feature_distance,
-                fixed_bw=self.bw_fixed,
-                kernel=self.kernel,
-                bw=bw,
-                use_expression_neighbors=self.use_expression_neighbors,
-                jaccard_threshold=self.target_expr_threshold,
-            ).reshape(-1, 1)
-
-            wi[mask_indices] = 0.0
-
-            xT = (X * wi).T
-            # Reconstitute the response-input mapping, but only for the current chunk:
-            proj = np.linalg.solve(xT.dot(X), xT).dot(init_partial_hat).T
-
-            # Estimate the hat matrix, but only for the current chunk:
-            partial_hat_i = proj * X[i]
-            partial_hat[i, :, :] = partial_hat_i
-
-        error = init_partial_hat - np.sum(partial_hat, axis=2)
-
-        for i in range(bw_history.shape[0]):
-            for j in range(X.shape[1]):
-                proj_j_old = partial_hat[:, :, j] + error
-                X_j = X[:, j]
-                chunk_size_j = int(np.ceil(float(self.n_samples / self.n_chunks)))
-                for n in range(self.n_chunks):
-                    chunk_index_temp = np.arange(self.n_samples)[n * chunk_size_j : (n + 1) * chunk_size_j]
-                    # Initialize response-input mapping:
-                    proj_j = np.empty((len(chunk_index_temp), self.n_samples))
-                    # Compute the hat matrix for the current chunk:
-                    for k in range(len(chunk_index_temp)):
-                        index = chunk_index_temp[k]
-
-                        if self.mod_type == "niche" or self.subsampled:
-                            cov = None
-                        else:
-                            # Distance in "signaling space", conditioned on target expression (matched zero/nonzero with the point in
-                            # question):
-                            if y[i] > 0:
-                                cov = np.where(y > 0, 1, 0).reshape(-1)
-                            else:
-                                cov = np.where(y == 0, 1, 0).reshape(-1)
-                        wi = get_wi(
-                            index,
-                            n_samples=len(X),
-                            cov=cov,
-                            coords=coords,
-                            expr_mat=self.feature_distance,
-                            fixed_bw=self.bw_fixed,
-                            kernel=self.kernel,
-                            bw=bw,
-                            use_expression_neighbors=self.use_expression_neighbors,
-                            jaccard_threshold=self.target_expr_threshold,
-                        ).reshape(-1, 1)
-
-                        wi[mask_indices] = 0.0
-
-                        xw = X_j * wi
-                        proj_j[k, :] = X_j[index] / np.sum(xw * X_j) * xw
-
-                    # Update the hat matrix:
-                    partial_hat[chunk_index_temp, :, j] = proj_j.dot(proj_j_old)
-
-                error = proj_j_old - partial_hat[:, :, j]
-
-        # Compute leverages for each predictor (if applicable- model assumes Gaussianity), Hessian matrix (if
-        # applicable- model assumes non-Gaussianity) and effective number of parameters of the model:
-        for i in range(len(chunk_index)):
-            ENP_chunk += partial_hat[chunk_index[i], i, :]
-        if self.distr == "gaussian":
-            for j in range(X.shape[1]):
-                lvg_chunk[:, j] += ((partial_hat[:, :, j] / X[:, j].reshape(-1, 1)) ** 2).sum(axis=1)
-
-            return ENP_chunk, lvg_chunk
-        else:
-            return ENP_chunk
-
-    def multiscale_compute_metrics(self, X: Optional[np.ndarray] = None, n_chunks: int = 2):
-        """Compute multiscale inference and output results.
-
-        Args:
-            X: Optional array, can be used to provide dependent variable array directly to the fit function. If
-                None, will use :attr `X` computed using the given AnnData object and the type of the model to create.
-                Must be the same X array as was used to fit the model (i.e. the same X given to :func
-                `multiscale_backfitting`).
-            n_chunks: Number of partitions comprising each covariate-specific hat matrix.
-        """
-        if X is None:
-            X = self.X
-
-        if self.multiscale_params_only:
-            self.logger.warning(
-                "Chunked computations will not be performed because `multiscale_params_only` is set to True, "
-                "so only parameter values (and no other metrics) will be saved."
-            )
-            return
-
-        # Check that initial bandwidths and bandwidth history are present (e.g. that :func `multiscale_backfitting` has
-        # been called):
-        if not hasattr(self, "all_bws_history"):
-            raise ValueError(
-                "Initial bandwidths must be computed before calling `multiscale_fit`. Run :func "
-                "`multiscale_backfitting` first."
-            )
-
-        if self.comm.rank == 0:
-            self.logger.info(f"Computing model metrics, using {n_chunks} chunks...")
-
-        self.n_chunks = self.comm.size * n_chunks
-        self.chunks = np.arange(self.comm.rank * n_chunks, (self.comm.rank + 1) * n_chunks)
-
-        y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
-        for target_label in y_arr.columns:
-            # sample_names = self.sample_names if not self.subsampled else self.fitted_sample_names[target_label]
-            # Fitted coefficients, errors and predictions:
-            parameters = self.params_all_targets[target_label]
-            predictions = self.predictions_all_targets[target_label]
-            errors = self.errors_all_targets[target_label]
-            y_label = target_label
-
-            # If model is based on ligands/receptors: filter X based on the prior knowledge network:
-            if self.mod_type in ["lr", "receptor", "ligand"]:
-                target_row = self.grn.loc[target_label]
-                target_TFs = target_row[target_row == 1].index.tolist()
-                temp = self.r_tf_db[self.r_tf_db["tf"].isin(target_TFs)]
-                target_receptors = temp["receptor"].unique().tolist()
-
-                if self.mod_type == "lr" or self.mod_type == "receptor":
-                    # Keep only the columns of X that contain any of the receptors for this target:
-                    keep_indices = [
-                        i for i, feat in enumerate(self.feature_names) if any(r in feat for r in target_receptors)
-                    ]
-                    self.X_labels = [self.feature_names[idx] for idx in keep_indices]
-                elif self.mod_type == "ligand":
-                    # Ligands that bind to the receptors for this target:
-                    target_ligands = []
-                    for receptor in target_receptors:
-                        filtered_df = self.lr_db[self.lr_db["to"] == receptor]
-                        ligands = list(set(filtered_df["from"]))
-                        target_ligands.extend(ligands)
-                    keep_indices = [
-                        i for i, feat in enumerate(self.feature_names) if any(l in feat for l in target_ligands)
-                    ]
-                    self.X_labels = [self.feature_names[idx] for idx in keep_indices]
-            else:
-                self.X_labels = self.feature_names
-                keep_indices = np.arange(self.n_features)
-
-            self.X_labels = self.comm.bcast(self.X_labels, root=0)
-
-            # If subsampling was done, check for the number of fitted samples for the right target:
-            if self.subsampled:
-                self.n_samples = self.n_samples_subsampled[target_label]
-                self.indices = self.subsampled_indices[target_label]
-                coords = self.coords[self.indices, :]
-            elif self.subset:
-                self.n_samples = self.n_samples_subset
-                self.indices = self.subset_indices
-                coords = self.coords[self.indices, :]
-            else:
-                self.indices = np.arange(self.n_samples)
-                coords = self.coords
-
-            X = X[self.indices, self.X_labels]
-            mask_indices = np.where(
-                (y_arr[target_label].iloc[self.indices].values == 0) & np.all(np.abs(X) > 1e-3, axis=1)
-            )[0]
-
-            # Lists to store the results of each chunk for this variable (lvg list only used if Gaussian,
-            # Hessian list only used if non-Gaussian):
-            ENP_list = []
-            lvg_list = []
-
-            for chunk in self.chunks:
-                if self.distr == "gaussian":
-                    ENP_chunk, lvg_chunk = self.chunk_compute_metrics(
-                        X, chunk_id=chunk, target_label=target_label, coords=coords, mask_indices=mask_indices
-                    )
-                    ENP_list.append(ENP_chunk)
-                    lvg_list.append(lvg_chunk)
-                else:
-                    ENP_chunk = self.chunk_compute_metrics(
-                        X, chunk_id=chunk, target_label=target_label, coords=coords, mask_indices=mask_indices
-                    )
-                    ENP_list.append(ENP_chunk)
-
-            # Gather results from all chunks:
-            ENP_list = np.array(self.comm.gather(ENP_list, root=0))
-            if self.distr == "gaussian":
-                lvg_list = np.array(self.comm.gather(lvg_list, root=0))
-
-            if self.comm.rank == 0:
-                # Compile results from all chunks to get the estimated number of parameters for this response variable:
-                ENP = np.sum(np.vstack(ENP_list), axis=0)
-                # Total estimated parameters:
-                ENP_total = np.sum(ENP)
-
-                if self.distr == "gaussian":
-                    # Compile results from all chunks to get the leverage matrix for this response variable:
-                    lvg = np.sum(np.vstack(lvg_list), axis=0)
-
-                    # Get sums-of-squares corresponding to this feature:
-                    RSS = self.all_RSS[target_label]
-                    TSS = self.all_TSS[target_label]
-                    # Residual variance:
-                    sigma_squared = RSS / (self.n_samples - ENP)
-                    # R-squared:
-                    r_squared = 1 - RSS / TSS
-                    # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_linear(RSS, ENP_total, n_samples=self.n_samples)
-                    # Scale leverages by the residual variance to compute standard errors:
-                    standard_error = np.sqrt(lvg * sigma_squared)
-                    self.output_diagnostics(aicc, ENP_total, r_squared=r_squared, deviance=None, y_label=y_label)
-
-                    header = "index,residual,"
-                    outputs = np.hstack([self.indices, errors.reshape(-1, 1), parameters, standard_error])
-
-                    varNames = self.X_labels
-                    # Save intercept and parameter estimates:
-                    for x in varNames:
-                        header += "b_" + x + ","
-                    for x in varNames:
-                        header += "se_" + x + ","
-
-                    self.save_results(outputs, header, label=y_label)
-
-                if self.distr == "poisson" or self.distr == "nb":
-                    # Get deviances corresponding to this feature:
-                    deviance = self.all_deviances[target_label]
-                    ll = self.all_log_likelihoods[target_label]
-
-                    # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_glm(ll, ENP_total, n_samples=self.n_samples)
-                    self.output_diagnostics(aicc, ENP_total, r_squared=None, deviance=deviance, y_label=y_label)
-
-                    header = "index,prediction,"
-                    outputs = np.hstack([self.indices.reshape(-1, 1), predictions.reshape(-1, 1), parameters])
-
-                    varNames = self.X_labels
-                    # Save intercept and parameter estimates:
-                    for x in varNames:
-                        header += "b_" + x + ","
-
-                    self.save_results(outputs, header, label=y_label)

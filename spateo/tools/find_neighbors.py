@@ -331,9 +331,17 @@ class Kernel(object):
             self.dist_vector = local_dist(data[i], data).reshape(-1)
             self.function = function.lower()
 
+        if fixed:
+            self.bandwidth = float(bw)
+        else:
+            if exclude_self:
+                self.bandwidth = np.partition(self.dist_vector, int(bw) + 1)[int(bw) + 1] * eps
+            else:
+                self.bandwidth = np.partition(self.dist_vector, int(bw))[int(bw)] * eps
+
         max_dist = np.max(self.dist_vector)
         if cov is not None and ct is not None:
-            # If condition is met, compare to samples of the same cell type if they also meet this condition:
+            # If condition is met, compare to samples of the same cell type:
             if cov[i] == 1:
                 self.dist_vector[ct != ct[i]] = max_dist
         elif cov is not None and ct is not None:
@@ -342,14 +350,6 @@ class Kernel(object):
         elif ct is not None:
             # Compare to samples of the same cell type:
             self.dist_vector[ct != ct[i]] = max_dist
-
-        if fixed:
-            self.bandwidth = float(bw)
-        else:
-            if exclude_self:
-                self.bandwidth = np.partition(self.dist_vector, int(bw) + 1)[int(bw) + 1] * eps
-            else:
-                self.bandwidth = np.partition(self.dist_vector, int(bw))[int(bw)] * eps
 
         bw_dist = self.dist_vector / self.bandwidth
         # Exclude self as a neighbor:
@@ -363,10 +363,20 @@ class Kernel(object):
 
         # Set density to zero if below threshold:
         self.kernel[self.kernel < threshold] = 0
+        n_neighbors = np.count_nonzero(self.kernel)
+
+        if cov is not None:
+            # If there are outlier samples that do not match condition of this sample within the neighborhood,
+            # set their weights to zero- set this threshold number to 1/10 of the number of neighbors:
+            thresh = int(0.1 * n_neighbors) if exclude_self else int(0.1 * n_neighbors + 1)
+            if np.sum(cov[self.kernel > 0] == 0) < thresh:
+                self.kernel[(cov == 0) & (self.kernel > 0)] = 0
+
+        n_neighbors = np.count_nonzero(self.kernel)
 
         # Normalize the kernel by the number of non-zero neighbors, if applicable:
         if normalize_weights:
-            self.kernel = self.kernel / np.count_nonzero(self.kernel)
+            self.kernel = self.kernel / n_neighbors
 
         if sparse_array:
             self.kernel = scipy.sparse.csr_matrix(self.kernel)

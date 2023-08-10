@@ -8,8 +8,7 @@ import numpy as np
 from mpi4py import MPI
 
 from ...logging import logger_manager as lm
-from .MuSIC import MuSIC, VMuSIC
-from .MuSIC_upstream import MuSIC_target_selector
+from .MuSIC import MuSIC
 
 np.random.seed(888)
 random.seed(888)
@@ -93,7 +92,7 @@ def define_spateo_argparse(**kwargs):
 
 
         coords_key: Entry in :attr:`adata` .obsm that contains spatial coordinates. Defaults to "spatial".
-        group_key: Entry in :attr:`adata` .obs that contains cell type labels. Defaults to "cell_type".
+        group_key: Entry in :attr:`adata` .obs that contains cell type labels. Required for 'mod_type' = "niche".
         group_subset: Subset of cell types to include in the model (provided as a whitespace-separated list in
             command line). If given, will consider only cells of these types in modeling. Defaults to all cell types.
         covariate_keys: Entries in :attr:`adata` .obs or :attr:`adata` .var that contain covariates to include
@@ -286,7 +285,7 @@ def define_spateo_argparse(**kwargs):
             "default": "cell_type",
             "type": str,
             "help": "Key to entry in .obs containing cell type or other category labels. Required if 'mod_type' is "
-            "'niche' or 'slice'.",
+            "'niche'.",
         },
         "-group_subset": {
             "nargs": "+",
@@ -617,9 +616,7 @@ if __name__ == "__main__":
         "-group_key",
         default="cell_type",
         type=str,
-        help="Key to entry in .obs containing cell type "
-        "or other category labels. Required if "
-        "'mod_type' is 'niche' or 'slice'.",
+        help="Key to entry in .obs containing cell type or other category labels.",
     )
     parser.add_argument(
         "-group_subset",
@@ -849,21 +846,10 @@ if __name__ == "__main__":
         swr_selector = MuSIC_target_selector(parser)
         swr_selector.select_features()
 
-    if parser.parse_args().multiscale:
-        print(
-            "Multiscale algorithm may be computationally intensive for large number of features- if this is the "
-            "case, it is advisable to reduce the number of parameters."
-        )
-        multiscale_model = VMuSIC(comm, parser)
-        multiscale_model.multiscale_backfitting()
-        multiscale_model.multiscale_compute_metrics(n_chunks=int(n_multiscale_chunks))
-        multiscale_model.predict_and_save()
-
-    else:
-        swr_model = MuSIC(comm, parser)
-        swr_model._set_up_model()
-        swr_model.fit()
-        swr_model.predict_and_save()
+    swr_model = MuSIC(comm, parser)
+    swr_model._set_up_model()
+    swr_model.fit()
+    swr_model.predict_and_save()
 
     t_last = MPI.Wtime()
 

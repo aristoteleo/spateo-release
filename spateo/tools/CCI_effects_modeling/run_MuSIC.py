@@ -350,7 +350,7 @@ def run(
         adata_path: Path to AnnData object containing gene expression data
         coords_key: Key to entry in .obs containing x- and y-coordinates
         group_key: Key to entry in .obs containing cell type or other category labels. Required if 'mod_type' is
-            'niche' or 'slice'.
+            'niche'.
         csv_path: Can be used to provide a .csv file, containing gene expression data or any other kind of data.
             Assumes the first three columns contain x- and y-coordinates and then dependent variable values,
             in that order.
