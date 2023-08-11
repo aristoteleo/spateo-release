@@ -318,6 +318,7 @@ def _mask_from_label_prior(
     labelA = pd.DataFrame(adataA.obs[label_key].values, columns=[label_key])
     labelB = pd.DataFrame(adataB.obs[label_key].values, columns=[label_key])
     
+    
     # get the intersect and different label
     cateA = labelA[label_key].astype('category').cat.categories
     cateB = labelB[label_key].astype('category').cat.categories
