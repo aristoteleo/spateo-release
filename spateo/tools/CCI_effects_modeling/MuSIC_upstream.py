@@ -3,38 +3,30 @@ Functionalities to aid in feature selection to characterize signaling patterns f
 list of signaling molecules (ligands or receptors) and/or target genes
 """
 import argparse
-import multiprocessing
 import os
-import re
-import sys
-from functools import partial
-from multiprocessing import Pool
-from typing import List, Optional, Union
+import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from itertools import combinations
+from typing import List, Literal, Optional, Union
 
 import anndata
 import numpy as np
 import pandas as pd
-import scipy
 from mpi4py import MPI
-from scipy.stats import mannwhitneyu
-from sklearn.inspection import permutation_importance
-from sklearn.metrics import r2_score
-from sklearn.utils import check_random_state
+from scipy.stats import percentileofscore
 
 from ...logging import logger_manager as lm
-from ...preprocessing import log1p, normalize_total
-from ...preprocessing.normalize import factor_normalization
-from ..find_neighbors import get_wi, neighbors
-from ..gene_expression_variance import get_highvar_genes_sparse
+from ..find_neighbors import find_bw_for_n_neighbors
 from .MuSIC import MuSIC
-from .regression_utils import multicollinearity_check, multitesting_correction, smooth
+from .regression_utils import multitesting_correction
 from .SWR_mpi import define_spateo_argparse
 
 
 # ---------------------------------------------------------------------------------------------------
 # Selection of targets and signaling regulators
 # ---------------------------------------------------------------------------------------------------
-class MuSIC_molecule_selector(MuSIC):
+class MuSIC_Molecule_Selector(MuSIC):
     """Various methods to select initial targets or predictors for intercellular analyses.
 
     Args:
@@ -105,88 +97,162 @@ class MuSIC_molecule_selector(MuSIC):
 
     def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
         super().__init__(comm, parser, args_list, verbose=False)
-        self.logger = lm.get_main_logger()
 
-        self.parser = parser
-        self.comm = MPI.COMM_WORLD
+        self.load_and_process(upstream=True)
 
-        self.parse_args()
-
-    def parse_args(self):
-        """
-        Parse command line arguments for arguments pertinent to modeling.
-        """
-        self.arg_retrieve = self.parser.parse_args()
-        self.mod_type = self.arg_retrieve.mod_type
-        if self.mod_type not in ["niche", "lr", "ligand", "receptor"]:
-            raise ValueError("Invalid model type provided. Must be one of 'niche', 'lr', 'ligand', or 'receptor'.")
-        self.distr = self.arg_retrieve.distr
-
-        self.adata_path = self.arg_retrieve.adata_path
-        self.adata = anndata.read_h5ad(self.adata_path)
-
-        self.cci_dir = self.arg_retrieve.cci_dir
-        self.species = self.arg_retrieve.species
-        self.output_path = self.arg_retrieve.output_path
-        if self.output_path is None:
-            raise ValueError("Must provide an output path for the results file, of the form 'path/to/file.csv'.")
-        self.custom_ligands_path = self.arg_retrieve.custom_lig_path
-        self.custom_ligands = self.arg_retrieve.ligand
-        self.custom_receptors_path = self.arg_retrieve.custom_rec_path
-        self.custom_receptors = self.arg_retrieve.receptor
-        self.custom_pathways_path = self.arg_retrieve.custom_pathways_path
-        self.custom_pathways = self.arg_retrieve.pathway
-        self.targets_path = self.arg_retrieve.targets_path
-        self.custom_targets = self.arg_retrieve.target
-
-        self.normalize = self.arg_retrieve.normalize
-        self.smooth = self.arg_retrieve.smooth
-        self.log_transform = self.arg_retrieve.log_transform
-        self.target_expr_threshold = self.arg_retrieve.target_expr_threshold
-        self.r_squared_threshold = self.arg_retrieve.r_squared_threshold
-
-        self.coords_key = self.arg_retrieve.coords_key
-        self.group_key = self.arg_retrieve.group_key
-        self.group_subset = self.arg_retrieve.group_subset
-
-        self.n_neighbors = self.arg_retrieve.n_neighbors
-        self.bw_fixed = self.arg_retrieve.bw_fixed
-
-    def find_targets(self):
-        """Find genes that may serve as interesting targets."""
-
-    def find_predictors(
-        self,
-        targets: Union[str, List[str]],
-        pct_coverage: Optional[float] = 0.9,
-        min_n_receptors: int = 2,
-        nontarget_expr_percentage_threshold: float = 0.4,
-        save_id: Optional[str] = None,
-        **kwargs,
-    ):
-        """Find ligands and receptors for modeling efforts. Will also suggest targets from among the given targets
-        based on the uniqueness of the found ligand-receptor signature.
+    def find_targets_single(
+        self, X: pd.DataFrame, col: str, method: Optional[str] = None, significance_threshold: float = 0.05
+    ) -> Union[None, List[str]]:
+        """For a given feature column, ranks target genes based on degree of cooccurence with the feature. Will
+        assume the name of a receptor occurs somewhere in the column name.
 
         Args:
-            pct_coverage: Will adjust thresholds until this percentage of expressing cells have at least one
-                interaction associated (if possible). Will include receptors in the order of largest -> smallest
-                difference in the percentage of target-expressing cells with that receptor vs. the percentage of
-                non-target-expressing cells with that receptor.
-            min_n_receptors: Minimum number of receptors to find- if threshold percentage filter is not met for a
-                sufficient number of receptors, will relax filter until threshold is met.
-            nontarget_expr_percentage: Percentage of non-target-expressing cells that also express a given receptor-
-                this number will be used to identify whether a particular target/set of targets is interesting for
-                cell-cell communication modeling. Recommended to set above 0.2 but below 0.5.
+            X: DataFrame containing columns to query
+            col: Name of the column to compare to target genes
+            method: Optional method to use for multiple hypothesis correction. It is recommended not to false
+                positive correct because this function is not looking for most important features, but rather all that
+                are reasonably interesting. Available methods can be found in the documentation for
+                statsmodels.stats.multitest.multipletests(), and are also listed below (in correct case) for
+                convenience:
+                - Named methods:
+                    - bonferroni
+                    - sidak
+                    - holm-sidak
+                    - holm
+                    - simes-hochberg
+                    - hommel
+                - Abbreviated methods:
+                    - fdr_bh: Benjamini-Hochberg correction
+                    - fdr_by: Benjamini-Yekutieli correction
+                    - fdr_tsbh: Two-stage Benjamini-Hochberg
+                    - fdr_tsbky: Two-stage Benjamini-Krieger-Yekutieli method
+            significance_threshold: p-value (or q-value) needed to call a parameter significant. Only used if
+                'method' is not None.
+        """
+        start = time.time()
+        binary_col = (X[col] > 0).astype(int).values.reshape(-1)
+        # Null distribution of IoU values:
+        iou_null = self.adata.uns["iou_null"]
+
+        # Storage for targets of interest for this feature, and for all p-values:
+        p_vals = []
+
+        # Find the set of targets to search over for this feature:
+        if ":" in col:
+            rec = col.split(":")[1]
+        else:
+            rec = col
+
+        tf_for_rec = self.r_tf_db[self.r_tf_db["receptor"] == rec]["tf"].unique()
+        tf_for_rec = [tf for tf in tf_for_rec if tf in self.grn.columns]
+
+        # Extract the target genes where at least one of the TFs has a regulatory relationship:
+        target_genes_for_common_tfs = self.grn.loc[:, tf_for_rec].apply(lambda x: x == 1)
+        all_targets = self.grn.index[target_genes_for_common_tfs.any(axis=1)]
+        # Only consider targets measured in the dataset:
+        all_targets = [target for target in all_targets if target in self.adata.var_names]
+        # Only consider targets above expression threshold:
+        all_targets = np.array(
+            [
+                target
+                for target in all_targets
+                if (self.adata[:, target].X > 0).sum() > self.target_expr_threshold * self.adata.n_obs
+            ]
+        )
+
+        for target in all_targets:
+            binary_gene_expr = (self.adata[:, target].X > 0).astype(int).toarray().reshape(-1)
+
+            # Intersection-over-union w/ the query feature:
+            intersection = np.sum(binary_col * binary_gene_expr)
+            union = np.sum(binary_col + binary_gene_expr > 0)
+            iou = intersection / union if union > 0 else 0
+            p_val = 1 - percentileofscore(iou_null, iou) / 100
+            p_vals.append(p_val)
+
+        # Mark any targets for which intersection-over-union is significant compared to the null distribution
+        if method is not None:
+            q_vals = multitesting_correction(p_vals, method=method, alpha=significance_threshold)
+            sig = np.where(q_vals < 0.05)[0]
+        else:
+            sig = np.where(np.array(p_vals) < significance_threshold)[0]
+        sig_targets = all_targets[sig]
+
+        self.logger.info(f"Number of targets for {col}: {len(sig_targets)}")
+        elapsed_time = time.time() - start
+        self.logger.info(f"Time elapsed for {col}: {elapsed_time:.2f}s")
+
+        # If there are no targets for which the intersection with receptor is larger than the intersection with
+        # non-receptor expressing cells, don't include any targets with this receptor.
+        if len(sig_targets) == 0:
+            return None
+        else:
+            return list(sig_targets)
+
+    @staticmethod
+    def compute_iou(gene_combination, expressed_nonexpressed):
+        """Helper function for :func ~`find_targets_ligands_and_receptors` that computes the null distribution of
+        intersection-over-union"""
+        gene1_idx, gene2_idx = gene_combination
+        gene1 = expressed_nonexpressed[:, gene1_idx].toarray()
+        gene2 = expressed_nonexpressed[:, gene2_idx].toarray()
+
+        # Scramble expression of both genes:
+        # Scramble gene1 and gene2
+        np.random.shuffle(gene1)
+        np.random.shuffle(gene2)
+
+        # Calculate intersection, union, and IoU
+        intersection = np.sum(gene1 * gene2)
+        union = np.sum(gene1 + gene2 > 0)
+        iou = intersection / union if union > 0 else 0
+        return iou
+
+    def find_targets_ligands_and_receptors(
+        self,
+        save_id: Optional[str] = None,
+        bw_membrane_bound: Union[float, int] = 8,
+        bw_secreted: Union[float, int] = 25,
+        kernel: Literal["bisquare", "exponential", "gaussian", "quadratic", "triangular", "uniform"] = "bisquare",
+        method: Optional[str] = None,
+        **kwargs,
+    ):
+        """Find genes that may serve as interesting targets. Will find genes that are highly coexpressed with
+        receptors, using this to also filter receptors and ligands.
+
+        Args:
             save_id: Optional string to append to the end of the saved file name. Will save signaling molecule names as
                 "ligand_{save_id}.txt", etc.
+            bw_membrane_bound: Bandwidth used to compute spatial weights for membrane-bound ligands. If integer,
+                will convert to appropriate distance bandwidth.
+            bw_secreted: Bandwidth used to compute spatial weights for secreted ligands. If integer, will convert to
+                appropriate distance bandwidth.
+            kernel: Type of kernel function used to weight observations when computing spatial weights; one of
+                "bisquare", "exponential", "gaussian", "quadratic", "triangular" or "uniform".
+            method: Used for optional multiple hypothesis correction
             kwargs: Keyword arguments for any of the Spateo argparse arguments. Should not include 'output_path' (
                 which will be determined by the output path used for the main model). Should also not include any of
-                'mod_type', 'ligands' or 'receptors', which will be determined by this function.
+                'ligands' or 'receptors', which will be determined by this function.
         """
-        # Save found ligands and receptors to the same directory as the output path:
+        self.logger.info(
+            "Beginning comprehensive search for targets, ligands, and receptors. This may take a long time..."
+        )
+
+        if self.mod_type != "receptor" and self.mod_type != "lr":
+            raise ValueError(
+                "Unsupervised target finding can only be done using receptor and ligand/receptor-based " "models."
+            )
+
+        lig_id = f"ligands_{save_id}" if save_id else "ligands"
+        rec_id = f"receptors_{save_id}" if save_id else "receptors"
+        targets_id = f"targets_{save_id}" if save_id else "targets"
+
+        if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0])):
+            os.makedirs(os.path.join(os.path.splitext(self.output_path)[0]))
+
         if self.species == "human":
             try:
-                lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+                self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
             except FileNotFoundError:
                 raise FileNotFoundError(
                     f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
@@ -197,11 +263,11 @@ class MuSIC_molecule_selector(MuSIC):
                     "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
                 )
 
-            r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
-            grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
+            self.r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
+            self.grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
         elif self.species == "mouse":
             try:
-                lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+                self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
             except FileNotFoundError:
                 raise FileNotFoundError(
                     f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
@@ -212,175 +278,164 @@ class MuSIC_molecule_selector(MuSIC):
                     "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
                 )
 
-            r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
-            grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
+            self.r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
+            self.grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
 
-        # All receptors associated with any of the given targets:
-        receptors = []
-        for target in targets:
-            target_gene_row = grn.loc[target, :]
-            target_TFs = target_gene_row[target_gene_row == 1].index.tolist()
-            filtered_df = r_tf_db[r_tf_db["tf"].isin(target_TFs)]
-            target_receptors = list(set(filtered_df["receptor"].tolist()))
-            receptors.extend(target_receptors)
+        # If design matrix exists, use it to identify potential targets- if not, create it using all
+        # ligands/receptors present in the dataset, use it to identify potential targets, then delete it :
+        try:
+            X_df = pd.read_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
+            )
+        except:
+            adata_expr = self.adata.copy()
+            # Remove all-zero genes:
+            adata_expr = adata_expr[:, adata_expr.X.sum(axis=0) > 0].copy()
 
-        complexes = [r for r in receptors if "_" in r]
-        receptors = [r for r in receptors if all(part in self.adata.var_names for part in r.split("_")) or "_" not in r]
-        # Partition AnnData for this set of targets:
-        target_cells = self.adata[:, targets].X
-        target_cell_indices = (target_cells > 0).sum(axis=1).nonzero()[0]
-        # Subset matrix to the target cells:
-        target_sub = self.adata[target_cell_indices, :]
+            if self.custom_receptors is None:
+                receptors = list(set(self.lr_db["to"]))
+                receptors = [
+                    r for r in receptors if all(part in adata_expr.var_names for part in r.split("_")) or "_" not in r
+                ]
+            else:
+                receptors = self.custom_receptors
 
-        nontarget_cell_indices = [i for i in range(self.adata.n_obs) if i not in target_cell_indices]
-        nontarget_sub = self.adata[nontarget_cell_indices, :]
+            if self.custom_ligands is None:
+                # All cognate ligands:
+                ligands = []
+                cognate_ligands = list(set(self.lr_db[self.lr_db["to"].isin(receptors)]["from"]))
+                # For each ligand, check that all parts can be found in the dataset:
+                for l in cognate_ligands:
+                    parts = l.split("_")
+                    if all(part in self.adata.var_names for part in parts):
+                        ligands.append(l)
+            else:
+                ligands = self.custom_ligands
 
-        # Rank receptors given this target set- compute expression in the target-expressing subset and the subset not
-        # expressing the target gene for each receptor:
-        expr_percentages_target = []
-        expr_percentages_nontarget = []
-        for r in receptors:
-            r_subset_target = target_sub[:, r].X > 0
-            expressing_cells_target = r_subset_target.sum()
-            percentage_target = (expressing_cells_target / target_sub.n_obs) * 100
-            expr_percentages_target.append(percentage_target)
+            # Temporarily save initial receptors and ligands to path:
+            lig_path = os.path.join(os.path.dirname(self.adata_path), f"{lig_id}.txt")
+            with open(lig_path, "w") as f:
+                f.write("\n".join(ligands))
+            rec_path = os.path.join(os.path.dirname(self.adata_path), f"{rec_id}.txt")
+            with open(rec_path, "w") as f:
+                f.write("\n".join(receptors))
 
-            r_subset_nontarget = nontarget_sub[:, r].X > 0
-            expressing_cells_nontarget = r_subset_nontarget.sum()
-            percentage_nontarget = (expressing_cells_nontarget / nontarget_sub.n_obs) * 100
-            expr_percentages_nontarget.append(percentage_nontarget)
-
-        # For complexes, take the minimum percentages of the constituent receptors:
-        # Create a mapping between receptors and their corresponding expression percentages
-        receptor_to_percentage_target = {r: percentage for r, percentage in zip(receptors, expr_percentages_target)}
-        receptor_to_percentage_nontarget = {
-            r: percentage for r, percentage in zip(receptors, expr_percentages_nontarget)
-        }
-
-        # Set to collect parts that should be removed at the end
-        parts_to_remove = set()
-
-        # Iterate through complexes
-        min_percentages_target = []
-        min_percentages_nontarget = []
-        for complex_r in complexes:
-            # Extract subparts of the complex
-            parts = complex_r.split("_")
-            parts_to_remove.update(parts)
-
-            # Find the corresponding percentages for target and nontarget
-            percentages_target = [
-                receptor_to_percentage_target[part] for part in parts if part in receptor_to_percentage_target
-            ]
-            percentages_nontarget = [
-                receptor_to_percentage_nontarget[part] for part in parts if part in receptor_to_percentage_nontarget
-            ]
-
-            # Compute the minimum percentage for both target and nontarget
-            if percentages_target:
-                min_percentages_target.append(min(percentages_target))
-                receptor_to_percentage_target[complex_r] = min(percentages_target)
-            if percentages_nontarget:
-                min_percentages_nontarget.append(min(percentages_nontarget))
-                receptor_to_percentage_nontarget[complex_r] = min(percentages_nontarget)
-        parts_to_remove = set(parts_to_remove)
-        # Remove the individual parts from receptor_to_percentage_target
-        for part in parts_to_remove:
-            receptor_to_percentage_target.pop(part, None)
-            receptor_to_percentage_nontarget.pop(part, None)
-
-        # Get difference in percentage of target-expressing cells with that receptor vs. the percentage of
-        # non-target-expressing cells with that receptor
-        difference_dict = {
-            key: receptor_to_percentage_target[key] - receptor_to_percentage_nontarget[key]
-            for key in receptor_to_percentage_target
-        }
-        receptors = list(receptor_to_percentage_target.keys())
-        if len(receptors) < min_n_receptors:
-            self.logger.info("Value for 'min_n_receptors' is too high- setting equal to the total number of receptors.")
-            min_n_receptors = len(receptors)
-
-        # Ligands that bind these receptors:
-        lr_pairs = {}
-
-        for r in receptors:
-            r_ligands = []
-            filtered_df = lr_db[lr_db["to"] == r]
-            ligands = list(set(filtered_df["from"]))
-            # For each ligand, check that all parts can be found in the dataset:
-            for l in ligands:
-                parts = l.split("_")
-                if all(part in self.adata.var_names for part in parts):
-                    r_ligands.append(l)
-            lr_pairs[r] = r_ligands
-
-        # Construct design matrix from min_n_receptors receptors, prepare model independent variable array and adjust
-        # until percent coverage is met or all possible receptors have been queried:
-        # Initial set of receptors:
-        sorted_receptors = sorted(difference_dict, key=lambda receptor: difference_dict[receptor], reverse=True)
-        top_receptors = sorted_receptors[: min_n_receptors - 1]
-        # Initial set of associated ligands:
-        ligands = []
-        for r in top_receptors:
-            ligands.extend(lr_pairs[r])
-
-        test_pct = 0
-        next_index = min_n_receptors - 1
-        while test_pct < pct_coverage or len(receptors) == len(sorted_receptors):
-            # Add the next receptor and associated ligands:
-            next_receptor = sorted_receptors[next_index]
-            top_receptors.append(next_receptor)
-            ligands.extend(lr_pairs[next_receptor])
+            # Construct design matrix- need output path, AnnData path, path to CCI databases, and all information to
+            # compute spatial weights:
+            # Bandwidths for computing spatial weights:
+            if isinstance(bw_membrane_bound, int):
+                bw_membrane_bound = find_bw_for_n_neighbors(
+                    self.adata, target_n_neighbors=bw_membrane_bound, exclude_self=True
+                )
+            if isinstance(bw_secreted, int):
+                bw_secreted = find_bw_for_n_neighbors(self.adata, target_n_neighbors=bw_secreted, exclude_self=False)
 
             kwargs["output_path"] = self.output_path
             kwargs["adata_path"] = self.adata_path
-            kwargs["receptor"] = top_receptors
-            kwargs["ligand"] = ligands
-            kwargs["target"] = targets
+            kwargs["cci_dir"] = self.cci_dir
+            kwargs["custom_rec_path"] = rec_path
+            kwargs["custom_lig_path"] = lig_path
+            # "targets" is a necessary input, but for this purpose it doesn't matter what this is.
+            kwargs["target"] = receptors[0]
+            kwargs["mod_type"] = self.mod_type
+            kwargs["distance_membrane_bound"] = bw_membrane_bound
+            kwargs["distance_secreted"] = bw_secreted
+            kwargs["bw_fixed"] = True
+            kwargs["kernel"] = kernel
 
             comm, parser, args_list = define_spateo_argparse(**kwargs)
-            upstream_model = MuSIC(comm, parser)
+            upstream_model = MuSIC(comm, parser, args_list)
+            upstream_model.load_and_process(upstream=True)
             upstream_model.define_sig_inputs(recompute=True)
-
             # Load design matrix:
             X_df = pd.read_csv(
                 os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
             )
-            # Get coverage of these interaction features:
-            X_df["contains_nonzero"] = X_df.apply(lambda row: int(row.any()), axis=1)
-            # Subset to the target-expressing cells:
-            X_df_target = X_df.iloc[target_cell_indices, :]
-            # Get percentage of target-expressing cells with at least one nonzero interaction feature:
-            test_pct = (X_df_target["contains_nonzero"].sum() / X_df.shape[0]) * 100
 
-            next_index += 1
+        if self.mod_type == "lr":
+            # All unique receptors:
+            receptor_set = [c.split(":")[1] for c in X_df.columns]
+        else:
+            receptor_set = X_df.columns
 
-        # Check if the final signaling features are highly-specific to the target(s):
-        X_df_nontarget = X_df.iloc[nontarget_cell_indices, :]
-        test_pct = (X_df_nontarget["contains_nonzero"].sum() / X_df.shape[0]) * 100
-        if test_pct < nontarget_expr_percentage_threshold:
-            self.logger.info(f"Chosen set of ligands/receptors are highly-specific to chosen target(s): \n{targets}.")
+        # Null distribution for cooccurence:
+        subset = (self.adata.X > 0).mean(axis=0) < 0.5
+        adata_filt = self.adata[:, subset].copy()
+        expressed_nonexpressed = (adata_filt.X > 0).astype(int)
+
+        # Intersection-over-union for all pairwise combinations of genes:
+        gene_combinations = combinations(range(expressed_nonexpressed.shape[1]), 2)
+
+        # Parallelized computation to define IoU null distribution:
+        with ThreadPoolExecutor() as executor:
+            iou_results = list(
+                executor.map(
+                    lambda gene_combination: self.compute_iou(gene_combination, expressed_nonexpressed),
+                    gene_combinations,
+                )
+            )
+
+        # Store results in .uns
+        self.logger.info(f"Average intersection-over-union of the null distribution: {np.mean(iou_results):.3f}")
+        self.adata.uns["iou_null"] = np.array(iou_results)
+
+        # For each design matrix column, find targets with significant cooccurence:
+        with ThreadPoolExecutor() as executor:
+            targets = list(executor.map(lambda col: self.find_targets_single(X_df, col, method, 0.05), X_df.columns))
+        rem_targets = [t for t in targets if t is not None]
+
+        # Find targets that were marked as of interest for multiple interactions:
+        flat_targets = [t for t_list in rem_targets for t in t_list]
+        target_counts = Counter(flat_targets)
+        main_targets = [k for k, v in target_counts.items() if v > 5]
+        self.logger.info(f"Set of {len(main_targets)} more notable targets: \n{targets}")
+        self.logger.info(
+            f"Saving list of most notable targets to "
+            f"{os.path.join(os.path.dirname(self.adata_path), f'major_{targets_id}.txt')} for potential use downstream."
+        )
+
+        # If any element in the return is None, remove the receptor from the list of receptors:
+        receptors = set([r for r, condition in zip(receptor_set, targets) if condition is not None])
+        # If necessary, redefine the list of ligands based on the list of remaining receptors:
+        if self.mod_type == "lr":
+            # New set of cognate ligands:
+            new_ligands = []
+            cognate_ligands = list(set(self.lr_db[self.lr_db["to"].isin(receptors)]["from"]))
+            # For each ligand, check that all parts can be found in the dataset:
+            for l in cognate_ligands:
+                parts = l.split("_")
+                if all(part in self.adata.var_names for part in parts):
+                    new_ligands.append(l)
+            ligands = [l for l in ligands if l in new_ligands]
 
         # Final list of used receptors:
-        self.logger.info(f"Final set of {len(top_receptors)} receptors: \n{top_receptors}")
+        self.logger.info(f"Final set of {len(receptors)} receptors: \n{receptors}")
         # Final list of used ligands:
         self.logger.info(f"Final set of {len(ligands)} ligands: \n{ligands}")
 
         self.logger.info(
             f"Saving list of manually found ligands to "
-            f"{os.path.join(os.path.dirname(self.adata_path), 'ligands.txt')}"
+            f"{os.path.join(os.path.dirname(self.adata_path), f'{lig_id}.txt')} for potential use downstream."
         )
-        with open(os.path.join(os.path.dirname(self.adata_path), "ligands.txt"), "w") as f:
+        with open(os.path.join(os.path.dirname(self.adata_path), f"{lig_id}.txt"), "w") as f:
             f.write("\n".join(ligands))
 
         self.logger.info(
             f"Saving list of manually found receptors to "
-            f"{os.path.join(os.path.dirname(self.adata_path), 'receptors.txt')}"
+            f"{os.path.join(os.path.dirname(self.adata_path), f'{rec_id}.txt')} for potential use downstream."
         )
-        with open(os.path.join(os.path.dirname(self.adata_path), "receptors.txt"), "w") as f:
-            f.write("\n".join(top_receptors))
+        with open(os.path.join(os.path.dirname(self.adata_path), f"{rec_id}.txt"), "w") as f:
+            f.write("\n".join(receptors))
 
-        # At the end of this process, delete the design matrix and any other files created by MuSIC:
+        # Final list of (potentially good) targets:
+        targets = list(set([t for t_list in targets for t in t_list]))
+        self.logger.info(f"Full final set of {len(targets)} potential targets: \n{targets}")
+        self.logger.info(
+            f"Saving list of manually found targets to "
+            f"{os.path.join(os.path.dirname(self.adata_path), f'{targets_id}.txt')} for potential use downstream."
+        )
+
+        # Delete other files created during the process:
         os.remove(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"))
         os.remove(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"))
         os.remove(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "ligands_expr.csv"))

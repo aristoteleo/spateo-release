@@ -1843,6 +1843,7 @@ class MuSIC_Interpreter(MuSIC):
 
         kwargs["mod_type"] = "downstream"
         kwargs["cci_dir_path"] = cci_dir_path
+
         # Use the same output directory as the main model, add folder demarcating results from downstream task:
         output_dir = os.path.dirname(self.output_path)
         output_file_name = os.path.basename(self.output_path)
@@ -1879,7 +1880,7 @@ class MuSIC_Interpreter(MuSIC):
 
             # Create new instance of MuSIC:
             comm, parser, args_list = define_spateo_argparse(**kwargs)
-            downstream_model = MuSIC(comm, parser)
+            downstream_model = MuSIC(comm, parser, args_list)
             downstream_model._set_up_model()
             downstream_model.fit()
             downstream_model.predict_and_save()
@@ -1913,7 +1914,7 @@ class MuSIC_Interpreter(MuSIC):
 
             # Create new instance of MuSIC:
             comm, parser, args_list = define_spateo_argparse(**kwargs)
-            downstream_model = MuSIC(comm, parser)
+            downstream_model = MuSIC(comm, parser, args_list)
             downstream_model._set_up_model()
             downstream_model.fit()
             downstream_model.predict_and_save()

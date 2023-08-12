@@ -59,7 +59,6 @@ def main():
     is_flag=True,
     help="Recommended for large datasets (>5000 samples), " "otherwise model fitting is quite slow.",
 )
-@click.option("-multiscale", default=False, is_flag=True)
 @click.option(
     "-mod_type",
     default="niche",
@@ -183,8 +182,7 @@ def main():
 @click.option(
     "-patience",
     default=5,
-    help="Number of iterations to wait before stopping if parameters have "
-    "stabilized. Only used if `multiscale` is True.",
+    help="Number of iterations to wait before stopping if parameters have " "stabilized.",
 )
 @click.option("-ridge_lambda", default=0.3)
 
@@ -286,8 +284,6 @@ def run(
     group_subset,
     csv_path,
     n_spatial_dim_csv,
-    multiscale,
-    multiscale_params_only,
     mod_type,
     grn,
     cci_dir,
@@ -356,9 +352,6 @@ def run(
             in that order.
         n_spatial_dim_csv: If csv_path is provided, this argument specifies the number of spatial dimensions (e.g. 2
             for X-Y, 3 for X-Y-Z) in the data
-        multiscale: If True, the MGWR model will be used
-        multiscale_params_only: If True, will only fit parameters for MGWR model and no other metrics. Otherwise,
-            the effective number of parameters and leverages will be returned.
         mod_type: If adata_path is provided, one of the SWR models will be used. Options: 'niche', 'lr', 'ligand',
             'receptor', 'downstream'.
 
@@ -417,11 +410,8 @@ def run(
         no_hurdle: If True, will implement spatially-weighted hurdle model to attempt to account for biological zeros.
         tolerance: Tolerance for convergence of model
         max_iter: Maximum number of iterations for model
-        patience: Number of iterations to wait before stopping if parameters have stabilized. Only used if
-            `multiscale` is True.
+        patience: Number of iterations to wait before stopping if parameters have stabilized.
         ridge_lambda: Ridge lambda value to use for L2 regularization
-        chunks: Number of chunks for multiscale computation (default: 1). Increase the number if run out of memory
-            but should keep it as low as possible.
 
 
         search_bw: Used for downstream analyses; specifies the bandwidth to search for senders/receivers.
@@ -507,10 +497,6 @@ def run(
         for key in group_subset:
             command += key + " "
 
-    if multiscale:
-        command += " -multiscale "
-    if multiscale_params_only:
-        command += " -multiscale_params_only "
     if grn:
         command += " -grn "
     if cci_dir is not None:

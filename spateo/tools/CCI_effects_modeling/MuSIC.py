@@ -362,8 +362,6 @@ class MuSIC:
         self.group_subset = self.arg_retrieve.group_subset
         self.covariate_keys = self.arg_retrieve.covariate_keys
 
-        self.multiscale_flag = self.arg_retrieve.multiscale
-        self.multiscale_params_only = self.arg_retrieve.multiscale_params_only
         self.bw_fixed = self.arg_retrieve.bw_fixed
         self.distance_membrane_bound = self.arg_retrieve.distance_membrane_bound
         self.distance_secreted = self.arg_retrieve.distance_secreted
@@ -396,14 +394,12 @@ class MuSIC:
 
         self.fit_intercept = self.arg_retrieve.fit_intercept
         # self.include_offset = self.arg_retrieve.include_offset
-        self.no_hurdle = self.arg_retrieve.no_hurdle
 
         # Parameters related to the fitting process (tolerance, number of iterations, etc.)
         self.tolerance = self.arg_retrieve.tolerance
         self.max_iter = self.arg_retrieve.max_iter
         self.patience = self.arg_retrieve.patience
         self.ridge_lambda = self.arg_retrieve.ridge_lambda
-        self.multiscale_chunks = self.arg_retrieve.chunks
 
         if self.arg_retrieve.bw:
             if self.bw_fixed:
@@ -461,9 +457,13 @@ class MuSIC:
                     f"files beforehand."
                 )
 
-    def load_and_process(self):
+    def load_and_process(self, upstream: bool = False):
         """
         Load AnnData object and process it for modeling.
+
+        Args:
+            upstream: Set False if performing the actual model fitting process, True to define only the AnnData
+                object for upstream purposes.
         """
         try:
             self.adata = anndata.read_h5ad(self.adata_path)
@@ -477,150 +477,153 @@ class MuSIC:
 
         self.adata.uns["__type"] = "UMI"
 
-        # For downstream, modify some of the parameters:
-        if self.mod_type == "downstream":
-            # Use neighbors in expression space:
-            self.use_expression_neighbors = True
-            # Pathways can be used as targets, which often violates the count assumption of the other distributions-
-            # redefine the model type in this case:
-            if self.adata.uns["target_type"] == "pathway":
-                self.distr = "gaussian"
-                link = Gaussian.__init__.__defaults__[0]
-                self.distr_obj = Gaussian(link)
-
-        # If group_subset is given, subset the AnnData object to contain the specified groups as well as neighboring
-        # cells:
-        if self.group_subset is not None:
-            subset = self.adata[self.adata.obs[self.group_key].isin(self.group_subset)]
-            fitted_indices = [self.sample_names.get_loc(name) for name in subset.index]
-            # Add cells that are neighboring cells of the chosen type, but which are not of the chosen type:
-            get_wi_partial = partial(
-                get_wi,
-                n_samples=self.n_samples,
-                coords=self.coords,
-                fixed_bw=False,
-                exclude_self=True,
-                kernel="bisquare",
-                bw=self.n_neighbors_secreted,
-                threshold=0.01,
-                sparse_array=True,
-                normalize_weights=True,
-            )
-
-            with Pool() as pool:
-                weights = pool.map(get_wi_partial, fitted_indices)
-            w_subset = scipy.sparse.vstack(weights)
-            rows, cols = w_subset.nonzero()
-            unique_indices = list(set(cols))
-            names_all_neighbors = self.sample_names[unique_indices]
-            self.adata = self.adata[self.adata.obs_names.isin(names_all_neighbors)].copy()
-
         self.sample_names = self.adata.obs_names
         self.coords = self.adata.obsm[self.coords_key]
         self.n_samples = self.adata.n_obs
         # Placeholder- this will change at time of fitting:
         self.n_features = self.adata.n_vars
 
-        if self.distr in ["poisson", "nb"]:
-            if self.normalize or self.smooth or self.log_transform:
-                self.logger.info(
-                    f"With a {self.distr} assumption, discrete counts are required for the response variable. "
-                    f"Computing normalizations and transforms if applicable, but rounding nonintegers to nearest "
-                    f"integer; original counts can be round in .layers['raw']. Log-transform should not be applied."
-                )
-                self.adata.layers["raw"] = self.adata.X
+        # If not performing upstream tasks, only load the AnnData object:
+        if not upstream:
+            # For downstream, modify some of the parameters:
+            if self.mod_type == "downstream":
+                # Use neighbors in expression space:
+                self.use_expression_neighbors = True
+                # Pathways can be used as targets, which often violates the count assumption of the other distributions-
+                # redefine the model type in this case:
+                if self.adata.uns["target_type"] == "pathway":
+                    self.distr = "gaussian"
+                    link = Gaussian.__init__.__defaults__[0]
+                    self.distr_obj = Gaussian(link)
 
-        if self.normalize:
-            if self.distr == "gaussian":
-                self.logger.info(
-                    "Computing TMM factors and setting total counts in each cell to uniform target sum " "inplace..."
+            # If group_subset is given, subset the AnnData object to contain the specified groups as well as neighboring
+            # cells:
+            if self.group_subset is not None:
+                subset = self.adata[self.adata.obs[self.group_key].isin(self.group_subset)]
+                fitted_indices = [self.sample_names.get_loc(name) for name in subset.index]
+                # Add cells that are neighboring cells of the chosen type, but which are not of the chosen type:
+                get_wi_partial = partial(
+                    get_wi,
+                    n_samples=self.n_samples,
+                    coords=self.coords,
+                    fixed_bw=False,
+                    exclude_self=True,
+                    kernel="bisquare",
+                    bw=self.n_neighbors_secreted,
+                    threshold=0.01,
+                    sparse_array=True,
+                    normalize_weights=True,
                 )
-                # target_sum to None to automatically determine suitable target sum:
-                self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
-            else:
-                self.logger.info(
-                    "Computing TMM factors, setting total counts in each cell to uniform target sum and rounding "
-                    "nonintegers inplace..."
-                )
-                # target_sum to None to automatically determine suitable target sum:
-                self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
-                # Round, except for the case where data would round down to zero-
-                if scipy.sparse.issparse(self.adata.X):
-                    mask_less_than_1 = self.adata.X < 1
-                    mask_greater_than_1 = self.adata.X >= 1
 
-                    mask_less_than_1_values = self.adata.X.copy()
-                    mask_greater_than_1_values = self.adata.X.copy()
+                with Pool() as pool:
+                    weights = pool.map(get_wi_partial, fitted_indices)
+                w_subset = scipy.sparse.vstack(weights)
+                rows, cols = w_subset.nonzero()
+                unique_indices = list(set(cols))
+                names_all_neighbors = self.sample_names[unique_indices]
+                self.adata = self.adata[self.adata.obs_names.isin(names_all_neighbors)].copy()
 
-                    mask_less_than_1_values.data = np.ceil(mask_less_than_1_values.data)
-                    mask_greater_than_1_values.data = np.round(mask_greater_than_1_values.data)
-                    result = mask_less_than_1.multiply(mask_less_than_1_values) + mask_greater_than_1.multiply(
-                        mask_greater_than_1_values
+            if self.distr in ["poisson", "nb"]:
+                if self.normalize or self.smooth or self.log_transform:
+                    self.logger.info(
+                        f"With a {self.distr} assumption, discrete counts are required for the response variable. "
+                        f"Computing normalizations and transforms if applicable, but rounding nonintegers to nearest "
+                        f"integer; original counts can be round in .layers['raw']. Log-transform should not be applied."
                     )
+                    self.adata.layers["raw"] = self.adata.X
 
-                    self.adata.X = scipy.sparse.csr_matrix(result)
+            if self.normalize:
+                if self.distr == "gaussian":
+                    self.logger.info(
+                        "Computing TMM factors and setting total counts in each cell to uniform target sum "
+                        "inplace..."
+                    )
+                    # target_sum to None to automatically determine suitable target sum:
+                    self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
+                else:
+                    self.logger.info(
+                        "Computing TMM factors, setting total counts in each cell to uniform target sum and rounding "
+                        "nonintegers inplace..."
+                    )
+                    # target_sum to None to automatically determine suitable target sum:
+                    self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
+                    # Round, except for the case where data would round down to zero-
+                    if scipy.sparse.issparse(self.adata.X):
+                        mask_less_than_1 = self.adata.X < 1
+                        mask_greater_than_1 = self.adata.X >= 1
+
+                        mask_less_than_1_values = self.adata.X.copy()
+                        mask_greater_than_1_values = self.adata.X.copy()
+
+                        mask_less_than_1_values.data = np.ceil(mask_less_than_1_values.data)
+                        mask_greater_than_1_values.data = np.round(mask_greater_than_1_values.data)
+                        result = mask_less_than_1.multiply(mask_less_than_1_values) + mask_greater_than_1.multiply(
+                            mask_greater_than_1_values
+                        )
+
+                        self.adata.X = scipy.sparse.csr_matrix(result)
+
+                    else:
+                        self.adata.X = np.where(self.adata.X < 1, np.ceil(self.adata.X), np.round(self.adata.X))
+
+            # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
+            if self.smooth:
+                # Compute connectivity matrix if not already existing:
+                try:
+                    conn = self.adata.obsp["spatial_connectivities"]
+                except:
+                    _, adata = neighbors(
+                        self.adata,
+                        n_neighbors=self.n_neighbors_membrane_bound * 2,
+                        basis="spatial",
+                        spatial_key=self.coords_key,
+                        n_neighbors_method="ball_tree",
+                    )
+                    conn = adata.obsp["spatial_connectivities"]
+
+                # Subsample half of the neighbors in the smoothing process:
+                n_subsample = int(self.n_neighbors_membrane_bound)
+                if self.distr == "gaussian":
+                    self.logger.info("Smoothing gene expression inplace...")
+                    adata_smooth_norm, _ = smooth(self.adata.X, conn, normalize_W=False, n_subsample=n_subsample)
+                    self.adata.X = adata_smooth_norm
 
                 else:
-                    self.adata.X = np.where(self.adata.X < 1, np.ceil(self.adata.X), np.round(self.adata.X))
+                    self.logger.info("Smoothing gene expression and rounding nonintegers inplace...")
+                    adata_smooth_norm, _ = smooth(
+                        self.adata.X, conn, normalize_W=False, n_subsample=n_subsample, return_discrete=True
+                    )
+                    self.adata.X = adata_smooth_norm
 
-        # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
-        if self.smooth:
-            # Compute connectivity matrix if not already existing:
-            try:
-                conn = self.adata.obsp["spatial_connectivities"]
-            except:
-                _, adata = neighbors(
-                    self.adata,
-                    n_neighbors=self.n_neighbors_membrane_bound * 2,
-                    basis="spatial",
-                    spatial_key=self.coords_key,
-                    n_neighbors_method="ball_tree",
-                )
-                conn = adata.obsp["spatial_connectivities"]
+            if self.log_transform:
+                if self.distr == "gaussian":
+                    self.logger.info("Log-transforming expression inplace...")
+                    self.adata.X = log1p(self.adata)
+                else:
+                    self.logger.info(
+                        "For the chosen distributional assumption, log-transform should not be applied. Log-transforming "
+                        "expression and storing in adata.layers['X_log1p'], but not applying inplace and not using for "
+                        "modeling."
+                    )
+                    self.adata.layers["X_log1p"] = log1p(self.adata)
 
-            # Subsample half of the neighbors in the smoothing process:
-            n_subsample = int(self.n_neighbors_membrane_bound)
-            if self.distr == "gaussian":
-                self.logger.info("Smoothing gene expression inplace...")
-                adata_smooth_norm, _ = smooth(self.adata.X, conn, normalize_W=False, n_subsample=n_subsample)
-                self.adata.X = adata_smooth_norm
+            # If distribution is Poisson or negative binomial, add pseudocount to each nonzero so that the min. is 2 and
+            # not 1- expression of 1 indicates some interaction has a positive effect, but the linear predictor that
+            # corresponds to this is 0, indicating no net effect:
+            if self.distr in ["poisson", "nb"]:
+                self.adata.layers["original_counts"] = self.adata.X.copy()
+                if scipy.sparse.issparse(self.adata.X):
+                    self.adata.X.data += 1
+                else:
+                    self.adata.X += 1
 
-            else:
-                self.logger.info("Smoothing gene expression and rounding nonintegers inplace...")
-                adata_smooth_norm, _ = smooth(
-                    self.adata.X, conn, normalize_W=False, n_subsample=n_subsample, return_discrete=True
-                )
-                self.adata.X = adata_smooth_norm
+            if self.mod_type == "downstream":
+                # For finding upstream associations with ligand
+                self.setup_downstream()
 
-        if self.log_transform:
-            if self.distr == "gaussian":
-                self.logger.info("Log-transforming expression inplace...")
-                self.adata.X = log1p(self.adata)
-            else:
-                self.logger.info(
-                    "For the chosen distributional assumption, log-transform should not be applied. Log-transforming "
-                    "expression and storing in adata.layers['X_log1p'], but not applying inplace and not using for "
-                    "modeling."
-                )
-                self.adata.layers["X_log1p"] = log1p(self.adata)
-
-        # If distribution is Poisson or negative binomial, add pseudocount to each nonzero so that the min. is 2 and
-        # not 1- expression of 1 indicates some interaction has a positive effect, but the linear predictor that
-        # corresponds to this is 0, indicating no net effect:
-        if self.distr in ["poisson", "nb"]:
-            self.adata.layers["original_counts"] = self.adata.X.copy()
-            if scipy.sparse.issparse(self.adata.X):
-                self.adata.X.data += 1
-            else:
-                self.adata.X += 1
-
-        if self.mod_type == "downstream":
-            # For finding upstream associations with ligand
-            self.setup_downstream()
-
-        elif self.mod_type in ["ligand", "receptor", "lr", "niche"]:
-            # Construct initial arrays for CCI modeling:
-            self.define_sig_inputs()
+            elif self.mod_type in ["ligand", "receptor", "lr", "niche"]:
+                # Construct initial arrays for CCI modeling:
+                self.define_sig_inputs()
 
     def setup_downstream(self, adata: Optional[anndata.AnnData] = None):
         """Setup for downstream tasks- namely, models for inferring signaling-associated differential expression."""
@@ -1327,11 +1330,7 @@ class MuSIC:
                     try:
                         spatial_weights_secreted = scipy.sparse.load_npz(secreted_path)
                     except:
-                        bw = (
-                            self.n_neighbors_membrane_bound
-                            if self.distance_secreted is None
-                            else self.distance_secreted
-                        )
+                        bw = self.n_neighbors_secreted if self.distance_secreted is None else self.distance_secreted
                         bw_fixed = True if self.distance_secreted is not None else False
                         # Autocrine signaling is much easier with secreted signals:
                         spatial_weights_secreted = self._compute_all_wi(
@@ -1440,6 +1439,9 @@ class MuSIC:
 
                     # Communication signature b/w receptor in target and ligand in neighbors:
                     X_df[f"{lig}:{rec}"] = lig_expr_values * rec_expr_values
+
+                # Full original signaling feature array:
+                X_df_full = X_df.copy()
 
                 # If applicable, drop all-zero columns:
                 X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
@@ -1594,6 +1596,9 @@ class MuSIC:
                 elif self.mod_type == "receptor":
                     X_df = self.receptors_expr
 
+                # Full original signaling feature array:
+                X_df_full = X_df.copy()
+
                 # If applicable, drop all-zero columns:
                 X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
 
@@ -1632,6 +1637,10 @@ class MuSIC:
                 f"{os.path.join(os.path.splitext(self.output_path)[0], 'design_matrix', 'design_matrix.csv')}."
             )
             X_df.to_csv(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"))
+            if self.mod_type != "niche":
+                X_df_full.to_csv(
+                    os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix_full.csv")
+                )
 
             if self.mod_type == "ligand" or self.mod_type == "lr":
                 self.logger.info(

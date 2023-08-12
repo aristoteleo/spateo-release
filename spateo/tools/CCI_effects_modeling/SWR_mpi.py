@@ -207,13 +207,6 @@ def define_spateo_argparse(**kwargs):
             "action": "store_true",
             "help": "Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
         },
-        "-multiscale": {
-            "action": "store_true",
-            "help": "Currently, it is recommended to only create multiscale models for Gaussian regression models.",
-        },
-        "-multiscale_params_only": {
-            "action": "store_true",
-        },
         "-mod_type": {
             "type": str,
             "default": "niche",
@@ -359,12 +352,6 @@ def define_spateo_argparse(**kwargs):
         "-max_iter": {"default": 500, "type": int},
         "-patience": {"default": 5, "type": int},
         "-ridge_lambda": {"default": 0.3, "type": float},
-        "-chunks": {
-            "default": 1,
-            "type": int,
-            "help": "For use if `multiscale` is True- increase the number of parallel processes. Can be used to help "
-            "prevent memory from running out, otherwise keep as low as possible.",
-        },
         # Downstream arguments:
         "-search_bw": {
             "type": float,
@@ -482,7 +469,7 @@ def define_spateo_argparse(**kwargs):
                 raise TypeError(f"Argument {key} must be an iterable containing values of type {element_type}.")
 
     # Initialize parser:
-    parser = argparse.ArgumentParser(description="MuSIC arguments")
+    parser = argparse.ArgumentParser(description="MuSIC arguments", allow_abbrev=False)
 
     # Use arg_dict to populate the parser:
     for arg, arg_info in arg_dict.items():
@@ -513,7 +500,7 @@ def define_spateo_argparse(**kwargs):
 
 if __name__ == "__main__":
     # Run from the command line:
-    parser = argparse.ArgumentParser(description="MuSIC arguments")
+    parser = argparse.ArgumentParser(description="MuSIC arguments", allow_abbrev=False)
 
     parser.add_argument("-run_upstream", action="store_true")
 
@@ -536,13 +523,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
     )
-    parser.add_argument(
-        "-multiscale",
-        action="store_true",
-        help="Currently, it is recommended to only create multiscale models for Gaussian regression models.",
-    )
-    # Flag to return additional metrics along with the coefficients for multiscale models.
-    parser.add_argument("-multiscale_params_only", action="store_true")
     parser.add_argument("-mod_type", type=str, default="niche")
     parser.add_argument("-cci_dir", type=str)
     parser.add_argument("-species", type=str, default="human")
@@ -820,31 +800,6 @@ if __name__ == "__main__":
     size = comm.Get_size()
 
     t1 = MPI.Wtime()
-
-    # # Testing time! Uncomment this (and comment anything below) to test the downstream functions:
-    # test_downstream = MuSIC_Interpreter(comm, parser)
-    # print(test_downstream.n_features)
-    # # test_downstream.compute_coeff_significance()
-    # # test_downstream.get_sig_potential()
-    # # test_downstream.compute_cell_type_coupling()
-
-    # # Testing time! Uncomment this (and then comment anything above and below) to test the upstream functions:
-    # # test = MuSIC_target_selector(parser)
-    # test_gene = self.adata[:, "MMP1"].X
-    # # test.parse_predictors(data=test_gene)
-    #
-    # Check if GRN model is specified:
-    # if parser.parse_args().grn:
-    #     "filler"
-
-    # else:
-
-    # For use only with VMuSIC:
-    n_multiscale_chunks = parser.parse_args().chunks
-
-    if parser.parse_args().run_upstream:
-        swr_selector = MuSIC_target_selector(parser)
-        swr_selector.select_features()
 
     swr_model = MuSIC(comm, parser)
     swr_model._set_up_model()
