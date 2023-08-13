@@ -3,6 +3,7 @@ Functionalities to aid in feature selection to characterize signaling patterns f
 list of signaling molecules (ligands or receptors) and/or target genes
 """
 import argparse
+import json
 import os
 import time
 from collections import Counter
@@ -10,13 +11,11 @@ from concurrent.futures import ThreadPoolExecutor
 from itertools import combinations
 from typing import List, Literal, Optional, Union
 
-import anndata
 import numpy as np
 import pandas as pd
 from mpi4py import MPI
 from scipy.stats import percentileofscore
 
-from ...logging import logger_manager as lm
 from ..find_neighbors import find_bw_for_n_neighbors
 from .MuSIC import MuSIC
 from .regression_utils import multitesting_correction
@@ -143,6 +142,12 @@ class MuSIC_Molecule_Selector(MuSIC):
         else:
             rec = col
 
+        # Make note of the components of this receptor:
+        if "_" in rec:
+            rec_components = rec.split("_")
+        else:
+            rec_components = [rec]
+
         tf_for_rec = self.r_tf_db[self.r_tf_db["receptor"] == rec]["tf"].unique()
         tf_for_rec = [tf for tf in tf_for_rec if tf in self.grn.columns]
 
@@ -157,6 +162,7 @@ class MuSIC_Molecule_Selector(MuSIC):
                 target
                 for target in all_targets
                 if (self.adata[:, target].X > 0).sum() > self.target_expr_threshold * self.adata.n_obs
+                and target not in rec_components
             ]
         )
 
@@ -196,11 +202,14 @@ class MuSIC_Molecule_Selector(MuSIC):
         gene1_idx, gene2_idx = gene_combination
         gene1 = expressed_nonexpressed[:, gene1_idx].toarray()
         gene2 = expressed_nonexpressed[:, gene2_idx].toarray()
+        intersection = np.sum(gene1 * gene2)
+        union = np.sum(gene1 + gene2 > 0)
+        iou = intersection / union if union > 0 else 0
 
-        # Scramble expression of both genes:
-        # Scramble gene1 and gene2
-        np.random.shuffle(gene1)
-        np.random.shuffle(gene2)
+        if iou > 0.5:
+            # Scramble expression of both genes:
+            np.random.shuffle(gene1)
+            np.random.shuffle(gene2)
 
         # Calculate intersection, union, and IoU
         intersection = np.sum(gene1 * gene2)
@@ -249,6 +258,8 @@ class MuSIC_Molecule_Selector(MuSIC):
 
         if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0])):
             os.makedirs(os.path.join(os.path.splitext(self.output_path)[0]))
+        if not os.path.exists(os.path.join(os.path.dirname(self.adata_path), "predictors_and_targets")):
+            os.makedirs(os.path.join(os.path.dirname(self.adata_path), "predictors_and_targets"))
 
         if self.species == "human":
             try:
@@ -281,6 +292,38 @@ class MuSIC_Molecule_Selector(MuSIC):
             self.r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
             self.grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
 
+        adata_expr = self.adata.copy()
+        # Remove all-zero genes:
+        adata_expr = adata_expr[:, adata_expr.X.sum(axis=0) > 0].copy()
+
+        if self.custom_receptors is None:
+            receptors = list(set(self.lr_db["to"]))
+            receptors = [
+                r for r in receptors if all(part in adata_expr.var_names for part in r.split("_")) or "_" not in r
+            ]
+        else:
+            receptors = self.custom_receptors
+
+        if self.custom_ligands is None:
+            # All cognate ligands:
+            ligands = []
+            cognate_ligands = list(set(self.lr_db[self.lr_db["to"].isin(receptors)]["from"]))
+            # For each ligand, check that all parts can be found in the dataset:
+            for l in cognate_ligands:
+                parts = l.split("_")
+                if all(part in self.adata.var_names for part in parts):
+                    ligands.append(l)
+        else:
+            ligands = self.custom_ligands
+
+        # Temporarily save initial receptors and ligands to path:
+        lig_path = os.path.join(os.path.dirname(self.adata_path), f"{lig_id}.txt")
+        with open(lig_path, "w") as f:
+            f.write("\n".join(ligands))
+        rec_path = os.path.join(os.path.dirname(self.adata_path), f"{rec_id}.txt")
+        with open(rec_path, "w") as f:
+            f.write("\n".join(receptors))
+
         # If design matrix exists, use it to identify potential targets- if not, create it using all
         # ligands/receptors present in the dataset, use it to identify potential targets, then delete it :
         try:
@@ -288,38 +331,6 @@ class MuSIC_Molecule_Selector(MuSIC):
                 os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
             )
         except:
-            adata_expr = self.adata.copy()
-            # Remove all-zero genes:
-            adata_expr = adata_expr[:, adata_expr.X.sum(axis=0) > 0].copy()
-
-            if self.custom_receptors is None:
-                receptors = list(set(self.lr_db["to"]))
-                receptors = [
-                    r for r in receptors if all(part in adata_expr.var_names for part in r.split("_")) or "_" not in r
-                ]
-            else:
-                receptors = self.custom_receptors
-
-            if self.custom_ligands is None:
-                # All cognate ligands:
-                ligands = []
-                cognate_ligands = list(set(self.lr_db[self.lr_db["to"].isin(receptors)]["from"]))
-                # For each ligand, check that all parts can be found in the dataset:
-                for l in cognate_ligands:
-                    parts = l.split("_")
-                    if all(part in self.adata.var_names for part in parts):
-                        ligands.append(l)
-            else:
-                ligands = self.custom_ligands
-
-            # Temporarily save initial receptors and ligands to path:
-            lig_path = os.path.join(os.path.dirname(self.adata_path), f"{lig_id}.txt")
-            with open(lig_path, "w") as f:
-                f.write("\n".join(ligands))
-            rec_path = os.path.join(os.path.dirname(self.adata_path), f"{rec_id}.txt")
-            with open(rec_path, "w") as f:
-                f.write("\n".join(receptors))
-
             # Construct design matrix- need output path, AnnData path, path to CCI databases, and all information to
             # compute spatial weights:
             # Bandwidths for computing spatial weights:
@@ -387,12 +398,27 @@ class MuSIC_Molecule_Selector(MuSIC):
         # Find targets that were marked as of interest for multiple interactions:
         flat_targets = [t for t_list in rem_targets for t in t_list]
         target_counts = Counter(flat_targets)
-        main_targets = [k for k, v in target_counts.items() if v > 5]
-        self.logger.info(f"Set of {len(main_targets)} more notable targets: \n{targets}")
+        main_targets = [k for k, v in target_counts.items() if v > 10]
+        # Associations between main targets and interaction features:
+        target_column_mapping = {t: [] for t in main_targets}
+        self.logger.info(f"Found {len(target_column_mapping)} notable targets of interest.")
+        for t in main_targets:
+            for col_idx, target_list in enumerate(targets):
+                if target_list and t in target_list:
+                    # If the target is present in the list for a column, add the column name to the mapping
+                    column_name = X_df.columns[col_idx]
+                    target_column_mapping[t].append(column_name)
+
         self.logger.info(
-            f"Saving list of most notable targets to "
-            f"{os.path.join(os.path.dirname(self.adata_path), f'major_{targets_id}.txt')} for potential use downstream."
+            f"Saving mapping of most notable targets to signaling features to "
+            f"{os.path.join(os.path.dirname(self.adata_path), 'predictors_and_targets',f'major_{targets_id}_map.json')} "
+            f"for potential use downstream."
         )
+        with open(
+            os.path.join(os.path.dirname(self.adata_path), "predictors_and_targets", f"major_{targets_id}_map.json"),
+            "w",
+        ) as f:
+            json.dump(target_column_mapping, f)
 
         # If any element in the return is None, remove the receptor from the list of receptors:
         receptors = set([r for r, condition in zip(receptor_set, targets) if condition is not None])
@@ -415,25 +441,50 @@ class MuSIC_Molecule_Selector(MuSIC):
 
         self.logger.info(
             f"Saving list of manually found ligands to "
-            f"{os.path.join(os.path.dirname(self.adata_path), f'{lig_id}.txt')} for potential use downstream."
+            f"{os.path.join(os.path.dirname(self.adata_path), 'predictors_and_targets', f'{lig_id}.txt')} for "
+            "potential use downstream."
         )
-        with open(os.path.join(os.path.dirname(self.adata_path), f"{lig_id}.txt"), "w") as f:
+        with open(os.path.join(os.path.dirname(self.adata_path), "predictors_and_targets", f"{lig_id}.txt"), "w") as f:
             f.write("\n".join(ligands))
 
         self.logger.info(
             f"Saving list of manually found receptors to "
-            f"{os.path.join(os.path.dirname(self.adata_path), f'{rec_id}.txt')} for potential use downstream."
+            f"{os.path.join(os.path.dirname(self.adata_path), 'predictors_and_targets', f'{rec_id}.txt')} for "
+            f"potential use downstream."
         )
-        with open(os.path.join(os.path.dirname(self.adata_path), f"{rec_id}.txt"), "w") as f:
+        with open(os.path.join(os.path.dirname(self.adata_path), "predictors_and_targets", f"{rec_id}.txt"), "w") as f:
             f.write("\n".join(receptors))
 
-        # Final list of (potentially good) targets:
-        targets = list(set([t for t_list in targets for t in t_list]))
-        self.logger.info(f"Full final set of {len(targets)} potential targets: \n{targets}")
+        # Final list of (potentially good) targets and mapping to interaction features:
+        all_targets = list(set([t for t_list in rem_targets for t in t_list]))
+        # Associations between main targets and interaction features:
+        target_column_mapping = {target: [] for target in all_targets}
+        for t in all_targets:
+            for col_idx, target_list in enumerate(targets):
+                if target_list and t in target_list:
+                    # If the target is present in the list for a column, add the column name to the mapping
+                    column_name = X_df.columns[col_idx]
+                    target_column_mapping[t].append(column_name)
+
+        self.logger.info(
+            f"Saving mapping of most notable targets to signaling features to "
+            f"{os.path.join(os.path.dirname(self.adata_path), 'predictors_and_targets', f'{targets_id}_map.json')} "
+            f"for potential use downstream."
+        )
+        with open(
+            os.path.join(os.path.dirname(self.adata_path), "predictors_and_targets", f"{targets_id}_map.json"), "w"
+        ) as f:
+            json.dump(target_column_mapping, f)
+
         self.logger.info(
             f"Saving list of manually found targets to "
-            f"{os.path.join(os.path.dirname(self.adata_path), f'{targets_id}.txt')} for potential use downstream."
+            f"{os.path.join(os.path.dirname(self.adata_path), 'predictors_and_targets', f'{targets_id}.txt')} for "
+            f"potential use downstream."
         )
+        with open(
+            os.path.join(os.path.dirname(self.adata_path), "predictors_and_targets", f"{targets_id}.txt"), "w"
+        ) as f:
+            f.write("\n".join(all_targets))
 
         # Delete other files created during the process:
         os.remove(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"))
