@@ -30,11 +30,11 @@ from joblib import Parallel, delayed
 from matplotlib import rcParams
 from mpi4py import MPI
 from pysal import explore, lib
-from scipy.stats import pearsonr, spearmanr, zscore
-from sklearn.decomposition import PCA
+from scipy.stats import pearsonr, spearmanr, ttest_1samp, zscore
+from sklearn.metrics import f1_score, mean_squared_error, roc_auc_score
 from sklearn.preprocessing import normalize
 
-from ...configuration import config_spateo_rcParams, shiftedColorMap
+from ...configuration import config_spateo_rcParams
 from ...logging import logger_manager as lm
 from ...plotting.static.utils import save_return_show_fig_utils
 from ..dimensionality_reduction import (
@@ -1451,7 +1451,6 @@ class MuSIC_Interpreter(MuSIC):
         use_receptors: bool = False,
         use_pathways: bool = False,
         use_cell_types: bool = False,
-        perform_dimensionality_reduction: bool = False,
     ):
         """Computes differential expression signatures of cells with various levels of ligand expression.
 
@@ -1467,8 +1466,6 @@ class MuSIC_Interpreter(MuSIC):
                 also provided.
             use_cell_types: Use cell types to use for differential expression analysis. If given,
                 will preprocess/construct the necessary components to initialize cell type-specific models.
-            perform_dimensionality_reduction: Set True to perform dimensionality reduction on the array of
-                predictors. If False, will use the raw expression (in the case of 'use_ligands' or 'use_pathways').
 
         Returns:
             None
@@ -1927,23 +1924,19 @@ class MuSIC_Interpreter(MuSIC):
     # ---------------------------------------------------------------------------------------------------
     # Permutation testing
     # ---------------------------------------------------------------------------------------------------
-    def permutation_test(self, gene: str, n_permutations: int = 100, **kwargs):
+    def permutation_test(self, gene: str, n_permutations: int = 100, permute_nonzeros_only: bool = False, **kwargs):
         """Sets up permutation test for determination of statistical significance of model diagnostics. Can be used
         to identify true/the strongest signal-responsive expression patterns.
 
         Args:
             gene: Target gene to perform permutation test on.
             n_permutations: Number of permutations of the gene expression to perform. Default is 100.
+            permute_nonzeros_only: Whether to only perform the permutation over the gene-expressing cells
             kwargs: Keyword arguments for any of the Spateo argparse arguments. Should not include 'adata_path',
-                and should not include 'output_path' (which will be determined by the output path used for the main
-                model).
+                'target_path', or 'output_path' (which will be determined by the output path used for the main
+                model). Also should not include 'custom_lig_path', 'custom_rec_path', 'mod_type', 'bw_fixed' or 'kernel'
+                (which will be determined by the initial model instantiation).
         """
-        logger = lm.get_main_logger()
-
-        try:
-            labels = self.adata.obs[self.group_key]
-        except:
-            raise ValueError("Please provide grouping key for cell types (or other groups of interest).")
 
         # Set up storage folder:
         # Check if the array of additional molecules to query has already been created:
@@ -1952,8 +1945,10 @@ class MuSIC_Interpreter(MuSIC):
 
         if not os.path.exists(os.path.join(parent_dir, "permutation_test")):
             os.makedirs(os.path.join(parent_dir, "permutation_test"))
-        if not os.path.exists(os.path.join(parent_dir, "permutation_test_outputs")):
-            os.makedirs(os.path.join(parent_dir, "permutation_test_outputs"))
+        if not os.path.exists(os.path.join(parent_dir, "permutation_test_inputs")):
+            os.makedirs(os.path.join(parent_dir, "permutation_test_inputs"))
+        if not os.path.exists(os.path.join(parent_dir, f"permutation_test_outputs_{gene}")):
+            os.makedirs(os.path.join(parent_dir, f"permutation_test_outputs_{gene}"))
 
         gene_idx = self.adata.var_names.tolist().index(gene)
         gene_data = np.array(self.adata.X[:, gene_idx].todense())
@@ -1961,15 +1956,55 @@ class MuSIC_Interpreter(MuSIC):
         permuted_data_list = [gene_data]
         perm_names = [f'{gene}_nonpermuted']
 
-        for i in range(n_permutations):
-            perm_name = f'{gene}_permuted_{i}'
-            permuted_data = np.random.permutation(gene_data)
-            # Convert to sparse matrix
-            permuted_data_sparse = scipy.sparse.csr_matrix(permuted_data)
+        # Set save name for AnnData object and output file depending on whether all cells or only gene-expressing
+        # cells are permuted:
+        if permute_nonzeros_only:
+            adata_path = os.path.join(parent_dir, "permutation_test",
+                                      f"{file_name}_{gene}_permuted_expressing_subset.h5ad")
+            output_path = os.path.join(parent_dir, "permutation_test_outputs",
+                                       f"{file_name}_{gene}_permuted_expressing_subset.csv")
+            self.permuted_nonzeros_only = True
+        else:
+            adata_path = os.path.join(parent_dir, "permutation_test", f"{file_name}_{gene}_permuted.h5ad")
+            output_path = os.path.join(parent_dir, "permutation_test_outputs", f"{file_name}_{gene}_permuted.csv")
+            self.permuted_nonzeros_only = False
 
-            # 5. Store back in the AnnData object
-            permuted_data_list.append(permuted_data_sparse)
-            perm_names.append(perm_name)
+        if permute_nonzeros_only:
+            self.logger.info("Performing permutation by scrambling expression for all cells...")
+            for i in range(n_permutations):
+                perm_name = f'{gene}_permuted_{i}'
+                permuted_data = np.random.permutation(gene_data)
+                # Convert to sparse matrix
+                permuted_data_sparse = scipy.sparse.csr_matrix(permuted_data)
+
+                # Store back in the AnnData object
+                permuted_data_list.append(permuted_data_sparse)
+                perm_names.append(perm_name)
+        else:
+            self.logger.info("Performing permutation by scrambling expression only for the subset of cells that "
+                             "express the gene of interest...")
+            for i in range(n_permutations):
+                perm_name = f'{gene}_permuted_{i}'
+                # Separate non-zero rows and zero rows:
+                nonzero_indices = np.where(gene_data != 0)[0]
+                zero_indices = np.where(gene_data == 0)[0]
+
+                non_zero_rows = gene_data[gene_data != 0]
+                zero_rows = gene_data[gene_data == 0]
+
+                # Permute non-zero rows:
+                permuted_non_zero_rows = np.random.permutation(non_zero_rows)
+
+                # Recombine permuted non-zero rows and zero rows:
+                permuted_gene_data = np.zeros_like(gene_data)
+                permuted_gene_data[nonzero_indices] = permuted_non_zero_rows.reshape(-1, 1)
+                permuted_gene_data[zero_indices] = zero_rows.reshape(-1, 1)
+                # Convert to sparse matrix
+                permuted_gene_data_sparse = scipy.sparse.csr_matrix(permuted_gene_data)
+
+                # Store back in the AnnData object
+                permuted_data_list.append(permuted_gene_data_sparse)
+                perm_names.append(perm_name)
 
         # Concatenate the original and permuted data:
         all_data_sparse = scipy.sparse.hstack([self.adata.X] + permuted_data_list)
@@ -1985,13 +2020,220 @@ class MuSIC_Interpreter(MuSIC):
         adata_permuted.obs[self.group_key] = self.adata.obs[self.group_key]
         adata_permuted.obs["__type"] = self.adata.obs["__type"]
 
+        # Save list of targets:
+        targets = [v for v in adata_permuted.var_names if "permuted" in v]
+        target_path = os.path.join(parent_dir, "permutation_test_inputs", f"{gene}_permutation_targets.txt")
+        with open(target_path, "w") as f:
+            for target in targets:
+                f.write(f"{target}\n")
         # Save the permuted AnnData object:
-        adata_permuted.write(os.path.join(parent_dir, "permutation_test", f"{file_name}_permuted.h5ad"))
+        adata_permuted.write(adata_path)
 
         # Fitting permutation model:
-        kwargs["adata_path"] = os.path.join(parent_dir, "permutation_test", f"{file_name}_permuted.h5ad")
-        kwargs["output_path"] = os.path.join(parent_dir, "permutation_test_outputs", f"{file_name}_permuted.csv")
+        kwargs["adata_path"] = adata_path
+        kwargs["output_path"] = output_path
+        kwargs["cci_dir"] = self.cci_dir
+        if hasattr(self, "custom_receptors_path") and self.mod_type.isin(["receptor", "lr"]):
+            kwargs["custom_rec_path"] = self.custom_receptors_path
+        elif hasattr(self, "custom_pathways_path") and self.mod_type.isin(["receptor", "lr"]):
+            kwargs["custom_pathways_path"] = self.custom_pathways_path
+        else:
+            raise ValueError("For permutation testing, receptors/pathways must be given from .txt file.")
+        if hasattr(self, "custom_ligands_path") and self.mod_type.isin(["ligand", "lr"]):
+            kwargs["custom_lig_path"] = self.custom_ligands_path
+        elif hasattr(self, "custom_pathways_path") and self.mod_type.isin(["ligand", "lr"]):
+            kwargs["custom_pathways_path"] = self.custom_pathways_path
+        else:
+            raise ValueError("For permutation testing, ligands/pathways must be given from .txt file.")
 
+        kwargs["targets_path"] = target_path
+        kwargs["mod_type"] = self.mod_type
+        kwargs["distance_secreted"] = self.distance_secreted
+        kwargs["distance_membrane_bound"] = self.distance_membrane_bound
+        kwargs["bw_fixed"] = self.bw_fixed
+        kwargs["kernel"] = self.kernel
+
+        comm, parser, args_list = define_spateo_argparse(**kwargs)
+        permutation_model = MuSIC(comm, parser, args_list)
+        permutation_model._set_up_model()
+        permutation_model.fit()
+        permutation_model.predict_and_save()
+
+    def eval_permutation_test(self, gene: str):
+        """Evaluation function for permutation tests. Will compute multiple metrics (correlation coefficients,
+        F1 scores, AUROC in the case that all cells were permuted, etc.) to compare true and model-predicted gene
+        expression vectors.
+
+        Args:
+            gene: Target gene for which to evaluate permutation test
+        """
+
+        parent_dir = os.path.dirname(self.adata_path)
+        file_name = os.path.basename(self.adata_path).split(".")[0]
+
+        output_dir = os.path.join(parent_dir, f"permutation_test_outputs_{gene}")
+        if not os.path.exists(os.path.join(output_dir, "diagnostics")):
+            os.makedirs(os.path.join(output_dir, "diagnostics"))
+
+        if self.permuted_nonzeros_only:
+            adata_permuted = anndata.read_h5ad(os.path.join(parent_dir, "permutation_test",
+                                      f"{file_name}_{gene}_permuted_expressing_subset.h5ad"))
+        else:
+            adata_permuted = anndata.read_h5ad(os.path.join(parent_dir, "permutation_test",
+                                                            f"{file_name}_{gene}_permuted.h5ad"))
+
+        predictions = pd.read_csv(os.path.join(output_dir, "predictions.csv"), index_col=0)
+        original_column_names = predictions.columns.tolist()
+
+        # Create a dictionary to map integer column names to new permutation names
+        column_name_map = {}
+        for column_name in original_column_names:
+            if column_name != "nonpermuted":
+                column_name_map[column_name] = f"permutation_{column_name}"
+
+        # Rename the columns in the dataframe using the created dictionary
+        predictions.rename(columns=column_name_map, inplace=True)
+
+        if not self.permuted_nonzeros_only:
+            # Instantiate metric storage variables:
+            all_pearson_correlations = {}
+            all_spearman_correlations = {}
+            all_f1_scores = {}
+            all_auroc_scores = {}
+            all_rmse_scores = {}
+
+        # For the nonzero subset- will be used both in the case that permutation occurred across all cells and
+        # across only gene-expressing cells:
+        all_pearson_correlations_nz = {}
+        all_spearman_correlations_nz = {}
+        all_f1_scores_nz = {}
+        all_auroc_scores_nz = {}
+        all_rmse_scores_nz = {}
+
+        for col in predictions.columns:
+            if "_" in col:
+                perm_no = col.split("_")[1]
+                y = adata_permuted[:, f'{gene}_permuted_{perm_no}'].X.toarray().reshape(-1)
+            else:
+                y = adata_permuted[:, f'{gene}_{col}'].X.toarray().reshape(-1)
+            y_binary = (y > 0).astype(int)
+
+            y_pred = predictions[col].values.reshape(-1)
+            y_pred_binary = (y_pred > 0).astype(int)
+
+            # Compute metrics for the subset of rows that are nonzero:
+            nonzero_indices = np.nonzero(y)[0]
+            y_nonzero = y[nonzero_indices]
+            y_pred_nonzero = y_pred[nonzero_indices]
+
+            y_binary_nonzero = y_binary[nonzero_indices]
+            y_pred_binary_nonzero = y_pred_binary[nonzero_indices]
+
+            rp, _ = pearsonr(y_nonzero, y_pred_nonzero)
+            r, _ = spearmanr(y_nonzero, y_pred_nonzero)
+            f1 = f1_score(y_binary_nonzero, y_pred_binary_nonzero)
+            auroc = roc_auc_score(y_binary_nonzero, y_pred_binary_nonzero)
+            rmse = mean_squared_error(y_nonzero, y_pred_nonzero, squared=False)
+
+            all_pearson_correlations_nz[col] = rp
+            all_spearman_correlations_nz[col] = r
+            all_f1_scores_nz[col] = f1
+            all_auroc_scores_nz[col] = auroc
+            all_rmse_scores_nz[col] = rmse
+
+            # Additionally calculate metrics for all cells if permutation occurred over all cells:
+            if not self.permuted_nonzeros_only:
+                rp, _ = pearsonr(y, y_pred)
+                r, _ = spearmanr(y, y_pred)
+                f1 = f1_score(y_binary, y_pred_binary)
+                auroc = roc_auc_score(y_binary, y_pred_binary)
+                rmse = mean_squared_error(y, y_pred, squared=False)
+
+                all_pearson_correlations[col] = rp
+                all_spearman_correlations[col] = r
+                all_f1_scores[col] = f1
+                all_auroc_scores[col] = auroc
+                all_rmse_scores[col] = rmse
+
+        # Collect all diagnostics in dataframe form:
+        if not self.permuted_nonzeros_only:
+            results = pd.DataFrame({
+                'Pearson correlation': all_pearson_correlations,
+                'Spearman correlation': all_spearman_correlations,
+                'F1 score': all_f1_scores,
+                'AUROC': all_auroc_scores,
+                'RMSE': all_rmse_scores,
+                'Pearson correlation (expressing subset)': all_pearson_correlations_nz,
+                'Spearman correlation (expressing subset)': all_spearman_correlations_nz,
+                'F1 score (expressing subset)': all_f1_scores_nz,
+                'AUROC (expressing subset)': all_auroc_scores_nz,
+                'RMSE (expressing subset)': all_rmse_scores_nz
+            })
+            # Without nonpermuted scores:
+            results_permuted = results.loc[[r for r in results.index if r != "nonpermuted"], :]
+
+            self.logger.info("Average permutation metrics for all cells: ")
+            self.logger.info(f"Average Pearson correlation: {results_permuted['Pearson correlation'].mean()}")
+            self.logger.info(f"Average Spearman correlation: {results_permuted['Spearman correlation'].mean()}")
+            self.logger.info(f"Average F1 score: {results_permuted['F1 score'].mean()}")
+            self.logger.info(f"Average AUROC: {results_permuted['AUROC'].mean()}")
+            self.logger.info(f"Average RMSE: {results_permuted['RMSE'].mean()}")
+            self.logger.info("Average permutation metrics for expressing cells: ")
+            self.logger.info(f"Average Pearson correlation: "
+                             f"{results_permuted['Pearson correlation (expressing subset)'].mean()}")
+            self.logger.info(f"Average Spearman correlation: "
+                             f"{results_permuted['Spearman correlation (expressing subset)'].mean()}")
+            self.logger.info(f"Average F1 score: {results_permuted['F1 score (expressing subset)'].mean()}")
+            self.logger.info(f"Average AUROC: {results_permuted['AUROC (expressing subset)'].mean()}")
+            self.logger.info(f"Average RMSE: {results_permuted['RMSE (expressing subset)'].mean()}")
+
+            diagnostic_path = os.path.join(output_dir, "diagnostics", f"{gene}_permutations_diagnostics.csv")
+        else:
+            results = pd.DataFrame({
+                'Pearson correlation (expressing subset)': all_pearson_correlations_nz,
+                'Spearman correlation (expressing subset)': all_spearman_correlations_nz,
+                'F1 score (expressing subset)': all_f1_scores_nz,
+                'AUROC (expressing subset)': all_auroc_scores_nz,
+                'RMSE (expressing subset)': all_rmse_scores_nz
+            })
+            # Without nonpermuted scores:
+            results_permuted = results.loc[[r for r in results.index if r != "nonpermuted"], :]
+
+            self.logger.info("Average permutation metrics for expressing cells: ")
+            self.logger.info(f"Average Pearson correlation: "
+                             f"{results_permuted['Pearson correlation (expressing subset)'].mean()}")
+            self.logger.info(f"Average Spearman correlation: "
+                             f"{results_permuted['Spearman correlation (expressing subset)'].mean()}")
+            self.logger.info(f"Average F1 score: {results_permuted['F1 score (expressing subset)'].mean()}")
+            self.logger.info(f"Average AUROC: {results_permuted['AUROC (expressing subset)'].mean()}")
+            self.logger.info(f"Average RMSE: {results_permuted['RMSE (expressing subset)'].mean()}")
+
+            diagnostic_path = os.path.join(output_dir, "diagnostics",
+                                           f"{gene}_nonzero_subset_permutations_diagnostics.csv")
+
+        # Significance testing:
+        nonpermuted_values = results.loc['nonpermuted']
+
+        # Create dictionaries to store the t-statistics, p-values, and significance indicators:
+        t_statistics, pvals, significance = {}, {}, {}
+
+        # Iterate over the columns of the DataFrame
+        for col in results_permuted.columns:
+            column_data = results_permuted[col]
+            # Perform one-sample t-test:
+            t_stat, pval = ttest_1samp(column_data, nonpermuted_values[col])
+            # Store the t-statistic, p-value, and significance indicator
+            t_statistics[col] = t_stat
+            pvals[col] = pval
+            significance[col] = 'yes' if pval < 0.05 else 'no'
+
+        # Store the t-statistics, p-values, and significance indicators in the results DataFrame:
+        results.loc['t-statistic'] = t_statistics
+        results.loc['p-value'] = pvals
+        results.loc['significant'] = significance
+
+        # Save results:
+        results.to_csv(diagnostic_path)
 
     # ---------------------------------------------------------------------------------------------------
     # In silico perturbation of signaling effects

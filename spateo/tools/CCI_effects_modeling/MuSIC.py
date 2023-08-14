@@ -1918,9 +1918,9 @@ class MuSIC:
         if self.minbw is None:
             if self.bw_fixed:
                 if self.mod_type == "downstream":
-                    # Check over the 20-50 nearest neighbors- compute distances such that each cell has this number
+                    # Check over the 10-50 nearest neighbors- compute distances such that each cell has this number
                     # on average:
-                    self.minbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=20)
+                    self.minbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=10)
 
                     self.maxbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=50)
 
