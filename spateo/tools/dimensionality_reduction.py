@@ -384,7 +384,7 @@ def umap_conn_indices_dist_embedding(
             angular=rp_forest,
         )
 
-    logger.info("Constructing embedding ...")
+    #logger.info("Constructing embedding ...")
 
     a, b = find_ab_params(spread, min_dist)
     if type(graph) == tuple:
@@ -504,7 +504,7 @@ def find_optimal_n_umap_components(X_data: np.ndarray, max_n_components: Optiona
 
     # Plot the sihouette score as a function of the number of components
     plt.figure(figsize=(6, 4))
-    plt.plot(range(2, max_n_components + 1), scores, "bo-", linewidth=2)
+    plt.plot(range(5, max_n_components + 1), scores, "bo-", linewidth=2)
     plt.xlabel("Number of components")
     plt.ylabel("Total explained variance")
     plt.title("Elbow plot for PCA")

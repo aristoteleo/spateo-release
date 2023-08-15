@@ -73,7 +73,7 @@ class MuSIC_Interpreter(MuSIC):
                 "analysis now..."
             )
             self._set_up_model()
-            self.logger.info("Finished preprocessing, getting fitted coefficients and standard errors.")
+            # self.logger.info("Finished preprocessing, getting fitted coefficients and standard errors.")
 
         # Dictionary containing coefficients:
         self.coeffs, self.standard_errors = self.return_outputs()
@@ -1455,10 +1455,11 @@ class MuSIC_Interpreter(MuSIC):
         """Computes differential expression signatures of cells with various levels of ligand expression.
 
         Args:
-            sender_or_receiver_degs: Whether to compute DEGs for sender or receiver cells. Note that 'use_ligands' is
-                only an option if this is set to 'sender', whereas 'use_receptors' is only an option if this is set to
-                'receiver'. If 'use_pathways' is True, the value of this argument will determine whether ligands or
-                receptors are used to define the pathway.
+            sender_or_receiver_degs: Only makes a difference if 'use_pathways' or 'use_cell_types' is specified.
+                Determines whether to compute DEGs for sender or receiver cells. If 'use_pathways' is True,
+                the value of this argument will determine whether ligands or receptors are used to define the model.
+                Note that in either case, differential expression of TFs, binding factors, etc. will be computed in
+                association w/ ligands/receptors.
             use_ligands: Use ligand array for differential expression analysis. Will take precedent over
                 sender/receiver cell type if also provided.
             use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
@@ -1470,10 +1471,15 @@ class MuSIC_Interpreter(MuSIC):
         Returns:
             None
         """
-        logger = lm.get_main_logger()
+
+        if use_ligands and use_receptors:
+            self.logger.info(
+                "Both 'use_ligands' and 'use_receptors' are given as function inputs. Note that "
+                "'use_ligands' will take priority."
+            )
 
         # Check if the array of additional molecules to query has already been created:
-        parent_dir = os.path.dirname(self.adata_path)
+        parent_dir = os.path.dirname(self.output_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
         if use_ligands:
             targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt")
@@ -1488,7 +1494,7 @@ class MuSIC_Interpreter(MuSIC):
             os.makedirs(os.path.join(parent_dir, "cci_deg_detection"))
 
         # Check for existing processed downstream-task AnnData object:
-        try:
+        if os.path.exists(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}.h5ad")):
             # Load files in case they are already existent:
             counts_plus = anndata.read_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}.h5ad"))
             if use_ligands or use_pathways or use_receptors:
@@ -1496,12 +1502,12 @@ class MuSIC_Interpreter(MuSIC):
                     targets = file.readlines()
             else:
                 targets = pd.read_csv(targets_path, index_col=0)
-            logger.info(
+            self.logger.info(
                 "Found existing files for downstream analysis- skipping processing. Can proceed by running "
                 ":func ~`self.CCI_sender_deg_detection()`."
             )
-        except:
-            logger.info("Generating and saving AnnData object for downstream analysis...")
+        else:
+            self.logger.info("Generating and saving AnnData object for downstream analysis...")
             if self.cci_dir is None:
                 raise ValueError("Please provide :attr `cci_dir`.")
 
@@ -1519,23 +1525,27 @@ class MuSIC_Interpreter(MuSIC):
                 lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
 
             # Subset GRN and other databases to only include TFs that are in the adata object:
-            grn = grn[np.isin(self.adata.var_names, grn.columns)]
-            cof_db = cof_db[np.isin(self.adata.var_names, cof_db.columns)]
-            tf_tf_db = tf_tf_db[np.isin(self.adata.var_names, tf_tf_db.columns)]
-            # For use if 'use_cell_types':
-            if use_cell_types:
-                if sender_or_receiver_degs == "sender":
-                    database_ligands = list(set(lr_db["from"]))
-                    l_complexes = [elem for elem in database_ligands if "_" in elem]
-                    # Get individual components if any complexes are included in this list:
-                    ligand_set = [l for item in database_ligands for l in item.split("_")]
-                    ligand_set = [l for l in ligand_set if l not in self.adata.var_names]
-                else:
-                    database_receptors = list(set(lr_db["to"]))
-                    r_complexes = [elem for elem in database_receptors if "_" in elem]
-                    # Get individual components if any complexes are included in this list:
-                    receptor_set = [r for item in database_receptors for r in item.split("_")]
-                    receptor_set = [r for r in receptor_set if r not in self.adata.var_names]
+            grn = grn[[col for col in grn.columns if col in self.adata.var_names]]
+            cof_db = cof_db[[col for col in cof_db.columns if col in self.adata.var_names]]
+            tf_tf_db = tf_tf_db[[col for col in tf_tf_db.columns if col in self.adata.var_names]]
+
+            analyze_pathway_ligands = sender_or_receiver_degs == "sender" and use_pathways
+            analyze_pathway_receptors = sender_or_receiver_degs == "receiver" and use_pathways
+            analyze_celltype_ligands = sender_or_receiver_degs == "sender" and use_cell_types
+            analyze_celltype_receptors = sender_or_receiver_degs == "receiver" and use_cell_types
+
+            if use_ligands or analyze_pathway_ligands or analyze_celltype_ligands:
+                database_ligands = list(set(lr_db["from"]))
+                l_complexes = [elem for elem in database_ligands if "_" in elem]
+                # Get individual components if any complexes are included in this list:
+                ligand_set = [l for item in database_ligands for l in item.split("_")]
+                ligand_set = [l for l in ligand_set if l not in self.adata.var_names]
+            elif use_receptors or analyze_pathway_receptors or analyze_celltype_receptors:
+                database_receptors = list(set(lr_db["to"]))
+                r_complexes = [elem for elem in database_receptors if "_" in elem]
+                # Get individual components if any complexes are included in this list:
+                receptor_set = [r for item in database_receptors for r in item.split("_")]
+                receptor_set = [r for r in receptor_set if r not in self.adata.var_names]
 
             signal = {}
             subsets = {}
@@ -1728,7 +1738,7 @@ class MuSIC_Interpreter(MuSIC):
 
                 self.logger.info(f"For this dataset, marked {len(all_TFs)} of interest.")
                 self.logger.info(
-                    f"For this dataset, marked {len(all_cofactors)} transcriptional cofactors of " f"interest."
+                    f"For this dataset, marked {len(all_cofactors)} transcriptional cofactors of interest."
                 )
                 if len(all_RBPs) > 0:
                     self.logger.info(f"For this dataset, marked {len(all_RBPs)} RNA-binding proteins of interest.")
@@ -1766,7 +1776,7 @@ class MuSIC_Interpreter(MuSIC):
 
                 # Compute the ideal number of UMAP components to use- use half the number of features as the
                 # max possible number of components:
-                logger.info("Computing optimal number of UMAP components ...")
+                self.logger.info("Computing optimal number of UMAP components ...")
                 n_umap_components = find_optimal_n_umap_components(sender_deg_predictors_scaled)
 
                 # Perform UMAP reduction with the chosen number of components, store in AnnData object:
@@ -1776,6 +1786,10 @@ class MuSIC_Interpreter(MuSIC):
                 counts_plus.obsm["X_umap"] = X_umap
 
                 targets = signal[subset_key].columns
+                # Add each target to AnnData .obs field:
+                for col in signal[subset_key].columns:
+                    counts_plus.obs[f"regulator_{col}"] = signal[subset_key][col].values
+
                 if "targets_path" in locals():
                     # Save to .txt file:
                     with open(targets_path, "w") as file:
@@ -1850,7 +1864,17 @@ class MuSIC_Interpreter(MuSIC):
         if use_ligands or use_receptors or use_pathways:
             parent_dir = os.path.dirname(self.adata_path)
             file_name = os.path.basename(self.adata_path).split(".")[0]
-            output_path = os.path.join(output_dir, "cci_deg_detection", output_file_name)
+            if use_ligands:
+                file_id = "ligand_analysis"
+            elif use_receptors:
+                file_id = "receptor_analysis"
+            elif use_pathways and sender_or_receiver_degs == "sender":
+                file_id = "pathway_analysis_ligands"
+            elif use_pathways and sender_or_receiver_degs == "receiver":
+                file_id = "pathway_analysis_receptors"
+            if not os.path.exists(os.path.join(output_dir, "cci_deg_detection", file_id)):
+                os.makedirs(os.path.join(output_dir, "cci_deg_detection", file_id))
+            output_path = os.path.join(output_dir, "cci_deg_detection", file_id, output_file_name)
             kwargs["output_path"] = output_path
 
             logger.info(
@@ -1888,7 +1912,13 @@ class MuSIC_Interpreter(MuSIC):
             file_name = os.path.basename(self.adata_path).split(".")[0]
 
             # create output sub-directory for this model:
-            subset_output_dir = os.path.join(output_dir, "cci_deg_detection", cell_type)
+            if sender_or_receiver_degs == "sender":
+                file_id = "ligand_analysis"
+            elif sender_or_receiver_degs == "receiver":
+                file_id = "receptor_analysis"
+            if not os.path.exists(os.path.join(output_dir, "cci_deg_detection", cell_type, file_id)):
+                os.makedirs(os.path.join(output_dir, "cci_deg_detection", cell_type, file_id))
+            subset_output_dir = os.path.join(output_dir, "cci_deg_detection", cell_type, file_id)
             # Check if directory already exists, if not create it
             if not os.path.exists(subset_output_dir):
                 self.logger.info(f"Output folder for cell type {cell_type} does not exist, creating it now.")
@@ -1954,15 +1984,17 @@ class MuSIC_Interpreter(MuSIC):
         gene_data = np.array(self.adata.X[:, gene_idx].todense())
 
         permuted_data_list = [gene_data]
-        perm_names = [f'{gene}_nonpermuted']
+        perm_names = [f"{gene}_nonpermuted"]
 
         # Set save name for AnnData object and output file depending on whether all cells or only gene-expressing
         # cells are permuted:
         if permute_nonzeros_only:
-            adata_path = os.path.join(parent_dir, "permutation_test",
-                                      f"{file_name}_{gene}_permuted_expressing_subset.h5ad")
-            output_path = os.path.join(parent_dir, "permutation_test_outputs",
-                                       f"{file_name}_{gene}_permuted_expressing_subset.csv")
+            adata_path = os.path.join(
+                parent_dir, "permutation_test", f"{file_name}_{gene}_permuted_expressing_subset.h5ad"
+            )
+            output_path = os.path.join(
+                parent_dir, "permutation_test_outputs", f"{file_name}_{gene}_permuted_expressing_subset.csv"
+            )
             self.permuted_nonzeros_only = True
         else:
             adata_path = os.path.join(parent_dir, "permutation_test", f"{file_name}_{gene}_permuted.h5ad")
@@ -1972,7 +2004,7 @@ class MuSIC_Interpreter(MuSIC):
         if permute_nonzeros_only:
             self.logger.info("Performing permutation by scrambling expression for all cells...")
             for i in range(n_permutations):
-                perm_name = f'{gene}_permuted_{i}'
+                perm_name = f"{gene}_permuted_{i}"
                 permuted_data = np.random.permutation(gene_data)
                 # Convert to sparse matrix
                 permuted_data_sparse = scipy.sparse.csr_matrix(permuted_data)
@@ -1981,10 +2013,12 @@ class MuSIC_Interpreter(MuSIC):
                 permuted_data_list.append(permuted_data_sparse)
                 perm_names.append(perm_name)
         else:
-            self.logger.info("Performing permutation by scrambling expression only for the subset of cells that "
-                             "express the gene of interest...")
+            self.logger.info(
+                "Performing permutation by scrambling expression only for the subset of cells that "
+                "express the gene of interest..."
+            )
             for i in range(n_permutations):
-                perm_name = f'{gene}_permuted_{i}'
+                perm_name = f"{gene}_permuted_{i}"
                 # Separate non-zero rows and zero rows:
                 nonzero_indices = np.where(gene_data != 0)[0]
                 zero_indices = np.where(gene_data == 0)[0]
@@ -2076,11 +2110,13 @@ class MuSIC_Interpreter(MuSIC):
             os.makedirs(os.path.join(output_dir, "diagnostics"))
 
         if self.permuted_nonzeros_only:
-            adata_permuted = anndata.read_h5ad(os.path.join(parent_dir, "permutation_test",
-                                      f"{file_name}_{gene}_permuted_expressing_subset.h5ad"))
+            adata_permuted = anndata.read_h5ad(
+                os.path.join(parent_dir, "permutation_test", f"{file_name}_{gene}_permuted_expressing_subset.h5ad")
+            )
         else:
-            adata_permuted = anndata.read_h5ad(os.path.join(parent_dir, "permutation_test",
-                                                            f"{file_name}_{gene}_permuted.h5ad"))
+            adata_permuted = anndata.read_h5ad(
+                os.path.join(parent_dir, "permutation_test", f"{file_name}_{gene}_permuted.h5ad")
+            )
 
         predictions = pd.read_csv(os.path.join(output_dir, "predictions.csv"), index_col=0)
         original_column_names = predictions.columns.tolist()
@@ -2113,9 +2149,9 @@ class MuSIC_Interpreter(MuSIC):
         for col in predictions.columns:
             if "_" in col:
                 perm_no = col.split("_")[1]
-                y = adata_permuted[:, f'{gene}_permuted_{perm_no}'].X.toarray().reshape(-1)
+                y = adata_permuted[:, f"{gene}_permuted_{perm_no}"].X.toarray().reshape(-1)
             else:
-                y = adata_permuted[:, f'{gene}_{col}'].X.toarray().reshape(-1)
+                y = adata_permuted[:, f"{gene}_{col}"].X.toarray().reshape(-1)
             y_binary = (y > 0).astype(int)
 
             y_pred = predictions[col].values.reshape(-1)
@@ -2157,18 +2193,20 @@ class MuSIC_Interpreter(MuSIC):
 
         # Collect all diagnostics in dataframe form:
         if not self.permuted_nonzeros_only:
-            results = pd.DataFrame({
-                'Pearson correlation': all_pearson_correlations,
-                'Spearman correlation': all_spearman_correlations,
-                'F1 score': all_f1_scores,
-                'AUROC': all_auroc_scores,
-                'RMSE': all_rmse_scores,
-                'Pearson correlation (expressing subset)': all_pearson_correlations_nz,
-                'Spearman correlation (expressing subset)': all_spearman_correlations_nz,
-                'F1 score (expressing subset)': all_f1_scores_nz,
-                'AUROC (expressing subset)': all_auroc_scores_nz,
-                'RMSE (expressing subset)': all_rmse_scores_nz
-            })
+            results = pd.DataFrame(
+                {
+                    "Pearson correlation": all_pearson_correlations,
+                    "Spearman correlation": all_spearman_correlations,
+                    "F1 score": all_f1_scores,
+                    "AUROC": all_auroc_scores,
+                    "RMSE": all_rmse_scores,
+                    "Pearson correlation (expressing subset)": all_pearson_correlations_nz,
+                    "Spearman correlation (expressing subset)": all_spearman_correlations_nz,
+                    "F1 score (expressing subset)": all_f1_scores_nz,
+                    "AUROC (expressing subset)": all_auroc_scores_nz,
+                    "RMSE (expressing subset)": all_rmse_scores_nz,
+                }
+            )
             # Without nonpermuted scores:
             results_permuted = results.loc[[r for r in results.index if r != "nonpermuted"], :]
 
@@ -2179,40 +2217,49 @@ class MuSIC_Interpreter(MuSIC):
             self.logger.info(f"Average AUROC: {results_permuted['AUROC'].mean()}")
             self.logger.info(f"Average RMSE: {results_permuted['RMSE'].mean()}")
             self.logger.info("Average permutation metrics for expressing cells: ")
-            self.logger.info(f"Average Pearson correlation: "
-                             f"{results_permuted['Pearson correlation (expressing subset)'].mean()}")
-            self.logger.info(f"Average Spearman correlation: "
-                             f"{results_permuted['Spearman correlation (expressing subset)'].mean()}")
+            self.logger.info(
+                f"Average Pearson correlation: " f"{results_permuted['Pearson correlation (expressing subset)'].mean()}"
+            )
+            self.logger.info(
+                f"Average Spearman correlation: "
+                f"{results_permuted['Spearman correlation (expressing subset)'].mean()}"
+            )
             self.logger.info(f"Average F1 score: {results_permuted['F1 score (expressing subset)'].mean()}")
             self.logger.info(f"Average AUROC: {results_permuted['AUROC (expressing subset)'].mean()}")
             self.logger.info(f"Average RMSE: {results_permuted['RMSE (expressing subset)'].mean()}")
 
             diagnostic_path = os.path.join(output_dir, "diagnostics", f"{gene}_permutations_diagnostics.csv")
         else:
-            results = pd.DataFrame({
-                'Pearson correlation (expressing subset)': all_pearson_correlations_nz,
-                'Spearman correlation (expressing subset)': all_spearman_correlations_nz,
-                'F1 score (expressing subset)': all_f1_scores_nz,
-                'AUROC (expressing subset)': all_auroc_scores_nz,
-                'RMSE (expressing subset)': all_rmse_scores_nz
-            })
+            results = pd.DataFrame(
+                {
+                    "Pearson correlation (expressing subset)": all_pearson_correlations_nz,
+                    "Spearman correlation (expressing subset)": all_spearman_correlations_nz,
+                    "F1 score (expressing subset)": all_f1_scores_nz,
+                    "AUROC (expressing subset)": all_auroc_scores_nz,
+                    "RMSE (expressing subset)": all_rmse_scores_nz,
+                }
+            )
             # Without nonpermuted scores:
             results_permuted = results.loc[[r for r in results.index if r != "nonpermuted"], :]
 
             self.logger.info("Average permutation metrics for expressing cells: ")
-            self.logger.info(f"Average Pearson correlation: "
-                             f"{results_permuted['Pearson correlation (expressing subset)'].mean()}")
-            self.logger.info(f"Average Spearman correlation: "
-                             f"{results_permuted['Spearman correlation (expressing subset)'].mean()}")
+            self.logger.info(
+                f"Average Pearson correlation: " f"{results_permuted['Pearson correlation (expressing subset)'].mean()}"
+            )
+            self.logger.info(
+                f"Average Spearman correlation: "
+                f"{results_permuted['Spearman correlation (expressing subset)'].mean()}"
+            )
             self.logger.info(f"Average F1 score: {results_permuted['F1 score (expressing subset)'].mean()}")
             self.logger.info(f"Average AUROC: {results_permuted['AUROC (expressing subset)'].mean()}")
             self.logger.info(f"Average RMSE: {results_permuted['RMSE (expressing subset)'].mean()}")
 
-            diagnostic_path = os.path.join(output_dir, "diagnostics",
-                                           f"{gene}_nonzero_subset_permutations_diagnostics.csv")
+            diagnostic_path = os.path.join(
+                output_dir, "diagnostics", f"{gene}_nonzero_subset_permutations_diagnostics.csv"
+            )
 
         # Significance testing:
-        nonpermuted_values = results.loc['nonpermuted']
+        nonpermuted_values = results.loc["nonpermuted"]
 
         # Create dictionaries to store the t-statistics, p-values, and significance indicators:
         t_statistics, pvals, significance = {}, {}, {}
@@ -2225,12 +2272,12 @@ class MuSIC_Interpreter(MuSIC):
             # Store the t-statistic, p-value, and significance indicator
             t_statistics[col] = t_stat
             pvals[col] = pval
-            significance[col] = 'yes' if pval < 0.05 else 'no'
+            significance[col] = "yes" if pval < 0.05 else "no"
 
         # Store the t-statistics, p-values, and significance indicators in the results DataFrame:
-        results.loc['t-statistic'] = t_statistics
-        results.loc['p-value'] = pvals
-        results.loc['significant'] = significance
+        results.loc["t-statistic"] = t_statistics
+        results.loc["p-value"] = pvals
+        results.loc["significant"] = significance
 
         # Save results:
         results.to_csv(diagnostic_path)
@@ -2261,7 +2308,7 @@ class MuSIC_Interpreter(MuSIC):
         """
         # For ligand or L:R models, recompute neighborhood ligand level if perturbing a ligand:
         if ligand is not None and self.mod_type in ["ligand", "lr"]:
-
+            "filler"
 
     # ---------------------------------------------------------------------------------------------------
     # Cell type coupling:

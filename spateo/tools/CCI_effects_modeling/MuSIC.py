@@ -649,43 +649,6 @@ class MuSIC:
         # For downstream analysis entire AnnData object except for the ligands will be used for independent variable
         # array:
         else:
-            if self.species == "human":
-                try:
-                    self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
-                    self.cof_db = pd.read_csv(os.path.join(self.cci_dir, "human_cofactors.csv"), index_col=0)
-                    self.tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_TF_db.csv"), index_col=0)
-                    self.grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
-                except FileNotFoundError:
-                    raise FileNotFoundError(
-                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
-                    )
-                except IOError:
-                    raise IOError(
-                        "Issue reading L:R database. Files can be downloaded from "
-                        "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
-                    )
-
-            elif self.species == "mouse":
-                try:
-                    self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
-                    self.cof_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_cofactors.csv"), index_col=0)
-                    self.tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_TF_db.csv"), index_col=0)
-                    self.grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
-                except FileNotFoundError:
-                    raise FileNotFoundError(
-                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
-                    )
-                except IOError:
-                    raise IOError(
-                        "Issue reading L:R database. Files can be downloaded from "
-                        "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
-                    )
-
-            self.lr_db = self.comm.bcast(self.lr_db, root=0)
-            self.cof_db = self.comm.bcast(self.cof_db, root=0)
-            self.tf_tf_db = self.comm.bcast(self.tf_tf_db, root=0)
-            self.grn = self.comm.bcast(self.grn, root=0)
-
             # Targets = ligands
             if self.custom_ligands_path is not None or self.custom_ligands is not None:
                 if self.custom_ligands_path is not None:
@@ -693,7 +656,7 @@ class MuSIC:
                         targets = f.read().splitlines()
                 else:
                     targets = self.custom_ligands
-                # Check that all ligands can be found in the source AnnData object:
+                # Check that all ligands can be found in the source AnnData object- they will be stored in .obs:
                 targets = [t for t in targets if t in adata.var_names]
 
             # Else: targets = receptors:
@@ -728,12 +691,15 @@ class MuSIC:
                 index=adata.obs_names,
                 columns=targets,
             )
-            # Subset adata to exclude ligands/pathways (all contents aside from ligands will be used as explanatory
-            # variables):
-            adata = adata[:, ~adata.var_names.isin(targets)].copy()
 
+            self.logger.info("Searching AnnData object .obs field to construct regulator array for modeling...")
+            if not any("predictor_" in obs for obs in adata.obs.columns):
+                raise ValueError(
+                    "No .obs fields found in AnnData object that start with 'predictor_'. These are added by the "
+                    "downstream setup function- please run :class `MuSIC_Interpreter.CCI_deg_detection_setup()`."
+                )
             X_df = pd.DataFrame(
-                adata.X.A if scipy.sparse.issparse(adata.X) else adata.X,
+                adata.obs[[col for col in adata.obs.columns if "predictor_" in col]],
                 index=adata.obs_names,
                 columns=adata.var_names,
             )
@@ -1925,7 +1891,9 @@ class MuSIC:
                     self.maxbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=50)
 
                 if self.distance_membrane_bound is not None and self.distance_secreted is not None:
-                    self.minbw = self.distance_membrane_bound
+                    self.minbw = (
+                        self.distance_membrane_bound * 1.5 if self.kernel != "uniform" else self.distance_membrane_bound
+                    )
                     self.maxbw = self.distance_secreted * 1.5 if self.kernel != "uniform" else self.distance_secreted
                 else:
                     # Set minimum bandwidth to the distance to the smallest distance between neighboring points:
@@ -2285,7 +2253,7 @@ class MuSIC:
                     if any(not np.isnan(x) for x in optimum_score_history):
                         return optimum_bw
                     else:
-                        sys.exit()
+                        return None
 
                 # Update new value for score:
                 score = optimum_score
@@ -2825,6 +2793,9 @@ class MuSIC:
                 fit_predictor=fit_predictor,
             )
             optimal_bw = self.find_optimal_bw(self.minbw, self.maxbw, fit_function)
+            if optimal_bw is None:
+                self.logger.info(f"Issue fitting for target {target}. Skipping.")
+                continue
             self.optimal_bw = optimal_bw
             self.optimal_bw = self.comm.bcast(self.optimal_bw, root=0)
             if not multiscale:

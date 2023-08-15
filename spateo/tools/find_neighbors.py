@@ -103,22 +103,22 @@ def adj_to_knn(adj: np.ndarray, n_neighbors: int = 15) -> Tuple[np.ndarray, np.n
     weights = np.zeros((n_obs, n_neighbors), dtype=float)
 
     for i in range(n_obs):
-        neighbors = adj[i, :].nonzero()
+        current_neighbors = adj[i, :].nonzero()
         # Set self as nearest neighbor
         indices[i, :] = i
         weights[i, :] = 0.0
 
         # there could be more or less than n_neighbors because of an approximate search
-        n_neighbors = len(neighbors[1])
+        current_n_neighbors = len(current_neighbors[1])
 
-        if n_neighbors > n_neighbors - 1:
-            sorted_indices = np.argsort(adj[i][:, neighbors[1]].A)[0][: (n_neighbors - 1)]
-            indices[i, 1:] = neighbors[1][sorted_indices]
-            weights[i, 1:] = adj[i][0, neighbors[1][sorted_indices]].A
+        if current_n_neighbors > n_neighbors - 1:
+            sorted_indices = np.argsort(adj[i][:, current_neighbors[1]].A)[0][: (n_neighbors - 1)]
+            indices[i, 1:] = current_neighbors[1][sorted_indices]
+            weights[i, 1:] = adj[i][0, current_neighbors[1][sorted_indices]].A
         else:
-            idx_ = np.arange(1, (n_neighbors + 1))
-            indices[i, idx_] = neighbors[1]
-            weights[i, idx_] = adj[i][:, neighbors[1]].A
+            idx_ = np.arange(1, (current_n_neighbors + 1))
+            indices[i, idx_] = current_neighbors[1]
+            weights[i, idx_] = adj[i][:, current_neighbors[1]].A
 
     return indices, weights
 

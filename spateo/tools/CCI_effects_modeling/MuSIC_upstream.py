@@ -128,7 +128,7 @@ class MuSIC_Molecule_Selector(MuSIC):
             significance_threshold: p-value (or q-value) needed to call a parameter significant. Only used if
                 'method' is not None.
         """
-        start = time.time()
+        # start = time.time()
         binary_col = (X[col] > 0).astype(int).values.reshape(-1)
         # Null distribution of IoU values:
         iou_null = self.adata.uns["iou_null"]
@@ -184,9 +184,9 @@ class MuSIC_Molecule_Selector(MuSIC):
             sig = np.where(np.array(p_vals) < significance_threshold)[0]
         sig_targets = all_targets[sig]
 
-        self.logger.info(f"Number of targets for {col}: {len(sig_targets)}")
-        elapsed_time = time.time() - start
-        self.logger.info(f"Time elapsed for {col}: {elapsed_time:.2f}s")
+        # self.logger.info(f"Number of targets for {col}: {len(sig_targets)}")
+        # elapsed_time = time.time() - start
+        # self.logger.info(f"Time elapsed for {col}: {elapsed_time:.2f}s")
 
         # If there are no targets for which the intersection with receptor is larger than the intersection with
         # non-receptor expressing cells, don't include any targets with this receptor.
@@ -224,6 +224,7 @@ class MuSIC_Molecule_Selector(MuSIC):
         bw_secreted: Union[float, int] = 25,
         kernel: Literal["bisquare", "exponential", "gaussian", "quadratic", "triangular", "uniform"] = "bisquare",
         method: Optional[str] = None,
+        common_signal_threshold: Optional[float] = None,
         **kwargs,
     ):
         """Find genes that may serve as interesting targets. Will find genes that are highly coexpressed with
@@ -239,6 +240,11 @@ class MuSIC_Molecule_Selector(MuSIC):
             kernel: Type of kernel function used to weight observations when computing spatial weights; one of
                 "bisquare", "exponential", "gaussian", "quadratic", "triangular" or "uniform".
             method: Used for optional multiple hypothesis correction
+            common_signal_threshold: Whether to use features that have high overlap with particular gene. By
+                default, this function searches for high degree of coexpression between prospective target gene and
+                signaling feature, which has a tendency to filter out common features. If this is given,
+                will instead use these common features that are coexpressed w/ the target in greater than this
+                proportion of cells.
             kwargs: Keyword arguments for any of the Spateo argparse arguments. Should not include 'output_path' (
                 which will be determined by the output path used for the main model). Should also not include any of
                 'ligands' or 'receptors', which will be determined by this function.
@@ -281,7 +287,7 @@ class MuSIC_Molecule_Selector(MuSIC):
                 self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
             except FileNotFoundError:
                 raise FileNotFoundError(
-                    f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                    f"CCI resources cannot be found at {self.cci_dir}. Please check the path and try again."
                 )
             except IOError:
                 raise IOError(
@@ -363,6 +369,10 @@ class MuSIC_Molecule_Selector(MuSIC):
                 os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
             )
 
+        if common_signal_threshold is not None:
+            # Non-zero rows for each column of the dataframe:
+            non_zero_rows = {col: X_df.index[X_df[col] != 0].tolist() for col in X_df.columns}
+
         if self.mod_type == "lr":
             # All unique receptors:
             receptor_set = [c.split(":")[1] for c in X_df.columns]
@@ -422,6 +432,7 @@ class MuSIC_Molecule_Selector(MuSIC):
 
         # If any element in the return is None, remove the receptor from the list of receptors:
         receptors = set([r for r, condition in zip(receptor_set, targets) if condition is not None])
+
         # If necessary, redefine the list of ligands based on the list of remaining receptors:
         if self.mod_type == "lr":
             # New set of cognate ligands:
@@ -460,11 +471,25 @@ class MuSIC_Molecule_Selector(MuSIC):
         # Associations between main targets and interaction features:
         target_column_mapping = {target: [] for target in all_targets}
         for t in all_targets:
-            for col_idx, target_list in enumerate(targets):
-                if target_list and t in target_list:
-                    # If the target is present in the list for a column, add the column name to the mapping
-                    column_name = X_df.columns[col_idx]
-                    target_column_mapping[t].append(column_name)
+            # Add common signaling features that overlap with the target, if applicable:
+            if common_signal_threshold is not None:
+                # Expressing cells for target:
+                nz_indices = np.nonzero(self.adata[:, t].X)[0]
+                nz_cells = self.adata.obs_names[nz_indices]
+                # Intersection of design matrix columns with target-expressing cells:
+                total_nz = len(nz_cells)
+                for col, nz in non_zero_rows.items():
+                    intersection_count = len(set(nz_cells).intersection(set(nz)))
+                    percentage = intersection_count / total_nz
+                    if percentage > common_signal_threshold:
+                        target_column_mapping[t].append(col)
+            else:
+                for col_idx, target_list in enumerate(targets):
+                    if target_list and t in target_list:
+                        # If the target is present in the list for a column, add the column name to the mapping
+                        column_name = X_df.columns[col_idx]
+                        target_column_mapping[t].append(column_name)
+            self.logger.info(f"Number of signaling features associated with {t}: {len(target_column_mapping[t])}")
 
         self.logger.info(
             f"Saving mapping of most notable targets to signaling features to "
