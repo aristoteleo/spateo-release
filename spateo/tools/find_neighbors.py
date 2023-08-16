@@ -198,6 +198,7 @@ def find_bw_for_n_neighbors(
     initial_bw: Optional[float] = None,
     chunk_size: int = 1000,
     exclude_self: bool = False,
+    verbose: bool = True,
 ) -> float:
     """Finds the bandwidth such that on average, cells in the sample have n neighbors.
 
@@ -208,6 +209,7 @@ def find_bw_for_n_neighbors(
         initial_bw: Can optionally be used to set the starting distance for the bandwidth search
         chunk_size: Number of cells to compute pairwise distance for at once
         exclude_self: Whether to exclude self from the list of neighbors
+        verbose: Whether to print the bandwidth at each iteration. If False, will only print the final bandwidth.
 
     Returns:
         bandwidth: Bandwidth in distance units
@@ -224,7 +226,8 @@ def find_bw_for_n_neighbors(
 
     # Initialize bandwidth:
     bandwidth = 88 if initial_bw is None else initial_bw
-    print(f"Initial bandwidth: {bandwidth}")
+    if verbose:
+        print(f"Initial bandwidth: {bandwidth}")
 
     # Iteratively adjust bandwidth:
     while True:
@@ -236,8 +239,10 @@ def find_bw_for_n_neighbors(
 
         # Check if the average number of neighbors is close to the target
         avg_neighbors = np.mean(neighbor_counts)
-        print(f"For bandwidth {bandwidth}, found {avg_neighbors} neighbors on average.")
+        if verbose:
+            print(f"For bandwidth {bandwidth}, found {avg_neighbors} neighbors on average.")
         if np.round(avg_neighbors) == target_n_neighbors:
+            print(f"Final bandwidth: {bandwidth}")
             break
 
         # Adjust bandwidth if needed
@@ -245,7 +250,8 @@ def find_bw_for_n_neighbors(
             bandwidth *= 0.8  # decrease bandwidth
         else:
             bandwidth *= 1.2  # increase bandwidth
-        print(f"New bandwidth: {bandwidth}")
+        if verbose:
+            print(f"New bandwidth: {bandwidth}")
 
     return bandwidth
 

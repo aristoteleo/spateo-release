@@ -1464,14 +1464,13 @@ class MuSIC_Interpreter(MuSIC):
                 association w/ ligands/receptors.
             use_ligands: Use ligand array for differential expression analysis. Will take precedent over
                 sender/receiver cell type if also provided.
+            use_receptors: Use receptor array for differential expression analysis. Will take precedent over
+                sender/receiver cell type if also provided.
             use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
                 to collectively compute signaling potential score. Will take precedent over sender cell types if
                 also provided.
             use_cell_types: Use cell types to use for differential expression analysis. If given,
                 will preprocess/construct the necessary components to initialize cell type-specific models.
-
-        Returns:
-            None
         """
 
         if use_ligands and use_receptors:
@@ -1481,24 +1480,24 @@ class MuSIC_Interpreter(MuSIC):
             )
 
         # Check if the array of additional molecules to query has already been created:
-        parent_dir = os.path.dirname(self.output_path)
+        output_dir = os.path.dirname(self.output_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
         if use_ligands:
-            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt")
+            targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt")
         elif use_receptors:
-            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt")
+            targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt")
         elif use_pathways:
-            targets_path = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
+            targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
         elif use_cell_types:
-            targets_folder = os.path.join(parent_dir, "cci_deg_detection")
+            targets_folder = os.path.join(output_dir, "cci_deg_detection")
 
-        if not os.path.exists(os.path.join(parent_dir, "cci_deg_detection")):
-            os.makedirs(os.path.join(parent_dir, "cci_deg_detection"))
+        if not os.path.exists(os.path.join(output_dir, "cci_deg_detection")):
+            os.makedirs(os.path.join(output_dir, "cci_deg_detection"))
 
         # Check for existing processed downstream-task AnnData object:
-        if os.path.exists(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}.h5ad")):
+        if os.path.exists(os.path.join(output_dir, "cci_deg_detection", f"{file_name}.h5ad")):
             # Load files in case they are already existent:
-            counts_plus = anndata.read_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}.h5ad"))
+            counts_plus = anndata.read_h5ad(os.path.join(output_dir, "cci_deg_detection", f"{file_name}.h5ad"))
             if use_ligands or use_pathways or use_receptors:
                 with open(targets_path, "r") as file:
                     targets = file.readlines()
@@ -1756,7 +1755,7 @@ class MuSIC_Interpreter(MuSIC):
                 # combined_df = pd.concat([counts_df, signal[subset_key]], axis=1)
 
                 # Store the targets (ligands/receptors) to AnnData object, save to file path:
-                counts_targets = anndata.AnnData(signal[subset_key].values)
+                counts_targets = anndata.AnnData(scipy.sparse.csr_matrix(signal[subset_key].values))
                 counts_targets.obs_names = signal[subset_key].index
                 counts_targets.var_names = signal[subset_key].columns
                 targets = signal[subset_key].columns
@@ -1771,20 +1770,16 @@ class MuSIC_Interpreter(MuSIC):
 
                 # Optionally, can use dimensionality reduction to aid in computing the nearest neighbors for the model (
                 # cells that are nearby in dimensionally-reduced signaling space will be neighbors in this scenario)
-                # Compute latent representation of the AnnData subset ("counts"):
-                # Minmax scale interaction features for the purpose of dimensionality reduction:
-                sig_scaled = signal[subset_key].apply(
-                    lambda column: (column - column.min()) / (column.max() - column.min())
-                )
+                # Compute latent representation of the AnnData subset:
 
                 # Compute the ideal number of UMAP components to use- use half the number of features as the
                 # max possible number of components:
                 self.logger.info("Computing optimal number of UMAP components ...")
-                n_umap_components = find_optimal_n_umap_components(sig_scaled)
+                n_umap_components = find_optimal_n_umap_components(signal[subset_key].values)
 
                 # Perform UMAP reduction with the chosen number of components, store in AnnData object:
                 _, _, _, _, X_umap = umap_conn_indices_dist_embedding(
-                    sig_scaled, n_neighbors=30, n_components=n_umap_components
+                    signal[subset_key].values, n_neighbors=30, n_components=n_umap_components
                 )
                 counts_targets.obsm["X_umap"] = X_umap
                 counts_targets.obs[group_key] = group_key
@@ -1822,7 +1817,7 @@ class MuSIC_Interpreter(MuSIC):
                     "directory of the output..."
                 )
                 counts_targets.write_h5ad(
-                    os.path.join(parent_dir, "cci_deg_detection", f"{file_name}" f"_{subset_key}.h5ad")
+                    os.path.join(output_dir, "cci_deg_detection", f"{file_name}" f"_{subset_key}.h5ad")
                 )
 
     def CCI_deg_detection(
@@ -1835,7 +1830,7 @@ class MuSIC_Interpreter(MuSIC):
         use_pathways: bool = False,
         cell_type: Optional[str] = None,
         **kwargs,
-    ) -> MuSIC:
+    ):
         """Downstream method that when called, creates a separate instance of :class `MuSIC` specifically designed
         for the downstream task of detecting differentially expressed genes associated w/ ligand expression.
 
@@ -1846,10 +1841,10 @@ class MuSIC_Interpreter(MuSIC):
                 only an option if this is set to 'sender', whereas 'use_receptors' is only an option if this is set to
                 'receiver'. If 'use_pathways' is True, the value of this argument will determine whether ligands or
                 receptors are used to define the pathway.
-            use_ligands: Use ligand array for differential expression analysis. Will take precedent over
-                sender/receiver cell type if also provided. Should match the input to :func
+            use_ligands: Use ligand array for differential expression analysis. Will take precedent over receptors and
+                sender/receiver cell types if also provided. Should match the input to :func
                 `CCI_sender_deg_detection_setup`.
-
+            use_receptors: Use receptor array for differential expression analysis.
             use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
                 to collectively compute signaling potential score. Will take precedent over sender cell types if also
                 provided. Should match the input to :func `CCI_sender_deg_detection_setup`.
@@ -1880,7 +1875,6 @@ class MuSIC_Interpreter(MuSIC):
             os.makedirs(os.path.join(output_dir, "cci_deg_detection"))
 
         if use_ligands or use_receptors or use_pathways:
-            parent_dir = os.path.dirname(self.output_path)
             file_name = os.path.basename(self.adata_path).split(".")[0]
             if use_ligands:
                 file_id = "ligand_analysis"
@@ -1897,21 +1891,21 @@ class MuSIC_Interpreter(MuSIC):
 
             logger.info(
                 f"Using AnnData object stored at "
-                f"{os.path.join(parent_dir, 'cci_deg_detection', f'{file_name}_all.h5ad')}."
+                f"{os.path.join(output_dir, 'cci_deg_detection', f'{file_name}_all.h5ad')}."
             )
-            kwargs["adata_path"] = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_all.h5ad")
+            kwargs["adata_path"] = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all.h5ad")
             if use_ligands:
                 kwargs["custom_lig_path"] = os.path.join(
-                    parent_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt"
+                    output_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt"
                 )
                 logger.info(f"Using ligands stored at {kwargs['custom_lig_path']}.")
             elif use_receptors:
                 kwargs["custom_rec_path"] = os.path.join(
-                    parent_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt"
+                    output_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt"
                 )
             elif use_pathways:
                 kwargs["custom_pathways_path"] = os.path.join(
-                    parent_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt"
+                    output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt"
                 )
                 logger.info(f"Using pathways stored at {kwargs['custom_pathways_path']}.")
             else:
@@ -1926,7 +1920,6 @@ class MuSIC_Interpreter(MuSIC):
 
         elif cell_type is not None:
             # For each cell type, fit a different model:
-            parent_dir = os.path.dirname(self.adata_path)
             file_name = os.path.basename(self.adata_path).split(".")[0]
 
             # create output sub-directory for this model:
@@ -1944,16 +1937,16 @@ class MuSIC_Interpreter(MuSIC):
             output_path = os.path.join(subset_output_dir, output_file_name)
             kwargs["output_path"] = output_path
 
-            kwargs["adata_path"] = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}.h5ad")
+            kwargs["adata_path"] = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}.h5ad")
             logger.info(f"Using AnnData object stored at {kwargs['adata_path']}.")
             if sender_or_receiver_degs == "sender":
                 kwargs["custom_lig_path"] = os.path.join(
-                    parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt"
+                    output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt"
                 )
                 logger.info(f"Using ligands stored at {kwargs['custom_lig_path']}.")
             elif sender_or_receiver_degs == "receiver":
                 kwargs["custom_rec_path"] = os.path.join(
-                    parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}_receptors.txt"
+                    output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_receptors.txt"
                 )
                 logger.info(f"Using receptors stored at {kwargs['custom_rec_path']}.")
 
@@ -1967,7 +1960,189 @@ class MuSIC_Interpreter(MuSIC):
         else:
             raise ValueError("'use_ligands' and 'use_pathways' are both False, and 'cell_type' was not given.")
 
-        return downstream_model
+    def visualize_CCI_degs(
+        self,
+        plot_mode: Literal["proportion", "average"] = "proportion",
+        sender_or_receiver_degs: Literal["sender", "receiver"] = "sender",
+        use_ligands: bool = True,
+        use_receptors: bool = False,
+        use_pathways: bool = False,
+        cell_type: Optional[str] = None,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = "seismic",
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+    ):
+        """Visualize the result of downstream model that maps TFs/other regulatory genes to target genes.
+
+        Args:
+            plot_mode: Specifies what gets plotted.
+                Options:
+                    - "proportion": elements of the plot represent the proportion of total target-expressing cells
+                        for which the given factor is predicted to have a nonzero effect
+                    - "average": elements of the plot represent the average effect size across all target-expressing
+                        cells
+            sender_or_receiver_degs: Will be used if 'use_pathways' or 'use_cell_types' is True (i.e. if these
+                arguments were true for the original model). Make sure the input ('sender' or 'receiver') matches
+                that given when creating the initial model.
+            use_ligands: Set True if this was True for the original model. Used to find the correct output location.
+            use_receptors: Set True if this was True for the original model. Used to find the correct output location.
+            use_pathways: Set True if this was True for the original model. Used to find the correct output location.
+            cell_type: Cell type of interest- should be the same as was provided to :func `CCI_deg_detection`.
+            figsize: Width and height of plotting window
+            cmap: Name of matplotlib colormap specifying colormap to use
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+        """
+        config_spateo_rcParams()
+
+        if fontsize is None:
+            self.fontsize = rcParams.get("font.size")
+        else:
+            self.fontsize = fontsize
+        if figsize is None:
+            self.figsize = rcParams.get("figure.figsize")
+        else:
+            self.figsize = figsize
+
+        output_dir = os.path.dirname(self.output_path)
+        file_name = os.path.basename(self.adata_path).split(".")[0]
+
+        # Load files for all targets:
+        if use_ligands or use_receptors or use_pathways:
+            if use_ligands:
+                file_id = "ligand_analysis"
+                plot_id = "Target Ligand"
+                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt")
+            elif use_receptors:
+                file_id = "receptor_analysis"
+                plot_id = "Target Receptor"
+                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt")
+            elif use_pathways and sender_or_receiver_degs == "sender":
+                file_id = "pathway_analysis_ligands"
+                plot_id = "Target Ligand"
+                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
+            elif use_pathways and sender_or_receiver_degs == "receiver":
+                file_id = "pathway_analysis_receptors"
+                plot_id = "Target Receptor"
+                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
+        elif cell_type is not None:
+            if sender_or_receiver_degs == "sender":
+                file_id = "ligand_analysis"
+                plot_id = "Target Ligand"
+                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt")
+            elif sender_or_receiver_degs == "receiver":
+                file_id = "receptor_analysis"
+                plot_id = "Target Receptor"
+                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_receptors.txt")
+        else:
+            raise ValueError(
+                "'use_ligands', 'use_receptors', 'use_pathways' are all False, and 'cell_type' was not given."
+            )
+        contents_folder = os.path.join(output_dir, "cci_deg_detection", file_id)
+        # Load list of targets:
+        with open(targets_path, "r") as f:
+            targets = [line.strip() for line in f.readlines()]
+        # Complete list of regulatory factors- search through .obs of the AnnData object:
+        regulator_cols = [col for col in self.adata.obs.columns if "regulator_" in col]
+
+        # Compute proportion or average coefficients for all targets:
+        # Load all targets files:
+        target_files = {}
+
+        for filename in os.listdir(contents_folder):
+            # Check if any of the search strings are present in the filename
+            for t in targets:
+                if t in filename:
+                    filepath = os.path.join(contents_folder, filename)
+                    target_file = pd.read_csv(filepath, index_col=0)
+                    target_files[t] = target_file[
+                        [c for c in target_file.columns if "b_" in c and "intercept" not in c]
+                    ].copy()
+
+        # Plot:
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
+        if plot_mode == "proportion":
+            all_proportions = pd.DataFrame(0, index=regulator_cols, columns=targets)
+            for t, target_df in target_files.items():
+                nz_cells = self.adata[:, t].X > 0
+                proportions = (target_df.loc[nz_cells] != 0).mean()
+                all_proportions.loc[proportions.index, t] = proportions
+
+            hmap = sns.heatmap(
+                all_proportions,
+                square=True,
+                linecolor="grey",
+                linewidths=0.3,
+                cbar_kws={"label": "Proportion of cells", "location": "top"},
+                cmap=cmap,
+                center=0.2,
+                vmin=0.0,
+                vmax=1.0,
+                ax=ax,
+            )
+
+            # Outer frame:
+            for _, spine in hmap.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
+
+            plt.title(
+                "Preponderance of inferred \n regulatory effect on ligand expression"
+            ) if cell_type is None else plt.title(
+                f"Preponderance of inferred regulatory \n effect on ligand expression in {cell_type}"
+            )
+
+        elif plot_mode == "average":
+            all_averages = pd.DataFrame(0, index=regulator_cols, columns=targets)
+            for t, target_df in target_files.items():
+                nz_cells = self.adata[:, t].X > 0
+                averages = target_df.loc[nz_cells].mean()
+                all_averages.loc[averages.index, t] = averages
+
+            q20 = np.percentile(all_averages.values.flatten(), 20)
+            hmap = sns.heatmap(
+                all_averages,
+                square=True,
+                linecolor="grey",
+                linewidths=0.3,
+                cbar_kws={"label": "Proportion of cells", "location": "top"},
+                cmap=cmap,
+                center=q20,
+                vmin=0.0,
+                vmax=1.0,
+                ax=ax,
+            )
+
+            # Outer frame:
+            for _, spine in hmap.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(0.75)
+
+            plt.xlabel(plot_id)
+            plt.ylabel("Regulatory factor")
+            plt.title("Average inferred \n regulatory effects on ligand expression")
+            plt.tight_layout()
+
+            save_return_show_fig_utils(
+                save_show_or_return=save_show_or_return,
+                show_legend=True,
+                background="white",
+                prefix=f"{plot_mode}_{file_name}_{file_id}",
+                save_kwargs=save_kwargs,
+                total_panels=1,
+                fig=fig,
+                axes=ax,
+                return_all=False,
+                return_all_list=None,
+            )
 
     # ---------------------------------------------------------------------------------------------------
     # Permutation testing

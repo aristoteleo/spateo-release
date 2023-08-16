@@ -733,6 +733,13 @@ class MuSIC:
                 index=adata.obs_names,
                 columns=targets,
             )
+            targets_expr_raw = pd.DataFrame(
+                adata.layers["original_counts"].A
+                if scipy.sparse.issparse(adata.X)
+                else adata.layers["original_counts"],
+                index=adata.obs_names,
+                columns=targets,
+            )
 
             self.logger.info("Searching AnnData object .obs field to construct regulator array for modeling...")
             if not any("regulator_" in obs for obs in adata.obs.columns):
@@ -740,18 +747,19 @@ class MuSIC:
                     "No .obs fields found in AnnData object that start with 'regulator_'. These are added by the "
                     "downstream setup function- please run :class `MuSIC_Interpreter.CCI_deg_detection_setup()`."
                 )
+            regulator_cols = [col for col in adata.obs.columns if "regulator_" in col]
             X_df = pd.DataFrame(
-                adata.obs[[col for col in adata.obs.columns if "regulator_" in col]],
+                adata.obs.loc[:, regulator_cols],
                 index=adata.obs_names,
-                columns=adata.var_names,
+                columns=regulator_cols,
             )
 
             # If applicable, check for multicollinearity:
             if self.multicollinear_threshold is not None:
                 X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
-            # Normalize the data to prevent numerical overflow:
-            X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
+            # # Normalize the data to prevent numerical overflow:
+            # X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
 
             # Save design matrix and component dataframes (here, target ligands dataframe):
             if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix")):
@@ -771,12 +779,12 @@ class MuSIC:
                 f"Saving targets array to "
                 f"{os.path.join(os.path.splitext(self.output_path)[0], 'downstream_design_matrix', 'targets.csv')}"
             )
-            self.targets_expr.to_csv(
+            targets_expr_raw.to_csv(
                 os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix", "targets.csv")
             )
 
         self.X = X_df.values
-        self.feature_names = list(X_df.columns)
+        self.feature_names = [f.replace("regulator_", "") for f in X_df.columns]
 
         # If applicable, add covariates:
         if self.covariate_keys is not None:
@@ -1910,16 +1918,20 @@ class MuSIC:
                 if self.mod_type == "downstream":
                     # Check over the 10-50 nearest neighbors- compute distances such that each cell has this number
                     # on average:
-                    self.minbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=10)
+                    self.minbw = find_bw_for_n_neighbors(
+                        self.adata, coords_key="X_umap", target_n_neighbors=20, verbose=False
+                    )
 
                     # Take the minimum value between the distance to the 50th nearest neighbor and the distance
                     # beyond which the distance values to "nearest neighbors" start to become unreasonably large:
                     max_a = find_threshold_distance(self.adata, coords_key="X_umap", n_neighbors=20)
-                    max_b = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=50)
+                    max_b = find_bw_for_n_neighbors(
+                        self.adata, coords_key="X_umap", target_n_neighbors=50, verbose=False
+                    )
 
                     self.maxbw = np.minimum(max_a, max_b)
 
-                if self.distance_membrane_bound is not None and self.distance_secreted is not None:
+                elif self.distance_membrane_bound is not None and self.distance_secreted is not None:
                     self.minbw = (
                         self.distance_membrane_bound * 1.5 if self.kernel != "uniform" else self.distance_membrane_bound
                     )
@@ -2028,7 +2040,6 @@ class MuSIC:
         mask_indices: Optional[np.ndarray] = None,
         feature_mask: Optional[np.ndarray] = None,
         final: bool = False,
-        multiscale: bool = False,
         fit_predictor: bool = False,
     ) -> Union[np.ndarray, List[float]]:
         """Fit a local regression model for each sample.
@@ -2045,8 +2056,6 @@ class MuSIC:
             feature_mask: Can be optionally used to provide a mask for features to mask out of the dataset
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
-            multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
-                over different spatial scales
             fit_predictor: Set True to indicate that dependent variable to fit is a linear predictor rather than a
                 true response variable
 
@@ -2063,7 +2072,7 @@ class MuSIC:
                 - bw_diagnostic: Output to be used for diagnostic purposes during bandwidth selection- for Gaussian
                     regression, this is the squared residual, for non-Gaussian generalized linear regression,
                     this is the fitted response variable value. One of the returns if :param `final` is False
-                - betas: Estimated coefficients for sample i- if :param `multiscale` is True, betas is the only return
+                - betas: Estimated coefficients for sample i
                 - leverages: Leverages for sample i, representing the influence of each independent variable on the
                     predicted values (linear predictor for GLMs, response variable for Gaussian regression).
         """
@@ -2156,8 +2165,6 @@ class MuSIC:
                 mask=feature_mask,
             )
 
-            # For multiscale GLM models, this is the predicted dependent variable value- if i is in the mask,
-            # set betas to 0 and y_hat to 0:
             if i in mask_indices:
                 betas = np.zeros_like(betas)
                 pred_y = 0.0
@@ -2170,10 +2177,6 @@ class MuSIC:
             diagnostic = pred_y
             if isinstance(diagnostic, np.ndarray):
                 diagnostic = pred_y[0]
-            # For multiscale models, keep track of the residual as well- in this case,
-            # the given y is assumed to also be the linear predictor:
-            if multiscale:
-                residual = y[i] - pred_y
 
             # Reshape coefficients if necessary:
             betas = betas.flatten()
@@ -2189,10 +2192,7 @@ class MuSIC:
         # CCT = np.diag(np.dot(pseudoinverse, pseudoinverse.T)).reshape(-1)
 
         if final:
-            if multiscale:
-                return betas
-            else:
-                return np.concatenate(([sample_index, diagnostic, hat_i], betas, inv_diag))
+            return np.concatenate(([sample_index, diagnostic, hat_i], betas, inv_diag))
         else:
             # For bandwidth optimization:
             if self.distr == "gaussian" or fit_predictor:
@@ -2293,28 +2293,29 @@ class MuSIC:
                         patience += 1
                     else:
                         patience = 0
-                    if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.01 * most_optimum_score:
-                        self.logger.info(
-                            "Plateau detected (optimum score was reached at last iteration- exiting optimization and "
-                            "returning optimum score up to this point."
-                        )
-                        self.logger.info(f"Score from last iteration: {optimum_score_history[-2]}")
-                        self.logger.info(f"Score from current iteration: {optimum_score_history[-1]}")
-                        patience = 3
+                    if self.mod_type != "downstream":
+                        if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.01 * most_optimum_score:
+                            self.logger.info(
+                                "Plateau detected (optimum score was reached at last iteration)- exiting optimization"
+                                "and returning optimum score up to this point."
+                            )
+                            self.logger.info(f"Score from last iteration: {optimum_score_history[-2]}")
+                            self.logger.info(f"Score from current iteration: {optimum_score_history[-1]}")
+                            patience = 3
 
-                if np.abs(new_ub - self.maxbw) < 1.0 and self.bw_fixed:
-                    self.logger.info(
-                        "Approaching maximum bandwidth. Exiting optimization and returning optimum score up to this "
-                        "point."
-                    )
-                    patience = 3
-
-                if np.abs(new_lb - self.minbw) < 1.0 and self.bw_fixed:
-                    self.logger.info(
-                        "Approaching minimum bandwidth. Exiting optimization and returning optimum score up to this "
-                        "point."
-                    )
-                    patience = 3
+                # if np.abs(new_ub - self.maxbw) < 1.0 and self.bw_fixed:
+                #     self.logger.info(
+                #         "Approaching maximum bandwidth. Exiting optimization and returning optimum score up to this "
+                #         "point."
+                #     )
+                #     patience = 3
+                #
+                # if np.abs(new_lb - self.minbw) < 1.0 and self.bw_fixed:
+                #     self.logger.info(
+                #         "Approaching minimum bandwidth. Exiting optimization and returning optimum score up to this "
+                #         "point."
+                #     )
+                #     patience = 3
 
             new_lb = self.comm.bcast(new_lb, root=0)
             new_ub = self.comm.bcast(new_ub, root=0)
@@ -2335,9 +2336,8 @@ class MuSIC:
         mask_indices: Optional[np.ndarray] = None,
         feature_mask: Optional[np.ndarray] = None,
         final: bool = False,
-        multiscale: bool = False,
         fit_predictor: bool = False,
-    ) -> Union[None, np.ndarray]:
+    ) -> None:
         """Fit local regression model for each sample in parallel, given a specified bandwidth.
 
         Args:
@@ -2354,8 +2354,6 @@ class MuSIC:
             feature_mask: Optional array used to mask out features in the fitting process
             final: Set True to indicate that no additional parameter selection needs to be performed; the model can
                 be fit and more stats can be returned.
-            multiscale: Set True to fit a multiscale GWR model where the independent-dependent relationships can vary
-                over different spatial scales
             fit_predictor: Set True to indicate that dependent variable to fit is a linear predictor rather than a
                 true response variable
         """
@@ -2368,13 +2366,9 @@ class MuSIC:
             n_features = self.n_features
             X_labels = self.feature_names
         n_samples = X.shape[0]
-        chunk_sample_names = self.sample_names[self.x_chunk]
 
         if final:
-            if multiscale:
-                local_fit_outputs = np.empty((self.x_chunk.shape[0], n_features), dtype=np.float64)
-            else:
-                local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * n_features + 3), dtype=np.float64)
+            local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * n_features + 3), dtype=np.float64)
 
             # Fitting for each location, or each location that is among the subsampled points:
             pos = 0
@@ -2389,7 +2383,6 @@ class MuSIC:
                     feature_mask=feature_mask,
                     bw=bw,
                     final=final,
-                    multiscale=multiscale,
                     fit_predictor=fit_predictor,
                 )
                 pos += 1
@@ -2404,13 +2397,6 @@ class MuSIC:
             # Columns 3-n_feats+3: Estimated coefficients
             # Columns n_feats+3-end: Placeholder for standard errors
             # All columns are betas for MGWR
-
-            # If multiscale, do not need to fit using fixed bandwidth:
-            if multiscale:
-                # At final iteration, for MGWR, this function is only needed to get parameters:
-                all_fit_outputs = self.comm.bcast(all_fit_outputs, root=0)
-                all_fit_outputs = np.vstack(all_fit_outputs)
-                return all_fit_outputs
 
             if self.comm.rank == 0:
                 all_fit_outputs = np.vstack(all_fit_outputs)
@@ -2505,7 +2491,6 @@ class MuSIC:
                     feature_mask=feature_mask,
                     bw=bw,
                     final=False,
-                    multiscale=multiscale,
                     fit_predictor=fit_predictor,
                 )
                 # fit_outputs = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder))
@@ -2521,13 +2506,11 @@ class MuSIC:
                 RSS = np.sum(RSS_list)
                 trace_hat = np.sum(trace_hat_list)
                 aicc = self.compute_aicc_linear(RSS, trace_hat, n_samples=n_samples)
-                if not multiscale:
-                    self.logger.info(f"Bandwidth: {bw:.3f}, Linear AICc: {aicc:.3f}")
+                self.logger.info(f"Bandwidth: {bw:.3f}, Linear AICc: {aicc:.3f}")
                 return aicc
 
         elif self.distr == "poisson" or self.distr == "nb":
-            # Compute AICc using the fitted and observed values, using the linear predictor for multiscale models and
-            # the predicted response otherwise:
+            # Compute AICc using the fitted and observed values:
             trace_hat = 0
             pos = 0
             y_pred = np.empty(self.x_chunk.shape[0], dtype=np.float64)
@@ -2543,7 +2526,6 @@ class MuSIC:
                     feature_mask=feature_mask,
                     bw=bw,
                     final=False,
-                    multiscale=multiscale,
                     fit_predictor=fit_predictor,
                 )
                 y_pred_i, hat_i = fit_outputs[0], fit_outputs[1]
@@ -2570,7 +2552,6 @@ class MuSIC:
         self,
         y: Optional[pd.DataFrame] = None,
         X: Optional[np.ndarray] = None,
-        multiscale: bool = False,
         fit_predictor: bool = False,
         verbose: bool = True,
     ) -> Optional[Tuple[Union[None, Dict[str, np.ndarray]], Dict[str, float]]]:
@@ -2588,19 +2569,9 @@ class MuSIC:
             n_feat: Optional int, can be used to specify one column of the X array to fit to.
             init_betas: Optional dictionary containing arrays with initial values for the coefficients. Keys should
                 correspond to target genes and values should be arrays of shape [n_features, 1].
-            multiscale: Set True to indicate that a multiscale model should be fitted
             fit_predictor: Set True to indicate that dependent variable to fit is a linear predictor rather than a
                 response variable
-            verbose: Set True to print out information about the bandwidth selection and/or fitting process. Will be
-                False for most multiscale runs, but defaults to True.
-
-        Returns:
-            all_data: Dictionary containing outputs of :func `SWR.mpi_fit()` with the chosen or determined bandwidth-
-                note that this will either be None or in the case that :param `multiscale` is True, an array of shape [
-                n_samples, n_features] representing the coefficients for each sample (if :param `multiscale` is False,
-                these arrays will instead be saved to file).
-            all_bws: Dictionary containing outputs in the case that bandwidth is not already known, resulting from
-                the conclusion of the optimization process.
+            verbose: Set True to print out information about the bandwidth selection and/or fitting process.
         """
 
         if not self.set_up:
@@ -2626,11 +2597,6 @@ class MuSIC:
         cat_to_num = {k: v + 1 for v, k in enumerate(cell_types.unique())}
         self.ct_vec = cell_types.map(cat_to_num).values
         self.ct_vec = self.comm.bcast(self.ct_vec, root=0)
-
-        # Compute fit for each column of the dependent variable array individually- store each output array (if
-        # applicable, i.e. if :param `multiscale` is True) and optimal bandwidth (also if applicable, i.e. if :param
-        # `multiscale` is True):
-        all_data, all_bws = {}, {}
 
         for target in y_arr.columns:
             y = y_arr[target].values
@@ -2784,8 +2750,7 @@ class MuSIC:
                         f"Starting fitting process for target {target}. First finding optimal " f"bandwidth..."
                     )
                 self._set_search_range()
-                if not multiscale:
-                    self.logger.info(f"Calculated bandwidth range over which to search: {self.minbw}-{self.maxbw}.")
+                self.logger.info(f"Calculated bandwidth range over which to search: {self.minbw}-{self.maxbw}.")
             self.minbw = self.comm.bcast(self.minbw, root=0)
             self.maxbw = self.comm.bcast(self.maxbw, root=0)
 
@@ -2800,7 +2765,6 @@ class MuSIC:
                 coords=self.coords,
                 feature_mask=feature_mask,
                 final=False,
-                multiscale=multiscale,
                 fit_predictor=fit_predictor,
             )
             optimal_bw = self.find_optimal_bw(self.minbw, self.maxbw, fit_function)
@@ -2809,12 +2773,11 @@ class MuSIC:
                 continue
             self.optimal_bw = optimal_bw
             self.optimal_bw = self.comm.bcast(self.optimal_bw, root=0)
-            if not multiscale:
-                self.logger.info(f"Discovered optimal bandwidth for {target}: {self.optimal_bw}")
+            self.logger.info(f"Discovered optimal bandwidth for {target}: {self.optimal_bw}")
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)
 
-            data = self.mpi_fit(
+            self.mpi_fit(
                 y,
                 X,
                 y_label=target,
@@ -2823,27 +2786,13 @@ class MuSIC:
                 coords=self.coords,
                 feature_mask=feature_mask,
                 final=True,
-                multiscale=multiscale,
                 fit_predictor=fit_predictor,
             )
-            if data is not None:
-                all_data[target] = data
-            all_bws[target] = optimal_bw
-
-        index = "fixed" if self.bw_fixed else "variable"
-        all_bws_df = pd.DataFrame(all_bws, index=[index])
-
-        if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "bandwidths")):
-            os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "bandwidths"))
-        all_bws_df.to_csv(os.path.join(os.path.splitext(self.output_path)[0], "bandwidths", "optimal_bandwidths.csv"))
-
-        return all_data, all_bws
 
     def predict(
         self,
         input: Optional[pd.DataFrame] = None,
         coeffs: Optional[Union[np.ndarray, Dict[str, pd.DataFrame]]] = None,
-        cell_types: Optional[Union[str, List[str]]] = None,
     ) -> pd.DataFrame:
         """Given input data and learned coefficients, predict the dependent variables.
 
@@ -2851,7 +2800,6 @@ class MuSIC:
             input: Input data to be predicted on.
             coeffs: Coefficients to be used in the prediction. If None, will attempt to load the coefficients learned
                 in the fitting process from file.
-            cell_types: Can be used to optionally provide cell types to constrain prediction to
         """
         if input is None:
             input = self.X_df
