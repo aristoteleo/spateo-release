@@ -384,7 +384,7 @@ def umap_conn_indices_dist_embedding(
             angular=rp_forest,
         )
 
-    #logger.info("Constructing embedding ...")
+    # logger.info("Constructing embedding ...")
 
     a, b = find_ab_params(spread, min_dist)
     if type(graph) == tuple:
@@ -484,14 +484,16 @@ def find_optimal_n_umap_components(X_data: np.ndarray, max_n_components: Optiona
     umap_params["min_dist"] = 0.5
 
     if max_n_components is None:
-        max_n_components = int(X_data.shape[1] // 2)
+        max_n_components = int(X_data.shape[1] // 3)
 
     scores = []
     # Minimum of 5 components:
-    for n_components in range(5, max_n_components + 1):
+    for n_components in range(4, max_n_components + 1):
         umap_params["n_components"] = n_components
         _, _, _, embedding = umap_conn_indices_dist_embedding(X_data, **umap_params)
-        clusters = calculate_leiden_partition(input_mat=embedding, num_neighbors=10, graph_type="embedding")
+        clusters = calculate_leiden_partition(
+            input_mat=embedding, num_neighbors=10, resolution=0.05, graph_type="embedding"
+        )
 
         # Compute silhouette score:
         score = silhouette_score(embedding, clusters)
@@ -504,10 +506,10 @@ def find_optimal_n_umap_components(X_data: np.ndarray, max_n_components: Optiona
 
     # Plot the sihouette score as a function of the number of components
     plt.figure(figsize=(6, 4))
-    plt.plot(range(5, max_n_components + 1), scores, "bo-", linewidth=2)
+    plt.plot(range(4, max_n_components + 1), scores, "bo-", linewidth=2)
     plt.xlabel("Number of components")
-    plt.ylabel("Total explained variance")
-    plt.title("Elbow plot for PCA")
+    plt.ylabel("Silhouette score")
+    plt.title("Silhouette score for different numbers of UMAP components.")
     plt.show()
 
     return best_n_components

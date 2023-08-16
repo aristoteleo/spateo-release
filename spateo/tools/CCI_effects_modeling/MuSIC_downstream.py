@@ -1446,6 +1446,7 @@ class MuSIC_Interpreter(MuSIC):
     # ---------------------------------------------------------------------------------------------------
     def CCI_deg_detection_setup(
         self,
+        group_key: str,
         sender_or_receiver_degs: Literal["sender", "receiver"] = "sender",
         use_ligands: bool = True,
         use_receptors: bool = False,
@@ -1455,6 +1456,7 @@ class MuSIC_Interpreter(MuSIC):
         """Computes differential expression signatures of cells with various levels of ligand expression.
 
         Args:
+            group_key: Key in `adata.obs` that corresponds to the cell type (or other grouping) labels
             sender_or_receiver_degs: Only makes a difference if 'use_pathways' or 'use_cell_types' is specified.
                 Determines whether to compute DEGs for sender or receiver cells. If 'use_pathways' is True,
                 the value of this argument will determine whether ligands or receptors are used to define the model.
@@ -1749,46 +1751,55 @@ class MuSIC_Interpreter(MuSIC):
                 # Take subset of AnnData object corresponding to these regulators:
                 counts = adata[:, regulator_features].copy()
 
-                # Convert to dataframe, append signal (ligand/receptor) dataframe:
+                # Convert to dataframe:
                 counts_df = pd.DataFrame(counts.X.toarray(), index=counts.obs_names, columns=counts.var_names)
-                combined_df = pd.concat([counts_df, signal[subset_key]], axis=1)
+                # combined_df = pd.concat([counts_df, signal[subset_key]], axis=1)
 
-                # Convert back to AnnData object, save to file path:
-                counts_plus = anndata.AnnData(combined_df.values)
-                counts_plus.obs_names = combined_df.index
-                counts_plus.var_names = combined_df.columns
+                # Store the targets (ligands/receptors) to AnnData object, save to file path:
+                counts_targets = anndata.AnnData(signal[subset_key].values)
+                counts_targets.obs_names = signal[subset_key].index
+                counts_targets.var_names = signal[subset_key].columns
+                targets = signal[subset_key].columns
                 # Make note that certain columns are pathways and not individual molecules that can be found in the
                 # AnnData object:
                 if use_pathways:
-                    counts_plus.uns["target_type"] = "pathway"
+                    counts_targets.uns["target_type"] = "pathway"
                 elif use_ligands:
-                    counts_plus.uns["target_type"] = "ligands"
+                    counts_targets.uns["target_type"] = "ligands"
                 elif use_receptors:
-                    counts_plus.uns["target_type"] = "receptors"
+                    counts_targets.uns["target_type"] = "receptors"
 
                 # Optionally, can use dimensionality reduction to aid in computing the nearest neighbors for the model (
-                # cells that are nearby in dimensionally-reduced TF space will be neighbors in this scenario)
+                # cells that are nearby in dimensionally-reduced signaling space will be neighbors in this scenario)
                 # Compute latent representation of the AnnData subset ("counts"):
                 # Minmax scale interaction features for the purpose of dimensionality reduction:
-                sender_deg_predictors_scaled = counts_df.apply(
+                sig_scaled = signal[subset_key].apply(
                     lambda column: (column - column.min()) / (column.max() - column.min())
                 )
 
                 # Compute the ideal number of UMAP components to use- use half the number of features as the
                 # max possible number of components:
                 self.logger.info("Computing optimal number of UMAP components ...")
-                n_umap_components = find_optimal_n_umap_components(sender_deg_predictors_scaled)
+                n_umap_components = find_optimal_n_umap_components(sig_scaled)
 
                 # Perform UMAP reduction with the chosen number of components, store in AnnData object:
                 _, _, _, _, X_umap = umap_conn_indices_dist_embedding(
-                    sender_deg_predictors_scaled, n_neighbors=30, n_components=n_umap_components
+                    sig_scaled, n_neighbors=30, n_components=n_umap_components
                 )
-                counts_plus.obsm["X_umap"] = X_umap
+                counts_targets.obsm["X_umap"] = X_umap
+                counts_targets.obs[group_key] = group_key
+                if use_pathways:
+                    counts_targets.uns["type"] = "pathway"
+                elif use_ligands or (use_cell_types and sender_or_receiver_degs == "sender"):
+                    counts_targets.uns["type"] = "ligand"
+                elif use_receptors or (use_cell_types and sender_or_receiver_degs == "receiver"):
+                    counts_targets.uns["type"] = "receptor"
 
-                targets = signal[subset_key].columns
+                # Iterate over regulators:
+                regulators = counts_df.columns
                 # Add each target to AnnData .obs field:
-                for col in signal[subset_key].columns:
-                    counts_plus.obs[f"regulator_{col}"] = signal[subset_key][col].values
+                for reg in regulators:
+                    counts_targets.obs[f"regulator_{reg}"] = counts_df[reg].values
 
                 if "targets_path" in locals():
                     # Save to .txt file:
@@ -1808,12 +1819,15 @@ class MuSIC_Interpreter(MuSIC):
 
                 self.logger.info(
                     "'CCI_sender_deg_detection'- saving regulatory molecules to test as .h5ad file to the "
-                    "directory of the original AnnData object..."
+                    "directory of the output..."
                 )
-                counts_plus.write_h5ad(os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{subset_key}.h5ad"))
+                counts_targets.write_h5ad(
+                    os.path.join(parent_dir, "cci_deg_detection", f"{file_name}" f"_{subset_key}.h5ad")
+                )
 
     def CCI_deg_detection(
         self,
+        group_key: str,
         cci_dir_path: str,
         sender_or_receiver_degs: Literal["sender", "receiver"] = "sender",
         use_ligands: bool = True,
@@ -1826,6 +1840,7 @@ class MuSIC_Interpreter(MuSIC):
         for the downstream task of detecting differentially expressed genes associated w/ ligand expression.
 
         Args:
+            group_key: Key in `adata.obs` that corresponds to the cell type (or other grouping) labels
             cci_dir_path: Path to directory containing all Spateo databases
             sender_or_receiver_degs: Whether to compute DEGs for sender or receiver cells. Note that 'use_ligands' is
                 only an option if this is set to 'sender', whereas 'use_receptors' is only an option if this is set to
@@ -1842,7 +1857,7 @@ class MuSIC_Interpreter(MuSIC):
                 ligand/receptor subset obtained from :func ~`CCI_sender_deg_detection_setup` and cells of the chosen
                 cell type in the model.
             kwargs: Keyword arguments for any of the Spateo argparse arguments. Should not include 'adata_path',
-                'custom_ligands_path' & 'ligand' or 'custom_pathways_path' & 'pathway' (depending on whether ligands or
+                'custom_lig_path' & 'ligand' or 'custom_pathways_path' & 'pathway' (depending on whether ligands or
                 pathways are being used for the analysis), and should not include 'output_path' (which will be
                 determined by the output path used for the main model). Should also not include any of the other
                 arguments for this function
@@ -1853,7 +1868,10 @@ class MuSIC_Interpreter(MuSIC):
         logger = lm.get_main_logger()
 
         kwargs["mod_type"] = "downstream"
-        kwargs["cci_dir_path"] = cci_dir_path
+        kwargs["cci_dir"] = cci_dir_path
+        kwargs["group_key"] = group_key
+        kwargs["coords_key"] = "X_umap"
+        kwargs["bw_fixed"] = True
 
         # Use the same output directory as the main model, add folder demarcating results from downstream task:
         output_dir = os.path.dirname(self.output_path)
@@ -1862,7 +1880,7 @@ class MuSIC_Interpreter(MuSIC):
             os.makedirs(os.path.join(output_dir, "cci_deg_detection"))
 
         if use_ligands or use_receptors or use_pathways:
-            parent_dir = os.path.dirname(self.adata_path)
+            parent_dir = os.path.dirname(self.output_path)
             file_name = os.path.basename(self.adata_path).split(".")[0]
             if use_ligands:
                 file_id = "ligand_analysis"
@@ -1883,17 +1901,17 @@ class MuSIC_Interpreter(MuSIC):
             )
             kwargs["adata_path"] = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_all.h5ad")
             if use_ligands:
-                kwargs["custom_ligands_path"] = os.path.join(
-                    parent_dir, "cci_deg_detection", f"{file_name}_ligands.txt"
+                kwargs["custom_lig_path"] = os.path.join(
+                    parent_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt"
                 )
-                logger.info(f"Using ligands stored at {kwargs['custom_ligands_path']}.")
+                logger.info(f"Using ligands stored at {kwargs['custom_lig_path']}.")
             elif use_receptors:
-                kwargs["custom_receptors_path"] = os.path.join(
-                    parent_dir, "cci_deg_detection", f"{file_name}_receptors.txt"
+                kwargs["custom_rec_path"] = os.path.join(
+                    parent_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt"
                 )
             elif use_pathways:
                 kwargs["custom_pathways_path"] = os.path.join(
-                    parent_dir, "cci_deg_detection", f"{file_name}_pathways.txt"
+                    parent_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt"
                 )
                 logger.info(f"Using pathways stored at {kwargs['custom_pathways_path']}.")
             else:
@@ -1929,15 +1947,15 @@ class MuSIC_Interpreter(MuSIC):
             kwargs["adata_path"] = os.path.join(parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}.h5ad")
             logger.info(f"Using AnnData object stored at {kwargs['adata_path']}.")
             if sender_or_receiver_degs == "sender":
-                kwargs["custom_ligands_path"] = os.path.join(
+                kwargs["custom_lig_path"] = os.path.join(
                     parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt"
                 )
-                logger.info(f"Using ligands stored at {kwargs['custom_ligands_path']}.")
+                logger.info(f"Using ligands stored at {kwargs['custom_lig_path']}.")
             elif sender_or_receiver_degs == "receiver":
-                kwargs["custom_receptors_path"] = os.path.join(
+                kwargs["custom_rec_path"] = os.path.join(
                     parent_dir, "cci_deg_detection", f"{file_name}_{cell_type}_receptors.txt"
                 )
-                logger.info(f"Using receptors stored at {kwargs['custom_receptors_path']}.")
+                logger.info(f"Using receptors stored at {kwargs['custom_rec_path']}.")
 
             # Create new instance of MuSIC:
             comm, parser, args_list = define_spateo_argparse(**kwargs)
@@ -2073,7 +2091,7 @@ class MuSIC_Interpreter(MuSIC):
             kwargs["custom_pathways_path"] = self.custom_pathways_path
         else:
             raise ValueError("For permutation testing, receptors/pathways must be given from .txt file.")
-        if hasattr(self, "custom_ligands_path") and self.mod_type.isin(["ligand", "lr"]):
+        if hasattr(self, "custom_lig_path") and self.mod_type.isin(["ligand", "lr"]):
             kwargs["custom_lig_path"] = self.custom_ligands_path
         elif hasattr(self, "custom_pathways_path") and self.mod_type.isin(["ligand", "lr"]):
             kwargs["custom_pathways_path"] = self.custom_pathways_path

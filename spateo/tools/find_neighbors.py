@@ -198,7 +198,7 @@ def find_bw_for_n_neighbors(
     initial_bw: Optional[float] = None,
     chunk_size: int = 1000,
     exclude_self: bool = False,
-) -> int:
+) -> float:
     """Finds the bandwidth such that on average, cells in the sample have n neighbors.
 
     Args:
@@ -208,6 +208,9 @@ def find_bw_for_n_neighbors(
         initial_bw: Can optionally be used to set the starting distance for the bandwidth search
         chunk_size: Number of cells to compute pairwise distance for at once
         exclude_self: Whether to exclude self from the list of neighbors
+
+    Returns:
+        bandwidth: Bandwidth in distance units
     """
     coords = adata.obsm[coords_key]
 
@@ -245,6 +248,46 @@ def find_bw_for_n_neighbors(
         print(f"New bandwidth: {bandwidth}")
 
     return bandwidth
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def find_threshold_distance(
+    adata: anndata.AnnData, coords_key: str = "X_umap", n_neighbors: int = 10, chunk_size: int = 1000
+) -> float:
+    """Finds threshold distance beyond which there is a dramatic increase in the average distance to remaining
+    nearest neighbors.
+
+    Args:
+        adata: AnnData object containing coordinates for all cells
+        coords_key: Key in adata.obsm where the spatial coordinates are stored
+        n_neighbors: Will first compute the number of nearest neighbors as a comparison for querying additional
+            distance values.
+        chunk_size: Number of cells to compute pairwise distance for at once
+
+    Returns:
+        bandwidth: Bandwidth in distance units
+    """
+    coords = adata.obsm[coords_key]
+
+    # Compute distances in chunks
+    chunks = [coords[i : i + chunk_size] for i in range(0, coords.shape[0], chunk_size)]
+    # Calculate pairwise distances for each chunk in parallel
+    partial_func = partial(calculate_distances_chunk, coords=coords)
+    distances = Parallel(n_jobs=-1)(delayed(partial_func)(chunk) for chunk in chunks)
+    # Concatenate the results to get the full pairwise distance matrix
+    distances = np.concatenate(distances, axis=0)
+
+    # Find the k nearest neighbors for each sample
+    k_nearest_distances = np.sort(distances)[:, :n_neighbors]
+
+    # Compute the mean and standard deviation of the k nearest distances
+    mean_k_distances = np.mean(k_nearest_distances, axis=1)
+    std_k_distances = np.std(k_nearest_distances, axis=1)
+
+    # Find the distance where there is a dramatic increase compared to the k nearest neighbors
+    threshold_distance = np.max(mean_k_distances + 3 * std_k_distances)
+
+    return threshold_distance
 
 
 # ---------------------------------------------------------------------------------------------------

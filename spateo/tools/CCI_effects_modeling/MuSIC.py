@@ -28,7 +28,12 @@ from sklearn.cluster import KMeans
 from ...logging import logger_manager as lm
 from ...preprocessing.normalize import factor_normalization
 from ...preprocessing.transform import log1p
-from ..find_neighbors import find_bw_for_n_neighbors, get_wi, neighbors
+from ..find_neighbors import (
+    find_bw_for_n_neighbors,
+    find_threshold_distance,
+    get_wi,
+    neighbors,
+)
 from ..spatial_degs import moran_i
 from .distributions import Gaussian, NegativeBinomial, Poisson
 from .regression_utils import compute_betas_local, iwls, multicollinearity_check, smooth
@@ -488,6 +493,7 @@ class MuSIC:
             # For downstream, modify some of the parameters:
             if self.mod_type == "downstream":
                 # Use neighbors in expression space:
+                self.logger.info("Because `mod_type` is `downstream`, using expression neighbors.")
                 self.use_expression_neighbors = True
                 # Pathways can be used as targets, which often violates the count assumption of the other distributions-
                 # redefine the model type in this case:
@@ -630,6 +636,43 @@ class MuSIC:
         if adata is None:
             adata = self.adata.copy()
 
+        if self.species == "human":
+            try:
+                self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
+            except FileNotFoundError:
+                raise FileNotFoundError(
+                    f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                )
+            except IOError:
+                raise IOError(
+                    "Issue reading L:R database. Files can be downloaded from "
+                    "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
+                )
+
+            self.r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_receptor_TF_db.csv"), index_col=0)
+            self.tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_TF_db.csv"), index_col=0)
+            self.cof_db = pd.read_csv(os.path.join(self.cci_dir, "human_cofactors.csv"), index_col=0)
+            self.grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
+        elif self.species == "mouse":
+            try:
+                self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
+            except FileNotFoundError:
+                raise FileNotFoundError(
+                    f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                )
+            except IOError:
+                raise IOError(
+                    "Issue reading L:R database. Files can be downloaded from "
+                    "https://github.com/aristoteleo/spateo-release/spateo/tools/database."
+                )
+
+            self.r_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_receptor_TF_db.csv"), index_col=0)
+            self.tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_TF_db.csv"), index_col=0)
+            self.cof_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_cofactors.csv"), index_col=0)
+            self.grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
+        else:
+            raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
+
         if os.path.exists(
             os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix", "design_matrix.csv")
         ):
@@ -646,8 +689,6 @@ class MuSIC:
                 index_col=0,
             )
 
-        # For downstream analysis entire AnnData object except for the ligands will be used for independent variable
-        # array:
         else:
             # Targets = ligands
             if self.custom_ligands_path is not None or self.custom_ligands is not None:
@@ -684,6 +725,7 @@ class MuSIC:
                     "For 'mod_type' = 'downstream', ligands must be provided using either "
                     "'custom_lig_path' or 'ligand' arguments."
                 )
+            self.logger.info(f"Found {len(targets)} signaling molecules to serve as dependent variable targets.")
 
             # Define ligand/receptor/pathway expression array:
             self.targets_expr = pd.DataFrame(
@@ -693,13 +735,13 @@ class MuSIC:
             )
 
             self.logger.info("Searching AnnData object .obs field to construct regulator array for modeling...")
-            if not any("predictor_" in obs for obs in adata.obs.columns):
+            if not any("regulator_" in obs for obs in adata.obs.columns):
                 raise ValueError(
-                    "No .obs fields found in AnnData object that start with 'predictor_'. These are added by the "
+                    "No .obs fields found in AnnData object that start with 'regulator_'. These are added by the "
                     "downstream setup function- please run :class `MuSIC_Interpreter.CCI_deg_detection_setup()`."
                 )
             X_df = pd.DataFrame(
-                adata.obs[[col for col in adata.obs.columns if "predictor_" in col]],
+                adata.obs[[col for col in adata.obs.columns if "regulator_" in col]],
                 index=adata.obs_names,
                 columns=adata.var_names,
             )
@@ -761,9 +803,6 @@ class MuSIC:
         if self.fit_intercept:
             self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
             self.feature_names = ["intercept"] + self.feature_names
-            if self.feature_indicator is not None:
-                intercept_indicator = pd.DataFrame(1, index=self.sample_names, columns=["intercept"])
-                self.feature_indicator = pd.concat([intercept_indicator, self.feature_indicator], axis=1)
 
         # Add small amount to expression to prevent issues during regression:
         zero_rows = np.where(np.all(self.X == 0, axis=1))[0]
@@ -835,10 +874,6 @@ class MuSIC:
                 self.grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
             else:
                 raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
-
-            self.grn = self.comm.bcast(self.grn, root=0)
-            self.r_tf_db = self.comm.bcast(self.r_tf_db, root=0)
-            self.lr_db = self.comm.bcast(self.lr_db, root=0)
 
             database_pathways = set(self.lr_db["pathway"])
 
@@ -1653,19 +1688,12 @@ class MuSIC:
         # molecules used:
         if self.mod_type == "ligand":
             self.ligands = self.feature_names
-            self.feature_indicator = (self.ligands_expr != 0).astype(int)
         elif self.mod_type == "receptor":
             self.receptors = self.feature_names
-            self.feature_indicator = (self.receptors_expr != 0).astype(int)
         elif self.mod_type == "lr":
             # Update :attr `lr_pairs` to reflect the final L:R pairs used:
             self.lr_pairs = [tuple((pair.split(":")[0], pair.split(":")[1])) for pair in self.feature_names]
             receptors = [p[1] for p in self.lr_pairs]
-            self.feature_indicator = pd.DataFrame(0, index=self.sample_names, columns=self.feature_names)
-            for i, r in enumerate(receptors):
-                self.feature_indicator.loc[self.receptors_expr[r] != 0, self.feature_names[i]] = 1
-        else:
-            self.feature_indicator = None
 
         # If applicable, add covariates:
         if self.covariate_keys is not None:
@@ -1692,9 +1720,6 @@ class MuSIC:
         if self.fit_intercept:
             self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
             self.feature_names = ["intercept"] + self.feature_names
-            if self.feature_indicator is not None:
-                intercept_indicator = pd.DataFrame(1, index=self.sample_names, columns=["intercept"])
-                self.feature_indicator = pd.concat([intercept_indicator, self.feature_indicator], axis=1)
 
         # Add small amount to expression to prevent issues during regression:
         zero_rows = np.where(np.all(self.X == 0, axis=1))[0]
@@ -1703,7 +1728,6 @@ class MuSIC:
 
         # Broadcast independent variables and feature names:
         self.X = self.comm.bcast(self.X, root=0)
-        self.feature_indicator = self.comm.bcast(self.feature_indicator, root=0)
         self.feature_names = self.comm.bcast(self.feature_names, root=0)
         self.n_features = self.X.shape[1]
         self.n_features = self.comm.bcast(self.n_features, root=0)
@@ -1888,7 +1912,12 @@ class MuSIC:
                     # on average:
                     self.minbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=10)
 
-                    self.maxbw = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=50)
+                    # Take the minimum value between the distance to the 50th nearest neighbor and the distance
+                    # beyond which the distance values to "nearest neighbors" start to become unreasonably large:
+                    max_a = find_threshold_distance(self.adata, coords_key="X_umap", n_neighbors=20)
+                    max_b = find_bw_for_n_neighbors(self.adata, coords_key="X_umap", target_n_neighbors=50)
+
+                    self.maxbw = np.minimum(max_a, max_b)
 
                 if self.distance_membrane_bound is not None and self.distance_secreted is not None:
                     self.minbw = (
@@ -2405,21 +2434,6 @@ class MuSIC:
                     # Standard errors of the predictor:
                     all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * sigma_squared)
 
-                    # Multiply coefficients and standard errors by an indicator array wherever receptor expression is
-                    # zero (this captures the true effects from the data)- this won't effect prediction because the
-                    # zero values are not affected by coefficient size either way. If needed, find the names of
-                    # indices that can be found in x_chunk (in the case of subsampling):
-                    if self.feature_indicator is not None:
-                        if self.subsampled:
-                            indicator = self.feature_indicator.loc[chunk_sample_names]
-                        else:
-                            indicator = self.feature_indicator
-                        indicator = indicator[X_labels]
-                        all_fit_outputs[:, 3 : n_features + 3] = (
-                            all_fit_outputs[:, 3 : n_features + 3] * indicator.values
-                        )
-                        all_fit_outputs[:, -n_features:] = all_fit_outputs[:, -n_features:] * indicator.values
-
                     # For saving/showing outputs:
                     header = "index,residual,influence,"
                     deviance = None
@@ -2456,21 +2470,6 @@ class MuSIC:
                     aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
                     # Standard errors of the predictor:
                     all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:])
-
-                    # Multiply coefficients and standard errors by an indicator array wherever receptor expression is
-                    # zero (this captures the true effects from the data)- this won't effect prediction because the
-                    # zero values are not affected by coefficient size either way. If needed, find the names of
-                    # indices that can be found in x_chunk (in the case of subsampling):
-                    if self.feature_indicator is not None:
-                        if self.subsampled:
-                            indicator = self.feature_indicator.loc[chunk_sample_names]
-                        else:
-                            indicator = self.feature_indicator
-                        indicator = indicator[X_labels]
-                        all_fit_outputs[:, 3 : n_features + 3] = (
-                            all_fit_outputs[:, 3 : n_features + 3] * indicator.values
-                        )
-                        all_fit_outputs[:, -n_features:] = all_fit_outputs[:, -n_features:] * indicator.values
 
                     # For saving/showing outputs:
                     header = "index,prediction,influence,"
@@ -2685,12 +2684,24 @@ class MuSIC:
 
                 # Transcription factors that have binding sites proximal to this target:
                 target_rows = self.grn.loc[gene_query]
-                target_TFs = target_rows.columns[(target_rows == 1).any()].tolist()
+                if not isinstance(target_rows, pd.Series):
+                    target_TFs = target_rows.columns[(target_rows == 1).any()].tolist()
+                else:
+                    target_TFs = target_rows[target_rows == 1].index.tolist()
                 # Cofactors for these transcription factors:
-                cof_subset = list(self.cof_db[(self.cof_db[target_TFs] == 1).any(axis=1)].index)
+                target_TFs_cof_int = [tf for tf in target_TFs if tf in self.cof_db.columns]
+                cof_subset = list(self.cof_db[(self.cof_db[target_TFs_cof_int] == 1).any(axis=1)].index)
                 # Other TFs that interact with these transcription factors:
-                intersecting_tf_subset = list(self.tf_tf_db[(self.tf_tf_db[target_TFs] == 1).any(axis=1)].index)
+                target_TFs_i_int = [tf for tf in target_TFs if tf in self.tf_tf_db.columns]
+                intersecting_tf_subset = list(self.tf_tf_db[(self.tf_tf_db[target_TFs_i_int] == 1).any(axis=1)].index)
                 target_regulators = target_TFs + cof_subset + intersecting_tf_subset
+                # If there are no features, skip fitting for this gene and move on:
+                if len(target_regulators) == 0:
+                    self.logger.info(
+                        "None of the provided regulators could be found to have an association with the "
+                        "target gene. Skipping past this target."
+                    )
+                    continue
 
                 keep_indices = [i for i, feat in enumerate(self.feature_names) if feat in target_regulators]
                 X_labels = [self.feature_names[idx] for idx in keep_indices]
@@ -3057,11 +3068,6 @@ class MuSIC:
                         for nonsampled_idx in nonsampled_idxs:
                             betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
                             standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
-
-                    # Convolve betas and standard errors with the indicator array:
-                    feature_subset = [c.replace("b_", "") for c in betas.columns]
-                    betas = betas * self.feature_indicator[feature_subset]
-                    standard_errors = standard_errors * self.feature_indicator[feature_subset]
 
                 # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas
