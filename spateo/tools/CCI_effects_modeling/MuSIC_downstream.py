@@ -79,6 +79,10 @@ class MuSIC_Interpreter(MuSIC):
         self.coeffs, self.standard_errors = self.return_outputs()
         self.coeffs = self.comm.bcast(self.coeffs, root=0)
         self.standard_errors = self.comm.bcast(self.standard_errors, root=0)
+        # Design matrix:
+        self.design_matrix = pd.read_csv(
+            os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
+        )
 
         self.predictions = self.predict(coeffs=self.coeffs)
         self.predictions = self.comm.bcast(self.predictions, root=0)
@@ -144,10 +148,11 @@ class MuSIC_Interpreter(MuSIC):
             # Get coefficients and standard errors for this key
             coef = self.coeffs[target]
             columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
-            coef = coef[[columns]]
+            coef = coef[columns]
             coef = self.comm.bcast(coef, root=0)
             se = self.standard_errors[target]
             se = self.comm.bcast(se, root=0)
+            se_feature_match = [c.replace("se_", "") for c in se.columns]
 
             # Parallelize computations over observations and features:
             local_p_values_all = np.zeros((len(self.x_chunk), self.n_features))
@@ -155,24 +160,30 @@ class MuSIC_Interpreter(MuSIC):
             # Compute p-values for local observations and features
             for i, obs_index in enumerate(self.x_chunk):
                 for j in range(self.n_features):
-                    if se.iloc[obs_index, j] == 0:
-                        local_p_values_all[i, j] = 1
+                    if self.feature_names[j] in se_feature_match:
+                        if se.iloc[obs_index][f"se_{self.feature_names[j]}"] == 0:
+                            local_p_values_all[i, j] = 1
+                        else:
+                            local_p_values_all[i, j] = wald_test(
+                                coef.iloc[obs_index][f"b_{self.feature_names[j]}"],
+                                se.iloc[obs_index][f"se_{self.feature_names[j]}"],
+                            )
                     else:
-                        local_p_values_all[i, j] = wald_test(coef.iloc[obs_index, j], se.iloc[obs_index, j])
+                        local_p_values_all[i, j] = 1
 
             # Collate p-values from all processes:
             p_values_all = self.comm.gather(local_p_values_all, root=0)
 
             if self.comm.rank == 0:
                 p_values_all = np.concatenate(p_values_all, axis=0)
-                p_values_df = pd.DataFrame(p_values_all, index=self.sample_names, columns=columns)
+                p_values_df = pd.DataFrame(p_values_all, index=self.sample_names, columns=self.feature_names)
                 # Multiple testing correction for each observation:
                 qvals = np.zeros_like(p_values_all)
                 for i in range(p_values_all.shape[0]):
                     qvals[i, :] = multitesting_correction(
                         p_values_all[i, :], method=method, alpha=significance_threshold
                     )
-                q_values_df = pd.DataFrame(qvals, index=self.sample_names, columns=columns)
+                q_values_df = pd.DataFrame(qvals, index=self.sample_names, columns=self.feature_names)
 
                 # Significance:
                 is_significant_df = q_values_df < significance_threshold
@@ -374,6 +385,7 @@ class MuSIC_Interpreter(MuSIC):
         cut_pvals: float = -5,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
+        center: Optional[float] = None,
         cmap: str = "Reds",
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
@@ -409,6 +421,7 @@ class MuSIC_Interpreter(MuSIC):
                 below this will be clipped to this value.
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
+            center: Optional, determines position of the colormap center. Between 0 and 1.
             cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
                 the range is 0. It is recommended to use a sequential colormap (e.g. "Reds", "Blues", "Viridis",
                 etc.). For metric = "fc", if a divergent colormap is not provided, "seismic" will automatically be
@@ -443,25 +456,27 @@ class MuSIC_Interpreter(MuSIC):
         targets = all_targets if target_subset is None else target_subset
         feature_names = [feat for feat in self.feature_names if feat != "intercept"]
         df = pd.DataFrame(0, index=feature_names, columns=targets)
+
+        # Colormap can be divergent for any option-
+        diverging_colormaps = [
+            "PiYG",
+            "PRGn",
+            "BrBG",
+            "PuOr",
+            "RdGy",
+            "RdBu",
+            "RdYlBu",
+            "RdYlGn",
+            "Spectral",
+            "coolwarm",
+            "bwr",
+            "seismic",
+        ]
+
         # For metric = fold change, significance of the fold-change:
         if metric == "fc" or metric == "fc_qvals":
             df_pvals = pd.DataFrame(1, index=feature_names, columns=targets)
-            # For fold-change, colormap should be divergent-
             if metric == "fc":
-                diverging_colormaps = [
-                    "PiYG",
-                    "PRGn",
-                    "BrBG",
-                    "PuOr",
-                    "RdGy",
-                    "RdBu",
-                    "RdYlBu",
-                    "RdYlGn",
-                    "Spectral",
-                    "coolwarm",
-                    "bwr",
-                    "seismic",
-                ]
                 if cmap not in diverging_colormaps:
                     logger.info("For metric fold-change, colormap should be divergent: using 'seismic'.")
                     cmap = "seismic"
@@ -503,7 +518,7 @@ class MuSIC_Interpreter(MuSIC):
                 "magma",
                 "cividis",
             ]
-            if cmap not in sequential_colormaps:
+            if cmap not in sequential_colormaps and cmap not in diverging_colormaps:
                 logger.info(f"For metric {metric}, colormap should be sequential: using 'viridis'.")
                 cmap = "viridis"
 
@@ -519,7 +534,7 @@ class MuSIC_Interpreter(MuSIC):
             # Get coefficients for this key
             coef = self.coeffs[target]
             columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
-            feat_names_target = [col.split("_")[1] for col in columns]
+            feat_names_target = [col.replace("b_", "") for col in columns]
 
             # For fold-change, significance will be incorporated post-calculation:
             if plot_significant and metric != "fc":
@@ -528,7 +543,7 @@ class MuSIC_Interpreter(MuSIC):
                 try:
                     parent_dir = os.path.dirname(self.output_path)
                     is_significant_df = pd.read_csv(
-                        os.path.join(parent_dir, "significance", f"{target}_is_significant.csv")
+                        os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
                     )
                 except:
                     self.logger.info(
@@ -538,14 +553,17 @@ class MuSIC_Interpreter(MuSIC):
                     self.compute_coeff_significance()
                     parent_dir = os.path.dirname(self.output_path)
                     is_significant_df = pd.read_csv(
-                        os.path.join(parent_dir, "significance", f"{target}_is_significant.csv")
+                        os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
                     )
+                # Take the subset of the significance matrix that applies to the columns used for this target:
+                is_significant_df = is_significant_df.loc[:, feat_names_target]
                 # Convolve coefficients with significance matrix:
                 coef = coef * is_significant_df.values
 
             if metric == "number":
                 # Compute number of nonzero interactions for each feature:
                 n_nonzero_interactions = np.sum(coef != 0, axis=0)
+                n_nonzero_interactions.index = [idx.replace("b_", "") for idx in n_nonzero_interactions.index]
                 # Compute proportion:
                 df.loc[feat_names_target, target] = n_nonzero_interactions
             elif metric == "proportion":
@@ -558,31 +576,40 @@ class MuSIC_Interpreter(MuSIC):
                 # Compute number of cells for which each interaction is inferred to be present from among the
                 # target-expressing cells:
                 n_nonzero_interactions = np.sum(coef_target_expr != 0, axis=0)
+                proportions = n_nonzero_interactions / n_target_expr_cells
+                proportions.index = [idx.replace("b_", "") for idx in proportions.index]
                 # Compute proportion:
-                df.loc[feat_names_target, target] = n_nonzero_interactions / n_target_expr_cells
+                df.loc[feat_names_target, target] = proportions
             elif metric == "specificity":
+                # Design matrix will be used for this mode:
+                dm = self.design_matrix[feat_names_target]
+
                 # Compute total number of target-expressing cells, and the indices of target-expressing cells:
                 target_expr_cells_indices = np.where(adata[:, target].X.toarray() != 0)[0]
                 # Intersection of each interaction w/ target-expressing cells to determine the numerator for the
                 # proportion:
-                intersections = {}
+                intersections = pd.Series(0, index=columns)
                 for col in columns:
                     nz_indices = np.where(coef[col].values != 0)[0]
-                    intersections[col] = np.intersect1d(target_expr_cells_indices, nz_indices)
-                intersections = np.array(list(intersections.values()))
+                    intersection = np.intersect1d(target_expr_cells_indices, nz_indices)
+                    intersections[col] = len(intersection)
+                intersections.index = [idx.replace("b_", "") for idx in intersections.index]
 
                 # Compute number of cells for which each interaction is inferred to be present to determine the
                 # denominator for the proportion:
-                n_nonzero_interactions = np.sum(coef != 0, axis=0)
+                n_nonzero_interactions = np.sum(dm != 0, axis=0)
+                proportions = intersections / n_nonzero_interactions
 
                 # Ratio of intersections to total number of nonzero values:
-                df.loc[feat_names_target, target] = intersections / n_nonzero_interactions
+                df.loc[feat_names_target, target] = proportions
             elif metric == "mean":
-                df.loc[:, target] = np.mean(coef, axis=0)
+                means = np.mean(coef, axis=0)
+                means.index = [idx.replace("b_", "") for idx in means.index]
+                df.loc[:, target] = means
             elif metric == "fc":
                 # Get indices of zero effect and predicted positive effect:
                 for col in columns:
-                    feat = col.split("_")[1]
+                    feat = col.replace("b_", "")
                     nz_effect_indices = np.where(coef[col].values != 0)[0]
                     zero_effect_indices = np.where(coef[col].values == 0)[0]
 
@@ -608,45 +635,88 @@ class MuSIC_Interpreter(MuSIC):
             if plot_significant:
                 df[df_pvals > 0.05] = 0.0
 
+        # Formatting for visualization:
+        df.index = [replace_col_with_collagens(idx) for idx in df.index]
+        if metric == "fc" or metric == "fc_qvals":
+            df_pvals.index = [replace_col_with_collagens(idx) for idx in df_pvals.index]
+        df.index = [replace_hla_with_hlas(idx) for idx in df.index]
+        if metric == "fc" or metric == "fc_qvals":
+            df_pvals.index = [replace_hla_with_hlas(idx) for idx in df_pvals.index]
+
         # Plot preprocessing:
         # For metric = fold change q-values, compute the log-transformed fold change:
         if metric == "fc_qvals":
             df_log = np.log10(df_pvals.values)
             df_log[df_log < cut_pvals] = cut_pvals
             df_pvals = pd.DataFrame(df_log, index=df_pvals.index, columns=df_pvals.columns)
+            if center is None:
+                center = np.percentile(df_pvals.values.flatten(), 30)
+            else:
+                center = np.percentile(df_pvals.values.flatten(), center)
             # Adjust cmap such that the value typically corresponding to the minimum is the max- the max p-value is
             # the least significant:
             cmap = f"{cmap}_r"
             label = "$\log_{10}$ FDR-corrected pvalues"
-            title = "Significance of target gene expression fold-change for each interaction"
+            title = "Significance of target gene expression \n fold-change for each interaction"
         elif metric == "fc":
             # Set values below cutoff to 1 (no fold-change):
             df[(df < metric_threshold + 1) & (df > 1 - metric_threshold)] = 1.0
+            if center is None:
+                center = np.percentile(df.values.flatten(), 30)
+            else:
+                center = np.percentile(df.values.flatten(), center)
             vmax = np.max(np.abs(df.values))
-            vmin = -vmax
+            vmin = 0.0
             label = "Fold-change"
-            title = "Target gene expression fold-change for each interaction"
+            title = "Target gene expression \n fold-change for each interaction"
         elif metric == "mean":
             df[np.abs(df) < metric_threshold] = 0.0
+            if center is None:
+                center = np.percentile(df.values.flatten(), 30)
+            else:
+                center = np.percentile(df.values.flatten(), center)
             vmax = np.max(df.values)
             vmin = np.min(df.values)
             label = "Mean effect size"
-            title = "Mean effect size for each interaction on each target"
+            title = "Mean effect size for \n each interaction on each target"
         elif metric in ["number", "proportion", "specificity"]:
             if normalize:
                 df = (df - df.min()) / (df.max() - df.min() + 1e-8)
+                if center is None:
+                    center = 0.5
+            else:
+                if metric == "number":
+                    if center is None:
+                        center = np.percentile(df.values.flatten(), 40)
+                    else:
+                        center = np.percentile(df.values.flatten(), center)
+                elif metric == "proportion" or metric == "specificity":
+                    if center is None:
+                        center = 0.3
             df[df < metric_threshold] = 0.0
             vmax = np.max(np.abs(df.values))
             vmin = 0
             if metric == "number":
-                label = "Number of cells"
-                title = "Number of cells w/ predicted effect on target for each interaction"
+                label = "Number of cells" if not normalize else "Number of cells (normalized)"
+                title = (
+                    "Number of cells w/ predicted effect \n on target for each interaction"
+                    if not normalize
+                    else "Number of cells w/ predicted effect \n on target for each interaction (normalized)"
+                )
             elif metric == "proportion":
-                label = "Proportion of cells"
-                title = "Proportion of cells w/ predicted effect on target for each interaction"
+                label = "Proportion of cells" if not normalize else "Proportion of cells (normalized)"
+                title = (
+                    "Proportion of cells w/ predicted effect \n on target for each interaction"
+                    if not normalize
+                    else "Proportion of cells w/ predicted effect \n on target for each interaction (normalized)"
+                )
             elif metric == "specificity":
-                label = "Specificity"
-                title = "Exclusivity of predicted effect on target for each interaction"
+                label = "Specificity" if not normalize else "Specificity (normalized)"
+                title = (
+                    "Exclusivity of predicted effect \n on target for each interaction"
+                    if not normalize
+                    else "Proportion of cells w/ predicted effect \n on target for each interaction (normalized)"
+                )
 
         # Plot heatmap:
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
@@ -658,6 +728,7 @@ class MuSIC_Interpreter(MuSIC):
                 linewidths=0.3,
                 cbar_kws={"label": label, "location": "top"},
                 cmap=cmap,
+                center=center,
                 vmin=cut_pvals,
                 vmax=0,
                 ax=ax,
@@ -668,6 +739,7 @@ class MuSIC_Interpreter(MuSIC):
                 spine.set_visible(True)
                 spine.set_linewidth(0.75)
         else:
+            mask = df == 0
             m = sns.heatmap(
                 df,
                 square=True,
@@ -675,8 +747,10 @@ class MuSIC_Interpreter(MuSIC):
                 linewidths=0.3,
                 cbar_kws={"label": label, "location": "top"},
                 cmap=cmap,
+                center=center,
                 vmin=vmin,
                 vmax=vmax,
+                mask=mask,
                 ax=ax,
             )
 
@@ -685,9 +759,15 @@ class MuSIC_Interpreter(MuSIC):
                 spine.set_visible(True)
                 spine.set_linewidth(0.75)
 
-        plt.xlabel("Target gene", fontsize=fontsize)
-        plt.ylabel("Interaction", fontsize=fontsize)
-        plt.title(title, fontsize=fontsize + 4)
+        # Adjust colorbar label font size
+        cbar = m.collections[0].colorbar
+        cbar.set_label(label, fontsize=fontsize * 1.1)
+        # Adjust colorbar tick font size
+        cbar.ax.tick_params(labelsize=fontsize)
+
+        plt.xlabel("Target gene", fontsize=fontsize * 1.1)
+        plt.ylabel("Interaction", fontsize=fontsize * 1.1)
+        plt.title(title, fontsize=fontsize * 1.25)
         plt.tight_layout()
 
         # Use the saved name for the AnnData object to define part of the name of the saved file:
@@ -697,7 +777,7 @@ class MuSIC_Interpreter(MuSIC):
         # Save figure:
         save_return_show_fig_utils(
             save_show_or_return=save_show_or_return,
-            show_legend=True,
+            show_legend=False,
             background="white",
             prefix=prefix,
             save_kwargs=save_kwargs,
@@ -2129,7 +2209,7 @@ class MuSIC_Interpreter(MuSIC):
             plt.yticks(fontsize=self.fontsize)
             plt.title(
                 f"Preponderance of inferred \n regulatory effect on {title_id} expression",
-                fontsize=self.fontsize * 1.25
+                fontsize=self.fontsize * 1.25,
             ) if cell_type is None else plt.title(
                 f"Preponderance of inferred regulatory \n effect on {title_id} expression in {cell_type}",
                 fontsize=self.fontsize * 1.25,
@@ -2188,7 +2268,7 @@ class MuSIC_Interpreter(MuSIC):
                 f"Average inferred \n regulatory effects on {title_id} expression", fontsize=self.fontsize * 1.25
             ) if cell_type is None else plt.title(
                 f"Average inferred regulatory effects on {title_id} expression in {cell_type}",
-                fontsize=self.fontsize * 1.25
+                fontsize=self.fontsize * 1.25,
             )
             plt.tight_layout()
 
@@ -3029,6 +3109,73 @@ class MuSIC_Interpreter(MuSIC):
 
         return pathway_coupling, pathway_coupling_significance
 
-    # ---------------------------------------------------------------------------------------------------
-    # Visualization functions
-    # ---------------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------------
+# Formatting functions
+# ---------------------------------------------------------------------------------------------------
+def replace_col_with_collagens(string):
+    # Split the string at the colon (if any)
+    parts = string.split(":")
+    # Split the first part of the string at slashes
+    elements = parts[0].split("/")
+    # Flag to check if we've encountered a "COL" element or a "Collagens" element
+    encountered_col = False
+
+    # Process each element
+    for i, element in enumerate(elements):
+        # If the element starts with "COL" or "b_COL", or if it is "Collagens" or "b_Collagens"
+        if element.startswith("COL") or element.startswith("b_COL") or element in ["Collagens", "b_Collagens"]:
+            # If we've already encountered a "COL" or "Collagens" element, remove this one
+            if encountered_col:
+                elements[i] = None
+            # Otherwise, replace it with "Collagens" or "b_Collagens" as appropriate
+            else:
+                if element.startswith("b_COL") or element == "b_Collagens":
+                    elements[i] = "b_Collagens"
+                else:
+                    elements[i] = "Collagens"
+                encountered_col = True
+
+    # Remove None elements and join the rest with slashes
+    replaced_part = "/".join([element for element in elements if element is not None])
+    # If there's a second part, add it back
+    if len(parts) > 1:
+        replaced_string = replaced_part + ":" + parts[1]
+    else:
+        replaced_string = replaced_part
+
+    return replaced_string
+
+
+def replace_hla_with_hlas(string):
+    # Split the string at the colon (if any)
+    parts = string.split(":")
+    # Split the first part of the string at slashes
+    elements = parts[0].split("/")
+    # Flag to check if we've encountered an "HLA" element or an "HLAs" element
+    encountered_hla = False
+
+    # Process each element
+    for i, element in enumerate(elements):
+        # If the element starts with "HLA" or "b_HLA", or if it is "HLAs" or "b_HLAs"
+        if element.startswith("HLA") or element.startswith("b_HLA") or element in ["HLAs", "b_HLAs"]:
+            # If we've already encountered an "HLA" or "HLAs" element, remove this one
+            if encountered_hla:
+                elements[i] = None
+            # Otherwise, replace it with "HLAs" or "b_HLAs" as appropriate
+            else:
+                if element.startswith("b_HLA") or element == "b_HLAs":
+                    elements[i] = "b_HLAs"
+                else:
+                    elements[i] = "HLAs"
+                encountered_hla = True
+
+    # Remove None elements and join the rest with slashes
+    replaced_part = "/".join([element for element in elements if element is not None])
+    # If there's a second part, add it back
+    if len(parts) > 1:
+        replaced_string = replaced_part + ":" + parts[1]
+    else:
+        replaced_string = replaced_part
+
+    return replaced_string
