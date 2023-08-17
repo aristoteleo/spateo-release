@@ -758,8 +758,8 @@ class MuSIC:
             if self.multicollinear_threshold is not None:
                 X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
-            # # Normalize the data to prevent numerical overflow:
-            # X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
+            # Base 2 log-transform to deal with the case that there are enormous numerical outliers:
+            X_df = np.log1p(X_df) / np.log(2)
 
             # Save design matrix and component dataframes (here, target ligands dataframe):
             if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix")):

@@ -2020,27 +2020,33 @@ class MuSIC_Interpreter(MuSIC):
             if use_ligands:
                 file_id = "ligand_analysis"
                 plot_id = "Target Ligand"
+                title_id = "ligand"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt")
             elif use_receptors:
                 file_id = "receptor_analysis"
                 plot_id = "Target Receptor"
+                title_id = "receptor"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt")
             elif use_pathways and sender_or_receiver_degs == "sender":
                 file_id = "pathway_analysis_ligands"
                 plot_id = "Target Ligand"
+                title_id = "ligand"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
             elif use_pathways and sender_or_receiver_degs == "receiver":
                 file_id = "pathway_analysis_receptors"
                 plot_id = "Target Receptor"
+                title_id = "receptor"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
         elif cell_type is not None:
             if sender_or_receiver_degs == "sender":
                 file_id = "ligand_analysis"
                 plot_id = "Target Ligand"
+                title_id = "ligand"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt")
             elif sender_or_receiver_degs == "receiver":
                 file_id = "receptor_analysis"
                 plot_id = "Target Receptor"
+                title_id = "receptor"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_receptors.txt")
         else:
             raise ValueError(
@@ -2051,7 +2057,11 @@ class MuSIC_Interpreter(MuSIC):
         with open(targets_path, "r") as f:
             targets = [line.strip() for line in f.readlines()]
         # Complete list of regulatory factors- search through .obs of the AnnData object:
-        regulator_cols = [col for col in self.adata.obs.columns if "regulator_" in col]
+        if cell_type is None:
+            adata = anndata.read_h5ad(os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all.h5ad"))
+        else:
+            adata = anndata.read_h5ad(os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}.h5ad"))
+        regulator_cols = [col.replace("regulator_", "") for col in adata.obs.columns if "regulator_" in col]
 
         # Compute proportion or average coefficients for all targets:
         # Load all targets files:
@@ -2063,72 +2073,123 @@ class MuSIC_Interpreter(MuSIC):
                 if t in filename:
                     filepath = os.path.join(contents_folder, filename)
                     target_file = pd.read_csv(filepath, index_col=0)
-                    target_files[t] = target_file[
+                    target_file = target_file[
                         [c for c in target_file.columns if "b_" in c and "intercept" not in c]
                     ].copy()
+                    target_file.columns = [c.replace("b_", "") for c in target_file.columns]
+                    target_files[t] = target_file
 
         # Plot:
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
         if plot_mode == "proportion":
             all_proportions = pd.DataFrame(0, index=regulator_cols, columns=targets)
             for t, target_df in target_files.items():
-                nz_cells = self.adata[:, t].X > 0
-                proportions = (target_df.loc[nz_cells] != 0).mean()
+                nz_cells = np.where(adata[:, t].X.toarray() > 0)[0]
+                proportions = (target_df.iloc[nz_cells] != 0).mean()
                 all_proportions.loc[proportions.index, t] = proportions
 
+            if all_proportions.shape[0] < all_proportions.shape[1]:
+                to_plot = all_proportions.T
+                xlabel = "Regulatory factor"
+                ylabel = plot_id
+            else:
+                to_plot = all_proportions
+                xlabel = plot_id
+                ylabel = "Regulatory factor"
+
+            mask = to_plot < 0.1
             hmap = sns.heatmap(
-                all_proportions,
+                to_plot,
                 square=True,
                 linecolor="grey",
                 linewidths=0.3,
-                cbar_kws={"label": "Proportion of cells", "location": "top"},
+                cbar_kws={"label": "Proportion of cells", "location": "top", "shrink": 0.5},
                 cmap=cmap,
-                center=0.2,
+                center=0.3,
                 vmin=0.0,
                 vmax=1.0,
+                mask=mask,
                 ax=ax,
             )
+
+            # Adjust colorbar label font size
+            cbar = hmap.collections[0].colorbar
+            cbar.set_label("Proportion of cells", fontsize=self.fontsize * 1.1)
+            # Adjust colorbar tick font size
+            cbar.ax.tick_params(labelsize=self.fontsize)
 
             # Outer frame:
             for _, spine in hmap.spines.items():
                 spine.set_visible(True)
                 spine.set_linewidth(0.75)
 
+            plt.xlabel(xlabel, fontsize=self.fontsize * 1.1)
+            plt.ylabel(ylabel, fontsize=self.fontsize * 1.1)
+            plt.xticks(fontsize=self.fontsize)
+            plt.yticks(fontsize=self.fontsize)
             plt.title(
-                "Preponderance of inferred \n regulatory effect on ligand expression"
+                f"Preponderance of inferred \n regulatory effect on {title_id} expression",
+                fontsize=self.fontsize * 1.25
             ) if cell_type is None else plt.title(
-                f"Preponderance of inferred regulatory \n effect on ligand expression in {cell_type}"
+                f"Preponderance of inferred regulatory \n effect on {title_id} expression in {cell_type}",
+                fontsize=self.fontsize * 1.25,
             )
+            plt.tight_layout()
 
         elif plot_mode == "average":
             all_averages = pd.DataFrame(0, index=regulator_cols, columns=targets)
             for t, target_df in target_files.items():
-                nz_cells = self.adata[:, t].X > 0
-                averages = target_df.loc[nz_cells].mean()
+                nz_cells = np.where(adata[:, t].X.toarray() > 0)[0]
+                averages = target_df.iloc[nz_cells].mean()
                 all_averages.loc[averages.index, t] = averages
 
+            if all_averages.shape[0] < all_averages.shape[1]:
+                to_plot = all_averages.T
+                xlabel = "Regulatory factor"
+                ylabel = plot_id
+            else:
+                to_plot = all_averages
+                xlabel = plot_id
+                ylabel = "Regulatory factor"
+
+            q40 = np.percentile(all_averages.values.flatten(), 40)
             q20 = np.percentile(all_averages.values.flatten(), 20)
+            mask = to_plot < q20
             hmap = sns.heatmap(
-                all_averages,
+                to_plot,
                 square=True,
                 linecolor="grey",
                 linewidths=0.3,
-                cbar_kws={"label": "Proportion of cells", "location": "top"},
+                cbar_kws={"label": "Average effect size", "location": "top", "shrink": 0.5},
                 cmap=cmap,
-                center=q20,
+                center=q40,
                 vmin=0.0,
                 vmax=1.0,
+                mask=mask,
                 ax=ax,
             )
+
+            # Adjust colorbar label font size
+            cbar = hmap.collections[0].colorbar
+            cbar.set_label("Average effect size", fontsize=self.fontsize * 1.1)
+            # Adjust colorbar tick font size
+            cbar.ax.tick_params(labelsize=self.fontsize)
 
             # Outer frame:
             for _, spine in hmap.spines.items():
                 spine.set_visible(True)
                 spine.set_linewidth(0.75)
 
-            plt.xlabel(plot_id)
-            plt.ylabel("Regulatory factor")
-            plt.title("Average inferred \n regulatory effects on ligand expression")
+            plt.xlabel(xlabel, fontsize=self.fontsize * 1.1)
+            plt.ylabel(ylabel, fontsize=self.fontsize * 1.1)
+            plt.xticks(fontsize=self.fontsize)
+            plt.yticks(fontsize=self.fontsize)
+            plt.title(
+                f"Average inferred \n regulatory effects on {title_id} expression", fontsize=self.fontsize * 1.25
+            ) if cell_type is None else plt.title(
+                f"Average inferred regulatory effects on {title_id} expression in {cell_type}",
+                fontsize=self.fontsize * 1.25
+            )
             plt.tight_layout()
 
             save_return_show_fig_utils(
