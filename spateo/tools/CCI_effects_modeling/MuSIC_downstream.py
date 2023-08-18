@@ -389,6 +389,7 @@ class MuSIC_Interpreter(MuSIC):
         cmap: str = "Reds",
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
+        save_df: bool = False
     ):
         """Given the target gene of interest, identify interaction features that are enriched for particular targets.
         Visualized in heatmap form.
@@ -434,11 +435,17 @@ class MuSIC_Interpreter(MuSIC):
                 {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
                 "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
                 keys according to your needs.
+            save_df: Set True to save the metric dataframe in the end
         """
         logger = lm.get_main_logger()
         config_spateo_rcParams()
         # But set display DPI to 300:
         plt.rcParams["figure.dpi"] = 300
+
+        if save_df:
+            output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder)
 
         # Check inputs:
         if metric not in ["number", "proportion", "specificity", "mean", "fc", "fc_qvals"]:
@@ -787,6 +794,12 @@ class MuSIC_Interpreter(MuSIC):
             return_all=False,
             return_all_list=None,
         )
+
+        if save_df:
+            if metric == "fc_qvals":
+                df_pvals.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
+            else:
+                df.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
 
     def moran_i_signaling_effects(
         self,
