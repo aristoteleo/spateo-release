@@ -90,6 +90,11 @@ def changes_along_shape(
 def ElPiGraph_tree(
     X: np.ndarray,
     NumNodes: int = 50,
+    topology: Literal["tree", "circle", "curve"] = "curve",
+    Lambda: float = 0.01,
+    Mu: float = 0.1,
+    alpha: float = 0.0,
+    FinalEnergy: Literal["Base", "Penalized"] = "Penalized",
     **kwargs,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -99,8 +104,13 @@ def ElPiGraph_tree(
     Args:
         X: DxN, data matrix list.
         NumNodes: The number of nodes of the principal graph. Use a range of 10 to 100 for ElPiGraph approach.
+        topology:The appropriate topology used to fit a principal graph for each dataset.
+        Lambda: The attractive strength of edges between nodes (constrains edge lengths)
+        Mu: The repulsive strength of a node’s neighboring nodes (constrains angles to be close to harmonic)
+        alpha: Branching penalty (penalizes number of branches for the principal tree)
+        FinalEnergy: Indicating the final elastic emergy associated with the configuration. Currently it can be “Base” or “Penalized”
         **kwargs: Other parameters used in elpigraph.computeElasticPrincipalTree. For details, please see:
-                  https://github.com/j-bac/elpigraph-python/blob/master/elpigraph/_topologies.py
+                  https://elpigraph-python.readthedocs.io/en/latest/basics.html
 
     Returns:
         nodes: The nodes in the principal tree.
@@ -115,21 +125,22 @@ def ElPiGraph_tree(
         )
 
     ElPiGraph_kwargs = {
-        "alpha": 0.01,
-        "FinalEnergy": "Penalized",
-        "StoreGraphEvolution": True,
-        "GPU": False,
+        "NumNodes": NumNodes,
+        "Lambda": Lambda,
+        "Mu": Mu,
+        "alpha": alpha,
+        "FinalEnergy": FinalEnergy,
     }
     ElPiGraph_kwargs.update(kwargs)
-    if ElPiGraph_kwargs["GPU"] is True:
-        try:
-            import cupy
-        except ImportError:
-            raise ImportError(
-                "You need to install the package `cupy`." "\nInstall cupy via `pip install cupy-cuda113`."
-            )
 
-    elpi_tree = elpigraph.computeElasticPrincipalTree(X=np.asarray(X), NumNodes=NumNodes, **ElPiGraph_kwargs)
+    if str(topology).lower() == "tree":
+        elpi_tree = elpigraph.computeElasticPrincipalTree(X=np.asarray(X), **ElPiGraph_kwargs)
+    elif str(topology).lower() == "circle":
+        elpi_tree = elpigraph.computeElasticPrincipalCircle(X=np.asarray(X), **ElPiGraph_kwargs)
+    elif str(topology).lower() == "curve":
+        elpi_tree = elpigraph.computeElasticPrincipalCurve(X=np.asarray(X), **ElPiGraph_kwargs)
+    else:
+        raise ValueError("`topology` value is wrong." "\nAvailable `topology` are: `'tree'`, `'circle'`, `'curve'`.")
 
     nodes = elpi_tree[0]["NodePositions"]  # ['AllNodePositions'][k]
     matrix_edges_weights = elpi_tree[0]["ElasticMatrix"]  # ['AllElasticMatrices'][k]
