@@ -9,8 +9,6 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import geopandas as gpd
 
-from inspect import signature
-
 import matplotlib
 import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
@@ -170,7 +168,9 @@ def _scatter_projection(ax, points, projection, **kwargs):
         ax.scatter(points[:, 0], points[:, 1], **kwargs)
 
 
-def _vector_projection(ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", **kwargs):
+def _vector_projection(
+        ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", geo: bool = False, **kwargs
+):
     """Plot a 2D field of arrows over spatial transcriptomics data
 
     Args:
@@ -179,16 +179,34 @@ def _vector_projection(ax, points: np.ndarray, vectors: np.ndarray, projection: 
             coordinates of the cells themselves (for cell plots)
         vectors: Array of shape [n_samples, 2] or [n_samples, 3] containing the vector field
         projection: Either '2d' or '3d' to indicate if plot is 2D or 3D
+        geo: Set True if plotting atop geometrical objects. If only generating a scatterplot, set False.
         **kwargs: Additional keyword arguments provided to :func `ax.quiver()`
     """
+    if geo and not isinstance(points, np.ndarray):
+        centroids = np.array([polygon.centroid.coords[0] for polygon in points])
+        if projection == "3d":
+            ax.quiver(
+                centroids[:, 0],
+                centroids[:, 1],
+                centroids[:, 2],
+                vectors[:, 0],
+                vectors[:, 1],
+                vectors[:, 2],
+                **kwargs
+            )
+        else:
+            ax.quiver(centroids[:, 0], centroids[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
 
-    if projection == "3d":
-        ax.quiver(points[:, 0], points[:, 1], points[:, 2], vectors[:, 0], vectors[:, 1], vectors[:, 2], **kwargs)
     else:
-        ax.quiver(points[:, 0], points[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
+        if projection == "3d":
+            ax.quiver(points[:, 0], points[:, 1], points[:, 2], vectors[:, 0], vectors[:, 1], vectors[:, 2], **kwargs)
+        else:
+            ax.quiver(points[:, 0], points[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
 
 
-def _streamlines_projection(ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", **kwargs):
+def _streamlines_projection(
+        ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", geo: bool = False, **kwargs
+):
     """Plot streamlines over spatial transcriptomics data
 
     Args:
@@ -197,12 +215,20 @@ def _streamlines_projection(ax, points: np.ndarray, vectors: np.ndarray, project
             coordinates of the cells themselves (for cell plots)
         vectors: Array of shape [n_samples, 2] or [n_samples, 3] containing the vector field
         projection: Either '2d' or '3d' to indicate if plot is 2D or 3D
+        geo: Set True if plotting atop geometrical objects. If only generating a scatterplot, set False.
         **kwargs: Additional keyword arguments provided to :func `ax.streamplot()`
     """
-    if projection == "3d":
-        raise NotImplementedError("Streamlines are not supported in 3D")
+    if geo and not isinstance(points, np.ndarray):
+        centroids = np.array([polygon.centroid.coords[0] for polygon in points])
+        if projection == "3d":
+            raise NotImplementedError("Streamlines are not supported in 3D")
+        else:
+            ax.streamplot(centroids[:, 0], centroids[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
     else:
-        ax.streamplot(points[:, 0], points[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
+        if projection == "3d":
+            raise NotImplementedError("Streamlines are not supported in 3D")
+        else:
+            ax.streamplot(points[:, 0], points[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
 
 
 def _geo_projection(ax, points, **kwargs):
@@ -230,6 +256,7 @@ def plot_vectors(
     V: np.ndarray,
     vf_plot_method: str = "cell",
     projection: str = "2d",
+    geo: bool = False,
     **kwargs,
 ):
     """Wrapper for plotting vector fields.
@@ -242,6 +269,7 @@ def plot_vectors(
         vf_plot_method: 'grid' or 'streamplot' to indicate if plot should be vectors coming from the cells themselves
             ('cell'), vectors coming from vertices of a grid ('grid') or streamlines coming from vertices of a grid (
             'streamplot')
+        geo: Set True if plotting atop geometrical objects. If only generating a scatterplot, set False.
     """
     if vf_plot_method == "grid" or vf_plot_method == "cell":
         _vector_projection(
@@ -249,6 +277,7 @@ def plot_vectors(
             points,
             V,
             projection,
+            geo,
             **kwargs,
         )
     elif vf_plot_method == "streamplot":
@@ -257,6 +286,7 @@ def plot_vectors(
             points,
             V,
             projection,
+            geo,
             **kwargs,
         )
     else:
@@ -319,8 +349,10 @@ def _matplotlib_points(
     # Separate keyword arguments used for scatter and quiver plots (if the latter is applicable):
     if V is not None:
         if vf_plot_method == "grid" or vf_plot_method == "cell":
-            quiver_signature = signature(plt.quiver)
-            quiver_params = quiver_signature.parameters
+            quiver_params = [
+                'scale', 'scale_units', 'angles', 'width', 'color', 'pivot', 'headwidth', 'headlength',
+                'headaxislength', 'minshaft', 'minlength', 'linewidth', 'edgecolor', 'norm', 'cmap'
+            ]
 
             quiver_kwargs = {}
 
@@ -329,8 +361,10 @@ def _matplotlib_points(
                     quiver_kwargs[key] = value
 
         elif vf_plot_method == "stream":
-            streamplot_signature = signature(plt.streamplot)
-            streamplot_params = streamplot_signature.parameters
+            streamplot_params = [
+                'density', 'linewidth', 'color', 'cmap', 'norm', 'arrowsize', 'arrowstyle', 'minlength',
+                'start_points', 'zorder', 'maxlength', 'integration_direction', 'data'
+            ]
 
             streamplot_kwargs = {}
 
@@ -518,9 +552,9 @@ def _matplotlib_points(
                     vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
                     vec_points = points if vf_plot_method == "cell" else X_grid
                     if len(vf_kwargs) == 0:
-                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True)
                     else:
-                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True, **vf_kwargs)
             else:
                 _scatter_projection(
                     ax,
@@ -701,9 +735,9 @@ def _matplotlib_points(
                     vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
                     vec_points = points if vf_plot_method == "cell" else X_grid
                     if len(vf_kwargs) == 0:
-                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True)
                     else:
-                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True, **vf_kwargs)
 
             else:
                 _scatter_projection(
@@ -752,9 +786,9 @@ def _matplotlib_points(
                 vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
                 vec_points = points if vf_plot_method == "cell" else X_grid
                 if len(vf_kwargs) == 0:
-                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True)
                 else:
-                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True, **vf_kwargs)
         else:
             _scatter_projection(ax, points, projection, c=colors, **kwargs)
 

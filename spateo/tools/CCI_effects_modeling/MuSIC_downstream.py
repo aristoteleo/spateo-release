@@ -994,15 +994,22 @@ class MuSIC_Interpreter(MuSIC):
                 raise ValueError("Must provide both ligand name and receptor name for lr model.")
 
             if self.mod_type == "lr":
-                lr_pair = (ligand, receptor)
-                if lr_pair not in self.lr_pairs:
+                if "/" in ligand:
+                    multi_interaction = True
+                    lr_pair = f"{ligand}:{receptor}"
+                else:
+                    multi_interaction = False
+                    lr_pair = (ligand, receptor)
+                if lr_pair not in self.lr_pairs and lr_pair not in self.feature_names:
                     raise ValueError(
                         "Invalid ligand-receptor pair given. Check that input to 'lr_pair' is given in "
                         "the form of a tuple."
                     )
+            else:
+                multi_interaction = False
 
             # Check if ligand is membrane-bound or secreted:
-            matching_rows = self.lr_db[self.lr_db["from"] == ligand]
+            matching_rows = self.lr_db[self.lr_db["from"].isin(ligand.split("/"))]
             if (
                 matching_rows["type"].str.contains("Secreted Signaling").any()
                 or matching_rows["type"].str.contains("ECM-Receptor").any()
@@ -1012,7 +1019,12 @@ class MuSIC_Interpreter(MuSIC):
                 spatial_weights = spatial_weights_membrane_bound
 
             # Use the non-lagged ligand expression to construct ligand indicator array:
-            ligand_expr = self.ligands_expr_nonlag[ligand].values.reshape(-1, 1)
+            if not multi_interaction:
+                ligand_expr = self.ligands_expr_nonlag[ligand].values.reshape(-1, 1)
+            else:
+                all_multi_ligands = ligand.split("/")
+                ligand_expr = self.ligands_expr_nonlag[all_multi_ligands].mean(axis=1).values.reshape(-1, 1)
+
             # Referred to as "sent potential"
             sent_potential = spatial_weights.multiply(ligand_expr)
             sent_potential.eliminate_zeros()
@@ -1115,6 +1127,10 @@ class MuSIC_Interpreter(MuSIC):
                     ] = normalized_effect_potential_sum_receiver
 
             elif self.mod_type == "ligand":
+                if "/" in ligand:
+                    ligand = replace_col_with_collagens(ligand)
+                    ligand = replace_hla_with_hlas(ligand)
+
                 self.adata.obs[
                     f"norm_sum_sent_effect_potential_{ligand}_for_{target}"
                 ] = normalized_effect_potential_sum_sender
@@ -1124,6 +1140,10 @@ class MuSIC_Interpreter(MuSIC):
                 ] = normalized_effect_potential_sum_receiver
 
             elif self.mod_type == "lr":
+                if "/" in ligand:
+                    ligand = replace_col_with_collagens(ligand)
+                    ligand = replace_hla_with_hlas(ligand)
+
                 self.adata.obs[
                     f"norm_sum_sent_effect_potential_{ligand}_for_{target}_via_{receptor}"
                 ] = normalized_effect_potential_sum_sender
@@ -1186,8 +1206,8 @@ class MuSIC_Interpreter(MuSIC):
             raise ValueError("Must provide pathway to analyze.")
 
         lr_db_subset = self.lr_db[self.lr_db["pathway"] == pathway]
-        all_senders = list(set(lr_db_subset["from"]))
         all_receivers = list(set(lr_db_subset["to"]))
+        all_senders = list(set(lr_db_subset["from"]))
 
         if self.mod_type == "lr":
             self.logger.info(
@@ -1195,9 +1215,13 @@ class MuSIC_Interpreter(MuSIC):
                 "`mod_type` is 'lr'."
             )
 
-            # All possible ligand-receptor combinations:
-            possible_lr_combos = list(itertools.product(all_senders, all_receivers))
-            valid_lr_combos = list(set(possible_lr_combos).intersection(set(self.lr_pairs)))
+            # Get ligand-receptor combinations in the pathway from our model:
+            valid_lr_combos = []
+            for col in self.design_matrix.columns:
+                parts = col.split(":")
+                if parts[1] in all_receivers:
+                    valid_lr_combos.append((parts[0], parts[1]))
+
             if len(valid_lr_combos) < 3:
                 raise ValueError(
                     f"Pathway effect potential computation for pathway {pathway} is unsuitable for this model, "
@@ -1355,13 +1379,6 @@ class MuSIC_Interpreter(MuSIC):
                 observed = self.adata[:, target].X.toarray().reshape(-1, 1)
                 predicted = self.predictions[target].reshape(-1, 1)
 
-                # Ignore large predicted values that are actually zero- these have a high likelihood of being
-                # dropouts rather than biological zeros:
-                z_scores = zscore(predicted)
-                outlier_indices = np.where((observed == 0) & (z_scores > 2))[0]
-                predicted = np.delete(predicted, outlier_indices)
-                observed = np.delete(observed, outlier_indices)
-
                 rp, _ = pearsonr(observed, predicted)
                 pearson_dict[target] = rp
 
@@ -1467,6 +1484,7 @@ class MuSIC_Interpreter(MuSIC):
         normalized_effect_potential_sum_receiver: np.ndarray,
         sig: str,
         target: str,
+        max_val: float = 0.05,
     ):
         """Given the pairwise effect potential array, computes the effect vector field.
 
@@ -1477,6 +1495,8 @@ class MuSIC_Interpreter(MuSIC):
                 cell. Output from :func:`get_effect_potential`.
             normalized_effect_potential_sum_receiver: Array containing the sum of the effect potentials received by
                 each cell. Output from :func:`get_effect_potential`.
+            max_val: Constrains the size of the vector field vectors. Recommended to set within the order of
+                magnitude of 1/100 of the desired plot dimensions.
             sig: Label for the mediating interaction (e.g. name of a ligand, name of a ligand-receptor pair, etc.)
             target: Name of the target that the vector field describes the effect for
         """
@@ -1504,7 +1524,7 @@ class MuSIC_Interpreter(MuSIC):
                 avg_v = np.sum(temp_v * temp_val.reshape(-1, 1), axis=0)
             avg_v = normalize(avg_v.reshape(1, -1))
             sending_vf[i, :] = avg_v[0, :] * normalized_effect_potential_sum_sender[i]
-        sending_vf = np.clip(sending_vf, -0.02, 0.02)
+        sending_vf = np.clip(sending_vf, -max_val, max_val)
 
         # Vector field for received signal:
         effect_potential_lil = effect_potential.T.tolil()
@@ -1527,9 +1547,13 @@ class MuSIC_Interpreter(MuSIC):
                 avg_v = np.sum(temp_v * temp_val.reshape(-1, 1), axis=0)
             avg_v = normalize(avg_v.reshape(1, -1))
             receiving_vf[i, :] = avg_v[0, :] * normalized_effect_potential_sum_receiver[i]
-        receiving_vf = np.clip(receiving_vf, -0.02, 0.02)
+        receiving_vf = np.clip(receiving_vf, -max_val, max_val)
 
         del effect_potential
+
+        # Shorten names if collagens/HLA in "sig":
+        sig = replace_col_with_collagens(sig)
+        sig = replace_hla_with_hlas(sig)
 
         self.adata.obsm[f"spatial_effect_sender_vf_{sig}_{target}"] = sending_vf
         self.adata.obsm[f"spatial_effect_receiver_vf_{sig}_{target}"] = receiving_vf

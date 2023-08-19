@@ -367,8 +367,8 @@ def define_spateo_argparse(**kwargs):
         },
         "-filter_targets": {
             "action": "store_true",
-            "help": "Used for downstream analyses, specifically :func `infer_effect_direction`; if True, will subset to only "
-            "the targets that were predicted well by the model.",
+            "help": "Used for downstream analyses, specifically :func `inferred_effect_direction`; if True, "
+            "will subset to only the targets that were predicted well by the model.",
         },
         "-filter_target_threshold": {
             "default": 0.65,

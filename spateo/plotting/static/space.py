@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Literal
 
 import anndata
 import numpy as np
@@ -158,6 +158,7 @@ def plot_cell_signaling(
     geo: bool = False,
     color: Optional[Union[List[str], str, None]] = None,
     arrow_color: str = "tab:blue",
+    edgewidth: float = 0.2,
     genes: List[str] = [],
     gene_cmaps=None,
     space: str = "spatial",
@@ -170,15 +171,16 @@ def plot_cell_signaling(
     dpi: int = 100,
     ps_sample_num: int = 1000,
     alpha: float = 0.8,
-    plot_method: str = "cell",
-    scale: float = 1.0,
+    plot_method: Literal["cell", "grid", "stream"] = "cell",
+    scale: Optional[float] = None,
+    scale_units: Optional[Literal['width', 'height', 'dots', 'inches', 'x', 'y', 'xy']] = None,
     grid_density: float = 1,
     grid_knn: Optional[int] = None,
     grid_scale: float = 1.0,
     grid_threshold: float = 1.0,
-    grid_width: float = 0.005,
-    stream_density: float = 1.0,
-    stream_linewidth: float = 1,
+    grid_width: Optional[float] = None,
+    stream_density: Optional[float] = None,
+    stream_linewidth: Optional[float] = None,
     stream_cutoff_percentile: float = 5,
     figsize: Optional[Tuple[float, float]] = None,
     *args,
@@ -199,11 +201,12 @@ def plot_cell_signaling(
             Any or any list of column names or gene name, etc. that will be used for coloring cells. If `color` is not
             None, stack_genes will be disabled automatically because `color` can contain non numerical values.
         arrow_color: Sets color of vector field arrows
+        edgewidth: Sets width of vector field arrows. Recommended 0.1-0.3.
         genes: The gene list that will be used to plot the gene expression on the same scatter plot. Each gene will
             have a different color.
         genes_cmaps: Optional color map for each gene.
         space: The key to spatial coordinates
-        alpha: The alpha value of the scatter points
+        alpha: The alpha value of the scatter points. Recommended 0.5-0.7.
         width: Width of the figure
         marker: A string representing some marker from matplotlib
             https://matplotlib.org/stable/api/markers_api.html#module-matplotlib.markers
@@ -238,7 +241,7 @@ def plot_cell_signaling(
             'grid': Plot the vector field on a grid.
             'stream': Plot the vector field as stream lines.
         scale: The scale parameter passed to :func `matplotlib.pyplot.quiver` for vector field plots. The smaller the
-            value, the longer the arrows.
+            value, the longer the arrows. Recommended ~0.01.
         grid_density: Only used if 'to_plot' is 'grid'. The density of the grid points used to estimate the vector
             field. The larger the value, the more grid points there will be.
         grid_knn: Only used if 'to_plot' is 'grid'. The number of nearest neighbors used to interpolate the signaling
@@ -247,7 +250,7 @@ def plot_cell_signaling(
             directions of spots to grid points.
         grid_threshold: Only used if 'to_plot' is 'grid'. The threshold forinterpolation weights, used to determine
             whether to include a grid point. Smaller values give tighter coverage of the tissue by the grid points.
-        grid_width: Only used if 'to_plot' is 'grid'. The width of the vector lines.
+        grid_width: Only used if 'to_plot' is 'grid'. The width of the vector lines. Recommended on the order of 0.005.
         stream_density: Only used if 'to_plot' is 'stream'. The density of the stream lines passed to :func
             `matplotlib.pyplot.streamplot`.
         stream_linewidth: Only used if 'to_plot' is 'stream'. The width of the stream lines passed to :func
@@ -359,11 +362,12 @@ def plot_cell_signaling(
     # scatters call with vector field kwargs
     vf_kwargs = {
         "scale": scale,
-        "scale_units": "x",
+        "scale_units": scale_units,
         "width": grid_width,
         "color": arrow_color,
+        "edgecolor": "black",
         "density": stream_density,
-        "linewidth": stream_linewidth,
+        "linewidth": stream_linewidth if stream_linewidth is not None else edgewidth,
     }
 
     V = vf_cell if plot_method == "cell" else vf_grid
@@ -388,6 +392,7 @@ def plot_cell_signaling(
         geo=geo,
         boundary_width=boundary_width,
         boundary_color=boundary_color,
+        vf_plot_method=plot_method,
         vf_kwargs=vf_kwargs,
         *args,
         **kwargs,

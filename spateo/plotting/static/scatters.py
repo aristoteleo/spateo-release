@@ -111,6 +111,7 @@ def scatters(
     aspect: str = "auto",
     slices: Optional[int] = None,
     img_layers: Optional[int] = None,
+    vf_plot_method: Literal["cell", "grid", "stream"] = "cell",
     vf_kwargs: Optional[Dict[str, Union[str, int, float]]] = None,
     **kwargs,
 ) -> Union[None, Axes]:
@@ -331,6 +332,10 @@ def scatters(
         slices: The index to the tissue slice, will used in adata.uns["spatial"][slices].
         img_layers: The index to the (staining) image of a tissue slice, will be used in
             adata.uns["spatial"][slices]["images"].
+        vf_plot_method: The method used to plot the vector field. Can be one of the following:
+            'cell': Plot the vector field at the center of each cell.
+            'grid': Plot the vector field on a grid.
+            'stream': Plot the vector field as stream lines.
         vf_kwargs: Optional dictionary containing parameters for vector field plotting
         kwargs:
             Additional arguments passed to plt functions (plt.scatters, plt.quiver, plt.streamplot).
@@ -565,8 +570,9 @@ def scatters(
         for cur_c in color:
             # main_debug("coloring scatter of cur_c: %s" % str(cur_c))
             if vf_key is not None:
-                effector = re.search(r"_([A-Z0-9]+)_", vf_key).group(1)
-                target = re.search(r"_[A-Z0-9]+_([A-Z0-9]+)", vf_key).group(1)
+                # Look after the 4th underscore (spatial_effect_sender/receiver_vf_ ...)
+                effector = re.search(r"(?:[^_]*_){4}([A-Za-z0-9/]+)_", vf_key).group(1)
+                target = re.search(r"_([A-Z0-9]+)$", vf_key).group(1)
                 cur_title = f"Effect {effector}-{target}, overlaid on {cur_c}"
             elif not stack_colors:
                 cur_title = cur_c
@@ -841,6 +847,7 @@ def scatters(
                         geo=True,
                         X_grid=X_grid,
                         V=V,
+                        vf_plot_method=vf_plot_method,
                         vf_kwargs=vf_kwargs,
                         **geo_kwargs,
                     )
@@ -878,6 +885,7 @@ def scatters(
                         projection=projection,
                         X_grid=X_grid,
                         V=V,
+                        vf_plot_method=vf_plot_method,
                         vf_kwargs=vf_kwargs,
                         **scatter_kwargs,
                     )
