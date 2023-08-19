@@ -280,13 +280,14 @@ class NLPCA(object):
             proj: A one-dimension array that contains the projection index for each point in data.
             all_sorted: A m x n+1 array that contains data sorted by its projection index, along with the index.
         """
+        num_dim = data.shape[1]  # get number of dimensions for pts
+
         pts = self.model.predict(data)
         proj = self.intermediate_layer_model.predict(data)
-
         self.fit_points = pts
 
         all = np.concatenate([pts, proj], axis=1)
-        all_sorted = all[all[:, 2].argsort()]
+        all_sorted = all[all[:, num_dim].argsort()]
 
         return proj, all_sorted
 
