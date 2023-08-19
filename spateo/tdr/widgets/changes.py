@@ -356,29 +356,24 @@ def map_gene_to_branch(
 
 
 def calc_tree_length(
-    tree_model: Union[UnstructuredGrid, PolyData],
+    points: np.ndarray,
+    edges: np.ndarray,
 ) -> float:
     """
     Calculate the length of a tree model.
 
     Args:
-        tree_model: A three-dims principal tree model.
+        points: The nodes in the principal tree.
+        edges: The edges between nodes in the principal tree.
 
     Returns:
         The length of the tree model.
     """
     from scipy.spatial.distance import cdist
 
-    tree_length = (
-        cdist(
-            XA=np.asarray(tree_model.points[:-1, :]),
-            XB=np.asarray(tree_model.points[1:, :]),
-            metric="euclidean",
-        )
-        .diagonal()
-        .sum()
-    )
-    return tree_length
+    s_points, e_points = points[edges[:, 0], :], points[edges[:, 1], :]
+    length = cdist(XA=np.asarray(s_points), XB=np.asarray(e_points), metric="euclidean").diagonal().sum()
+    return length
 
 
 def changes_along_branch(
@@ -432,7 +427,7 @@ def changes_along_branch(
     map_points_to_branch(model=model, nodes=nodes, spatial_key=spatial_key, key_added=nodes_key, inplace=True)
     tree_model, plot_cmap = construct_lines(points=nodes, edges=edges, key_added=key_added, label=label, color=color)
     tree_model.point_data[nodes_key] = np.arange(0, len(nodes), 1)
-    tree_length = calc_tree_length(tree_model=tree_model)
+    tree_length = calc_tree_length(points=nodes, edges=edges)
 
     if not (map_key is None):
         map_gene_to_branch(model=model, tree=tree_model, key=map_key, nodes_key=nodes_key, inplace=True)
