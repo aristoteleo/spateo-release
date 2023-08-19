@@ -153,6 +153,12 @@ def ElPiGraph_tree(
 def SimplePPT_tree(
     X: np.ndarray,
     NumNodes: int = 50,
+    sigma: Optional[Union[float, int]] = 0.1,
+    lam: Optional[Union[float, int]] = 1,
+    metric: str = "euclidean",
+    nsteps: int = 50,
+    err_cut: float = 5e-3,
+    seed: Optional[int] = 1,
     **kwargs,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -162,6 +168,13 @@ def SimplePPT_tree(
     Args:
         X: DxN, data matrix list.
         NumNodes: The number of nodes of the principal graph. Use a range of 100 to 2000 for PPT approach.
+        sigma: Regularization parameter.
+        lam: Penalty for the tree length.
+        metric: The metric to use to compute distances in high dimensional space. For compatible metrics, check the
+                documentation of sklearn.metrics.pairwise_distances.
+        nsteps: Number of steps for the optimisation process.
+        err_cut: Stop algorithm if proximity of principal points between iterations less than defined value.
+        seed: A numpy random seed.
         **kwargs: Other parameters used in simpleppt.ppt. For details, please see:
                   https://github.com/LouisFaure/simpleppt/blob/main/simpleppt/ppt.py
 
@@ -180,8 +193,12 @@ def SimplePPT_tree(
         )
 
     SimplePPT_kwargs = {
-        "seed": 1,
-        "lam": 10,
+        "seed": seed,
+        "lam": lam,
+        "sigma": sigma,
+        "metric": metric,
+        "nsteps": nsteps,
+        "err_cut": err_cut,
     }
     SimplePPT_kwargs.update(kwargs)
 
