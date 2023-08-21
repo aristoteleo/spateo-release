@@ -1,16 +1,19 @@
-from .mesh import (
-    alpha_shape_mesh,
-    ball_pivoting_mesh,
-    construct_cells,
-    construct_surface,
-    fix_mesh,
-    marching_cube_mesh,
-    poisson_mesh,
-    pv_mesh,
-    uniform_larger_pc,
-    uniform_mesh,
+from .models_backbone import (
+    ElPiGraph_method,
+    PrinCurve_method,
+    SimplePPT_method,
+    construct_backbone,
+    map_gene_to_backbone,
+    map_points_to_backbone,
 )
-from .morpho_models import (
+from .models_individual import (
+    construct_cells,
+    construct_pc,
+    construct_surface,
+    voxelize_mesh,
+    voxelize_pc,
+)
+from .models_migration import (
     construct_align_lines,
     construct_arrow,
     construct_arrows,
@@ -26,7 +29,6 @@ from .morpho_models import (
     construct_trajectory,
     construct_trajectory_X,
 )
-from .pc import construct_pc
 from .utilities import (
     add_model_labels,
     center_to_zero,
@@ -39,4 +41,3 @@ from .utilities import (
     scale_model,
     translate_model,
 )
-from .voxel import voxelize_mesh, voxelize_pc

@@ -43,7 +43,7 @@ def grid_deformation(
     for x_level in x_level_list:
         liney = np.linspace(y_min, y_max, 1000)[:, np.newaxis]
         liney = np.concatenate((x_level * np.ones_like(liney), liney), axis=1)
-        deform_liney, quary_velocities = BA_transform(
+        deform_liney, quary_velocities, _ = BA_transform(
             vecfld=model.uns[vecfld_key],
             quary_points=liney,
             deformation_scale=deformation_scale,
@@ -70,7 +70,7 @@ def grid_deformation(
     for y_level in y_level_list:
         linex = np.linspace(x_min, x_max, 1000)[:, np.newaxis]
         linex = np.concatenate((linex, y_level * np.ones_like(linex)), axis=1)
-        deform_linex, quary_velocities = BA_transform(
+        deform_linex, quary_velocities, _ = BA_transform(
             vecfld=model.uns[vecfld_key],
             quary_points=linex,
             deformation_scale=deformation_scale,

@@ -104,7 +104,7 @@ def construct_surface(
     cs_args: Optional[dict] = None,
     nsub: Optional[int] = 3,
     nclus: int = 20000,
-    smooth: Optional[int] = 1000,
+    smooth: Optional[int] = 3000,
     scale_distance: Union[float, int, list, tuple] = None,
     scale_factor: Union[float, int, list, tuple] = None,
 ) -> Tuple[Union[PolyData, UnstructuredGrid, None], PolyData, Optional[str]]:
@@ -163,7 +163,7 @@ def construct_surface(
         if not (cs_args is None):
             _cs_args.update(cs_args)
 
-        from .reconstruction_methods import pv_mesh
+        from .mesh_methods import pv_mesh
 
         surf = pv_mesh(pc=cloud, alpha=_cs_args["alpha"])
 
@@ -172,7 +172,7 @@ def construct_surface(
         if not (cs_args is None):
             _cs_args.update(cs_args)
 
-        from .reconstruction_methods import alpha_shape_mesh
+        from .mesh_methods import alpha_shape_mesh
 
         surf = alpha_shape_mesh(pc=cloud, alpha=_cs_args["alpha"])
 
@@ -181,7 +181,7 @@ def construct_surface(
         if not (cs_args is None):
             _cs_args.update(cs_args)
 
-        from .reconstruction_methods import ball_pivoting_mesh
+        from .mesh_methods import ball_pivoting_mesh
 
         surf = ball_pivoting_mesh(pc=cloud, radii=_cs_args["radii"])
 
@@ -196,7 +196,7 @@ def construct_surface(
         if not (cs_args is None):
             _cs_args.update(cs_args)
 
-        from .reconstruction_methods import poisson_mesh
+        from .mesh_methods import poisson_mesh
 
         surf = poisson_mesh(
             pc=cloud,
@@ -211,7 +211,7 @@ def construct_surface(
         if not (cs_args is None):
             _cs_args.update(cs_args)
 
-        from .reconstruction_methods import marching_cube_mesh
+        from .mesh_methods import marching_cube_mesh
 
         surf = marching_cube_mesh(pc=cloud, levelset=_cs_args["levelset"], mc_scale_factor=_cs_args["mc_scale_factor"])
 
