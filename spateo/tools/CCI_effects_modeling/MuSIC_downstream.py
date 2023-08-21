@@ -389,7 +389,7 @@ class MuSIC_Interpreter(MuSIC):
         cmap: str = "Reds",
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
-        save_df: bool = False
+        save_df: bool = False,
     ):
         """Given the target gene of interest, identify interaction features that are enriched for particular targets.
         Visualized in heatmap form.

@@ -4,6 +4,10 @@ inference-based analyses. Makes use of dotplot-generating functions
 """
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
+from matplotlib.collections import PolyCollection
+from matplotlib.ticker import StrMethodFormatter
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
 try:
     from typing import Literal
 except ImportError:
@@ -16,15 +20,16 @@ import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
+import scipy
 from anndata import AnnData
 from matplotlib import rcParams
 from scipy.cluster import hierarchy as sch
 
 from ...configuration import SKM, config_spateo_rcParams, set_pub_style
 from ...logging import logger_manager as lm
-from ...plotting.static.colorlabel import interaction_colors
 from ...plotting.static.dotplot import CCDotplot
+from ...tools.find_neighbors import neighbors
+from ...tools.labels import Label, interlabel_connections
 from .utils import _dendrogram_sig, save_return_show_fig_utils
 
 
@@ -311,215 +316,421 @@ def ligrec(
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def plot_sender_upstream_degs(
+def plot_connections(
     adata: AnnData,
-    colormap: str = "magma",
-    show_n_genes_per_cluster: Optional[int] = None,
-    font_scale: float = 1.0,
-    figsize: Union[None, Tuple[float, float]] = None,
+    cat_key: str,
+    spatial_key: str = "spatial",
+    n_spatial_neighbors: Union[None, int] = 6,
+    spatial_weights_matrix: Union[None, scipy.sparse.csr_matrix, np.ndarray] = None,
+    expr_weights_matrix: Union[None, scipy.sparse.csr_matrix, np.ndarray] = None,
+    reverse_expr_plot_orientation: bool = False,
+    ax: Union[None, mpl.axes.Axes] = None,
+    figsize: tuple = (3, 3),
+    zero_self_connections: bool = True,
+    normalize_by_self_connections: bool = False,
+    shapes_style: bool = True,
+    label_outline: bool = False,
+    max_scale: float = 0.46,
+    colormap: Union[str, dict, "mpl.colormap"] = "Spectral",
+    title_str: Union[None, str] = None,
+    title_fontsize: Union[None, float] = None,
+    label_fontsize: Union[None, float] = None,
     save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
     save_kwargs: Optional[dict] = {},
 ):
-    """Plots the smoothed gene expression as predicted by regression using the sent signaling potential,
-        e.g. of a particular ligand or particular "sending" cell type. Note that this function is largely identical
-        to :func `plot_receiver_coexpressed_degs`- the two are given distinct names for clarity.
+    """Plot spatial_connections between labels- visualization of how closely labels are colocalized
 
     Args:
-        adata: AnnData object where each entry in .var contains a gene that has been modeled using the GAM method
-            implemented :func `MuSIC_interpreter.sender_receiver_effect_deg_detection` and with Leiden partitioning
-            results added from :func `MuSIC_interpreter.group_sender_receiver_effect_degs`.
-        colormap: Colormap for the smoothed predicted expression- any of the colormaps in `seaborn` can be used.
-        show_n_genes_per_cluster: For larger datasets, it may be useful to only show a subset of genes per cluster-
-            if selected, will plot the top n genes per cluster, where n is the value of this parameter; these genes
-            will be selected by sorting by Wald statistic.
-        font_scale: Multiplicative factor for the font size in Seaborn
-        figsize: The width and height of a figure
-        save_show_or_return: Options: "save", "show", "return", "both", "all"
-                - "both" for save and show
-        save_kwargs: A dictionary that will passed to the save_fig function. By default it is an empty dictionary
-            and the save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf',
-            "transparent": True, "close": True, "verbose": True} as its parameters. But to change any of these
-            parameters, this dictionary can be used to do so.
-    """
-    logger = lm.get_main_logger()
+        adata: AnnData object
+        cat_key: Key in .obs containing categorical grouping labels. Colocalization will be assessed
+            for pairwise combinations of these labels.
+        spatial_key: Key in .obsm containing coordinates in the physical space. Not used unless
+            'spatial_weights_matrix' is None, in which case this is required. Defaults to "spatial".
+        n_spatial_neighbors: Optional, number of neighbors in the physical space for each cell. Not used unless
+            'spatial_weights_matrix' is None.
+        spatial_weights_matrix: Spatial distance matrix, weighted by distance between spots. If not given,
+            will compute at runtime.
+        expr_weights_matrix: Gene expression distance matrix, weighted by distance in transcriptomic or PCA space.
+            If not given, only the spatial distance matrix will be plotted. If given, will plot the spatial distance
+            matrix in the left plot and the gene expression distance matrix in the right plot.
+        reverse_expr_plot_orientation: If True, plot the gene expression connections in the form of a lower right
+            triangle. If False, gene expression connections will be an upper left triangle just like the spatial
+            connections.
+        ax: Existing axes object, if applicable
+        figsize: Width x height of desired figure window in inches
+        zero_self_connections: If True, ignores intra-label interactions
+        normalize_by_self_connections: Only used if 'zero_self_connections' is False. If True, normalize intra-label
+            connections by the number of spots of that label
+        shapes_style: If True plots squares, if False plots heatmap
+        label_outline: If True, gives dark outline to axis tick label text
+        max_scale: Only used for the case that 'shape_style' is True, gives maximum size of square
+        colormap: Specifies colors to use for plotting. If dictionary, keys should be numerical labels corresponding
+            to those of the Label object.
+        title_str: Optionally used to give plot a title
+        title_fontsize: Size of plot title- only used if 'title_str' is given.
+        label_fontsize: Size of labels along the axes of the graph
+        save_show_or_return: Whether to save, show or return the figure.
+            If "both", it will save and plot the figure at the same time. If "all", the figure will be saved, displayed
+            and the associated axis and other object will be return.
+        save_kwargs: A dictionary that will passed to the save_fig function.
+            By default it is an empty dictionary and the save_fig function will use the
+            {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+            "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+            keys according to your needs.
 
-    if "Sent potential" not in adata.uns["predictor_key"]:
-        raise KeyError(
-            "Sent signaling potential was not used to model the gene expression; if AnnData object is "
-            "already the output of , :func `plot_receiver_coexpressed_degs` is more appropriate."
+    Returns:
+        (fig, ax): Returns plot and axis object if 'save_show_or_return' is "all"
+    """
+    from ...plotting.static.utils import save_fig
+    from ...tools.utils import update_dict
+
+    logger = lm.get_main_logger()
+    config_spateo_rcParams()
+    title_fontsize = rcParams.get("axes.titlesize") if title_fontsize is None else title_fontsize
+    label_fontsize = rcParams.get("axes.labelsize") if label_fontsize is None else label_fontsize
+
+    if ax is None:
+        if expr_weights_matrix is not None:
+            figsize = (figsize[0] * 2.25, figsize[1])
+            fig, axes = plt.subplots(1, 2, figsize=figsize)
+            ax_sp, ax_expr = axes[0], axes[1]
+
+            if reverse_expr_plot_orientation:
+                # Allow subplot boundaries to technically be partially overlapping (for better visual)
+                box = ax_expr.get_position()
+                box.x0 = box.x0 - 0.3
+                box.x1 = box.x1 - 0.3
+                ax_expr.set_position(box)
+        else:
+            fig, ax_sp = plt.subplots(1, 1, figsize=figsize)
+    else:
+        ax = ax
+        if len(ax) > 1:
+            ax_sp, ax_expr = ax[0], ax[1]
+        else:
+            ax_sp = ax
+        fig = ax.get_figure()
+
+    # Convert cell type labels to numerical using Label object:
+    # Remove cell types with fewer than 30 cells:
+    logger.info("Filtering out cell types with fewer than 30 cells...")
+    categories_str = adata.obs[cat_key]
+    # Count occurrences for each category
+    category_counts = categories_str.value_counts()
+    # Filter categories with at least 30 occurrences
+    filtered_categories = category_counts[category_counts >= 30].index
+    # Update the AnnData object to include only the filtered categories
+    adata = adata[categories_str.isin(filtered_categories)].copy()
+    categories_str_cat = np.unique(adata.obs[cat_key].values)
+    categories_num_cat = range(len(categories_str_cat))
+    map_dict = dict(zip(categories_num_cat, categories_str_cat))
+    categories_num = adata.obs[cat_key].replace(categories_str_cat, categories_num_cat)
+
+    label = Label(categories_num.to_numpy(), str_map=map_dict)
+
+    # If spatial weights matrix is not given, compute it. 'spatial_key' needs to be present in the AnnData object:
+    if spatial_weights_matrix is None:
+        if spatial_key not in adata.obsm_keys():
+            logger.error(
+                f"Given 'spatial_key' {spatial_key} does not exist as key in adata.obsm. Options: "
+                f"{adata.obsm_keys()}."
+            )
+        _, adata = neighbors(
+            adata, basis="spatial", spatial_key=spatial_key, n_neighbors=n_spatial_neighbors
+        )
+        spatial_weights_matrix = adata.obsp["connectivities"]
+
+    # Compute spatial connections array:
+    spatial_connections = interlabel_connections(label, spatial_weights_matrix)
+
+    if zero_self_connections:
+        np.fill_diagonal(spatial_connections, 0)
+    elif normalize_by_self_connections:
+        spatial_connections /= spatial_connections.diagonal()[:, np.newaxis]
+
+    spatial_connections_max = np.amax(spatial_connections)
+
+    # Optionally, compute gene expression connections array:
+    if expr_weights_matrix is not None:
+        expr_connections = interlabel_connections(label, expr_weights_matrix)
+
+        if zero_self_connections:
+            np.fill_diagonal(expr_connections, 0)
+        elif normalize_by_self_connections:
+            expr_connections /= expr_connections.diagonal()[:, np.newaxis]
+
+        expr_connections_max = np.amax(expr_connections)
+
+    # Set label colors:
+    if isinstance(colormap, str):
+        cmap = mpl.cm.get_cmap(colormap)
+    else:
+        cmap = colormap
+
+    # If colormap is given, map label ID to points along the colormap. If dictionary is given, instead map each label
+    # to a color using the dictionary keys as guides.
+    if isinstance(cmap, dict):
+        if type(list(cmap.keys())[0]) == str:
+            id_colors = {n_id: cmap[id] for n_id, id in zip(label.ids, label.str_ids)}
+        else:
+            id_colors = {id: cmap[id] for id in label.ids}
+    else:
+        id_colors = {id: cmap(id / label.max_id) for id in label.ids}
+
+    # -------------------------------- Spatial Connections Plot- Setup -------------------------------- #
+    if shapes_style:
+        # Cell types/labels will be represented using triangles:
+        left_triangle = np.array(
+            (
+                (-1.0, 1.0),
+                # (1., 1.),
+                (1.0, -1.0),
+                (-1.0, -1.0),
+            )
         )
 
-    wald_stats = adata.var["wald_stats"].values
-    cluster_labels = np.array(adata.obs["cluster"].values, dtype=int)
-    n_clusters = np.max(cluster_labels) + 1
-
-    scaled_predictions = adata.varm["pred_y"].values
-
-    # Sort clusters by max predicted value:
-    all_clusters_peak_idx = []
-
-    for cluster in range(n_clusters):
-        cluster_idx = np.where(cluster_labels == cluster)[0]
-        y_pred_cluster = scaled_predictions[cluster_idx, :]
-        # Find the cell at which the predicted expression is highest for this cluster- take the average over all
-        # genes to get an indication of approximately where this cluster should be positioned:
-        all_clusters_peak_idx.append(np.mean(np.argmax(y_pred_cluster, axis=1)))
-
-    cluster_order = np.argsort(all_clusters_peak_idx)
-    all_idx = np.array([])
-    row_colors = []
-    for i in cluster_order:
-        cluster_idx = np.where(cluster_labels == i)[0]
-        cluster_order = np.argsort(-wald_stats[cluster_idx])
-        if show_n_genes_per_cluster is not None:
-            top_n = min(len(cluster_idx), show_n_genes_per_cluster)
-            if top_n < show_n_genes_per_cluster:
-                logger.info(
-                    f"Using the top {len(cluster_idx)} genes instead of {show_n_genes_per_cluster} because "
-                    f"cluster {i} has fewer than {show_n_genes_per_cluster} genes."
-                )
-        else:
-            top_n = len(cluster_idx)
-        idx = np.concatenate((all_idx, cluster_idx[cluster_order][:top_n]))
-        for j in range(top_n):
-            row_colors.append(interaction_colors[i % len(interaction_colors)])
-
-    sns.set(font_scale=font_scale)
-    predictions_df = pd.DataFrame(scaled_predictions, index=adata.var_names, columns=adata.obs_names)
-    g = sns.clustermap(
-        predictions_df.iloc[all_idx, :],
-        row_cluster=False,
-        col_cluster=False,
-        row_colors=row_colors,
-        cmap=colormap,
-        figsize=figsize,
-        xticklabels=False,
-        yticklabels=predictions_df.index,
-        linewidths=0,
-    )
-    g.cax.set_position([0.1, 0.2, 0.03, 0.45])
-    g.fig.suptitle(f"Coexpression w/ {adata.uns['predictor_key'].lower()}")
-
-    # Save, show or return figures:
-    return save_return_show_fig_utils(
-        save_show_or_return=save_show_or_return,
-        # Doesn't matter what show_legend is for this plotting function
-        show_legend=False,
-        background="white",
-        prefix="signaling_clustermap",
-        save_kwargs=save_kwargs,
-        total_panels=1,
-        fig=g.fig,
-        axes=g.ax_heatmap,
-        # Return all parameters are for returning multiple values for 'axes', but this function uses a single dictionary
-        return_all=False,
-        return_all_list=None,
-    )
-
-
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def plot_receiver_coexpressed_degs(
-    adata: AnnData,
-    colormap: str = "magma",
-    show_n_genes_per_cluster: Optional[int] = None,
-    font_scale: float = 1.0,
-    figsize: Union[None, Tuple[float, float]] = None,
-    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
-    save_kwargs: Optional[dict] = {},
-):
-    """Plots the smoothed gene expression as predicted by regression using the received signaling potential,
-        i.e. the amount of predicted influence the sent signal has on the downstream expression pattern (potentially
-        mediated by a particular receptor). Note that this function is largely identical to :func
-        `plot_sender_upstream_degs`; the two are given distinct names for clarity.
-
-    Args:
-        adata: AnnData object where each entry in .var contains a gene that has been modeled using the GAM method
-            implemented :func `MuSIC_interpreter.sender_receiver_effect_deg_detection` and with Leiden partitioning
-            results added from :func `MuSIC_interpreter.group_sender_receiver_effect_degs`.
-        colormap: Colormap for the smoothed predicted expression- any of the colormaps in `seaborn` can be used.
-        show_n_genes_per_cluster: For larger datasets, it may be useful to only show a subset of genes per cluster-
-            if selected, will plot the top n genes per cluster, where n is the value of this parameter; these genes
-            will be selected by sorting by Wald statistic.
-        font_scale: Multiplicative factor for the font size in Seaborn
-        figsize: The width and height of a figure
-        save_show_or_return: Options: "save", "show", "return", "both", "all"
-                - "both" for save and show
-        save_kwargs: A dictionary that will passed to the save_fig function. By default it is an empty dictionary
-            and the save_fig function will use the {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf',
-            "transparent": True, "close": True, "verbose": True} as its parameters. But to change any of these
-            parameters, this dictionary can be used to do so.
-    """
-    logger = lm.get_main_logger()
-
-    if "Sent potential" not in adata.uns["predictor_key"]:
-        raise KeyError(
-            "Sent signaling potential was not used to model the gene expression; if AnnData object is "
-            "already the output of , :func `plot_receptor_coexpressed_degs` is more appropriate."
+        right_triangle = np.array(
+            (
+                (-1.0, 1.0),
+                (1.0, 1.0),
+                (1.0, -1.0),
+                # (-1., -1.)
+            )
         )
 
-    wald_stats = adata.var["wald_stats"].values
-    cluster_labels = np.array(adata.obs["cluster"].values, dtype=int)
-    n_clusters = np.max(cluster_labels) + 1
+        polygon_list = []
+        color_list = []
 
-    scaled_predictions = adata.varm["pred_y"].values
+        ax_sp.set_ylim(-0.55, label.num_labels - 0.45)
+        ax_sp.set_xlim(-0.55, label.num_labels - 0.45)
 
-    # Sort clusters by max predicted value:
-    all_clusters_peak_idx = []
+        for label_1 in range(spatial_connections.shape[0]):
+            for label_2 in range(spatial_connections.shape[1]):
 
-    for cluster in range(n_clusters):
-        cluster_idx = np.where(cluster_labels == cluster)[0]
-        y_pred_cluster = scaled_predictions[cluster_idx, :]
-        # Find the cell at which the predicted expression is highest for this cluster- take the average over all
-        # genes to get an indication of approximately where this cluster should be positioned:
-        all_clusters_peak_idx.append(np.mean(np.argmax(y_pred_cluster, axis=1)))
+                if label_1 <= label_2:
 
-    cluster_order = np.argsort(all_clusters_peak_idx)
-    all_idx = np.array([])
-    row_colors = []
-    for i in cluster_order:
-        cluster_idx = np.where(cluster_labels == i)[0]
-        cluster_order = np.argsort(-wald_stats[cluster_idx])
-        if show_n_genes_per_cluster is not None:
-            top_n = min(len(cluster_idx), show_n_genes_per_cluster)
-            if top_n < show_n_genes_per_cluster:
-                logger.info(
-                    f"Using the top {len(cluster_idx)} genes instead of {show_n_genes_per_cluster} because "
-                    f"cluster {i} has fewer than {show_n_genes_per_cluster} genes."
-                )
+                    for triangle in [left_triangle, right_triangle]:
+                        center = np.array((label_1, label_2))[np.newaxis, :]
+                        scale_factor = spatial_connections[label_1, label_2] / spatial_connections_max
+                        offsets = triangle * max_scale * scale_factor
+                        polygon_list.append(center + offsets)
+
+                    color_list += (id_colors[label.ids[label_2]], id_colors[label.ids[label_1]])
+
+        collection = PolyCollection(polygon_list, facecolors=color_list, edgecolors="face", linewidths=0)
+
+        ax_sp.add_collection(collection)
+
+        # Remove ticks
+        ax_sp.tick_params(labelbottom=False, labeltop=True, top=False, bottom=False, left=False)
+        ax_sp.xaxis.set_tick_params(pad=-2)
+    else:
+        # Heatmap of connection strengths
+        heatmap = ax_sp.imshow(spatial_connections, cmap=colormap, interpolation="nearest")
+
+        divider = make_axes_locatable(ax_sp)
+        cax = divider.append_axes("right", size="5%", pad=0.1)
+
+        fig.colorbar(heatmap, cax=cax)
+        cax.tick_params(axis="both", which="major", labelsize=6, rotation=-45)
+
+        # Change formatting if values too small
+        if spatial_connections_max < 0.001:
+            cax.yaxis.set_major_formatter(StrMethodFormatter("{x:,.1e}"))
+
+    # Formatting adjustments
+    ax_sp.set_aspect("equal")
+
+    ax_sp.set_xticks(
+        np.arange(label.num_labels),
+    )
+    text_outline = [PathEffects.Stroke(linewidth=0.5, foreground="black", alpha=0.8)] if label_outline else None
+
+    # If label has categorical labels associated, use those to label the axes instead:
+    if label.str_map is not None:
+        ax_sp.set_xticklabels(
+            label.str_ids,
+            fontsize=label_fontsize,
+            fontweight="bold",
+            rotation=90,
+            path_effects=text_outline,
+        )
+    else:
+        ax_sp.set_xticklabels(
+            label.ids,
+            fontsize=label_fontsize,
+            fontweight="bold",
+            rotation=0,
+            path_effects=text_outline,
+        )
+
+    ax_sp.set_yticks(np.arange(label.num_labels))
+    if label.str_map is not None:
+        ax_sp.set_yticklabels(
+            label.str_ids,
+            fontsize=label_fontsize,
+            fontweight="bold",
+            path_effects=text_outline,
+        )
+    else:
+        ax_sp.set_yticklabels(
+            label.ids,
+            fontsize=label_fontsize,
+            fontweight="bold",
+            path_effects=text_outline,
+        )
+
+    for ticklabels in [ax_sp.get_xticklabels(), ax_sp.get_yticklabels()]:
+        for n, id in enumerate(label.ids):
+            ticklabels[n].set_color(id_colors[id])
+
+    title_str_sp = "Spatial Connections" if title_str is None else title_str
+    ax_sp.set_title(title_str_sp, fontsize=title_fontsize, fontweight="bold")
+
+    # ------------------------------ Optional Gene Expression Connections Plot- Setup ------------------------------ #
+    if expr_weights_matrix is not None:
+        if shapes_style:
+            polygon_list = []
+            color_list = []
+
+            ax_expr.set_ylim(-0.55, label.num_labels - 0.45)
+            ax_expr.set_xlim(-0.55, label.num_labels - 0.45)
+
+            for label_1 in range(expr_connections.shape[0]):
+                for label_2 in range(expr_connections.shape[1]):
+
+                    if label_1 <= label_2:
+                        for triangle in [left_triangle, right_triangle]:
+                            center = np.array((label_1, label_2))[np.newaxis, :]
+                            scale_factor = expr_connections[label_1, label_2] / expr_connections_max
+                            offsets = triangle * max_scale * scale_factor
+                            polygon_list.append(center + offsets)
+
+                        color_list += (id_colors[label.ids[label_2]], id_colors[label.ids[label_1]])
+
+                # Remove ticks
+                if reverse_expr_plot_orientation:
+                    ax_expr.tick_params(
+                        labelbottom=True,
+                        labeltop=False,
+                        labelleft=False,
+                        labelright=True,
+                        top=False,
+                        bottom=False,
+                        left=False,
+                    )
+                    # Flip x- and y-axes of the expression plot:
+                    ax_expr.invert_xaxis()
+                    ax_expr.invert_yaxis()
+                else:
+                    ax_expr.tick_params(labelbottom=False, labeltop=True, top=False, bottom=False, left=False)
+                ax_expr.xaxis.set_tick_params(pad=-2)
+
+            collection = PolyCollection(polygon_list, facecolors=color_list, edgecolors="face", linewidths=0)
+
+            ax_expr.add_collection(collection)
         else:
-            top_n = len(cluster_idx)
-        idx = np.concatenate((all_idx, cluster_idx[cluster_order][:top_n]))
-        for j in range(top_n):
-            row_colors.append(interaction_colors[i % len(interaction_colors)])
+            # Heatmap of connection strengths
+            heatmap = ax_expr.imshow(expr_connections, cmap=colormap, interpolation="nearest")
 
-    sns.set(font_scale=font_scale)
-    predictions_df = pd.DataFrame(scaled_predictions, index=adata.var_names, columns=adata.obs_names)
-    g = sns.clustermap(
-        predictions_df.iloc[all_idx, :],
-        row_cluster=False,
-        col_cluster=False,
-        row_colors=row_colors,
-        cmap=colormap,
-        figsize=figsize,
-        xticklabels=False,
-        yticklabels=predictions_df.index,
-        linewidths=0,
-    )
-    g.cax.set_position([0.1, 0.2, 0.03, 0.45])
-    g.fig.suptitle(f"Coexpression w/ {adata.uns['label'].lower()}")
+            divider = make_axes_locatable(ax_expr)
+            cax = divider.append_axes("right", size="5%", pad=0.1)
 
-    # Save, show or return figures:
-    return save_return_show_fig_utils(
-        save_show_or_return=save_show_or_return,
-        # Doesn't matter what show_legend is for this plotting function
-        show_legend=False,
-        background="white",
-        prefix="signaling_clustermap",
-        save_kwargs=save_kwargs,
-        total_panels=1,
-        fig=g.fig,
-        axes=g.ax_heatmap,
-        # Return all parameters are for returning multiple values for 'axes', but this function uses a single dictionary
-        return_all=False,
-        return_all_list=None,
-    )
+            fig.colorbar(heatmap, cax=cax)
+            cax.tick_params(axis="both", which="major", labelsize=6, rotation=-45)
+
+            # Change formatting if values too small
+            if spatial_connections_max < 0.001:
+                cax.yaxis.set_major_formatter(StrMethodFormatter("{x:,.1e}"))
+
+        # Formatting adjustments
+        ax_expr.set_aspect("equal")
+
+        ax_expr.set_xticks(
+            np.arange(label.num_labels),
+        )
+        if reverse_expr_plot_orientation:
+            # Despine both spatial connections & gene expression connections plots:
+            ax_sp.spines["right"].set_visible(False)
+            ax_sp.spines["top"].set_visible(False)
+            ax_sp.spines["left"].set_visible(False)
+            ax_sp.spines["bottom"].set_visible(False)
+
+            ax_expr.spines["right"].set_visible(False)
+            ax_expr.spines["top"].set_visible(False)
+            ax_expr.spines["left"].set_visible(False)
+            ax_expr.spines["bottom"].set_visible(False)
+
+        text_outline = [PathEffects.Stroke(linewidth=0.5, foreground="black", alpha=0.8)] if label_outline else None
+
+        # If label has categorical labels associated, use those to label the axes instead:
+        if label.str_map is not None:
+            ax_expr.set_xticklabels(
+                label.str_ids,
+                fontsize=label_fontsize,
+                fontweight="bold",
+                rotation=90,
+                path_effects=text_outline,
+            )
+        else:
+            ax_expr.set_xticklabels(
+                label.ids,
+                fontsize=label_fontsize,
+                fontweight="bold",
+                rotation=0,
+                path_effects=text_outline,
+            )
+
+        ax_expr.set_yticks(np.arange(label.num_labels))
+        if label.str_map is not None:
+            ax_expr.set_yticklabels(
+                label.str_ids,
+                fontsize=label_fontsize,
+                fontweight="bold",
+                path_effects=text_outline,
+            )
+        else:
+            ax_expr.set_yticklabels(
+                label.ids,
+                fontsize=label_fontsize,
+                fontweight="bold",
+                path_effects=text_outline,
+            )
+
+        for ticklabels in [ax_expr.get_xticklabels(), ax_expr.get_yticklabels()]:
+            for n, id in enumerate(label.ids):
+                ticklabels[n].set_color(id_colors[id])
+
+        title_str_expr = "Gene Expression Similarity" if title_str is None else title_str
+        if reverse_expr_plot_orientation:
+            if label_fontsize <= 8:
+                y = -0.35
+            elif label_fontsize > 8:
+                y = -0.45
+        else:
+            y = None
+        ax_expr.set_title(title_str_expr, fontsize=title_fontsize, fontweight="bold", y=y)
+
+    prefix = "spatial_connections" if expr_weights_matrix is None else "spatial_and_expr_connections"
+    if save_show_or_return in ["save", "both", "all"]:
+        s_kwargs = {
+            "path": None,
+            "prefix": prefix,
+            "dpi": None,
+            "ext": "pdf",
+            "transparent": True,
+            "close": True,
+            "verbose": True,
+        }
+        s_kwargs = update_dict(s_kwargs, save_kwargs)
+
+        save_fig(**s_kwargs)
+
+    elif save_show_or_return in ["show", "both", "all"]:
+        plt.show()
+    elif save_show_or_return in ["return", "all"]:
+        if expr_weights_matrix is not None:
+            ax = axes
+        else:
+            ax = ax_sp
+        return (fig, ax)

@@ -169,7 +169,7 @@ def _scatter_projection(ax, points, projection, **kwargs):
 
 
 def _vector_projection(
-        ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", geo: bool = False, **kwargs
+    ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", geo: bool = False, **kwargs
 ):
     """Plot a 2D field of arrows over spatial transcriptomics data
 
@@ -186,13 +186,7 @@ def _vector_projection(
         centroids = np.array([polygon.centroid.coords[0] for polygon in points])
         if projection == "3d":
             ax.quiver(
-                centroids[:, 0],
-                centroids[:, 1],
-                centroids[:, 2],
-                vectors[:, 0],
-                vectors[:, 1],
-                vectors[:, 2],
-                **kwargs
+                centroids[:, 0], centroids[:, 1], centroids[:, 2], vectors[:, 0], vectors[:, 1], vectors[:, 2], **kwargs
             )
         else:
             ax.quiver(centroids[:, 0], centroids[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
@@ -205,7 +199,7 @@ def _vector_projection(
 
 
 def _streamlines_projection(
-        ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", geo: bool = False, **kwargs
+    ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", geo: bool = False, **kwargs
 ):
     """Plot streamlines over spatial transcriptomics data
 
@@ -350,8 +344,21 @@ def _matplotlib_points(
     if V is not None:
         if vf_plot_method == "grid" or vf_plot_method == "cell":
             quiver_params = [
-                'scale', 'scale_units', 'angles', 'width', 'color', 'pivot', 'headwidth', 'headlength',
-                'headaxislength', 'minshaft', 'minlength', 'linewidth', 'edgecolor', 'norm', 'cmap'
+                "scale",
+                "scale_units",
+                "angles",
+                "width",
+                "color",
+                "pivot",
+                "headwidth",
+                "headlength",
+                "headaxislength",
+                "minshaft",
+                "minlength",
+                "linewidth",
+                "edgecolor",
+                "norm",
+                "cmap",
             ]
 
             quiver_kwargs = {}
@@ -362,8 +369,19 @@ def _matplotlib_points(
 
         elif vf_plot_method == "stream":
             streamplot_params = [
-                'density', 'linewidth', 'color', 'cmap', 'norm', 'arrowsize', 'arrowstyle', 'minlength',
-                'start_points', 'zorder', 'maxlength', 'integration_direction', 'data'
+                "density",
+                "linewidth",
+                "color",
+                "cmap",
+                "norm",
+                "arrowsize",
+                "arrowstyle",
+                "minlength",
+                "start_points",
+                "zorder",
+                "maxlength",
+                "integration_direction",
+                "data",
             ]
 
             streamplot_kwargs = {}

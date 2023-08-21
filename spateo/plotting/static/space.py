@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union, Literal
+from typing import List, Literal, Optional, Tuple, Union
 
 import anndata
 import numpy as np
@@ -173,7 +173,7 @@ def plot_cell_signaling(
     alpha: float = 0.8,
     plot_method: Literal["cell", "grid", "stream"] = "cell",
     scale: Optional[float] = None,
-    scale_units: Optional[Literal['width', 'height', 'dots', 'inches', 'x', 'y', 'xy']] = None,
+    scale_units: Optional[Literal["width", "height", "dots", "inches", "x", "y", "xy"]] = None,
     grid_density: float = 1,
     grid_knn: Optional[int] = None,
     grid_scale: float = 1.0,
