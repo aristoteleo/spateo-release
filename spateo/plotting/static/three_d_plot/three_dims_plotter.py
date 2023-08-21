@@ -3,12 +3,22 @@ from typing import Optional, Tuple, Union
 import matplotlib as mpl
 import numpy as np
 import pyvista as pv
+from matplotlib.colors import LinearSegmentedColormap
 from pyvista import MultiBlock, Plotter, PolyData, UnstructuredGrid
 
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
+
+
+def _get_default_cmap():
+    if "default_cmap" not in mpl.colormaps():
+        colors = ["#4B0082", "#800080", "#F97306", "#FFA500", "#FFD700", "#FFFFCB"]
+        nodes = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+
+        mpl.colormaps.register(LinearSegmentedColormap.from_list("default_cmap", list(zip(nodes, colors))))
+    return "default_cmap"
 
 
 def create_plotter(
@@ -40,6 +50,7 @@ def create_plotter(
     """
 
     # Create an initial plotting object.
+    _get_default_cmap()
     plotter = pv.Plotter(
         off_screen=off_screen,
         window_size=window_size,
@@ -58,7 +69,6 @@ def create_plotter(
                 plotter.add_camera_orientation_widget()
             else:
                 plotter.add_axes()
-
     return plotter
 
 

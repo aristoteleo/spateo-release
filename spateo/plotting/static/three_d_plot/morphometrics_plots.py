@@ -1,10 +1,8 @@
 from typing import Optional, Union
 
-import matplotlib as mpl
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from matplotlib.colors import LinearSegmentedColormap
 from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
 from ....tdr import add_model_labels, collect_models
@@ -14,15 +12,6 @@ try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
-
-
-def _get_default_cmap():
-    if "default_cmap" not in mpl.colormaps():
-        colors = ["#4B0082", "#800080", "#F97306", "#FFA500", "#FFD700", "#FFFFCB"]
-        nodes = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-
-        mpl.colormaps.register(LinearSegmentedColormap.from_list("default_cmap", list(zip(nodes, colors))))
-    return "default_cmap"
 
 
 def _check_index_in_adata(adata, model):
@@ -204,7 +193,6 @@ def jacobian(
 
     # Visualization.
     j_keys = [f"∂{f}/∂{i}" for f in ["fx", "fy", "fz"] for i in ["x", "y", "z"]]
-    colormap = _get_default_cmap() if colormap is None or colormap == "default_cmap" else colormap
     return three_d_multi_plot(
         model=collect_models([models]),
         key=j_keys,
@@ -350,7 +338,6 @@ def feature(
         )
 
     # Visualization.
-    colormap = _get_default_cmap() if colormap is None or colormap == "default_cmap" else colormap
     return three_d_plot(
         model=models,
         key=feature_key,
