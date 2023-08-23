@@ -323,7 +323,7 @@ def plot_connections(
     n_spatial_neighbors: Union[None, int] = 6,
     spatial_weights_matrix: Union[None, scipy.sparse.csr_matrix, np.ndarray] = None,
     expr_weights_matrix: Union[None, scipy.sparse.csr_matrix, np.ndarray] = None,
-    reverse_expr_plot_orientation: bool = False,
+    reverse_expr_plot_orientation: bool = True,
     ax: Union[None, mpl.axes.Axes] = None,
     figsize: tuple = (3, 3),
     zero_self_connections: bool = True,
@@ -398,7 +398,7 @@ def plot_connections(
             if reverse_expr_plot_orientation:
                 # Allow subplot boundaries to technically be partially overlapping (for better visual)
                 box = ax_expr.get_position()
-                box.x0 = box.x0 - 0.3
+                box.x0 = box.x0 - 0.4
                 box.x1 = box.x1 - 0.3
                 ax_expr.set_position(box)
         else:
@@ -426,6 +426,12 @@ def plot_connections(
     map_dict = dict(zip(categories_num_cat, categories_str_cat))
     categories_num = adata.obs[cat_key].replace(categories_str_cat, categories_num_cat)
 
+    # Update expression weights matrix if applicable to only include filtered categories:
+    if expr_weights_matrix is not None:
+        mask = categories_str.isin(filtered_categories)
+        indices_to_retain = np.where(mask)[0]
+        expr_weights_matrix = expr_weights_matrix[indices_to_retain, :][:, indices_to_retain]
+
     label = Label(categories_num.to_numpy(), str_map=map_dict)
 
     # If spatial weights matrix is not given, compute it. 'spatial_key' needs to be present in the AnnData object:
@@ -435,9 +441,7 @@ def plot_connections(
                 f"Given 'spatial_key' {spatial_key} does not exist as key in adata.obsm. Options: "
                 f"{adata.obsm_keys()}."
             )
-        _, adata = neighbors(
-            adata, basis="spatial", spatial_key=spatial_key, n_neighbors=n_spatial_neighbors
-        )
+        _, adata = neighbors(adata, basis="spatial", spatial_key=spatial_key, n_neighbors=n_spatial_neighbors)
         spatial_weights_matrix = adata.obsp["connectivities"]
 
     # Compute spatial connections array:
@@ -511,7 +515,7 @@ def plot_connections(
 
                     for triangle in [left_triangle, right_triangle]:
                         center = np.array((label_1, label_2))[np.newaxis, :]
-                        scale_factor = spatial_connections[label_1, label_2] / spatial_connections_max
+                        scale_factor = np.sqrt(spatial_connections[label_1, label_2] / spatial_connections_max)
                         offsets = triangle * max_scale * scale_factor
                         polygon_list.append(center + offsets)
 
@@ -602,7 +606,7 @@ def plot_connections(
                     if label_1 <= label_2:
                         for triangle in [left_triangle, right_triangle]:
                             center = np.array((label_1, label_2))[np.newaxis, :]
-                            scale_factor = expr_connections[label_1, label_2] / expr_connections_max
+                            scale_factor = np.sqrt(expr_connections[label_1, label_2] / expr_connections_max)
                             offsets = triangle * max_scale * scale_factor
                             polygon_list.append(center + offsets)
 
@@ -644,6 +648,7 @@ def plot_connections(
                 cax.yaxis.set_major_formatter(StrMethodFormatter("{x:,.1e}"))
 
         # Formatting adjustments
+        ax_expr.set_facecolor("none")
         ax_expr.set_aspect("equal")
 
         ax_expr.set_xticks(
@@ -704,9 +709,9 @@ def plot_connections(
         title_str_expr = "Gene Expression Similarity" if title_str is None else title_str
         if reverse_expr_plot_orientation:
             if label_fontsize <= 8:
-                y = -0.35
+                y = -0.3
             elif label_fontsize > 8:
-                y = -0.45
+                y = -0.35
         else:
             y = None
         ax_expr.set_title(title_str_expr, fontsize=title_fontsize, fontweight="bold", y=y)
