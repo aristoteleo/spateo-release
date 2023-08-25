@@ -1014,5 +1014,18 @@ def subsample_neighbors_sparse(W, n):
 
 
 # ---------------------------------------------------------------------------------------------------
-# Auxiliary functionality for upstream and downstream association testing
+# Auxiliary functionality for upstream processing or downstream analysis
 # ---------------------------------------------------------------------------------------------------
+def find_maximal_sets(data: pd.DataFrame, feature_of_interest: str, threshold_pct: float = 0.75):
+    """Find the maximal set of features such that all of these features (together with the feature of interest)
+    are the only features that are nonzero in at least 75% of cells. Then subset to all cells for which all of these
+    features are present, or all of these features are absent.
+
+    Args:
+        data:
+        feature_of_interest:
+        threshold_pct:
+
+    Returns:
+
+    """

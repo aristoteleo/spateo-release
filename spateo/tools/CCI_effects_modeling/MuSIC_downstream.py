@@ -37,6 +37,7 @@ from sklearn.preprocessing import normalize
 from ...configuration import config_spateo_rcParams
 from ...logging import logger_manager as lm
 from ...plotting.static.utils import save_return_show_fig_utils
+from ...preprocessing.transform import log1p
 from ..dimensionality_reduction import (
     find_optimal_n_umap_components,
     umap_conn_indices_dist_embedding,
@@ -377,8 +378,9 @@ class MuSIC_Interpreter(MuSIC):
     def visualize_enriched_interactions(
         self,
         target_subset: Optional[List[str]] = None,
+        interaction_subset: Optional[List[str]] = None,
         cell_types: Optional[List[str]] = None,
-        metric: Literal["number", "proportion", "specificity", "mean", "fc", "fc_qvals"] = "fc",
+        metric: Literal["number", "multiplicity", "proportion", "specificity", "mean", "fc", "fc_qvals"] = "fc",
         normalize: bool = True,
         plot_significant: bool = False,
         metric_threshold: float = 0.05,
@@ -396,11 +398,14 @@ class MuSIC_Interpreter(MuSIC):
 
         Args:
             target_subset: List of targets to consider. If None, will use all targets used in model fitting.
+            interaction_subset: List of interactions to consider. If None, will use all interactions used in model.
             cell_types: Can be used to restrict the enrichment analysis to only cells of a particular type. If given,
                 will search for cell types in "group_key" attribute from model initialization.
             metric: Metric to display on plot. For all plot variants, the color will be determined by a combination
             of the size & magnitude of the effect. Options:
                 - "number": Number of cells for which the interaction is predicted to have nonzero effect
+                - "multiplicity": For each interaction/target combination, gets the average number of additional
+                    interactions that are predicted in cells expressing that target
                 - "proportion": Percentage of interactions predicted to have nonzero effect over the number of cells
                     that express each target.
                 - "specificity": Number of target-expressing cells for which a particular interaction is predicted to
@@ -539,6 +544,9 @@ class MuSIC_Interpreter(MuSIC):
 
         for target in self.coeffs.keys():
             # Get coefficients for this key
+            if interaction_subset is not None:
+                if target not in interaction_subset:
+                    continue
             coef = self.coeffs[target]
             columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
             feat_names_target = [col.replace("b_", "") for col in columns]
@@ -573,6 +581,21 @@ class MuSIC_Interpreter(MuSIC):
                 n_nonzero_interactions.index = [idx.replace("b_", "") for idx in n_nonzero_interactions.index]
                 # Compute proportion:
                 df.loc[feat_names_target, target] = n_nonzero_interactions
+            elif metric == "multiplicity":
+                multiplicity_series = pd.Series()
+                # Indices of target-expressing cells:
+                target_expr_cells_indices = np.where(adata[:, target].X.toarray() != 0)[0]
+                # Extract only the rows of coef that correspond to target-expressing cells:
+                coef_target_expr = coef.iloc[target_expr_cells_indices, :]
+                # For each interaction (each column), subset to nonzero rows:
+                for col in coef_target_expr.columns:
+                    nonzero_rows = coef_target_expr[coef_target_expr[col] != 0]
+                    # Count the number of predicted cooccurring interactions (exclude the current column and count
+                    # the number of nonzeros in each row):
+                    count_nonzero = (nonzero_rows.drop(columns=[col]) != 0).sum(axis=1)
+                    # Compute the multiplicity of the interaction as the mean number of cooccurring interactions:
+                    multiplicity_series[col.replace("b_", "")] = count_nonzero.mean()
+                df.loc[feat_names_target, target] = multiplicity_series
             elif metric == "proportion":
                 # Compute total number of target-expressing cells, and the indices of target-expressing cells:
                 target_expr_cells_indices = np.where(adata[:, target].X.toarray() != 0)[0]
@@ -614,10 +637,18 @@ class MuSIC_Interpreter(MuSIC):
                 means.index = [idx.replace("b_", "") for idx in means.index]
                 df.loc[:, target] = means
             elif metric == "fc":
-                # Get indices of zero effect and predicted positive effect:
+                # log1p transform AnnData to mitigate the effect of large numerical outliers:
+                adata.X = log1p(adata)
+
+                # Get indices of zero effect and predicted nonzero effect:
                 for col in columns:
                     feat = col.replace("b_", "")
                     nz_effect_indices = np.where(coef[col].values != 0)[0]
+                    if len(nz_effect_indices) < 100:
+                        self.logger.info(f"Interaction {feat} has too few nonzero effects. Skipping...")
+                        df.loc[feat, target] = 0.0
+                        df_pvals.loc[feat, target] = 1.0
+                        continue
                     zero_effect_indices = np.where(coef[col].values == 0)[0]
 
                     # Compute mean target expression for both subsets:
@@ -674,7 +705,7 @@ class MuSIC_Interpreter(MuSIC):
                 center = np.percentile(df.values.flatten(), center)
             vmax = np.max(np.abs(df.values))
             vmin = 0.0
-            label = "Fold-change"
+            label = "Fold-change, $\log_{e}$ expression"
             title = "Target gene expression \n fold-change for each interaction"
         elif metric == "mean":
             df[np.abs(df) < metric_threshold] = 0.0
@@ -686,15 +717,15 @@ class MuSIC_Interpreter(MuSIC):
             vmin = np.min(df.values)
             label = "Mean effect size"
             title = "Mean effect size for \n each interaction on each target"
-        elif metric in ["number", "proportion", "specificity"]:
+        elif metric in ["number", "multiplicity", "proportion", "specificity"]:
             if normalize:
                 df = (df - df.min()) / (df.max() - df.min() + 1e-8)
                 if center is None:
                     center = 0.5
             else:
-                if metric == "number":
+                if metric == "number" or metric == "multiplicity":
                     if center is None:
-                        center = np.percentile(df.values.flatten(), 40)
+                        center = np.percentile(df.values.flatten(), 30)
                     else:
                         center = np.percentile(df.values.flatten(), center)
                 elif metric == "proportion" or metric == "specificity":
