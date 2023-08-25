@@ -235,7 +235,7 @@ nbsphinx_prolog = r"""
     version=str(tutorials_repo.head.commit), docname="{{ docname|e }}"
 )
 nbsphinx_thumbnails = {
-    "tutorials/notebooks/1_cell_segmentation": "_static/tutorials/1_cell_segmentation.png",
+    "tutorials/notebooks/cell_segmentation": "_static/tutorials/1_cell_segmentation.png",
     "tutorials/notebooks/2_cluster_digitization": "_static/tutorials/2_cluster_digitization.png",
     "tutorials/notebooks/3_cci": "_static/tutorials/3_cci.png",
     "tutorials/notebooks/4_alignment": "_static/tutorials/4_alignment.png",
