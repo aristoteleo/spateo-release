@@ -3,9 +3,8 @@ from typing import Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
-import statsmodels.api as sm
+import seaborn as sns
 from anndata import AnnData
-from scipy.interpolate import interp1d
 
 try:
     from typing import Literal
@@ -17,16 +16,18 @@ from .utils import save_return_show_fig_utils
 
 def glm_fit(
     adata: AnnData,
-    gene: Union[str, list] = None,
+    genes: Optional[Union[str, list]] = None,
     feature_x: str = None,
     feature_y: str = "expression",
     glm_key: str = "glm_degs",
-    frac: float = 0.6,
-    point_size: float = 1,
+    remove_zero: bool = False,
+    color_key: Optional[str] = None,
+    color_key_cmap: Optional[str] = "vlag",
+    point_size: float = 14,
     point_color: Union[str, np.ndarray, list] = "skyblue",
-    line_size: float = 1,
+    line_size: float = 2,
     line_color: str = "black",
-    ax_size: Union[tuple, list] = (3, 3),
+    ax_size: Union[tuple, list] = (6, 4),
     background_color: str = "white",
     ncols: int = 4,
     show_point: bool = True,
@@ -41,12 +42,13 @@ def glm_fit(
 
     Args:
         adata: An Anndata object contain glm_degs result in ``.uns[glm_key]``.
-        gene: A gene name or a list of genes that will be used to plot.
+        genes: A gene name or a list of genes that will be used to plot.
         feature_x: The key in ``.uns[glm_key]['correlation'][gene]`` that corresponds to the independent variables, such as ``'torsion'``, etc.
         feature_y: The key in ``.uns[glm_key]['correlation'][gene]`` that corresponds to the dependent variables, such as ``'expression'``, etc.
         glm_key: The key in ``.uns`` that corresponds to the glm_degs result.
-        frac: Between 0 and 1. The fraction of the data used when estimating each feature_y-value.
-        show_legend: Whether to show the legend.
+        remove_zero: Whether to remove the data equal to 0 saved in ``.uns[glm_key]['correlation'][gene][feature_y]``.
+        color_key: This can either be an explicit dict mapping labels to colors (as strings of form ‘#RRGGBB’), or an array like object providing one color for each distinct category being provided in labels.
+        color_key_cmap: The name of a matplotlib colormap to use for categorical coloring.
         point_size: The scale of the feature_y point size.
         point_color: The color of the feature_y point.
         line_size: The scale of the fitted line width.
@@ -66,17 +68,17 @@ def glm_fit(
                      "dpi": None, "ext": 'pdf', "transparent": True, "close": True, "verbose": True}`` as its parameters.
 
                      Otherwise, you can provide a dictionary that properly modify those keys according to your needs.
-        **kwargs: Additional parameters that will be passed into the ``statsmodels.nonparametric.smoothers_lowess.lowess`` function.
+        **kwargs: Additional parameters that will be passed into the ``seaborn.scatterplot`` function.
     """
 
-    assert not (gene is None), "``gene`` cannot be None."
     assert not (feature_x is None), "``feature_x`` cannot be None."
     assert not (feature_y is None), "``feature_y`` cannot be None."
     assert (
         glm_key in adata.uns
     ), f"``glm_key`` does not exist in adata.uns, please replace ``glm_key`` or run st.tl.glm_degs(key_added={glm_key})."
 
-    genes = list(gene) if isinstance(gene, list) else [gene]
+    genes = list(adata.uns[glm_key]["glm_result"].index) if genes is None else genes
+    genes = list(genes) if isinstance(genes, list) else [genes]
     genes_data = [adata.uns[glm_key]["correlation"][g].copy() for g in genes]
 
     ncols = len(genes) if len(genes) < ncols else ncols
@@ -86,42 +88,40 @@ def glm_fit(
     axes_list = []
     for i, data in enumerate(genes_data):
         data.sort_values(by=feature_x, ascending=True, axis=0, inplace=True)
-        feature_x_values = np.asarray(data[feature_x]).flatten()
+        if remove_zero:
+            data = data[np.asarray(data[feature_y]).flatten() != 0]
 
         ax = plt.subplot(nrows, ncols, i + 1)
         ax.set_title(f"Gene: {genes[i]}")
 
-        feature_y_values = np.asarray(data[feature_y]).flatten()
-
-        plot_feature_x_values = feature_x_values[feature_y_values != 0]
-        plot_feature_y_values = feature_y_values[feature_y_values != 0]
         if show_point:
-            ax.scatter(
-                plot_feature_x_values,
-                plot_feature_y_values,
-                c=point_color,
+            sns.scatterplot(
+                data=data,
+                x=feature_x,
+                y=feature_y,
+                hue=color_key,
+                palette=color_key_cmap,
+                color=point_color,
                 s=point_size,
+                legend=show_legend,
+                ax=ax,
+                **kwargs,
             )
+            ax.set_ylabel(feature_y)
 
         if show_line:
-            # lowess: Locally Weighted Scatter-plot Smoothing. Whether to use the lowess function on the feature_y value.
-            tmp = sm.nonparametric.lowess(
-                plot_feature_y_values, plot_feature_x_values, frac=frac, is_sorted=True, return_sorted=True, **kwargs
-            )
-            f = interp1d(tmp[:, 0], tmp[:, 1], bounds_error=False)
-            lowess_feature_y_values = f(plot_feature_x_values)
-            ax.plot(
-                plot_feature_x_values,
-                lowess_feature_y_values,
+            ax = ax.twinx() if show_point is True else ax
+            sns.lineplot(
+                data=data,
+                x=feature_x,
+                y="mu",
                 color=line_color,
-                linewidth=line_size,
+                lw=line_size,
+                legend=False,
+                ax=ax,
             )
+            ax.set_ylabel("mu")
         axes_list.append(ax)
-
-    fig.supxlabel(feature_x)
-    fig.supylabel(feature_y)
-    if show_legend:
-        fig.legend(loc="center right")
 
     added_pad = nrows * 0.1 if ncols * 2 < nrows else ncols * 0.2
     plt.tight_layout(pad=1 + added_pad)
