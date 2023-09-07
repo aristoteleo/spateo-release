@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Literal, Optional, Union
 
 import numpy as np
 import vtk
@@ -62,6 +62,9 @@ def _interactive_rectangle_clip(
 def interactive_rectangle_clip(
     model: Union[PolyData, UnstructuredGrid, MultiBlock],
     key: str = "groups",
+    model_style: Union[Literal["points", "surface", "wireframe"], list] = "points",
+    model_size: Union[float, list] = 8.0,
+    colormap: str = "Spectral",
     invert: bool = False,
     bg_model=None,
 ) -> MultiBlock:
@@ -107,13 +110,37 @@ def interactive_rectangle_clip(
 
     # Clip model via a 2D rectangle widget.
     picked_models, picking_r_list = [], []
-    p.add_mesh(
-        model,
-        scalars=f"{key}_rgba",
-        rgba=True,
-        render_points_as_spheres=True,
-        point_size=10,
-    )
+
+    if model_style == "points":
+        render_spheres, render_tubes, smooth_shading = True, False, True
+    elif model_style == "wireframe":
+        render_spheres, render_tubes, smooth_shading = False, True, False
+    else:
+        render_spheres, render_tubes, smooth_shading = False, False, True
+    if f"{key}_rgba" in model.array_names:
+        p.add_mesh(
+            model,
+            scalars=f"{key}_rgba",
+            rgba=True,
+            style=model_style,
+            render_points_as_spheres=render_spheres,
+            render_lines_as_tubes=render_tubes,
+            point_size=model_size,
+            line_width=model_size,
+            smooth_shading=smooth_shading,
+        )
+    else:
+        p.add_mesh(
+            model,
+            scalars=key,
+            style=model_style,
+            render_points_as_spheres=render_spheres,
+            render_lines_as_tubes=render_tubes,
+            point_size=model_size,
+            line_width=model_size,
+            smooth_shading=smooth_shading,
+            cmap=colormap,
+        )
     _interactive_rectangle_clip(
         plotter=p,
         model=model,
