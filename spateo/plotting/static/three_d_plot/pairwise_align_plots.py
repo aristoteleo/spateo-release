@@ -206,9 +206,9 @@ def pairwise_mapping(
         z = np.zeros(shape=(adataB.obsm[spatial_key].shape[0], 1))
         adataB.obsm[spatial_key] = np.c_[adataB.obsm[spatial_key], z]
 
-    if direction is "x":
+    if direction == "x":
         models_distance = np.asarray([-distance, 0, 0])
-    elif direction is "y":
+    elif direction == "y":
         models_distance = np.asarray([0, -distance, 0])
     else:
         models_distance = np.asarray([0, 0, -distance])
