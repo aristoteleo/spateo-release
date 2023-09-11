@@ -12,6 +12,8 @@ from keras import optimizers
 from keras.layers import Dense, Input
 from keras.models import Model
 
+from .backbone_utils import sort_nodes_of_curve
+
 #####################################################################
 # Principal curves algorithm                                        #
 # ================================================================= #
@@ -186,10 +188,21 @@ def ElPiGraph_method(
     else:
         raise ValueError("`topology` value is wrong." "\nAvailable `topology` are: `'tree'`, `'circle'`, `'curve'`.")
 
-    nodes = elpi_tree[0]["NodePositions"]  # ['AllNodePositions'][k]
-    matrix_edges_weights = elpi_tree[0]["ElasticMatrix"]  # ['AllElasticMatrices'][k]
-    matrix_edges_weights = np.triu(matrix_edges_weights, 1)
-    edges = np.array(np.nonzero(matrix_edges_weights), dtype=int).transpose()
+    nodes = elpi_tree[0]["NodePositions"]
+    edges = np.asarray(elpi_tree[0]["Edges"][0])
+
+    if str(topology).lower() in ["curve", "circle"]:
+        unique_values, occurrence_count = np.unique(edges.flatten(), return_counts=True)
+        started_node_indices = [v for c, v in zip(occurrence_count, unique_values) if c == 1]
+        started_node = nodes[started_node_indices[0]] if len(started_node_indices) != 0 else nodes[0]
+
+        nodes = sort_nodes_of_curve(nodes, started_node)
+        if str(topology).lower() == "curve":
+            edges = np.c_[np.arange(0, len(nodes) - 1, 1).reshape(-1, 1), np.arange(1, len(nodes), 1).reshape(-1, 1)]
+        else:
+            edges = np.c_[
+                np.arange(0, len(nodes), 1).reshape(-1, 1), np.asarray(list(range(1, len(nodes))) + [0]).reshape(-1, 1)
+            ]
 
     return nodes, edges
 
@@ -320,5 +333,12 @@ def PrinCurve_method(
     n_nodes = nodes.shape[0]
     edges = np.asarray([np.arange(0, n_nodes, 1), np.arange(1, n_nodes + 1, 1)]).T
     edges[-1, 1] = n_nodes - 1
+    """
+    unique_values, occurrence_count = np.unique(edges.flatten(), return_counts=True)
+    started_node_indices = [v for c, v in zip(occurrence_count, unique_values) if c == 1]
+    started_node = nodes[started_node_indices[0]] if len(started_node_indices) != 0 else nodes[0]
 
+    sorted_nodes = sort_nodes_of_curve(nodes, started_node)
+    sorted_edges = np.c_[np.arange(0, len(nodes) - 1, 1).reshape(-1, 1), np.arange(1, len(nodes), 1).reshape(-1, 1)]
+    """
     return nodes, edges

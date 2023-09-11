@@ -88,3 +88,23 @@ def map_gene_to_backbone(
         tree.point_data[sub_key] = tree_data[sub_key].values
 
     return tree if not inplace else None
+
+
+def _euclidean_distance(N1, N2):
+    temp = np.asarray(N1) - np.asarray(N2)
+    euclid_dist = np.sqrt(np.dot(temp.T, temp))
+    return euclid_dist
+
+
+def sort_nodes_of_curve(nodes, started_node):
+    current_node = tuple(started_node)
+    remaining_nodes = [tuple(node) for node in nodes]
+
+    sorted_nodes = []
+    while remaining_nodes:
+        closest_node = min(remaining_nodes, key=lambda x: _euclidean_distance(current_node, x))
+        sorted_nodes.append(closest_node)
+        remaining_nodes.remove(closest_node)
+        current_node = closest_node
+    sorted_nodes = np.asarray([list(sn) for sn in sorted_nodes])
+    return sorted_nodes

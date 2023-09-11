@@ -5,6 +5,7 @@ from .models_backbone import (
     construct_backbone,
     map_gene_to_backbone,
     map_points_to_backbone,
+    update_backbone,
 )
 from .models_individual import (
     construct_cells,

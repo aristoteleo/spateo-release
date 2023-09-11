@@ -6,6 +6,7 @@ except ImportError:
     from typing_extensions import Literal
 
 import numpy as np
+from anndata import AnnData
 from pyvista import PolyData, UnstructuredGrid
 from scipy.spatial.distance import cdist
 
@@ -74,3 +75,77 @@ def construct_backbone(
     backbone_length = cdist(XA=np.asarray(s_points), XB=np.asarray(e_points), metric="euclidean").diagonal().sum()
 
     return backbone_model, backbone_length, plot_cmap
+
+
+def update_backbone(
+    backbone: PolyData,
+    nodes_key: str = "nodes",
+    key_added: str = "updated_nodes",
+    select_nodes: Optional[Union[list, np.ndarray]] = None,
+    interactive: Optional[bool] = True,
+    model_size: Union[float, list] = 8.0,
+    colormap: str = "Spectral",
+) -> Union[PolyData, UnstructuredGrid]:
+    """
+    Update the bakcbone through interaction or input of selected nodes.
+
+    Args:
+        backbone: The backbone model.
+        nodes_key: The key that corresponds to the coordinates of the nodes in the backbone.
+        key_added: The key under which to add the labels of new nodes.
+        select_nodes: Nodes that need to be retained.
+        interactive: Whether to delete useless nodes interactively. When ``interactive`` is True, ``select_nodes`` is invalid.
+        model_size: Thickness of backbone. When ``interactive`` is False, ``model_size`` is invalid.
+        colormap: Colormap of backbone. When ``interactive`` is False, ``colormap`` is invalid.
+
+    Returns:
+        updated_backbone: The updated backbone model.
+    """
+    model = backbone.copy()
+    if interactive is True:
+        from ...widgets.clip import _interactive_rectangle_clip
+        from ...widgets.utils import _interactive_plotter
+
+        p = _interactive_plotter()
+        p.add_point_labels(
+            model,
+            labels=nodes_key,
+            font_size=18,
+            font_family="arial",
+            text_color="white",
+            shape_color="black",
+            always_visible=True,
+        )
+
+        picked_models, picking_r_list = [], []
+        if f"{nodes_key}_rgba" in model.array_names:
+            p.add_mesh(
+                model,
+                scalars=f"{nodes_key}_rgba",
+                rgba=True,
+                style="wireframe",
+                render_lines_as_tubes=True,
+                line_width=model_size,
+            )
+        else:
+            p.add_mesh(
+                model,
+                scalars=nodes_key,
+                style="wireframe",
+                render_lines_as_tubes=True,
+                line_width=model_size,
+                cmap=colormap,
+            )
+        _interactive_rectangle_clip(
+            plotter=p,
+            model=model,
+            picking_list=picked_models,
+            picking_r_list=picking_r_list,
+        )
+        p.show(cpos="iso")
+        updated_backbone = picking_r_list[0]
+    else:
+        updated_backbone = model.extract_cells(np.isin(np.asarray(model.point_data[nodes_key]), select_nodes))
+
+    updated_backbone.point_data[key_added] = np.arange(0, updated_backbone.n_points, 1)
+    return updated_backbone
