@@ -2,6 +2,7 @@ from .models_backbone import (
     ElPiGraph_method,
     PrinCurve_method,
     SimplePPT_method,
+    backbone_scc,
     construct_backbone,
     map_gene_to_backbone,
     map_points_to_backbone,
