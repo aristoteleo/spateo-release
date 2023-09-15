@@ -1,585 +1,30 @@
 """
-Functions for finding nearest neighbors and the distances between them in spatial transcriptomics data.
+Functions for finding nearest neighbors, the distances between them and the spatial weighting between points in
+spatial transcriptomics data.
 """
 import os
+import sys
+from functools import partial
 from typing import Optional, Tuple, Union
 
+import anndata
 import numpy as np
 import pandas as pd
 import scipy
-import sklearn
 from anndata import AnnData
-from scipy.sparse.csgraph import floyd_warshall
+from joblib import Parallel, delayed
 from scipy.spatial.distance import pdist, squareform
 from sklearn.decomposition import PCA
+from sklearn.metrics import pairwise_distances
 from sklearn.neighbors import NearestNeighbors
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-from ..preprocessing.aggregate import bin_adata
-from ..tools.labels import row_normalize
 
 
-# ------------------------------------- Wrapper for weighted spatial graph ------------------------------------- #
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def weighted_spatial_graph(
-    adata: AnnData,
-    spatial_key: str = "spatial",
-    fixed: str = "n_neighbors",
-    n_neighbors_method: str = "ball_tree",
-    n_neighbors: int = 30,
-    decay_type: str = "reciprocal",
-    p: float = 0.05,
-    sigma: float = 100,
-) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]:
-    """Given an AnnData object, compute distance array with either a fixed number of neighbors for each bucket or a
-    fixed search radius for each bucket. Additional note: parameters 'p' and 'sigma' (used only if 'fixed' is
-    'radius') are used to modulate the radius when defining neighbors using a fixed radius. 'Sigma' parameterizes
-    the standard deviation (e.g. in pixels, micrometers, etc.) of a Gaussian distribution that is centered at a
-    particular bucket with height 'a'- to search for that bucket's neighbors, 'p' is the cutoff height of the
-    Gaussian, as a proportion of the peak height 'a'. Essentially, to define the radius that should be used for all
-    buckets, this function measures how far out from each bucket you would need to go before the Gaussian decays to
-    e.g. 0.05 of its peak height. With knowledge of e.g. diffusion kinetics for particular soluble factors,
-    the neighborhood can be defined taking this into account.
-
-    Args:
-        adata: an anndata object.
-        spatial_key: Key in .obsm containing coordinates for each bucket.
-        fixed: Options: 'n_neighbors', 'radius'- sets either fixed number of neighbors or fixed search radius for each
-            bucket.
-        n_neighbors_method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-            "ball_tree" and "kd_tree". Unused unless 'fixed' is 'n_neighbors'.
-        n_neighbors: Number of neighbors each bucket has. Unused unless 'fixed' is 'n_neighbors'.
-        decay_type: Sets method by which edge weights are defined. Options: "reciprocal", "ranked", "uniform".
-            Unused unless 'fixed' is 'n_neighbors'.
-        p: Cutoff for Gaussian (used to find where distribution drops below p * (max_value)). Unused unless 'fixed' is
-            'radius'.
-        sigma: Standard deviation of the Gaussian. Unused unless 'fixed' is 'radius'.
-
-    Returns:
-        out_graph: Weighted nearest neighbors graph with shape [n_samples, n_samples]
-        distance_graph: Unweighted graph with shape [n_samples, n_samples]
-        adata: Updated AnnData object containing 'spatial_distances','spatial_weights','spatial_connectivities' in .obsp and 'spatial_neighbors' in .uns.
-    """
-    logger = lm.get_main_logger()
-    if fixed == "n_neighbors":
-        weights_graph, distance_graph, adata = generate_spatial_weights_fixed_nbrs(
-            adata,
-            spatial_key,
-            num_neighbors=n_neighbors,
-            method=n_neighbors_method,
-            decay_type=decay_type,
-        )
-    elif fixed == "radius":
-        weights_graph, distance_graph, adata = generate_spatial_weights_fixed_radius(
-            adata,
-            spatial_key,
-            method=n_neighbors_method,
-            p=p,
-            sigma=sigma,
-        )
-    else:
-        logger.error("Invalid argument given to 'fixed'. Options: 'n_neighbors', 'radius'.")
-        raise ValueError("Invalid argument given to 'fixed'. Options: 'n_neighbors', 'radius'.")
-
-    return weights_graph, distance_graph, adata
-
-
-# -------------------------------- Wrapper for weighted transcriptomic space graph -------------------------------- #
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def weighted_expr_neighbors_graph(
-    adata: AnnData,
-    nbr_object: NearestNeighbors = None,
-    basis: str = "pca",
-    n_neighbors_method: str = "ball_tree",
-    n_pca_components: int = 30,
-    num_neighbors: int = 30,
-    decay_type: str = "reciprocal",
-) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]:
-    """Given an AnnData object, compute distance array in gene expression space.
-
-    Args:
-        adata: an anndata object.
-        nbr_object: An optional sklearn.neighbors.NearestNeighbors object. Can optionally create a nearest neighbor
-            object with custom functionality.
-        basis: str, default 'pca'
-            The space that will be used for nearest neighbor search. Valid names includes, for example, `pca`, `umap`,
-            or `X`
-        n_neighbors_method: str, default 'ball_tree'
-            Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-            "ball_tree" and "kd_tree".
-        n_pca_components: Only used if 'basis' is 'pca'. Sets number of principal components to compute.
-        num_neighbors: Number of neighbors for each bucket, used in computing distance graph
-        decay_type: Sets method by which edge weights are defined. Options: "reciprocal", "ranked", "uniform".
-
-    Returns:
-        out_graph: Weighted k-nearest neighbors graph with shape [n_samples, n_samples].
-        distance_graph: Unweighted graph with shape [n_samples, n_samples].
-        adata: Updated AnnData object containing 'spatial_distance' in .obsp and 'spatial_neighbors' in .uns.
-    """
-    logger = lm.get_main_logger()
-
-    nbrs, adata = transcriptomic_connectivity(adata, nbr_object, basis, n_neighbors_method, n_pca_components)
-
-    assert isinstance(num_neighbors, int), f"Number of neighbors {num_neighbors} is not an integer."
-
-    distance_graph = nbrs.kneighbors_graph(n_neighbors=num_neighbors, mode="distance")
-
-    if basis == "X":
-        X_data = adata.X
-    elif "X_" + basis in adata.obsm_keys():
-        # Assume basis can be found in .obs under "X_{basis}":
-        X_data = adata.obsm["X_" + basis]
-    else:
-        logger.error("Invalid option given to 'basis'. Options: 'pca', 'umap' or 'X'.")
-
-    distances, knn = nbrs.kneighbors(X_data)
-    n_obs, n_neighbors = knn.shape
-
-    logger.info_insert_adata("expression_neighbors", adata_attr="uns")
-    logger.info_insert_adata("expression_neighbors.indices", adata_attr="uns")
-    logger.info_insert_adata("expression_neighbors.params", adata_attr="uns")
-
-    adata.uns["expression_neighbors"] = {}
-    adata.uns["expression_neighbors"]["indices"] = knn
-    adata.uns["expression_neighbors"]["params"] = {
-        "n_neighbors": n_neighbors,
-        "method": n_neighbors_method,
-        "metric": "euclidean",
-    }
-
-    # Compute nonspatial (gene expression) weights:
-    graph_out = distance_graph.copy()
-
-    # Convert distances to weights
-    if decay_type == "uniform":
-        graph_out.data = np.ones_like(graph_out.data)
-    elif decay_type == "reciprocal":
-        graph_out.data = 1 / graph_out.data
-    elif decay_type == "ranked":
-        linear_weights = np.exp(-1 * (np.arange(1, num_neighbors + 1) * 1.5 / num_neighbors) ** 2)
-
-        indptr, data = graph_out.indptr, graph_out.data
-
-        for n in range(len(indptr) - 1):
-            start_ptr, end_ptr = indptr[n], indptr[n + 1]
-
-            if end_ptr >= start_ptr:
-                # Row entries correspond to a cell's neighbours
-                nbrs = data[start_ptr:end_ptr]
-
-                # Assign the weights in ranked order
-                weights = np.empty_like(linear_weights)
-                weights[np.argsort(nbrs)] = linear_weights
-
-                data[start_ptr:end_ptr] = weights
-        graph_out.data = data
-    else:
-        logger.error(
-            f"Weights decay type <{decay_type}> not recognised. Should be 'uniform', 'reciprocal' or 'ranked'."
-        )
-        raise ValueError(
-            f"Weights decay type <{decay_type}> not recognised.\n" f"Should be 'uniform', 'reciprocal' or 'ranked'."
-        )
-
-    out_graph = row_normalize(graph_out, verbose=False)
-    return out_graph, distance_graph, adata
-
-
-def transcriptomic_connectivity(
-    adata: AnnData,
-    nbr_object: NearestNeighbors = None,
-    basis: str = "pca",
-    n_neighbors_method: str = "ball_tree",
-    n_pca_components: int = 30,
-) -> Tuple[NearestNeighbors, AnnData]:
-    """Given an AnnData object, compute pairwise connectivity matrix in transcriptomic space
-
-    Args:
-        adata : an anndata object.
-        nbr_object: An optional sklearn.neighbors.NearestNeighbors object. Can optionally create a nearest neighbor
-            object with custom functionality.
-        basis: str, default 'pca'
-            The space that will be used for nearest neighbor search. Valid names includes, for example, `pca`, `umap`,
-            or `X`
-        n_neighbors_method: str, default 'ball_tree'
-            Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-            "ball_tree" and "kd_tree".
-        n_pca_components: Only used if 'basis' is 'pca'. Sets number of principal components to compute.
-
-    Returns:
-        nbrs : Object of class `sklearn.neighbors.NearestNeighbors`
-        adata : Modified AnnData object
-    """
-    logger = lm.get_main_logger()
-
-    if basis == "pca" and "X_pca" not in adata.obsm_keys():
-        logger.info(
-            "PCA to be used as basis for :func `transcriptomic_connectivity`, X_pca not found, " "computing PCA...",
-            indent_level=2,
-        )
-        pca = PCA(
-            n_components=min(n_pca_components, adata.X.shape[1] - 1),
-            svd_solver="arpack",
-            random_state=0,
-        )
-        fit = pca.fit(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else pca.fit(adata.X)
-        X_pca = fit.transform(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else fit.transform(adata.X)
-        adata.obsm["X_pca"] = X_pca
-
-    if basis == "X":
-        X_data = adata.X
-    elif "X_" + basis in adata.obsm_keys():
-        # Assume basis can be found in .obs under "X_{basis}":
-        X_data = adata.obsm["X_" + basis]
-    else:
-        logger.error("Invalid option given to 'basis'. Options: 'pca', 'umap' or 'X'.")
-
-    if nbr_object is None:
-        # set up neighbour object
-        nbrs = NearestNeighbors(algorithm=n_neighbors_method).fit(X_data)
-    else:  # use provided sklearn NN object
-        nbrs = nbr_object
-
-    # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
-    # NearestNeighbors run:
-    distances, knn = nbrs.kneighbors(X_data)
-    n_obs, n_neighbors = knn.shape
-    distances = scipy.sparse.csr_matrix(
-        (
-            distances.flatten(),
-            (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
-        ),
-        shape=(n_obs, n_obs),
-    )
-    connectivities = distances.copy()
-    connectivities.data[connectivities.data > 0] = 1
-
-    distances.eliminate_zeros()
-    connectivities.eliminate_zeros()
-
-    logger.info_insert_adata("expression_connectivities", adata_attr="obsp")
-    logger.info_insert_adata("expression_distances", adata_attr="obsp")
-
-    adata.obsp["expression_distances"] = distances
-    adata.obsp["expression_connectivities"] = connectivities
-
-    return nbrs, adata
-
-
-# --------------------------------------- Cell-cell/bucket-bucket distance --------------------------------------- #
-def remove_greater_than(
-    graph: scipy.sparse.csr_matrix, threshold: float, copy: bool = False, verbose: bool = False
-) -> scipy.sparse.csr_matrix:
-    """Remove values greater than a threshold from a sparse matrix.
-
-    Args:
-        graph: The input scipy matrix of the graph.
-        threshold: Upper numerical threshold to avoid filtering.
-        copy: Set True to avoid altering original graph.
-        verbose: Set True to display messages at runtime- not recommended generally since this will print entire arrays.
-
-    Returns:
-        graph: The updated graph with values greater than the threshold removed.
-    """
-    logger = lm.get_main_logger()
-
-    if copy:
-        graph = graph.copy()
-
-    greater_indices = np.where(graph.data > threshold)[0]
-
-    if verbose:
-        logger.info(
-            f"CSR data field:\n{graph.data}\n" f"compressed indices of values > threshold:\n{greater_indices}\n"
-        )
-
-    graph.data = np.delete(graph.data, greater_indices)
-    graph.indices = np.delete(graph.indices, greater_indices)
-
-    # Update ptr
-    hist, _ = np.histogram(greater_indices, bins=graph.indptr)
-    cum_hist = np.cumsum(hist)
-    graph.indptr[1:] -= cum_hist
-
-    if verbose:
-        logger.info(
-            f"\nCumulative histogram:\n{cum_hist}\n"
-            f"\n___ New CSR ___\n"
-            f"pointers:\n{graph.indptr}\n"
-            f"indices:\n{graph.indices}\n"
-            f"data:\n{graph.data}\n"
-        )
-
-    return graph
-
-
-def generate_spatial_distance_graph(
-    locations: np.ndarray,
-    nbr_object: NearestNeighbors = None,
-    method: str = "ball_tree",
-    num_neighbors: Union[None, int] = None,
-    radius: Union[None, float] = None,
-) -> Tuple[sklearn.neighbors.NearestNeighbors, scipy.sparse.csr_matrix]:
-    """Creates graph based on distance in space.
-
-    Args:
-        locations: Spatial coordinates for each bucket with shape [n_samples, 2]
-        nbr_object : An optional sklearn.neighbors.NearestNeighbors object. Can optionally create a nearest neighbor
-            object with custom functionality.
-        method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-            "ball_tree" and "kd_tree".
-        num_neighbors: Number of neighbors for each bucket.
-        radius: Search radius around each bucket.
-
-    Returns:
-        nbrs: sklearn NearestNeighbor object.
-        graph_out: A sparse matrix of the spatial graph.
-    """
-    logger = lm.get_main_logger()
-
-    if num_neighbors is None and radius is None:
-        logger.error("Number of neighbors or search radius for each bucket must be provided.")
-        raise ValueError("Number of neighbors or search radius for each bucket must be provided.")
-
-    if nbr_object is None:
-        # set up neighbour object
-        nbrs = NearestNeighbors(algorithm=method).fit(locations)
-    else:  # use provided sklearn NN object
-        nbrs = nbr_object
-
-    if num_neighbors is None:
-        # no limit to number of neighbours
-        return nbrs, nbrs.radius_neighbors_graph(radius=radius, mode="distance")
-
-    else:
-        assert isinstance(num_neighbors, int), f"Number of neighbors {num_neighbors} is not an integer."
-
-        graph_out = nbrs.kneighbors_graph(n_neighbors=num_neighbors, mode="distance")
-
-        if radius is not None:
-            assert isinstance(radius, (float, int)), f"Radius {radius} is not an integer or float."
-
-            graph_out = remove_greater_than(graph_out, radius, copy=False, verbose=False)
-
-        return nbrs, graph_out
-
-
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def generate_spatial_weights_fixed_nbrs(
-    adata: AnnData,
-    spatial_key: str = "spatial",
-    num_neighbors: int = 10,
-    method: str = "ball_tree",
-    decay_type: str = "reciprocal",
-    nbr_object: NearestNeighbors = None,
-) -> Union[Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]]:
-    """Starting from a k-nearest neighbor graph, generate a nearest neighbor graph. Specifically, this function
-    calculates spatial weights for the k-nearest neighbors of each bucket.
-
-    Args:
-        spatial_key: Key in .obsm where x- and y-coordinates are stored.
-        num_neighbors: Number of neighbors each bucket has.
-        method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-        "ball_tree" and "kd_tree".
-        decay_type: Sets method by which edge weights are defined. Options: "reciprocal", "ranked", "uniform".
-
-    Returns:
-        out_graph: Weighted k-nearest neighbors graph with shape [n_samples, n_samples].
-        distance_graph: Unweighted graph with shape [n_samples, n_samples].
-        adata: Updated AnnData object containing 'spatial_distances','spatial_weights','spatial_connectivities' in .obsp and 'spatial_neighbors' in .uns.
-    """
-    logger = lm.get_main_logger()
-
-    if method not in ["ball_tree", "kd_tree"]:
-        logger.error("Invalid argument passed to 'method'. Options: 'ball_tree', 'kd_tree'.")
-
-    # Get locations from AnnData:
-    locations = adata.obsm[spatial_key]
-
-    # Define the nearest-neighbors graph
-    nbrs, distance_graph = generate_spatial_distance_graph(
-        locations,
-        nbr_object=nbr_object,
-        method=method,
-        num_neighbors=num_neighbors,
-        radius=None,
-    )
-
-    # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
-    # NearestNeighbors run:
-    distances, knn = nbrs.kneighbors(n_neighbors=num_neighbors)
-    n_obs, n_neighbors = knn.shape
-    distances = scipy.sparse.csr_matrix(
-        (
-            distances.flatten(),
-            (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
-        ),
-        shape=(n_obs, n_obs),
-    )
-    connectivities = distances.copy()
-    connectivities.data[connectivities.data > 0] = 1
-
-    # Store as sparse matrices:
-    distances.eliminate_zeros()
-    connectivities.eliminate_zeros()
-
-    logger.info_insert_adata("spatial_connectivities", adata_attr="obsp")
-    logger.info_insert_adata("spatial_distances", adata_attr="obsp")
-
-    adata.obsp["spatial_distances"] = distances
-    adata.obsp["spatial_connectivities"] = connectivities
-
-    logger.info_insert_adata("spatial_neighbors", adata_attr="uns")
-    logger.info_insert_adata("spatial_neighbors.indices", adata_attr="uns")
-    logger.info_insert_adata("spatial_neighbors.params", adata_attr="uns")
-
-    adata.uns["spatial_neighbors"] = {}
-    adata.uns["spatial_neighbors"]["indices"] = knn
-    adata.uns["spatial_neighbors"]["params"] = {"n_neighbors": n_neighbors, "method": method, "metric": "euclidean"}
-
-    # Compute spatial weights:
-    graph_out = distance_graph.copy()
-
-    # Convert distances to weights
-    if decay_type == "uniform":
-        graph_out.data = np.ones_like(graph_out.data)
-    elif decay_type == "reciprocal":
-        graph_out.data = 1 / graph_out.data
-    elif decay_type == "ranked":
-        linear_weights = np.exp(-1 * (np.arange(1, num_neighbors + 1) * 1.5 / num_neighbors) ** 2)
-
-        indptr, data = graph_out.indptr, graph_out.data
-
-        for n in range(len(indptr) - 1):
-            start_ptr, end_ptr = indptr[n], indptr[n + 1]
-
-            if end_ptr >= start_ptr:
-                # Row entries correspond to a cell's neighbours
-                nbrs = data[start_ptr:end_ptr]
-
-                # Assign the weights in ranked order
-                weights = np.empty_like(linear_weights)
-                weights[np.argsort(nbrs)] = linear_weights
-
-                data[start_ptr:end_ptr] = weights
-        graph_out.data = data
-    else:
-        logger.error(
-            f"Weights decay type <{decay_type}> not recognised. Should be 'uniform', 'reciprocal' or 'ranked'."
-        )
-        raise ValueError(
-            f"Weights decay type <{decay_type}> not recognised.\n" f"Should be 'uniform', 'reciprocal' or 'ranked'."
-        )
-
-    out_graph = row_normalize(graph_out, verbose=False)
-
-    logger.info_insert_adata("spatial_weights", adata_attr="obsp")
-    adata.obsp["spatial_weights"] = out_graph
-
-    return out_graph, distance_graph, adata
-
-
-def gaussian_weight_2d(distance: float, sigma: float) -> float:
-    """Calculate normalized gaussian value for a given distance from central point
-    Normalized by 2*pi*sigma-squared
-    """
-    sigma_squared = float(sigma) ** 2
-    return np.exp(-0.5 * distance**2 / sigma_squared) / np.sqrt(sigma_squared * 2 * np.pi)
-
-
-def p_equiv_radius(p: float, sigma: float) -> float:
-    """Find radius at which you eliminate fraction p of a radial Gaussian probability distribution with standard
-    deviation sigma.
-    """
-    assert p < 1.0, f"p was {p}, must be less than 1"
-    return np.sqrt(-2 * sigma**2 * np.log(p))
-
-
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def generate_spatial_weights_fixed_radius(
-    adata: AnnData,
-    spatial_key: str = "spatial",
-    p: float = 0.05,
-    sigma: float = 100,
-    nbr_object: NearestNeighbors = None,
-    method: str = "ball_tree",
-    verbose: bool = False,
-) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix, AnnData]:
-    """Starting from a radius-based neighbor graph, generate a sparse graph (csr format) with weighted edges, where edge
-    weights decay with distance.
-
-    Note that decay is assumed to follow a Gaussian distribution.
-
-    Args:
-        spatial_key: Key in .obsm where x- and y-coordinates are stored.
-        p: Cutoff for Gaussian (used to find where distribution drops below p * (max_value)).
-        sigma: Standard deviation of the Gaussian.
-        method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-            "ball_tree" and "kd_tree".
-
-    Returns:
-        out_graph: Weighted nearest neighbors graph with shape [n_samples, n_samples].
-        distance_graph: Unweighted graph with shape [n_samples, n_samples].
-        adata: Updated AnnData object containing 'spatial_distances','spatial_weights','spatial_connectivities' in .obsp and 'spatial_neighbors' in .uns.
-    """
-    logger = lm.get_main_logger()
-
-    # Get locations from AnnData:
-    locations = adata.obsm[spatial_key]
-
-    # Selecting r for neighbor graph construction:
-    r = p_equiv_radius(p, sigma)
-    if verbose:
-        logger.info(f"Equivalent radius for removing {p} of " f"gaussian distribution with sigma {sigma} is: {r}\n")
-
-    # Define the nearest neighbor graph:
-    nbrs, distance_graph = generate_spatial_distance_graph(locations, nbr_object=nbr_object, radius=r)
-
-    # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
-    # NearestNeighbors run:
-    distances, knn = nbrs.kneighbors(locations)
-    n_obs, n_neighbors = knn.shape
-    distances = scipy.sparse.csr_matrix(
-        (
-            distances.flatten(),
-            (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
-        ),
-        shape=(n_obs, n_obs),
-    )
-    connectivities = distances.copy()
-    connectivities.data[connectivities.data > 0] = 1
-
-    distances.eliminate_zeros()
-    connectivities.eliminate_zeros()
-
-    logger.info_insert_adata("spatial_connectivities", adata_attr="obsp")
-    logger.info_insert_adata("spatial_distances", adata_attr="obsp")
-
-    adata.obsp["spatial_distances"] = distances
-    adata.obsp["spatial_connectivities"] = connectivities
-
-    logger.info_insert_adata("spatial_neighbors", adata_attr="uns")
-    logger.info_insert_adata("spatial_neighbors.indices", adata_attr="uns")
-    logger.info_insert_adata("spatial_neighbors.params", adata_attr="uns")
-
-    adata.uns["spatial_neighbors"] = {}
-    adata.uns["spatial_neighbors"]["indices"] = knn
-    adata.uns["spatial_neighbors"]["params"] = {"n_neighbors": n_neighbors, "method": method, "metric": "euclidean"}
-
-    graph_out = distance_graph.copy()
-
-    # Convert distances to weights
-    graph_out.data = gaussian_weight_2d(graph_out.data, sigma)
-
-    out_graph = row_normalize(graph_out, verbose=verbose)
-
-    logger.info_insert_adata("spatial_weights", adata_attr="obsp")
-    adata.obsp["spatial_weights"] = out_graph
-
-    return out_graph, distance_graph, adata
-
-
+# ---------------------------------------------------------------------------------------------------
+# Utility functions
+# ---------------------------------------------------------------------------------------------------
 def calculate_distance(position: np.ndarray, dist_metric: str = "euclidean") -> np.ndarray:
     """Given array of x- and y-coordinates, compute pairwise distances between all samples using Euclidean distance."""
     distance_matrix = squareform(pdist(position, metric=dist_metric))
@@ -587,264 +32,500 @@ def calculate_distance(position: np.ndarray, dist_metric: str = "euclidean") -> 
     return distance_matrix
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def construct_spatial_distance_matrix(
-    adata: AnnData,
-    spatial_key: str = "spatial",
-    dist_metric: str = "euclidean",
-    min_dist_threshold: Optional[float] = None,
-    max_dist_threshold: Optional[float] = None,
-) -> AnnData:
-    """Given AnnData object and key to array of x- and y-coordinates, compute pairwise spatial distances between all
-    samples.
+def local_dist(coords_i: np.ndarray, coords: np.ndarray):
+    """For single sample, compute distance between that sample and each other sample in the data.
 
     Args:
-        adata: An AnnData object.
-        spatial_key: Key in .obsm in which x- and y-coordinates are stored.
-        dist_metric: Distance metric to use. Options: ‘braycurtis’, ‘canberra’, ‘chebyshev’, ‘cityblock’, ‘correlation’,
-            ‘cosine’, ‘dice’, ‘euclidean’, ‘hamming’, ‘jaccard’, ‘jensenshannon’, ‘kulczynski1’, ‘mahalanobis’,
-            ‘matching’, ‘minkowski’, ‘rogerstanimoto’, ‘russellrao’, ‘seuclidean’, ‘sokalmichener’, ‘sokalsneath’,
-            ‘sqeuclidean’, ‘yule’.
-        min_dist_threshold: Optional, sets the max allowable distance that a cell can be from its nearest neighbor to
-            avoid being filtered out. Used to remove singular isolated cells.
-        max_dist_threshold: Optional, used to remove clusters of isolated cells close to one another but far from all
-            other cells.
+        coords_i: Array of shape (n, ), where n is the dimensionality of the data; the coordinates of a single point
+        coords: Array of shape (m, n), where n is the dimensionality of the data and m is an arbitrary number of
+            samples; pairwise distances from `coords_i`.
 
     Returns:
-        adata: Input AnnData object with spatial distance matrix in .obsp.
+        distances: array-like, shape (m, ), where m is an arbitrary number of samples. The pairwise distances
+            between `coords_i` and each point in `coords`.
     """
-    logger = lm.get_main_logger()
-
-    if not isinstance(adata.obsm[spatial_key], np.ndarray):
-        pos = adata.obsm[spatial_key].values
-    else:
-        pos = adata.obsm[spatial_key]
-
-    distance_matrix = squareform(pdist(pos, metric=dist_metric))
-
-    logger.info_insert_adata(f"{spatial_key}_pairwise_distances", adata_attr="obsp")
-    adata.obsp[f"{spatial_key}_pairwise_distances"] = distance_matrix
-
-    # Optionally, filter the pairwise distance matrix:
-    if min_dist_threshold is not None:
-        adata = adata[
-            np.min(
-                adata.obsp[f"{spatial_key}_pairwise_distances"].A,
-                axis=1,
-                initial=1e10,
-                where=np.array(adata.obsp[f"{spatial_key}_pairwise_distances"].A > 0),
-            )
-            <= min_dist_threshold
-        ]
-    logger.info(f"Number of buckets remaining after filtering by `min_dist_threshold`: {adata.n_obs}")
-
-    if max_dist_threshold is not None:
-        adata = adata[np.max(adata.obsp[f"{spatial_key}_pairwise_distances"].A, axis=1) <= max_dist_threshold]
-    logger.info(f"Number of buckets remaining after filtering by `max_dist_threshold`: {adata.n_obs}")
-
-    return adata
+    distances = np.sqrt(np.sum((coords_i - coords) ** 2, axis=1))
+    return distances
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def construct_geodesic_distance_matrix(
-    adata: AnnData,
-    spatial_key: str = "spatial",
-    nbr_object: NearestNeighbors = None,
-    method: str = "ball_tree",
-    n_neighbors: int = 30,
-    min_dist_threshold: Optional[float] = None,
-    max_dist_threshold: Optional[float] = None,
-) -> AnnData:
-    """Given AnnData object and key to array of x- and y-coordinates, compute geodesic distance each sample and its
-    nearest neighbors (geodesic distance is the shortest path between vertices, where paths are lines in space that
-    connect points).
+def jaccard_index(row_i: np.ndarray, array: np.ndarray):
+    """Compute the Jaccard index between a row of a binary array and all other rows.
 
     Args:
-        adata: AnnData object.
-        spatial_key: Key in .obsm in which x- and y-coordinates are stored.
-        nbr_object : An optional sklearn.neighbors.NearestNeighbors object. Can optionally create a nearest neighbor
-            object with custom functionality.
-        method: Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
-            "ball_tree" and "kd_tree".
-        n_neighbors: For each bucket, number of neighbors to include in the distance matrix.
-        min_dist_threshold: Optional, sets the max allowable distance that a cell can be from its nearest neighbor to
-            avoid being filtered out. Used to remove singular isolated cells.
-        max_dist_threshold: Optional, used to remove clusters of isolated cells close to one another but far from all
-            other cells.
+        row_i: 1D binary array representing the row for which to compute the Jaccard index.
+        array: 2D binary array containing the rows to compare against.
 
     Returns:
-        adata: Input AnnData object with spatial distance matrix and geodesic distance matrix in .obsp.
+        jaccard_indices: 1D array of Jaccard indices between `row_i` and each row in `array`.
     """
-    logger = lm.get_main_logger()
-    unfiltered_n_buckets = adata.n_obs
+    intersect = np.logical_and(row_i, array)
+    union = np.logical_or(row_i, array)
+    jaccard_scores = np.sum(intersect, axis=1) / np.sum(union, axis=1)
+    return jaccard_scores
 
-    if not isinstance(adata.obsm[spatial_key], np.ndarray):
-        pos = adata.obsm[spatial_key].values
-    else:
-        pos = adata.obsm[spatial_key]
 
-    # Define the nearest-neighbors graph- find only the top n_neighbors to ease computational burden when it comes
-    # time to find all pairwise Geodesic distances.
-    nbrs, distance_graph = generate_spatial_distance_graph(
-        pos,
-        nbr_object=nbr_object,
-        method=method,
-        num_neighbors=n_neighbors,
-        radius=None,
+def normalize_adj(adj: np.ndarray, exclude_self: bool = True) -> np.ndarray:
+    """Symmetrically normalize adjacency matrix, set diagonal to 1 and return processed adjacency array.
+
+    Args:
+        adj: Pairwise distance matrix of shape [n_samples, n_samples].
+        exclude_self: Set True to set diagonal of adjacency matrix to 1.
+
+    Returns:
+        adj_proc: The normalized adjacency matrix.
+    """
+    adj = scipy.sparse.coo_matrix(adj)
+    rowsum = np.array(adj.sum(1))
+    d_inv_sqrt = np.power(rowsum, -0.5).flatten()
+    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.0
+    d_mat_inv_sqrt = scipy.sparse.diags(d_inv_sqrt)
+    adj = adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt)
+    adj_proc = adj.toarray() if exclude_self else adj.toarray() + np.eye(adj.shape[0])
+
+    return adj_proc
+
+
+def adj_to_knn(adj: np.ndarray, n_neighbors: int = 15) -> Tuple[np.ndarray, np.ndarray]:
+    """Given an adjacency matrix, convert to KNN graph.
+
+    Args:
+        adj: Adjacency matrix of shape (n_samples, n_samples)
+        n_neighbors: Number of nearest neighbors to include in the KNN graph
+
+    Returns:
+        indices: Array (n_samples x n_neighbors) storing the indices for each node's nearest neighbors in the
+            knn graph.
+        weights: Array (n_samples x n_neighbors) storing the edge weights for each node's nearest neighbors in
+            the knn graph.
+    """
+    n_obs = adj.shape[0]
+    indices = np.zeros((n_obs, n_neighbors), dtype=int)
+    weights = np.zeros((n_obs, n_neighbors), dtype=float)
+
+    for i in range(n_obs):
+        current_neighbors = adj[i, :].nonzero()
+        # Set self as nearest neighbor
+        indices[i, :] = i
+        weights[i, :] = 0.0
+
+        # there could be more or less than n_neighbors because of an approximate search
+        current_n_neighbors = len(current_neighbors[1])
+
+        if current_n_neighbors > n_neighbors - 1:
+            sorted_indices = np.argsort(adj[i][:, current_neighbors[1]].A)[0][: (n_neighbors - 1)]
+            indices[i, 1:] = current_neighbors[1][sorted_indices]
+            weights[i, 1:] = adj[i][0, current_neighbors[1][sorted_indices]].A
+        else:
+            idx_ = np.arange(1, (current_n_neighbors + 1))
+            indices[i, idx_] = current_neighbors[1]
+            weights[i, idx_] = adj[i][:, current_neighbors[1]].A
+
+    return indices, weights
+
+
+def knn_to_adj(knn_indices: np.ndarray, knn_weights: np.ndarray) -> scipy.sparse.csr_matrix:
+    """Given the indices and weights of a KNN graph, convert to adjacency matrix.
+
+    Args:
+        knn_indices: Array (n_samples x n_neighbors) storing the indices for each node's nearest neighbors in the
+            knn graph.
+        knn_weights: Array (n_samples x n_neighbors) storing the edge weights for each node's nearest neighbors in
+            the knn graph.
+
+    Returns:
+        adj: The adjacency matrix corresponding to the KNN graph
+    """
+    adj = scipy.sparse.csr_matrix(
+        (
+            knn_weights.flatten(),
+            (
+                np.repeat(knn_indices[:, 0], knn_indices.shape[1]),
+                knn_indices.flatten(),
+            ),
+        )
     )
+    adj.eliminate_zeros()
+    return adj
 
-    # Update AnnData to add spatial distances from the sklearn NearestNeighbors run:
-    distances, knn = nbrs.kneighbors(pos, n_neighbors=n_neighbors)
-    n_obs, n_neighbors = knn.shape
 
-    # In case filtering is not performed, at this point save a copy of the dense distance matrix for Geodesic distance
-    # computation:
-    if min_dist_threshold is None and max_dist_threshold is None:
-        dists_copy = distances.copy()
+def compute_distances_and_connectivities(
+    knn_indices: np.ndarray, distances: np.ndarray
+) -> Tuple[scipy.sparse.csr_matrix, scipy.sparse.csr_matrix]:
+    """Computes connectivity and sparse distance matrices
 
+    Args:
+        knn_indices: Array of shape (n_samples, n_samples) containing the indices of the nearest neighbors for each
+            sample.
+        distances: The distances to the n_neighbors the closest points in knn graph
+
+    Returns:
+        distances: Sparse distance matrix
+        connectivities: Sparse connectivity matrix
+    """
+    n_obs, n_neighbors = knn_indices.shape
     distances = scipy.sparse.csr_matrix(
         (
             distances.flatten(),
-            (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
+            (np.repeat(np.arange(n_obs), n_neighbors), knn_indices.flatten()),
         ),
         shape=(n_obs, n_obs),
     )
+    connectivities = distances.copy()
+    connectivities.data[connectivities.data > 0] = 1
+
     distances.eliminate_zeros()
+    connectivities.eliminate_zeros()
 
-    logger.info_insert_adata("spatial_distances", adata_attr="obsp")
-    adata.obsp["spatial_distances"] = distances
-
-    # Optionally, filter the pairwise distance matrix:
-    if min_dist_threshold is not None:
-        adata = adata[
-            np.min(
-                adata.obsp[f"{spatial_key}_pairwise_distances"].A,
-                axis=1,
-                initial=1e10,
-                where=np.array(adata.obsp[f"{spatial_key}_pairwise_distances"].A > 0),
-            )
-            <= min_dist_threshold
-        ]
-        logger.info(f"Number of buckets remaining after filtering by `min_dist_threshold`: {adata.n_obs}")
-
-    if max_dist_threshold is not None:
-        adata = adata[np.max(adata.obsp["spatial_distances"].A, axis=1) <= max_dist_threshold]
-        logger.info(f"Number of buckets remaining after filtering by `max_dist_threshold`: {adata.n_obs}")
-
-    # If filtering was performed, recompute the distance matrix (repeat process above, but with the updated AnnData
-    # object) to reflect the change:
-    if adata.n_obs != unfiltered_n_buckets:
-        if not isinstance(adata.obsm[spatial_key], np.ndarray):
-            pos = adata.obsm[spatial_key].values
-        else:
-            pos = adata.obsm[spatial_key]
-
-        # Define the nearest-neighbors graph
-        nbrs, distance_graph = generate_spatial_distance_graph(
-            pos,
-            nbr_object=nbr_object,
-            method=method,
-            num_neighbors=n_neighbors,
-            radius=None,
-        )
-
-        # Update AnnData to add spatial distances from the sklearn NearestNeighbors run:
-        distances, knn = nbrs.kneighbors(pos)
-        n_obs, n_neighbors = knn.shape
-
-        # Store Euclidean distances as sparse matrix:
-        distances = scipy.sparse.csr_matrix(
-            (
-                distances.flatten(),
-                (np.repeat(np.arange(n_obs), n_neighbors), knn.flatten()),
-            ),
-            shape=(n_obs, n_obs),
-        )
-        distances.eliminate_zeros()
-
-        logger.info("Updating `spatial_distances` in .obsp since some buckets were filtered out of the AnnData object.")
-        adata.obsp["spatial_distances"] = distances
-
-    distances[distances == np.inf] = 0
-    distances.eliminate_zeros()
-
-    # Compute Geodesic distance matrix and store as sparse matrix:
-    geodesic_dist_mat = scipy.sparse.csr_matrix(floyd_warshall(csgraph=distances, directed=False))
-    print(geodesic_dist_mat.shape)
-    logger.info_insert_adata("geodesic_pairwise_distances", adata_attr="obsp")
-    adata.obsp["geodesic_pairwise_distances"] = geodesic_dist_mat
-
-    return adata
+    return distances, connectivities
 
 
-@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
-def construct_binned_spatial_distance(
-    adata: AnnData,
-    bin_size: int = 1,
-    coords_key: str = "spatial",
-    distance_method: str = "spatial",
-    min_dist_threshold: Optional[float] = None,
-    max_dist_threshold: Optional[float] = None,
-    distance_metric: Optional[str] = "euclidean",
-    n_neighbors: Optional[int] = 30,
-):
-    """Given AnnData object and key to array of x- and y-coordinates, first "collapse" the dataset by aggregating
-    nearby cells together into bins, and then compute pairwise spatial distances between all samples.
+def calculate_distances_chunk(coords_chunk: np.ndarray, coords: np.ndarray) -> np.ndarray:
+    """Pairwise distance computation, coupled with :func `find_bw`.
 
     Args:
-        adata: AnnData object.
-        bin_size: Shrinking factor to be applied to spatial coordinates; the size of this factor dictates the size of
-            the regions that will be combined into one pseudo-cell (larger -> generally higher number of cells in
-            each bin).
-        coords_key: Key in .obsm in which spatial coordinates are stored.
-        distance_method: Options: "spatial" and "geodesic", indicating that pairwise spatial distance or pairwise
-            geodesic distance should be computed, respectively.
-        distance_metric: Optional, can be used to change the distance metric used when "distance_method" is "spatial".
-            Options: ‘braycurtis’, ‘canberra’, ‘chebyshev’, ‘cityblock’, ‘correlation’, ‘cosine’, ‘dice’,
-            ‘euclidean’, ‘hamming’, ‘jaccard’, ‘jensenshannon’, ‘kulczynski1’, ‘mahalanobis’, ‘matching’,
-            ‘minkowski’, ‘rogerstanimoto’, ‘russellrao’, ‘seuclidean’, ‘sokalmichener’, ‘sokalsneath’,
-            ‘sqeuclidean’, ‘yule’.
-        min_dist_threshold: Optional, sets the max allowable distance that a cell can be from its nearest neighbor to
-            avoid being filtered out. Used to remove singular isolated cells.
-        max_dist_threshold: Optional, used to remove clusters of isolated cells close to one another but far from all
-            other cells.
-        n_neighbors: For each bucket, number of neighbors to include in the distance matrix. Must be given if
-            "distance_method" is "geodesic".
+        coords_chunk: Array of shape (n_samples_chunk, n_features) containing coordinates of the chunk of interest.
+        coords: Array of shape (n_samples, n_features) containing the coordinates of all points.
+    """
+    distances_chunk = pairwise_distances(coords_chunk, coords, metric="euclidean")
+    return distances_chunk
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def find_bw_for_n_neighbors(
+    adata: anndata.AnnData,
+    coords_key: str = "spatial",
+    target_n_neighbors: int = 6,
+    initial_bw: Optional[float] = None,
+    chunk_size: int = 1000,
+    exclude_self: bool = False,
+    verbose: bool = True,
+) -> float:
+    """Finds the bandwidth such that on average, cells in the sample have n neighbors.
+
+    Args:
+        adata: AnnData object containing coordinates for all cells
+        coords_key: Key in adata.obsm where the spatial coordinates are stored
+        target_n_neighbors: Target average number of neighbors per cell
+        initial_bw: Can optionally be used to set the starting distance for the bandwidth search
+        chunk_size: Number of cells to compute pairwise distance for at once
+        exclude_self: Whether to exclude self from the list of neighbors
+        verbose: Whether to print the bandwidth at each iteration. If False, will only print the final bandwidth.
 
     Returns:
-        adata_binned: New AnnData object generated by the binning process.
-        M: Pairwise distance array.
+        bandwidth: Bandwidth in distance units
     """
-    logger = lm.get_main_logger()
-    adata_binned = bin_adata(adata, bin_size, coords_key=coords_key)
+    coords = adata.obsm[coords_key]
 
-    if distance_method == "spatial":
-        adata_binned = construct_spatial_distance_matrix(
-            adata_binned,
-            spatial_key=coords_key,
-            dist_metric=distance_metric,
-            min_dist_threshold=min_dist_threshold,
-            max_dist_threshold=max_dist_threshold,
-        )
-        M = adata_binned.obsp[f"{coords_key}_pairwise_distances"]
-    elif distance_method == "geodesic":
-        adata_binned = construct_geodesic_distance_matrix(
-            adata_binned,
-            spatial_key=coords_key,
-            n_neighbors=n_neighbors,
-            min_dist_threshold=min_dist_threshold,
-            max_dist_threshold=max_dist_threshold,
-        )
-        M = adata_binned.obsp["geodesic_pairwise_distances"]
-    else:
-        logger.error("Invalid input given to `distance_method`. Options: 'spatial' or 'geodesic'.")
+    # Compute distances in chunks
+    chunks = [coords[i : i + chunk_size] for i in range(0, coords.shape[0], chunk_size)]
+    # Calculate pairwise distances for each chunk in parallel
+    partial_func = partial(calculate_distances_chunk, coords=coords)
+    distances = Parallel(n_jobs=-1)(delayed(partial_func)(chunk) for chunk in chunks)
+    # Concatenate the results to get the full pairwise distance matrix
+    distances = np.concatenate(distances, axis=0)
 
-    if np.sum(~np.isfinite(M)) > 0:
-        logger.error("Distance matrix has inf value")
+    # Initialize bandwidth:
+    bandwidth = 88 if initial_bw is None else initial_bw
+    if verbose:
+        print(f"Initial bandwidth: {bandwidth}")
 
-    return adata_binned, M
+    # Iteratively adjust bandwidth:
+    while True:
+        bw_dist = distances / bandwidth
+        if exclude_self:
+            neighbor_counts = np.sum(bw_dist <= 1, axis=1) - 1
+        else:
+            neighbor_counts = np.sum(bw_dist <= 1, axis=1)
+
+        # Check if the average number of neighbors is close to the target
+        avg_neighbors = np.mean(neighbor_counts)
+        if verbose:
+            print(f"For bandwidth {bandwidth}, found {avg_neighbors} neighbors on average.")
+        if np.round(avg_neighbors) == target_n_neighbors:
+            print(f"Final bandwidth: {bandwidth}")
+            break
+
+        # Adjust bandwidth if needed
+        if avg_neighbors > target_n_neighbors:
+            bandwidth *= 0.8  # decrease bandwidth
+        else:
+            bandwidth *= 1.2  # increase bandwidth
+        if verbose:
+            print(f"New bandwidth: {bandwidth}")
+
+    return bandwidth
 
 
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def find_threshold_distance(
+    adata: anndata.AnnData, coords_key: str = "X_umap", n_neighbors: int = 10, chunk_size: int = 1000
+) -> float:
+    """Finds threshold distance beyond which there is a dramatic increase in the average distance to remaining
+    nearest neighbors.
+
+    Args:
+        adata: AnnData object containing coordinates for all cells
+        coords_key: Key in adata.obsm where the spatial coordinates are stored
+        n_neighbors: Will first compute the number of nearest neighbors as a comparison for querying additional
+            distance values.
+        chunk_size: Number of cells to compute pairwise distance for at once
+
+    Returns:
+        bandwidth: Bandwidth in distance units
+    """
+    coords = adata.obsm[coords_key]
+
+    # Compute distances in chunks
+    chunks = [coords[i : i + chunk_size] for i in range(0, coords.shape[0], chunk_size)]
+    # Calculate pairwise distances for each chunk in parallel
+    partial_func = partial(calculate_distances_chunk, coords=coords)
+    distances = Parallel(n_jobs=-1)(delayed(partial_func)(chunk) for chunk in chunks)
+    # Concatenate the results to get the full pairwise distance matrix
+    distances = np.concatenate(distances, axis=0)
+
+    # Find the k nearest neighbors for each sample
+    k_nearest_distances = np.sort(distances)[:, :n_neighbors]
+
+    # Compute the mean and standard deviation of the k nearest distances
+    mean_k_distances = np.mean(k_nearest_distances, axis=1)
+    std_k_distances = np.std(k_nearest_distances, axis=1)
+
+    # Find the distance where there is a dramatic increase compared to the k nearest neighbors
+    threshold_distance = np.max(mean_k_distances + 3 * std_k_distances)
+
+    return threshold_distance
+
+
+# ---------------------------------------------------------------------------------------------------
+# Kernel functions
+# ---------------------------------------------------------------------------------------------------
+class Kernel(object):
+    """
+    Spatial weights for regression models are learned using kernel functions.
+
+    Args:
+        i: Index of the point for which to estimate the density
+        data: Array of shape (n_samples, n_features) representing the data. If aiming to derive weights from spatial
+            distance, this should be the array of spatial positions.
+        bw: Bandwidth parameter for the kernel density estimation
+        cov: Optional array of shape (n_samples, ). Can be used to adjust the distance calculation to look only at
+            samples of interest vs. samples not of interest, which is determined from nonzero values in this vector.
+            This can be used to modify the modeling process based on factors thought to reflect biological differences,
+            for example, to condition on histological classification, passing a distance threshold, etc. If 'ct' is
+            also given, will look for samples of interest that are also of the same cell type.
+        ct: Optional array of shape (n_samples, ), containing vector where cell types are encoded as integers. Can be
+            used to condition nearest neighbor finding on cell type or other category.
+        expr_mat: Can be used together with 'cov' (so will only be used if 'cov' is not None)- if the spatial neighbors
+            are not consistent with the sample in question (determined by assessing similarity by "cov"),
+            there may be different mechanisms at play. In this case, will instead search for nearest neighbors in
+            the gene expression space if given.
+        fixed: If True, `bw` is treated as a fixed bandwidth parameter. Otherwise, it is treated as the number
+            of nearest neighbors to include in the bandwidth estimation.
+        exclude_self: If True, ignore each sample itself when computing the kernel density estimation
+        function: The name of the kernel function to use. Valid options are as follows (note that in equations,
+            any "1" can be substituted for any other value(s)):
+            - 'triangular': linearly decaying kernel,
+                :math K(u) =
+                    \begin{cases}
+                        1-|u| & \text{if} |u| \leq 1 \ 0 & \text{otherwise}
+                    \end{cases},
+            - 'quadratic': quadratically decaying kernel,
+                :math K(u) =
+                    \begin{cases}
+                        \dfrac{3}{4}(1-u^2)
+                    \end{cases},
+            - 'gaussian': decays following normal distribution, :math K(u) = \dfrac{1}{\sqrt{2\pi}} e^{-\frac{1}{2}u^2},
+            - 'uniform': AKA the tophat kernel, sets weight of all observations within the bandwidth to the same value,
+                :math K(u) =
+                    \begin{cases}
+                        1 & \text{if} |u| \leq 1 \\ 0 & \text{otherwise}
+                    \end{cases},
+            - 'exponential': exponentially decaying kernel, :math K(u) = e^{-|u|},
+            - 'bisquare': assigns a weight of zero to observations outside of the bandwidth, and decays within the
+                bandwidth following equation
+                    :math K(u) =
+                        \begin{cases}
+                            \dfrac{15}{16}(1-u^2)^2 & \text{if} |u| \leq 1 \\ 0 & \text{otherwise}
+                        \end{cases}.
+        threshold: Threshold for the kernel density estimation. If the density is below this threshold, the density
+            will be set to zero.
+        eps: Error-correcting factor to avoid division by zero
+        sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
+        normalize_weights: If True, the weights will be normalized to sum to 1.
+        use_expression_neighbors: If True, will only use the expression matrix to find nearest neighbors.
+    """
+
+    def __init__(
+        self,
+        i: int,
+        data: Union[np.ndarray, scipy.sparse.spmatrix],
+        bw: Union[int, float],
+        cov: Optional[np.ndarray] = None,
+        ct: Optional[np.ndarray] = None,
+        expr_mat: Optional[np.ndarray] = None,
+        fixed: bool = True,
+        exclude_self: bool = False,
+        function: str = "triangular",
+        threshold: float = 1e-5,
+        eps: float = 1.0000001,
+        sparse_array: bool = False,
+        normalize_weights: bool = False,
+        use_expression_neighbors: bool = False,
+    ):
+
+        if use_expression_neighbors:
+            self.dist_vector = local_dist(expr_mat[i], expr_mat).reshape(-1)
+            self.function = "uniform"
+        else:
+            self.dist_vector = local_dist(data[i], data).reshape(-1)
+            self.function = function.lower()
+
+        if fixed:
+            self.bandwidth = float(bw)
+        else:
+            if exclude_self:
+                self.bandwidth = np.partition(self.dist_vector, int(bw) + 1)[int(bw) + 1] * eps
+            else:
+                self.bandwidth = np.partition(self.dist_vector, int(bw))[int(bw)] * eps
+
+        max_dist = np.max(self.dist_vector)
+        if cov is not None and ct is not None:
+            # If condition is met, compare to samples of the same cell type:
+            if cov[i] == 1:
+                self.dist_vector[ct != ct[i]] = max_dist
+        elif cov is not None and ct is not None:
+            # Ignore samples that do not meet the condition:
+            self.dist_vector[cov == 0] = max_dist
+        elif ct is not None:
+            # Compare to samples of the same cell type:
+            self.dist_vector[ct != ct[i]] = max_dist
+
+        bw_dist = self.dist_vector / self.bandwidth
+        # Exclude self as a neighbor:
+        if exclude_self:
+            bw_dist = np.where(bw_dist == 0.0, np.max(bw_dist), bw_dist)
+        self.kernel = self._kernel_functions(bw_dist)
+
+        # Bisquare and uniform need to be truncated if the sample is outside of the provided bandwidth:
+        if self.function in ["bisquare", "uniform"]:
+            self.kernel[bw_dist > 1] = 0
+
+        # Set density to zero if below threshold:
+        self.kernel[self.kernel < threshold] = 0
+        n_neighbors = np.count_nonzero(self.kernel)
+
+        if cov is not None:
+            # If there are outlier samples that do not match condition of this sample within the neighborhood,
+            # set their weights to zero- set this threshold number to 1/10 of the number of neighbors:
+            thresh = int(0.1 * n_neighbors) if exclude_self else int(0.1 * n_neighbors + 1)
+            if np.sum(cov[self.kernel > 0] == 0) < thresh:
+                self.kernel[(cov == 0) & (self.kernel > 0)] = 0
+
+        n_neighbors = np.count_nonzero(self.kernel)
+
+        # Normalize the kernel by the number of non-zero neighbors, if applicable:
+        if normalize_weights:
+            self.kernel = self.kernel / n_neighbors
+
+        if sparse_array:
+            self.kernel = scipy.sparse.csr_matrix(self.kernel)
+
+    def _kernel_functions(self, x):
+        if self.function == "triangular":
+            return 1 - x
+        elif self.function == "uniform":
+            return np.ones(x.shape) * 0.5
+        elif self.function == "quadratic":
+            return (3.0 / 4) * (1 - x**2)
+        # elif self.function == "bisquare":
+        #     return (15.0 / 16) * (1 - x**2) ** 2
+        elif self.function == "bisquare":
+            return (1 - (x) ** 2) ** 2
+        elif self.function == "gaussian":
+            return np.exp(-0.5 * (x) ** 2)
+        elif self.function == "exponential":
+            return np.exp(-x)
+        else:
+            raise ValueError(
+                f'Unsupported kernel function. Valid options: "triangular", "uniform", "quadratic", '
+                f'"bisquare", "gaussian" or "exponential". Got {self.function}.'
+            )
+
+
+def get_wi(
+    i: int,
+    n_samples: int,
+    coords: np.ndarray,
+    cov: Optional[np.ndarray] = None,
+    ct: Optional[np.ndarray] = None,
+    expr_mat: Optional[np.ndarray] = None,
+    fixed_bw: bool = True,
+    exclude_self: bool = False,
+    kernel: str = "gaussian",
+    bw: Union[float, int] = 100,
+    threshold: float = 1e-5,
+    sparse_array: bool = False,
+    normalize_weights: bool = False,
+    use_expression_neighbors: bool = False,
+) -> scipy.sparse.csr_matrix:
+    """Get spatial weights for an individual sample, given the coordinates of all samples in space.
+
+    Args:
+        i: Index of sample for which weights are to be calculated to all other samples in the dataset
+        n_samples: Total number of samples in the dataset
+        coords: Array of shape (n_samples, 2) or (n_samples, 3) representing the spatial coordinates of each sample
+        cov: Optional array of shape (n_samples, ). Can be used to adjust the distance calculation to look only at
+            samples of interest vs. samples not of interest, which is determined from nonzero values in this vector.
+            This can be used to modify the modeling process based on factors thought to reflect biological differences,
+            for example, to condition on histological classification, passing a distance threshold, etc. If 'ct' is
+            also given, will look for samples of interest that are also of the same cell type.
+        ct: Optional array of shape (n_samples, ), containing vector where cell types are encoded as integers. Can be
+            used to condition nearest neighbor finding on cell type or other category.
+        expr_mat: Can be used together with 'cov'- if the spatial neighbors are not consistent with the sample in
+            question (determined by assessing similarity by "cov"), there may be different mechanisms at play. In this
+            case, will instead search for nearest neighbors in the gene expression space if given.
+        fixed_bw: If True, `bw` is treated as a spatial distance for computing spatial weights. Otherwise,
+            it is treated as the number of neighbors.
+        exclude_self: If True, ignore each sample itself when computing the kernel density estimation
+        kernel: The name of the kernel function to use. Valid options: "triangular", "uniform", "quadratic",
+            "bisquare", "gaussian" or "exponential"
+        bw: Bandwidth for the spatial kernel
+        threshold: Threshold for the kernel density estimation. If the density is below this threshold, the density
+            will be set to zero.
+        sparse_array: If True, the kernel will be converted to sparse array. Recommended for large datasets.
+        normalize_weights: If True, the weights will be normalized to sum to 1.
+        use_expression_neighbors: If True, will only use expression neighbors to determine the bandwidth.
+
+    Returns:
+        wi: Array of weights for sample of interest
+    """
+
+    if bw == np.inf:
+        wi = np.ones(n_samples)
+        return wi
+
+    wi = Kernel(
+        i,
+        coords,
+        bw,
+        cov=cov,
+        ct=ct,
+        expr_mat=expr_mat,
+        fixed=fixed_bw,
+        exclude_self=exclude_self,
+        function=kernel,
+        threshold=threshold,
+        sparse_array=sparse_array,
+        normalize_weights=normalize_weights,
+        use_expression_neighbors=use_expression_neighbors,
+    ).kernel
+
+    return wi
+
+
+# ---------------------------------------------------------------------------------------------------
+# Construct nearest neighbor graphs
+# ---------------------------------------------------------------------------------------------------
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
 def construct_nn_graph(
     adata: AnnData,
@@ -895,8 +576,6 @@ def construct_nn_graph(
         neighbors_df = pd.DataFrame(interaction, index=list(adata.obs_names), columns=list(adata.obs_names))
         neighbors_df.to_csv(os.path.join(os.getcwd(), f"./neighbors/{save_id}_neighbors.csv"))
 
-    adata.obsp["graph_neigh"] = interaction
-
     # transform adj to symmetrical adj
     adj = interaction
 
@@ -907,25 +586,119 @@ def construct_nn_graph(
     if exclude_self:
         np.fill_diagonal(adj, 0)
 
-    adata.obsp["adj"] = adj
+    adata.obsp["adj"] = scipy.sparse.csr_matrix(adj)
 
 
-def normalize_adj(adj: np.ndarray, exclude_self: bool = True) -> np.ndarray:
-    """Symmetrically normalize adjacency matrix, set diagonal to 1 and return processed adjacency array.
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def neighbors(
+    adata: AnnData,
+    nbr_object: NearestNeighbors = None,
+    basis: str = "pca",
+    spatial_key: str = "spatial",
+    n_neighbors_method: str = "ball_tree",
+    n_pca_components: int = 30,
+    n_neighbors: int = 10,
+) -> Tuple[NearestNeighbors, AnnData]:
+    """Given an AnnData object, compute pairwise connectivity matrix in transcriptomic space
 
     Args:
-        adj: Pairwise distance matrix of shape [n_samples, n_samples].
-        exclude_self: Set True to set diagonal of adjacency matrix to 1.
+        adata : an anndata object.
+        nbr_object: An optional sklearn.neighbors.NearestNeighbors object. Can optionally create a nearest neighbor
+            object with custom functionality.
+        basis: str, default 'pca'
+            The space that will be used for nearest neighbor search. Valid names includes, for example, `pca`, `umap`,
+            or `X` for gene expression neighbors, 'spatial' for neighbors in the physical space.
+        spatial_key: Optional, can be used to specify .obsm entry in adata that contains spatial coordinates. Only
+            used if basis is 'spatial'.
+        n_neighbors_method: str, default 'ball_tree'
+            Specifies algorithm to use in computing neighbors using sklearn's implementation. Options:
+            "ball_tree" and "kd_tree".
+        n_pca_components: Only used if 'basis' is 'pca'. Sets number of principal components to compute (if PCA has
+            not already been computed for this dataset).
+        n_neighbors: Number of neighbors for kneighbors queries.
 
     Returns:
-        adj_proc: The normalized adjacency matrix.
+        nbrs : Object of class `sklearn.neighbors.NearestNeighbors`
+        adata : Modified AnnData object
     """
-    adj = scipy.sparse.coo_matrix(adj)
-    rowsum = np.array(adj.sum(1))
-    d_inv_sqrt = np.power(rowsum, -0.5).flatten()
-    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.0
-    d_mat_inv_sqrt = scipy.sparse.diags(d_inv_sqrt)
-    adj = adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt)
-    adj_proc = adj.toarray() if exclude_self else adj.toarray() + np.eye(adj.shape[0])
+    logger = lm.get_main_logger()
 
-    return adj_proc
+    if basis == "pca" and "X_pca" not in adata.obsm_keys():
+        logger.info(
+            "PCA to be used as basis for :func `transcriptomic_connectivity`, X_pca not found, " "computing PCA...",
+            indent_level=2,
+        )
+        pca = PCA(
+            n_components=min(n_pca_components, adata.X.shape[1] - 1),
+            svd_solver="arpack",
+            random_state=0,
+        )
+        fit = pca.fit(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else pca.fit(adata.X)
+        X_pca = fit.transform(adata.X.toarray()) if scipy.sparse.issparse(adata.X) else fit.transform(adata.X)
+        adata.obsm["X_pca"] = X_pca
+
+    if basis == "X":
+        X_data = adata.X
+    elif basis == "spatial":
+        X_data = adata.obsm[spatial_key]
+    elif "X_" + basis in adata.obsm_keys():
+        # Assume basis can be found in .obs under "X_{basis}":
+        X_data = adata.obsm["X_" + basis]
+    else:
+        raise ValueError("Invalid option given to 'basis'. Options: 'pca', 'umap', 'spatial' or 'X'.")
+
+    if nbr_object is None:
+        # set up neighbour object
+        nbrs = NearestNeighbors(algorithm=n_neighbors_method, n_neighbors=n_neighbors, metric="euclidean").fit(X_data)
+    else:  # use provided sklearn NN object
+        nbrs = nbr_object
+
+    # Update AnnData to add spatial distances, spatial connectivities and spatial neighbors from the sklearn
+    # NearestNeighbors run:
+    distances, knn = nbrs.kneighbors(X_data)
+    distances, connectivities = compute_distances_and_connectivities(knn, distances)
+
+    if basis != "spatial":
+        logger.info_insert_adata("expression_connectivities", adata_attr="obsp")
+        logger.info_insert_adata("expression_distances", adata_attr="obsp")
+
+        adata.obsp["expression_distances"] = distances
+        adata.obsp["expression_connectivities"] = connectivities
+    else:
+        logger.info_insert_adata("spatial_distances", adata_attr="obsp")
+        logger.info_insert_adata("spatial_connectivities", adata_attr="obsp")
+
+        adata.obsp["spatial_distances"] = distances
+        adata.obsp["spatial_connectivities"] = connectivities
+
+    return nbrs, adata
+
+
+# ---------------------------------------------------------------------------------------------------
+# Compute affinity matrix
+# ---------------------------------------------------------------------------------------------------
+def calculate_affinity(position: np.ndarray, dist_metric: str = "euclidean", n_neighbors: int = 10) -> np.ndarray:
+    """Given array of x- and y-coordinates, compute affinity matrix between all samples using Euclidean distance.
+    Math from: Zelnik-Manor, L., & Perona, P. (2004). Self-tuning spectral clustering.
+    Advances in neural information processing systems, 17.
+    https://proceedings.neurips.cc/paper/2004/file/40173ea48d9567f1f393b20c855bb40b-Paper.pdf
+    """
+    # Calculate euclidian distance matrix
+    dists = squareform(pdist(position, metric=dist_metric))
+
+    # For each row, sort the distances in ascending order and take the index of the n-th position (nearest neighbors)
+    knn_distances = np.sort(dists, axis=0)[n_neighbors]
+    knn_distances = knn_distances[np.newaxis].T
+
+    # Calculate sigma_i * sigma_j
+    local_scale = knn_distances.dot(knn_distances.T)
+
+    affinity_matrix = dists * dists
+    affinity_matrix = -affinity_matrix / local_scale
+
+    # Divide square distance matrix by local scale
+    affinity_matrix[np.where(np.isnan(affinity_matrix))] = 0.0
+    # Apply exponential
+    affinity_matrix = np.exp(affinity_matrix)
+    np.fill_diagonal(affinity_matrix, 0)
+    return affinity_matrix
