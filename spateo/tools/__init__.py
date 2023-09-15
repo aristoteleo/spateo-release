@@ -5,7 +5,8 @@ from .architype import (
     find_spatially_related_genes,
     get_genes_from_spatial_archetype,
 )
-#from .CCI_effects_modeling import *
+
+# from .CCI_effects_modeling import *
 from .cci_two_cluster import (
     find_cci_two_group,
     prepare_cci_cellpair_adata,
