@@ -65,7 +65,7 @@ def calculate_leiden_partition(
     graph_type: Literal["distance", "embedding"] = "distance",
     resolution: float = 1.0,
     n_iterations: int = -1,
-):
+) -> np.ndarray:
     """Performs Leiden clustering on a given dataset.
 
     Args:
@@ -79,7 +79,7 @@ def calculate_leiden_partition(
         n_iterations: The number of iterations for the Leiden algorithm (-1 for unlimited iterations)
 
     Returns:
-        adata: Modified AnnData object with cluster assignments added to `adata.obs`
+        clusters: Array containing cluster assignments
     """
     if adj is None and input_mat is None:
         raise ValueError("Either `adj` or `input_mat` must be specified")

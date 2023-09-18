@@ -604,14 +604,9 @@ class MuSIC:
             if self.log_transform:
                 if self.distr == "gaussian":
                     self.logger.info("Log-transforming expression inplace...")
-                    self.adata.X = log1p(self.adata)
+                    log1p(self.adata)
                 else:
-                    self.logger.info(
-                        "For the chosen distributional assumption, log-transform should not be applied. Log-transforming "
-                        "expression and storing in adata.layers['X_log1p'], but not applying inplace and not using for "
-                        "modeling."
-                    )
-                    self.adata.layers["X_log1p"] = log1p(self.adata)
+                    self.logger.info("For the chosen distributional assumption, log-transform should not be applied.")
 
             # If distribution is Poisson or negative binomial, add pseudocount to each nonzero so that the min. is 2 and
             # not 1- expression of 1 indicates some interaction has a positive effect, but the linear predictor that

@@ -42,6 +42,75 @@ def compute_gene_groups_p_val(gene: str, group1: anndata.AnnData, group2: anndat
 # ---------------------------------------------------------------------------------------------------
 # Compute highly variable genes
 # ---------------------------------------------------------------------------------------------------
+def get_highvar_genes(
+    expression: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix, scipy.sparse.coo_matrix],
+    expected_fano_threshold: Optional[float] = None,
+    numgenes: Optional[int] = None,
+    minimal_mean: float = 0.5,
+) -> Tuple[pd.DataFrame, Dict]:
+    """Find highly-variable genes in single-cell data matrices.
+
+    Args:
+        expression: Gene expression matrix
+        expected_fano_threshold: Optionally can be used to set a manual dispersion threshold (for definition of
+            "highly-variable")
+        numgenes: Optionally can be used to find the n most variable genes
+        minimal_mean: Sets a threshold on the minimum mean expression to consider
+    """
+    gene_mean = expression.mean(axis=0)
+    gene2_mean = np.square(expression).mean(axis=0)
+    gene_var = gene2_mean - np.square(gene_mean)
+
+    gene_mean = pd.Series(gene_mean)
+    gene_fano = gene_var / gene_mean
+
+    # Find parameters for expected fano line
+    top_genes = gene_mean.sort_values(ascending=False)[:20].index
+    A = (np.sqrt(gene_var) / gene_mean)[top_genes].min()
+
+    w_mean_low, w_mean_high = gene_mean.quantile([0.10, 0.90])
+    w_fano_low, w_fano_high = gene_fano.quantile([0.10, 0.90])
+    winsor_box = (
+        (gene_fano > w_fano_low) & (gene_fano < w_fano_high) & (gene_mean > w_mean_low) & (gene_mean < w_mean_high)
+    )
+    fano_median = gene_fano[winsor_box].median()
+    B = np.sqrt(fano_median)
+
+    gene_expected_fano = (A**2) * gene_mean + (B**2)
+    fano_ratio = gene_fano / gene_expected_fano
+
+    # Identify high var genes
+    if numgenes is not None:
+        highvargenes = fano_ratio.sort_values(ascending=False).index[:numgenes]
+        high_var_genes_ind = fano_ratio.index.isin(highvargenes)
+        T = None
+    else:
+        if not expected_fano_threshold:
+            T = 1.0 + gene_fano[winsor_box].std()
+        else:
+            T = expected_fano_threshold
+
+        high_var_genes_ind = (fano_ratio > T) & (gene_mean > minimal_mean)
+
+    gene_counts_stats = pd.DataFrame(
+        {
+            "mean": gene_mean,
+            "var": gene_var,
+            "fano": gene_fano,
+            "expected_fano": gene_expected_fano,
+            "high_var": high_var_genes_ind,
+            "fano_ratio": fano_ratio,
+        }
+    )
+    gene_fano_parameters = {
+        "A": A,
+        "B": B,
+        "T": T,
+        "minimal_mean": minimal_mean,
+    }
+    return (gene_counts_stats, gene_fano_parameters)
+
+
 def get_highvar_genes_sparse(
     expression: Union[
         np.ndarray,
