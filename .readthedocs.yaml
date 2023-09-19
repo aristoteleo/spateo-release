@@ -1,6 +1,6 @@
 version: 2
 build:
-  os: latest
+  os: ubuntu-20.04
 sphinx:
   configuration: docs/conf.py
 python:
