@@ -10,7 +10,6 @@ These include:
     of the predicted influence of the ligand on downstream expression.
 """
 import argparse
-import glob
 import itertools
 import math
 import os
@@ -19,9 +18,12 @@ from collections import Counter
 from typing import List, Literal, Optional, Tuple, Union
 
 import anndata
+import igviz as ig
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import pandas as pd
+import plotly
 import scipy.sparse
 import scipy.stats
 import seaborn as sns
@@ -30,7 +32,8 @@ from joblib import Parallel, delayed
 from matplotlib import rcParams
 from mpi4py import MPI
 from pysal import explore, lib
-from scipy.stats import pearsonr, spearmanr, ttest_1samp, zscore
+from scipy.stats import pearsonr, spearmanr, ttest_1samp
+from sklearn.decomposition import TruncatedSVD
 from sklearn.metrics import f1_score, mean_squared_error, roc_auc_score
 from sklearn.preprocessing import normalize
 
@@ -38,10 +41,7 @@ from ...configuration import config_spateo_rcParams
 from ...logging import logger_manager as lm
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...preprocessing.transform import log1p
-from ..dimensionality_reduction import (
-    find_optimal_n_umap_components,
-    umap_conn_indices_dist_embedding,
-)
+from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
 from .MuSIC import MuSIC
 from .regression_utils import multitesting_correction, permutation_testing, wald_test
 from .SWR_mpi import define_spateo_argparse
@@ -67,6 +67,7 @@ class MuSIC_Interpreter(MuSIC):
 
         self.k = self.arg_retrieve.top_k_receivers
 
+        self.logger.info("Gathering all information from preliminary L:R model...")
         # Coefficients:
         if not self.set_up:
             self.logger.info(
@@ -1595,21 +1596,24 @@ class MuSIC_Interpreter(MuSIC):
     def CCI_deg_detection_setup(
         self,
         group_key: str,
-        sender_or_receiver_degs: Literal["sender", "receiver"] = "sender",
+        sender_receiver_or_target_degs: Literal["sender", "receiver", "target"] = "sender",
         use_ligands: bool = True,
         use_receptors: bool = False,
         use_pathways: bool = False,
+        use_targets: bool = False,
         use_cell_types: bool = False,
+        compute_dim_reduction: bool = False,
     ):
         """Computes differential expression signatures of cells with various levels of ligand expression.
 
         Args:
             group_key: Key in `adata.obs` that corresponds to the cell type (or other grouping) labels
-            sender_or_receiver_degs: Only makes a difference if 'use_pathways' or 'use_cell_types' is specified.
-                Determines whether to compute DEGs for sender or receiver cells. If 'use_pathways' is True,
+            sender_receiver_or_target_degs: Only makes a difference if 'use_pathways' or 'use_cell_types' is specified.
+                Determines whether to compute DEGs for ligands, receptors or target genes. If 'use_pathways' is True,
                 the value of this argument will determine whether ligands or receptors are used to define the model.
                 Note that in either case, differential expression of TFs, binding factors, etc. will be computed in
-                association w/ ligands/receptors.
+                association w/ ligands/receptors/target genes (only valid if 'use_cell_types' and not 'use_pathways'
+                is specified.
             use_ligands: Use ligand array for differential expression analysis. Will take precedent over
                 sender/receiver cell type if also provided.
             use_receptors: Use receptor array for differential expression analysis. Will take precedent over
@@ -1617,15 +1621,22 @@ class MuSIC_Interpreter(MuSIC):
             use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
                 to collectively compute signaling potential score. Will take precedent over sender cell types if
                 also provided.
+            use_targets: Use target array for differential expression analysis.
             use_cell_types: Use cell types to use for differential expression analysis. If given,
-                will preprocess/construct the necessary components to initialize cell type-specific models.
+                will preprocess/construct the necessary components to initialize cell type-specific models. Note-
+                should be used alongside 'use_ligands', 'use_receptors', 'use_pathways' or 'use_targets' to select
+                which molecules to investigate in each cell type.
+            compute_dim_reduction: Whether to compute UMAP representation of the data subsetted to targets. Note:
+                computationally expensive.
         """
 
-        if use_ligands and use_receptors:
+        if (use_ligands and use_receptors) or (use_ligands and use_targets) or (use_receptors and use_targets):
             self.logger.info(
-                "Both 'use_ligands' and 'use_receptors' are given as function inputs. Note that "
+                "Multiple of 'use_ligands', 'use_receptors', 'use_targets' are given as function inputs. Note that "
                 "'use_ligands' will take priority."
             )
+        if sender_receiver_or_target_degs == "target" and use_pathways:
+            raise ValueError("`sender_receiver_or_target_degs` cannot be 'target' if 'use_pathways' is True.")
 
         # Check if the array of additional molecules to query has already been created:
         output_dir = os.path.dirname(self.output_path)
@@ -1636,6 +1647,8 @@ class MuSIC_Interpreter(MuSIC):
             targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt")
         elif use_pathways:
             targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
+        elif use_targets:
+            targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_target_genes.txt")
         elif use_cell_types:
             targets_folder = os.path.join(output_dir, "cci_deg_detection")
 
@@ -1646,7 +1659,7 @@ class MuSIC_Interpreter(MuSIC):
         if os.path.exists(os.path.join(output_dir, "cci_deg_detection", f"{file_name}.h5ad")):
             # Load files in case they are already existent:
             counts_plus = anndata.read_h5ad(os.path.join(output_dir, "cci_deg_detection", f"{file_name}.h5ad"))
-            if use_ligands or use_pathways or use_receptors:
+            if use_ligands or use_pathways or use_receptors or use_targets:
                 with open(targets_path, "r") as file:
                     targets = file.readlines()
             else:
@@ -1655,6 +1668,7 @@ class MuSIC_Interpreter(MuSIC):
                 "Found existing files for downstream analysis- skipping processing. Can proceed by running "
                 ":func ~`self.CCI_sender_deg_detection()`."
             )
+        # Else generate the necessary files:
         else:
             self.logger.info("Generating and saving AnnData object for downstream analysis...")
             if self.cci_dir is None:
@@ -1678,23 +1692,26 @@ class MuSIC_Interpreter(MuSIC):
             cof_db = cof_db[[col for col in cof_db.columns if col in self.adata.var_names]]
             tf_tf_db = tf_tf_db[[col for col in tf_tf_db.columns if col in self.adata.var_names]]
 
-            analyze_pathway_ligands = sender_or_receiver_degs == "sender" and use_pathways
-            analyze_pathway_receptors = sender_or_receiver_degs == "receiver" and use_pathways
-            analyze_celltype_ligands = sender_or_receiver_degs == "sender" and use_cell_types
-            analyze_celltype_receptors = sender_or_receiver_degs == "receiver" and use_cell_types
+            analyze_pathway_ligands = sender_receiver_or_target_degs == "sender" and use_pathways
+            analyze_pathway_receptors = sender_receiver_or_target_degs == "receiver" and use_pathways
+            analyze_celltype_ligands = sender_receiver_or_target_degs == "sender" and use_cell_types
+            analyze_celltype_receptors = sender_receiver_or_target_degs == "receiver" and use_cell_types
+            analyze_celltype_targets = sender_receiver_or_target_degs == "target" and use_cell_types
 
             if use_ligands or analyze_pathway_ligands or analyze_celltype_ligands:
                 database_ligands = list(set(lr_db["from"]))
                 l_complexes = [elem for elem in database_ligands if "_" in elem]
                 # Get individual components if any complexes are included in this list:
                 ligand_set = [l for item in database_ligands for l in item.split("_")]
-                ligand_set = [l for l in ligand_set if l not in self.adata.var_names]
+                ligand_set = [l for l in ligand_set if l in self.adata.var_names]
             elif use_receptors or analyze_pathway_receptors or analyze_celltype_receptors:
                 database_receptors = list(set(lr_db["to"]))
                 r_complexes = [elem for elem in database_receptors if "_" in elem]
                 # Get individual components if any complexes are included in this list:
                 receptor_set = [r for item in database_receptors for r in item.split("_")]
-                receptor_set = [r for r in receptor_set if r not in self.adata.var_names]
+                receptor_set = [r for r in receptor_set if r in self.adata.var_names]
+            elif use_targets or analyze_celltype_targets:
+                target_set = self.targets_expr.columns
 
             signal = {}
             subsets = {}
@@ -1744,7 +1761,7 @@ class MuSIC_Interpreter(MuSIC):
 
                 signal["all"] = sig_df
                 subsets["all"] = self.adata
-            elif use_pathways and sender_or_receiver_degs == "sender":
+            elif use_pathways and sender_receiver_or_target_degs == "sender":
                 if self.mod_type != "ligand" and self.mod_type != "lr":
                     raise ValueError(
                         "Sent signal from ligands cannot be used because the original specified 'mod_type' "
@@ -1756,7 +1773,7 @@ class MuSIC_Interpreter(MuSIC):
                 mapped_ligands.columns = self.ligands_expr_nonlag.columns.map(lig_to_pathway_map)
                 signal["all"] = mapped_ligands.groupby(by=mapped_ligands.columns, axis=1).sum()
                 subsets["all"] = self.adata
-            elif use_pathways and sender_or_receiver_degs == "receiver":
+            elif use_pathways and sender_receiver_or_target_degs == "receiver":
                 if self.mod_type != "receptor" and self.mod_type != "lr":
                     raise ValueError(
                         "Received signal from receptors cannot be used because the original specified 'mod_type' "
@@ -1767,6 +1784,21 @@ class MuSIC_Interpreter(MuSIC):
                 mapped_receptors = self.receptors_expr.copy()
                 mapped_receptors.columns = self.receptors_expr.columns.map(rec_to_pathway_map)
                 signal["all"] = mapped_receptors.groupby(by=mapped_receptors.columns, axis=1).sum()
+                subsets["all"] = self.adata
+            elif use_targets:
+                if self.targets_path is not None:
+                    with open(self.targets_path, "r") as f:
+                        targets = f.read().splitlines()
+                else:
+                    targets = self.custom_targets
+                # Check that all targets can be found in the source AnnData object:
+                targets = [t for t in targets if t in self.adata.var_names]
+                targets_expr = pd.DataFrame(
+                    self.adata[:, targets].X.A if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
+                    index=self.adata.obs_names,
+                    columns=targets,
+                )
+                signal["all"] = targets_expr
                 subsets["all"] = self.adata
             elif use_cell_types:
                 if self.mod_type != "niche":
@@ -1781,7 +1813,12 @@ class MuSIC_Interpreter(MuSIC):
                     ct_subset = self.adata[self.adata.obs[self.group_key] == cell_type, :].copy()
                     subsets[cell_type] = ct_subset
 
-                    mols = ligand_set if sender_or_receiver_degs == "sender" else receptor_set
+                    if "ligand_set" in locals():
+                        mols = ligand_set
+                    elif "receptor_set" in locals():
+                        mols = receptor_set
+                    elif "target_set" in locals():
+                        mols = target_set
                     ct_signaling = ct_subset[:, mols].copy()
                     # Find the set of ligands/receptors that are expressed in at least n% of the cells of this cell type
                     sig_expr_percentage = (
@@ -1814,7 +1851,7 @@ class MuSIC_Interpreter(MuSIC):
                 )
 
                 # Further subset list of additional factors to those that are expressed in at least n% of the cells
-                # that are nonzero in sending cells (use the user input 'target_expr_threshold'):
+                # that are nonzero in cells of interest (use the user input 'target_expr_threshold'):
                 indices = np.any(signal_values != 0, axis=0).nonzero()[0]
                 nz_signal = list(self.sample_names[indices])
                 adata_subset = adata[nz_signal, :]
@@ -1911,32 +1948,37 @@ class MuSIC_Interpreter(MuSIC):
                 # AnnData object:
                 if use_pathways:
                     counts_targets.uns["target_type"] = "pathway"
-                elif use_ligands:
+                elif use_ligands or (use_cell_types and sender_receiver_or_target_degs == "sender"):
                     counts_targets.uns["target_type"] = "ligands"
-                elif use_receptors:
+                elif use_receptors or (use_cell_types and sender_receiver_or_target_degs == "receiver"):
                     counts_targets.uns["target_type"] = "receptors"
+                elif use_targets or (use_cell_types and sender_receiver_or_target_degs == "target"):
+                    counts_targets.uns["target_type"] = "target_genes"
 
-                # Optionally, can use dimensionality reduction to aid in computing the nearest neighbors for the model (
-                # cells that are nearby in dimensionally-reduced signaling space will be neighbors in this scenario)
-                # Compute latent representation of the AnnData subset:
+                if compute_dim_reduction:
+                    # To compute PCA, first need to standardize data:
+                    sig_sub_df = signal[subset_key]
+                    sig_sub_df = np.log1p(sig_sub_df)
+                    sig_sub_df = (sig_sub_df - sig_sub_df.mean()) / sig_sub_df.std()
 
-                # Compute the ideal number of UMAP components to use- use half the number of features as the
-                # max possible number of components:
-                self.logger.info("Computing optimal number of UMAP components ...")
-                n_umap_components = find_optimal_n_umap_components(signal[subset_key].values)
+                    # Optionally, can use dimensionality reduction to aid in computing the nearest neighbors for the
+                    # model (cells that are nearby in dimensionally-reduced signaling space will be neighbors in
+                    # this scenario).
+                    # Compute latent representation of the AnnData subset:
 
-                # Perform UMAP reduction with the chosen number of components, store in AnnData object:
-                _, _, _, _, X_umap = umap_conn_indices_dist_embedding(
-                    signal[subset_key].values, n_neighbors=30, n_components=n_umap_components
-                )
-                counts_targets.obsm["X_umap"] = X_umap
-                counts_targets.obs[group_key] = group_key
-                if use_pathways:
-                    counts_targets.uns["type"] = "pathway"
-                elif use_ligands or (use_cell_types and sender_or_receiver_degs == "sender"):
-                    counts_targets.uns["type"] = "ligand"
-                elif use_receptors or (use_cell_types and sender_or_receiver_degs == "receiver"):
-                    counts_targets.uns["type"] = "receptor"
+                    # Compute the ideal number of UMAP components to use- use half the number of features as the
+                    # max possible number of components:
+                    self.logger.info("Computing optimal number of PCA components ...")
+                    n_pca_components = find_optimal_pca_components(sig_sub_df.values, TruncatedSVD)
+
+                    # Perform UMAP reduction with the chosen number of components, store in AnnData object:
+                    _, X_pca = pca_fit(sig_sub_df.values, TruncatedSVD, n_components=n_pca_components)
+                    counts_targets.obsm["X_pca"] = X_pca
+                    counts_targets.obs[group_key] = group_key
+                    self.logger.info("Computed dimensionality reduction for gene expression targets.")
+
+                # Compute the "Jaccard array" (recording expressed/not expressed):
+                counts_targets.obsm["X_jaccard"] = np.where(signal[subset_key].values > 0, 1, 0)
 
                 # Iterate over regulators:
                 regulators = counts_df.columns
@@ -1950,32 +1992,42 @@ class MuSIC_Interpreter(MuSIC):
                         for t in targets:
                             file.write(t + "\n")
                 else:
-                    if use_ligands or (use_cell_types and sender_or_receiver_degs == "sender"):
+                    if use_ligands or (use_cell_types and sender_receiver_or_target_degs == "sender"):
                         targets_path = os.path.join(targets_folder, f"{file_name}_{subset_key}_ligands.txt")
-                    elif use_receptors or (use_cell_types and sender_or_receiver_degs == "receiver"):
+                    elif use_receptors or (use_cell_types and sender_receiver_or_target_degs == "receiver"):
                         targets_path = os.path.join(targets_folder, f"{file_name}_{subset_key}_receptors.txt")
                     elif use_pathways:
                         targets_path = os.path.join(targets_folder, f"{file_name}_{subset_key}_pathways.txt")
+                    elif use_targets or (use_cell_types and sender_receiver_or_target_degs == "target"):
+                        targets_path = os.path.join(targets_folder, f"{file_name}_{subset_key}_target_genes.txt")
                     with open(targets_path, "w") as file:
                         for t in targets:
                             file.write(t + "\n")
+
+                if "ligand_set" in locals():
+                    id = "ligand_regulators"
+                elif "receptor_set" in locals():
+                    id = "receptor_regulators"
+                elif "target_set" in locals():
+                    id = "target_gene_regulators"
 
                 self.logger.info(
                     "'CCI_sender_deg_detection'- saving regulatory molecules to test as .h5ad file to the "
                     "directory of the output..."
                 )
                 counts_targets.write_h5ad(
-                    os.path.join(output_dir, "cci_deg_detection", f"{file_name}" f"_{subset_key}.h5ad")
+                    os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{subset_key}_{id}.h5ad")
                 )
 
     def CCI_deg_detection(
         self,
         group_key: str,
         cci_dir_path: str,
-        sender_or_receiver_degs: Literal["sender", "receiver"] = "sender",
+        sender_receiver_or_target_degs: Literal["sender", "receiver", "target"] = "sender",
         use_ligands: bool = True,
         use_receptors: bool = False,
         use_pathways: bool = False,
+        use_targets: bool = False,
         cell_type: Optional[str] = None,
         **kwargs,
     ):
@@ -1985,10 +2037,12 @@ class MuSIC_Interpreter(MuSIC):
         Args:
             group_key: Key in `adata.obs` that corresponds to the cell type (or other grouping) labels
             cci_dir_path: Path to directory containing all Spateo databases
-            sender_or_receiver_degs: Whether to compute DEGs for sender or receiver cells. Note that 'use_ligands' is
-                only an option if this is set to 'sender', whereas 'use_receptors' is only an option if this is set to
-                'receiver'. If 'use_pathways' is True, the value of this argument will determine whether ligands or
-                receptors are used to define the pathway.
+            sender_receiver_or_target_degs: Only makes a difference if 'use_pathways' or 'use_cell_types' is specified.
+                Determines whether to compute DEGs for ligands, receptors or target genes. If 'use_pathways' is True,
+                the value of this argument will determine whether ligands or receptors are used to define the model.
+                Note that in either case, differential expression of TFs, binding factors, etc. will be computed in
+                association w/ ligands/receptors/target genes (only valid if 'use_cell_types' and not 'use_pathways'
+                is specified.
             use_ligands: Use ligand array for differential expression analysis. Will take precedent over receptors and
                 sender/receiver cell types if also provided. Should match the input to :func
                 `CCI_sender_deg_detection_setup`.
@@ -1996,6 +2050,7 @@ class MuSIC_Interpreter(MuSIC):
             use_pathways: Use pathway array for differential expression analysis. Will use ligands in these pathways
                 to collectively compute signaling potential score. Will take precedent over sender cell types if also
                 provided. Should match the input to :func `CCI_sender_deg_detection_setup`.
+            use_targets: Use target genes array for differential expression analysis.
             cell_type: Cell type to use to use for differential expression analysis. If given, will use the
                 ligand/receptor subset obtained from :func ~`CCI_sender_deg_detection_setup` and cells of the chosen
                 cell type in the model.
@@ -2022,16 +2077,23 @@ class MuSIC_Interpreter(MuSIC):
         if not os.path.exists(os.path.join(output_dir, "cci_deg_detection")):
             os.makedirs(os.path.join(output_dir, "cci_deg_detection"))
 
-        if use_ligands or use_receptors or use_pathways:
+        if use_ligands or use_receptors or use_pathways or use_targets:
             file_name = os.path.basename(self.adata_path).split(".")[0]
             if use_ligands:
+                id = "ligand_regulators"
                 file_id = "ligand_analysis"
             elif use_receptors:
+                id = "receptor_regulators"
                 file_id = "receptor_analysis"
-            elif use_pathways and sender_or_receiver_degs == "sender":
+            elif use_pathways and sender_receiver_or_target_degs == "sender":
+                id = "ligand_regulators"
                 file_id = "pathway_analysis_ligands"
-            elif use_pathways and sender_or_receiver_degs == "receiver":
+            elif use_pathways and sender_receiver_or_target_degs == "receiver":
+                id = "receptor_regulators"
                 file_id = "pathway_analysis_receptors"
+            elif use_targets:
+                id = "target_gene_regulators"
+                file_id = "target_gene_analysis"
             if not os.path.exists(os.path.join(output_dir, "cci_deg_detection", file_id)):
                 os.makedirs(os.path.join(output_dir, "cci_deg_detection", file_id))
             output_path = os.path.join(output_dir, "cci_deg_detection", file_id, output_file_name)
@@ -2039,9 +2101,9 @@ class MuSIC_Interpreter(MuSIC):
 
             logger.info(
                 f"Using AnnData object stored at "
-                f"{os.path.join(output_dir, 'cci_deg_detection', f'{file_name}_all.h5ad')}."
+                f"{os.path.join(output_dir, 'cci_deg_detection', f'{file_name}_all_{id}.h5ad')}."
             )
-            kwargs["adata_path"] = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all.h5ad")
+            kwargs["adata_path"] = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_{id}.h5ad")
             if use_ligands:
                 kwargs["custom_lig_path"] = os.path.join(
                     output_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt"
@@ -2056,8 +2118,13 @@ class MuSIC_Interpreter(MuSIC):
                     output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt"
                 )
                 logger.info(f"Using pathways stored at {kwargs['custom_pathways_path']}.")
+            elif use_targets:
+                kwargs["targets_path"] = os.path.join(
+                    output_dir, "cci_deg_detection", f"{file_name}_all_target_genes.txt"
+                )
+                logger.info(f"Using target genes stored at {kwargs['targets_path']}.")
             else:
-                raise ValueError("One of 'use_ligands', 'use_receptors' or 'use_pathways' must be True.")
+                raise ValueError("One of 'use_ligands', 'use_receptors', 'use_pathways' or 'use_targets' must be True.")
 
             # Create new instance of MuSIC:
             comm, parser, args_list = define_spateo_argparse(**kwargs)
@@ -2071,10 +2138,12 @@ class MuSIC_Interpreter(MuSIC):
             file_name = os.path.basename(self.adata_path).split(".")[0]
 
             # create output sub-directory for this model:
-            if sender_or_receiver_degs == "sender":
+            if sender_receiver_or_target_degs == "sender":
                 file_id = "ligand_analysis"
-            elif sender_or_receiver_degs == "receiver":
+            elif sender_receiver_or_target_degs == "receiver":
                 file_id = "receptor_analysis"
+            elif sender_receiver_or_target_degs == "target":
+                file_id = "target_gene_analysis"
             if not os.path.exists(os.path.join(output_dir, "cci_deg_detection", cell_type, file_id)):
                 os.makedirs(os.path.join(output_dir, "cci_deg_detection", cell_type, file_id))
             subset_output_dir = os.path.join(output_dir, "cci_deg_detection", cell_type, file_id)
@@ -2087,16 +2156,21 @@ class MuSIC_Interpreter(MuSIC):
 
             kwargs["adata_path"] = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}.h5ad")
             logger.info(f"Using AnnData object stored at {kwargs['adata_path']}.")
-            if sender_or_receiver_degs == "sender":
+            if sender_receiver_or_target_degs == "sender":
                 kwargs["custom_lig_path"] = os.path.join(
                     output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt"
                 )
                 logger.info(f"Using ligands stored at {kwargs['custom_lig_path']}.")
-            elif sender_or_receiver_degs == "receiver":
+            elif sender_receiver_or_target_degs == "receiver":
                 kwargs["custom_rec_path"] = os.path.join(
                     output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_receptors.txt"
                 )
                 logger.info(f"Using receptors stored at {kwargs['custom_rec_path']}.")
+            elif sender_receiver_or_target_degs == "target":
+                kwargs["targets_path"] = os.path.join(
+                    output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_target_genes.txt"
+                )
+                logger.info(f"Using target genes stored at {kwargs['targets_path']}.")
 
             # Create new instance of MuSIC:
             comm, parser, args_list = define_spateo_argparse(**kwargs)
@@ -2111,7 +2185,7 @@ class MuSIC_Interpreter(MuSIC):
     def visualize_CCI_degs(
         self,
         plot_mode: Literal["proportion", "average"] = "proportion",
-        sender_or_receiver_degs: Literal["sender", "receiver"] = "sender",
+        sender_receiver_or_target_degs: Literal["sender", "receiver", "target"] = "sender",
         use_ligands: bool = True,
         use_receptors: bool = False,
         use_pathways: bool = False,
@@ -2131,9 +2205,12 @@ class MuSIC_Interpreter(MuSIC):
                         for which the given factor is predicted to have a nonzero effect
                     - "average": elements of the plot represent the average effect size across all target-expressing
                         cells
-            sender_or_receiver_degs: Will be used if 'use_pathways' or 'use_cell_types' is True (i.e. if these
-                arguments were true for the original model). Make sure the input ('sender' or 'receiver') matches
-                that given when creating the initial model.
+            sender_receiver_or_target_degs: Only makes a difference if 'use_pathways' or 'use_cell_types' is specified.
+                Determines whether to compute DEGs for ligands, receptors or target genes. If 'use_pathways' is True,
+                the value of this argument will determine whether ligands or receptors are used to define the model.
+                Note that in either case, differential expression of TFs, binding factors, etc. will be computed in
+                association w/ ligands/receptors/target genes (only valid if 'use_cell_types' and not 'use_pathways'
+                is specified.
             use_ligands: Set True if this was True for the original model. Used to find the correct output location.
             use_receptors: Set True if this was True for the original model. Used to find the correct output location.
             use_pathways: Set True if this was True for the original model. Used to find the correct output location.
@@ -2175,27 +2252,34 @@ class MuSIC_Interpreter(MuSIC):
                 plot_id = "Target Receptor"
                 title_id = "receptor"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt")
-            elif use_pathways and sender_or_receiver_degs == "sender":
+            elif use_pathways and sender_receiver_or_target_degs == "sender":
                 file_id = "pathway_analysis_ligands"
                 plot_id = "Target Ligand"
                 title_id = "ligand"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
-            elif use_pathways and sender_or_receiver_degs == "receiver":
+            elif use_pathways and sender_receiver_or_target_degs == "receiver":
                 file_id = "pathway_analysis_receptors"
                 plot_id = "Target Receptor"
                 title_id = "receptor"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
         elif cell_type is not None:
-            if sender_or_receiver_degs == "sender":
+            if sender_receiver_or_target_degs == "sender":
                 file_id = "ligand_analysis"
                 plot_id = "Target Ligand"
                 title_id = "ligand"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt")
-            elif sender_or_receiver_degs == "receiver":
+            elif sender_receiver_or_target_degs == "receiver":
                 file_id = "receptor_analysis"
                 plot_id = "Target Receptor"
                 title_id = "receptor"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_receptors.txt")
+            elif sender_receiver_or_target_degs == "target":
+                file_id = "target_analysis"
+                plot_id = "Target Gene"
+                title_id = "target"
+                targets_path = os.path.join(
+                    output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_target_genes.txt"
+                )
         else:
             raise ValueError(
                 "'use_ligands', 'use_receptors', 'use_pathways' are all False, and 'cell_type' was not given."
@@ -2352,6 +2436,128 @@ class MuSIC_Interpreter(MuSIC):
                 return_all=False,
                 return_all_list=None,
             )
+
+    def visualize_intercellular_network(
+        self,
+        lr_model_output_dir: str,
+        target_subset: Optional[Union[List[str], str]] = None,
+        ligand_subset: Optional[Union[List[str], str]] = None,
+        receptor_subset: Optional[Union[List[str], str]] = None,
+        regulator_subset: Optional[Union[List[str], str]] = None,
+        target_regulator_path: Optional[str] = None,
+        cell_subset: Optional[Union[List[str], str]] = None,
+        metric_threshold: float = 0.05,
+        layout: Literal["random", "circular", "kamada", "planar", "spring", "spectral", "spiral"] = "planar",
+        save_path: Optional[str] = None,
+        save_ext: str = "png",
+        dpi: int = 300,
+        visualize: bool = True,
+        **kwargs,
+    ):
+        """After fitting model, construct and visualize the inferred intercellular regulatory network. Effect sizes (
+        edge values) will be averaged over cells specified by "cell_subset", otherwise all cells will be used.
+
+        Args:
+            lr_model_output_dir: Path to directory containing the outputs of the L:R model. This function will assume
+                :attr `output_path` is the output path for the downstream model, i.e. connecting regulatory
+                factors/TFs to ligands/receptors/targets.
+            target_subset: Optional, can be used to specify target genes downstream of signaling interactions of
+                interest. If not given, will use all targets used for the model.
+            ligand_subset: Optional, can be used to specify subset of ligands. If not given, will use all ligands
+                present in any of the interactions for the model.
+            receptor_subset: Optional, can be used to specify subset of receptors. If not given, will use all receptors
+                present in any of the interactions for the model.
+            regulator_subset: Optional, can be used to specify subset of regulators (transcription factors,
+                etc.). If not given, will use all regulatory molecules used in fitting the downstream model(s).
+            target_regulator_path: Can be used to provide path to external .csv file containing results from
+                regulatory network inference algorithms. If given as "spateo_output", will assume these were inferred
+                from Spateo's model and will search for the file in Spateo's output directory structure.
+            cell_subset: Optional, can be used to specify subset of cells to use for averaging effect sizes. Can be
+                either:
+                    - A list of cell IDs (must be in the same format as the cell IDs in the adata object)
+                    - Cell type label(s)
+            metric_threshold: Threshold for filtering out edges with low effect sizes, as a percentile of the maximum
+                average effect size. Default is 0.05 (i.e. 5% of the maximum average effect size).
+            layout: Used for positioning nodes on the plot. Options:
+                - "random": Randomly positions nodes ini the unit square.
+                - "circular": Positions nodes on a circle.
+                - "kamada": Positions nodes using Kamada-Kawai path-length cost-function.
+                - "planar": Positions nodes without edge intersections, if possible.
+                - "spring": Positions nodes using Fruchterman-Reingold force-directed algorithm.
+                - "spectral": Positions nodes using eigenvectors of the graph Laplacian.
+                - "spiral": Positions nodes in a spiral layout.
+            save_path: Optional, directory to save figure to. If not given, will save to the parent folder of the
+                path provided for :attr `output_path` in the argument specification.
+            save_ext: File extension to save figure as. Default is "png".
+            dpi: Resolution to save figure at. Default is 300.
+            visualize: Whether to visualize the plot. Default is True. If False, will save intermediate dataframes
+                e.g. for better idea of thresholds to use.
+            **kwargs: Additional arguments that can be provided to :func igviz.plot(); note that 'color_method',
+                'node_label' and 'edge_label' should not be provided this way. Notable options include:
+                    - node_label_position: Position of the node label relative to the node. Either {'top left',
+                        'top center', 'top right', 'middle left', 'middle center', 'middle right', 'bottom left',
+                        'bottom center', 'bottom right'}
+                    - edge_label_position: Position of the edge label relative to the edge. Either {'top left',
+                        'top center', 'top right', 'middle left', 'middle center', 'middle right', 'bottom left',
+                        'bottom center', 'bottom right'}
+
+        Returns:
+            None
+        """
+        # Check that self.output_path corresponds to the downstream model if "regulator_subset" is given:
+        downstream_model_output_dir = os.path.dirname(self.output_path)
+        if (
+            not os.path.exists(os.path.join(downstream_model_output_dir, "cci_deg_detection"))
+            and regulator_subset is not None
+        ):
+            raise FileNotFoundError(
+                "No downstream model was ever constructed, however this is necessary to include "
+                "regulatory factors in the network."
+            )
+
+        # Check that lr_model_output_dir points to the correct folder for the L:R model- to do this check for
+        # predictions file directly in the folder (for downstream models, predictions are further nested in the
+        # "cci_deg_detection" derived subdirectories):
+        if not os.path.exists(os.path.join(lr_model_output_dir, "predictions.csv")):
+            raise FileNotFoundError(
+                "Check that provided `lr_model_output_dir` points to the correct folder for the "
+                "L:R model. For example, if the specified model output path is "
+                "outer/folder/results.csv, this should be outer/folder."
+            )
+
+        logger = lm.get_main_logger()
+        config_spateo_rcParams()
+        # Set display DPI:
+        plt.rcParams["figure.dpi"] = dpi
+
+        if save_path is not None:
+            save_folder = os.path.join(os.path.dirname(save_path), "networks")
+        else:
+            save_folder = os.path.join(os.path.dirname(self.output_path), "networks")
+
+        if not os.path.exists(save_folder):
+            os.makedirs(save_folder)
+
+        if cell_subset is not None:
+            if all(label in set(self.adata.obs[self.group_key]) for label in cell_subset):
+                adata = self.adata[self.adata.obs[self.group_key].isin(cell_subset)].copy()
+            else:
+                adata = self.adata[cell_subset, :].copy()
+        else:
+            adata = self.adata.copy()
+
+        all_targets = list(self.coeffs.keys())
+        targets = all_targets if target_subset is None else target_subset
+        feature_names = [feat for feat in self.feature_names if feat != "intercept"]
+        # if ligand_subset is not None:
+
+        # Construct L:R-to-target dataframe:
+        lr_to_target_df = pd.DataFrame(0, index=feature_names, columns=targets)
+
+        # Save L:R-to-target dataframe:
+        lr_to_target_df.to_csv(os.path.join(save_folder, "lr_to_target.csv"))
+
+        # Note: set color_method node_property
 
     # ---------------------------------------------------------------------------------------------------
     # Permutation testing

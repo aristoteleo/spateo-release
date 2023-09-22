@@ -455,12 +455,7 @@ class MuSIC:
                     self.logger.info(f"Using list of target genes from: {self.targets_path}.")
                 if self.custom_targets is not None:
                     self.logger.info(f"Using provided list of target genes: {self.custom_targets}.")
-                self.logger.info(
-                    f"Saving all outputs to this directory: "
-                    f"{os.path.dirname(self.output_path)}. Note that running `fit` or "
-                    f"`predict_and_save` will clear the contents of this folder- copy any essential "
-                    f"files beforehand."
-                )
+                self.logger.info(f"Saving all outputs to this directory: {os.path.dirname(self.output_path)}.")
 
     def load_and_process(self, upstream: bool = False):
         """
@@ -715,10 +710,21 @@ class MuSIC:
                 # Check that all pathways can be found in the source AnnData object:
                 targets = [t for t in targets if t in adata.var_names]
 
+            # Else: targets = the targets from the initial model:
+            elif self.targets_path is not None or self.custom_targets is not None:
+                if self.targets_path is not None:
+                    with open(self.targets_path, "r") as f:
+                        targets = f.read().splitlines()
+                else:
+                    targets = self.custom_targets
+                # Check that all targets can be found in the source AnnData object:
+                targets = [t for t in targets if t in adata.var_names]
+
             else:
                 raise FileNotFoundError(
-                    "For 'mod_type' = 'downstream', ligands must be provided using either "
-                    "'custom_lig_path' or 'ligand' arguments."
+                    "For 'mod_type' = 'downstream', receptors, ligands or targets can be provided. Ligands must be "
+                    "provided using either 'custom_lig_path' or 'ligand' arguments, receptors using 'custom_rec_path' "
+                    "or 'receptor' arguments, and targets with 'targets_path' or 'target' arguments."
                 )
             self.logger.info(f"Found {len(targets)} signaling molecules to serve as dependent variable targets.")
 
@@ -824,7 +830,7 @@ class MuSIC:
         # Compute distance in "signaling space":
         # Check for dimensionality reduction in the source AnnData object
         try:
-            self.feature_distance = self.adata.obsm["X_sig_umap"]
+            self.feature_distance = self.adata.obsm["X_pca"]
             self.bw_fixed = True
         except:
             # Binarize design matrix to encode presence/absence of signaling pairs:
@@ -1911,6 +1917,12 @@ class MuSIC:
         if self.minbw is None:
             if self.bw_fixed:
                 if self.mod_type == "downstream":
+                    # Check for dimensionality reduction- if not present, use the Jaccard distance:
+                    if "X_pca" in self.adata.obsm_keys():
+                        coords_key = "X_pca"
+                    else:
+                        coords_key = "X_jaccard"
+
                     # Check over the 10-50 nearest neighbors- compute distances such that each cell has this number
                     # on average:
                     self.minbw = find_bw_for_n_neighbors(
@@ -2637,7 +2649,7 @@ class MuSIC:
             elif self.mod_type == "downstream":
                 # If target is a complex, or a pathway, look at all rows corresponding to components of the
                 # multi-component target:
-                if self.adata.uns["type"] == "pathway" or "_" in target:
+                if self.adata.uns["target_type"] == "pathway" or "_" in target:
                     gene_query = self.lr_db[self.lr_db["pathway"] == target]["from"].unique().tolist()
                     gene_query = [g for element in gene_query for g in element.split("_")]
                 else:

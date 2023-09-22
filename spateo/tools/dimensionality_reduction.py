@@ -757,6 +757,7 @@ def truncated_SVD_with_center(
 def find_optimal_pca_components(
     X: np.ndarray,
     pca_func: Callable,
+    method: Literal["elbow", "eigen"] = "elbow",
     max_components: Optional[int] = None,
     drop_ratio: float = 0.33,
     **kwargs,
@@ -767,6 +768,9 @@ def find_optimal_pca_components(
         X: The input data array of shape (n_samples, n_features)
         pca_func: The PCA function to use, which should have a 'fit' and 'transform' method, such as the PCA class
             or the IncrementalPCA class from sklearn.decomposition.
+        method: Method to use to find the optimal number of components. Either 'elbow' or 'eigen'. "Elbow" uses the
+            elbow method, "eigen" uses a permutation procedure to find the maximum eigenvalue to use as a threshold for
+            variance explained.
         max_components: The maximum number of principal components to test. If not given, will use half the number of
             features (half the number of columns of the input array).
         drop_ratio: The ratio of the change in explained variance to consider a significant drop
@@ -775,35 +779,54 @@ def find_optimal_pca_components(
     Returns:
         n: Optimal number of components
     """
-    if max_components is None:
-        max_components = int(X.shape[1] // 2)
+    if method == "elbow":
+        if max_components is None:
+            max_components = int(X.shape[1] // 2)
 
-    explained_variances = []
-    for n_components in range(2, max_components + 1):
-        fit, _ = pca_fit(X, pca_func, n_components=n_components, **kwargs)
-        explained_variances.append(fit.explained_variance_ratio_.sum())
-    explained_variances = np.array(explained_variances)
+        explained_variances = []
+        for n_components in range(2, max_components + 1):
+            fit, _ = pca_fit(X, pca_func, n_components=n_components, **kwargs)
+            explained_variances.append(fit.explained_variance_ratio_.sum())
+        explained_variances = np.array(explained_variances)
 
-    # Plot the explained variance as a function of the number of components
-    plt.figure(figsize=(10, 5))
-    plt.plot(range(2, max_components + 1), explained_variances, "bo-", linewidth=2)
-    plt.xlabel("Number of components")
-    plt.ylabel("Total explained variance")
-    plt.title("Elbow plot for PCA")
-    plt.show()
+        # Plot the explained variance as a function of the number of components
+        plt.figure(figsize=(10, 5))
+        plt.plot(range(2, max_components + 1), explained_variances, "bo-", linewidth=2)
+        plt.xlabel("Number of components")
+        plt.ylabel("Total explained variance")
+        plt.title("Elbow plot for PCA")
+        plt.show()
 
-    # The elbow point is the point of maximum curvature from the end of the curve, but we also want to find the point
-    # where the change in explained variance drops significantly
-    # We subtract each point from the preceding point (ignoring the first few components because the variance
-    # explained by each of the first few components will be the highest):
-    start_index = 5
-    deltas = np.diff(explained_variances[start_index:][::-1])
+        # The elbow point is the point of maximum curvature from the end of the curve, but we also want to find the point
+        # where the change in explained variance drops significantly
+        # We subtract each point from the preceding point (ignoring the first few components because the variance
+        # explained by each of the first few components will be the highest):
+        start_index = 5
+        deltas = np.diff(explained_variances[start_index:][::-1])
 
-    significant_drop = [i for i in range(1, len(deltas)) if deltas[i] < drop_ratio * deltas[i - 1]]
-    if significant_drop:
-        n = significant_drop[0] + start_index + 1
-    else:
-        # If there's no significant drop, use the point of maximum curvature
-        n = np.argmax(deltas) + start_index + 1
+        significant_drop = [i for i in range(1, len(deltas)) if deltas[i] < drop_ratio * deltas[i - 1]]
+        if significant_drop:
+            n = significant_drop[0] + start_index + 1
+        else:
+            # If there's no significant drop, use the point of maximum curvature
+            n = np.argmax(deltas) + start_index + 1
+
+    elif method == "eigen":
+        # Number of iterations
+        n_iterations = 50
+        # List to store the maximum eigenvalues from each iteration
+        max_eigenvalues = []
+
+        for _ in range(n_iterations):
+            # Permute the expression values of each gene independently across cells
+            randomized_data = np.apply_along_axis(np.random.permutation, 1, X)
+            # Perform PCA on the randomized data
+            pca = PCA()
+            pca.fit(randomized_data)
+            # Store the maximum eigenvalue from this iteration
+            max_eigenvalues.append(max(pca.explained_variance_))
+
+        # Calculate the threshold as the mean of the maximum eigenvalues
+        threshold = np.mean(max_eigenvalues)
 
     return n
