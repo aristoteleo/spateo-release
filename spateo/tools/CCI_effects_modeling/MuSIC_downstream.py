@@ -1595,7 +1595,7 @@ class MuSIC_Interpreter(MuSIC):
     # ---------------------------------------------------------------------------------------------------
     def CCI_deg_detection_setup(
         self,
-        group_key: str,
+        group_key: Optional[str] = None,
         sender_receiver_or_target_degs: Literal["sender", "receiver", "target"] = "sender",
         use_ligands: bool = True,
         use_receptors: bool = False,
@@ -1607,7 +1607,8 @@ class MuSIC_Interpreter(MuSIC):
         """Computes differential expression signatures of cells with various levels of ligand expression.
 
         Args:
-            group_key: Key in `adata.obs` that corresponds to the cell type (or other grouping) labels
+            group_key: Key to add to .obs of the AnnData object created by this function, containing cell type labels
+                for each cell. If not given, will use :attr `group_key`.
             sender_receiver_or_target_degs: Only makes a difference if 'use_pathways' or 'use_cell_types' is specified.
                 Determines whether to compute DEGs for ligands, receptors or target genes. If 'use_pathways' is True,
                 the value of this argument will determine whether ligands or receptors are used to define the model.
@@ -1626,9 +1627,11 @@ class MuSIC_Interpreter(MuSIC):
                 will preprocess/construct the necessary components to initialize cell type-specific models. Note-
                 should be used alongside 'use_ligands', 'use_receptors', 'use_pathways' or 'use_targets' to select
                 which molecules to investigate in each cell type.
-            compute_dim_reduction: Whether to compute UMAP representation of the data subsetted to targets. Note:
-                computationally expensive.
+            compute_dim_reduction: Whether to compute PCA representation of the data subsetted to targets.
         """
+
+        if group_key is None:
+            group_key = self.group_key
 
         if (use_ligands and use_receptors) or (use_ligands and use_targets) or (use_receptors and use_targets):
             self.logger.info(
@@ -1974,11 +1977,12 @@ class MuSIC_Interpreter(MuSIC):
                     # Perform UMAP reduction with the chosen number of components, store in AnnData object:
                     _, X_pca = pca_fit(sig_sub_df.values, TruncatedSVD, n_components=n_pca_components)
                     counts_targets.obsm["X_pca"] = X_pca
-                    counts_targets.obs[group_key] = group_key
                     self.logger.info("Computed dimensionality reduction for gene expression targets.")
 
                 # Compute the "Jaccard array" (recording expressed/not expressed):
                 counts_targets.obsm["X_jaccard"] = np.where(signal[subset_key].values > 0, 1, 0)
+                cell_types = self.adata.obs.loc[signal[subset_key].index, self.group_key]
+                counts_targets.obs[group_key] = cell_types
 
                 # Iterate over regulators:
                 regulators = counts_df.columns
@@ -2029,6 +2033,7 @@ class MuSIC_Interpreter(MuSIC):
         use_pathways: bool = False,
         use_targets: bool = False,
         cell_type: Optional[str] = None,
+        use_dim_reduction: bool = False,
         **kwargs,
     ):
         """Downstream method that when called, creates a separate instance of :class `MuSIC` specifically designed
@@ -2052,8 +2057,11 @@ class MuSIC_Interpreter(MuSIC):
                 provided. Should match the input to :func `CCI_sender_deg_detection_setup`.
             use_targets: Use target genes array for differential expression analysis.
             cell_type: Cell type to use to use for differential expression analysis. If given, will use the
-                ligand/receptor subset obtained from :func ~`CCI_sender_deg_detection_setup` and cells of the chosen
+                ligand/receptor subset obtained from :func ~`CCI_deg_detection_setup` and cells of the chosen
                 cell type in the model.
+            use_dim_reduction: Whether to use PCA representation of the data to find nearest neighbors. If False,
+                will instead use the Jaccard distance. Defaults to False. Note that this will ultimately fail if
+                dimensionality reduction was not performed in :func ~`CCI_deg_detection_setup`.
             kwargs: Keyword arguments for any of the Spateo argparse arguments. Should not include 'adata_path',
                 'custom_lig_path' & 'ligand' or 'custom_pathways_path' & 'pathway' (depending on whether ligands or
                 pathways are being used for the analysis), and should not include 'output_path' (which will be
@@ -2068,7 +2076,7 @@ class MuSIC_Interpreter(MuSIC):
         kwargs["mod_type"] = "downstream"
         kwargs["cci_dir"] = cci_dir_path
         kwargs["group_key"] = group_key
-        kwargs["coords_key"] = "X_umap"
+        kwargs["coords_key"] = "X_pca" if use_dim_reduction else "X_jaccard"
         kwargs["bw_fixed"] = True
 
         # Use the same output directory as the main model, add folder demarcating results from downstream task:

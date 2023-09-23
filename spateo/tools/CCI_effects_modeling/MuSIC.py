@@ -1920,20 +1920,39 @@ class MuSIC:
                     # Check for dimensionality reduction- if not present, use the Jaccard distance:
                     if "X_pca" in self.adata.obsm_keys():
                         coords_key = "X_pca"
+                        initial_bw = 8
+                        alpha = 0.5
                     else:
                         coords_key = "X_jaccard"
+                        initial_bw = 0.2
+                        alpha = 0.1
 
                     # Check over the 10-50 nearest neighbors- compute distances such that each cell has this number
                     # on average:
                     self.minbw = find_bw_for_n_neighbors(
-                        self.adata, coords_key="X_umap", target_n_neighbors=20, verbose=False
+                        self.adata,
+                        coords_key=coords_key,
+                        target_n_neighbors=20,
+                        verbose=False,
+                        initial_bw=initial_bw,
+                        alpha=alpha,
+                        normalize_distances=True,
                     )
 
                     # Take the minimum value between the distance to the 50th nearest neighbor and the distance
                     # beyond which the distance values to "nearest neighbors" start to become unreasonably large:
-                    max_a = find_threshold_distance(self.adata, coords_key="X_umap", n_neighbors=20)
+                    max_a = find_threshold_distance(
+                        self.adata, coords_key=coords_key, n_neighbors=20, normalize_distances=True
+                    )
+
                     max_b = find_bw_for_n_neighbors(
-                        self.adata, coords_key="X_umap", target_n_neighbors=50, verbose=False
+                        self.adata,
+                        coords_key=coords_key,
+                        target_n_neighbors=50,
+                        verbose=False,
+                        initial_bw=initial_bw,
+                        alpha=alpha,
+                        normalize_distances=True,
                     )
 
                     self.maxbw = np.minimum(max_a, max_b)
@@ -2407,7 +2426,7 @@ class MuSIC:
 
             if self.comm.rank == 0:
                 all_fit_outputs = np.vstack(all_fit_outputs)
-                self.logger.info(f"Computing metrics for GWR using bandwidth: {bw}")
+                # self.logger.info(f"Computing metrics for GWR using bandwidth: {bw}")
 
                 # Note: trace of the hat matrix and effective number of parameters (ENP) will be used
                 # interchangeably:
@@ -2513,7 +2532,7 @@ class MuSIC:
                 RSS = np.sum(RSS_list)
                 trace_hat = np.sum(trace_hat_list)
                 aicc = self.compute_aicc_linear(RSS, trace_hat, n_samples=n_samples)
-                self.logger.info(f"Bandwidth: {bw:.3f}, Linear AICc: {aicc:.3f}")
+                # self.logger.info(f"Bandwidth: {bw:.3f}, Linear AICc: {aicc:.3f}")
                 return aicc
 
         elif self.distr == "poisson" or self.distr == "nb":
@@ -2549,7 +2568,7 @@ class MuSIC:
                 ll = self.distr_obj.log_likelihood(y, all_y_pred)
                 trace_hat = np.sum(trace_hat_list)
                 aicc = self.compute_aicc_glm(ll, trace_hat, n_samples=n_samples)
-                self.logger.info(f"Bandwidth: {bw:.3f}, GLM AICc: {aicc:.3f}")
+                # self.logger.info(f"Bandwidth: {bw:.3f}, GLM AICc: {aicc:.3f}")
 
                 return aicc
 
@@ -2780,7 +2799,7 @@ class MuSIC:
                 continue
             self.optimal_bw = optimal_bw
             self.optimal_bw = self.comm.bcast(self.optimal_bw, root=0)
-            self.logger.info(f"Discovered optimal bandwidth for {target}: {self.optimal_bw}")
+            # self.logger.info(f"Discovered optimal bandwidth for {target}: {self.optimal_bw}")
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)
 
@@ -2842,7 +2861,10 @@ class MuSIC:
 
                     # Subtract 1 from predictions for predictions to account for the pseudocount from model setup:
                     y_pred -= 1
-                    y_pred[y_pred < 1] = 0.0
+                    if self.mod_type != "downstream":
+                        y_pred[y_pred < 1] = 0.0
+                    else:
+                        y_pred[y_pred < 0] = 0.0
 
                     # thresh = 1.01 if self.normalize else 0
                     # y_pred[y_pred <= thresh] = 0.0
