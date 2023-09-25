@@ -2197,6 +2197,7 @@ class MuSIC_Interpreter(MuSIC):
         use_ligands: bool = True,
         use_receptors: bool = False,
         use_pathways: bool = False,
+        use_targets: bool = False,
         cell_type: Optional[str] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
@@ -2222,6 +2223,7 @@ class MuSIC_Interpreter(MuSIC):
             use_ligands: Set True if this was True for the original model. Used to find the correct output location.
             use_receptors: Set True if this was True for the original model. Used to find the correct output location.
             use_pathways: Set True if this was True for the original model. Used to find the correct output location.
+            use_targets: Set True if this was True for the original model. Used to find the correct output location.
             cell_type: Cell type of interest- should be the same as was provided to :func `CCI_deg_detection`.
             figsize: Width and height of plotting window
             cmap: Name of matplotlib colormap specifying colormap to use
@@ -2249,40 +2251,53 @@ class MuSIC_Interpreter(MuSIC):
         file_name = os.path.basename(self.adata_path).split(".")[0]
 
         # Load files for all targets:
-        if use_ligands or use_receptors or use_pathways:
+        if use_ligands or use_receptors or use_pathways or use_targets:
             if use_ligands:
                 file_id = "ligand_analysis"
+                adata_id = "ligand_regulators"
                 plot_id = "Target Ligand"
                 title_id = "ligand"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt")
             elif use_receptors:
                 file_id = "receptor_analysis"
+                adata_id = "receptor_regulators"
                 plot_id = "Target Receptor"
                 title_id = "receptor"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt")
+            elif use_targets:
+                file_id = "target_gene_analysis"
+                adata_id = "target_gene_regulators"
+                plot_id = "Target Gene"
+                title_id = "target gene"
+                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_target_genes.txt")
             elif use_pathways and sender_receiver_or_target_degs == "sender":
                 file_id = "pathway_analysis_ligands"
+                adata_id = "ligand_regulators"
                 plot_id = "Target Ligand"
                 title_id = "ligand"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
             elif use_pathways and sender_receiver_or_target_degs == "receiver":
                 file_id = "pathway_analysis_receptors"
+                adata_id = "receptor_regulators"
                 plot_id = "Target Receptor"
                 title_id = "receptor"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
         elif cell_type is not None:
             if sender_receiver_or_target_degs == "sender":
                 file_id = "ligand_analysis"
+                adata_id = "ligand_regulators"
                 plot_id = "Target Ligand"
                 title_id = "ligand"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt")
             elif sender_receiver_or_target_degs == "receiver":
                 file_id = "receptor_analysis"
+                adata_id = "receptor_regulators"
                 plot_id = "Target Receptor"
                 title_id = "receptor"
                 targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_receptors.txt")
             elif sender_receiver_or_target_degs == "target":
                 file_id = "target_analysis"
+                adata_id = "target_gene_regulators"
                 plot_id = "Target Gene"
                 title_id = "target"
                 targets_path = os.path.join(
@@ -2298,9 +2313,11 @@ class MuSIC_Interpreter(MuSIC):
             targets = [line.strip() for line in f.readlines()]
         # Complete list of regulatory factors- search through .obs of the AnnData object:
         if cell_type is None:
-            adata = anndata.read_h5ad(os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all.h5ad"))
+            adata = anndata.read_h5ad(os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_{adata_id}.h5ad"))
         else:
-            adata = anndata.read_h5ad(os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}.h5ad"))
+            adata = anndata.read_h5ad(
+                os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_{adata_id}.h5ad")
+            )
         regulator_cols = [col.replace("regulator_", "") for col in adata.obs.columns if "regulator_" in col]
 
         # Compute proportion or average coefficients for all targets:
@@ -2454,7 +2471,9 @@ class MuSIC_Interpreter(MuSIC):
         regulator_subset: Optional[Union[List[str], str]] = None,
         target_regulator_path: Optional[str] = None,
         cell_subset: Optional[Union[List[str], str]] = None,
-        metric_threshold: float = 0.05,
+        top_n_lr: int = 5,
+        top_n_tf: int = 3,
+        subset_ligand_expr_threshold: float = 0.2,
         layout: Literal["random", "circular", "kamada", "planar", "spring", "spectral", "spiral"] = "planar",
         save_path: Optional[str] = None,
         save_ext: str = "png",
@@ -2480,12 +2499,17 @@ class MuSIC_Interpreter(MuSIC):
             target_regulator_path: Can be used to provide path to external .csv file containing results from
                 regulatory network inference algorithms. If given as "spateo_output", will assume these were inferred
                 from Spateo's model and will search for the file in Spateo's output directory structure.
-            cell_subset: Optional, can be used to specify subset of cells to use for averaging effect sizes. Can be
-                either:
+            cell_subset: Optional, can be used to specify subset of cells to use for averaging effect sizes. If not
+                given, will use all cells. Can be either:
                     - A list of cell IDs (must be in the same format as the cell IDs in the adata object)
                     - Cell type label(s)
-            metric_threshold: Threshold for filtering out edges with low effect sizes, as a percentile of the maximum
-                average effect size. Default is 0.05 (i.e. 5% of the maximum average effect size).
+            top_n_lr: Threshold for filtering out edges with low effect sizes, by selecting up to the top n L:R
+                interactions per target (fewer can be selected if the top n are all zero). Default is 5.
+            top_n_tf: Threshold for filtering out edges with low effect sizes, by selecting up to the top n
+                TF-ligand, TF-receptor and/or TF-target relationships (fewer can be selected if the top n are all
+                zero). Default is 3.
+            subset_ligand_expr_threshold: For the specified cell subset, this threshold will be used to filter out
+                ligands- only those expressed in above this threshold proportion of cells will be kept.
             layout: Used for positioning nodes on the plot. Options:
                 - "random": Randomly positions nodes ini the unit square.
                 - "circular": Positions nodes on a circle.
@@ -2512,6 +2536,12 @@ class MuSIC_Interpreter(MuSIC):
         Returns:
             None
         """
+
+        logger = lm.get_main_logger()
+        config_spateo_rcParams()
+        # Set display DPI:
+        plt.rcParams["figure.dpi"] = dpi
+
         # Check that self.output_path corresponds to the downstream model if "regulator_subset" is given:
         downstream_model_output_dir = os.path.dirname(self.output_path)
         if (
@@ -2532,11 +2562,104 @@ class MuSIC_Interpreter(MuSIC):
                 "L:R model. For example, if the specified model output path is "
                 "outer/folder/results.csv, this should be outer/folder."
             )
+        lr_model_output_files = os.listdir(lr_model_output_dir)
+        # Get L:R names from the design matrix:
+        for file in lr_model_output_files:
+            path = os.path.join(lr_model_output_dir, file)
+            if os.path.isdir(path):
+                if file not in ["analyses", "significance", "networks", ".ipynb_checkpoints"]:
+                    design_mat = pd.read_csv(os.path.join(path, "design_matrix", "design_matrix.csv"), index_col=0)
+        lr_to_target_feature_names = design_mat.columns.tolist()
 
-        logger = lm.get_main_logger()
-        config_spateo_rcParams()
-        # Set display DPI:
-        plt.rcParams["figure.dpi"] = dpi
+        downstream_model_dir = os.path.dirname(self.output_path)
+
+        # Get the names of target genes from the L:R-to-target model from input to lr_model_output_dir:
+        all_targets = []
+        target_to_file = {}
+        for file in lr_model_output_files:
+            if file.endswith(".csv") and "predictions" not in file:
+                parts = file.split("_")
+                target_str = parts[-1].replace(".csv", "")
+                # And map the target to the file name:
+                target_to_file[target_str] = os.path.join(lr_model_output_dir, file)
+                all_targets.append(target_str)
+
+        # Check if any downstream models exist (TF-ligand, TF-receptor, or TF-target):
+        if os.path.exists(os.path.join(downstream_model_dir, "cci_deg_detection")):
+            if os.path.exists(os.path.join(downstream_model_dir, "cci_deg_detection", "ligand_analysis")):
+                # Get the names of target genes from the TF-to-ligand model by looking within the output directory
+                # containing :attr `output_path`:
+                all_modeled_ligands = []
+                ligand_to_file = {}
+                ligand_folder = os.path.join(downstream_model_dir, "cci_deg_detection", "ligand_analysis")
+                ligand_files = os.listdir(ligand_folder)
+                for file in ligand_files:
+                    if file.endswith(".csv"):
+                        parts = file.split("_")
+                        ligand_str = parts[-1].replace(".csv", "")
+                        # And map the ligand to the file name:
+                        ligand_to_file[ligand_str] = os.path.join(ligand_folder, file)
+                        all_modeled_ligands.append(ligand_str)
+
+                # Get TF names from the design matrix:
+                for file in ligand_files:
+                    path = os.path.join(ligand_folder, file)
+                    if file != ".ipynb_checkpoints":
+                        if os.path.isdir(path):
+                            design_mat = pd.read_csv(
+                                os.path.join(path, "downstream_design_matrix", "design_matrix.csv"), index_col=0
+                            )
+                tf_to_ligand_feature_names = [col.replace("regulator_", "") for col in design_mat.columns]
+
+            if os.path.exists(os.path.join(downstream_model_dir, "cci_deg_detection", "receptor_analysis")):
+                # Get the names of target genes from the TF-to-receptor model by looking within the output directory
+                # containing :attr `output_path`:
+                all_modeled_receptors = []
+                receptor_to_file = {}
+                receptor_folder = os.path.join(downstream_model_dir, "cci_deg_detection", "receptor_analysis")
+                receptor_files = os.listdir(receptor_folder)
+                for file in receptor_files:
+                    if file.endswith(".csv"):
+                        parts = file.split("_")
+                        receptor_str = parts[-1].replace(".csv", "")
+                        # And map the receptor to the file name:
+                        receptor_to_file[receptor_str] = os.path.join(receptor_folder, file)
+                        all_modeled_receptors.append(receptor_str)
+
+                # Get TF names from the design matrix:
+                for file in receptor_files:
+                    path = os.path.join(receptor_folder, file)
+                    if file != ".ipynb_checkpoints":
+                        if os.path.isdir(path):
+                            design_mat = pd.read_csv(
+                                os.path.join(path, "downstream_design_matrix", "design_matrix.csv"), index_col=0
+                            )
+                tf_to_receptor_feature_names = [col.replace("regulator_", "") for col in design_mat.columns]
+
+            if os.path.exists(os.path.join(downstream_model_dir, "cci_deg_detection", "target_gene_analysis")):
+                # Get the names of target genes from the TF-to-target model by looking within the output directory
+                # containing :attr `output_path`:
+                all_modeled_targets = []
+                modeled_target_to_file = {}
+                target_folder = os.path.join(downstream_model_dir, "cci_deg_detection", "target_gene_analysis")
+                target_files = os.listdir(target_folder)
+                for file in target_files:
+                    if file.endswith(".csv"):
+                        parts = file.split("_")
+                        target_str = parts[-1].replace(".csv", "")
+                        # And map the target to the file name:
+                        modeled_target_to_file[target_str] = os.path.join(target_folder, file)
+                        all_modeled_targets.append(target_str)
+
+                # Get TF names from the design matrix:
+                for file in target_files:
+                    path = os.path.join(target_folder, file)
+                    if file != ".ipynb_checkpoints":
+                        if os.path.isdir(path):
+                            design_mat = pd.read_csv(
+                                os.path.join(path, "downstream_design_matrix", "design_matrix.csv"), index_col=0
+                            )
+                tf_to_target_feature_names = [col.replace("regulator_", "") for col in design_mat.columns]
 
         if save_path is not None:
             save_folder = os.path.join(os.path.dirname(save_path), "networks")
@@ -2549,21 +2672,59 @@ class MuSIC_Interpreter(MuSIC):
         if cell_subset is not None:
             if all(label in set(self.adata.obs[self.group_key]) for label in cell_subset):
                 adata = self.adata[self.adata.obs[self.group_key].isin(cell_subset)].copy()
+                # Get numerical indices corresponding to cells in the subset:
+                cell_ids = [i for i, name in enumerate(self.adata.obs_names) if name in adata.obs_names]
             else:
                 adata = self.adata[cell_subset, :].copy()
+                cell_ids = [i for i, name in enumerate(self.adata.obs_names) if name in adata.obs_names]
         else:
             adata = self.adata.copy()
+            cell_ids = [i for i, name in enumerate(self.adata.obs_names)]
 
-        all_targets = list(self.coeffs.keys())
         targets = all_targets if target_subset is None else target_subset
-        feature_names = [feat for feat in self.feature_names if feat != "intercept"]
-        # if ligand_subset is not None:
 
-        # Construct L:R-to-target dataframe:
-        lr_to_target_df = pd.DataFrame(0, index=feature_names, columns=targets)
+        # Check for existing dataframes that will be used to construct the network:
+        if os.path.exists(os.path.join(save_folder, "lr_to_target.csv")):
+            lr_to_target_df = pd.read_csv(os.path.join(save_folder, "lr_to_target.csv"), index_col=0)
+        else:
+            # Construct L:R-to-target dataframe:
+            lr_to_target_df = pd.DataFrame(0, index=lr_to_target_feature_names, columns=targets)
 
-        # Save L:R-to-target dataframe:
-        lr_to_target_df.to_csv(os.path.join(save_folder, "lr_to_target.csv"))
+            for target in targets:
+                # Load file corresponding to this target:
+                file_name = target_to_file[target]
+                file_path = os.path.join(lr_model_output_dir, file_name)
+                target_df = pd.read_csv(file_path, index_col=0)
+                target_df = target_df.loc[:, [col for col in target_df.columns if col.startswith("b_")]]
+                # Compute average predicted effect size over the chosen cell subset to populate L:R-to-target
+                # dataframe:
+                target_df.columns = [col.replace("b_", "") for col in target_df.columns if col.startswith("b_")]
+                lr_to_target_df.loc[:, target] = target_df.iloc[cell_ids, :].mean(axis=0)
+
+            # Save L:R-to-target dataframe:
+            lr_to_target_df.to_csv(os.path.join(save_folder, "lr_to_target.csv"))
+
+        # Construct TF-to-ligand/receptor/target dataframes if needed:
+        if "tf_to_ligand_feature_names" in locals():
+            if os.path.exists(os.path.join(save_folder, "tf_to_ligand.csv")):
+                tf_to_ligand_df = pd.read_csv(os.path.join(save_folder, "tf_to_ligand.csv"), index_col=0)
+            else:
+                # Construct TF to ligand dataframe:
+                tf_to_ligand_df = pd.DataFrame(0, index=tf_to_ligand_feature_names, columns=all_modeled_ligands)
+
+                for ligand in all_modeled_ligands:
+                    file_name = ligand_to_file[ligand]
+                    file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "ligand_analysis", file_name)
+                    ligand_df = pd.read_csv(file_path, index_col=0)
+
+        # if
+
+        # Identify nodes and edges from L:R-to-target dataframe:
+
+        # For inferred effects that passed all filtering, if applicable get individual ligands and keep the ligands
+        # that are expressed in the specified cell subset:
+
+        # Check which of the downstream models (if any) were run, load the corresponding files and add to the network:
 
         # Note: set color_method node_property
 
