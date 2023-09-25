@@ -19,6 +19,7 @@ from typing import List, Literal, Optional, Tuple, Union
 
 import anndata
 import igviz as ig
+import matplotlib
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -2474,6 +2475,9 @@ class MuSIC_Interpreter(MuSIC):
         top_n_lr: int = 5,
         top_n_tf: int = 3,
         subset_ligand_expr_threshold: float = 0.2,
+        cmap_neighbors: str = "YlOrRd",
+        cmap_default: str = "YlGnBu",
+        scale_factor: float = 3,
         layout: Literal["random", "circular", "kamada", "planar", "spring", "spectral", "spiral"] = "planar",
         save_path: Optional[str] = None,
         save_ext: str = "png",
@@ -2510,6 +2514,11 @@ class MuSIC_Interpreter(MuSIC):
                 zero). Default is 3.
             subset_ligand_expr_threshold: For the specified cell subset, this threshold will be used to filter out
                 ligands- only those expressed in above this threshold proportion of cells will be kept.
+            cmap_neighbors: Colormap to use for nodes belonging to "source"/receiver cells. Defaults to
+                yellow-orange-red.
+            cmap_default: Colormap to use for nodes belonging to "neighbor"/sender cells. Defaults to
+                purple-blue-green.
+            scale_factor: Adjust to modify the size of the nodes
             layout: Used for positioning nodes on the plot. Options:
                 - "random": Randomly positions nodes ini the unit square.
                 - "circular": Positions nodes on a circle.
@@ -2570,6 +2579,22 @@ class MuSIC_Interpreter(MuSIC):
                 if file not in ["analyses", "significance", "networks", ".ipynb_checkpoints"]:
                     design_mat = pd.read_csv(os.path.join(path, "design_matrix", "design_matrix.csv"), index_col=0)
         lr_to_target_feature_names = design_mat.columns.tolist()
+
+        # If subset for ligands and/or receptors is not specified, use all that were included in the model:
+        if ligand_subset is None:
+            ligand_subset = []
+        if receptor_subset is None:
+            receptor_subset = []
+
+        for lig_rec in lr_to_target_feature_names:
+            lig, rec = lig_rec.split(":")
+            lig_split = lig.split("/")
+            for l in lig_split:
+                if l not in ligand_subset:
+                    ligand_subset.append(l)
+
+            if rec not in receptor_subset:
+                receptor_subset.append(rec)
 
         downstream_model_dir = os.path.dirname(self.output_path)
 
@@ -2716,17 +2741,187 @@ class MuSIC_Interpreter(MuSIC):
                     file_name = ligand_to_file[ligand]
                     file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "ligand_analysis", file_name)
                     ligand_df = pd.read_csv(file_path, index_col=0)
+                    ligand_df = ligand_df.loc[:, [col for col in ligand_df.columns if col.startswith("b_")]]
+                    # Compute average predicted effect size over the chosen cell subset to populate the TF-to-ligand
+                    # dataframe:
+                    ligand_df.columns = [col.replace("b_", "") for col in ligand_df.columns if col.startswith("b_")]
+                    tf_to_ligand_df.loc[:, ligand] = ligand_df.iloc[cell_ids, :].mean(axis=0)
 
-        # if
+                # Save TF-to-ligand dataframe:
+                tf_to_ligand_df.to_csv(os.path.join(save_folder, "tf_to_ligand.csv"))
+
+        if "tf_to_receptor_feature_names" in locals():
+            if os.path.exists(os.path.join(save_folder, "tf_to_receptor.csv")):
+                tf_to_receptor_df = pd.read_csv(os.path.join(save_folder, "tf_to_receptor.csv"), index_col=0)
+            else:
+                # Construct TF to receptor dataframe:
+                tf_to_receptor_df = pd.DataFrame(0, index=tf_to_receptor_feature_names, columns=all_modeled_receptors)
+
+                for receptor in all_modeled_receptors:
+                    file_name = receptor_to_file[receptor]
+                    file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "receptor_analysis", file_name)
+                    receptor_df = pd.read_csv(file_path, index_col=0)
+                    receptor_df = receptor_df.loc[:, [col for col in receptor_df.columns if col.startswith("b_")]]
+                    # Compute average predicted effect size over the chosen cell subset to populate the TF-to-receptor
+                    # dataframe:
+                    receptor_df.columns = [col.replace("b_", "") for col in receptor_df.columns if col.startswith("b_")]
+                    tf_to_receptor_df.loc[:, receptor] = receptor_df.iloc[cell_ids, :].mean(axis=0)
+
+                # Save TF-to-receptor dataframe:
+                tf_to_receptor_df.to_csv(os.path.join(save_folder, "tf_to_receptor.csv"))
+
+        if "tf_to_target_feature_names" in locals():
+            if os.path.exists(os.path.join(save_folder, "tf_to_target.csv")):
+                tf_to_target_df = pd.read_csv(os.path.join(save_folder, "tf_to_target.csv"), index_col=0)
+            else:
+                # Construct TF to target dataframe:
+                tf_to_target_df = pd.DataFrame(0, index=tf_to_target_feature_names, columns=targets)
+
+                for target in targets:
+                    file_name = target_to_file[target]
+                    file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "target_analysis", file_name)
+                    target_df = pd.read_csv(file_path, index_col=0)
+                    target_df = target_df.loc[:, [col for col in target_df.columns if col.startswith("b_")]]
+                    # Compute average predicted effect size over the chosen cell subset to populate the TF-to-target
+                    # dataframe:
+                    target_df.columns = [col.replace("b_", "") for col in target_df.columns if col.startswith("b_")]
+                    tf_to_target_df.loc[:, target] = target_df.iloc[cell_ids, :].mean(axis=0)
+
+                # Save TF-to-target dataframe:
+                tf_to_target_df.to_csv(os.path.join(save_folder, "tf_to_target.csv"))
+
+        # Graph construction:
+        G = nx.DiGraph()
 
         # Identify nodes and edges from L:R-to-target dataframe:
+        for target in lr_to_target_df.columns:
+            top_n_lr = lr_to_target_df.nlargest(n=top_n_lr, columns=target).index
+            # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
+            # of the maximum in the array (because these values can be variable):
+            reference_value = lr_to_target_df.max()
+            top_n_lr = [
+                lr
+                for lr in top_n_lr
+                if lr_to_target_df.loc[lr, target] >= (self.target_expr_threshold * reference_value[target])
+            ]
 
-        # For inferred effects that passed all filtering, if applicable get individual ligands and keep the ligands
-        # that are expressed in the specified cell subset:
+            for lr in top_n_lr:
+                ligand_receptor_pair = lr
+                ligands, receptor = ligand_receptor_pair.split(":")
+
+                # Check if ligands and receptors are in their respective subsets
+                if receptor in receptor_subset and any(lig in ligand_subset for lig in ligands.split("/")):
+                    # For ligands separated by "/", check expression of each individual ligand in the AnnData object,
+                    # keep ligands that are sufficiently expressed in the specified cell subset:
+                    for lig in ligands.split("/"):
+                        num_expr = (adata[:, lig].X > 0).sum()
+                        expr_percent = (num_expr / adata.shape[0]) * 100
+                        pass_threshold = expr_percent >= subset_ligand_expr_threshold
+
+                        if lig in ligand_subset and pass_threshold:
+                            # For the intents of this network, the ligand refers to ligand expressed in neighboring
+                            # cells:
+                            lig = f"Neighbor {lig}"
+                            G.add_edge(lig, receptor, attr_dict={"Type": "L:R"})
+
+                    # Add edge from receptor to target with the DataFrame value as property:
+                    G.add_edge(receptor, target, attr_dict={"Type": "Downstream effect"})
 
         # Check which of the downstream models (if any) were run, load the corresponding files and add to the network:
+        if "tf_to_ligand_df" in locals():
+            if regulator_subset is None:
+                regulator_subset = tf_to_ligand_df.index
 
-        # Note: set color_method node_property
+            for ligand in tf_to_ligand_df.columns:
+                top_n_tf = tf_to_ligand_df.nlargest(n=top_n_tf, columns=ligand).index
+                # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
+                # of the maximum in the array (because these values can be variable):
+                reference_value = tf_to_ligand_df.max().max()
+                top_n_tf = [
+                    tf
+                    for tf in top_n_tf
+                    if tf_to_ligand_df.loc[tf, ligand] >= (self.target_expr_threshold * reference_value)
+                ]
+
+                for tf in top_n_tf:
+                    # Check if ligand is in the ligand subset:
+                    if ligand in ligand_subset:
+                        # For the intents of this network, the TF refers to TF expressed in neighboring cells:
+                        tf = f"Neighbor {tf}"
+                        ligand = f"Neighbor {ligand}"
+                        G.add_edge(tf, ligand, attr_dict={"Type": "TF:Ligand"})
+
+        if "tf_to_receptor_df" in locals():
+            if regulator_subset is None:
+                regulator_subset = tf_to_receptor_df.index
+
+            for receptor in tf_to_receptor_df.columns:
+                top_n_tf = tf_to_receptor_df.nlargest(n=top_n_tf, columns=receptor).index
+                # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
+                # of the maximum in the array (because these values can be variable):
+                reference_value = tf_to_receptor_df.max().max()
+                top_n_tf = [
+                    tf
+                    for tf in top_n_tf
+                    if tf_to_receptor_df.loc[tf, receptor] >= (self.target_expr_threshold * reference_value)
+                ]
+
+                for tf in top_n_tf:
+                    # Check if receptor is in the receptor subset:
+                    if receptor in receptor_subset:
+                        G.add_edge(tf, receptor, attr_dict={"Type": "TF:Receptor"})
+
+        if "tf_to_target_df" in locals():
+            if regulator_subset is None:
+                regulator_subset = tf_to_target_df.index
+
+            for target in tf_to_target_df.columns:
+                top_n_tf = tf_to_target_df.nlargest(n=top_n_tf, columns=target).index
+                # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
+                # of the maximum in the array (because these values can be variable):
+                reference_value = tf_to_target_df.max().max()
+                top_n_tf = [
+                    tf
+                    for tf in top_n_tf
+                    if tf_to_target_df.loc[tf, target] >= (self.target_expr_threshold * reference_value)
+                ]
+
+                for tf in top_n_tf:
+                    G.add_edge(tf, target, attr_dict={"Type": "TF:Target"})
+
+        # Set colors for nodes- for neighboring cell ligands + TFs, use a distinct colormap (and same w/ receptors,
+        # targets and TFs for source cells)- color both on gradient based on number of connections:
+        color_list = []
+        sizing_list = []
+        sizing_neighbor = {}
+        sizing_nonneighbor = {}
+
+        cmap_neighbor = plt.cm.get_cmap(cmap_neighbors)
+        cmap_non_neighbor = plt.cm.get_cmap(cmap_default)
+
+        # Calculate node degrees and set color and size based on the degree and label
+        for node in G.nodes():
+            degree = G.degree(node)
+            size_and_color = degree * scale_factor
+
+            # Add size to sizing_list
+            if "Neighbor" in node:
+                sizing_neighbor[node] = size_and_color
+            else:
+                sizing_nonneighbor[node] = size_and_color
+
+        for node in G.nodes():
+            if "Neighbor" in node:
+                color = matplotlib.colors.to_hex(cmap_neighbor(sizing_neighbor[node] / max(sizing_neighbor.values())))
+                sizing_list.append(sizing_neighbor[node])
+            else:
+                color = matplotlib.colors.to_hex(
+                    cmap_non_neighbor(sizing_nonneighbor[node] / max(sizing_nonneighbor.values()))
+                )
+                sizing_list.append(sizing_nonneighbor[node])
+            color_list.append(color)
+
+        # Draw graph:
 
     # ---------------------------------------------------------------------------------------------------
     # Permutation testing
