@@ -2,7 +2,6 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import ot
-import pandas as pd
 import torch
 from anndata import AnnData
 from sklearn.decomposition import NMF
@@ -112,40 +111,27 @@ def paste_pairwise_align(
         G_init = nx.from_numpy(G_init, type_as=type_as)
         G0 = (1 / nx.sum(G_init)) * G_init
 
-    if ot.__version__ == "0.8.3dev":
-        pi, log = ot.optim.cg(
-            a,
-            b,
-            (1 - alpha) * M,
-            alpha,
-            lambda G: ot.gromov.gwloss(constC, hC1, hC2, G),
-            lambda G: ot.gromov.gwggrad(constC, hC1, hC2, G),
-            G0,
-            armijo=False,
-            C1=D_A,
-            C2=D_B,
-            constC=constC,
-            numItermax=numItermax,
-            numItermaxEmd=numItermaxEmd,
-            log=True,
-        )
-    else:
-        pi, log = ot.gromov.cg(
-            a,
-            b,
-            (1 - alpha) * M,
-            alpha,
-            lambda G: ot.gromov.gwloss(constC, hC1, hC2, G),
-            lambda G: ot.gromov.gwggrad(constC, hC1, hC2, G),
-            G0,
-            armijo=False,
-            C1=D_A,
-            C2=D_B,
-            constC=constC,
-            numItermax=numItermax,
-            numItermaxEmd=numItermaxEmd,
-            log=True,
-        )
+    try:
+        from ot.optim import cg
+    except ImportError:
+        from ot.gromov import cg
+
+    pi, log = ot.gromov.cg(
+        a,
+        b,
+        (1 - alpha) * M,
+        alpha,
+        lambda G: ot.gromov.gwloss(constC, hC1, hC2, G),
+        lambda G: ot.gromov.gwggrad(constC, hC1, hC2, G),
+        G0,
+        armijo=False,
+        C1=D_A,
+        C2=D_B,
+        constC=constC,
+        numItermax=numItermax,
+        numItermaxEmd=numItermaxEmd,
+        log=True,
+    )
 
     pi = nx.to_numpy(pi)
     obj = nx.to_numpy(log["loss"][-1])
