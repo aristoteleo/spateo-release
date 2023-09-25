@@ -2470,19 +2470,21 @@ class MuSIC_Interpreter(MuSIC):
         ligand_subset: Optional[Union[List[str], str]] = None,
         receptor_subset: Optional[Union[List[str], str]] = None,
         regulator_subset: Optional[Union[List[str], str]] = None,
-        target_regulator_path: Optional[str] = None,
+        include_tf_ligand: bool = False,
+        include_tf_receptor: bool = False,
+        include_tf_target: bool = True,
         cell_subset: Optional[Union[List[str], str]] = None,
-        top_n_lr: int = 5,
-        top_n_tf: int = 3,
+        select_n_lr: int = 5,
+        select_n_tf: int = 3,
         subset_ligand_expr_threshold: float = 0.2,
         cmap_neighbors: str = "YlOrRd",
         cmap_default: str = "YlGnBu",
         scale_factor: float = 3,
         layout: Literal["random", "circular", "kamada", "planar", "spring", "spectral", "spiral"] = "planar",
         save_path: Optional[str] = None,
+        save_id: Optional[str] = None,
         save_ext: str = "png",
         dpi: int = 300,
-        visualize: bool = True,
         **kwargs,
     ):
         """After fitting model, construct and visualize the inferred intercellular regulatory network. Effect sizes (
@@ -2500,16 +2502,19 @@ class MuSIC_Interpreter(MuSIC):
                 present in any of the interactions for the model.
             regulator_subset: Optional, can be used to specify subset of regulators (transcription factors,
                 etc.). If not given, will use all regulatory molecules used in fitting the downstream model(s).
-            target_regulator_path: Can be used to provide path to external .csv file containing results from
-                regulatory network inference algorithms. If given as "spateo_output", will assume these were inferred
-                from Spateo's model and will search for the file in Spateo's output directory structure.
+            include_tf_ligand: Whether to include TF-ligand interactions in the network. While providing more
+                information, this can make it more difficult to interpret the plot. Defaults to False.
+            include_tf_receptor: Whether to include TF-receptor interactions in the network. While providing more
+                information, this can make it more difficult to interpret the plot. Defaults to False.
+            include_tf_target: Whether to include TF-target interactions in the network. While providing more
+                information, this can make it more difficult to interpret the plot. Defaults to True.
             cell_subset: Optional, can be used to specify subset of cells to use for averaging effect sizes. If not
                 given, will use all cells. Can be either:
                     - A list of cell IDs (must be in the same format as the cell IDs in the adata object)
                     - Cell type label(s)
-            top_n_lr: Threshold for filtering out edges with low effect sizes, by selecting up to the top n L:R
+            select_n_lr: Threshold for filtering out edges with low effect sizes, by selecting up to the top n L:R
                 interactions per target (fewer can be selected if the top n are all zero). Default is 5.
-            top_n_tf: Threshold for filtering out edges with low effect sizes, by selecting up to the top n
+            select_n_tf: Threshold for filtering out edges with low effect sizes, by selecting up to the top n
                 TF-ligand, TF-receptor and/or TF-target relationships (fewer can be selected if the top n are all
                 zero). Default is 3.
             subset_ligand_expr_threshold: For the specified cell subset, this threshold will be used to filter out
@@ -2529,12 +2534,13 @@ class MuSIC_Interpreter(MuSIC):
                 - "spiral": Positions nodes in a spiral layout.
             save_path: Optional, directory to save figure to. If not given, will save to the parent folder of the
                 path provided for :attr `output_path` in the argument specification.
+            save_id: Optional unique identifier that can be used in saving. If not given, will use the AnnData
+                object path to derive this.
             save_ext: File extension to save figure as. Default is "png".
             dpi: Resolution to save figure at. Default is 300.
-            visualize: Whether to visualize the plot. Default is True. If False, will save intermediate dataframes
-                e.g. for better idea of thresholds to use.
-            **kwargs: Additional arguments that can be provided to :func igviz.plot(); note that 'color_method',
-                'node_label' and 'edge_label' should not be provided this way. Notable options include:
+            **kwargs: NOT CURRENTLY INCLUDED. Additional arguments that can be provided to :func igviz.plot(); note
+                that 'color_method', 'node_label' and 'edge_label' should not be provided this way. Notable options
+                include:
                     - node_label_position: Position of the node label relative to the node. Either {'top left',
                         'top center', 'top right', 'middle left', 'middle center', 'middle right', 'bottom left',
                         'bottom center', 'bottom right'}
@@ -2543,7 +2549,9 @@ class MuSIC_Interpreter(MuSIC):
                         'bottom center', 'bottom right'}
 
         Returns:
-            None
+            G: Graph object, such that it can be separately plotted in interactive window.
+            sizing_list: List of node sizes, for use in interactive window.
+            color_list: List of node colors, for use in interactive window.
         """
 
         logger = lm.get_main_logger()
@@ -2794,16 +2802,20 @@ class MuSIC_Interpreter(MuSIC):
         G = nx.DiGraph()
 
         # Identify nodes and edges from L:R-to-target dataframe:
-        for target in lr_to_target_df.columns:
-            top_n_lr = lr_to_target_df.nlargest(n=top_n_lr, columns=target).index
+        for target in targets:
+            top_n_lr = lr_to_target_df.nlargest(n=select_n_lr, columns=target).index.tolist()
             # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
             # of the maximum in the array (because these values can be variable):
-            reference_value = lr_to_target_df.max()
+            reference_value = lr_to_target_df.max().max()
             top_n_lr = [
                 lr
                 for lr in top_n_lr
-                if lr_to_target_df.loc[lr, target] >= (self.target_expr_threshold * reference_value[target])
+                if lr_to_target_df.loc[lr, target] >= (self.target_expr_threshold * reference_value)
             ]
+
+            target = f"Target: {target}"
+            if not G.has_node(target):
+                G.add_node(target, ID=target)
 
             for lr in top_n_lr:
                 ligand_receptor_pair = lr
@@ -2822,18 +2834,23 @@ class MuSIC_Interpreter(MuSIC):
                             # For the intents of this network, the ligand refers to ligand expressed in neighboring
                             # cells:
                             lig = f"Neighbor {lig}"
-                            G.add_edge(lig, receptor, attr_dict={"Type": "L:R"})
+                            if not G.has_node(lig):
+                                G.add_node(lig, ID=lig)
+                            if not G.has_node(receptor):
+                                G.add_node(receptor, ID=receptor)
+                            G.add_edge(lig, receptor, Type="L:R")
 
                     # Add edge from receptor to target with the DataFrame value as property:
-                    G.add_edge(receptor, target, attr_dict={"Type": "Downstream effect"})
+                    G.add_edge(receptor, target, Type="L:R effect")
 
         # Check which of the downstream models (if any) were run, load the corresponding files and add to the network:
-        if "tf_to_ligand_df" in locals():
+        if "tf_to_ligand_df" in locals() and include_tf_ligand:
             if regulator_subset is None:
                 regulator_subset = tf_to_ligand_df.index
 
             for ligand in tf_to_ligand_df.columns:
-                top_n_tf = tf_to_ligand_df.nlargest(n=top_n_tf, columns=ligand).index
+                node_ligand_label = f"Neighbor {ligand}"
+                top_n_tf = tf_to_ligand_df.nlargest(n=select_n_tf, columns=ligand).index.tolist()
                 # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
                 # of the maximum in the array (because these values can be variable):
                 reference_value = tf_to_ligand_df.max().max()
@@ -2845,18 +2862,20 @@ class MuSIC_Interpreter(MuSIC):
 
                 for tf in top_n_tf:
                     # Check if ligand is in the ligand subset:
-                    if ligand in ligand_subset:
+                    if ligand in ligand_subset and G.has_node(node_ligand_label):
                         # For the intents of this network, the TF refers to TF expressed in neighboring cells:
                         tf = f"Neighbor {tf}"
                         ligand = f"Neighbor {ligand}"
-                        G.add_edge(tf, ligand, attr_dict={"Type": "TF:Ligand"})
+                        if not G.has_node(tf):
+                            G.add_node(tf, ID=tf)
+                        G.add_edge(tf, ligand, Type="TF:Ligand")
 
-        if "tf_to_receptor_df" in locals():
+        if "tf_to_receptor_df" in locals() and include_tf_receptor:
             if regulator_subset is None:
                 regulator_subset = tf_to_receptor_df.index
 
             for receptor in tf_to_receptor_df.columns:
-                top_n_tf = tf_to_receptor_df.nlargest(n=top_n_tf, columns=receptor).index
+                top_n_tf = tf_to_receptor_df.nlargest(n=select_n_tf, columns=receptor).index.tolist()
                 # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
                 # of the maximum in the array (because these values can be variable):
                 reference_value = tf_to_receptor_df.max().max()
@@ -2868,15 +2887,17 @@ class MuSIC_Interpreter(MuSIC):
 
                 for tf in top_n_tf:
                     # Check if receptor is in the receptor subset:
-                    if receptor in receptor_subset:
-                        G.add_edge(tf, receptor, attr_dict={"Type": "TF:Receptor"})
+                    if receptor in receptor_subset and G.has_node(receptor):
+                        if not G.has_node(tf):
+                            G.add_node(tf, ID=tf)
+                        G.add_edge(tf, receptor, Type="TF:Receptor")
 
-        if "tf_to_target_df" in locals():
+        if "tf_to_target_df" in locals() and include_tf_target:
             if regulator_subset is None:
                 regulator_subset = tf_to_target_df.index
 
             for target in tf_to_target_df.columns:
-                top_n_tf = tf_to_target_df.nlargest(n=top_n_tf, columns=target).index
+                top_n_tf = tf_to_target_df.nlargest(n=select_n_tf, columns=target).index.tolist()
                 # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
                 # of the maximum in the array (because these values can be variable):
                 reference_value = tf_to_target_df.max().max()
@@ -2887,7 +2908,10 @@ class MuSIC_Interpreter(MuSIC):
                 ]
 
                 for tf in top_n_tf:
-                    G.add_edge(tf, target, attr_dict={"Type": "TF:Target"})
+                    if G.has_node(f"Target: {target}"):
+                        if not G.has_node(tf):
+                            G.add_node(tf, ID=tf)
+                        G.add_edge(tf, target, Type="TF:Target")
 
         # Set colors for nodes- for neighboring cell ligands + TFs, use a distinct colormap (and same w/ receptors,
         # targets and TFs for source cells)- color both on gradient based on number of connections:
@@ -2902,7 +2926,9 @@ class MuSIC_Interpreter(MuSIC):
         # Calculate node degrees and set color and size based on the degree and label
         for node in G.nodes():
             degree = G.degree(node)
-            size_and_color = degree * scale_factor
+            # Add degree as property:
+            G.nodes[node]["Connections"] = degree
+            size_and_color = np.sqrt(degree) * scale_factor
 
             # Add size to sizing_list
             if "Neighbor" in node:
@@ -2921,7 +2947,41 @@ class MuSIC_Interpreter(MuSIC):
                 sizing_list.append(sizing_nonneighbor[node])
             color_list.append(color)
 
+        if layout == "planar":
+            is_planar, _ = nx.check_planarity(G)
+            if not is_planar:
+                logger.info("Graph is not planar, using spring layout instead.")
+                layout = "spring"
+
         # Draw graph:
+        f = ig.plot(
+            G,
+            size_method=sizing_list,
+            color_method=color_list,
+            node_text=["Connections"],
+            node_label="ID",
+            node_label_position="top center",
+            edge_text=["Type"],
+            # edge_label="Type",
+            # edge_label_position="bottom center",
+            layout=layout,
+            arrow_size=1,
+        )
+
+        # Save graph:
+        if save_id is None:
+            save_id = os.path.basename(self.adata_path).split(".")[0]
+        if save_path is None:
+            save_path = save_folder
+        full_save_path = os.path.join(save_path, f"{save_id}_network.{save_ext}")
+        logger.info(f"Writing network to {full_save_path}...")
+
+        fig = plotly.graph_objects.Figure(f)
+        fig.update_layout(margin=dict(b=20, l=20, r=20, t=40))
+        # The default is 100 DPI
+        fig.write_image(full_save_path, scale=dpi / 100)
+
+        return G, sizing_list, color_list
 
     # ---------------------------------------------------------------------------------------------------
     # Permutation testing
