@@ -18,7 +18,6 @@ from collections import Counter
 from typing import List, Literal, Optional, Tuple, Union
 
 import anndata
-import igviz as ig
 import matplotlib
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -40,6 +39,7 @@ from sklearn.preprocessing import normalize
 
 from ...configuration import config_spateo_rcParams
 from ...logging import logger_manager as lm
+from ...plotting.static.networks import plot_network
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...preprocessing.transform import log1p
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
@@ -2481,11 +2481,17 @@ class MuSIC_Interpreter(MuSIC):
         cmap_default: str = "YlGnBu",
         scale_factor: float = 3,
         layout: Literal["random", "circular", "kamada", "planar", "spring", "spectral", "spiral"] = "planar",
+        node_fontsize: int = 8,
+        edge_fontsize: int = 8,
+        upper_margin: float = 40,
+        lower_margin: float = 20,
+        left_margin: float = 50,
+        right_margin: float = 50,
+        title: Optional[str] = None,
         save_path: Optional[str] = None,
         save_id: Optional[str] = None,
         save_ext: str = "png",
         dpi: int = 300,
-        **kwargs,
     ):
         """After fitting model, construct and visualize the inferred intercellular regulatory network. Effect sizes (
         edge values) will be averaged over cells specified by "cell_subset", otherwise all cells will be used.
@@ -2532,21 +2538,20 @@ class MuSIC_Interpreter(MuSIC):
                 - "spring": Positions nodes using Fruchterman-Reingold force-directed algorithm.
                 - "spectral": Positions nodes using eigenvectors of the graph Laplacian.
                 - "spiral": Positions nodes in a spiral layout.
+            node_fontsize: Font size for node labels
+            edge_fontsize: Font size for edge labels
+            title: Optional, title for the plot. If not given, will use the AnnData object path to derive this.
+            upper_margin: Margin between top of the plot and top of the figure
+            lower_margin: Margin between bottom of the plot and bottom of the figure
+            left_margin: Margin between left of the plot and left of the figure
+            right_margin: Margin between right of the plot and right of the figure
             save_path: Optional, directory to save figure to. If not given, will save to the parent folder of the
                 path provided for :attr `output_path` in the argument specification.
             save_id: Optional unique identifier that can be used in saving. If not given, will use the AnnData
                 object path to derive this.
             save_ext: File extension to save figure as. Default is "png".
             dpi: Resolution to save figure at. Default is 300.
-            **kwargs: NOT CURRENTLY INCLUDED. Additional arguments that can be provided to :func igviz.plot(); note
-                that 'color_method', 'node_label' and 'edge_label' should not be provided this way. Notable options
-                include:
-                    - node_label_position: Position of the node label relative to the node. Either {'top left',
-                        'top center', 'top right', 'middle left', 'middle center', 'middle right', 'bottom left',
-                        'bottom center', 'bottom right'}
-                    - edge_label_position: Position of the edge label relative to the edge. Either {'top left',
-                        'top center', 'top right', 'middle left', 'middle center', 'middle right', 'bottom left',
-                        'bottom center', 'bottom right'}
+
 
         Returns:
             G: Graph object, such that it can be separately plotted in interactive window.
@@ -2954,18 +2959,28 @@ class MuSIC_Interpreter(MuSIC):
                 layout = "spring"
 
         # Draw graph:
-        f = ig.plot(
+        if title is None:
+            title = os.path.basename(self.adata_path).split(".")[0]
+
+        f = plot_network(
             G,
+            title=title,
             size_method=sizing_list,
             color_method=color_list,
             node_text=["Connections"],
             node_label="ID",
+            nodefont_size=node_fontsize,
             node_label_position="top center",
             edge_text=["Type"],
-            # edge_label="Type",
-            # edge_label_position="bottom center",
+            edge_label="Type",
+            edge_label_position="bottom center",
+            edgefont_size=edge_fontsize,
             layout=layout,
             arrow_size=1,
+            upper_margin=upper_margin,
+            lower_margin=lower_margin,
+            left_margin=left_margin,
+            right_margin=right_margin,
         )
 
         # Save graph:
@@ -2977,7 +2992,6 @@ class MuSIC_Interpreter(MuSIC):
         logger.info(f"Writing network to {full_save_path}...")
 
         fig = plotly.graph_objects.Figure(f)
-        fig.update_layout(margin=dict(b=20, l=20, r=20, t=40))
         # The default is 100 DPI
         fig.write_image(full_save_path, scale=dpi / 100)
 
