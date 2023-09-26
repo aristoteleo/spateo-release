@@ -28,7 +28,10 @@ jobs:
       matrix:
         python: [3.8, 3.9]
         os: [ubuntu-20.04]
-        mpi: [msmpi]
+        mpi:
+          - mpich
+          - openmpi
+          - intelmpi
     name: Test on Python ${{ matrix.python }}
     steps:
       - name: Checkout branch
