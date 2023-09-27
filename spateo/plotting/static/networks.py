@@ -1,6 +1,8 @@
 from typing import Dict, List, Optional, Tuple, Union
 
 import networkx
+import numpy as np
+import plotly.figure_factory as ff
 import plotly.graph_objects as go
 from plotly import callbacks
 
@@ -9,8 +11,7 @@ from ...logging import logger_manager as lm
 
 class PlotNetwork:
     def __init__(self, G: Union[networkx.Graph, networkx.DiGraph], layout: str):
-        """Sets up and configures nodes and edges to plot a network graph. Adapted from igviz:
-        https://github.com/Ashton-Sidhu/plotly-graph.
+        """Sets up and configures nodes and edges to plot a network graph.
 
         Args:
             G: Networkx graph object
@@ -77,9 +78,11 @@ class PlotNetwork:
             y=[],
             mode=node_mode,
             text=[],
+            hovertext=[],
             hoverinfo="text",
             textposition=node_label_position,
             textfont=dict(size=node_label_size, color="black"),
+            showlegend=False,
             marker=dict(
                 showscale=show_colorbar,
                 colorscale=colorscale,
@@ -137,7 +140,9 @@ class PlotNetwork:
         edge_label_size: int,
         edge_label_position: str,
         edge_text: List[str],
-    ) -> Tuple[go.Scatter, go.Scatter]:
+        edge_attribute_for_linestyle: Optional[str] = None,
+        add_text: bool = False,
+    ) -> Tuple[List[go.Scatter], go.Scatter]:
         """Formatting for edges
 
         Args:
@@ -146,24 +151,43 @@ class PlotNetwork:
             edge_label_position: Position of edge labels. Options: 'top left', 'top center', 'top right',
                 'middle left', 'middle center', 'middle right', 'bottom left', 'bottom center', 'bottom right'
             edge_text: List containing properties to be displayed when hovering over edges
+            edge_attribute_for_linestyle: Optional edge property to use for linestyle. If not given, will default to
+                property given to 'edge_label'.
+            add_text: If True, will add text corresponding to edge_label onto the edges rather than only
+                adding different line styles.
 
         Returns:
-            edge_trace: Plotly graph objects scatter plot
+            edge_traces: Plotly graph objects scatter plots
             middle_node_trace: Labels are created by adding invisible nodes to the middle of each edge. This
                 trace contains information for these invisible nodes.
         """
-        edge_mode = "lines+text" if edge_label else "lines"
+        edge_mode = "lines+text" if add_text else "lines"
         edge_properties = {}
 
-        # This trace is for the actual lines that appear on the plot
-        edge_trace = go.Scatter(
-            x=[],
-            y=[],
-            line=dict(width=1, color="#888"),
-            text=[],
-            hoverinfo="text",
-            mode=edge_mode,
+        if edge_attribute_for_linestyle is None:
+            edge_attribute_for_linestyle = edge_label
+
+        unique_values = list(
+            {
+                edge[2].get(edge_attribute_for_linestyle)
+                for edge in self.G.edges(data=True)
+                if edge[2].get(edge_attribute_for_linestyle)
+            }
         )
+        # Can accomodate up to four line styles
+        if len(unique_values) > 4:
+            self.logger.info("More than four unique labels detected. Using the first four.")
+            unique_values = unique_values[:4]
+
+        styles = {
+            unique_values[0]: dict(color="#888", dash="solid"),
+            unique_values[1]: dict(color="#555", dash="dash"),
+            unique_values[2]: dict(color="#222", dash="dot"),
+            unique_values[3]: dict(color="#000", dash="dashdot"),
+        }
+
+        # Initialize an empty list for the edge traces- these will be the lines connecting nodes
+        edge_traces = []
 
         middle_node_trace = go.Scatter(
             x=[],
@@ -174,13 +198,40 @@ class PlotNetwork:
             textposition=edge_label_position,
             textfont=dict(size=edge_label_size, color="black"),
             marker=dict(opacity=0),
+            showlegend=False,
         )
 
         for edge in self.G.edges(data=True):
             x0, y0 = self.G.nodes[edge[0]]["pos"]
             x1, y1 = self.G.nodes[edge[1]]["pos"]
-            edge_trace["x"] += (x0, x1, None)
-            edge_trace["y"] += (y0, y1, None)
+
+            if edge_attribute_for_linestyle is not None and edge[2].get(edge_attribute_for_linestyle):
+                style = styles.get(edge[2][edge_attribute_for_linestyle], {"color": "#888", "dash": "solid"})
+            else:
+                style = {"color": "#888", "dash": "solid"}
+
+            # Check if there's already a trace with this style:
+            matching_trace = None
+            for trace in edge_traces:
+                if trace["line"]["color"] == style["color"] and trace["line"]["dash"] == style["dash"]:
+                    matching_trace = trace
+                    break
+
+            # If no trace with this style exists, create a new one
+            if not matching_trace:
+                matching_trace = go.Scatter(
+                    x=[],
+                    y=[],
+                    line=dict(width=1, color=style["color"], dash=style["dash"]),
+                    hoverinfo="text",
+                    mode="lines",
+                    name=edge[2][edge_attribute_for_linestyle],
+                )
+                edge_traces.append(matching_trace)
+
+            # Add the edge coordinates to the trace
+            matching_trace["x"] += (x0, x1, None)
+            matching_trace["y"] += (y0, y1, None)
 
             if edge_text or edge_label:
                 edge_pair = edge[0], edge[1]
@@ -195,7 +246,7 @@ class PlotNetwork:
                         edge_properties[edge_pair][prop] = []
                     edge_properties[edge_pair][prop].append(edge[2][prop])
 
-            if edge_label:
+            if add_text:
                 middle_node_trace["text"] += (edge[2][edge_label],)
                 middle_node_trace["mode"] = "markers+text"
 
@@ -204,12 +255,12 @@ class PlotNetwork:
 
             middle_node_trace["hovertext"] = edge_text_list
 
-        return edge_trace, middle_node_trace
+        return edge_traces, middle_node_trace
 
     def generate_figure(
         self,
         node_trace: go.Scatter,
-        edge_trace: go.Scatter,
+        edge_traces: List[go.Scatter],
         middle_node_trace: go.Scatter,
         title: str,
         title_font_size: int,
@@ -225,6 +276,9 @@ class PlotNetwork:
 
         annotations = []
 
+        data = [node_trace, middle_node_trace]
+        data = data + edge_traces
+
         if isinstance(self.G, networkx.DiGraph):
             annotations.extend(
                 dict(
@@ -236,21 +290,58 @@ class PlotNetwork:
                     y=self.G.nodes[edge[1]]["pos"][1] * 0.85 + self.G.nodes[edge[0]]["pos"][1] * 0.15,
                     xref="x",
                     yref="y",
-                    showarrow=True,
-                    arrowhead=1,
-                    arrowsize=arrow_size,
+                    showarrow=False,
+                    text="",
                 )
                 for edge in self.G.edges()
             )
 
+            # Draw arrows:
+            x_vals, y_vals, u_vals, v_vals = [], [], [], []
+
+            # Compute all edge lengths
+            edge_lengths = [
+                np.linalg.norm(np.array(self.G.nodes[edge[1]]["pos"]) - np.array(self.G.nodes[edge[0]]["pos"]))
+                for edge in self.G.edges()
+            ]
+            median_length = np.median(edge_lengths)
+
+            for edge in self.G.edges():
+                start = np.array(self.G.nodes[edge[0]]["pos"])
+                end = np.array(self.G.nodes[edge[1]]["pos"])
+
+                # Calculate direction vector
+                direction = end - start
+                direction_length = np.linalg.norm(direction)
+                direction_normalized = direction / direction_length
+
+                # Adjust the arrow's end position based on edge length
+                if direction_length <= median_length:
+                    scale_factor = 0.5
+                else:
+                    scale_factor = 0.9
+
+                start_shortened = start + scale_factor * direction
+                x_vals.append(start_shortened[0])
+                y_vals.append(start_shortened[1])
+                u_vals.append(direction_normalized[0])
+                v_vals.append(direction_normalized[1])
+
+            # Create the quiver plot for the arrows
+            quiver = ff.create_quiver(
+                x_vals, y_vals, u_vals, v_vals, scale=0.1, arrow_scale=arrow_size, line=dict(width=2)
+            )
+            for trace in quiver.data:
+                data.append(trace)
+
         self.f = go.FigureWidget(
-            data=[edge_trace, node_trace, middle_node_trace],
+            data=data,
             layout=go.Layout(
                 title=title,
                 titlefont=dict(size=title_font_size),
-                showlegend=False,
+                showlegend=True,
                 hovermode="closest",
-                margin=dict(b=20, l=50, r=50, t=40),
+                margin=dict(b=lower_margin, l=left_margin, r=right_margin, t=upper_margin),
                 annotations=annotations,
                 xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
@@ -414,16 +505,17 @@ def plot_network(
         show_colorbar=show_colorbar,
     )
 
-    edge_trace, middle_node_trace = plot.generate_edge_traces(
+    edge_traces, middle_node_trace = plot.generate_edge_traces(
         edge_label=edge_label,
         edge_label_size=edgefont_size,
         edge_label_position=edge_label_position,
         edge_text=edge_text,
+        edge_attribute_for_linestyle=edge_label,
     )
 
     fig = plot.generate_figure(
         node_trace=node_trace,
-        edge_trace=edge_trace,
+        edge_traces=edge_traces,
         middle_node_trace=middle_node_trace,
         title=title,
         title_font_size=titlefont_size,

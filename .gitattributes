@@ -1,1 +1,2 @@
 spateo/tools/database/human_GRN.csv filter=lfs diff=lfs merge=lfs -text
+spateo/tools/database/mouse_GRN.csv filter=lfs diff=lfs merge=lfs -text

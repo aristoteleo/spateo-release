@@ -2309,9 +2309,31 @@ class MuSIC_Interpreter(MuSIC):
                 "'use_ligands', 'use_receptors', 'use_pathways' are all False, and 'cell_type' was not given."
             )
         contents_folder = os.path.join(output_dir, "cci_deg_detection", file_id)
+
         # Load list of targets:
         with open(targets_path, "r") as f:
             targets = [line.strip() for line in f.readlines()]
+
+        # Filter targets if desired:
+        if self.filter_targets:
+            predictions = pd.read_csv(
+                os.path.join(output_dir, "cci_deg_detection", file_id, "predictions.csv"), index_col=0
+            )
+            pearson_dict = {}
+            for target in targets:
+                if target not in predictions.columns:
+                    self.logger.info(
+                        f"Model for target {target} ran into errors in the fitting process, so no predictions exist."
+                    )
+                    continue
+                observed = self.adata[:, target].X.toarray().reshape(-1)
+                predicted = predictions[target].values.reshape(-1)
+
+                rp, _ = pearsonr(observed, predicted)
+                pearson_dict[target] = rp
+
+            targets = [target for target in predictions.columns if pearson_dict[target] > self.filter_target_threshold]
+
         # Complete list of regulatory factors- search through .obs of the AnnData object:
         if cell_type is None:
             adata = anndata.read_h5ad(os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_{adata_id}.h5ad"))
@@ -2483,6 +2505,8 @@ class MuSIC_Interpreter(MuSIC):
         layout: Literal["random", "circular", "kamada", "planar", "spring", "spectral", "spiral"] = "planar",
         node_fontsize: int = 8,
         edge_fontsize: int = 8,
+        node_label_position: str = "middle center",
+        edge_label_position: str = "middle center",
         upper_margin: float = 40,
         lower_margin: float = 20,
         left_margin: float = 50,
@@ -2540,6 +2564,10 @@ class MuSIC_Interpreter(MuSIC):
                 - "spiral": Positions nodes in a spiral layout.
             node_fontsize: Font size for node labels
             edge_fontsize: Font size for edge labels
+            node_label_position: Position of node labels. Options: 'top left', 'top center', 'top right', 'middle left',
+                'middle center', 'middle right', 'bottom left', 'bottom center', 'bottom right'
+            edge_label_position: Position of edge labels. Options: 'top left', 'top center', 'top right', 'middle left',
+                'middle center', 'middle right', 'bottom left', 'bottom center', 'bottom right'
             title: Optional, title for the plot. If not given, will use the AnnData object path to derive this.
             upper_margin: Margin between top of the plot and top of the figure
             lower_margin: Margin between bottom of the plot and bottom of the figure
@@ -2832,7 +2860,7 @@ class MuSIC_Interpreter(MuSIC):
                     # keep ligands that are sufficiently expressed in the specified cell subset:
                     for lig in ligands.split("/"):
                         num_expr = (adata[:, lig].X > 0).sum()
-                        expr_percent = (num_expr / adata.shape[0]) * 100
+                        expr_percent = num_expr / adata.shape[0]
                         pass_threshold = expr_percent >= subset_ligand_expr_threshold
 
                         if lig in ligand_subset and pass_threshold:
@@ -2846,6 +2874,8 @@ class MuSIC_Interpreter(MuSIC):
                             G.add_edge(lig, receptor, Type="L:R")
 
                     # Add edge from receptor to target with the DataFrame value as property:
+                    if not G.has_node(receptor):
+                        G.add_node(receptor, ID=receptor)
                     G.add_edge(receptor, target, Type="L:R effect")
 
         # Check which of the downstream models (if any) were run, load the corresponding files and add to the network:
@@ -2873,7 +2903,7 @@ class MuSIC_Interpreter(MuSIC):
                         ligand = f"Neighbor {ligand}"
                         if not G.has_node(tf):
                             G.add_node(tf, ID=tf)
-                        G.add_edge(tf, ligand, Type="TF:Ligand")
+                        G.add_edge(tf, ligand, Type="TF:L")
 
         if "tf_to_receptor_df" in locals() and include_tf_receptor:
             if regulator_subset is None:
@@ -2895,7 +2925,7 @@ class MuSIC_Interpreter(MuSIC):
                     if receptor in receptor_subset and G.has_node(receptor):
                         if not G.has_node(tf):
                             G.add_node(tf, ID=tf)
-                        G.add_edge(tf, receptor, Type="TF:Receptor")
+                        G.add_edge(tf, receptor, Type="TF:R")
 
         if "tf_to_target_df" in locals() and include_tf_target:
             if regulator_subset is None:
@@ -2970,10 +3000,10 @@ class MuSIC_Interpreter(MuSIC):
             node_text=["Connections"],
             node_label="ID",
             nodefont_size=node_fontsize,
-            node_label_position="top center",
+            node_label_position=node_label_position,
             edge_text=["Type"],
             edge_label="Type",
-            edge_label_position="bottom center",
+            edge_label_position=node_label_position,
             edgefont_size=edge_fontsize,
             layout=layout,
             arrow_size=1,
@@ -2981,6 +3011,7 @@ class MuSIC_Interpreter(MuSIC):
             lower_margin=lower_margin,
             left_margin=left_margin,
             right_margin=right_margin,
+            show_colorbar=False,
         )
 
         # Save graph:

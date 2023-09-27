@@ -687,8 +687,6 @@ class MuSIC:
                         targets = f.read().splitlines()
                 else:
                     targets = self.custom_ligands
-                # Check that all ligands can be found in the source AnnData object- they will be stored in .obs:
-                targets = [t for t in targets if t in adata.var_names]
 
             # Else: targets = receptors:
             elif self.custom_receptors_path is not None or self.custom_receptors is not None:
@@ -697,18 +695,12 @@ class MuSIC:
                         targets = f.read().splitlines()
                 else:
                     targets = self.custom_receptors
-                # Check that all receptors can be found in the source AnnData object:
-                targets = [t for t in targets if t in adata.var_names]
 
             # Else: targets = pathways:
             elif self.custom_pathways_path is not None or self.custom_pathways is not None:
-                if self.custom_pathways_path is not None:
-                    with open(self.custom_pathways_path, "r") as f:
-                        targets = f.read().splitlines()
-                else:
-                    targets = self.custom_pathways
-                # Check that all pathways can be found in the source AnnData object:
-                targets = [t for t in targets if t in adata.var_names]
+                raise AttributeError(
+                    "For downstream models, only custom sets of ligands or receptors should be provided."
+                )
 
             # Else: targets = the targets from the initial model:
             elif self.targets_path is not None or self.custom_targets is not None:
@@ -717,8 +709,6 @@ class MuSIC:
                         targets = f.read().splitlines()
                 else:
                     targets = self.custom_targets
-                # Check that all targets can be found in the source AnnData object:
-                targets = [t for t in targets if t in adata.var_names]
 
             else:
                 raise FileNotFoundError(
@@ -726,7 +716,12 @@ class MuSIC:
                     "provided using either 'custom_lig_path' or 'ligand' arguments, receptors using 'custom_rec_path' "
                     "or 'receptor' arguments, and targets with 'targets_path' or 'target' arguments."
                 )
-            self.logger.info(f"Found {len(targets)} signaling molecules to serve as dependent variable targets.")
+
+            # Check that all targets can be found in the source AnnData object:
+            targets = [t for t in targets if t in adata.var_names]
+            # Check that all targets can be found in the GRN:
+            targets = [t for t in targets if t in self.grn.index]
+            self.logger.info(f"Found {len(targets)} genes to serve as dependent variable targets.")
 
             # Define ligand/receptor/pathway expression array:
             self.targets_expr = pd.DataFrame(
@@ -734,10 +729,11 @@ class MuSIC:
                 index=adata.obs_names,
                 columns=targets,
             )
+
+            adata_orig = adata.copy()
+            adata_orig.X = adata.layers["original_counts"]
             targets_expr_raw = pd.DataFrame(
-                adata.layers["original_counts"].A
-                if scipy.sparse.issparse(adata.X)
-                else adata.layers["original_counts"],
+                adata_orig[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata_orig[:, targets].X,
                 index=adata.obs_names,
                 columns=targets,
             )
@@ -759,7 +755,7 @@ class MuSIC:
             if self.multicollinear_threshold is not None:
                 X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
-            # Base 2 log-transform to deal with the case that there are enormous numerical outliers:
+            # Base 2 log-transform design matrix to deal with the case that there are enormous numerical outliers:
             X_df = np.log1p(X_df) / np.log(2)
 
             # Save design matrix and component dataframes (here, target ligands dataframe):
@@ -1294,6 +1290,9 @@ class MuSIC:
                 else:
                     target_expr_percentage = np.count_nonzero(adata[:, targets].X, axis=0) / adata.n_obs
                 targets = np.array(targets)[target_expr_percentage > self.target_expr_threshold]
+
+            # Filter targets to those that can be found in our prior GRN:
+            targets = [t for t in targets if t in self.grn.index]
 
             self.targets_expr = pd.DataFrame(
                 adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
@@ -1927,7 +1926,7 @@ class MuSIC:
                         initial_bw = 0.2
                         alpha = 0.1
 
-                    # Check over the 10-50 nearest neighbors- compute distances such that each cell has this number
+                    # Check over the 20-60 nearest neighbors- compute distances such that each cell has this number
                     # on average:
                     self.minbw = find_bw_for_n_neighbors(
                         self.adata,
@@ -1948,7 +1947,7 @@ class MuSIC:
                     max_b = find_bw_for_n_neighbors(
                         self.adata,
                         coords_key=coords_key,
-                        target_n_neighbors=50,
+                        target_n_neighbors=60,
                         verbose=False,
                         initial_bw=initial_bw,
                         alpha=alpha,
@@ -2638,6 +2637,13 @@ class MuSIC:
                     gene_query = target
                 target_row = self.grn.loc[gene_query]
                 target_TFs = target_row[target_row == 1].index.tolist()
+                if len(target_TFs) == 0:
+                    self.logger.info(
+                        "None of the provided regulators could be found to have an association with the "
+                        "target gene. Skipping past this target."
+                    )
+                    continue
+
                 temp = self.r_tf_db[self.r_tf_db["tf"].isin(target_TFs)]
                 target_receptors = temp["receptor"].unique().tolist()
 
@@ -2680,6 +2686,13 @@ class MuSIC:
                     target_TFs = target_rows.columns[(target_rows == 1).any()].tolist()
                 else:
                     target_TFs = target_rows[target_rows == 1].index.tolist()
+                if len(target_TFs) == 0:
+                    self.logger.info(
+                        "None of the provided regulators could be found to have an association with the "
+                        "target gene. Skipping past this target."
+                    )
+                    continue
+
                 # Cofactors for these transcription factors:
                 target_TFs_cof_int = [tf for tf in target_TFs if tf in self.cof_db.columns]
                 cof_subset = list(self.cof_db[(self.cof_db[target_TFs_cof_int] == 1).any(axis=1)].index)
