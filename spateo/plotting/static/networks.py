@@ -329,7 +329,7 @@ class PlotNetwork:
 
             # Create the quiver plot for the arrows
             quiver = ff.create_quiver(
-                x_vals, y_vals, u_vals, v_vals, scale=0.1, arrow_scale=arrow_size, line=dict(width=2)
+                x_vals, y_vals, u_vals, v_vals, scale=0.1, arrow_scale=arrow_size, line=dict(width=2), showlegend=False
             )
             for trace in quiver.data:
                 data.append(trace)

@@ -2506,6 +2506,7 @@ class MuSIC_Interpreter(MuSIC):
         layout: Literal["random", "circular", "kamada", "planar", "spring", "spectral", "spiral"] = "planar",
         node_fontsize: int = 8,
         edge_fontsize: int = 8,
+        arrow_size: int = 1,
         node_label_position: str = "middle center",
         edge_label_position: str = "middle center",
         upper_margin: float = 40,
@@ -2565,6 +2566,7 @@ class MuSIC_Interpreter(MuSIC):
                 - "spiral": Positions nodes in a spiral layout.
             node_fontsize: Font size for node labels
             edge_fontsize: Font size for edge labels
+            arrow_size: Size of the arrow for directed graphs, by default 1
             node_label_position: Position of node labels. Options: 'top left', 'top center', 'top right', 'middle left',
                 'middle center', 'middle right', 'bottom left', 'bottom center', 'bottom right'
             edge_label_position: Position of edge labels. Options: 'top left', 'top center', 'top right', 'middle left',
@@ -2737,6 +2739,9 @@ class MuSIC_Interpreter(MuSIC):
             os.makedirs(save_folder)
 
         if cell_subset is not None:
+            if not isinstance(cell_subset, list):
+                cell_subset = [cell_subset]
+
             if all(label in set(self.adata.obs[self.group_key]) for label in cell_subset):
                 adata = self.adata[self.adata.obs[self.group_key].isin(cell_subset)].copy()
                 # Get numerical indices corresponding to cells in the subset:
@@ -3007,7 +3012,7 @@ class MuSIC_Interpreter(MuSIC):
             edge_label_position=node_label_position,
             edgefont_size=edge_fontsize,
             layout=layout,
-            arrow_size=1,
+            arrow_size=arrow_size,
             upper_margin=upper_margin,
             lower_margin=lower_margin,
             left_margin=left_margin,
