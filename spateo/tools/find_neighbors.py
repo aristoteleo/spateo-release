@@ -458,7 +458,7 @@ class Kernel(object):
             # If condition is met, compare to samples of the same cell type:
             if cov[i] == 1:
                 self.dist_vector[ct != ct[i]] = max_dist
-        elif cov is not None and ct is not None:
+        elif cov is not None and ct is None:
             # Ignore samples that do not meet the condition:
             self.dist_vector[cov == 0] = max_dist
         elif ct is not None:
@@ -477,15 +477,6 @@ class Kernel(object):
 
         # Set density to zero if below threshold:
         self.kernel[self.kernel < threshold] = 0
-        n_neighbors = np.count_nonzero(self.kernel)
-
-        if cov is not None:
-            # If there are outlier samples that do not match condition of this sample within the neighborhood,
-            # set their weights to zero- set this threshold number to 1/10 of the number of neighbors:
-            thresh = int(0.1 * n_neighbors) if exclude_self else int(0.1 * n_neighbors + 1)
-            if np.sum(cov[self.kernel > 0] == 0) < thresh:
-                self.kernel[(cov == 0) & (self.kernel > 0)] = 0
-
         n_neighbors = np.count_nonzero(self.kernel)
 
         # Normalize the kernel by the number of non-zero neighbors, if applicable:

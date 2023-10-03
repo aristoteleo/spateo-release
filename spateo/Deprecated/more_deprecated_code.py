@@ -2626,3 +2626,11 @@ def get_knots(nknots: int, var: np.ndarray, weights: np.ndarray):
     knotList = {f"x{i}": knots for i in range(var.shape[1])}
 
     return knotList
+
+
+if cov is not None:
+    # If there are outlier samples that do not match condition of this sample within the neighborhood,
+    # set their weights to zero- set this threshold number to 1/10 of the number of neighbors:
+    thresh = int(0.1 * n_neighbors) if exclude_self else int(0.1 * n_neighbors + 1)
+    if np.sum(cov[self.kernel > 0] == 0) < thresh:
+        self.kernel[(cov == 0) & (self.kernel > 0)] = 0

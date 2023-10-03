@@ -2498,6 +2498,7 @@ class MuSIC_Interpreter(MuSIC):
         cell_subset: Optional[Union[List[str], str]] = None,
         select_n_lr: int = 5,
         select_n_tf: int = 3,
+        effect_size_threshold: float = 0.2,
         subset_ligand_expr_threshold: float = 0.2,
         cmap_neighbors: str = "YlOrRd",
         cmap_default: str = "YlGnBu",
@@ -2990,7 +2991,7 @@ class MuSIC_Interpreter(MuSIC):
 
         # Draw graph:
         if title is None:
-            title = os.path.basename(self.adata_path).split(".")[0]
+            title = f"{os.path.basename(self.adata_path).split('.')[0]} Regulatory Correlation Network"
 
         f = plot_network(
             G,
