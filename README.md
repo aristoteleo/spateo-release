@@ -88,3 +88,31 @@ pip install -r dev-requirements.txt
 make test
 ```
 Any failing tests will cause a check to fail.
+
+## Documentation
+We use `sphinx` to generate documentation. 
+Importantly, we used the submodule functionality to import documentation from a separate repository (https://github.com/aristoteleo/spateo-tutorials).
+It is important to keep the submodule up to date with the main repository and the following commands will help you do so.
+
+
+### Update All Submodules at Once:
+
+1. **Fetch and Merge Changes for All Submodules**:
+   
+   You can fetch the latest changes for all submodules and merge them into your current checkouts of the submodules:
+
+   ```bash
+   git submodule update --remote --merge
+   ```
+
+2. **Commit the Updated Submodules**:
+
+   This step is important because the parent repository tracks a specific commit of the submodule. By updating the submodule, the parent repository needs to be informed of the new commit to track.
+
+   ```bash
+   git add .
+   git commit -m "Updated all submodules"
+   git push
+   ```
+Once you are done the above, check the link directory (something like spateo-tutorials @ 8e372ee) under the `docs` folder to make sure the related commit (such as 8e372ee) is the same as the latest one in the spateo-tutorials repository. If not, you may need to redo the above procedure again. 
+```
