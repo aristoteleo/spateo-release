@@ -10,6 +10,7 @@ These include:
     of the predicted influence of the ligand on downstream expression.
 """
 import argparse
+import collections
 import itertools
 import math
 import os
@@ -2489,17 +2490,18 @@ class MuSIC_Interpreter(MuSIC):
         self,
         lr_model_output_dir: str,
         target_subset: Optional[Union[List[str], str]] = None,
+        top_n_targets: Optional[int] = 3,
         ligand_subset: Optional[Union[List[str], str]] = None,
         receptor_subset: Optional[Union[List[str], str]] = None,
         regulator_subset: Optional[Union[List[str], str]] = None,
         include_tf_ligand: bool = False,
-        include_tf_receptor: bool = False,
         include_tf_target: bool = True,
         cell_subset: Optional[Union[List[str], str]] = None,
         select_n_lr: int = 5,
         select_n_tf: int = 3,
         effect_size_threshold: float = 0.2,
-        subset_ligand_expr_threshold: float = 0.2,
+        coexpression_threshold: float = 0.2,
+        aggregate_method: Literal["mean", "median", "sum"] = "mean",
         cmap_neighbors: str = "YlOrRd",
         cmap_default: str = "YlGnBu",
         scale_factor: float = 3,
@@ -2528,6 +2530,9 @@ class MuSIC_Interpreter(MuSIC):
                 factors/TFs to ligands/receptors/targets.
             target_subset: Optional, can be used to specify target genes downstream of signaling interactions of
                 interest. If not given, will use all targets used for the model.
+            top_n_targets: Optional, can be used to specify the number of top targets to include in the network
+                instead of providing full list of custom targets ("top" judged by fraction of the chosen subset of
+                cells each target is expressed in).
             ligand_subset: Optional, can be used to specify subset of ligands. If not given, will use all ligands
                 present in any of the interactions for the model.
             receptor_subset: Optional, can be used to specify subset of receptors. If not given, will use all receptors
@@ -2535,8 +2540,6 @@ class MuSIC_Interpreter(MuSIC):
             regulator_subset: Optional, can be used to specify subset of regulators (transcription factors,
                 etc.). If not given, will use all regulatory molecules used in fitting the downstream model(s).
             include_tf_ligand: Whether to include TF-ligand interactions in the network. While providing more
-                information, this can make it more difficult to interpret the plot. Defaults to False.
-            include_tf_receptor: Whether to include TF-receptor interactions in the network. While providing more
                 information, this can make it more difficult to interpret the plot. Defaults to False.
             include_tf_target: Whether to include TF-target interactions in the network. While providing more
                 information, this can make it more difficult to interpret the plot. Defaults to True.
@@ -2547,10 +2550,12 @@ class MuSIC_Interpreter(MuSIC):
             select_n_lr: Threshold for filtering out edges with low effect sizes, by selecting up to the top n L:R
                 interactions per target (fewer can be selected if the top n are all zero). Default is 5.
             select_n_tf: Threshold for filtering out edges with low effect sizes, by selecting up to the top n
-                TF-ligand, TF-receptor and/or TF-target relationships (fewer can be selected if the top n are all
-                zero). Default is 3.
-            subset_ligand_expr_threshold: For the specified cell subset, this threshold will be used to filter out
-                ligands- only those expressed in above this threshold proportion of cells will be kept.
+                TFs. For TF-ligand edges, will select the top n for each receptor (with a theoretical maximum of n *
+                number of receptors in the graph).
+            coexpression_threshold: For receptor-target, TF-ligand, TF-receptor links, only draw edges if the
+                molecule pairs in question are coexpressed in > threshold number of cells.
+            aggregate_method: Only used when "include_tf_ligand" is True. For the TF-ligand array, each row will
+                be replaced by the mean, median or sum of the neighboring rows. Defaults to "mean".
             cmap_neighbors: Colormap to use for nodes belonging to "source"/receiver cells. Defaults to
                 yellow-orange-red.
             cmap_default: Colormap to use for nodes belonging to "neighbor"/sender cells. Defaults to
@@ -2624,6 +2629,47 @@ class MuSIC_Interpreter(MuSIC):
                     design_mat = pd.read_csv(os.path.join(path, "design_matrix", "design_matrix.csv"), index_col=0)
         lr_to_target_feature_names = design_mat.columns.tolist()
 
+        # Get spatial weights- only needed if "include_tf_ligand" is True:
+        if include_tf_ligand:
+            for file in lr_model_output_files:
+                path = os.path.join(lr_model_output_dir, file)
+                if os.path.isdir(path):
+                    if file not in ["analyses", "significance", "networks", ".ipynb_checkpoints"]:
+                        spatial_weights_membrane_bound_obj = np.load(
+                            os.path.join(path, "spatial_weights", "spatial_weights_membrane_bound.npz")
+                        )
+                        membrane_bound_data = spatial_weights_membrane_bound_obj["data"]
+                        membrane_bound_indices = spatial_weights_membrane_bound_obj["indices"]
+                        membrane_bound_indptr = spatial_weights_membrane_bound_obj["indptr"]
+                        membrane_bound_shape = spatial_weights_membrane_bound_obj["shape"]
+
+                        spatial_weights_membrane_bound = scipy.sparse.csr_matrix(
+                            (membrane_bound_data, membrane_bound_indices, membrane_bound_indptr),
+                            shape=membrane_bound_shape,
+                        )
+                        # Row and column indices of nonzero elements:
+                        rows, cols = spatial_weights_membrane_bound.nonzero()
+                        all_pairs_membrane_bound = collections.defaultdict(list)
+                        for i, j in zip(rows, cols):
+                            all_pairs_membrane_bound[i].append(j)
+
+                        spatial_weights_secreted = np.load(
+                            os.path.join(path, "spatial_weights", "spatial_weights_secreted.npz")
+                        )
+                        secreted_data = spatial_weights_secreted["data"]
+                        secreted_indices = spatial_weights_secreted["indices"]
+                        secreted_indptr = spatial_weights_secreted["indptr"]
+                        secreted_shape = spatial_weights_secreted["shape"]
+
+                        spatial_weights_secreted = scipy.sparse.csr_matrix(
+                            (secreted_data, secreted_indices, secreted_indptr), shape=secreted_shape
+                        )
+                        # Row and column indices of nonzero elements:
+                        rows, cols = spatial_weights_secreted.nonzero()
+                        all_pairs_secreted = collections.defaultdict(list)
+                        for i, j in zip(rows, cols):
+                            all_pairs_secreted[i].append(j)
+
         # If subset for ligands and/or receptors is not specified, use all that were included in the model:
         if ligand_subset is None:
             ligand_subset = []
@@ -2679,31 +2725,6 @@ class MuSIC_Interpreter(MuSIC):
                                 os.path.join(path, "downstream_design_matrix", "design_matrix.csv"), index_col=0
                             )
                 tf_to_ligand_feature_names = [col.replace("regulator_", "") for col in design_mat.columns]
-
-            if os.path.exists(os.path.join(downstream_model_dir, "cci_deg_detection", "receptor_analysis")):
-                # Get the names of target genes from the TF-to-receptor model by looking within the output directory
-                # containing :attr `output_path`:
-                all_modeled_receptors = []
-                receptor_to_file = {}
-                receptor_folder = os.path.join(downstream_model_dir, "cci_deg_detection", "receptor_analysis")
-                receptor_files = os.listdir(receptor_folder)
-                for file in receptor_files:
-                    if file.endswith(".csv"):
-                        parts = file.split("_")
-                        receptor_str = parts[-1].replace(".csv", "")
-                        # And map the receptor to the file name:
-                        receptor_to_file[receptor_str] = os.path.join(receptor_folder, file)
-                        all_modeled_receptors.append(receptor_str)
-
-                # Get TF names from the design matrix:
-                for file in receptor_files:
-                    path = os.path.join(receptor_folder, file)
-                    if file != ".ipynb_checkpoints":
-                        if os.path.isdir(path):
-                            design_mat = pd.read_csv(
-                                os.path.join(path, "downstream_design_matrix", "design_matrix.csv"), index_col=0
-                            )
-                tf_to_receptor_feature_names = [col.replace("regulator_", "") for col in design_mat.columns]
 
             if os.path.exists(os.path.join(downstream_model_dir, "cci_deg_detection", "target_gene_analysis")):
                 # Get the names of target genes from the TF-to-target model by looking within the output directory
@@ -2768,74 +2789,13 @@ class MuSIC_Interpreter(MuSIC):
                 file_path = os.path.join(lr_model_output_dir, file_name)
                 target_df = pd.read_csv(file_path, index_col=0)
                 target_df = target_df.loc[:, [col for col in target_df.columns if col.startswith("b_")]]
-                # Compute average predicted effect size over the chosen cell subset to populate L:R-to-target
-                # dataframe:
+                # Compute average predicted absolute value effect size over the chosen cell subset to populate
+                # L:R-to-target dataframe:
                 target_df.columns = [col.replace("b_", "") for col in target_df.columns if col.startswith("b_")]
-                lr_to_target_df.loc[:, target] = target_df.iloc[cell_ids, :].mean(axis=0)
+                lr_to_target_df.loc[:, target] = target_df.iloc[cell_ids, :].abs().mean(axis=0)
 
             # Save L:R-to-target dataframe:
             lr_to_target_df.to_csv(os.path.join(save_folder, "lr_to_target.csv"))
-
-        # Construct TF-to-ligand/receptor/target dataframes if needed:
-        if "tf_to_ligand_feature_names" in locals():
-            if os.path.exists(os.path.join(save_folder, "tf_to_ligand.csv")):
-                tf_to_ligand_df = pd.read_csv(os.path.join(save_folder, "tf_to_ligand.csv"), index_col=0)
-            else:
-                # Construct TF to ligand dataframe:
-                tf_to_ligand_df = pd.DataFrame(0, index=tf_to_ligand_feature_names, columns=all_modeled_ligands)
-
-                for ligand in all_modeled_ligands:
-                    file_name = ligand_to_file[ligand]
-                    file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "ligand_analysis", file_name)
-                    ligand_df = pd.read_csv(file_path, index_col=0)
-                    ligand_df = ligand_df.loc[:, [col for col in ligand_df.columns if col.startswith("b_")]]
-                    # Compute average predicted effect size over the chosen cell subset to populate the TF-to-ligand
-                    # dataframe:
-                    ligand_df.columns = [col.replace("b_", "") for col in ligand_df.columns if col.startswith("b_")]
-                    tf_to_ligand_df.loc[:, ligand] = ligand_df.iloc[cell_ids, :].mean(axis=0)
-
-                # Save TF-to-ligand dataframe:
-                tf_to_ligand_df.to_csv(os.path.join(save_folder, "tf_to_ligand.csv"))
-
-        if "tf_to_receptor_feature_names" in locals():
-            if os.path.exists(os.path.join(save_folder, "tf_to_receptor.csv")):
-                tf_to_receptor_df = pd.read_csv(os.path.join(save_folder, "tf_to_receptor.csv"), index_col=0)
-            else:
-                # Construct TF to receptor dataframe:
-                tf_to_receptor_df = pd.DataFrame(0, index=tf_to_receptor_feature_names, columns=all_modeled_receptors)
-
-                for receptor in all_modeled_receptors:
-                    file_name = receptor_to_file[receptor]
-                    file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "receptor_analysis", file_name)
-                    receptor_df = pd.read_csv(file_path, index_col=0)
-                    receptor_df = receptor_df.loc[:, [col for col in receptor_df.columns if col.startswith("b_")]]
-                    # Compute average predicted effect size over the chosen cell subset to populate the TF-to-receptor
-                    # dataframe:
-                    receptor_df.columns = [col.replace("b_", "") for col in receptor_df.columns if col.startswith("b_")]
-                    tf_to_receptor_df.loc[:, receptor] = receptor_df.iloc[cell_ids, :].mean(axis=0)
-
-                # Save TF-to-receptor dataframe:
-                tf_to_receptor_df.to_csv(os.path.join(save_folder, "tf_to_receptor.csv"))
-
-        if "tf_to_target_feature_names" in locals():
-            if os.path.exists(os.path.join(save_folder, "tf_to_target.csv")):
-                tf_to_target_df = pd.read_csv(os.path.join(save_folder, "tf_to_target.csv"), index_col=0)
-            else:
-                # Construct TF to target dataframe:
-                tf_to_target_df = pd.DataFrame(0, index=tf_to_target_feature_names, columns=targets)
-
-                for target in targets:
-                    file_name = target_to_file[target]
-                    file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "target_analysis", file_name)
-                    target_df = pd.read_csv(file_path, index_col=0)
-                    target_df = target_df.loc[:, [col for col in target_df.columns if col.startswith("b_")]]
-                    # Compute average predicted effect size over the chosen cell subset to populate the TF-to-target
-                    # dataframe:
-                    target_df.columns = [col.replace("b_", "") for col in target_df.columns if col.startswith("b_")]
-                    tf_to_target_df.loc[:, target] = target_df.iloc[cell_ids, :].mean(axis=0)
-
-                # Save TF-to-target dataframe:
-                tf_to_target_df.to_csv(os.path.join(save_folder, "tf_to_target.csv"))
 
         # Graph construction:
         G = nx.DiGraph()
@@ -2852,9 +2812,9 @@ class MuSIC_Interpreter(MuSIC):
                 if lr_to_target_df.loc[lr, target] >= (self.target_expr_threshold * reference_value)
             ]
 
-            target = f"Target: {target}"
-            if not G.has_node(target):
-                G.add_node(target, ID=target)
+            target_label = f"Target: {target}"
+            if not G.has_node(target_label):
+                G.add_node(target_label, ID=target_label)
 
             for lr in top_n_lr:
                 ligand_receptor_pair = lr
@@ -2867,7 +2827,7 @@ class MuSIC_Interpreter(MuSIC):
                     for lig in ligands.split("/"):
                         num_expr = (adata[:, lig].X > 0).sum()
                         expr_percent = num_expr / adata.shape[0]
-                        pass_threshold = expr_percent >= subset_ligand_expr_threshold
+                        pass_threshold = expr_percent >= self.target_expr_threshold
 
                         if lig in ligand_subset and pass_threshold:
                             # For the intents of this network, the ligand refers to ligand expressed in neighboring
@@ -2877,82 +2837,152 @@ class MuSIC_Interpreter(MuSIC):
                                 G.add_node(lig, ID=lig)
                             if not G.has_node(receptor):
                                 G.add_node(receptor, ID=receptor)
-                            G.add_edge(lig, receptor, Type="L:R")
+                            G.add_edge(lig, receptor, Type="L:R", Coexpression=None)
 
-                    # Add edge from receptor to target with the DataFrame value as property:
-                    if not G.has_node(receptor):
-                        G.add_node(receptor, ID=receptor)
-                    G.add_edge(receptor, target, Type="L:R effect")
+                    # Check if receptor and target are coexpressed enough to draw connection:
+                    receptor_expression = (adata[:, receptor].X > 0).toarray().flatten()
+                    target_expression = (adata[:, target].X > 0).toarray().flatten()
+                    coexpression = np.sum(receptor_expression * target_expression)
+                    # Threshold based on proportion of cells expressing receptor:
+                    num_coexpressed_threshold = coexpression_threshold * np.sum(receptor_expression)
+                    if coexpression >= num_coexpressed_threshold:
+                        G.add_edge(
+                            receptor,
+                            target_label,
+                            Type="L:R effect",
+                            Coexpression=coexpression / np.sum(receptor_expression),
+                        )
 
-        # Check which of the downstream models (if any) were run, load the corresponding files and add to the network:
-        if "tf_to_ligand_df" in locals() and include_tf_ligand:
-            if regulator_subset is None:
-                regulator_subset = tf_to_ligand_df.index
+        # Incorporate TF-to-ligand connections based on existing L:R-target links:
+        if "tf_to_ligand_feature_names" in locals() and include_tf_ligand:
+            # Intersection between graph ligands and modeled ligands:
+            graph_ligands = [node.replace("Neighbor ", "") for node in G.nodes if node.startswith("Neighbor")]
+            valid_ligands = [lig for lig in graph_ligands if lig in all_modeled_ligands]
+            if len(valid_ligands) == 0:
+                raise ValueError(
+                    "No modeled ligands are included among the graph ligands. We recommend "
+                    "re-running the downstream model with a new set of ligands, taken from the "
+                    "L:R interactions used for the L:R-to-target model."
+                )
 
-            for ligand in tf_to_ligand_df.columns:
-                node_ligand_label = f"Neighbor {ligand}"
-                top_n_tf = tf_to_ligand_df.nlargest(n=select_n_tf, columns=ligand).index.tolist()
-                # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
-                # of the maximum in the array (because these values can be variable):
-                reference_value = tf_to_ligand_df.max().max()
-                top_n_tf = [
-                    tf
-                    for tf in top_n_tf
-                    if tf_to_ligand_df.loc[tf, ligand] >= (self.target_expr_threshold * reference_value)
-                ]
+            for ligand in valid_ligands:
+                ligand_expression_mask = (adata[:, ligand].X > 0).toarray().flatten()
+                file_name = ligand_to_file[ligand]
+                file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "ligand_analysis", file_name)
+                ligand_df = pd.read_csv(file_path, index_col=0)
+                ligand_df = ligand_df.loc[:, [col for col in ligand_df.columns if col.startswith("b_")]]
+                ligand_df.columns = [col.replace("b_", "") for col in ligand_df.columns if col.startswith("b_")]
+                if regulator_subset is not None:
+                    ligand_df = ligand_df.loc[:, [col for col in ligand_df.columns if col in regulator_subset]]
 
-                for tf in top_n_tf:
-                    # Check if ligand is in the ligand subset:
-                    if ligand in ligand_subset and G.has_node(node_ligand_label):
-                        # For the intents of this network, the TF refers to TF expressed in neighboring cells:
-                        tf = f"Neighbor {tf}"
-                        ligand = f"Neighbor {ligand}"
+                # For each ligand in the L:R-to-target DF, consider the subset of cells expressing the receptor
+                # the ligand is associated with-
+                # Construct the TF-to-ligand DF based only on the subset of cells that are neighbors for cells
+                # expressing the receptor and that also express the ligand.
+                # First determine whether the ligand is secreted or membrane-bound:
+                matching_rows = self.lr_db[self.lr_db["from"] == ligand]
+                is_secreted = (
+                    matching_rows["type"].str.contains("Secreted Signaling").any()
+                    or matching_rows["type"].str.contains("ECM-Receptor").any()
+                )
+                # Select the appropriate dictionary of neighboring cells
+                neighbors_dict = all_pairs_secreted if is_secreted else all_pairs_membrane_bound
+
+                # Get receptors on the other end of edges corresponding to this ligand:
+                receptors = set([edge[1] for edge in G.edges if edge[0] == f"Neighbor {ligand}"])
+                # Find the top n TFs for each receptor (connections will be made from TF to ligand to receptor,
+                # so the primary node might be slightly different for each receptor):
+                for receptor in receptors:
+                    # Indices of cells expressing the receptor:
+                    receptor_expression_mask = (adata[:, receptor].X > 0).toarray().flatten()
+                    receptor_expressing_cells_indices = np.where(receptor_expression_mask)[0]
+                    mean_values_temp = pd.DataFrame(
+                        index=range(len(receptor_expressing_cells_indices)), columns=ligand_df.columns
+                    )
+
+                    # Processing of ligand_df - rather than measuring TF-ligand connection for each cell,
+                    # mean_values_temp will instead reflect the average TF-ligand connection over all neighbors of that
+                    # cell.
+                    # This is necessary because the network is an intercellular network, so the receptor-target edge
+                    # and TF-ligand edge coming from the same cell would be misleading:
+                    ligand_df_mod = ligand_df.iloc[receptor_expressing_cells_indices, :]
+                    # Get the neighboring cells for each receptor-expressing cell:
+                    for i, idx in enumerate(receptor_expressing_cells_indices):
+                        # Get neighboring indices for each index from neighbors_dict
+                        neighboring_indices = neighbors_dict.get(idx, [])
+                        if neighboring_indices:
+                            mean_vals_over_neighbors = ligand_df.loc[neighboring_indices, :].mean(axis=0)
+                            mean_values_temp.iloc[i, :] = mean_vals_over_neighbors
+                    # Get top TFs for this receptor:
+                    # First, take mean effect size for each column:
+                    mean_tf_ligand_effect_size = mean_values_temp.mean(axis=0)
+                    top_n_tf = mean_tf_ligand_effect_size.sort_values(ascending=False).index[:select_n_tf]
+                    # For each TF in top_n, if TF and ligand pass coexpression threshold (optional), check if node
+                    # exists for TF (if not create it) and add edge from TF to ligand:
+                    for tf in top_n_tf:
+                        if coexpression_threshold is not None:
+                            tf_expression = (adata[:, tf].X > 0).toarray().flatten()
+                            coexpression = np.sum(tf_expression * ligand_expression_mask)
+                            # Threshold based on proportion of cells expressing ligand:
+                            num_coexpressed_threshold = coexpression_threshold * np.sum(ligand_expression_mask)
+                            if coexpression < coexpression_threshold:
+                                continue
+                        tf = f"Neighbor TF: {tf}"
                         if not G.has_node(tf):
                             G.add_node(tf, ID=tf)
-                        G.add_edge(tf, ligand, Type="TF:L")
+                        G.add_edge(
+                            tf,
+                            f"Neighbor {ligand}",
+                            Type="TF:L",
+                            Coexpression=coexpression / np.sum(ligand_expression_mask),
+                        )
 
-        if "tf_to_receptor_df" in locals() and include_tf_receptor:
-            if regulator_subset is None:
-                regulator_subset = tf_to_receptor_df.index
+        # Add TF-to-target connections:
+        if "tf_to_target_feature_names" in locals() and include_tf_target:
+            graph_targets = [node.replace("Target: ", "") for node in G.nodes if node.startswith("Target")]
+            valid_targets = [target for target in graph_targets if target in all_modeled_targets]
+            if len(valid_targets) == 0:
+                raise ValueError(
+                    "No modeled targets are included among the graph targets. We recommend "
+                    "re-running the downstream model with a new set of targets, taken from the "
+                    "targets used for the L:R-to-target model."
+                )
 
-            for receptor in tf_to_receptor_df.columns:
-                top_n_tf = tf_to_receptor_df.nlargest(n=select_n_tf, columns=receptor).index.tolist()
-                # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
-                # of the maximum in the array (because these values can be variable):
-                reference_value = tf_to_receptor_df.max().max()
-                top_n_tf = [
-                    tf
-                    for tf in top_n_tf
-                    if tf_to_receptor_df.loc[tf, receptor] >= (self.target_expr_threshold * reference_value)
-                ]
+            # Construct TF to target dataframe:
+            tf_to_target_df = pd.DataFrame(0, index=tf_to_target_feature_names, columns=valid_targets)
 
-                for tf in top_n_tf:
-                    # Check if receptor is in the receptor subset:
-                    if receptor in receptor_subset and G.has_node(receptor):
-                        if not G.has_node(tf):
-                            G.add_node(tf, ID=tf)
-                        G.add_edge(tf, receptor, Type="TF:R")
+            for target in valid_targets:
+                target_expression_mask = (adata[:, target].X > 0).toarray().flatten()
+                file_name = modeled_target_to_file[target]
+                file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "target_gene_analysis", file_name)
+                target_df = pd.read_csv(file_path, index_col=0)
+                target_df = target_df.loc[:, [col for col in target_df.columns if col.startswith("b_")]]
+                target_df.columns = [col.replace("b_", "") for col in target_df.columns if col.startswith("b_")]
+                if regulator_subset is not None:
+                    target_df = target_df.loc[:, [col for col in target_df.columns if col in regulator_subset]]
 
-        if "tf_to_target_df" in locals() and include_tf_target:
-            if regulator_subset is None:
-                regulator_subset = tf_to_target_df.index
+                # Compute average predicted effect size over the chosen cell subset to populate the TF-to-target
+                # dataframe:
+                tf_to_target_df.loc[:, target] = target_df.iloc[cell_ids, :].mean(axis=0)
 
-            for target in tf_to_target_df.columns:
+                # Add edges from TFs to targets:
                 top_n_tf = tf_to_target_df.nlargest(n=select_n_tf, columns=target).index.tolist()
-                # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
-                # of the maximum in the array (because these values can be variable):
-                reference_value = tf_to_target_df.max().max()
-                top_n_tf = [
-                    tf
-                    for tf in top_n_tf
-                    if tf_to_target_df.loc[tf, target] >= (self.target_expr_threshold * reference_value)
-                ]
-
                 for tf in top_n_tf:
-                    if G.has_node(f"Target: {target}"):
-                        if not G.has_node(tf):
-                            G.add_node(tf, ID=tf)
-                        G.add_edge(tf, target, Type="TF:Target")
+                    if coexpression_threshold is not None:
+                        tf_expression = (adata[:, tf].X > 0).toarray().flatten()
+                        coexpression = np.sum(tf_expression * target_expression_mask)
+                        # Threshold based on proportion of cells expressing target:
+                        num_coexpressed_threshold = coexpression_threshold * np.sum(target_expression_mask)
+                        if coexpression < coexpression_threshold:
+                            continue
+                    if not G.has_node(f"TF: {tf}"):
+                        G.add_node(f"TF: {tf}", ID=f"TF: {tf}")
+                    G.add_edge(
+                        f"TF: {tf}",
+                        f"Target: {target}",
+                        Type="TF:T",
+                        Coexpression=coexpression / np.sum(target_expression_mask),
+                    )
 
         # Set colors for nodes- for neighboring cell ligands + TFs, use a distinct colormap (and same w/ receptors,
         # targets and TFs for source cells)- color both on gradient based on number of connections:
@@ -2965,11 +2995,22 @@ class MuSIC_Interpreter(MuSIC):
         cmap_non_neighbor = plt.cm.get_cmap(cmap_default)
 
         # Calculate node degrees and set color and size based on the degree and label
+        n_nodes = len(G.nodes())
+
         for node in G.nodes():
             degree = G.degree(node)
             # Add degree as property:
             G.nodes[node]["Connections"] = degree
-            size_and_color = np.sqrt(degree) * scale_factor
+
+            if degree < 3:
+                base = 2
+            else:
+                base = degree
+
+            if n_nodes < 20:
+                size_and_color = base * scale_factor
+            else:
+                size_and_color = np.sqrt(degree) * scale_factor
 
             # Add size to sizing_list
             if "Neighbor" in node:
@@ -3007,10 +3048,11 @@ class MuSIC_Interpreter(MuSIC):
             node_label="ID",
             nodefont_size=node_fontsize,
             node_label_position=node_label_position,
-            edge_text=["Type"],
+            edge_text=["Type", "Coexpression"],
             edge_label="Type",
             edge_label_position=node_label_position,
             edgefont_size=edge_fontsize,
+            edge_thickness_attr="Coexpression",
             layout=layout,
             arrow_size=arrow_size,
             upper_margin=upper_margin,

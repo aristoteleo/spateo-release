@@ -141,6 +141,7 @@ class PlotNetwork:
         edge_label_position: str,
         edge_text: List[str],
         edge_attribute_for_linestyle: Optional[str] = None,
+        edge_attribute_for_thickness: Optional[str] = None,
         add_text: bool = False,
     ) -> Tuple[List[go.Scatter], go.Scatter]:
         """Formatting for edges
@@ -153,6 +154,8 @@ class PlotNetwork:
             edge_text: List containing properties to be displayed when hovering over edges
             edge_attribute_for_linestyle: Optional edge property to use for linestyle. If not given, will default to
                 property given to 'edge_label'.
+            edge_attribute_for_thickness: Optional edge property to use for thickness. If not given, all edges will
+                have thickness 1.
             add_text: If True, will add text corresponding to edge_label onto the edges rather than only
                 adding different line styles.
 
@@ -161,7 +164,6 @@ class PlotNetwork:
             middle_node_trace: Labels are created by adding invisible nodes to the middle of each edge. This
                 trace contains information for these invisible nodes.
         """
-        edge_mode = "lines+text" if add_text else "lines"
         edge_properties = {}
 
         if edge_attribute_for_linestyle is None:
@@ -188,6 +190,7 @@ class PlotNetwork:
 
         # Initialize an empty list for the edge traces- these will be the lines connecting nodes
         edge_traces = []
+        created_styles = set()
 
         middle_node_trace = go.Scatter(
             x=[],
@@ -205,33 +208,28 @@ class PlotNetwork:
             x0, y0 = self.G.nodes[edge[0]]["pos"]
             x1, y1 = self.G.nodes[edge[1]]["pos"]
 
+            if edge_attribute_for_thickness is not None and edge[2].get(edge_attribute_for_thickness):
+                thickness = (edge[2].get(edge_attribute_for_thickness) * 2) ** 2
+            else:
+                thickness = 1
+
             if edge_attribute_for_linestyle is not None and edge[2].get(edge_attribute_for_linestyle):
                 style = styles.get(edge[2][edge_attribute_for_linestyle], {"color": "#888", "dash": "solid"})
             else:
                 style = {"color": "#888", "dash": "solid"}
+            style_key = (style["color"], style["dash"])
 
-            # Check if there's already a trace with this style:
-            matching_trace = None
-            for trace in edge_traces:
-                if trace["line"]["color"] == style["color"] and trace["line"]["dash"] == style["dash"]:
-                    matching_trace = trace
-                    break
-
-            # If no trace with this style exists, create a new one
-            if not matching_trace:
-                matching_trace = go.Scatter(
-                    x=[],
-                    y=[],
-                    line=dict(width=1, color=style["color"], dash=style["dash"]),
-                    hoverinfo="text",
-                    mode="lines",
-                    name=edge[2][edge_attribute_for_linestyle],
-                )
-                edge_traces.append(matching_trace)
-
-            # Add the edge coordinates to the trace
-            matching_trace["x"] += (x0, x1, None)
-            matching_trace["y"] += (y0, y1, None)
+            edge_trace = go.Scatter(
+                x=(x0, x1, None),
+                y=(y0, y1, None),
+                line=dict(width=thickness, color=style["color"], dash=style["dash"]),
+                hoverinfo="text",
+                mode="lines",
+                name=edge[2].get(edge_attribute_for_linestyle, "Unknown Linestyle"),
+                showlegend=style_key not in created_styles,
+            )
+            created_styles.add(style_key)
+            edge_traces.append(edge_trace)
 
             if edge_text or edge_label:
                 edge_pair = edge[0], edge[1]
@@ -252,7 +250,6 @@ class PlotNetwork:
 
         if edge_text:
             edge_text_list = ["\n".join(f"{k}: {v}" for k, v in vals.items()) for _, vals in edge_properties.items()]
-
             middle_node_trace["hovertext"] = edge_text_list
 
         return edge_traces, middle_node_trace
@@ -424,12 +421,13 @@ def plot_network(
     title: str,
     size_method: Union[str, List[float]],
     color_method: Union[str, List[str]],
-    layout: str = None,
-    node_label: str = None,
+    layout: Optional[str] = None,
+    node_label: Optional[str] = None,
     node_label_position: str = "top center",
     node_text: List[str] = None,
     nodefont_size: int = 8,
-    edge_label: str = None,
+    edge_label: Optional[str] = None,
+    edge_thickness_attr: Optional[str] = None,
     edge_label_position: str = "middle center",
     edge_text: List[str] = None,
     edgefont_size: int = 8,
@@ -471,6 +469,7 @@ def plot_network(
         edge_label: Edge property to be used as label
         edge_label_position: Position of edge labels. Options: 'top left', 'top center', 'top right', 'middle left',
             'middle center', 'middle right', 'bottom left', 'bottom center', 'bottom right'
+        edge_thickness_attr: Edge property to be used for determining edge thickness
         edge_text: List containing properties to be displayed when hovering over edges
         edgefont_size: Size of 'edge_label'
         titlefont_size: Size of title
@@ -492,6 +491,10 @@ def plot_network(
     """
     plot = PlotNetwork(G, layout)
 
+    # Below the title, always include explanation of line thickness:
+    if edge_thickness_attr is not None:
+        title = title + f"<br>Line thickness: {edge_thickness_attr}, L:R line thickness always = 1"
+
     node_trace = plot.generate_node_traces(
         colorscale=colorscale,
         colorbar_title=colorbar_title,
@@ -511,6 +514,7 @@ def plot_network(
         edge_label_position=edge_label_position,
         edge_text=edge_text,
         edge_attribute_for_linestyle=edge_label,
+        edge_attribute_for_thickness=edge_thickness_attr,
     )
 
     fig = plot.generate_figure(
