@@ -60,7 +60,6 @@ def cell_directions(
     """
     mapping_adatas = adatas if inplace else [adata.copy() for adata in adatas]
     for i in lm.progress_logger(range(len(mapping_adatas) - 1), progress_name="Cell Directions"):
-
         adataA = mapping_adatas[i]
         adataB = mapping_adatas[i + 1]
 

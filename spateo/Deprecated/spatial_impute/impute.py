@@ -49,13 +49,9 @@ def get_aug_feature(adata: AnnData, highly_variable: bool = False):
         adata_Vars = adata
 
     if isinstance(adata_Vars.X, scipy.sparse.csc_matrix) or isinstance(adata_Vars.X, scipy.sparse.csr_matrix):
-        feat = adata_Vars.X.toarray()[
-            :,
-        ]
+        feat = adata_Vars.X.toarray()[:,]
     else:
-        feat = adata_Vars.X[
-            :,
-        ]
+        feat = adata_Vars.X[:,]
 
     # Data augmentation:
     feat_a = permutation(feat)

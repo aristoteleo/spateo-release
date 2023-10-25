@@ -301,7 +301,9 @@ class MuSIC:
             self.subsampled = True
         elif self.group_subset:
             chunk_size = int(math.ceil(float(len(range(self.n_samples_subset))) / self.comm.size))
-            self.x_chunk = self.subset_indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+            self.x_chunk = np.array(
+                self.subset_indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+            )
             self.subsampled = False
         else:
             chunk_size = int(math.ceil(float(len(range(self.n_samples))) / self.comm.size))
@@ -314,7 +316,8 @@ class MuSIC:
         self.set_up = self.comm.bcast(self.set_up, root=0)
         self.subsampled = self.comm.bcast(self.subsampled, root=0)
         self.subset = self.comm.bcast(self.subset, root=0)
-        self.x_chunk = self.comm.bcast(self.x_chunk, root=0)
+        if hasattr(self, "x_chunk"):
+            self.x_chunk = self.comm.bcast(self.x_chunk, root=0)
 
     def parse_stgwr_args(self):
         """
@@ -1820,11 +1823,19 @@ class MuSIC:
                 ),
                 axis=1,
             )
-            temp_df = pd.DataFrame(
-                data,
-                columns=["x", "y", "spatial_cluster", target],
-                index=sample_names,
-            )
+
+            if coords.shape[1] == 2:
+                temp_df = pd.DataFrame(
+                    data,
+                    columns=["x", "y", "spatial_cluster", target],
+                    index=sample_names,
+                )
+            else:
+                temp_df = pd.DataFrame(
+                    data,
+                    columns=["x", "y", "z", "spatial_cluster", target],
+                    index=sample_names,
+                )
 
             temp_df[f"{target}_density"] = temp_df.groupby("spatial_cluster")[target].transform(
                 lambda x: np.count_nonzero(x) / len(x)
@@ -1838,10 +1849,10 @@ class MuSIC:
                     # Density of node feature in this stratum
                     node_feature_density = stratum_df[f"{target}_density"].iloc[0]
 
-                    # Set total number of cells to subsample- sample at least 2x the number of zero cells as nonzeros:
+                    # Set total number of cells to subsample- sample at least the number of zero cells as nonzeros:
                     # Sample size proportional to stratum size and node feature density:
-                    n_sample_nonzeros = int(np.ceil((len(stratum_df) // 2) * (1 + (node_feature_density - 1))))
-                    n_sample_zeros = 2 * n_sample_nonzeros
+                    n_sample_nonzeros = int(np.ceil((len(stratum_df) // 2) * node_feature_density))
+                    n_sample_zeros = n_sample_nonzeros
                     sample_size = n_sample_zeros + n_sample_nonzeros
                     sampled_stratum_df = stratum_df.sample(n=sample_size)
                     sampled_df = pd.concat([sampled_df, sampled_stratum_df])
@@ -1854,8 +1865,8 @@ class MuSIC:
                     # Proportional sample size based on number of nonzeros- or three zero cells, depending on which
                     # is larger:
                     num_nonzeros = len(stratum_df[stratum_df[f"{target}_density"] > 0])
-                    n_sample_nonzeros = int(np.ceil((num_nonzeros // 2) * (1 + (node_feature_density - 1))))
-                    n_sample_zeros = np.maximum(2 * n_sample_nonzeros, 3)
+                    n_sample_nonzeros = int(np.ceil((num_nonzeros // 2) * node_feature_density))
+                    n_sample_zeros = np.maximum(n_sample_nonzeros, 3)
                     sample_size = n_sample_zeros + n_sample_nonzeros
 
                     # Sample at least n_sample_zeros zeros if possible:
@@ -1880,8 +1891,22 @@ class MuSIC:
             if self.comm.rank == 0:
                 self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
 
-            # Map each non-sampled point to its closest sampled point:
-            distances = cdist(coords.astype(float), sampled_df[["x", "y"]].values.astype(float), "euclidean")
+            # Map each non-sampled point to its closest sampled point that matches the expression pattern
+            # (zero/nonzero):
+            if coords.shape[1] == 2:
+                ref = sampled_df[["x", "y"]].values.astype(float)
+            else:
+                ref = sampled_df[["x", "y", "z"]].values.astype(float)
+            distances = cdist(coords.astype(float), ref, "euclidean")
+
+            # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
+            non_sampled_expression = (values != 0).flatten()
+            sampled_expression = sampled_df[target].values != 0
+            mismatch_mask = non_sampled_expression[:, np.newaxis] != sampled_expression
+            # Replace distances in the mismatch mask with a very large value:
+            large_value = np.max(distances) + 1
+            distances[mismatch_mask] = large_value
+
             closest_indices = np.argmin(distances, axis=1)
 
             # Dictionary where keys are indices of subsampled points and values are lists of indices of the original
@@ -2102,12 +2127,7 @@ class MuSIC:
                     predicted values (linear predictor for GLMs, response variable for Gaussian regression).
         """
         # Get the index in the original AnnData object for the point in question.
-        if self.subsampled:
-            sample_index = self.subsampled_indices[y_label][i] if not self.subset else self.subsampled_indices[i]
-        elif self.subset:
-            sample_index = self.subset_indices[i]
-        else:
-            sample_index = i
+        sample_index = i
 
         if self.init_betas is not None:
             init_betas = self.init_betas[y_label]
@@ -2321,7 +2341,7 @@ class MuSIC:
                     if self.mod_type != "downstream":
                         if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.01 * most_optimum_score:
                             self.logger.info(
-                                "Plateau detected (optimum score was reached at last iteration)- exiting optimization"
+                                "Plateau detected (optimum score was reached at last iteration)- exiting optimization "
                                 "and returning optimum score up to this point."
                             )
                             self.logger.info(f"Score from last iteration: {optimum_score_history[-2]}")
@@ -2392,6 +2412,11 @@ class MuSIC:
             X_labels = self.feature_names
         n_samples = X.shape[0]
 
+        if self.subsampled:
+            true = y[self.x_chunk]
+        else:
+            true = y
+
         if final:
             local_fit_outputs = np.empty((self.x_chunk.shape[0], 2 * n_features + 3), dtype=np.float64)
 
@@ -2435,7 +2460,7 @@ class MuSIC:
                 if self.distr == "gaussian":
                     RSS = np.sum(all_fit_outputs[:, 1] ** 2)
                     # Total sum of squares:
-                    TSS = np.sum((y - np.mean(y)) ** 2)
+                    TSS = np.sum((true - np.mean(true)) ** 2)
                     r_squared = 1 - RSS / TSS
 
                     # Residual variance:
@@ -2463,14 +2488,14 @@ class MuSIC:
                 if self.distr == "poisson" or self.distr == "nb":
                     # For negative binomial, first compute the dispersion:
                     if self.distr == "nb":
-                        dev_resid = self.distr_obj.deviance_residuals(y, all_fit_outputs[:, 1].reshape(-1, 1))
+                        dev_resid = self.distr_obj.deviance_residuals(true, all_fit_outputs[:, 1].reshape(-1, 1))
                         residual_deviance = np.sum(dev_resid**2)
                         df = n_samples - ENP
                         self.distr_obj.variance.disp = residual_deviance / df
                     # Deviance:
-                    deviance = self.distr_obj.deviance(y, all_fit_outputs[:, 1].reshape(-1, 1))
+                    deviance = self.distr_obj.deviance(true, all_fit_outputs[:, 1].reshape(-1, 1))
                     # Log-likelihood:
-                    ll = self.distr_obj.log_likelihood(y, all_fit_outputs[:, 1].reshape(-1, 1))
+                    ll = self.distr_obj.log_likelihood(true, all_fit_outputs[:, 1].reshape(-1, 1))
                     # ENP:
                     if self.fit_intercept:
                         ENP = n_features + 1
@@ -2531,7 +2556,7 @@ class MuSIC:
                 RSS = np.sum(RSS_list)
                 trace_hat = np.sum(trace_hat_list)
                 aicc = self.compute_aicc_linear(RSS, trace_hat, n_samples=n_samples)
-                # self.logger.info(f"Bandwidth: {bw:.3f}, Linear AICc: {aicc:.3f}")
+                self.logger.info(f"Bandwidth: {bw:.3f}, Linear AICc: {aicc:.3f}")
                 return aicc
 
         elif self.distr == "poisson" or self.distr == "nb":
@@ -2564,10 +2589,10 @@ class MuSIC:
             trace_hat_list = self.comm.gather(trace_hat, root=0)
 
             if self.comm.rank == 0:
-                ll = self.distr_obj.log_likelihood(y, all_y_pred)
+                ll = self.distr_obj.log_likelihood(true, all_y_pred)
                 trace_hat = np.sum(trace_hat_list)
                 aicc = self.compute_aicc_glm(ll, trace_hat, n_samples=n_samples)
-                # self.logger.info(f"Bandwidth: {bw:.3f}, GLM AICc: {aicc:.3f}")
+                self.logger.info(f"Bandwidth: {bw:.3f}, GLM AICc: {aicc:.3f}")
 
                 return aicc
 
@@ -2721,7 +2746,7 @@ class MuSIC:
                 indices = self.subsampled_indices[target]
                 chunk_size = int(math.ceil(float(n_samples) / self.comm.size))
                 # Assign chunks to each process:
-                self.x_chunk = indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+                self.x_chunk = np.array(indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size])
                 self.x_chunk = self.comm.bcast(self.x_chunk, root=0)
 
             # Global relationship regularization (only for non-niche models):
@@ -3044,7 +3069,10 @@ class MuSIC:
                 target = file.split("_")[-1][:-4]
                 all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
                 betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
+                feat_sub = [col.replace("b_", "") for col in betas.columns]
+                betas.index = [self.X_df.index[idx] for idx in betas.index]
                 standard_errors = all_outputs[[col for col in all_outputs.columns if col.startswith("se_")]]
+                standard_errors.index = [self.X_df.index[idx] for idx in standard_errors.index]
 
                 # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
                 # subsampling is not done by cell type group):
@@ -3058,6 +3086,19 @@ class MuSIC:
                         for nonsampled_idx in nonsampled_idxs:
                             betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
                             standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
+
+                    # If this cell does not express the receptor(s) or doesn't have the ligand in neighborhood,
+                    # mask out the relevant element in "betas" and standard errors:
+                    mask_df = (self.X_df != 0).astype(int)
+                    mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
+                    mask_matrix = mask_df.values
+                    betas *= mask_matrix
+                    standard_errors *= mask_matrix
+
+                # Concatenate coefficients and standard errors to re-associate each row with its naeme in the AnnData
+                # object, save back to file path:
+                all_outputs = pd.concat([betas, standard_errors], axis=1)
+                all_outputs.to_csv(os.path.join(parent_dir, file))
 
                 # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas

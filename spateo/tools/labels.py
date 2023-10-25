@@ -43,7 +43,6 @@ def row_normalize(
     data = graph.data
 
     for start_ptr, end_ptr in zip(graph.indptr[:-1], graph.indptr[1:]):
-
         row_sum = data[start_ptr:end_ptr].sum()
 
         if row_sum != 0:

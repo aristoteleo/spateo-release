@@ -437,7 +437,6 @@ class Kernel(object):
         normalize_weights: bool = False,
         use_expression_neighbors: bool = False,
     ):
-
         if use_expression_neighbors:
             self.dist_vector = local_dist(expr_mat[i], expr_mat).reshape(-1)
             self.function = "uniform"

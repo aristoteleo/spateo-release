@@ -58,7 +58,15 @@ def pairwise_align(
     """
 
     # Preprocessing
-    (nx, type_as, new_samples, exp_matrices, spatial_coords, normalize_scale, normalize_mean_list,) = align_preprocess(
+    (
+        nx,
+        type_as,
+        new_samples,
+        exp_matrices,
+        spatial_coords,
+        normalize_scale,
+        normalize_mean_list,
+    ) = align_preprocess(
         samples=[sampleA, sampleB],
         genes=genes,
         spatial_key=spatial_key,

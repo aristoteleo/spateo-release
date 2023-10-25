@@ -318,7 +318,6 @@ def _matplotlib_points(
     vf_kwargs: Optional[Dict] = None,
     **kwargs,
 ):
-
     import matplotlib.pyplot as plt
     from matplotlib.ticker import MaxNLocator
 
@@ -945,7 +944,10 @@ def _datashade_points(
                     data["label"] == "other",
                 )
                 reorder_data = data.copy(deep=True)
-                (reorder_data.iloc[: sum(background_ids), :], reorder_data.iloc[sum(background_ids) :, :],) = (
+                (
+                    reorder_data.iloc[: sum(background_ids), :],
+                    reorder_data.iloc[sum(background_ids) :, :],
+                ) = (
                     data.iloc[background_ids, :],
                     data.iloc[highlight_ids, :],
                 )
@@ -1204,7 +1206,6 @@ def interactive(
         colors = matplotlib.colors.rgb2hex(plt.get_cmap(cmap)(0.5))
 
     if points.shape[0] <= width * height // 10:
-
         if hover_data is not None:
             tooltip_dict = {}
             for col_name in hover_data:
@@ -1894,7 +1895,6 @@ def save_return_show_fig_utils(
     return_all: bool,
     return_all_list: Union[List, Tuple, None],
 ) -> Optional[Tuple]:
-
     from ...configuration import reset_rcParams
     from ...tools.utils import update_dict
 

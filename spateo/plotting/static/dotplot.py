@@ -356,7 +356,6 @@ class Dotplot:
         norm: Optional[Normalize] = None,
         **kwargs,
     ):
-
         # Default plotting parameters:
         config_spateo_rcParams()
         set_pub_style()

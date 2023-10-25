@@ -83,7 +83,6 @@ class LiveWireSegmentation(object):
         self.edges = self.edges.astype(float)
 
     def _compute_graph(self):
-
         try:
             from dijkstar import Graph
         except ImportError:

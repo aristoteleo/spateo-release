@@ -137,7 +137,6 @@ def wrap_to_plotter(
             vertical=True,
         )
         if not (legend_kwargs is None):
-
             lg_kwargs.update((k, legend_kwargs[k]) for k in lg_kwargs.keys() & legend_kwargs.keys())
 
         add_legend(

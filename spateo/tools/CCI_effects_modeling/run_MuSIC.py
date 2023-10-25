@@ -22,7 +22,7 @@ def main():
 @click.option(
     "-np",
     default=2,
-    help="Number of processes to use. Note the max number of processes is " "determined by the number of CPUs.",
+    help="Number of processes to use. Note the max number of processes is determined by the number of CPUs.",
     required=True,
 )
 @click.option("-adata_path")
@@ -57,7 +57,7 @@ def main():
     "-subsample",
     default=False,
     is_flag=True,
-    help="Recommended for large datasets (>5000 samples), " "otherwise model fitting is quite slow.",
+    help="Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
 )
 @click.option(
     "-mod_type",

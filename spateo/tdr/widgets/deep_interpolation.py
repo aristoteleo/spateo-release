@@ -179,7 +179,6 @@ class DeepInterpolation:
         # The optimizers for Neural Nets
 
         if self.input_network_dim < self.data_dim:
-
             self.optimizer = optim.Adam(
                 list(self.A.parameters()) + list(self.h.parameters()) + list(self.B.parameters()),
                 lr=data_lr,
@@ -212,13 +211,11 @@ class DeepInterpolation:
 
         # LET'S TRAIN!!
         for iter in range(max_iter):
-
             ###############################
             ### MAIN FLOW PASS ###
             ###############################
 
             if self.data_sampler is not None:
-
                 # Set the gradients to zero
                 self.h.zero_grad()
                 if self.input_network_dim < self.data_dim:
@@ -262,7 +259,6 @@ class DeepInterpolation:
             #########################
 
             if self.input_network_dim < self.data_dim:
-
                 # Set the gradients to zero
                 self.A.zero_grad(), self.B.zero_grad()
 

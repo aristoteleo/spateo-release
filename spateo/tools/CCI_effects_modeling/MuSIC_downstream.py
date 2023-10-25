@@ -44,6 +44,7 @@ from ...plotting.static.networks import plot_network
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...preprocessing.transform import log1p
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
+from ..utils import flatten_list
 from .MuSIC import MuSIC
 from .regression_utils import multitesting_correction, permutation_testing, wald_test
 from .SWR_mpi import define_spateo_argparse
@@ -834,6 +835,89 @@ class MuSIC_Interpreter(MuSIC):
                 df_pvals.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
             else:
                 df.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
+
+    def partial_correlation_interactions(
+        self,
+        interactions: Optional[Union[str, List[str]]] = None,
+        targets: Optional[Union[str, List[str]]] = None,
+        method: Literal["pearson", "spearman"] = "pearson",
+        ignore_outliers: bool = True,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        center: Optional[float] = None,
+        cmap: str = "Reds",
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+        save_df: bool = False,
+    ):
+        """Repression is more difficult to infer from single-cell data- this function computes semi-partial correlations
+        to shed light on interactions that may be overall repressive. In this case, for a given interaction-target pair,
+        all other interactions are used as covariates in a semi-partial correlation (to account for their effects on
+        the target, but not the other interactions which should be more independent of each other compared to the
+        target).
+
+        Args:
+            interactions: Optional, given in the form ligand(s):receptor(s), following the formatting in the design
+                matrix. If not given, will use all interactions that were specified in model fitting.
+            targets: Can optionally specify a subset of the targets to compute this on. If not given, will use all
+                targets that were specified in model fitting.
+            method: Correlation type, options:
+                - Pearson :math:`r` product-moment correlation
+                - Spearman :math:`\\rho` rank-order correlation
+            ignore_outliers: Whether to ignore extremely high values for target gene expression when computing partial
+                correlations
+            fontsize: Size of font for x and y labels
+            figsize: Size of figure
+            center: Optional, determines position of the colormap center. Between 0 and 1.
+            cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
+                the range is 0. It is recommended to use a sequential colormap (e.g. "Reds", "Blues", "Viridis",
+                etc.). For metric = "fc", if a divergent colormap is not provided, "seismic" will automatically be
+                used.
+            save_show_or_return: Whether to save, show or return the figure
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+            save_df: Set True to save the metric dataframe in the end
+        """
+        logger = lm.get_main_logger()
+        config_spateo_rcParams()
+        # But set display DPI to 300:
+        plt.rcParams["figure.dpi"] = 300
+
+        assert method in [
+            "pearson",
+            "spearman",
+        ], 'only "pearson" and "spearman" are supported for partial correlation.'
+
+        if save_df:
+            output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder)
+
+        if interactions is None:
+            interactions = self.X_df.columns.tolist()
+        elif isinstance(interactions, str):
+            interactions = [interactions]
+
+        if targets is None:
+            targets = self.custom_targets
+        elif isinstance(targets, str):
+            targets = [targets]
+
+        interactions_df = self.X_df.loc[:, interactions]
+        targets_df = pd.DataFrame(self.adata[:, targets].X.toarray(), columns=targets, index=self.adata.obs_names)
+
+        # Check that columns are numeric
+        assert all([interactions_df[c].dtype.kind in "bfiu" for c in interactions])
+        assert all([targets_df[c].dtype.kind in "bfiu" for c in targets])
+
+        # NOTE: compute this
+        n = targets_df_sub.shape[0]  # Number of samples
+        k = targets_df_sub.shape[1] - 2  # Number of covariates
 
     def moran_i_signaling_effects(
         self,
@@ -2502,8 +2586,8 @@ class MuSIC_Interpreter(MuSIC):
         effect_size_threshold: float = 0.2,
         coexpression_threshold: float = 0.2,
         aggregate_method: Literal["mean", "median", "sum"] = "mean",
-        cmap_neighbors: str = "YlOrRd",
-        cmap_default: str = "YlGnBu",
+        cmap_neighbors: str = "autumn",
+        cmap_default: str = "winter",
         scale_factor: float = 3,
         layout: Literal["random", "circular", "kamada", "planar", "spring", "spectral", "spiral"] = "planar",
         node_fontsize: int = 8,
