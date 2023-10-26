@@ -44,7 +44,7 @@ from ...plotting.static.networks import plot_network
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...preprocessing.transform import log1p
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
-from ..utils import flatten_list
+from ..utils import compute_corr_ci
 from .MuSIC import MuSIC
 from .regression_utils import multitesting_correction, permutation_testing, wald_test
 from .SWR_mpi import define_spateo_argparse
@@ -836,12 +836,137 @@ class MuSIC_Interpreter(MuSIC):
             else:
                 df.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
 
+    def enriched_interactions_barplot(
+        self,
+        interactions: Optional[Union[str, List[str]]] = None,
+        targets: Optional[Union[str, List[str]]] = None,
+        effect_size_threshold: float = 0.0,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = "Reds",
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+    ):
+        """Visualize the top predicted effect sizes for each interaction on particular target gene(s).
+
+        Args:
+            interactions: Optional subset of interactions to focus on, given in the form ligand(s):receptor(s),
+                following the formatting in the design matrix. If not given, will consider all interactions that were
+                specified in model fitting.
+            targets: Can optionally specify a subset of the targets to compute this on. If not given, will use all
+                targets that were specified in model fitting. If multiple targets are given, "save_show_or_return"
+                should be "save" (and provide appropriate keyword arguments for saving using "save_kwargs"), otherwise
+                only the last target will be shown.
+            effect_size_threshold: Lower bound for average effect size to include a particular interaction in the
+                barplot
+            fontsize: Size of font for x and y labels
+            figsize: Size of figure
+            cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
+                the range is 0. It is recommended to use a sequential colormap (e.g. "Reds", "Blues", "Viridis",
+                etc.). For metric = "fc", if a divergent colormap is not provided, "seismic" will automatically be
+                used.
+            save_show_or_return: Whether to save, show or return the figure
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+        """
+        config_spateo_rcParams()
+        # But set display DPI to 300:
+        plt.rcParams["figure.dpi"] = 300
+
+        if fontsize is None:
+            fontsize = rcParams.get("font.size")
+
+        if interactions is None:
+            interactions = self.X_df.columns.tolist()
+        elif isinstance(interactions, str):
+            interactions = [interactions]
+        elif not isinstance(interactions, list):
+            raise TypeError(f"Interactions must be a list or string, not {type(interactions)}.")
+
+        if targets is None:
+            targets = self.custom_targets
+        elif isinstance(targets, str):
+            targets = [targets]
+        elif not isinstance(targets, list):
+            raise TypeError(f"targets must be a list or string, not {type(targets)}.")
+
+        for target in targets:
+            # Get coefficients for this key
+            coef = self.coeffs[target]
+            effects = coef[[col for col in coef.columns if col.startswith("b_") and "intercept" not in col]]
+            effects.columns = [col.split("_")[1] for col in effects.columns]
+            # Subset to only the interactions of interest:
+            effects = effects[interactions]
+
+            # Get the expression matrix corresponding to the target gene:
+            target_idx = np.where(self.adata.var_names == target)[0][0]
+            # Subset to the cells expressing the target:
+            target_expr = self.adata.X[:, target_idx] > 0
+            target_expr_sub = self.adata[target_expr, :].copy()
+
+            # Subset effects dataframe to same subset:
+            effects_sub = effects.loc[target_expr_sub.obs_names, :]
+            # Compute average for each column:
+            average_effects = effects_sub.mean(axis=0)
+
+            # Filter based on the threshold
+            average_effects = average_effects[average_effects > effect_size_threshold]
+            # Sort the average_expression in descending order
+            average_effects = average_effects.sort_values(ascending=False)
+
+            # Plot:
+            if figsize is None:
+                # Set figure size based on the number of interaction features and targets:
+                m = len(average_effects)
+                figsize = (m, 5)
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+
+            palette = sns.color_palette(cmap, n_colors=len(average_expression))
+            sns.barplot(
+                x=average_effects.index,
+                y=average_effects.values,
+                edgecolor="black",
+                linewidth=1,
+                palette=palette,
+                ax=ax,
+            )
+            ax.set_xticks(rotation=90)
+            ax.set_xlabel("Interaction (ligand(s):receptor(s))", fontsize=fontsize)
+            ax.set_ylabel("Mean Coefficient Magnitude", fontsize=fontsize)
+            ax.set_title(f"Average Predicted Interaction Effects on {target}", fontsize=fontsize)
+
+            # Use the saved name for the AnnData object to define part of the name of the saved file:
+            base_name = os.path.basename(self.adata_path)
+            adata_id = os.path.splitext(base_name)[0]
+            prefix = f"{adata_id}_interaction_barplot_{target}"
+            # Save figure:
+            save_return_show_fig_utils(
+                save_show_or_return=save_show_or_return,
+                show_legend=False,
+                background="white",
+                prefix=prefix,
+                save_kwargs=save_kwargs,
+                total_panels=1,
+                fig=fig,
+                axes=ax,
+                return_all=False,
+                return_all_list=None,
+            )
+
     def partial_correlation_interactions(
         self,
         interactions: Optional[Union[str, List[str]]] = None,
         targets: Optional[Union[str, List[str]]] = None,
         method: Literal["pearson", "spearman"] = "pearson",
+        filter_interactions_proportion_threshold: Optional[float] = None,
+        plot_zero_threshold: Optional[float] = None,
         ignore_outliers: bool = True,
+        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         center: Optional[float] = None,
@@ -864,8 +989,18 @@ class MuSIC_Interpreter(MuSIC):
             method: Correlation type, options:
                 - Pearson :math:`r` product-moment correlation
                 - Spearman :math:`\\rho` rank-order correlation
+            filter_interactions_proportion_threshold: Optional, if given, will filter out interactions that are
+                predicted to occur in below this proportion of cells beforehand (to reduce the number of computations)
+            plot_zero_threshold: Optional, if given, will mask out values below this threshold in the heatmap (will
+                keep the interactions in the dataframe, just will not color the elements in the plot). Can also be
+                used together with filter_interactions_proportion_threshold.
             ignore_outliers: Whether to ignore extremely high values for target gene expression when computing partial
                 correlations
+            alternative: Defines the alternative hypothesis, or tail of the partial correlation. Must be one of
+                "two-sided" (default), "greater" or "less". Both "greater" and "less" return a one-sided
+                p-value. "greater" tests against the alternative hypothesis that the partial correlation is
+                positive (greater than zero), "less" tests against the hypothesis that the partial
+                correlation is negative.
             fontsize: Size of font for x and y labels
             figsize: Size of figure
             center: Optional, determines position of the colormap center. Between 0 and 1.
@@ -898,26 +1033,159 @@ class MuSIC_Interpreter(MuSIC):
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder)
 
+        # Filter interactions based on prevalence, if specified:
+        if filter_interactions_proportion_threshold is not None:
+            interaction_proportions = (self.X_df != 0).sum() / self.X_df.shape[0]
+            X_df = self.X_df.loc[:, interaction_proportions >= filter_interactions_proportion_threshold]
+        else:
+            X_df = self.X_df
+
         if interactions is None:
-            interactions = self.X_df.columns.tolist()
+            interactions = X_df.columns.tolist()
         elif isinstance(interactions, str):
             interactions = [interactions]
+        elif not isinstance(interactions, list):
+            raise TypeError(f"Interactions must be a list or string, not {type(interactions)}.")
+
+        if not all([c in X_df.columns for c in interactions]):
+            logger.warning(
+                "Some columns given in 'interactions' are not in dataframe. If "
+                "'filter_interactions_proportion_threshold' is given, these may have gotten filtered out. Filtering to "
+                "provided interactions that can be found in the dataframe."
+            )
+            interactions = [c for c in interactions if c in X_df.columns]
 
         if targets is None:
             targets = self.custom_targets
         elif isinstance(targets, str):
             targets = [targets]
+        elif not isinstance(targets, list):
+            raise TypeError(f"targets must be a list or string, not {type(interactions)}.")
 
-        interactions_df = self.X_df.loc[:, interactions]
+        interactions_df = X_df.loc[:, interactions]
         targets_df = pd.DataFrame(self.adata[:, targets].X.toarray(), columns=targets, index=self.adata.obs_names)
 
         # Check that columns are numeric
         assert all([interactions_df[c].dtype.kind in "bfiu" for c in interactions])
         assert all([targets_df[c].dtype.kind in "bfiu" for c in targets])
 
-        # NOTE: compute this
-        n = targets_df_sub.shape[0]  # Number of samples
-        k = targets_df_sub.shape[1] - 2  # Number of covariates
+        df = pd.concat([interactions_df, targets_df], axis=1)
+        n = df.shape[0]  # Number of samples
+
+        # Optionally log-transform to remove the effect of outliers:
+        if ignore_outliers:
+            df = df.apply(np.log1p)
+
+        # Get all unique combinations of interactions and targets:
+        combinations = [f"{i}-{j}" for i in interactions for j in targets]
+        all_stats = pd.DataFrame(0, index=combinations, columns=["n_samples", "r", "CI95%"])
+        all_stats["n_samples"] = n
+
+        # Compute partial correlations for each interaction-target pair:
+        for interaction in interactions:
+            other_interactions = [c for c in interactions if c != interaction]
+            for target in targets:
+                # The dataframe to compute correlations from will consist of the interaction, the target and all other
+                # interactions as covariates:
+                data = df.loc[:, [interaction, target] + other_interactions]
+                k = data.shape[1] - 2  # Number of covariates
+
+                # Compute partial correlation:
+                if method == "spearman":
+                    # Convert the data to rank, similar to R cov()
+                    V = data.rank(na_option="keep").cov()
+                else:
+                    V = data.cov()
+
+                # Inverse covariance matrix:
+                Vi = np.linalg.pinv(V, hermitian=True)
+                Vi_diag = Vi.diagonal()
+                D = np.diag(np.sqrt(1 / Vi_diag))
+                pcor = -1 * (D @ Vi @ D)
+
+                # Semi-partial correlation:
+                with np.errstate(divide="ignore"):
+                    spcor = (
+                        pcor
+                        / np.sqrt(np.diag(V))[..., None]
+                        / np.sqrt(np.abs(Vi_diag - Vi**2 / Vi_diag[..., None])).T
+                    )
+
+                # Remove x covariates
+                r = spcor[1, 0]
+
+                # Two-sided confidence interval:
+                ci = compute_corr_ci(r, (n - k), confidence=95, decimals=6, alternative=alternative)
+                all_stats.loc[f"{interaction}-{target}", "r"] = r
+                all_stats.loc[f"{interaction}-{target}", "CI95%"] = ci
+        all_stats["Interaction"] = [i.split("-")[0] for i in all_stats.index]
+        all_stats["Target"] = [i.split("-")[1] for i in all_stats.index]
+
+        base_name = os.path.basename(self.adata_path)
+        adata_id = os.path.splitext(base_name)[0]
+        prefix = f"{adata_id}_semipartial_correlations"
+
+        if save_df:
+            all_stats.to_csv(os.path.join(output_folder, f"{prefix}_stats.csv"))
+
+        all_stats_to_plot = all_stats.pivot(index="Interaction", columns="Target", values="r")
+        if figsize is None:
+            # Set figure size based on the number of interaction features and targets:
+            m = len(all_stats_to_plot.index) * 40 / 300
+            n = len(all_stats_to_plot.columns) * 40 / 300
+            figsize = (n, m)
+
+        # Plot heatmap:
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+        if plot_zero_threshold is not None:
+            mask = all_stats_to_plot.abs() < plot_zero_threshold
+        else:
+            mask = all_stats_to_plot == 0
+
+        vmax = np.max(np.abs(all_stats_to_plot.values))
+        m = sns.heatmap(
+            all_stats_to_plot,
+            square=True,
+            linecolor="grey",
+            linewidths=0.3,
+            cbar_kws={"label": label, "location": "top"},
+            cmap=cmap,
+            center=center,
+            vmin=-vmax,
+            vmax=vmax,
+            mask=mask,
+            ax=ax,
+        )
+
+        # Outer frame:
+        for _, spine in m.spines.items():
+            spine.set_visible(True)
+            spine.set_linewidth(0.75)
+
+        # Adjust colorbar label font size
+        cbar = m.collections[0].colorbar
+        cbar.set_label(label, fontsize=fontsize * 1.1)
+        # Adjust colorbar tick font size
+        cbar.ax.tick_params(labelsize=fontsize)
+
+        plt.xlabel("Target gene", fontsize=fontsize * 1.1)
+        plt.ylabel("Interaction", fontsize=fontsize * 1.1)
+        plt.title(title, fontsize=fontsize * 1.25)
+        plt.tight_layout()
+
+        # Save figure:
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=False,
+            background="white",
+            prefix=prefix,
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None,
+        )
 
     def moran_i_signaling_effects(
         self,
@@ -950,7 +1218,7 @@ class MuSIC_Interpreter(MuSIC):
             if isinstance(targets, str):
                 targets = [targets]
             elif not isinstance(targets, list):
-                raise ValueError(f"targets must be a list or string, not {type(targets)}.")
+                raise TypeError(f"targets must be a list or string, not {type(targets)}.")
 
         # Get Moran's I scores for each target:
         feat_names = [feat for feat in self.feature_names if feat != "intercept"]

@@ -6,6 +6,7 @@ import scipy.sparse as sp
 from pyvista import PolyData
 from scipy.sparse import csr_matrix, diags, issparse, lil_matrix, spmatrix
 from scipy.spatial import ConvexHull, Delaunay, cKDTree
+from scipy.stats import norm
 
 
 def rescaling(mat: Union[np.ndarray, spmatrix], new_shape: Union[List, Tuple]) -> Union[np.ndarray, spmatrix]:
@@ -59,38 +60,50 @@ def flatten(arr):
     return ret
 
 
-def flatten_list(x: List, include_tuple: bool = False):
-    """Flatten an arbitrarily nested list into a new list.
+def compute_corr_ci(
+    r: float,
+    n: int,
+    confidence: float = 95,
+    decimals: int = 2,
+    alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+):
+    """Parametric confidence intervals around a correlation coefficient
 
     Args:
-        x: The input list
-        include_tuple: Whether to check for nested tuples as well
+        r: Correlation coefficient
+        n: Length of x vector and y vector (the vectors used to compute the correlation)
+        confidence: Confidence level, as a percent (so 95 = 95% confidence interval). Must be between 0 and 100.
+        decimals: Number of rounded decimals
+        alternative: Defines the alternative hypothesis, or tail for the correlation coefficient. Must be one of
+            "two-sided" (default), "greater" or "less"
 
     Returns:
-        result: Unfurled list
+        ci: Confidence interval
     """
-    # If x is not iterable, return x
-    if not isinstance(x, collections.abc.Iterable):
-        return x
-    # Remove None
-    x = list(filter(None.__ne__, x))
-    # Initialize empty output variable
-    result = []
-    # Loop over items in x
-    for el in x:
-        # Check if element is iterable
-        el_is_iter = isinstance(el, collections.abc.Iterable)
-        if el_is_iter:
-            if not isinstance(el, (str, tuple)):
-                result.extend(_flatten_list(el))
-            else:
-                if isinstance(el, tuple) and include_tuple:
-                    result.extend(_flatten_list(el))
-                else:
-                    result.append(el)
-        else:
-            result.append(el)
-    return result
+    assert alternative in [
+        "two-sided",
+        "greater",
+        "less",
+    ], "Alternative must be one of 'two-sided' (default), 'greater' or 'less'."
+
+    # r-to-z transform:
+    z = np.arctanh(r)
+    se = 1 / np.sqrt(n - 3)
+
+    if alternative == "two-sided":
+        critical_val = np.abs(norm.ppf((1 - confidence) / 2))
+        ci_z = np.array([z - critical_val * se, z + critical_val * se])
+    elif alternative == "greater":
+        critical_val = norm.ppf(confidence)
+        ci_z = np.array([z - critical_val * se, np.inf])
+    else:
+        critical_val = norm.ppf(confidence)
+        ci_z = np.array([-np.inf, z + critical_val * se])
+
+    # z-to-r transform:
+    ci = np.tanh(ci_z)
+    ci = np.round(ci, decimals)
+    return ci
 
 
 def calc_1nd_moment(X, W, normalize_W=True):

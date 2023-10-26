@@ -1016,8 +1016,8 @@ class MuSIC:
                         f"complex members."
                     )
 
-                    # In the case of using this method to find candidate ligands, save list of ligands in the same directory
-                    # as the AnnData file for later access:
+                    # In the case of using this method to find candidate ligands, save list of ligands in the same
+                    # directory as the AnnData file for later access:
                     self.logger.info(
                         f"Saving list of manually found ligands to "
                         f"{os.path.join(os.path.dirname(self.adata_path), 'ligands.txt')}"
@@ -1761,11 +1761,13 @@ class MuSIC:
         significantly different for the subsampled data.
 
         New Attributes:
-            indices: Dictionary containing indices of the subsampled cells for each dependent variable
-            n_samples_fitted: Dictionary containing number of samples to be fit (not total number of samples) for
+            subsampled_indices: Dictionary containing indices of the subsampled cells for each dependent variable
+            n_samples_subsampled: Dictionary containing number of samples to be fit (not total number of samples) for
                 each dependent variable
-            sample_names: Dictionary containing lists of names of the subsampled cells for each dependent variable
-            n_runs_all: Dictionary containing the number of runs for each dependent variable
+            subsampled_sample_names: Dictionary containing lists of names of the subsampled cells for each dependent
+                variable
+            neighboring_unsampled: Dictionary containing a mapping between each unsampled point and the closest
+                sampled point
         """
         # For subsampling by point selection (otherwise, these will not be dictionaries because they are the same for
         # all targets):
@@ -1930,6 +1932,19 @@ class MuSIC:
         self.n_samples_subsampled = self.comm.bcast(self.n_samples_subsampled, root=0)
         self.subsampled_sample_names = self.comm.bcast(self.subsampled_sample_names, root=0)
         self.neighboring_unsampled = self.comm.bcast(self.neighboring_unsampled, root=0)
+
+        # Save dictionary mapping unsampled points to nearest sampled points:
+        parent_dir = os.path.dirname(self.output_path)
+        if not os.path.exists(os.path.join(parent_dir, "subsampling")):
+            os.makedirs(os.path.join(parent_dir, "subsampling"))
+        if not os.path.exists(os.path.dirname(self.output_path)):
+            os.makedirs(os.path.dirname(self.output_path))
+
+        _, filename = os.path.split(self.output_path)
+        filename = os.path.splitext(filename)[0]
+
+        with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "w") as file:
+            json.dump(self.neighboring_unsampled, file)
 
     def _set_search_range(self):
         """Set the search range for the bandwidth selection procedure.
@@ -2899,10 +2914,10 @@ class MuSIC:
 
                     # Subtract 1 from predictions for predictions to account for the pseudocount from model setup:
                     y_pred -= 1
-                    if self.mod_type != "downstream":
-                        y_pred[y_pred < 1] = 0.0
-                    else:
-                        y_pred[y_pred < 0] = 0.0
+                    # if self.mod_type != "downstream":
+                    #     y_pred[y_pred < 1] = 0.0
+                    # else:
+                    y_pred[y_pred < 0] = 0.0
 
                     # thresh = 1.01 if self.normalize else 0
                     # y_pred[y_pred <= thresh] = 0.0
@@ -3070,14 +3085,22 @@ class MuSIC:
                 all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
                 betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
                 feat_sub = [col.replace("b_", "") for col in betas.columns]
-                betas.index = [self.X_df.index[idx] for idx in betas.index]
+                if isinstance(betas.index[0], int):
+                    betas.index = [self.X_df.index[idx] for idx in betas.index]
                 standard_errors = all_outputs[[col for col in all_outputs.columns if col.startswith("se_")]]
-                standard_errors.index = [self.X_df.index[idx] for idx in standard_errors.index]
+                if isinstance(standard_errors.index[0], int):
+                    standard_errors.index = [self.X_df.index[idx] for idx in standard_errors.index]
 
                 # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
                 # subsampling is not done by cell type group):
-                if self.subsampled and not self.subset:
-                    sampled_to_nonsampled_map = self.neighboring_unsampled[target]
+                _, filename = os.path.split(self.output_path)
+                filename = os.path.splitext(filename)[0]
+
+                if os.path.exists(os.path.join(parent_dir, "subsampling", f"{filename}.json")):
+                    with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "r") as dict_file:
+                        neighboring_unsampled = json.load(dict_file)
+
+                    sampled_to_nonsampled_map = neighboring_unsampled[target]
                     betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
                     standard_errors = standard_errors.reindex(
                         self.X_df.index, columns=standard_errors.columns, fill_value=0
@@ -3095,7 +3118,7 @@ class MuSIC:
                     betas *= mask_matrix
                     standard_errors *= mask_matrix
 
-                # Concatenate coefficients and standard errors to re-associate each row with its naeme in the AnnData
+                # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
                 # object, save back to file path:
                 all_outputs = pd.concat([betas, standard_errors], axis=1)
                 all_outputs.to_csv(os.path.join(parent_dir, file))

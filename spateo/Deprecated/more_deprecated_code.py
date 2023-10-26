@@ -2634,3 +2634,37 @@ if cov is not None:
     thresh = int(0.1 * n_neighbors) if exclude_self else int(0.1 * n_neighbors + 1)
     if np.sum(cov[self.kernel > 0] == 0) < thresh:
         self.kernel[(cov == 0) & (self.kernel > 0)] = 0
+
+
+def flatten_list(x: List, include_tuple: bool = False):
+    """Flatten an arbitrarily nested list into a new list.
+
+    Args:
+        x: The input list
+        include_tuple: Whether to check for nested tuples as well
+
+    Returns:
+        result: Unfurled list
+    """
+    # If x is not iterable, return x
+    if not isinstance(x, collections.abc.Iterable):
+        return x
+    # Remove None
+    x = list(filter(None.__ne__, x))
+    # Initialize empty output variable
+    result = []
+    # Loop over items in x
+    for el in x:
+        # Check if element is iterable
+        el_is_iter = isinstance(el, collections.abc.Iterable)
+        if el_is_iter:
+            if not isinstance(el, (str, tuple)):
+                result.extend(_flatten_list(el))
+            else:
+                if isinstance(el, tuple) and include_tuple:
+                    result.extend(_flatten_list(el))
+                else:
+                    result.append(el)
+        else:
+            result.append(el)
+    return result
