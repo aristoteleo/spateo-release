@@ -41,6 +41,18 @@ def main():
     help="If provided, only cells with labels that correspond to these group(s) will be used as prediction targets.",
 )
 @click.option(
+    "-total_counts_key",
+    default="total_counts",
+    required=False,
+    help="Key to entry in .obs containing total counts for each cell. Required if 'total_counts_threshold' is "
+    "specified to subset cells.",
+)
+@click.option(
+    "-total_counts_threshold",
+    required=False,
+    help="If provided, cells with total counts below this threshold will be removed from the dataset.",
+)
+@click.option(
     "-csv_path",
     required=False,
     help="Can be used to provide a .csv file, containing gene expression data or any other kind of data. "
@@ -54,7 +66,7 @@ def main():
     "3 for X-Y-Z) in the data.",
 )
 @click.option(
-    "-subsample",
+    "-spatial_subsample",
     default=False,
     is_flag=True,
     help="Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
@@ -282,6 +294,8 @@ def run(
     coords_key,
     group_key,
     group_subset,
+    total_counts_key,
+    total_counts_threshold,
     csv_path,
     n_spatial_dim_csv,
     mod_type,
@@ -472,6 +486,8 @@ def run(
         + coords_key
         + " -group_key "
         + group_key
+        + " -total_counts_key "
+        + total_counts_key
         + " -kernel "
         + kernel
         + " -distr "
@@ -491,6 +507,9 @@ def run(
 
     if n_spatial_dim_csv is not None:
         command += " -n_spatial_dim_csv " + str(n_spatial_dim_csv)
+
+    if total_counts_threshold is not None:
+        command += " -total_counts_threshold " + str(total_counts_threshold)
 
     if group_subset is not None:
         command += " -group_subset "
@@ -612,10 +631,3 @@ def run(
 
 if __name__ == "__main__":
     main()
-
-# ADD UPSTREAM PROCESSING COMMANDS BELOW:
-
-
-# ADD INTERPRETATION COMMANDS BELOW:
-# Note: for the interpretation command that clusters the sender-receiver effect DEGs, call a wrapper function that
-# first computes sender_receiver_effect_deg_detection, returns GAM_adata and bs_obj.

@@ -125,7 +125,10 @@ class MuSIC:
             command line). If given, will consider only cells of these types in modeling. Defaults to all cell types.
         covariate_keys: Can be used to optionally provide any number of keys in .obs or .var containing a continuous
             covariate (e.g. expression of a particular TF, avg. distance from a perturbed cell, etc.)
-
+        total_counts_key: Entry in :attr:`adata` .obs that contains total counts for each cell. Required if subsetting
+            by total counts.
+        total_counts_threshold: Threshold for total counts to subset cells by- cells with total counts greater than
+            this threshold will be retained.
 
         bw: Used to provide previously obtained bandwidth for the spatial kernel. Consists of either a distance
             value or N for the number of nearest neighbors. Pass "np.inf" if all other points should have the same
@@ -295,7 +298,7 @@ class MuSIC:
         else:
             self.subset = False
 
-        if self.subsample:
+        if self.spatial_subsample or self.total_counts_threshold is not None:
             self.run_subsample()
             # Indicate model has been subsampled:
             self.subsampled = True
@@ -330,7 +333,7 @@ class MuSIC:
 
         self.mod_type = self.arg_retrieve.mod_type
         # Set flag to evenly subsample spatial data:
-        self.subsample = self.arg_retrieve.subsample
+        self.spatial_subsample = self.arg_retrieve.spatial_subsample
 
         self.adata_path = self.arg_retrieve.adata_path
         self.csv_path = self.arg_retrieve.csv_path
@@ -369,6 +372,8 @@ class MuSIC:
         self.group_key = self.arg_retrieve.group_key
         self.group_subset = self.arg_retrieve.group_subset
         self.covariate_keys = self.arg_retrieve.covariate_keys
+        self.total_counts_key = self.arg_retrieve.total_counts_key
+        self.total_counts_threshold = self.arg_retrieve.total_counts_threshold
 
         self.bw_fixed = self.arg_retrieve.bw_fixed
         self.distance_membrane_bound = self.arg_retrieve.distance_membrane_bound
@@ -526,6 +531,7 @@ class MuSIC:
                 unique_indices = list(set(cols))
                 names_all_neighbors = self.sample_names[unique_indices]
                 self.adata = self.adata[self.adata.obs_names.isin(names_all_neighbors)].copy()
+                self.subsampled_sample_names = self.adata.obs_names
 
             if self.distr in ["poisson", "nb"]:
                 if self.normalize or self.smooth or self.log_transform:
@@ -1806,126 +1812,192 @@ class MuSIC:
             sample_names = self.sample_names
             coords = self.coords
 
-        for target in y_arr.columns:
-            if self.group_subset is None:
-                values = y_arr[target].values.reshape(-1, 1)
-            else:
-                values = y_arr[target][self.subsampled_sample_names].values.reshape(-1, 1)
+        if self.total_counts_threshold is not None:
+            if self.total_counts_key not in self.adata.obs_keys():
+                raise KeyError(f"{self.total_counts_key} not found in .obs of AnnData.")
+            adata_high_qual = self.adata[self.adata.obs[self.total_counts_key] >= self.total_counts_threshold]
+            sampled_coords = adata_high_qual.obsm[self.coords_key]
+            sample_names = adata_high_qual.obs_names
+            y_arr_high_qual = y_arr.loc[sample_names]
 
-            # Spatial clustering:
-            n_clust = int(0.05 * n_samples)
-            kmeans = KMeans(n_clusters=n_clust, random_state=0).fit(coords)
-            spatial_clusters = kmeans.predict(coords).astype(int).reshape(-1, 1)
-
-            data = np.concatenate(
-                (
-                    coords,
-                    spatial_clusters,
-                    values,
-                ),
-                axis=1,
-            )
-
-            if coords.shape[1] == 2:
-                temp_df = pd.DataFrame(
-                    data,
-                    columns=["x", "y", "spatial_cluster", target],
-                    index=sample_names,
-                )
-            else:
-                temp_df = pd.DataFrame(
-                    data,
-                    columns=["x", "y", "z", "spatial_cluster", target],
-                    index=sample_names,
-                )
-
-            temp_df[f"{target}_density"] = temp_df.groupby("spatial_cluster")[target].transform(
-                lambda x: np.count_nonzero(x) / len(x)
-            )
-
-            # Stratified subsampling:
-            sampled_df = pd.DataFrame()
-            for stratum in temp_df["spatial_cluster"].unique():
-                if len(set(temp_df[f"{target}_density"])) == 2:
-                    stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
-                    # Density of node feature in this stratum
-                    node_feature_density = stratum_df[f"{target}_density"].iloc[0]
-
-                    # Set total number of cells to subsample- sample at least the number of zero cells as nonzeros:
-                    # Sample size proportional to stratum size and node feature density:
-                    n_sample_nonzeros = int(np.ceil((len(stratum_df) // 2) * node_feature_density))
-                    n_sample_zeros = n_sample_nonzeros
-                    sample_size = n_sample_zeros + n_sample_nonzeros
-                    sampled_stratum_df = stratum_df.sample(n=sample_size)
-                    sampled_df = pd.concat([sampled_df, sampled_stratum_df])
-
+            for target in y_arr_high_qual.columns:
+                if self.group_subset is None:
+                    all_values = y_arr[target].values.reshape(-1, 1)
+                    sampled_values = y_arr_high_qual[target].values.reshape(-1, 1)
                 else:
-                    stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
-                    # Density of node feature in this stratum
-                    node_feature_density = stratum_df[f"{target}_density"].iloc[0]
+                    all_values = y_arr[target][sample_names].values.reshape(-1, 1)
+                    sampled_values = y_arr_high_qual[target][sample_names].values.reshape(-1, 1)
 
-                    # Proportional sample size based on number of nonzeros- or three zero cells, depending on which
-                    # is larger:
-                    num_nonzeros = len(stratum_df[stratum_df[f"{target}_density"] > 0])
-                    n_sample_nonzeros = int(np.ceil((num_nonzeros // 2) * node_feature_density))
-                    n_sample_zeros = np.maximum(n_sample_nonzeros, 3)
-                    sample_size = n_sample_zeros + n_sample_nonzeros
+                data = np.concatenate((sampled_coords, sampled_values), axis=1)
+                if coords.shape[1] == 2:
+                    sampled_df = pd.DataFrame(data, columns=["x", "y", target], index=sample_names)
+                else:
+                    sampled_df = pd.DataFrame(data, columns=["x", "y", "z", target], index=sample_names)
 
-                    # Sample at least n_sample_zeros zeros if possible:
-                    zero_sub = stratum_df[stratum_df[target] == 0]
-                    n_zeros_sample = np.minimum(n_sample_zeros, len(zero_sub))
-                    sampled_zero_stratum_df = zero_sub.sample(n=n_zeros_sample)
+                # Map each non-sampled point to its closest sampled point that matches the expression pattern
+                # (zero/nonzero):
+                if coords.shape[1] == 2:
+                    ref = sampled_df[["x", "y"]].values.astype(float)
+                else:
+                    ref = sampled_df[["x", "y", "z"]].values.astype(float)
+                distances = cdist(coords.astype(float), ref, "euclidean")
 
-                    # Check if any nonzeros exist
-                    stratum_nonzero_df = stratum_df[stratum_df[target] > 0]
-                    if not stratum_nonzero_df.empty:
-                        # Sample from nonzeros first
-                        num_nonzeros_sampled = min(len(stratum_nonzero_df), sample_size - n_sample_zeros)
-                        sampled_nonzero_stratum_df = stratum_nonzero_df.sample(n=num_nonzeros_sampled)
+                # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
+                all_expression = (all_values != 0).flatten()
+                sampled_expression = sampled_df[target].values != 0
+                mismatch_mask = all_expression[:, np.newaxis] != sampled_expression
+                # Replace distances in the mismatch mask with a very large value:
+                large_value = np.max(distances) + 1
+                distances[mismatch_mask] = large_value
 
-                        # Concatenate zeros and nonzeros:
-                        sampled_stratum_df = pd.concat([sampled_nonzero_stratum_df, sampled_zero_stratum_df])
+                closest_indices = np.argmin(distances, axis=1)
+
+                # Dictionary where keys are indices of subsampled points and values are lists of indices of the original
+                # points closest to them:
+                closest_dict = {}
+                for i, idx in enumerate(closest_indices):
+                    key = sampled_df.index[idx]
+                    if key not in closest_dict:
+                        closest_dict[key] = []
+                    if sample_names[i] not in sampled_df.index:
+                        closest_dict[key].append(sample_names[i])
+
+                # Define relevant dictionaries- only if further subsampling by region will not be performed:
+                if self.spatial_subsample is False:
+                    # If subsampling by total counts, the arrays of subsampled indices, number subsampled and subsampled
+                    # sample names (but notably not the unsampled-to-sampled mapping) are the same, but subsequent
+                    # computation will search through dictionary keys to get these, so we format them as dictionaries
+                    # anyways:
+                    self.subsampled_indices[target] = [
+                        self.sample_names.get_loc(name) for name in adata_high_qual.obs_names
+                    ]
+                    self.n_samples_subsampled[target] = adata_high_qual.n_obs
+                    self.subsampled_sample_names[target] = adata_high_qual.obs_names
+                    self.neighboring_unsampled[target] = closest_dict
+
+        # Subsampling by region:
+        if self.spatial_subsample:
+            self.logger.info("Performing stratified subsampling from different regions of the data...")
+            for target in y_arr.columns:
+                if self.group_subset is None:
+                    values = y_arr[target].values.reshape(-1, 1)
+                else:
+                    values = y_arr[target][sample_names].values.reshape(-1, 1)
+
+                # Spatial clustering:
+                n_clust = int(0.05 * n_samples)
+                kmeans = KMeans(n_clusters=n_clust, random_state=0).fit(coords)
+                spatial_clusters = kmeans.predict(coords).astype(int).reshape(-1, 1)
+
+                data = np.concatenate(
+                    (
+                        coords,
+                        spatial_clusters,
+                        values,
+                    ),
+                    axis=1,
+                )
+
+                if coords.shape[1] == 2:
+                    temp_df = pd.DataFrame(
+                        data,
+                        columns=["x", "y", "spatial_cluster", target],
+                        index=sample_names,
+                    )
+                else:
+                    temp_df = pd.DataFrame(
+                        data,
+                        columns=["x", "y", "z", "spatial_cluster", target],
+                        index=sample_names,
+                    )
+
+                temp_df[f"{target}_density"] = temp_df.groupby("spatial_cluster")[target].transform(
+                    lambda x: np.count_nonzero(x) / len(x)
+                )
+
+                # Stratified subsampling:
+                sampled_df = pd.DataFrame()
+                for stratum in temp_df["spatial_cluster"].unique():
+                    if len(set(temp_df[f"{target}_density"])) == 2:
+                        stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
+                        # Density of node feature in this stratum
+                        node_feature_density = stratum_df[f"{target}_density"].iloc[0]
+
+                        # Set total number of cells to subsample- sample at least the number of zero cells as nonzeros:
+                        # Sample size proportional to stratum size and node feature density:
+                        n_sample_nonzeros = int(np.ceil((len(stratum_df) // 2) * node_feature_density))
+                        n_sample_zeros = n_sample_nonzeros
+                        sample_size = n_sample_zeros + n_sample_nonzeros
+                        sampled_stratum_df = stratum_df.sample(n=sample_size)
+                        sampled_df = pd.concat([sampled_df, sampled_stratum_df])
+
                     else:
-                        sampled_stratum_df = sampled_zero_stratum_df
+                        stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
+                        # Density of node feature in this stratum
+                        node_feature_density = stratum_df[f"{target}_density"].iloc[0]
 
-                    sampled_df = pd.concat([sampled_df, sampled_stratum_df])
+                        # Proportional sample size based on number of nonzeros- or three zero cells, depending on which
+                        # is larger:
+                        num_nonzeros = len(stratum_df[stratum_df[f"{target}_density"] > 0])
+                        n_sample_nonzeros = int(np.ceil((num_nonzeros // 2) * node_feature_density))
+                        n_sample_zeros = np.maximum(n_sample_nonzeros, 3)
+                        sample_size = n_sample_zeros + n_sample_nonzeros
 
-            if self.comm.rank == 0:
-                self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
+                        # Sample at least n_sample_zeros zeros if possible:
+                        zero_sub = stratum_df[stratum_df[target] == 0]
+                        n_zeros_sample = np.minimum(n_sample_zeros, len(zero_sub))
+                        sampled_zero_stratum_df = zero_sub.sample(n=n_zeros_sample)
 
-            # Map each non-sampled point to its closest sampled point that matches the expression pattern
-            # (zero/nonzero):
-            if coords.shape[1] == 2:
-                ref = sampled_df[["x", "y"]].values.astype(float)
-            else:
-                ref = sampled_df[["x", "y", "z"]].values.astype(float)
-            distances = cdist(coords.astype(float), ref, "euclidean")
+                        # Check if any nonzeros exist
+                        stratum_nonzero_df = stratum_df[stratum_df[target] > 0]
+                        if not stratum_nonzero_df.empty:
+                            # Sample from nonzeros first
+                            num_nonzeros_sampled = min(len(stratum_nonzero_df), sample_size - n_sample_zeros)
+                            sampled_nonzero_stratum_df = stratum_nonzero_df.sample(n=num_nonzeros_sampled)
 
-            # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
-            non_sampled_expression = (values != 0).flatten()
-            sampled_expression = sampled_df[target].values != 0
-            mismatch_mask = non_sampled_expression[:, np.newaxis] != sampled_expression
-            # Replace distances in the mismatch mask with a very large value:
-            large_value = np.max(distances) + 1
-            distances[mismatch_mask] = large_value
+                            # Concatenate zeros and nonzeros:
+                            sampled_stratum_df = pd.concat([sampled_nonzero_stratum_df, sampled_zero_stratum_df])
+                        else:
+                            sampled_stratum_df = sampled_zero_stratum_df
 
-            closest_indices = np.argmin(distances, axis=1)
+                        sampled_df = pd.concat([sampled_df, sampled_stratum_df])
 
-            # Dictionary where keys are indices of subsampled points and values are lists of indices of the original
-            # points closest to them:
-            closest_dict = {}
-            for i, idx in enumerate(closest_indices):
-                key = sampled_df.index[idx]
-                if key not in closest_dict:
-                    closest_dict[key] = []
-                if sample_names[i] not in sampled_df.index:
-                    closest_dict[key].append(sample_names[i])
+                if self.comm.rank == 0:
+                    self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
 
-            # Get index position in original AnnData object of each subsampled index:
-            self.subsampled_indices[target] = [self.sample_names.get_loc(name) for name in sampled_df.index]
-            self.n_samples_subsampled[target] = len(sampled_df)
-            self.subsampled_sample_names[target] = sampled_df.index
-            self.neighboring_unsampled[target] = closest_dict
+                # Map each non-sampled point to its closest sampled point that matches the expression pattern
+                # (zero/nonzero):
+                if coords.shape[1] == 2:
+                    ref = sampled_df[["x", "y"]].values.astype(float)
+                else:
+                    ref = sampled_df[["x", "y", "z"]].values.astype(float)
+                distances = cdist(coords.astype(float), ref, "euclidean")
+
+                # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
+                all_expression = (values != 0).flatten()
+                sampled_expression = sampled_df[target].values != 0
+                mismatch_mask = all_expression[:, np.newaxis] != sampled_expression
+                # Replace distances in the mismatch mask with a very large value:
+                large_value = np.max(distances) + 1
+                distances[mismatch_mask] = large_value
+
+                closest_indices = np.argmin(distances, axis=1)
+
+                # Dictionary where keys are indices of subsampled points and values are lists of indices of the original
+                # points closest to them:
+                closest_dict = {}
+                for i, idx in enumerate(closest_indices):
+                    key = sampled_df.index[idx]
+                    if key not in closest_dict:
+                        closest_dict[key] = []
+                    if sample_names[i] not in sampled_df.index:
+                        closest_dict[key].append(sample_names[i])
+
+                # Get index position in original AnnData object of each subsampled index:
+                self.subsampled_indices[target] = [self.sample_names.get_loc(name) for name in sampled_df.index]
+                self.n_samples_subsampled[target] = len(sampled_df)
+                self.subsampled_sample_names[target] = sampled_df.index
+                self.neighboring_unsampled[target] = closest_dict
 
         # Cast each of these dictionaries to all processes:
         self.subsampled_indices = self.comm.bcast(self.subsampled_indices, root=0)

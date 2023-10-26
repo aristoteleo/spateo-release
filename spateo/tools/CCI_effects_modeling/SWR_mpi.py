@@ -26,7 +26,8 @@ def define_spateo_argparse(**kwargs):
         adata_path: Path to AnnData object containing gene expression data. This or 'csv_path' must be given to run.
         csv_path: Path to .csv file containing gene expression data. This or 'adata_path' must be given to run.
         n_spatial_dim_csv: Number of spatial dimensions to the data provided to 'csv_path'. Defaults to 2.
-        subsample: Flag to subsample the data. Recommended for large datasets (>5000 samples).
+        spatial_subsample: Flag to subsample the data- at a big picture level, this will be done by dividing the tissue
+            into regions and subsampling from each of these regions. Recommended for large datasets (>5000 samples).
         multiscale: Flag to create multiscale models. Currently, it is recommended to only create multiscale models
             for Gaussian data.
         multiscale_params_only: Flag to return additional metrics along with the coefficients for multiscale models (
@@ -96,7 +97,12 @@ def define_spateo_argparse(**kwargs):
         group_subset: Subset of cell types to include in the model (provided as a whitespace-separated list in
             command line). If given, will consider only cells of these types in modeling. Defaults to all cell types.
         covariate_keys: Entries in :attr:`adata` .obs or :attr:`adata` .var that contain covariates to include
-            in the model. Can be provided as a whitespace-separated list in the command line.
+            in the model. Can be provided as a whitespace-separated list in the command line. Numerical covariates
+            should be minmax scaled between 0 and 1.
+        total_counts_key: Entry in :attr:`adata` .obs that contains total counts for each cell. Required if subsetting
+            by total counts. Defaults to "total_counts".
+        total_counts_threshold: Threshold for total counts to subset cells by- cells with total counts greater than
+            this threshold will be retained.
 
 
         bw: Bandwidth for kernel density estimation. Consists of either a distance value or N for the number of
@@ -203,7 +209,7 @@ def define_spateo_argparse(**kwargs):
             "default": 2,
             "help": "If using a .csv file, specifies the number of spatial dimensions. Default is 2.",
         },
-        "-subsample": {
+        "-spatial_subsample": {
             "action": "store_true",
             "help": "Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
         },
@@ -292,6 +298,15 @@ def define_spateo_argparse(**kwargs):
             "help": "Any number of keys to entry in .obs or .var_names of an "
             "AnnData object. Values here will be added to"
             "the model as covariates.",
+        },
+        "-total_counts_key": {
+            "type": str,
+            "help": "Key to entry in .obs containing total counts per cell. Will be used if 'total_counts_threshold' "
+            "is provided.",
+        },
+        "-total_counts_threshold": {
+            "type": float,
+            "help": "If provided, cells with total counts below this threshold will be removed in preprocessing.",
         },
         "-bw": {
             "type": float,
@@ -519,7 +534,7 @@ if __name__ == "__main__":
         help="If using a .csv file, specifies the number of spatial dimensions. Default is 2.",
     )
     parser.add_argument(
-        "-subsample",
+        "-spatial_subsample",
         action="store_true",
         help="Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
     )
@@ -612,6 +627,17 @@ if __name__ == "__main__":
         help="Any number of keys to entry in .obs or .var_names of an "
         "AnnData object. Values here will be added to"
         "the model as covariates.",
+    )
+    parser.add_argument(
+        "-total_counts_key",
+        default="total_counts",
+        type=str,
+        help="Key to entry in .obs containing total counts per cell.",
+    )
+    parser.add_argument(
+        "-total_counts_threshold",
+        type=float,
+        help="If provided, cells with total counts below this threshold will be removed.",
     )
 
     parser.add_argument("-bw")
