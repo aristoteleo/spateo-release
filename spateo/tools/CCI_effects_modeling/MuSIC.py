@@ -1803,11 +1803,12 @@ class MuSIC:
         # their neighboring cells. However, we only want to fit the model on the cell types of interest,
         # so :attr `subsampled_indices` consists of the set of indices that don't correspond to the neighboring cells:
         if self.group_subset is not None:
-            adata = self.adata[self.subsampled_sample_names]
+            adata = self.adata[self.subsampled_sample_names].copy()
             n_samples = adata.n_obs
             sample_names = adata.obs_names
             coords = adata.obsm[self.coords_key]
         else:
+            adata = self.adata.copy()
             n_samples = self.n_samples
             sample_names = self.sample_names
             coords = self.coords
@@ -1815,24 +1816,21 @@ class MuSIC:
         if self.total_counts_threshold is not None:
             if self.total_counts_key not in self.adata.obs_keys():
                 raise KeyError(f"{self.total_counts_key} not found in .obs of AnnData.")
-            adata_high_qual = self.adata[self.adata.obs[self.total_counts_key] >= self.total_counts_threshold]
+            adata_high_qual = adata[adata.obs[self.total_counts_key] >= self.total_counts_threshold]
             sampled_coords = adata_high_qual.obsm[self.coords_key]
-            sample_names = adata_high_qual.obs_names
+            sample_names_high_qual = adata_high_qual.obs_names
             y_arr_high_qual = y_arr.loc[sample_names]
+            threshold_sampled_names = sample_names.intersection(sample_names_high_qual)
 
             for target in y_arr_high_qual.columns:
-                if self.group_subset is None:
-                    all_values = y_arr[target].values.reshape(-1, 1)
-                    sampled_values = y_arr_high_qual[target].values.reshape(-1, 1)
-                else:
-                    all_values = y_arr[target][sample_names].values.reshape(-1, 1)
-                    sampled_values = y_arr_high_qual[target][sample_names].values.reshape(-1, 1)
+                all_values = y_arr[target].loc[sample_names].values.reshape(-1, 1)
+                sampled_values = y_arr_high_qual[target].loc[threshold_sampled_names].values.reshape(-1, 1)
 
                 data = np.concatenate((sampled_coords, sampled_values), axis=1)
                 if coords.shape[1] == 2:
-                    sampled_df = pd.DataFrame(data, columns=["x", "y", target], index=sample_names)
+                    sampled_df = pd.DataFrame(data, columns=["x", "y", target], index=threshold_sampled_names)
                 else:
-                    sampled_df = pd.DataFrame(data, columns=["x", "y", "z", target], index=sample_names)
+                    sampled_df = pd.DataFrame(data, columns=["x", "y", "z", target], index=threshold_sampled_names)
 
                 # Map each non-sampled point to its closest sampled point that matches the expression pattern
                 # (zero/nonzero):
@@ -1869,10 +1867,10 @@ class MuSIC:
                     # computation will search through dictionary keys to get these, so we format them as dictionaries
                     # anyways:
                     self.subsampled_indices[target] = [
-                        self.sample_names.get_loc(name) for name in adata_high_qual.obs_names
+                        self.sample_names.get_loc(name) for name in threshold_sampled_names
                     ]
-                    self.n_samples_subsampled[target] = adata_high_qual.n_obs
-                    self.subsampled_sample_names[target] = adata_high_qual.obs_names
+                    self.n_samples_subsampled[target] = len(threshold_sampled_names)
+                    self.subsampled_sample_names[target] = threshold_sampled_names
                     self.neighboring_unsampled[target] = closest_dict
 
         # Subsampling by region:
@@ -1882,7 +1880,7 @@ class MuSIC:
                 if self.group_subset is None:
                     values = y_arr[target].values.reshape(-1, 1)
                 else:
-                    values = y_arr[target][sample_names].values.reshape(-1, 1)
+                    values = y_arr[target].loc[sample_names].values.reshape(-1, 1)
 
                 # Spatial clustering:
                 n_clust = int(0.05 * n_samples)
@@ -1962,6 +1960,12 @@ class MuSIC:
 
                         sampled_df = pd.concat([sampled_df, sampled_stratum_df])
 
+                # Check to see if counts-based subsampling was performed- if so, subset the sampled dataframe based
+                # on the subset already generated from that:
+                if "threshold_sampled_names" in locals():
+                    updated_sampled_names = set(threshold_sampled_names).intersection(sampled_df.index)
+                    sampled_df = sampled_df.loc[updated_sampled_names]
+
                 if self.comm.rank == 0:
                     self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
 
@@ -1971,6 +1975,7 @@ class MuSIC:
                     ref = sampled_df[["x", "y"]].values.astype(float)
                 else:
                     ref = sampled_df[["x", "y", "z"]].values.astype(float)
+
                 distances = cdist(coords.astype(float), ref, "euclidean")
 
                 # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
@@ -3157,10 +3162,10 @@ class MuSIC:
                 all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
                 betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
                 feat_sub = [col.replace("b_", "") for col in betas.columns]
-                if isinstance(betas.index[0], int):
+                if isinstance(betas.index[0], int) or isinstance(betas.index[0], float):
                     betas.index = [self.X_df.index[idx] for idx in betas.index]
                 standard_errors = all_outputs[[col for col in all_outputs.columns if col.startswith("se_")]]
-                if isinstance(standard_errors.index[0], int):
+                if isinstance(standard_errors.index[0], int) or isinstance(betas.index[0], float):
                     standard_errors.index = [self.X_df.index[idx] for idx in standard_errors.index]
 
                 # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
@@ -3180,6 +3185,7 @@ class MuSIC:
                     for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
                         for nonsampled_idx in nonsampled_idxs:
                             betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
+                            standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
                             standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
 
                     # If this cell does not express the receptor(s) or doesn't have the ligand in neighborhood,
