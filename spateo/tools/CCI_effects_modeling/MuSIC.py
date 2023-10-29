@@ -889,7 +889,8 @@ class MuSIC:
             else:
                 raise ValueError("Invalid species specified. Must be one of 'human' or 'mouse'.")
 
-            database_pathways = set(self.lr_db["pathway"])
+            if self.species == "human":
+                database_pathways = set(self.lr_db["pathway"])
 
         # Check for existing design matrix:
         if (
@@ -963,6 +964,9 @@ class MuSIC:
                     ligands = [l for item in ligands for l in item.split("_")]
 
                 elif self.custom_pathways_path is not None or self.custom_pathways is not None:
+                    if self.species != "human":
+                        raise ValueError("Pathway information currently exists only for the human database.")
+
                     if self.custom_pathways_path is not None:
                         with open(self.custom_pathways_path, "r") as f:
                             pathways = f.read().splitlines()
@@ -1090,6 +1094,9 @@ class MuSIC:
                     receptors = [r for item in receptors for r in item.split("_")]
 
                 elif self.custom_pathways_path is not None or self.custom_pathways is not None:
+                    if self.species != "human":
+                        raise ValueError("Pathway information currently exists only for the human database.")
+
                     if self.custom_pathways_path is not None:
                         with open(self.custom_pathways_path, "r") as f:
                             pathways = f.read().splitlines()

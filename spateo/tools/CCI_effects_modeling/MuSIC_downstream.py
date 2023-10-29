@@ -1984,6 +1984,9 @@ class MuSIC_Interpreter(MuSIC):
             compute_dim_reduction: Whether to compute PCA representation of the data subsetted to targets.
         """
 
+        if use_pathways and self.species != "human":
+            raise ValueError("Pathway analysis is only available for human samples.")
+
         if group_key is None:
             group_key = self.group_key
 
@@ -2427,6 +2430,9 @@ class MuSIC_Interpreter(MuSIC):
         """
         logger = lm.get_main_logger()
 
+        if use_pathways and self.species != "human":
+            raise ValueError("Pathway analysis is only available for human samples.")
+
         kwargs["mod_type"] = "downstream"
         kwargs["cci_dir"] = cci_dir_path
         kwargs["group_key"] = group_key
@@ -2603,6 +2609,9 @@ class MuSIC_Interpreter(MuSIC):
 
         output_dir = os.path.dirname(self.output_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
+
+        if use_pathways and self.species != "human":
+            raise ValueError("Pathway analysis is only available for human samples.")
 
         # Load files for all targets:
         if use_ligands or use_receptors or use_pathways or use_targets:
