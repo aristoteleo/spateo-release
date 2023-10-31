@@ -1415,7 +1415,7 @@ class MuSIC:
                             spatial_weights_niche = scipy.sparse.load_npz(niche_path)
                         except:
                             spatial_weights_niche = self._compute_all_wi(
-                                bw=self.n_neighbors_niche, bw_fixed=False, exclude_self=False, kernel="bisquare"
+                                bw=self.n_neighbors_niche, bw_fixed=False, exclude_self=False, kernel="uniform"
                             )
                             self.logger.info(f"Saving spatial weights for niche to {niche_path}.")
                             scipy.sparse.save_npz(niche_path, spatial_weights_niche)
@@ -1465,6 +1465,14 @@ class MuSIC:
                     # Communication signature b/w receptor in target and ligand in neighbors:
                     X_df[f"{lig}:{rec}"] = lig_expr_values * rec_expr_values
 
+                # If any columns are very sparse, drop them- define sparsity as < 0.1% of cells having nonzero values:
+                cols_to_drop = [col for col in X_df.columns if (X_df[col] != 0).sum() <= self.n_samples * 0.001]
+                self.logger.info(
+                    f"Dropping {cols_to_drop} columns due to sparsity (presence in <"
+                    f"{np.round(self.n_samples * 0.001)} cells)."
+                )
+                X_df.drop(columns=cols_to_drop, axis=1, inplace=True)
+
                 # Full original signaling feature array:
                 X_df_full = X_df.copy()
 
@@ -1472,7 +1480,8 @@ class MuSIC:
                 X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
                 if len(self.lr_pairs) != X_df.shape[1]:
                     self.logger.info(
-                        f"Dropped all-zero columns from signaling array, from {len(self.lr_pairs)} to {X_df.shape[1]}."
+                        f"Dropped all-zero columns and sparse columns from signaling array, from {len(self.lr_pairs)} "
+                        f"to {X_df.shape[1]}."
                     )
 
                 # If applicable, check for multicollinearity:
@@ -2367,10 +2376,11 @@ class MuSIC:
         difference = 1.0e9
         iterations = 0
         patience = 0
+        nan_count = 0
         optimum_score_history = []
         results_dict = {}
 
-        while np.abs(difference) > self.tolerance and iterations < self.max_iter and patience < 3:
+        while (np.abs(difference) > self.tolerance and iterations < self.max_iter and patience < 3) or nan_count < 3:
             iterations += 1
 
             # Bandwidth needs to be discrete:
@@ -2415,18 +2425,7 @@ class MuSIC:
                     new_ub = new_lb
                     new_lb = range_lowest + delta * np.abs(range_highest - range_lowest)
 
-                # Exit once difference is smaller than threshold, once NaN returns from one of the models or once a
-                # threshold number of iterations (default to 3) have passed without improvement:
                 difference = lb_score - ub_score
-                if np.isnan(lb_score) or np.isnan(ub_score):
-                    self.logger.info(
-                        "NaN returned from one of the models. Returning last non-NaN bandwidth, and if not "
-                        "found, exiting optimization."
-                    )
-                    if any(not np.isnan(x) for x in optimum_score_history):
-                        return optimum_bw
-                    else:
-                        return None
 
                 # Update new value for score:
                 score = optimum_score
@@ -2435,31 +2434,29 @@ class MuSIC:
                 if iterations >= 3:
                     if optimum_score_history[-2] == most_optimum_score:
                         patience += 1
+                    # If score is NaN for three bandwidth iterations, exit optimization:
+                    elif np.isnan(lb_score) or np.isnan(ub_score):
+                        nan_count += 1
                     else:
+                        nan_count = 0
                         patience = 0
                     if self.mod_type != "downstream":
                         if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.01 * most_optimum_score:
                             self.logger.info(
-                                "Plateau detected (optimum score was reached at last iteration)- exiting optimization "
-                                "and returning optimum score up to this point."
+                                "Plateau detected (optimum score was reached at last iteration)- exiting "
+                                "optimization and returning optimum score up to this point."
                             )
                             self.logger.info(f"Score from last iteration: {optimum_score_history[-2]}")
                             self.logger.info(f"Score from current iteration: {optimum_score_history[-1]}")
                             patience = 3
 
-                # if np.abs(new_ub - self.maxbw) < 1.0 and self.bw_fixed:
-                #     self.logger.info(
-                #         "Approaching maximum bandwidth. Exiting optimization and returning optimum score up to this "
-                #         "point."
-                #     )
-                #     patience = 3
-                #
-                # if np.abs(new_lb - self.minbw) < 1.0 and self.bw_fixed:
-                #     self.logger.info(
-                #         "Approaching minimum bandwidth. Exiting optimization and returning optimum score up to this "
-                #         "point."
-                #     )
-                #     patience = 3
+            # Exit once threshold number of iterations (default to 3) have passed without improvement:
+            if patience == 3:
+                self.logger.info(f"Returning bandwidth {optimum_bw}")
+                return optimum_bw
+            if nan_count == 3:
+                self.logger.info("Score is NaN for three bandwidth iterations- exiting optimization.")
+                return None
 
             new_lb = self.comm.bcast(new_lb, root=0)
             new_ub = self.comm.bcast(new_ub, root=0)

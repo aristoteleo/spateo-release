@@ -878,6 +878,8 @@ def mse(y_true, y_pred) -> float:
 def smooth(
     X: Union[np.ndarray, scipy.sparse.spmatrix],
     W: Union[np.ndarray, scipy.sparse.spmatrix],
+    ct: Optional[np.ndarray] = None,
+    gene_expr_subset: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
     normalize_W: bool = True,
     return_discrete: bool = False,
     n_subsample: Optional[int] = None,
@@ -887,6 +889,10 @@ def smooth(
     Args:
         X: Gene expression array or sparse matrix
         W: Spatial weights matrix
+        ct: Optional, indicates the cell type label for each cell. If given, will smooth only within each cell type.
+        gene_expr_subset: Optional, array corresponding to the expression of select genes. If given, will smooth only
+            over cells that largely match the expression patterns of these genes (assessed using a Jaccard index
+            threshold that is greater than the median score).
         normalize_W: Set True to scale the rows of the weights matrix to sum to 1. Use this to smooth by taking an
             average over the entire neighborhood, including zeros. Set False to take the average over only the
             nonzero elements in the neighborhood.
@@ -904,9 +910,20 @@ def smooth(
             W = subsample_neighbors_sparse(W, n_subsample)
         else:
             W = subsample_neighbors_dense(W, n_subsample)
+
     # Threshold for smoothing (check that a sufficient number of neighbors express a given gene for increased
     # confidence of biological signal- must be greater than or equal to this threshold for smoothing):
     threshold = int(np.ceil(n_subsample / 4))
+
+    # Incorporate cell type information
+    if ct is not None:
+        unique_ct = np.unique(ct)
+        ct_masks = [ct == u_ct for u_ct in unique_ct]
+        W = scipy.sparse.block_diag([W[mask][:, mask] for mask in ct_masks])
+
+    # Incorporate gene expression information
+    if gene_expr_subset is not None:
+        "filler"
 
     # Original nonzero entries (keep these around):
     initial_nz_rows, initial_nz_cols = X.nonzero()
@@ -958,8 +975,84 @@ def smooth(
         return x_new
 
 
-def smooth_process_column(i, X, W, threshold):
-    """Helper function for parallelization of smoothing, see :func `smooth`."""
+def jaccard_similarity(
+    row1: Union[np.ndarray, scipy.sparse.spmatrix], row2: Union[np.ndarray, scipy.sparse.spmatrix]
+) -> float:
+    """Calculate the Jaccard similarity between two rows.
+
+    Parameters:
+        row1: Dense or sparse array corresponding to the first row
+        row2: Dense or sparse array corresponding to the second row
+
+    Returns:
+        similarity: The Jaccard similarity between row1 and row2
+    """
+    if not np.all(np.isin(row1, [0, 1])):  # Check if row1 is binary
+        row1 = np.where(row1 > 0, 1, 0)
+    if not np.all(np.isin(row2, [0, 1])):  # Check if row2 is binary
+        row2 = np.where(row2 > 0, 1, 0)
+
+    intersection = len(np.intersect1d(row1, row2, assume_unique=True))
+    union = len(np.union1d(row1, row2))
+    similarity = intersection / union
+    return similarity
+
+
+def compute_jaccard_for_row(
+    index: int, gene_expr: Union[np.ndarray, scipy.sparse.spmatrix], n_samples: int
+) -> scipy.sparse.spmatrix:
+    """Compute Jaccard similarities between a specific row and all other rows in the gene expression matrix.
+
+    Parameters:
+        index: Index of the specific row in the gene expression matrix
+        gene_expr: Dense or sparse array gene expression array
+        n_samples: Number of samples (rows) in the gene expression matrix
+
+    Returns:
+        similarities: A sparse row vector of Jaccard similarities.
+    """
+    similarities = scipy.sparse.lil_matrix((1, n_samples))
+    for i in range(n_samples):
+        similarity = jaccard_similarity(gene_expr[index], gene_expr[i])
+        if similarity > 0:
+            similarities[0, i] = similarity
+    return similarities
+
+
+def compute_jaccard_parallel(gene_expr: Union[np.ndarray, scipy.sparse.spmatrix]) -> scipy.sparse.spmatrix:
+    """Compute the Jaccard similarity matrix for all pairs of rows in the gene expression matrix in parallel.
+
+    Args:
+        gene_expr: Dense or sparse array gene expression array
+
+    Returns:
+        jaccard_matrix: Pairwise Jaccard similarity matrix
+    """
+    n_samples = gene_expr.shape[0]
+    processor_func = functools.partial(compute_jaccard_for_row, gene_expr=gene_expr, n_samples=n_samples)
+    with Pool(cpu_count()) as pool:
+        jaccard_matrix = pool.map(processor_func, range(n_samples))
+    jaccard_matrix = scipy.sparse.vstack(jaccard_matrix)
+    return jaccard_matrix
+
+
+def smooth_process_column(
+    i: int,
+    X: Union[np.ndarray, scipy.sparse.csr_matrix],
+    W: Union[np.ndarray, scipy.sparse.csr_matrix],
+    threshold: float,
+) -> scipy.sparse.csr_matrix:
+    """Helper function for parallelization of smoothing.
+
+    Args:
+        i: Index of the column to be processed
+        X: Dense or sparse array input data matrix
+        W: Dense or sparse array pairwise spatial weights matrix
+        threshold: Threshold value for smoothing- anything below this will be set to 0.
+
+    Returns:
+        count_nnz: The processed column.
+    """
     feat = X[:, i].reshape(1, -1)
     if scipy.sparse.issparse(X):
         temp = W.multiply(feat)
@@ -974,8 +1067,16 @@ def smooth_process_column(i, X, W, threshold):
     return count_nnz
 
 
-def subsample_neighbors_dense(W, n):
-    """Given dense adjacency matrix W and number of random neighbors n to take, perform subsampling."""
+def subsample_neighbors_dense(W: np.ndarray, n: int) -> np.ndarray:
+    """Given dense spatial weights matrix W and number of random neighbors n to take, perform subsampling.
+
+    Parameters:
+        W: Spatial weights matrix
+        n: Number of neighbors to keep for each row
+
+    Returns:
+        W_new: Subsampled spatial weights matrix
+    """
     logger = lm.get_main_logger()
 
     W_new = W.copy()
@@ -991,8 +1092,16 @@ def subsample_neighbors_dense(W, n):
     return W_new
 
 
-def subsample_neighbors_sparse(W, n):
-    """Given sparse adjacency matrix W and number of random neighbors n to take, perform subsampling."""
+def subsample_neighbors_sparse(W: scipy.sparse.spmatrix, n: int) -> scipy.sparse.spmatrix:
+    """Given sparse spatial weights matrix W and number of random neighbors n to take, perform subsampling.
+
+    Parameters:
+        W: Spatial weights matrix
+        n: Number of neighbors to keep for each row
+
+    Returns:
+        W_new: Subsampled spatial weights matrix
+    """
     logger = lm.get_main_logger()
 
     W_new = W.copy().tocoo()
@@ -1011,21 +1120,3 @@ def subsample_neighbors_sparse(W, n):
             logger.warning(f"Cell {row} has fewer than {n} neighbors. Subsampling not performed.")
     W_new = W_new.tocsr()
     return W_new
-
-
-# ---------------------------------------------------------------------------------------------------
-# Auxiliary functionality for upstream processing or downstream analysis
-# ---------------------------------------------------------------------------------------------------
-def find_maximal_sets(data: pd.DataFrame, feature_of_interest: str, threshold_pct: float = 0.75):
-    """Find the maximal set of features such that all of these features (together with the feature of interest)
-    are the only features that are nonzero in at least 75% of cells. Then subset to all cells for which all of these
-    features are present, or all of these features are absent.
-
-    Args:
-        data:
-        feature_of_interest:
-        threshold_pct:
-
-    Returns:
-
-    """
