@@ -298,7 +298,7 @@ class MuSIC:
         else:
             self.subset = False
 
-        if self.spatial_subsample or self.total_counts_threshold is not None:
+        if self.spatial_subsample or self.total_counts_threshold is not None or self.group_subset is not None:
             self.run_subsample()
             # Indicate model has been subsampled:
             self.subsampled = True
@@ -509,7 +509,7 @@ class MuSIC:
             # cells:
             if self.group_subset is not None:
                 subset = self.adata[self.adata.obs[self.group_key].isin(self.group_subset)]
-                fitted_indices = [self.sample_names.get_loc(name) for name in subset.index]
+                fitted_indices = [self.sample_names.get_loc(name) for name in subset.obs_names]
                 # Add cells that are neighboring cells of the chosen type, but which are not of the chosen type:
                 get_wi_partial = partial(
                     get_wi,
@@ -2748,6 +2748,18 @@ class MuSIC:
             y = y_arr[target].values
             if y.ndim == 1:
                 y = y.reshape(-1, 1)
+
+            # If none of the ligands/receptors/L:R interactions are present in more than threshold percentage of the
+            # target-expressing cells, skip fitting for this target:
+            if self.mod_type in ["lr", "receptor", "ligand"]:
+                y_binary = (y != 0).astype(int)
+                X_binary = (X_orig != 0).astype(int)
+                concurrence = X_binary & y_binary
+                # Calculate the percentage of target-expressing cells for each interaction
+                percentages = concurrence.sum(axis=0) / y_binary.sum()
+                # Check if any of the percentages are above the threshold
+                if all(p <= self.target_expr_threshold for p in percentages):
+                    continue  # Skip to the next iteration if none of the columns meet the criterion
 
             # If model is based on ligands/receptors: filter X based on the prior knowledge network:
             if self.mod_type in ["lr", "receptor", "ligand"]:

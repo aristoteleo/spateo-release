@@ -880,6 +880,7 @@ def smooth(
     W: Union[np.ndarray, scipy.sparse.spmatrix],
     ct: Optional[np.ndarray] = None,
     gene_expr_subset: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
+    manual_mask: Optional[np.ndarray] = None,
     normalize_W: bool = True,
     return_discrete: bool = False,
     n_subsample: Optional[int] = None,
@@ -887,12 +888,16 @@ def smooth(
     """Leverages neighborhood information to smooth gene expression.
 
     Args:
-        X: Gene expression array or sparse matrix
-        W: Spatial weights matrix
-        ct: Optional, indicates the cell type label for each cell. If given, will smooth only within each cell type.
-        gene_expr_subset: Optional, array corresponding to the expression of select genes. If given, will smooth only
-            over cells that largely match the expression patterns of these genes (assessed using a Jaccard index
-            threshold that is greater than the median score).
+        X: Gene expression array or sparse matrix (shape n x m, where n is the number of cells and m is the number of
+            genes)
+        W: Spatial weights matrix (shape n x n)
+        ct: Optional, indicates the cell type label for each cell (shape n x 1). If given, will smooth only within each
+            cell type.
+        gene_expr_subset: Optional, array corresponding to the expression of select genes (shape n x k,
+            where k is the number of genes in the subset). If given, will smooth only over cells that largely match
+            the expression patterns of these genes (assessed using a Jaccard index threshold that is greater than
+            the median score).
+        manual_mask: Optional, array of shape n x n
         normalize_W: Set True to scale the rows of the weights matrix to sum to 1. Use this to smooth by taking an
             average over the entire neighborhood, including zeros. Set False to take the average over only the
             nonzero elements in the neighborhood.
