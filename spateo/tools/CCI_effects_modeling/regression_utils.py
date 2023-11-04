@@ -910,6 +910,8 @@ def smooth(
         x_new: Smoothed gene expression array or sparse matrix
         d: Only if normalize_W is True, returns the row sums of the weights matrix
     """
+    logger = lm.get_main_logger()
+
     # Subsample weights array if applicable:
     if n_subsample is not None:
         if scipy.sparse.issparse(W):
@@ -921,15 +923,35 @@ def smooth(
     # confidence of biological signal- must be greater than or equal to this threshold for smoothing):
     threshold = int(np.ceil(n_subsample / 4))
 
-    # Incorporate cell type information
-    if ct is not None:
-        unique_ct = np.unique(ct)
-        ct_masks = [ct == u_ct for u_ct in unique_ct]
-        W = scipy.sparse.block_diag([W[mask][:, mask] for mask in ct_masks])
+    # If mask is manually given, no need to use cell type & expression information:
+    if manual_mask is not None:
+        logger.info(
+            "Manual mask provided. Will use this to smooth, ignoring inputs to 'ct' and 'gene_expr_subset' if "
+            "provided."
+        )
+        W = W.multiply(manual_mask)
+    else:
+        # Incorporate cell type information
+        if ct is not None:
+            logger.info(
+                "Conditioning smoothing on cell type- only information from cells of the same type will be " "used."
+            )
+            unique_ct = np.unique(ct)
+            ct_masks = [ct == u_ct for u_ct in unique_ct]
+            W = scipy.sparse.block_diag([W[mask][:, mask] for mask in ct_masks])
 
-    # Incorporate gene expression information
-    if gene_expr_subset is not None:
-        "filler"
+        # Incorporate gene expression information
+        if gene_expr_subset is not None:
+            logger.info(
+                "Conditioning smoothing on gene expression- only information from cells with similar gene "
+                "expression patterns will be used."
+            )
+            jaccard_mat = compute_jaccard_parallel(gene_expr_subset)
+            jaccard_threshold = np.median(jaccard_mat.data)
+            # Generate a mask where Jaccard similarities are greater than the threshold, and apply to the weights
+            # matrix:
+            jaccard_mask = jaccard_mat >= jaccard_threshold
+            W = W.multiply(jaccard_mask)
 
     # Original nonzero entries (keep these around):
     initial_nz_rows, initial_nz_cols = X.nonzero()
@@ -993,14 +1015,15 @@ def jaccard_similarity(
     Returns:
         similarity: The Jaccard similarity between row1 and row2
     """
-    if not np.all(np.isin(row1, [0, 1])):  # Check if row1 is binary
-        row1 = np.where(row1 > 0, 1, 0)
-    if not np.all(np.isin(row2, [0, 1])):  # Check if row2 is binary
-        row2 = np.where(row2 > 0, 1, 0)
+    # Convert sparse rows to dense if necessary and ensure they are in boolean format (0, 1)
+    row1 = np.asarray(row1.toarray().ravel() > 0, dtype=int) if scipy.sparse.issparse(row1) else (row1 > 0).astype(int)
+    row2 = np.asarray(row2.toarray().ravel() > 0, dtype=int) if scipy.sparse.issparse(row2) else (row2 > 0).astype(int)
 
-    intersection = len(np.intersect1d(row1, row2, assume_unique=True))
-    union = len(np.union1d(row1, row2))
-    similarity = intersection / union
+    # Calculate intersection and union for Jaccard index calculation
+    intersection = np.logical_and(row1, row2).sum()
+    union = np.logical_or(row1, row2).sum()
+    # Calculate Jaccard similarity, handling division by zero
+    similarity = intersection / union if union != 0 else 0
     return similarity
 
 
@@ -1017,12 +1040,17 @@ def compute_jaccard_for_row(
     Returns:
         similarities: A sparse row vector of Jaccard similarities.
     """
+    if not scipy.sparse.issparse(gene_expr):
+        gene_expr = gene_expr.tocsr()  # Ensure gene expression is in sparse format
+
     similarities = scipy.sparse.lil_matrix((1, n_samples))
+    ref_row_data = gene_expr.getrow(index)
+
     for i in range(n_samples):
-        similarity = jaccard_similarity(gene_expr[index], gene_expr[i])
+        similarity = jaccard_similarity(ref_row_data, gene_expr.getrow(i))
         if similarity > 0:
             similarities[0, i] = similarity
-    return similarities
+    return similarities.tocsr()
 
 
 def compute_jaccard_parallel(gene_expr: Union[np.ndarray, scipy.sparse.spmatrix]) -> scipy.sparse.spmatrix:

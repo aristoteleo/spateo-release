@@ -254,31 +254,117 @@ class MuSIC_Molecule_Selector(MuSIC):
         cells_with_interaction = X_df[(X_df != 0).any(axis=1)].index
         adata_subset = self.adata[cells_with_interaction, :].copy()
         threshold_n = int(self.target_expr_threshold * adata_subset.shape[0])
-        self.logger.info(f"Finding genes expressed in at least {threshold_n} cells out of {adata_subset.n_obs}- to "
-                         f"raise/lower this threshold, raise/lower the 'target_expr_threshold' parameter.")
+        self.logger.info(
+            f"Finding genes expressed in at least {threshold_n} cells out of {adata_subset.n_obs}- to "
+            f"raise/lower this threshold, raise/lower the 'target_expr_threshold' parameter."
+        )
         expr_data = adata_subset.X
         if scipy.sparse.issparse(expr_data):
             genes_expressed = np.array(expr_data.getnnz(axis=0) >= threshold_n).reshape(-1)
         else:
             genes_expressed = np.count_nonzero(expr_data, axis=0) >= threshold_n
         self.adata = self.adata[:, genes_expressed]
-        self.logger.info(f"From {self.n_features} genes, {self.adata.n_vars} are highly expressed in cells predicted "
-                         f"to be involved in an interaction.")
+        self.logger.info(
+            f"From {self.n_features} genes, {self.adata.n_vars} are highly expressed in cells predicted "
+            f"to be involved in an interaction."
+        )
 
         # Do not include housekeeping genes in this- e.g. actin, tubulin, ribosome subunits, ubiquitination,
         # essential metabolic genes, mitochondria, elongation factors, histone proteins, etc.:
         if self.species == "human":
-            exclude = ["ACT", "TUB", "RPL", "RPS", "UB", "GAPDH", "HK", "PFK", "PLK", "CS", "ACO", "IDH", "SDH", "OGD",
-                       "FH", "MDH", "ACA", "FAS", "CPT", "GLU", "GOT", "SHMT", "RRM", "DHF", "SNR", "HNRN", "LDHA",
-                       "HSP", "H2", "H3", "H4", "HMGB", "EEF", "EIF", "ATP", "COX", "RAN", "GNAI", "MALAT", "PPIA",
-                       "MT-", "YWH", "ELO"]
+            exclude = [
+                "ACT",
+                "TUB",
+                "RPL",
+                "RPS",
+                "UB",
+                "GAPDH",
+                "HK",
+                "PFK",
+                "PLK",
+                "CS",
+                "ACO",
+                "IDH",
+                "SDH",
+                "OGD",
+                "FH",
+                "MDH",
+                "ACA",
+                "FAS",
+                "CPT",
+                "GLU",
+                "GOT",
+                "SHMT",
+                "RRM",
+                "DHF",
+                "SNR",
+                "HNRN",
+                "LDHA",
+                "HSP",
+                "H2",
+                "H3",
+                "H4",
+                "HMGB",
+                "EEF",
+                "EIF",
+                "ATP",
+                "COX",
+                "RAN",
+                "GNAI",
+                "MALAT",
+                "PPIA",
+                "MT-",
+                "YWH",
+                "ELO",
+            ]
         elif self.species == "mouse":
-            exclude = ["Act", "Tub", "Rpl", "Rps", "Ub", "Gapdh", "Hk", "Pfk", "Plk", "Cs", "Aco", "Idh", "Sdh", "Ogd",
-                       "Fh", "Mdh", "Aca", "Fas", "Cpt", "Glu", "Got", "Shmt", "Rrm", "Dhf", "Snr", "Hnrn", "Ldha",
-                       "Hsp", "H2", "H3", "H4", "Hmgb", "Eef", "Eif", "Atp", "Cox", "Ran", "Gnai", "Malat", "Ppia",
-                       "mt-", "Ywh", "Elo"]
+            exclude = [
+                "Act",
+                "Tub",
+                "Rpl",
+                "Rps",
+                "Ub",
+                "Gapdh",
+                "Hk",
+                "Pfk",
+                "Plk",
+                "Cs",
+                "Aco",
+                "Idh",
+                "Sdh",
+                "Ogd",
+                "Fh",
+                "Mdh",
+                "Aca",
+                "Fas",
+                "Cpt",
+                "Glu",
+                "Got",
+                "Shmt",
+                "Rrm",
+                "Dhf",
+                "Snr",
+                "Hnrn",
+                "Ldha",
+                "Hsp",
+                "H2",
+                "H3",
+                "H4",
+                "Hmgb",
+                "Eef",
+                "Eif",
+                "Atp",
+                "Cox",
+                "Ran",
+                "Gnai",
+                "Malat",
+                "Ppia",
+                "mt-",
+                "Ywh",
+                "Elo",
+            ]
         self.logger.info("Excluding housekeeping genes/essential genes from target search.")
-        mask = ~self.adata.var_names.str.contains('|'.join(exclude))
+        mask = ~self.adata.var_names.str.contains("|".join(exclude))
         self.adata = self.adata[:, mask]
 
         # Do not include receptors in this:
