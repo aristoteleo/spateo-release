@@ -1316,6 +1316,15 @@ class MuSIC:
                 columns=targets,
             )
 
+            # Cap extreme numerical outliers (this can happen in cancer or just as technical error):
+            for col in self.targets_expr.columns:
+                # Calculate the 99.7th percentile for each column
+                cap_value = np.percentile(self.targets_expr[col], 99.7)
+                # Replace values above the 99.7th percentile with the cap value
+                self.targets_expr[col] = np.where(self.targets_expr[col] > cap_value, cap_value, self.targets_expr[col])
+                # Round down to the nearest integer
+                self.targets_expr[col] = np.floor(self.targets_expr[col]).astype(int)
+
             # Compute spatial lag of ligand expression- exclude self for membrane-bound because autocrine signaling
             # is very difficult in principle:
             if self.mod_type == "lr" or self.mod_type == "ligand":
@@ -2759,7 +2768,12 @@ class MuSIC:
                 percentages = concurrence.sum(axis=0) / y_binary.sum()
                 # Check if any of the percentages are above the threshold
                 if all(p <= self.target_expr_threshold for p in percentages):
-                    continue  # Skip to the next iteration if none of the columns meet the criterion
+                    self.logger.info(
+                        f"None of the interactions are present in more than "
+                        f"{self.target_expr_threshold * 100} percent of cells expressing {target}. "
+                        f"Skipping."
+                    )
+                    continue
 
             # If model is based on ligands/receptors: filter X based on the prior knowledge network:
             if self.mod_type in ["lr", "receptor", "ligand"]:
@@ -2801,6 +2815,10 @@ class MuSIC:
                         i for i, feat in enumerate(self.feature_names) if any(l in feat for l in target_ligands)
                     ]
                     X_labels = [self.feature_names[idx] for idx in keep_indices]
+                    self.logger.info(
+                        f"For target {target}, from {len(self.feature_names)} features, "
+                        f"kept {len(keep_indices)} to fit model."
+                    )
 
                 X = X_orig[:, keep_indices]
             # If downstream analysis model, filter X based on known protein-protein interactions:
@@ -3181,7 +3199,7 @@ class MuSIC:
                 if isinstance(betas.index[0], int) or isinstance(betas.index[0], float):
                     betas.index = [self.X_df.index[idx] for idx in betas.index]
                 standard_errors = all_outputs[[col for col in all_outputs.columns if col.startswith("se_")]]
-                if isinstance(standard_errors.index[0], int) or isinstance(betas.index[0], float):
+                if isinstance(standard_errors.index[0], int) or isinstance(standard_errors.index[0], float):
                     standard_errors.index = [self.X_df.index[idx] for idx in standard_errors.index]
 
                 # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if

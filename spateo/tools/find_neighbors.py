@@ -209,6 +209,7 @@ def calculate_distances_chunk(
 def find_bw_for_n_neighbors(
     adata: anndata.AnnData,
     coords_key: str = "spatial",
+    n_anchors: Optional[int] = None,
     target_n_neighbors: int = 6,
     initial_bw: Optional[float] = None,
     chunk_size: int = 1000,
@@ -239,16 +240,25 @@ def find_bw_for_n_neighbors(
         bandwidth: Bandwidth in distance units
     """
     coords = adata.obsm[coords_key]
+    # Select n_anchors random indices if applicable:
+    if n_anchors is not None:
+        np.random.seed(0)  # Seed for reproducibility
+        anchor_indices = np.random.choice(coords.shape[0], size=n_anchors, replace=False)
+        anchor_coords = coords[anchor_indices]
+        chunk_size = min(chunk_size, anchor_coords.shape[0])
+    else:
+        anchor_coords = coords
+
     # If normalize_distances is True, get the indices of nonzero columns for each row in the distance matrix:
     if normalize_distances:
         n_nonzeros = {}
-        for i in range(coords.shape[0]):
-            n_nonzeros[i] = set(np.nonzero(coords[i, :])[0])
+        for i in range(anchor_coords.shape[0]):
+            n_nonzeros[i] = set(np.nonzero(anchor_coords[i, :])[0])
     else:
         n_nonzeros = None
 
     # Compute distances in chunks, include start and end indices:
-    chunks_with_indices = [(coords[i : i + chunk_size], i) for i in range(0, coords.shape[0], chunk_size)]
+    chunks_with_indices = [(anchor_coords[i : i + chunk_size], i) for i in range(0, anchor_coords.shape[0], chunk_size)]
     # Calculate pairwise distances for each chunk in parallel
     partial_func = partial(calculate_distances_chunk, coords=coords, n_nonzeros=n_nonzeros)
     distances = Parallel(n_jobs=-1)(delayed(partial_func)(chunk, start_idx) for chunk, start_idx in chunks_with_indices)

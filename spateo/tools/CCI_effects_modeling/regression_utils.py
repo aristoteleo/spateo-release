@@ -895,9 +895,10 @@ def smooth(
             cell type.
         gene_expr_subset: Optional, array corresponding to the expression of select genes (shape n x k,
             where k is the number of genes in the subset). If given, will smooth only over cells that largely match
-            the expression patterns of these genes (assessed using a Jaccard index threshold that is greater than
+            the expression patterns over these genes (assessed using a Jaccard index threshold that is greater than
             the median score).
-        manual_mask: Optional, array of shape n x n
+        manual_mask: Optional, binary array of shape n x n. For each cell (row), manually indicate which neighbors (
+            if any) to use for smoothing.
         normalize_W: Set True to scale the rows of the weights matrix to sum to 1. Use this to smooth by taking an
             average over the entire neighborhood, including zeros. Set False to take the average over only the
             nonzero elements in the neighborhood.
