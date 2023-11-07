@@ -2,9 +2,10 @@
 Auxiliary functions to aid in the interpretation functions for the spatial and spatially-lagged regression models.
 """
 import functools
-import sys
-from typing import Callable, Dict, List, Optional, Tuple, Union
+import gc
+from typing import Callable, List, Optional, Tuple, Union
 
+import psutil
 from joblib import Parallel, delayed
 
 try:
@@ -880,6 +881,7 @@ def smooth(
     W: Union[np.ndarray, scipy.sparse.spmatrix],
     ct: Optional[np.ndarray] = None,
     gene_expr_subset: Optional[Union[np.ndarray, scipy.sparse.spmatrix]] = None,
+    min_jaccard: Optional[float] = 0.05,
     manual_mask: Optional[np.ndarray] = None,
     normalize_W: bool = True,
     return_discrete: bool = False,
@@ -897,6 +899,8 @@ def smooth(
             where k is the number of genes in the subset). If given, will smooth only over cells that largely match
             the expression patterns over these genes (assessed using a Jaccard index threshold that is greater than
             the median score).
+        min_jaccard: Optional, and only used if 'gene_expr_subset' is also given. Minimum Jaccard similarity score to
+            be considered "nonzero".
         manual_mask: Optional, binary array of shape n x n. For each cell (row), manually indicate which neighbors (
             if any) to use for smoothing.
         normalize_W: Set True to scale the rows of the weights matrix to sum to 1. Use this to smooth by taking an
@@ -911,17 +915,30 @@ def smooth(
         d: Only if normalize_W is True, returns the row sums of the weights matrix
     """
     logger = lm.get_main_logger()
+    logger.info(
+        "Warning- this can be quite memory intensive when 'gene_expr_subset' is provided, depending on the "
+        "size of the AnnData object. If this is the case it is recommended only to use cell types."
+    )
+
+    if scipy.sparse.issparse(X):
+        logger.info(f"Initial sparsity of array: {X.count_nonzero()}")
+    else:
+        logger.info(f"Initial sparsity of array: {np.count_nonzero(X)}")
 
     # Subsample weights array if applicable:
     if n_subsample is not None:
+        # Threshold for smoothing (check that a sufficient number of neighbors express a given gene for increased
+        # confidence of biological signal- must be greater than or equal to this threshold for smoothing):
+        threshold = int(np.ceil(n_subsample / 4))
+
         if scipy.sparse.issparse(W):
             W = subsample_neighbors_sparse(W, n_subsample)
         else:
             W = subsample_neighbors_dense(W, n_subsample)
-
-    # Threshold for smoothing (check that a sufficient number of neighbors express a given gene for increased
-    # confidence of biological signal- must be greater than or equal to this threshold for smoothing):
-    threshold = int(np.ceil(n_subsample / 4))
+    else:
+        # Threshold of zero means all neighboring cells get incorporated into the smoothing operation
+        threshold = 0
+    logger.info(f"Threshold for smoothing: {threshold} neighbors")
 
     # If mask is manually given, no need to use cell type & expression information:
     if manual_mask is not None:
@@ -934,11 +951,10 @@ def smooth(
         # Incorporate cell type information
         if ct is not None:
             logger.info(
-                "Conditioning smoothing on cell type- only information from cells of the same type will be " "used."
+                "Conditioning smoothing on cell type- only information from cells of the same type will be used."
             )
-            unique_ct = np.unique(ct)
-            ct_masks = [ct == u_ct for u_ct in unique_ct]
-            W = scipy.sparse.block_diag([W[mask][:, mask] for mask in ct_masks])
+            ct_masks = ct == ct.transpose()
+            W = W.multiply(ct_masks)
 
         # Incorporate gene expression information
         if gene_expr_subset is not None:
@@ -946,12 +962,27 @@ def smooth(
                 "Conditioning smoothing on gene expression- only information from cells with similar gene "
                 "expression patterns will be used."
             )
-            jaccard_mat = compute_jaccard_parallel(gene_expr_subset)
-            jaccard_threshold = np.median(jaccard_mat.data)
+            jaccard_mat = compute_jaccard_similarity_matrix(gene_expr_subset, min_jaccard=min_jaccard)
+            logger.info("Computing median Jaccard score from nonzero entries only")
+            if scipy.sparse.issparse(jaccard_mat):
+                jaccard_threshold = sparse_matrix_median(jaccard_mat, nonzero_only=True)
+            else:
+                jaccard_threshold = np.median(jaccard_mat[jaccard_mat != 0])
+            logger.info(f"Threshold Jaccard score: {jaccard_threshold}")
             # Generate a mask where Jaccard similarities are greater than the threshold, and apply to the weights
             # matrix:
             jaccard_mask = jaccard_mat >= jaccard_threshold
             W = W.multiply(jaccard_mask)
+
+    if scipy.sparse.issparse(W):
+        # Calculate the average number of non-zero weights per row for a sparse matrix
+        row_nonzeros = W.getnnz(axis=1)  # Number of non-zero elements per row
+        average_nonzeros = row_nonzeros.mean()  # Average over all rows
+    else:
+        # Calculate the average number of non-zero weights per row for a dense matrix
+        row_nonzeros = (W != 0).sum(axis=1)  # Boolean matrix where True=1 for non-zeros, then sum per row
+        average_nonzeros = row_nonzeros.mean()  # Average over all rows
+    logger.info(f"Average number of non-zero weights per cell: {average_nonzeros}")
 
     # Original nonzero entries (keep these around):
     initial_nz_rows, initial_nz_cols = X.nonzero()
@@ -971,6 +1002,10 @@ def smooth(
                 data[:] = np.where((0 < data) & (data < 1), 1, np.round(data))
             else:
                 x_new = np.where((0 < x_new) & (x_new < 1), 1, np.round(x_new))
+        if scipy.sparse.issparse(x_new):
+            logger.info(f"Sparsity of smoothed array: {x_new.count_nonzero()}")
+        else:
+            logger.info(f"Sparsity of smoothed array: {np.count_nonzero(x_new)}")
         return x_new, d
     else:
         # Average of the nonzero elements:
@@ -993,6 +1028,10 @@ def smooth(
         x_new[mod_nz_rows, mod_nz_cols] = product[mod_nz_rows, mod_nz_cols]
         # For any zeros introduced by this process that were initially nonzeros, set back to the original value:
         x_new[initial_nz_rows, initial_nz_cols] = X[initial_nz_rows, initial_nz_cols]
+        if scipy.sparse.issparse(x_new):
+            logger.info(f"Sparsity of smoothed array: {x_new.count_nonzero()}")
+        else:
+            logger.info(f"Sparsity of smoothed array: {np.count_nonzero(x_new)}")
 
         if return_discrete:
             if scipy.sparse.issparse(x_new):
@@ -1003,71 +1042,106 @@ def smooth(
         return x_new
 
 
-def jaccard_similarity(
-    row1: Union[np.ndarray, scipy.sparse.spmatrix], row2: Union[np.ndarray, scipy.sparse.spmatrix]
-) -> float:
-    """Calculate the Jaccard similarity between two rows.
-
-    Parameters:
-        row1: Dense or sparse array corresponding to the first row
-        row2: Dense or sparse array corresponding to the second row
-
-    Returns:
-        similarity: The Jaccard similarity between row1 and row2
-    """
-    # Convert sparse rows to dense if necessary and ensure they are in boolean format (0, 1)
-    row1 = np.asarray(row1.toarray().ravel() > 0, dtype=int) if scipy.sparse.issparse(row1) else (row1 > 0).astype(int)
-    row2 = np.asarray(row2.toarray().ravel() > 0, dtype=int) if scipy.sparse.issparse(row2) else (row2 > 0).astype(int)
-
-    # Calculate intersection and union for Jaccard index calculation
-    intersection = np.logical_and(row1, row2).sum()
-    union = np.logical_or(row1, row2).sum()
-    # Calculate Jaccard similarity, handling division by zero
-    similarity = intersection / union if union != 0 else 0
-    return similarity
-
-
-def compute_jaccard_for_row(
-    index: int, gene_expr: Union[np.ndarray, scipy.sparse.spmatrix], n_samples: int
-) -> scipy.sparse.spmatrix:
-    """Compute Jaccard similarities between a specific row and all other rows in the gene expression matrix.
-
-    Parameters:
-        index: Index of the specific row in the gene expression matrix
-        gene_expr: Dense or sparse array gene expression array
-        n_samples: Number of samples (rows) in the gene expression matrix
-
-    Returns:
-        similarities: A sparse row vector of Jaccard similarities.
-    """
-    if not scipy.sparse.issparse(gene_expr):
-        gene_expr = gene_expr.tocsr()  # Ensure gene expression is in sparse format
-
-    similarities = scipy.sparse.lil_matrix((1, n_samples))
-    ref_row_data = gene_expr.getrow(index)
-
-    for i in range(n_samples):
-        similarity = jaccard_similarity(ref_row_data, gene_expr.getrow(i))
-        if similarity > 0:
-            similarities[0, i] = similarity
-    return similarities.tocsr()
-
-
-def compute_jaccard_parallel(gene_expr: Union[np.ndarray, scipy.sparse.spmatrix]) -> scipy.sparse.spmatrix:
-    """Compute the Jaccard similarity matrix for all pairs of rows in the gene expression matrix in parallel.
+def compute_jaccard_similarity_matrix(
+    data: Union[np.ndarray, scipy.sparse.spmatrix], chunk_size: int = 1000, min_jaccard: float = 0.1
+) -> np.ndarray:
+    """Compute the Jaccard similarity matrix for input data with rows corresponding to samples and columns
+    corresponding to features, processing in chunks for memory efficiency.
 
     Args:
-        gene_expr: Dense or sparse array gene expression array
+        data: A dense numpy array or a sparse matrix in CSR format, with rows as features
+        chunk_size: The number of rows to process in a single chunk
+        min_jaccard: Minimum Jaccard similarity to be considered "nonzero"
 
     Returns:
-        jaccard_matrix: Pairwise Jaccard similarity matrix
+        jaccard_matrix: A square matrix of Jaccard similarity coefficients
     """
-    n_samples = gene_expr.shape[0]
-    processor_func = functools.partial(compute_jaccard_for_row, gene_expr=gene_expr, n_samples=n_samples)
-    with Pool(cpu_count()) as pool:
-        jaccard_matrix = pool.map(processor_func, range(n_samples))
-    jaccard_matrix = scipy.sparse.vstack(jaccard_matrix)
+    n_samples = data.shape[0]
+    jaccard_matrix = np.zeros((n_samples, n_samples))
+
+    if scipy.sparse.isspmatrix(data):  # Check if input is a sparse matrix
+        # Ensure the matrix is in CSR format for efficient row slicing
+        data = scipy.sparse.csr_matrix(data)
+        data_bool = data.astype(bool).astype(int)
+        row_sums = data_bool.sum(axis=1)
+        data_bool_T = data_bool.T
+        row_sums_T = row_sums.T
+    else:
+        data_bool = (data > 0).astype(int)
+        row_sums = data_bool.sum(axis=1).reshape(-1, 1)
+        data_bool_T = data_bool.T
+        row_sums_T = row_sums.T
+
+    # Compute Jaccard similarities in chunks
+    for chunk_start in range(0, n_samples, chunk_size):
+        chunk_end = min(chunk_start + chunk_size, n_samples)
+        print(f"Pairwise Jaccard similarity computation: processing rows {chunk_start} to {chunk_end}...")
+
+        # Compute similarities for the current chunk
+        chunk_intersection = data_bool[chunk_start:chunk_end].dot(data_bool_T)
+        chunk_union = row_sums[chunk_start:chunk_end] + row_sums_T - chunk_intersection
+        chunk_similarity = chunk_intersection / np.maximum(chunk_union, 1)
+        chunk_similarity[chunk_similarity < min_jaccard] = 0.0
+
+        jaccard_matrix[chunk_start:chunk_end] = chunk_similarity
+
+        # Print available memory
+        memory_stats = psutil.virtual_memory()
+        print(f"Available memory: {memory_stats.available / (1024 * 1024):.2f} MB")
+
+        print(f"Completed rows {chunk_start} to {chunk_end}.")
+
+        # Clean up memory for the next chunk
+        del chunk_intersection, chunk_union, chunk_similarity
+        gc.collect()
+
+    print("Pairwise Jaccard similarity computation: all chunks processed. Converting to final format...")
+    if np.any(np.isnan(jaccard_matrix)) or np.any(np.isinf(jaccard_matrix)):
+        raise ValueError("jaccard_matrix contains NaN or Inf values")
+
+    if scipy.sparse.issparse(data):
+        jaccard_matrix = scipy.sparse.csr_matrix(jaccard_matrix)
+    print("Returning pairwise Jaccard similarity matrix...")
+
     return jaccard_matrix
+
+
+def sparse_matrix_median(spmat: scipy.sparse.spmatrix, nonzero_only: bool = False) -> scipy.sparse.spmatrix:
+    """Computes the median value of a sparse matrix, used here for determining a threshold value for Jaccard similarity.
+
+    Args:
+        spmat: The sparse matrix to compute the median value of
+        nonzero_only: If True, only consider nonzero values in the sparse matrix
+
+    Returns:
+        median_value: The median value of the sparse matrix
+    """
+    # Flatten the sparse matrix data and sort it
+    spmat_data_sorted = np.sort(spmat.data)
+
+    if nonzero_only:
+        # If the number of non-zero elements is even, take the average of the two middle values
+        middle_index = spmat.nnz // 2
+        if spmat.nnz % 2 == 0:  # Even number of non-zero elements
+            median_value = (spmat_data_sorted[middle_index - 1] + spmat_data_sorted[middle_index]) / 2
+        else:  # Odd number of non-zero elements, take the middle one
+            median_value = spmat_data_sorted[middle_index]
+    else:
+        # Get the total number of elements in the matrix
+        total_elements = spmat.shape[0] * spmat.shape[1]
+        # Calculate the number of zeros
+        num_zeros = total_elements - spmat.nnz
+        # Find the number of sorted elements that need to be sorted through to find the median
+        median_idx = total_elements // 2
+
+        # If there are more zeros than the index for the median, then the median is zero
+        if num_zeros > median_idx:
+            median_value = 0
+        else:
+            median_idx_non_zero = median_idx - num_zeros
+            median_value = spmat_data_sorted[median_idx_non_zero]
+
+    return median_value
 
 
 def smooth_process_column(
