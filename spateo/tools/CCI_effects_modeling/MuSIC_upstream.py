@@ -316,6 +316,11 @@ class MuSIC_Molecule_Selector(MuSIC):
                 "MT-",
                 "YWH",
                 "ELO",
+                "PTM",
+                "TMS",
+                "MARCK",
+                "NEDD",
+                "FAU",
             ]
         elif self.species == "mouse":
             exclude = [
@@ -362,6 +367,11 @@ class MuSIC_Molecule_Selector(MuSIC):
                 "mt-",
                 "Ywh",
                 "Elo",
+                "Ptm",
+                "Tms",
+                "Marck",
+                "Nedd",
+                "Fau",
             ]
         self.logger.info("Excluding housekeeping genes/essential genes from target search.")
         mask = ~self.adata.var_names.str.contains("|".join(exclude))
