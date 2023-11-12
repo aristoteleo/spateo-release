@@ -484,7 +484,7 @@ def find_optimal_n_umap_components(X_data: np.ndarray, max_n_components: Optiona
     umap_params["min_dist"] = 0.5
 
     if max_n_components is None:
-        max_n_components = int(X_data.shape[1] // 3)
+        max_n_components = int(X_data.shape[1] // 2)
 
     scores = []
     # Minimum of 5 components:

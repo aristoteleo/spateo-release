@@ -389,7 +389,7 @@ class VarianceFunction(object):
         Returns:
             var: Variance
         """
-        var = np.ones_like(fitted, dtype=float64)
+        var = np.ones_like(fitted, dtype=np.float64)
         return var
 
     def deriv(self, fitted):
@@ -675,6 +675,7 @@ class Distribution(object):
         Returns:
             w: Weights for the IRLS steps
         """
+        fitted = np.where(fitted == 0, EPS, fitted)
         w = 1.0 / (self.link.deriv(fitted) ** 2 * self.variance(fitted))
         return w
 

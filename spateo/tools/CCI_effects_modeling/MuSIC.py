@@ -1664,7 +1664,7 @@ class MuSIC:
                 if self.mod_type == "ligand":
                     X_df = X_df.applymap(np.log1p)
                 # Normalize the data to prevent numerical overflow:
-                X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
+                X_df = X_df.apply(lambda row: (row - row.min()) / (row.max() - row.min()), axis=1)
 
             else:
                 raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
@@ -2600,6 +2600,9 @@ class MuSIC:
                     # Deviance:
                     deviance = self.distr_obj.deviance(true, all_fit_outputs[:, 1].reshape(-1, 1))
                     # Log-likelihood:
+                    # Replace NaN values with 0:
+                    nan_indices = np.isnan(all_fit_outputs[:, 1])
+                    all_fit_outputs[nan_indices, 1] = 0
                     ll = self.distr_obj.log_likelihood(true, all_fit_outputs[:, 1].reshape(-1, 1))
                     # ENP:
                     if self.fit_intercept:
@@ -2634,6 +2637,7 @@ class MuSIC:
             # Compute AICc using the sum of squared residuals:
             RSS = 0
             trace_hat = 0
+            nan_count = 0
 
             for i in self.x_chunk:
                 fit_outputs = self.local_fit(
@@ -2651,7 +2655,10 @@ class MuSIC:
                 # fit_outputs = np.concatenate(([sample_index, 0.0, 0.0], zero_placeholder, zero_placeholder))
                 err, hat_i = fit_outputs[0], fit_outputs[1]
                 RSS += err**2
-                trace_hat += hat_i
+                if np.isnan(hat_i):
+                    nan_count += 1
+                else:
+                    trace_hat += hat_i
 
             # Send data to the central process:
             RSS_list = self.comm.gather(RSS, root=0)
@@ -2666,7 +2673,8 @@ class MuSIC:
 
         elif self.distr == "poisson" or self.distr == "nb":
             # Compute AICc using the fitted and observed values:
-            trace_hat = 0
+            nans = np.empty(self.x_chunk.shape[0], dtype=bool)
+            trace_hats = np.empty(self.x_chunk.shape[0], dtype=np.float64)
             pos = 0
             y_pred = np.empty(self.x_chunk.shape[0], dtype=np.float64)
 
@@ -2684,20 +2692,43 @@ class MuSIC:
                     fit_predictor=fit_predictor,
                 )
                 y_pred_i, hat_i = fit_outputs[0], fit_outputs[1]
+                if np.isnan(hat_i) or np.isnan(y_pred_i):
+                    nans[pos] = 1
                 y_pred[pos] = y_pred_i
-                trace_hat += hat_i
+                trace_hats[pos] = hat_i
                 pos += 1
 
             # Send data to the central process:
             all_y_pred = self.comm.gather(y_pred, root=0)
             all_y_pred = np.array(all_y_pred).reshape(-1, 1)
-            trace_hat_list = self.comm.gather(trace_hat, root=0)
+            all_trace_hat = self.comm.gather(trace_hats, root=0)
+            all_nans = self.comm.gather(nans, root=0)
+            all_nans = np.array(all_nans).reshape(-1, 1)
+
+            # Diagnostics: mean nonzero value
+            pred_test_val = np.mean(all_y_pred[true != 0])
+            obs_test_val = np.mean(true[true != 0])
 
             if self.comm.rank == 0:
-                ll = self.distr_obj.log_likelihood(true, all_y_pred)
-                trace_hat = np.sum(trace_hat_list)
-                aicc = self.compute_aicc_glm(ll, trace_hat, n_samples=n_samples)
-                self.logger.info(f"Bandwidth: {bw:.3f}, GLM AICc: {aicc:.3f}")
+                # For diagnostics, need to ignore NaN values, but also include print statement to indicate how many
+                # such elements were ignored:
+                mask = ~all_nans
+                num_valid = len(mask)
+                number_of_nans = np.sum(~mask)
+                self.logger.info(
+                    f"Bandwidth: {bw:.3f}, encountered issue getting pseudoinverse for {number_of_nans} cells."
+                )
+                ll = self.distr_obj.log_likelihood(true[mask], all_y_pred[mask])
+                norm_ll = ll / num_valid
+
+                trace_hat = np.sum(all_trace_hat[mask])
+                norm_trace_hat = trace_hat / num_valid
+                self.logger.info(f"Bandwidth: {bw:.3f}, hat matrix trace: {trace_hat}")
+                aicc = self.compute_aicc_glm(norm_ll, norm_trace_hat, n_samples=n_samples)
+                self.logger.info(
+                    f"Bandwidth: {bw:.3f}, LL: {ll:.3f}, GLM AICc: {aicc:.3f}, predicted average nonzero "
+                    f"value: {pred_test_val:.3f}, observed average nonzero value: {obs_test_val:.3f}"
+                )
 
                 return aicc
 
@@ -2757,23 +2788,6 @@ class MuSIC:
             y = y_arr[target].values
             if y.ndim == 1:
                 y = y.reshape(-1, 1)
-
-            # If none of the ligands/receptors/L:R interactions are present in more than threshold percentage of the
-            # target-expressing cells, skip fitting for this target:
-            if self.mod_type in ["lr", "receptor", "ligand"]:
-                y_binary = (y != 0).astype(int)
-                X_binary = (X_orig != 0).astype(int)
-                concurrence = X_binary & y_binary
-                # Calculate the percentage of target-expressing cells for each interaction
-                percentages = concurrence.sum(axis=0) / y_binary.sum()
-                # Check if any of the percentages are above the threshold
-                if all(p <= self.target_expr_threshold for p in percentages):
-                    self.logger.info(
-                        f"None of the interactions are present in more than "
-                        f"{self.target_expr_threshold * 100} percent of cells expressing {target}. "
-                        f"Skipping."
-                    )
-                    continue
 
             # If model is based on ligands/receptors: filter X based on the prior knowledge network:
             if self.mod_type in ["lr", "receptor", "ligand"]:
@@ -2865,6 +2879,23 @@ class MuSIC:
             else:
                 X_labels = self.feature_names
                 X = X_orig.copy()
+
+            # If none of the ligands/receptors/L:R interactions are present in more than threshold percentage of the
+            # target-expressing cells, skip fitting for this target:
+            if self.mod_type in ["lr", "receptor", "ligand"]:
+                y_binary = (y != 0).astype(int)
+                X_binary = (X != 0).astype(int)
+                concurrence = X_binary & y_binary
+                # Calculate the percentage of target-expressing cells for each interaction
+                percentages = concurrence.sum(axis=0) / y_binary.sum()
+                # Check if any of the percentages are above the threshold
+                if all(p <= self.target_expr_threshold for p in percentages):
+                    self.logger.info(
+                        f"None of the interactions are present in more than "
+                        f"{self.target_expr_threshold * 100} percent of cells expressing {target}. "
+                        f"Skipping."
+                    )
+                    continue
 
             # If subsampled, define the appropriate chunk of the right subsampled array for this process:
             if self.subsampled:

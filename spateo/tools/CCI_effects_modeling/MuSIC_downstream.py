@@ -35,7 +35,12 @@ from mpi4py import MPI
 from pysal import explore, lib
 from scipy.stats import pearsonr, spearmanr, ttest_1samp
 from sklearn.decomposition import TruncatedSVD
-from sklearn.metrics import f1_score, mean_squared_error, roc_auc_score
+from sklearn.metrics import (
+    confusion_matrix,
+    f1_score,
+    mean_squared_error,
+    roc_auc_score,
+)
 from sklearn.preprocessing import normalize
 
 from ...configuration import config_spateo_rcParams
@@ -199,10 +204,16 @@ class MuSIC_Interpreter(MuSIC):
                 q_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_q_values.csv"))
                 is_significant_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"))
 
-    def compute_diagnostics(self):
+    def compute_diagnostics(self, type: Literal["correlations", "confusion", "rmse"], n_genes_per_plot: int = 20):
         """
-        For true and predicted gene expression, compute and generate plots of various diagnostics, including the
-        Pearson correlation, Spearman correlation and root mean-squared-error (RMSE).
+        For true and predicted gene expression, compute and generate either: confusion matrices,
+        or correlations, including the Pearson correlation, Spearman correlation, or root mean-squared-error (RMSE).
+
+        Args:
+            type: Type of diagnostic to compute and visualize. Options: "correlations" for Pearson & Spearman
+                correlation, "confusion" for confusion matrix, "rmse" for root mean-squared-error.
+            n_genes_per_plot: Only used if "type" is "confusion". Number of genes to plot per figure. If there are
+                more than this number of genes, multiple figures will be generated.
         """
         # Plot title:
         file_name = os.path.splitext(os.path.basename(self.adata_path))[0]
@@ -215,169 +226,295 @@ class MuSIC_Interpreter(MuSIC):
         width = 0.5 * len(all_genes)
         pred_vals = predictions.values
 
-        # Pearson and Spearman dictionary for all cells:
-        pearson_dict = {}
-        spearman_dict = {}
-        # Pearson and Spearman dictionary for only the expressing subset of cells:
-        nz_pearson_dict = {}
-        nz_spearman_dict = {}
+        if type == "correlations":
+            # Pearson and Spearman dictionary for all cells:
+            pearson_dict = {}
+            spearman_dict = {}
+            # Pearson and Spearman dictionary for only the expressing subset of cells:
+            nz_pearson_dict = {}
+            nz_spearman_dict = {}
 
-        for i, gene in enumerate(all_genes):
-            y = self.adata[:, gene].X.toarray().reshape(-1)
-            music_results_target = pred_vals[:, i]
+            for i, gene in enumerate(all_genes):
+                y = self.adata[:, gene].X.toarray().reshape(-1)
+                music_results_target = pred_vals[:, i]
 
-            # Remove index of the largest predicted value (to mitigate sensitivity of these metrics to outliers):
-            outlier_index = np.where(np.max(music_results_target))[0]
-            music_results_target_to_plot = np.delete(music_results_target, outlier_index)
-            y_plot = np.delete(y, outlier_index)
+                # Remove index of the largest predicted value (to mitigate sensitivity of these metrics to outliers):
+                outlier_index = np.where(np.max(music_results_target))[0]
+                music_results_target_to_plot = np.delete(music_results_target, outlier_index)
+                y_plot = np.delete(y, outlier_index)
 
-            # Indices where target is nonzero:
-            nonzero_indices = y_plot != 0
+                # Indices where target is nonzero:
+                nonzero_indices = y_plot != 0
 
-            rp, _ = pearsonr(y_plot, music_results_target_to_plot)
-            r, _ = spearmanr(y_plot, music_results_target_to_plot)
+                rp, _ = pearsonr(y_plot, music_results_target_to_plot)
+                r, _ = spearmanr(y_plot, music_results_target_to_plot)
 
-            rp_nz, _ = pearsonr(y_plot[nonzero_indices], music_results_target_to_plot[nonzero_indices])
-            r_nz, _ = spearmanr(y_plot[nonzero_indices], music_results_target_to_plot[nonzero_indices])
+                rp_nz, _ = pearsonr(y_plot[nonzero_indices], music_results_target_to_plot[nonzero_indices])
+                r_nz, _ = spearmanr(y_plot[nonzero_indices], music_results_target_to_plot[nonzero_indices])
 
-            pearson_dict[gene] = rp
-            spearman_dict[gene] = r
-            nz_pearson_dict[gene] = rp_nz
-            nz_spearman_dict[gene] = r_nz
+                pearson_dict[gene] = rp
+                spearman_dict[gene] = r
+                nz_pearson_dict[gene] = rp_nz
+                nz_spearman_dict[gene] = r_nz
 
-        # Mean of diagnostic metrics:
-        mean_pearson = sum(pearson_dict.values()) / len(pearson_dict.values())
-        mean_spearman = sum(spearman_dict.values()) / len(spearman_dict.values())
-        mean_nz_pearson = sum(nz_pearson_dict.values()) / len(nz_pearson_dict.values())
-        mean_nz_spearman = sum(nz_spearman_dict.values()) / len(nz_spearman_dict.values())
+            # Mean of diagnostic metrics:
+            mean_pearson = sum(pearson_dict.values()) / len(pearson_dict.values())
+            mean_spearman = sum(spearman_dict.values()) / len(spearman_dict.values())
+            mean_nz_pearson = sum(nz_pearson_dict.values()) / len(nz_pearson_dict.values())
+            mean_nz_spearman = sum(nz_spearman_dict.values()) / len(nz_spearman_dict.values())
 
-        data = []
-        for gene in pearson_dict.keys():
-            data.append(
-                {
-                    "Gene": gene,
-                    "Pearson coefficient": pearson_dict[gene],
-                    "Spearman coefficient": spearman_dict[gene],
-                    "Pearson coefficient (expressing cells)": nz_pearson_dict[gene],
-                    "Spearman coefficient (expressing cells)": nz_spearman_dict[gene],
-                }
+            data = []
+            for gene in pearson_dict.keys():
+                data.append(
+                    {
+                        "Gene": gene,
+                        "Pearson coefficient": pearson_dict[gene],
+                        "Spearman coefficient": spearman_dict[gene],
+                        "Pearson coefficient (expressing cells)": nz_pearson_dict[gene],
+                        "Spearman coefficient (expressing cells)": nz_spearman_dict[gene],
+                    }
+                )
+            # Color palette:
+            colors = {
+                "Pearson coefficient": "#FF7F00",
+                "Spearmann coefficient": "#87CEEB",
+                "Pearson coefficient (expressing cells)": "#0BDA51",
+                "Spearmann coefficient (expressing cells)": "#FF6961",
+            }
+            df = pd.DataFrame(data)
+
+            # Plot Pearson correlation barplot:
+            sns.set(font_scale=2)
+            sns.set_style("white")
+            plt.figure(figsize=(width, 6))
+            plt.xticks(rotation="vertical")
+            ax = sns.barplot(
+                data=df,
+                x="Gene",
+                y="Pearson coefficient",
+                palette=colors["Pearson coefficient"],
+                edgecolor="black",
+                dodge=True,
             )
-        # Color palette:
-        colors = {
-            "Pearson coefficient": "#FF7F00",
-            "Spearmann coefficient": "#87CEEB",
-            "Pearson coefficient (expressing cells)": "#0BDA51",
-            "Spearmann coefficient (expressing cells)": "#FF6961",
-        }
-        df = pd.DataFrame(data)
 
-        # Plot Pearson correlation barplot:
-        sns.set(font_scale=2)
-        sns.set_style("white")
-        plt.figure(figsize=(width, 6))
-        plt.xticks(rotation="vertical")
-        ax = sns.barplot(
-            data=df,
-            x="Gene",
-            y="Pearson coefficient",
-            palette=colors["Pearson coefficient"],
-            edgecolor="black",
-            dodge=True,
-        )
+            # Mean line:
+            line_style = "--"
+            line_thickness = 2
+            ax.axhline(mean_pearson, color="black", linestyle=line_style, linewidth=line_thickness)
 
-        # Mean line:
-        line_style = "--"  # Specify the line style (e.g., "--" for dotted)
-        line_thickness = 2  # Specify the line thickness
-        ax.axhline(mean_pearson, color="black", linestyle=line_style, linewidth=line_thickness)
+            # Update legend:
+            legend_label = f"Mean: {mean_pearson}"
+            handles, labels = ax.get_legend_handles_labels()
+            handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+            labels.append(legend_label)
+            ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
 
-        # Update legend:
-        legend_label = f"Mean: {mean_pearson}"
-        handles, labels = ax.get_legend_handles_labels()
-        handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
-        labels.append(legend_label)
-        ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+            plt.title(f"Pearson correlation {file_name}")
+            plt.tight_layout()
+            plt.show()
 
-        plt.title(f"Pearson correlation {file_name}")
-        plt.tight_layout()
-        plt.show()
+            # Plot Spearman correlation barplot:
+            plt.figure(figsize=(width, 6))
+            plt.xticks(rotation="vertical")
+            ax = sns.barplot(
+                data=df,
+                x="Gene",
+                y="Spearman coefficient",
+                palette=colors["Spearman coefficient"],
+                edgecolor="black",
+                dodge=True,
+            )
 
-        # Plot Spearman correlation barplot:
-        plt.figure(figsize=(width, 6))
-        plt.xticks(rotation="vertical")
-        ax = sns.barplot(
-            data=df,
-            x="Gene",
-            y="Spearman coefficient",
-            palette=colors["Spearman coefficient"],
-            edgecolor="black",
-            dodge=True,
-        )
+            # Mean line:
+            ax.axhline(mean_spearman, color="black", linestyle=line_style, linewidth=line_thickness)
 
-        # Mean line:
-        ax.axhline(mean_spearman, color="black", linestyle=line_style, linewidth=line_thickness)
+            # Update legend:
+            legend_label = f"Mean: {mean_spearman}"
+            handles, labels = ax.get_legend_handles_labels()
+            handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+            labels.append(legend_label)
+            ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
 
-        # Update legend:
-        legend_label = f"Mean: {mean_spearman}"
-        handles, labels = ax.get_legend_handles_labels()
-        handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
-        labels.append(legend_label)
-        ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+            plt.title(f"Spearman correlation {file_name}")
+            plt.tight_layout()
+            plt.show()
 
-        plt.title(f"Spearman correlation {file_name}")
-        plt.tight_layout()
-        plt.show()
+            # Plot Pearson correlation barplot (expressing cells):
+            plt.figure(figsize=(width, 6))
+            plt.xticks(rotation="vertical")
+            ax = sns.barplot(
+                data=df,
+                x="Gene",
+                y="Pearson coefficient (expressing cells)",
+                palette=colors["Pearson coefficient (expressing cells)"],
+                edgecolor="black",
+                dodge=True,
+            )
 
-        # Plot Pearson correlation barplot (expressing cells):
-        plt.figure(figsize=(width, 6))
-        plt.xticks(rotation="vertical")
-        ax = sns.barplot(
-            data=df,
-            x="Gene",
-            y="Pearson coefficient (expressing cells)",
-            palette=colors["Pearson coefficient (expressing cells)"],
-            edgecolor="black",
-            dodge=True,
-        )
+            # Mean line:
+            ax.axhline(mean_nz_pearson, color="black", linestyle=line_style, linewidth=line_thickness)
 
-        # Mean line:
-        ax.axhline(mean_nz_pearson, color="black", linestyle=line_style, linewidth=line_thickness)
+            # Update legend:
+            legend_label = f"Mean: {mean_nz_pearson}"
+            handles, labels = ax.get_legend_handles_labels()
+            handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+            labels.append(legend_label)
+            ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
 
-        # Update legend:
-        legend_label = f"Mean: {mean_nz_pearson}"
-        handles, labels = ax.get_legend_handles_labels()
-        handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
-        labels.append(legend_label)
-        ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+            plt.title(f"Pearson correlation (expressing cells) {file_name}")
+            plt.tight_layout()
+            plt.show()
 
-        plt.title(f"Pearson correlation (expressing cells) {file_name}")
-        plt.tight_layout()
-        plt.show()
+            # Plot Spearman correlation barplot (expressing cells):
+            plt.figure(figsize=(width, 6))
+            plt.xticks(rotation="vertical")
+            ax = sns.barplot(
+                data=df,
+                x="Gene",
+                y="Spearman coefficient (expressing cells)",
+                palette=colors["Spearman coefficient (expressing cells)"],
+                edgecolor="black",
+                dodge=True,
+            )
 
-        # Plot Spearman correlation barplot (expressing cells):
-        plt.figure(figsize=(width, 6))
-        plt.xticks(rotation="vertical")
-        ax = sns.barplot(
-            data=df,
-            x="Gene",
-            y="Spearman coefficient (expressing cells)",
-            palette=colors["Spearman coefficient (expressing cells)"],
-            edgecolor="black",
-            dodge=True,
-        )
+            # Mean line:
+            ax.axhline(mean_nz_spearman, color="black", linestyle=line_style, linewidth=line_thickness)
 
-        # Mean line:
-        ax.axhline(mean_nz_spearman, color="black", linestyle=line_style, linewidth=line_thickness)
+            # Update legend:
+            legend_label = f"Mean: {mean_nz_spearman}"
+            handles, labels = ax.get_legend_handles_labels()
+            handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+            labels.append(legend_label)
+            ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
 
-        # Update legend:
-        legend_label = f"Mean: {mean_nz_spearman}"
-        handles, labels = ax.get_legend_handles_labels()
-        handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
-        labels.append(legend_label)
-        ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+            plt.title(f"Spearman correlation (expressing cells) {file_name}")
+            plt.tight_layout()
+            plt.show()
 
-        plt.title(f"Spearman correlation (expressing cells) {file_name}")
-        plt.tight_layout()
-        plt.show()
+        elif type == "confusion":
+            confusion_matrices = {}
+
+            for i, gene in enumerate(all_genes):
+                y = self.adata[:, gene].X.toarray().reshape(-1)
+                music_results_target = pred_vals[:, i]
+                predictions_binary = (music_results_target > 0).astype(int)
+                y_binary = (y > 0).astype(int)
+                confusion_matrices[gene] = confusion_matrix(y_binary, predictions_binary)
+
+            total_figs = int(math.ceil(len(all_genes) / n_genes_per_plot))
+
+            for fig_index in range(total_figs):
+                start_index = fig_index * n_genes_per_plot
+                end_index = min(start_index + n_genes_per_plot, len(all_genes))
+                genes_to_plot = all_genes[start_index:end_index]
+
+                fig, axs = plt.subplots(1, len(genes_to_plot), figsize=(width, width / 5))
+                axs = axs.flatten()
+
+                for i, gene in enumerate(genes_to_plot):
+                    sns.heatmap(
+                        confusion_matrices[gene],
+                        annot=True,
+                        fmt="d",
+                        cmap="Blues",
+                        ax=axs[i],
+                        cbar=False,
+                        xticklabels=["Predicted \nnot expressed", "Predicted \nexpressed"],
+                        yticklabels=["Actual \nnot expressed", "Actual \nexpressed"],
+                    )
+                    axs[i].set_title(gene)
+
+                # Hide any unused subplots on the last figure if total genes don't fill up the grid
+                for j in range(len(genes_to_plot), len(axs)):
+                    axs[j].axis("off")
+
+                plt.tight_layout()
+
+                # Save confusion matrices:
+                parent_dir = os.path.dirname(self.output_path)
+                plt.savefig(os.path.join(parent_dir, f"confusion_matrices_{fig_index}.png"), bbox_inches="tight")
+
+        elif type == "rmse":
+            rmse_dict = {}
+            nz_rmse_dict = {}
+
+            for i, gene in enumerate(all_genes):
+                y = self.adata[:, gene].X.toarray().reshape(-1)
+                music_results_target = pred_vals[:, i]
+                rmse_dict[gene] = np.sqrt(mean_squared_error(y, music_results_target))
+
+                # Indices where target is nonzero:
+                nonzero_indices = y != 0
+
+                nz_rmse_dict[gene] = np.sqrt(
+                    mean_squared_error(y[nonzero_indices], music_results_target[nonzero_indices])
+                )
+
+            mean_rmse = sum(rmse_dict.values()) / len(rmse_dict.values())
+            mean_nz_rmse = sum(nz_rmse_dict.values()) / len(nz_rmse_dict.values())
+
+            data = []
+            for gene in rmse_dict.keys():
+                data.append({"Gene": gene, "RMSE": rmse_dict[gene], "RMSE (expressing cells)": mean_nz_rmse[gene]})
+            # Color palette:
+            colors = {"RMSE": "#FF7F00", "RMSE (expressing cells)": "#87CEEB"}
+            df = pd.DataFrame(data)
+
+            # Plot RMSE barplot:
+            sns.set(font_scale=2)
+            sns.set_style("white")
+            plt.figure(figsize=(width, 6))
+            plt.xticks(rotation="vertical")
+            ax = sns.barplot(
+                data=df,
+                x="Gene",
+                y="RMSE",
+                palette=colors["RMSE"],
+                edgecolor="black",
+                dodge=True,
+            )
+
+            # Mean line:
+            line_style = "--"
+            line_thickness = 2
+            ax.axhline(mean_rmse, color="black", linestyle=line_style, linewidth=line_thickness)
+
+            # Update legend:
+            legend_label = f"Mean: {mean_rmse}"
+            handles, labels = ax.get_legend_handles_labels()
+            handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+            labels.append(legend_label)
+            ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+
+            plt.title(f"RMSE {file_name}")
+            plt.tight_layout()
+            plt.show()
+
+            # Plot RMSE barplot (expressing cells):
+            plt.figure(figsize=(width, 6))
+            plt.xticks(rotation="vertical")
+            ax = sns.barplot(
+                data=df,
+                x="Gene",
+                y="RMSE (expressing cells)",
+                palette=colors["RMSE (expressing cells)"],
+                edgecolor="black",
+                dodge=True,
+            )
+
+            # Mean line:
+            ax.axhline(mean_nz_rmse, color="black", linestyle=line_style, linewidth=line_thickness)
+
+            # Update legend:
+            legend_label = f"Mean: {mean_nz_rmse}"
+            handles, labels = ax.get_legend_handles_labels()
+            handles.append(plt.Line2D([0], [0], color="black", linewidth=line_thickness, linestyle=line_style))
+            labels.append(legend_label)
+            ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+
+            plt.title(f"RMSE (expressing cells) {file_name}")
+            plt.tight_layout()
+            plt.show()
 
     def visualize_enriched_interactions(
         self,
@@ -926,7 +1063,7 @@ class MuSIC_Interpreter(MuSIC):
                 figsize = (m, 5)
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
 
-            palette = sns.color_palette(cmap, n_colors=len(average_expression))
+            palette = sns.color_palette(cmap, n_colors=len(average_effects))
             sns.barplot(
                 x=average_effects.index,
                 y=average_effects.values,
@@ -1148,7 +1285,7 @@ class MuSIC_Interpreter(MuSIC):
             square=True,
             linecolor="grey",
             linewidths=0.3,
-            cbar_kws={"label": label, "location": "top"},
+            cbar_kws={"label": "Partial correlation", "location": "top"},
             cmap=cmap,
             center=center,
             vmin=-vmax,
@@ -1164,13 +1301,13 @@ class MuSIC_Interpreter(MuSIC):
 
         # Adjust colorbar label font size
         cbar = m.collections[0].colorbar
-        cbar.set_label(label, fontsize=fontsize * 1.1)
+        cbar.set_label("Partial correlation", fontsize=fontsize * 1.1)
         # Adjust colorbar tick font size
         cbar.ax.tick_params(labelsize=fontsize)
 
         plt.xlabel("Target gene", fontsize=fontsize * 1.1)
         plt.ylabel("Interaction", fontsize=fontsize * 1.1)
-        plt.title(title, fontsize=fontsize * 1.25)
+        plt.title("Partial correlation", fontsize=fontsize * 1.25)
         plt.tight_layout()
 
         # Save figure:
