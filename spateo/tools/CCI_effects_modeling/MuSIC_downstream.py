@@ -204,7 +204,9 @@ class MuSIC_Interpreter(MuSIC):
                 q_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_q_values.csv"))
                 is_significant_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"))
 
-    def compute_diagnostics(self, type: Literal["correlations", "confusion", "rmse"], n_genes_per_plot: int = 20):
+    def compute_and_visualize_diagnostics(
+        self, type: Literal["correlations", "confusion", "rmse"], n_genes_per_plot: int = 20
+    ):
         """
         For true and predicted gene expression, compute and generate either: confusion matrices,
         or correlations, including the Pearson correlation, Spearman correlation, or root mean-squared-error (RMSE).
@@ -600,6 +602,11 @@ class MuSIC_Interpreter(MuSIC):
                 f"'fc' or 'fc_qvals'."
             )
 
+        # Predictions:
+        parent_dir = os.path.dirname(self.output_path)
+        pred_path = os.path.join(parent_dir, "predictions.csv")
+        predictions = pd.read_csv(pred_path, index_col=0)
+
         if cell_types is None:
             adata = self.adata.copy()
         else:
@@ -692,6 +699,27 @@ class MuSIC_Interpreter(MuSIC):
             columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
             feat_names_target = [col.replace("b_", "") for col in columns]
 
+            # All necessary variables for any option:
+            # Get actual expression for the target:
+            target_expr = adata[:, target].X.toarray().squeeze() > 0
+            # Get predicted expression for the target from the loaded predictions:
+            target_pred = predictions[target].values.astype(bool)
+
+            # Indices of target-expressing cells that are predicted to be expressing target:
+            target_true_pos_indices = np.where(target_expr & target_pred)[0]
+            # Indices of non-expressing cells that are predicted not to be expressing target:
+            target_true_neg_indices = np.where(~target_expr & ~target_pred)[0]
+
+            # Extract only the rows of coef that correspond to target-expressing cells that are predicted to be
+            # positive:
+            coef_target_tp = coef.iloc[target_true_pos_indices, :]
+            # And the rows of coef that correspond to non-expressing cells that are predicted to be negative:
+            coef_target_tn = coef.iloc[target_true_neg_indices, :]
+
+            # Compute total number of target-expressing cells:
+            n_target_expr_cells = len(target_true_pos_indices)
+            n_nonzero_interactions = np.sum(coef_target_tp != 0, axis=0)
+
             # For fold-change, significance will be incorporated post-calculation:
             if plot_significant and metric != "fc":
                 # Adjust coefficients array to include only the significant coefficients:
@@ -724,13 +752,10 @@ class MuSIC_Interpreter(MuSIC):
                 df.loc[feat_names_target, target] = n_nonzero_interactions
             elif metric == "multiplicity":
                 multiplicity_series = pd.Series()
-                # Indices of target-expressing cells:
-                target_expr_cells_indices = np.where(adata[:, target].X.toarray() != 0)[0]
-                # Extract only the rows of coef that correspond to target-expressing cells:
-                coef_target_expr = coef.iloc[target_expr_cells_indices, :]
+
                 # For each interaction (each column), subset to nonzero rows:
-                for col in coef_target_expr.columns:
-                    nonzero_rows = coef_target_expr[coef_target_expr[col] != 0]
+                for col in coef_target_tp.columns:
+                    nonzero_rows = coef_target_tp[coef_target_tp[col] != 0]
                     # Count the number of predicted cooccurring interactions (exclude the current column and count
                     # the number of nonzeros in each row):
                     count_nonzero = (nonzero_rows.drop(columns=[col]) != 0).sum(axis=1)
@@ -738,15 +763,6 @@ class MuSIC_Interpreter(MuSIC):
                     multiplicity_series[col.replace("b_", "")] = count_nonzero.mean()
                 df.loc[feat_names_target, target] = multiplicity_series
             elif metric == "proportion":
-                # Compute total number of target-expressing cells, and the indices of target-expressing cells:
-                target_expr_cells_indices = np.where(adata[:, target].X.toarray() != 0)[0]
-                # Compute total number of target-expressing cells:
-                n_target_expr_cells = len(target_expr_cells_indices)
-                # Extract only the rows of coef that correspond to target-expressing cells:
-                coef_target_expr = coef.iloc[target_expr_cells_indices, :]
-                # Compute number of cells for which each interaction is inferred to be present from among the
-                # target-expressing cells:
-                n_nonzero_interactions = np.sum(coef_target_expr != 0, axis=0)
                 proportions = n_nonzero_interactions / n_target_expr_cells
                 proportions.index = [idx.replace("b_", "") for idx in proportions.index]
                 # Compute proportion:
@@ -755,14 +771,12 @@ class MuSIC_Interpreter(MuSIC):
                 # Design matrix will be used for this mode:
                 dm = self.design_matrix[feat_names_target]
 
-                # Compute total number of target-expressing cells, and the indices of target-expressing cells:
-                target_expr_cells_indices = np.where(adata[:, target].X.toarray() != 0)[0]
                 # Intersection of each interaction w/ target-expressing cells to determine the numerator for the
                 # proportion:
                 intersections = pd.Series(0, index=columns)
                 for col in columns:
                     nz_indices = np.where(coef[col].values != 0)[0]
-                    intersection = np.intersect1d(target_expr_cells_indices, nz_indices)
+                    intersection = np.intersect1d(target_true_pos_indices, nz_indices)
                     intersections[col] = len(intersection)
                 intersections.index = [idx.replace("b_", "") for idx in intersections.index]
 
@@ -774,7 +788,7 @@ class MuSIC_Interpreter(MuSIC):
                 # Ratio of intersections to total number of nonzero values:
                 df.loc[feat_names_target, target] = proportions
             elif metric == "mean":
-                means = np.mean(coef, axis=0)
+                means = np.mean(coef_target_tp, axis=0)
                 means.index = [idx.replace("b_", "") for idx in means.index]
                 df.loc[:, target] = means
             elif metric == "fc":
@@ -784,13 +798,13 @@ class MuSIC_Interpreter(MuSIC):
                 # Get indices of zero effect and predicted nonzero effect:
                 for col in columns:
                     feat = col.replace("b_", "")
-                    nz_effect_indices = np.where(coef[col].values != 0)[0]
+                    nz_effect_indices = np.where(coef_target_tp[col].values != 0)[0]
                     if len(nz_effect_indices) < 100:
                         self.logger.info(f"Interaction {feat} has too few nonzero effects. Skipping...")
                         df.loc[feat, target] = 0.0
                         df_pvals.loc[feat, target] = 1.0
                         continue
-                    zero_effect_indices = np.where(coef[col].values == 0)[0]
+                    zero_effect_indices = np.where(coef_target_tn[col].values == 0)[0]
 
                     # Compute mean target expression for both subsets:
                     mean_target_nonzero = adata[nz_effect_indices, target].X.mean()
@@ -1025,6 +1039,11 @@ class MuSIC_Interpreter(MuSIC):
         elif not isinstance(interactions, list):
             raise TypeError(f"Interactions must be a list or string, not {type(interactions)}.")
 
+        # Predictions:
+        parent_dir = os.path.dirname(self.output_path)
+        pred_path = os.path.join(parent_dir, "predictions.csv")
+        predictions = pd.read_csv(pred_path, index_col=0)
+
         if targets is None:
             targets = self.custom_targets
         elif isinstance(targets, str):
@@ -1040,11 +1059,11 @@ class MuSIC_Interpreter(MuSIC):
             # Subset to only the interactions of interest:
             effects = effects[interactions]
 
-            # Get the expression matrix corresponding to the target gene:
-            target_idx = np.where(self.adata.var_names == target)[0][0]
-            # Subset to the cells expressing the target:
-            target_expr = self.adata.X[:, target_idx] > 0
-            target_expr_sub = self.adata[target_expr, :].copy()
+            # Subset to cells expressing the target that are predicted to be expressing the target:
+            target_expr = self.adata[:, target].X.toarray().squeeze() > 0
+            target_pred = predictions[target].values.astype(bool)
+            target_true_pos_indices = np.where(target_expr & target_pred)[0]
+            target_expr_sub = self.adata[target_true_pos_indices, :].copy()
 
             # Subset effects dataframe to same subset:
             effects_sub = effects.loc[target_expr_sub.obs_names, :]
@@ -1199,6 +1218,11 @@ class MuSIC_Interpreter(MuSIC):
         elif not isinstance(targets, list):
             raise TypeError(f"targets must be a list or string, not {type(interactions)}.")
 
+        # Predictions:
+        parent_dir = os.path.dirname(self.output_path)
+        pred_path = os.path.join(parent_dir, "predictions.csv")
+        predictions = pd.read_csv(pred_path, index_col=0)
+
         interactions_df = X_df.loc[:, interactions]
         targets_df = pd.DataFrame(self.adata[:, targets].X.toarray(), columns=targets, index=self.adata.obs_names)
 
@@ -1222,9 +1246,15 @@ class MuSIC_Interpreter(MuSIC):
         for interaction in interactions:
             other_interactions = [c for c in interactions if c != interaction]
             for target in targets:
+                # Subset to cells expressing the target that are predicted to be expressing the target:
+                target_expr = self.adata[:, target].X.toarray().squeeze() > 0
+                target_pred = predictions[target].values.astype(bool)
+                target_true_pos_indices = np.where(target_expr & target_pred)[0]
+                target_true_pos_labels = df.index[target_true_pos_indices]
+
                 # The dataframe to compute correlations from will consist of the interaction, the target and all other
                 # interactions as covariates:
-                data = df.loc[:, [interaction, target] + other_interactions]
+                data = df.loc[target_true_pos_labels, [interaction, target] + other_interactions]
                 k = data.shape[1] - 2  # Number of covariates
 
                 # Compute partial correlation:
