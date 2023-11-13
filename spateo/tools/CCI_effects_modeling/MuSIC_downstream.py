@@ -1057,6 +1057,7 @@ class MuSIC_Interpreter(MuSIC):
             effects = coef[[col for col in coef.columns if col.startswith("b_") and "intercept" not in col]]
             effects.columns = [col.split("_")[1] for col in effects.columns]
             # Subset to only the interactions of interest:
+            interactions = [interaction for interaction in interactions if interaction in effects.columns]
             effects = effects[interactions]
 
             # Subset to cells expressing the target that are predicted to be expressing the target:

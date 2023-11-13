@@ -2702,6 +2702,7 @@ class MuSIC:
             all_y_pred = self.comm.gather(y_pred, root=0)
             all_y_pred = np.array(all_y_pred).reshape(-1, 1)
             all_trace_hat = self.comm.gather(trace_hats, root=0)
+            all_trace_hat = np.array(all_trace_hat).reshape(-1, 1)
             all_nans = self.comm.gather(nans, root=0)
             all_nans = np.array(all_nans).reshape(-1, 1)
 
@@ -2726,7 +2727,7 @@ class MuSIC:
                 self.logger.info(f"Bandwidth: {bw:.3f}, hat matrix trace: {trace_hat}")
                 aicc = self.compute_aicc_glm(norm_ll, norm_trace_hat, n_samples=n_samples)
                 self.logger.info(
-                    f"Bandwidth: {bw:.3f}, LL: {ll:.3f}, GLM AICc: {aicc:.3f}, predicted average nonzero "
+                    f"Bandwidth: {bw:.3f}, LL: {norm_ll:.3f}, GLM AICc: {aicc:.3f}, predicted average nonzero "
                     f"value: {pred_test_val:.3f}, observed average nonzero value: {obs_test_val:.3f}"
                 )
 
