@@ -70,8 +70,8 @@ class MuSIC_Interpreter(MuSIC):
             list. It is recommended to use the return from :func `define_spateo_argparse()` for this.
     """
 
-    def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
-        super().__init__(comm, parser, args_list, verbose=False)
+    def __init__(self, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
+        super().__init__(parser, args_list, verbose=False)
 
         self.k = self.arg_retrieve.top_k_receivers
 
@@ -87,19 +87,15 @@ class MuSIC_Interpreter(MuSIC):
 
         # Dictionary containing coefficients:
         self.coeffs, self.standard_errors = self.return_outputs()
-        self.coeffs = self.comm.bcast(self.coeffs, root=0)
-        self.standard_errors = self.comm.bcast(self.standard_errors, root=0)
         # Design matrix:
         self.design_matrix = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
         )
 
         self.predictions = self.predict(coeffs=self.coeffs)
-        self.predictions = self.comm.bcast(self.predictions, root=0)
 
-        chunk_size = int(math.ceil(float(len(range(self.n_samples))) / self.comm.size))
-        self.x_chunk = np.arange(self.n_samples)[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
-        self.x_chunk = self.comm.bcast(self.x_chunk, root=0)
+        chunk_size = int(math.ceil(float(len(range(self.n_samples)))))
+        self.x_chunk = np.arange(self.n_samples)
 
         # Save directory:
         parent_dir = os.path.dirname(self.output_path)
@@ -159,9 +155,7 @@ class MuSIC_Interpreter(MuSIC):
             coef = self.coeffs[target]
             columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
             coef = coef[columns]
-            coef = self.comm.bcast(coef, root=0)
             se = self.standard_errors[target]
-            se = self.comm.bcast(se, root=0)
             se_feature_match = [c.replace("se_", "") for c in se.columns]
 
             # Parallelize computations over observations and features:
@@ -181,28 +175,22 @@ class MuSIC_Interpreter(MuSIC):
                     else:
                         local_p_values_all[i, j] = 1
 
-            # Collate p-values from all processes:
-            p_values_all = self.comm.gather(local_p_values_all, root=0)
+            p_values_all = np.concatenate(local_p_values_all, axis=0)
+            p_values_df = pd.DataFrame(p_values_all, index=self.sample_names, columns=self.feature_names)
+            # Multiple testing correction for each observation:
+            qvals = np.zeros_like(p_values_all)
+            for i in range(p_values_all.shape[0]):
+                qvals[i, :] = multitesting_correction(p_values_all[i, :], method=method, alpha=significance_threshold)
+            q_values_df = pd.DataFrame(qvals, index=self.sample_names, columns=self.feature_names)
 
-            if self.comm.rank == 0:
-                p_values_all = np.concatenate(p_values_all, axis=0)
-                p_values_df = pd.DataFrame(p_values_all, index=self.sample_names, columns=self.feature_names)
-                # Multiple testing correction for each observation:
-                qvals = np.zeros_like(p_values_all)
-                for i in range(p_values_all.shape[0]):
-                    qvals[i, :] = multitesting_correction(
-                        p_values_all[i, :], method=method, alpha=significance_threshold
-                    )
-                q_values_df = pd.DataFrame(qvals, index=self.sample_names, columns=self.feature_names)
+            # Significance:
+            is_significant_df = q_values_df < significance_threshold
 
-                # Significance:
-                is_significant_df = q_values_df < significance_threshold
-
-                # Save dataframes:
-                parent_dir = os.path.dirname(self.output_path)
-                p_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_p_values.csv"))
-                q_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_q_values.csv"))
-                is_significant_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"))
+            # Save dataframes:
+            parent_dir = os.path.dirname(self.output_path)
+            p_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_p_values.csv"))
+            q_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_q_values.csv"))
+            is_significant_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"))
 
     def compute_and_visualize_diagnostics(
         self, type: Literal["correlations", "confusion", "rmse"], n_genes_per_plot: int = 20
@@ -4445,13 +4433,19 @@ def replace_col_with_collagens(string):
     # Process each element
     for i, element in enumerate(elements):
         # If the element starts with "COL" or "b_COL", or if it is "Collagens" or "b_Collagens"
-        if element.startswith("COL") or element.startswith("b_COL") or element in ["Collagens", "b_Collagens"]:
+        if (
+            element.startswith("COL")
+            or element.startswith("b_COL")
+            or element.startswith("Col")
+            or element.startswith("b_Col")
+            or element in ["Collagens", "b_Collagens"]
+        ):
             # If we've already encountered a "COL" or "Collagens" element, remove this one
             if encountered_col:
                 elements[i] = None
             # Otherwise, replace it with "Collagens" or "b_Collagens" as appropriate
             else:
-                if element.startswith("b_COL") or element == "b_Collagens":
+                if element.startswith("b_COL") or element.startswith("b_Col") or element == "b_Collagens":
                     elements[i] = "b_Collagens"
                 else:
                     elements[i] = "Collagens"

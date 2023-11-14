@@ -94,8 +94,8 @@ class MuSIC_Molecule_Selector(MuSIC):
             ligands of interest should be found
     """
 
-    def __init__(self, comm: MPI.Comm, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
-        super().__init__(comm, parser, args_list, verbose=False)
+    def __init__(self, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
+        super().__init__(parser, args_list, verbose=False)
 
         self.load_and_process(upstream=True)
 
@@ -240,8 +240,8 @@ class MuSIC_Molecule_Selector(MuSIC):
             kwargs["kernel"] = kernel
 
             self.logger.info("Constructing design matrix.")
-            comm, parser, args_list = define_spateo_argparse(**kwargs)
-            upstream_model = MuSIC(comm, parser, args_list)
+            parser, args_list = define_spateo_argparse(**kwargs)
+            upstream_model = MuSIC(parser, args_list)
             upstream_model.load_and_process(upstream=True)
             upstream_model.define_sig_inputs(recompute=True)
             # Load design matrix:

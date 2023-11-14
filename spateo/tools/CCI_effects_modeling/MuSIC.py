@@ -301,15 +301,10 @@ class MuSIC:
             # Indicate model has been subsampled:
             self.subsampled = True
         elif self.group_subset:
-            chunk_size = int(math.ceil(float(len(range(self.n_samples_subset))) / self.comm.size))
-            self.x_chunk = np.array(
-                self.subset_indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
-            )
+            self.x_chunk = np.array(self.subset_indices)
             self.subsampled = False
         else:
-            chunk_size = int(math.ceil(float(len(range(self.n_samples))) / self.comm.size))
-            # Assign chunks to each process:
-            self.x_chunk = np.arange(self.n_samples)[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size]
+            self.x_chunk = np.arange(self.n_samples)
             self.subsampled = False
 
         # Indicate model has now been set up:
@@ -427,37 +422,35 @@ class MuSIC:
                 self.maxbw = int(self.arg_retrieve.maxbw)
 
         # Helpful messages at process start:
-        if self.comm.rank == 0:
-            print("-" * 60, flush=True)
-            self.logger.info(f"Running SWR or downstream analyses on {self.comm.size} processes...")
-            fixed_or_adaptive = "Fixed " if self.bw_fixed else "Adaptive "
-            type = fixed_or_adaptive + self.kernel.capitalize()
-            self.logger.info(f"Spatial kernel: {type}")
+        print("-" * 60, flush=True)
+        fixed_or_adaptive = "Fixed " if self.bw_fixed else "Adaptive "
+        type = fixed_or_adaptive + self.kernel.capitalize()
+        self.logger.info(f"Spatial kernel: {type}")
 
-            if self.adata_path is not None:
-                self.logger.info(f"Loading AnnData object from: {self.adata_path}")
-            elif self.csv_path is not None:
-                self.logger.info(f"Loading CSV file from: {self.csv_path}")
+        if self.adata_path is not None:
+            self.logger.info(f"Loading AnnData object from: {self.adata_path}")
+        elif self.csv_path is not None:
+            self.logger.info(f"Loading CSV file from: {self.csv_path}")
 
-            if self.mod_type is not None:
-                self.logger.info(f"Model type: {self.mod_type}")
-                if self.mod_type in ["lr", "ligand", "receptor"]:
-                    self.logger.info(
-                        f"Loading cell-cell interaction databases from the following folder: " f" {self.cci_dir}."
-                    )
-                    if self.custom_ligands_path is not None:
-                        self.logger.info(f"Using list of custom ligands from: {self.custom_ligands_path}.")
-                    if self.custom_ligands is not None:
-                        self.logger.info(f"Using the provided list of ligands: {self.custom_ligands}.")
-                    if self.custom_receptors_path is not None:
-                        self.logger.info(f"Using list of custom receptors from: {self.custom_receptors_path}.")
-                    if self.custom_receptors is not None:
-                        self.logger.info(f"Using the provided list of receptors: {self.custom_receptors}.")
-                if self.targets_path is not None:
-                    self.logger.info(f"Using list of target genes from: {self.targets_path}.")
-                if self.custom_targets is not None:
-                    self.logger.info(f"Using provided list of target genes: {self.custom_targets}.")
-                self.logger.info(f"Saving all outputs to this directory: {os.path.dirname(self.output_path)}.")
+        if self.mod_type is not None:
+            self.logger.info(f"Model type: {self.mod_type}")
+            if self.mod_type in ["lr", "ligand", "receptor"]:
+                self.logger.info(
+                    f"Loading cell-cell interaction databases from the following folder: " f" {self.cci_dir}."
+                )
+                if self.custom_ligands_path is not None:
+                    self.logger.info(f"Using list of custom ligands from: {self.custom_ligands_path}.")
+                if self.custom_ligands is not None:
+                    self.logger.info(f"Using the provided list of ligands: {self.custom_ligands}.")
+                if self.custom_receptors_path is not None:
+                    self.logger.info(f"Using list of custom receptors from: {self.custom_receptors_path}.")
+                if self.custom_receptors is not None:
+                    self.logger.info(f"Using the provided list of receptors: {self.custom_receptors}.")
+            if self.targets_path is not None:
+                self.logger.info(f"Using list of target genes from: {self.targets_path}.")
+            if self.custom_targets is not None:
+                self.logger.info(f"Using provided list of target genes: {self.custom_targets}.")
+            self.logger.info(f"Saving all outputs to this directory: {os.path.dirname(self.output_path)}.")
 
     def load_and_process(self, upstream: bool = False):
         """
@@ -1046,8 +1039,17 @@ class MuSIC:
                             lambda x: x.prod() ** (1 / len(parts)), axis=1
                         )
                         # Mark the individual components for removal if the individual components cannot also be
-                        # found as ligands:
-                        to_drop.extend([part for part in parts if part not in database_ligands])
+                        # found as ligands (and the complex is present enough in the data)- otherwise,
+                        # keep the individual components:
+                        threshold = self.n_samples * self.target_expr_threshold
+
+                        for part in parts:
+                            # If the geometric mean of the complex components is nonzero in sufficient number of
+                            # cells, the individual components can be dropped.
+                            if part not in database_ligands and (self.ligands_expr[part] != 0).sum() > threshold:
+                                to_drop.append(part)
+
+                        # to_drop.extend([part for part in parts if part not in database_ligands])
                     else:
                         # Drop the hyphenated element from the dataframe if all components are not found in the
                         # dataframe columns
@@ -1184,8 +1186,19 @@ class MuSIC:
                                 lambda x: x.prod() ** (1 / len(parts)), axis=1
                             )
                             # Mark the individual components for removal if the individual components cannot also be
-                            # found as receptors:
-                            to_drop.extend([part for part in parts if part not in database_receptors])
+                            # found as receptors (and the complex is present enough in the data)- otherwise,
+                            # keep the individual components:
+                            threshold = self.n_samples * self.target_expr_threshold
+
+                            for part in parts:
+                                # If the geometric mean of the complex components is nonzero in sufficient number of
+                                # cells, the individual components can be dropped.
+                                if (
+                                    part not in database_receptors
+                                    and (self.receptors_expr[part] != 0).sum() > threshold
+                                ):
+                                    to_drop.append(part)
+                            # to_drop.extend([part for part in parts if part not in database_receptors])
                         else:
                             # Drop the hyphenated element from the dataframe if all components are not found in the
                             # dataframe columns
@@ -1820,6 +1833,7 @@ class MuSIC:
             coords = self.coords
 
         if self.total_counts_threshold is not None:
+            self.logger.info(f"Subsetting to cells with greater than {self.total_counts_threshold} total counts...")
             if self.total_counts_key not in self.adata.obs_keys():
                 raise KeyError(f"{self.total_counts_key} not found in .obs of AnnData.")
             adata_high_qual = adata[adata.obs[self.total_counts_key] >= self.total_counts_threshold]
@@ -1838,36 +1852,36 @@ class MuSIC:
                 else:
                     sampled_df = pd.DataFrame(data, columns=["x", "y", "z", target], index=threshold_sampled_names)
 
-                # Map each non-sampled point to its closest sampled point that matches the expression pattern
-                # (zero/nonzero):
-                if coords.shape[1] == 2:
-                    ref = sampled_df[["x", "y"]].values.astype(float)
-                else:
-                    ref = sampled_df[["x", "y", "z"]].values.astype(float)
-                distances = cdist(coords.astype(float), ref, "euclidean")
-
-                # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
-                all_expression = (all_values != 0).flatten()
-                sampled_expression = sampled_df[target].values != 0
-                mismatch_mask = all_expression[:, np.newaxis] != sampled_expression
-                # Replace distances in the mismatch mask with a very large value:
-                large_value = np.max(distances) + 1
-                distances[mismatch_mask] = large_value
-
-                closest_indices = np.argmin(distances, axis=1)
-
-                # Dictionary where keys are indices of subsampled points and values are lists of indices of the original
-                # points closest to them:
-                closest_dict = {}
-                for i, idx in enumerate(closest_indices):
-                    key = sampled_df.index[idx]
-                    if key not in closest_dict:
-                        closest_dict[key] = []
-                    if sample_names[i] not in sampled_df.index:
-                        closest_dict[key].append(sample_names[i])
-
                 # Define relevant dictionaries- only if further subsampling by region will not be performed:
                 if self.spatial_subsample is False:
+                    # Map each non-sampled point to its closest sampled point that matches the expression pattern
+                    # (zero/nonzero):
+                    if coords.shape[1] == 2:
+                        ref = sampled_df[["x", "y"]].values.astype(float)
+                    else:
+                        ref = sampled_df[["x", "y", "z"]].values.astype(float)
+                    distances = cdist(coords.astype(float), ref, "euclidean")
+
+                    # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
+                    all_expression = (all_values != 0).flatten()
+                    sampled_expression = sampled_df[target].values != 0
+                    mismatch_mask = all_expression[:, np.newaxis] != sampled_expression
+                    # Replace distances in the mismatch mask with a very large value:
+                    large_value = np.max(distances) + 1
+                    distances[mismatch_mask] = large_value
+
+                    closest_indices = np.argmin(distances, axis=1)
+
+                    # Dictionary where keys are indices of subsampled points and values are lists of indices of the original
+                    # points closest to them:
+                    closest_dict = {}
+                    for i, idx in enumerate(closest_indices):
+                        key = sampled_df.index[idx]
+                        if key not in closest_dict:
+                            closest_dict[key] = []
+                        if sample_names[i] not in sampled_df.index:
+                            closest_dict[key].append(sample_names[i])
+
                     # If subsampling by total counts, the arrays of subsampled indices, number subsampled and subsampled
                     # sample names (but notably not the unsampled-to-sampled mapping) are the same, but subsequent
                     # computation will search through dictionary keys to get these, so we format them as dictionaries
@@ -1972,8 +1986,7 @@ class MuSIC:
                     updated_sampled_names = set(threshold_sampled_names).intersection(sampled_df.index)
                     sampled_df = sampled_df.loc[updated_sampled_names]
 
-                if self.comm.rank == 0:
-                    self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
+                self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
 
                 # Map each non-sampled point to its closest sampled point that matches the expression pattern
                 # (zero/nonzero):
@@ -2386,53 +2399,52 @@ class MuSIC:
                 ub_score = function(new_ub)
                 results_dict[new_ub] = ub_score
 
-            if self.comm.rank == 0:
-                # Decrease bandwidth until score stops decreasing:
-                if ub_score < lb_score or np.isnan(lb_score):
-                    # Set new optimum score and bandwidth:
-                    optimum_score = ub_score
-                    optimum_bw = new_ub
+            # Decrease bandwidth until score stops decreasing:
+            if ub_score < lb_score or np.isnan(lb_score):
+                # Set new optimum score and bandwidth:
+                optimum_score = ub_score
+                optimum_bw = new_ub
 
-                    # Update new max lower bound and test upper bound:
-                    range_lowest = new_lb
-                    new_lb = new_ub
-                    new_ub = range_highest - delta * np.abs(range_highest - range_lowest)
+                # Update new max lower bound and test upper bound:
+                range_lowest = new_lb
+                new_lb = new_ub
+                new_ub = range_highest - delta * np.abs(range_highest - range_lowest)
 
-                # Else increase bandwidth until score stops increasing:
-                elif lb_score <= ub_score or np.isnan(ub_score):
-                    # Set new optimum score and bandwidth:
-                    optimum_score = lb_score
-                    optimum_bw = new_lb
+            # Else increase bandwidth until score stops increasing:
+            elif lb_score <= ub_score or np.isnan(ub_score):
+                # Set new optimum score and bandwidth:
+                optimum_score = lb_score
+                optimum_bw = new_lb
 
-                    # Update new max upper bound and test lower bound:
-                    range_highest = new_ub
-                    new_ub = new_lb
-                    new_lb = range_lowest + delta * np.abs(range_highest - range_lowest)
+                # Update new max upper bound and test lower bound:
+                range_highest = new_ub
+                new_ub = new_lb
+                new_lb = range_lowest + delta * np.abs(range_highest - range_lowest)
 
-                difference = lb_score - ub_score
+            difference = lb_score - ub_score
 
-                # Update new value for score:
-                score = optimum_score
-                optimum_score_history.append(optimum_score)
-                most_optimum_score = np.min(optimum_score_history)
-                if iterations >= 3:
-                    if optimum_score_history[-2] == most_optimum_score:
-                        patience += 1
-                    # If score is NaN for three bandwidth iterations, exit optimization:
-                    elif np.isnan(lb_score) or np.isnan(ub_score):
-                        nan_count += 1
-                    else:
-                        nan_count = 0
-                        patience = 0
-                    if self.mod_type != "downstream":
-                        if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.01 * most_optimum_score:
-                            self.logger.info(
-                                "Plateau detected (optimum score was reached at last iteration)- exiting "
-                                "optimization and returning optimum score up to this point."
-                            )
-                            self.logger.info(f"Score from last iteration: {optimum_score_history[-2]}")
-                            self.logger.info(f"Score from current iteration: {optimum_score_history[-1]}")
-                            patience = 3
+            # Update new value for score:
+            score = optimum_score
+            optimum_score_history.append(optimum_score)
+            most_optimum_score = np.min(optimum_score_history)
+            if iterations >= 3:
+                if optimum_score_history[-2] == most_optimum_score:
+                    patience += 1
+                # If score is NaN for three bandwidth iterations, exit optimization:
+                elif np.isnan(lb_score) or np.isnan(ub_score):
+                    nan_count += 1
+                else:
+                    nan_count = 0
+                    patience = 0
+                if self.mod_type != "downstream":
+                    if np.abs(optimum_score_history[-2] - optimum_score_history[-1]) <= 0.01 * most_optimum_score:
+                        self.logger.info(
+                            "Plateau detected (optimum score was reached at last iteration)- exiting "
+                            "optimization and returning optimum score up to this point."
+                        )
+                        self.logger.info(f"Score from last iteration: {optimum_score_history[-2]}")
+                        self.logger.info(f"Score from current iteration: {optimum_score_history[-1]}")
+                        patience = 3
 
             # Exit once threshold number of iterations (default to 3) have passed without improvement:
             if patience == 3:
@@ -2511,7 +2523,6 @@ class MuSIC:
 
             # Gather data to the central process such that an array is formed where each sample has its own
             # measurements:
-            all_fit_outputs = self.comm.gather(local_fit_outputs, root=0)
             # For non-MGWR:
             # Column 0: Index of the sample
             # Column 1: Diagnostic (residual for Gaussian, fitted response value for Poisson/NB)
@@ -2519,83 +2530,81 @@ class MuSIC:
             # Columns 3-n_feats+3: Estimated coefficients
             # Columns n_feats+3-end: Placeholder for standard errors
             # All columns are betas for MGWR
+            all_fit_outputs = np.vstack(local_fit_outputs)
+            # self.logger.info(f"Computing metrics for GWR using bandwidth: {bw}")
 
-            if self.comm.rank == 0:
-                all_fit_outputs = np.vstack(all_fit_outputs)
-                # self.logger.info(f"Computing metrics for GWR using bandwidth: {bw}")
+            # Note: trace of the hat matrix and effective number of parameters (ENP) will be used
+            # interchangeably:
+            ENP = np.sum(all_fit_outputs[:, 2])
 
-                # Note: trace of the hat matrix and effective number of parameters (ENP) will be used
-                # interchangeably:
-                ENP = np.sum(all_fit_outputs[:, 2])
+            # Residual sum of squares for Gaussian model:
+            if self.distr == "gaussian":
+                RSS = np.sum(all_fit_outputs[:, 1] ** 2)
+                # Total sum of squares:
+                TSS = np.sum((true - np.mean(true)) ** 2)
+                r_squared = 1 - RSS / TSS
 
-                # Residual sum of squares for Gaussian model:
-                if self.distr == "gaussian":
-                    RSS = np.sum(all_fit_outputs[:, 1] ** 2)
-                    # Total sum of squares:
-                    TSS = np.sum((true - np.mean(true)) ** 2)
-                    r_squared = 1 - RSS / TSS
+                # Residual variance:
+                sigma_squared = RSS / (n_samples - ENP)
+                # Corrected Akaike Information Criterion:
+                aicc = self.compute_aicc_linear(RSS, ENP, n_samples=X.shape[0])
+                # Standard errors of the predictor:
+                all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * sigma_squared)
 
-                    # Residual variance:
-                    sigma_squared = RSS / (n_samples - ENP)
-                    # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_linear(RSS, ENP, n_samples=X.shape[0])
-                    # Standard errors of the predictor:
-                    all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:] * sigma_squared)
+                # For saving/showing outputs:
+                header = "index,residual,influence,"
+                deviance = None
 
-                    # For saving/showing outputs:
-                    header = "index,residual,influence,"
-                    deviance = None
+                varNames = X_labels
+                # Columns for the possible intercept, coefficients and squared canonical coefficients:
+                for x in varNames:
+                    header += "b_" + x + ","
+                for x in varNames:
+                    header += "se_" + x + ","
 
-                    varNames = X_labels
-                    # Columns for the possible intercept, coefficients and squared canonical coefficients:
-                    for x in varNames:
-                        header += "b_" + x + ","
-                    for x in varNames:
-                        header += "se_" + x + ","
+                # Return output diagnostics and save result:
+                self.output_diagnostics(aicc, ENP, r_squared, deviance)
+                self.save_results(all_fit_outputs, header, label=y_label)
 
-                    # Return output diagnostics and save result:
-                    self.output_diagnostics(aicc, ENP, r_squared, deviance)
-                    self.save_results(all_fit_outputs, header, label=y_label)
+            if self.distr == "poisson" or self.distr == "nb":
+                # For negative binomial, first compute the dispersion:
+                if self.distr == "nb":
+                    dev_resid = self.distr_obj.deviance_residuals(true, all_fit_outputs[:, 1].reshape(-1, 1))
+                    residual_deviance = np.sum(dev_resid**2)
+                    df = n_samples - ENP
+                    self.distr_obj.variance.disp = residual_deviance / df
+                # Deviance:
+                deviance = self.distr_obj.deviance(true, all_fit_outputs[:, 1].reshape(-1, 1))
+                # Log-likelihood:
+                # Replace NaN values with 0:
+                nan_indices = np.isnan(all_fit_outputs[:, 1])
+                all_fit_outputs[nan_indices, 1] = 0
+                ll = self.distr_obj.log_likelihood(true, all_fit_outputs[:, 1].reshape(-1, 1))
+                # ENP:
+                if self.fit_intercept:
+                    ENP = n_features + 1
+                else:
+                    ENP = n_features
 
-                if self.distr == "poisson" or self.distr == "nb":
-                    # For negative binomial, first compute the dispersion:
-                    if self.distr == "nb":
-                        dev_resid = self.distr_obj.deviance_residuals(true, all_fit_outputs[:, 1].reshape(-1, 1))
-                        residual_deviance = np.sum(dev_resid**2)
-                        df = n_samples - ENP
-                        self.distr_obj.variance.disp = residual_deviance / df
-                    # Deviance:
-                    deviance = self.distr_obj.deviance(true, all_fit_outputs[:, 1].reshape(-1, 1))
-                    # Log-likelihood:
-                    # Replace NaN values with 0:
-                    nan_indices = np.isnan(all_fit_outputs[:, 1])
-                    all_fit_outputs[nan_indices, 1] = 0
-                    ll = self.distr_obj.log_likelihood(true, all_fit_outputs[:, 1].reshape(-1, 1))
-                    # ENP:
-                    if self.fit_intercept:
-                        ENP = n_features + 1
-                    else:
-                        ENP = n_features
+                # Corrected Akaike Information Criterion:
+                aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
+                # Standard errors of the predictor:
+                all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:])
 
-                    # Corrected Akaike Information Criterion:
-                    aicc = self.compute_aicc_glm(ll, ENP, n_samples=n_samples)
-                    # Standard errors of the predictor:
-                    all_fit_outputs[:, -n_features:] = np.sqrt(all_fit_outputs[:, -n_features:])
+                # For saving/showing outputs:
+                header = "index,prediction,influence,"
+                r_squared = None
 
-                    # For saving/showing outputs:
-                    header = "index,prediction,influence,"
-                    r_squared = None
+                varNames = X_labels
+                # Columns for the possible intercept, coefficients and squared canonical coefficients:
+                for x in varNames:
+                    header += "b_" + x + ","
+                for x in varNames:
+                    header += "se_" + x + ","
 
-                    varNames = X_labels
-                    # Columns for the possible intercept, coefficients and squared canonical coefficients:
-                    for x in varNames:
-                        header += "b_" + x + ","
-                    for x in varNames:
-                        header += "se_" + x + ","
-
-                    # Return output diagnostics and save result:
-                    self.output_diagnostics(aicc, ENP, r_squared, deviance)
-                    self.save_results(all_fit_outputs, header, label=y_label)
+                # Return output diagnostics and save result:
+                self.output_diagnostics(aicc, ENP, r_squared, deviance)
+                self.save_results(all_fit_outputs, header, label=y_label)
 
             return
 
@@ -2627,16 +2636,9 @@ class MuSIC:
                 else:
                     trace_hat += hat_i
 
-            # Send data to the central process:
-            RSS_list = self.comm.gather(RSS, root=0)
-            trace_hat_list = self.comm.gather(trace_hat, root=0)
-
-            if self.comm.rank == 0:
-                RSS = np.sum(RSS_list)
-                trace_hat = np.sum(trace_hat_list)
-                aicc = self.compute_aicc_linear(RSS, trace_hat, n_samples=n_samples)
-                self.logger.info(f"Bandwidth: {bw:.3f}, Linear AICc: {aicc:.3f}")
-                return aicc
+            aicc = self.compute_aicc_linear(RSS, trace_hat, n_samples=n_samples)
+            self.logger.info(f"Bandwidth: {bw:.3f}, Linear AICc: {aicc:.3f}")
+            return aicc
 
         elif self.distr == "poisson" or self.distr == "nb":
             # Compute AICc using the fitted and observed values:
@@ -2666,39 +2668,35 @@ class MuSIC:
                 pos += 1
 
             # Send data to the central process:
-            all_y_pred = self.comm.gather(y_pred, root=0)
-            all_y_pred = np.array(all_y_pred).reshape(-1, 1)
-            all_trace_hat = self.comm.gather(trace_hats, root=0)
-            all_trace_hat = np.array(all_trace_hat).reshape(-1, 1)
-            all_nans = self.comm.gather(nans, root=0)
-            all_nans = np.array(all_nans).reshape(-1, 1)
+            all_y_pred = np.array(y_pred).reshape(-1, 1)
+            all_trace_hat = np.array(trace_hats).reshape(-1, 1)
+            all_nans = np.array(nans).reshape(-1, 1)
 
             # Diagnostics: mean nonzero value
             pred_test_val = np.mean(all_y_pred[true != 0])
             obs_test_val = np.mean(true[true != 0])
 
-            if self.comm.rank == 0:
-                # For diagnostics, need to ignore NaN values, but also include print statement to indicate how many
-                # such elements were ignored:
-                mask = ~all_nans
-                num_valid = len(mask)
-                number_of_nans = np.sum(~mask)
-                self.logger.info(
-                    f"Bandwidth: {bw:.3f}, encountered issue getting pseudoinverse for {number_of_nans} cells."
-                )
-                ll = self.distr_obj.log_likelihood(true[mask], all_y_pred[mask])
-                norm_ll = ll / num_valid
+            # For diagnostics, need to ignore NaN values, but also include print statement to indicate how many
+            # such elements were ignored:
+            mask = ~all_nans
+            num_valid = len(mask)
+            number_of_nans = np.sum(~mask)
+            self.logger.info(
+                f"Bandwidth: {bw:.3f}, encountered issue getting pseudoinverse for {number_of_nans} cells."
+            )
+            ll = self.distr_obj.log_likelihood(true[mask], all_y_pred[mask])
+            norm_ll = ll / num_valid
 
-                trace_hat = np.sum(all_trace_hat[mask])
-                norm_trace_hat = trace_hat / num_valid
-                self.logger.info(f"Bandwidth: {bw:.3f}, hat matrix trace: {trace_hat}")
-                aicc = self.compute_aicc_glm(norm_ll, norm_trace_hat, n_samples=n_samples)
-                self.logger.info(
-                    f"Bandwidth: {bw:.3f}, LL: {norm_ll:.3f}, GLM AICc: {aicc:.3f}, predicted average nonzero "
-                    f"value: {pred_test_val:.3f}, observed average nonzero value: {obs_test_val:.3f}"
-                )
+            trace_hat = np.sum(all_trace_hat[mask])
+            norm_trace_hat = trace_hat / num_valid
+            self.logger.info(f"Bandwidth: {bw:.3f}, hat matrix trace: {trace_hat}")
+            aicc = self.compute_aicc_glm(norm_ll, norm_trace_hat, n_samples=n_samples)
+            self.logger.info(
+                f"Bandwidth: {bw:.3f}, LL: {norm_ll:.3f}, GLM AICc: {aicc:.3f}, predicted average nonzero "
+                f"value: {pred_test_val:.3f}, observed average nonzero value: {obs_test_val:.3f}"
+            )
 
-                return aicc
+            return aicc
 
         return
 
@@ -2866,9 +2864,7 @@ class MuSIC:
             if self.subsampled:
                 n_samples = self.n_samples_subsampled[target]
                 indices = self.subsampled_indices[target]
-                chunk_size = int(math.ceil(float(n_samples) / self.comm.size))
-                # Assign chunks to each process:
-                self.x_chunk = np.array(indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size])
+                self.x_chunk = np.array(indices)
 
             # Global relationship regularization (only for non-niche models):
             if self.mod_type != "niche":
@@ -2928,11 +2924,10 @@ class MuSIC:
                 )
                 return
 
-            if self.comm.rank == 0:
-                if verbose:
-                    self.logger.info(
-                        f"Starting fitting process for target {target}. First finding optimal " f"bandwidth..."
-                    )
+            if verbose:
+                self.logger.info(
+                    f"Starting fitting process for target {target}. First finding optimal " f"bandwidth..."
+                )
                 self._set_search_range()
                 self.logger.info(f"Calculated bandwidth range over which to search: {self.minbw}-{self.maxbw}.")
 
@@ -3154,9 +3149,8 @@ class MuSIC:
         else:
             path = self.output_path
 
-        if self.comm.rank == 0:
-            # Save to .csv:
-            np.savetxt(path, data, delimiter=",", header=header[:-1], comments="")
+        # Save to .csv:
+        np.savetxt(path, data, delimiter=",", header=header[:-1], comments="")
 
     def predict_and_save(
         self, input: Optional[np.ndarray] = None, coeffs: Optional[Union[np.ndarray, Dict[str, pd.DataFrame]]] = None

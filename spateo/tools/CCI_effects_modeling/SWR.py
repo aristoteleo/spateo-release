@@ -186,9 +186,6 @@ def define_spateo_argparse(**kwargs):
 
     logger = lm.get_main_logger()
 
-    # Initialize MPI
-    comm = MPI.COMM_WORLD
-
     arg_dict = {
         "-run_upstream": {
             "action": "store_true",
@@ -509,7 +506,7 @@ def define_spateo_argparse(**kwargs):
                 all_args.extend(map(str, value))
         all_args.append(str(value))
 
-    return comm, parser, all_args
+    return parser, all_args
 
 
 if __name__ == "__main__":
