@@ -52,7 +52,7 @@ from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
 from ..utils import compute_corr_ci
 from .MuSIC import MuSIC
 from .regression_utils import multitesting_correction, permutation_testing, wald_test
-from .SWR_mpi import define_spateo_argparse
+from .SWR import define_spateo_argparse
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -1079,7 +1079,7 @@ class MuSIC_Interpreter(MuSIC):
             # Plot:
             if figsize is None:
                 # Set figure size based on the number of interaction features and targets:
-                m = len(average_effects)
+                m = len(average_effects) / 2
                 figsize = (m, 5)
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
 
@@ -1092,9 +1092,10 @@ class MuSIC_Interpreter(MuSIC):
                 palette=palette,
                 ax=ax,
             )
-            ax.set_xticks(rotation=90)
+            ax.set_xticklabels(average_effects.index, rotation=90, fontsize=fontsize)
+            ax.set_yticklabels(["{:.1f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
             ax.set_xlabel("Interaction (ligand(s):receptor(s))", fontsize=fontsize)
-            ax.set_ylabel("Mean Coefficient Magnitude", fontsize=fontsize)
+            ax.set_ylabel("Mean Coefficient \nMagnitude", fontsize=fontsize)
             ax.set_title(f"Average Predicted Interaction Effects on {target}", fontsize=fontsize)
 
             # Use the saved name for the AnnData object to define part of the name of the saved file:

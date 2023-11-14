@@ -19,7 +19,7 @@ from scipy.stats import percentileofscore
 from ..find_neighbors import find_bw_for_n_neighbors
 from .MuSIC import MuSIC
 from .regression_utils import multitesting_correction
-from .SWR_mpi import define_spateo_argparse
+from .SWR import define_spateo_argparse
 
 
 # ---------------------------------------------------------------------------------------------------

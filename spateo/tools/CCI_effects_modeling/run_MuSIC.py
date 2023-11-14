@@ -1,6 +1,6 @@
 """
 Enables STGWR to be run using the "run" command rather than needing to navigate to and call the main file
-(SWR_mpi.py).
+(SWR.py).
 """
 import os
 import sys
@@ -466,7 +466,7 @@ def run(
             will summarize the effects of all ligands/ligand-receptor interactions in a pathway.
     """
 
-    mpi_path = os.path.dirname(music.__file__) + "/SWR_mpi.py"
+    mpi_path = os.path.dirname(music.__file__) + "/SWR.py"
 
     command = (
         "mpiexec "

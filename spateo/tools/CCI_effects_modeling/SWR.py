@@ -1,11 +1,10 @@
 import argparse
 import random
-import sys
+import time
 from collections.abc import Iterable
 from typing import List, Set, Tuple
 
 import numpy as np
-from mpi4py import MPI
 
 from ...logging import logger_manager as lm
 from .MuSIC import MuSIC
@@ -821,20 +820,14 @@ if __name__ == "__main__":
         "ligands/ligand-receptor interactions in a pathway.",
     )
 
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
+    t1 = time.time()
 
-    t1 = MPI.Wtime()
-
-    swr_model = MuSIC(comm, parser)
+    swr_model = MuSIC(parser)
     swr_model._set_up_model()
     swr_model.fit()
     swr_model.predict_and_save()
 
-    t_last = MPI.Wtime()
+    t_last = time.time()
 
-    wt = comm.gather(t_last - t1, root=0)
-    if rank == 0:
-        print("Total Time Elapsed:", np.round(max(wt), 2), "seconds")
-        print("-" * 60)
+    print("Total Time Elapsed:", np.round(t_last - t1, 2), "seconds")
+    print("-" * 60)

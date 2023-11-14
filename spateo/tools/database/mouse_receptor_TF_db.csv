@@ -13076,54 +13076,97 @@
 13066,Cdh5,Fluid shear stress and atherosclerosis,Edn1,0.052083133,Human Diseases,Cardiovascular disease
 13067,Cdh5,Fluid shear stress and atherosclerosis,Klf2,0.028073777,Human Diseases,Cardiovascular disease
 13068,Cdh5,Fluid shear stress and atherosclerosis,Mmp9,0.052083133,Human Diseases,Cardiovascular disease
-13069,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Akt1,0.037177015,Human Diseases,Cardiovascular disease
-13070,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Ifng,0.072830388,Human Diseases,Cardiovascular disease
-13071,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Nfkb1,0.094594751,Human Diseases,Cardiovascular disease
-13072,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Rela,0.094594751,Human Diseases,Cardiovascular disease
-13073,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Tnf,0.072830388,Human Diseases,Cardiovascular disease
-13074,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Edn1,0.072830388,Human Diseases,Cardiovascular disease
-13075,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Klf2,0.048706733,Human Diseases,Cardiovascular disease
-13076,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Mmp9,0.072830388,Human Diseases,Cardiovascular disease
-13077,Flt1_Kdr,Fluid shear stress and atherosclerosis,Akt1,0.04535608,Human Diseases,Cardiovascular disease
-13078,Flt1_Kdr,Fluid shear stress and atherosclerosis,Ifng,0.052083133,Human Diseases,Cardiovascular disease
-13079,Flt1_Kdr,Fluid shear stress and atherosclerosis,Nfkb1,0.046141426,Human Diseases,Cardiovascular disease
-13080,Flt1_Kdr,Fluid shear stress and atherosclerosis,Rela,0.046141426,Human Diseases,Cardiovascular disease
-13081,Flt1_Kdr,Fluid shear stress and atherosclerosis,Tnf,0.052083133,Human Diseases,Cardiovascular disease
-13082,Flt1_Kdr,Fluid shear stress and atherosclerosis,Edn1,0.052083133,Human Diseases,Cardiovascular disease
-13083,Flt1_Kdr,Fluid shear stress and atherosclerosis,Klf2,0.028073777,Human Diseases,Cardiovascular disease
-13084,Flt1_Kdr,Fluid shear stress and atherosclerosis,Mmp9,0.052083133,Human Diseases,Cardiovascular disease
-13085,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Fos,0.065753658,Human Diseases,Cardiovascular disease
-13086,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Ifng,0.089436863,Human Diseases,Cardiovascular disease
-13087,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Jun,0.065753658,Human Diseases,Cardiovascular disease
-13088,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk10,0.036497316,Human Diseases,Cardiovascular disease
-13089,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk11,0.036497316,Human Diseases,Cardiovascular disease
-13090,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk12,0.036497316,Human Diseases,Cardiovascular disease
-13091,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk13,0.036497316,Human Diseases,Cardiovascular disease
-13092,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk14,0.036497316,Human Diseases,Cardiovascular disease
-13093,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk8,0.036497316,Human Diseases,Cardiovascular disease
-13094,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk9,0.036497316,Human Diseases,Cardiovascular disease
-13095,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Nfkb1,0.070207137,Human Diseases,Cardiovascular disease
-13096,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Rela,0.070207137,Human Diseases,Cardiovascular disease
-13097,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Tnf,0.089436863,Human Diseases,Cardiovascular disease
-13098,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Edn1,0.089436863,Human Diseases,Cardiovascular disease
-13099,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Ikbkb,0.062387302,Human Diseases,Cardiovascular disease
-13100,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Klf2,0.036698241,Human Diseases,Cardiovascular disease
-13101,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Map3k7,0.069034214,Human Diseases,Cardiovascular disease
-13102,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mmp9,0.089436863,Human Diseases,Cardiovascular disease
-13103,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Ikbkg,0.062387302,Human Diseases,Cardiovascular disease
-13104,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Akt1,0.04768332,Human Diseases,Cardiovascular disease
-13105,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Ifng,0.072830388,Human Diseases,Cardiovascular disease
-13106,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Nfkb1,0.094594751,Human Diseases,Cardiovascular disease
-13107,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Rela,0.094594751,Human Diseases,Cardiovascular disease
-13108,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Tnf,0.072830388,Human Diseases,Cardiovascular disease
-13109,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Edn1,0.072830388,Human Diseases,Cardiovascular disease
-13110,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Klf2,0.048706733,Human Diseases,Cardiovascular disease
-13111,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Mmp9,0.072830388,Human Diseases,Cardiovascular disease
-13112,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Akt1,0.037177015,Human Diseases,Cardiovascular disease
-13113,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Ifng,0.072830388,Human Diseases,Cardiovascular disease
-13114,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Nfkb1,0.094594751,Human Diseases,Cardiovascular disease
-13115,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Rela,0.094594751,Human Diseases,Cardiovascular disease
-13116,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Tnf,0.072830388,Human Diseases,Cardiovascular disease
-13117,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Edn1,0.072830388,Human Diseases,Cardiovascular disease
-13118,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Klf2,0.048706733,Human Diseases,Cardiovascular disease
-13119,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Mmp9,0.072830388,Human Diseases,Cardiovascular disease
+13069,Cdh2,,Akt1,,,
+13070,Cdh2,,Akt2,,,
+13071,Cdh2,,Akt3,,,
+13072,Cdh2,,Ctnnb1,,,
+13073,Cdh2,,Ctnna1,,,
+13074,Cdh2,,Ctnnd1,,,
+13075,Cdh2,,Gli1,,,
+13076,Cdh2,,Gli2,,,
+13077,Cdh2,,Gli3,,,
+13078,Cdh3,,Ctnnb1,,,
+13079,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Akt1,0.037177015,Human Diseases,Cardiovascular disease
+13080,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Ifng,0.072830388,Human Diseases,Cardiovascular disease
+13081,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Nfkb1,0.094594751,Human Diseases,Cardiovascular disease
+13082,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Rela,0.094594751,Human Diseases,Cardiovascular disease
+13083,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Tnf,0.072830388,Human Diseases,Cardiovascular disease
+13084,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Edn1,0.072830388,Human Diseases,Cardiovascular disease
+13085,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Klf2,0.048706733,Human Diseases,Cardiovascular disease
+13086,Itgav_Itgb3,Fluid shear stress and atherosclerosis,Mmp9,0.072830388,Human Diseases,Cardiovascular disease
+13087,Flt1_Kdr,Fluid shear stress and atherosclerosis,Akt1,0.04535608,Human Diseases,Cardiovascular disease
+13088,Flt1_Kdr,Fluid shear stress and atherosclerosis,Ifng,0.052083133,Human Diseases,Cardiovascular disease
+13089,Flt1_Kdr,Fluid shear stress and atherosclerosis,Nfkb1,0.046141426,Human Diseases,Cardiovascular disease
+13090,Flt1_Kdr,Fluid shear stress and atherosclerosis,Rela,0.046141426,Human Diseases,Cardiovascular disease
+13091,Flt1_Kdr,Fluid shear stress and atherosclerosis,Tnf,0.052083133,Human Diseases,Cardiovascular disease
+13092,Flt1_Kdr,Fluid shear stress and atherosclerosis,Edn1,0.052083133,Human Diseases,Cardiovascular disease
+13093,Flt1_Kdr,Fluid shear stress and atherosclerosis,Klf2,0.028073777,Human Diseases,Cardiovascular disease
+13094,Flt1_Kdr,Fluid shear stress and atherosclerosis,Mmp9,0.052083133,Human Diseases,Cardiovascular disease
+13095,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Fos,0.065753658,Human Diseases,Cardiovascular disease
+13096,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Ifng,0.089436863,Human Diseases,Cardiovascular disease
+13097,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Jun,0.065753658,Human Diseases,Cardiovascular disease
+13098,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk10,0.036497316,Human Diseases,Cardiovascular disease
+13099,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk11,0.036497316,Human Diseases,Cardiovascular disease
+13100,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk12,0.036497316,Human Diseases,Cardiovascular disease
+13101,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk13,0.036497316,Human Diseases,Cardiovascular disease
+13102,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk14,0.036497316,Human Diseases,Cardiovascular disease
+13103,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk8,0.036497316,Human Diseases,Cardiovascular disease
+13104,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mapk9,0.036497316,Human Diseases,Cardiovascular disease
+13105,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Nfkb1,0.070207137,Human Diseases,Cardiovascular disease
+13106,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Rela,0.070207137,Human Diseases,Cardiovascular disease
+13107,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Tnf,0.089436863,Human Diseases,Cardiovascular disease
+13108,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Edn1,0.089436863,Human Diseases,Cardiovascular disease
+13109,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Ikbkb,0.062387302,Human Diseases,Cardiovascular disease
+13110,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Klf2,0.036698241,Human Diseases,Cardiovascular disease
+13111,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Map3k7,0.069034214,Human Diseases,Cardiovascular disease
+13112,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Mmp9,0.089436863,Human Diseases,Cardiovascular disease
+13113,Il1r1_Il1rap,Fluid shear stress and atherosclerosis,Ikbkg,0.062387302,Human Diseases,Cardiovascular disease
+13114,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Akt1,0.04768332,Human Diseases,Cardiovascular disease
+13115,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Ifng,0.072830388,Human Diseases,Cardiovascular disease
+13116,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Nfkb1,0.094594751,Human Diseases,Cardiovascular disease
+13117,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Rela,0.094594751,Human Diseases,Cardiovascular disease
+13118,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Tnf,0.072830388,Human Diseases,Cardiovascular disease
+13119,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Edn1,0.072830388,Human Diseases,Cardiovascular disease
+13120,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Klf2,0.048706733,Human Diseases,Cardiovascular disease
+13121,Itga2b_Itgb3,Fluid shear stress and atherosclerosis,Mmp9,0.072830388,Human Diseases,Cardiovascular disease
+13122,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Akt1,0.037177015,Human Diseases,Cardiovascular disease
+13123,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Ifng,0.072830388,Human Diseases,Cardiovascular disease
+13124,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Nfkb1,0.094594751,Human Diseases,Cardiovascular disease
+13125,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Rela,0.094594751,Human Diseases,Cardiovascular disease
+13126,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Tnf,0.072830388,Human Diseases,Cardiovascular disease
+13127,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Edn1,0.072830388,Human Diseases,Cardiovascular disease
+13128,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Klf2,0.048706733,Human Diseases,Cardiovascular disease
+13129,Itgav_Itgb6,Fluid shear stress and atherosclerosis,Mmp9,0.072830388,Human Diseases,Cardiovascular disease
+13130,Gpc3,PI3K-Akt signaling pathway,Akt1,,,
+13131,Gpc3,PI3K-Akt signaling pathway,Atf2,,,
+13132,Gpc3,PI3K-Akt signaling pathway,Atf4,,,
+13133,Gpc3,PI3K-Akt signaling pathway,Atf6b,,,
+13134,Gpc3,PI3K-Akt signaling pathway,Brca1,,,
+13135,Gpc3,PI3K-Akt signaling pathway,Creb1,,,
+13136,Gpc3,PI3K-Akt signaling pathway,Creb3,,,
+13137,Gpc3,PI3K-Akt signaling pathway,Creb3l1,,,
+13138,Gpc3,PI3K-Akt signaling pathway,Creb3l2,,,
+13139,Gpc3,PI3K-Akt signaling pathway,Creb3l3,,,
+13140,Gpc3,PI3K-Akt signaling pathway,Creb3l4,,,
+13141,Gpc3,PI3K-Akt signaling pathway,Creb5,,,
+13142,Gpc3,PI3K-Akt signaling pathway,Foxo3,,,
+13143,Gpc3,PI3K-Akt signaling pathway,Mapk1,,,
+13144,Gpc3,PI3K-Akt signaling pathway,Mapk3,,,
+13145,Gpc3,PI3K-Akt signaling pathway,Myb,,,
+13146,Gpc3,PI3K-Akt signaling pathway,Myc,,,
+13147,Gpc3,PI3K-Akt signaling pathway,Nfkb1,,,
+13148,Gpc3,PI3K-Akt signaling pathway,Rela,,,
+13149,Gpc3,PI3K-Akt signaling pathway,Rxra,,,
+13150,Gpc3,PI3K-Akt signaling pathway,Sos1,,,
+13151,Gpc3,PI3K-Akt signaling pathway,Sos2,,,
+13152,Gpc3,PI3K-Akt signaling pathway,Trp53,,,
+13153,Gpc3,PI3K-Akt signaling pathway,Ccnd1,,,
+13154,Gpc3,PI3K-Akt signaling pathway,Ikbkb,,,
+13155,Gpc3,PI3K-Akt signaling pathway,Mdm2,,,
+13156,Gpc3,PI3K-Akt signaling pathway,Nr4a1,,,
+13157,Gpc3,PI3K-Akt signaling pathway,Raf1,,,
+13158,Gpc3,PI3K-Akt signaling pathway,Rbl2,,,
+13159,Gpc3,PI3K-Akt signaling pathway,Ikbkg,,,
+13160,Gpc3,,Mapk8,,,
+13161,Gpc3,,Mapk9,,,
+13162,Gpc3,,Jun,,,

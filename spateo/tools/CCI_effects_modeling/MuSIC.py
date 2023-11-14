@@ -8,8 +8,6 @@ import json
 import math
 import os
 import re
-import sys
-from copy import deepcopy
 from functools import partial
 from itertools import product
 from multiprocessing import Pool
@@ -156,14 +154,12 @@ class MuSIC:
 
     def __init__(
         self,
-        comm: MPI.Comm,
         parser: argparse.ArgumentParser,
         args_list: Optional[List[str]] = None,
         verbose: bool = True,
     ):
         self.logger = lm.get_main_logger()
 
-        self.comm = comm
         self.parser = parser
         self.args_list = args_list
         self.verbose = verbose
@@ -197,6 +193,37 @@ class MuSIC:
 
         self.parse_stgwr_args()
 
+        # And initialize other attributes to None:
+        self.X_df = None
+        self.adata = None
+        self.cell_categories = None
+        self.clip = None
+        self.cof_db = None
+        self.ct_vec = None
+        self.feature_distance = None
+        self.feature_names = None
+        self.grn = None
+        self.ligands_expr = None
+        self.ligands_expr_nonlag = None
+        self.lr_db = None
+        self.lr_pairs = None
+        self.n_samples_subsampled = None
+        self.n_samples_subset = None
+        self.neighboring_unsampled = None
+        self.optimal_bw = None
+        self.r_tf_db = None
+        self.receptors_expr = None
+        self.sample_names = None
+        self.subsampled = None
+        self.subsampled_sample_names = None
+        self.subset = None
+        self.subset_indices = None
+        self.subset_sample_names = None
+        self.target = None
+        self.targets_expr = None
+        self.tf_tf_db = None
+        self.x_chunk = None
+
     def _set_up_model(self):
         if self.mod_type is None and self.adata_path is not None:
             raise ValueError(
@@ -204,86 +231,60 @@ class MuSIC:
                 "'receptor', 'ligand'."
             )
 
-        # Check if the program is currently in the master process:
-        if self.comm.rank == 0:
-            # If AnnData object is given, process it:
-            if self.adata_path is not None:
-                # Ensure CCI directory is provided:
-                if self.cci_dir is None and self.mod_type in ["lr", "receptor", "ligand"]:
-                    raise ValueError(
-                        "No CCI directory provided; need to provide a CCI directory to fit a model with "
-                        "ligand/receptor expression."
-                    )
-                self.load_and_process()
-            else:
-                if self.csv_path is None:
-                    raise ValueError(
-                        "No AnnData path or .csv path provided; need to provide at least one of these "
-                        "to provide a default dataset to fit."
-                    )
-                else:
-                    try:
-                        custom_data = pd.read_csv(self.csv_path, index_col=0)
-                    except FileNotFoundError:
-                        raise FileNotFoundError(f"Could not find file at path {self.csv_path}.")
-                    except IOError:
-                        raise IOError(f"Error reading file at path {self.csv_path}.")
-
-                    self.coords = custom_data.iloc[:, : self.n_spatial_dim_csv].values
-                    # Check if the names of any columns have been given as targets:
-                    if self.custom_targets is None and self.targets_path is None:
-                        # It is assumed the (n + 1)th column of the .csv file is the target variable, where n is the
-                        # number of spatial dimensions (e.g. 2 for 2D samples, 3 for 3D, etc.):
-                        self.target = pd.DataFrame(
-                            custom_data.iloc[:, self.n_spatial_dim_csv],
-                            index=custom_data.index,
-                            columns=[custom_data.columns[2]],
-                        )
-                    elif self.custom_targets is not None:
-                        self.targets_expr = custom_data[self.custom_targets]
-                    else:
-                        with open(self.targets_path, "r") as f:
-                            targets = f.read().splitlines()
-                        self.targets_expr = custom_data[targets]
-
-                    self.logger.info(f"Extracting target from column labeled '{custom_data.columns[2]}'.")
-                    independent_variables = custom_data.iloc[:, 3:]
-                    self.X_df = independent_variables
-                    self.X = independent_variables.values
-                    self.feature_names = list(independent_variables.columns)
-
-                    # Add intercept if applicable:
-                    if self.fit_intercept:
-                        self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
-                        self.feature_names = ["intercept"] + self.feature_names
-
-                    self.n_samples = self.X.shape[0]
-                    self.n_features = self.X.shape[1]
-                    self.sample_names = custom_data.index
-
-        # Broadcast data to other processes- gene expression variables:
+        # If AnnData object is given, process it:
         if self.adata_path is not None:
-            if self.mod_type == "niche":
-                self.cell_categories = self.comm.bcast(self.cell_categories, root=0)
-            if self.mod_type == "lr" or self.mod_type == "ligand":
-                self.ligands_expr = self.comm.bcast(self.ligands_expr, root=0)
-            if self.mod_type == "lr":
-                self.receptors_expr = self.comm.bcast(self.receptors_expr, root=0)
-            if hasattr(self, "targets_expr"):
-                self.targets_expr = self.comm.bcast(self.targets_expr, root=0)
-            elif hasattr(self, "target"):
-                self.target = self.comm.bcast(self.target, root=0)
+            # Ensure CCI directory is provided:
+            if self.cci_dir is None and self.mod_type in ["lr", "receptor", "ligand"]:
+                raise ValueError(
+                    "No CCI directory provided; need to provide a CCI directory to fit a model with "
+                    "ligand/receptor expression."
+                )
+            self.load_and_process()
+        else:
+            if self.csv_path is None:
+                raise ValueError(
+                    "No AnnData path or .csv path provided; need to provide at least one of these "
+                    "to provide a default dataset to fit."
+                )
+            else:
+                try:
+                    custom_data = pd.read_csv(self.csv_path, index_col=0)
+                except FileNotFoundError:
+                    raise FileNotFoundError(f"Could not find file at path {self.csv_path}.")
+                except IOError:
+                    raise IOError(f"Error reading file at path {self.csv_path}.")
 
-        # Broadcast data to other processes:
-        self.X = self.comm.bcast(self.X, root=0)
-        self.X_df = self.comm.bcast(self.X_df, root=0)
-        self.bw = self.comm.bcast(self.bw, root=0)
-        self.coords = self.comm.bcast(self.coords, root=0)
-        self.tolerance = self.comm.bcast(self.tolerance, root=0)
-        self.max_iter = self.comm.bcast(self.max_iter, root=0)
-        self.ridge_lambda = self.comm.bcast(self.ridge_lambda, root=0)
-        self.n_samples = self.comm.bcast(self.n_samples, root=0)
-        self.n_features = self.comm.bcast(self.n_features, root=0)
+                self.coords = custom_data.iloc[:, : self.n_spatial_dim_csv].values
+                # Check if the names of any columns have been given as targets:
+                if self.custom_targets is None and self.targets_path is None:
+                    # It is assumed the (n + 1)th column of the .csv file is the target variable, where n is the
+                    # number of spatial dimensions (e.g. 2 for 2D samples, 3 for 3D, etc.):
+                    self.target = pd.DataFrame(
+                        custom_data.iloc[:, self.n_spatial_dim_csv],
+                        index=custom_data.index,
+                        columns=[custom_data.columns[2]],
+                    )
+                elif self.custom_targets is not None:
+                    self.targets_expr = custom_data[self.custom_targets]
+                else:
+                    with open(self.targets_path, "r") as f:
+                        targets = f.read().splitlines()
+                    self.targets_expr = custom_data[targets]
+
+                self.logger.info(f"Extracting target from column labeled '{custom_data.columns[2]}'.")
+                independent_variables = custom_data.iloc[:, 3:]
+                self.X_df = independent_variables
+                self.X = independent_variables.values
+                self.feature_names = list(independent_variables.columns)
+
+                # Add intercept if applicable:
+                if self.fit_intercept:
+                    self.X = np.concatenate((np.ones((self.X.shape[0], 1)), self.X), axis=1)
+                    self.feature_names = ["intercept"] + self.feature_names
+
+                self.n_samples = self.X.shape[0]
+                self.n_features = self.X.shape[1]
+                self.sample_names = custom_data.index
 
         # Perform subsampling if applicable:
         if self.group_subset:
@@ -291,9 +292,6 @@ class MuSIC:
             self.subset_indices = [self.sample_names.get_loc(name) for name in subset.index]
             self.subset_sample_names = subset.index
             self.n_samples_subset = len(subset)
-            self.subset_indices = self.comm.bcast(self.subset_indices, root=0)
-            self.subset_sample_names = self.comm.bcast(self.subset_sample_names, root=0)
-            self.n_samples_subset = self.comm.bcast(self.n_samples_subset, root=0)
             self.subset = True
         else:
             self.subset = False
@@ -316,11 +314,6 @@ class MuSIC:
 
         # Indicate model has now been set up:
         self.set_up = True
-        self.set_up = self.comm.bcast(self.set_up, root=0)
-        self.subsampled = self.comm.bcast(self.subsampled, root=0)
-        self.subset = self.comm.bcast(self.subset, root=0)
-        if hasattr(self, "x_chunk"):
-            self.x_chunk = self.comm.bcast(self.x_chunk, root=0)
 
     def parse_stgwr_args(self):
         """
@@ -385,6 +378,7 @@ class MuSIC:
         self.n_neighbors_niche = self.n_neighbors_secreted
         self.exclude_self = self.arg_retrieve.exclude_self
         self.distr = self.arg_retrieve.distr
+
         # Get appropriate distribution family based on specified distribution:
         if self.distr == "gaussian":
             link = Gaussian.__init__.__defaults__[0]
@@ -823,14 +817,8 @@ class MuSIC:
         for row in zero_rows:
             self.X[row, 0] += 1e-6
 
-        # Broadcast independent variables and feature names:
-        self.X = self.comm.bcast(self.X, root=0)
-        self.feature_names = self.comm.bcast(self.feature_names, root=0)
         self.n_features = self.X.shape[1]
-        self.n_features = self.comm.bcast(self.n_features, root=0)
-
         self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
-        self.X_df = self.comm.bcast(self.X_df, root=0)
 
         # Compute distance in "signaling space":
         # Check for dimensionality reduction in the source AnnData object
@@ -840,7 +828,6 @@ class MuSIC:
         except:
             # Binarize design matrix to encode presence/absence of signaling pairs:
             self.feature_distance = np.where(self.X > 0, 1, 0)
-            self.feature_distance = self.comm.bcast(self.feature_distance, root=0)
 
     def define_sig_inputs(self, adata: Optional[anndata.AnnData] = None, recompute: bool = False):
         """For signaling-relevant models, define necessary quantities that will later be used to define the independent
@@ -859,7 +846,7 @@ class MuSIC:
                     self.lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
                 except FileNotFoundError:
                     raise FileNotFoundError(
-                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path " f"and try again."
+                        f"CCI resources cannot be found at {self.cci_dir}. Please check the path and try again."
                     )
                 except IOError:
                     raise IOError(
@@ -1221,7 +1208,7 @@ class MuSIC:
                 if self.mod_type == "lr":
                     if self.verbose:
                         self.logger.info(
-                            "Preparing data: finding matched pairs between the selected ligands and " "receptors."
+                            "Preparing data: finding matched pairs between the selected ligands and receptors."
                         )
                     starting_n_ligands = len(self.ligands_expr.columns)
                     starting_n_receptors = len(self.receptors_expr.columns)
@@ -1664,7 +1651,7 @@ class MuSIC:
                 if self.mod_type == "ligand":
                     X_df = X_df.applymap(np.log1p)
                 # Normalize the data to prevent numerical overflow:
-                X_df = X_df.apply(lambda row: (row - row.min()) / (row.max() - row.min()), axis=1)
+                X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
 
             else:
                 raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
@@ -1769,19 +1756,13 @@ class MuSIC:
             self.X[row, 0] += 1e-6
 
         # Broadcast independent variables and feature names:
-        self.X = self.comm.bcast(self.X, root=0)
-        self.feature_names = self.comm.bcast(self.feature_names, root=0)
         self.n_features = self.X.shape[1]
-        self.n_features = self.comm.bcast(self.n_features, root=0)
-
         self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
-        self.X_df = self.comm.bcast(self.X_df, root=0)
 
         # Compute distance in "signaling space":
         if self.mod_type != "niche":
             # Binarize design matrix to encode presence/absence of signaling pairs:
             self.feature_distance = np.where(self.X > 0, 1, 0)
-            self.feature_distance = self.comm.bcast(self.feature_distance, root=0)
         else:
             self.feature_distance = None
 
@@ -2028,12 +2009,6 @@ class MuSIC:
                 self.n_samples_subsampled[target] = len(sampled_df)
                 self.subsampled_sample_names[target] = sampled_df.index
                 self.neighboring_unsampled[target] = closest_dict
-
-        # Cast each of these dictionaries to all processes:
-        self.subsampled_indices = self.comm.bcast(self.subsampled_indices, root=0)
-        self.n_samples_subsampled = self.comm.bcast(self.n_samples_subsampled, root=0)
-        self.subsampled_sample_names = self.comm.bcast(self.subsampled_sample_names, root=0)
-        self.neighboring_unsampled = self.comm.bcast(self.neighboring_unsampled, root=0)
 
         # Save dictionary mapping unsampled points to nearest sampled points:
         parent_dir = os.path.dirname(self.output_path)
@@ -2467,12 +2442,6 @@ class MuSIC:
                 self.logger.info("Score is NaN for three bandwidth iterations- exiting optimization.")
                 return None
 
-            new_lb = self.comm.bcast(new_lb, root=0)
-            new_ub = self.comm.bcast(new_ub, root=0)
-            score = self.comm.bcast(score, root=0)
-            difference = self.comm.bcast(difference, root=0)
-            optimum_bw = self.comm.bcast(optimum_bw, root=0)
-
         return optimum_bw
 
     def mpi_fit(
@@ -2509,9 +2478,7 @@ class MuSIC:
         """
         if X.shape[1] != self.n_features:
             n_features = X.shape[1]
-            n_features = self.comm.bcast(n_features, root=0)
             X_labels = X_labels
-            X_labels = self.comm.bcast(X_labels, root=0)
         else:
             n_features = self.n_features
             X_labels = self.feature_names
@@ -2769,8 +2736,6 @@ class MuSIC:
             y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
         else:
             y_arr = y
-            y_arr = self.comm.bcast(y_arr, root=0)
-
         if X is None:
             X_orig = self.X
         else:
@@ -2783,7 +2748,6 @@ class MuSIC:
             cell_types = pd.Series(["NA"] * len(self.adata.obs), index=self.adata.obs.index)
         cat_to_num = {k: v + 1 for v, k in enumerate(cell_types.unique())}
         self.ct_vec = cell_types.map(cat_to_num).values
-        self.ct_vec = self.comm.bcast(self.ct_vec, root=0)
 
         for target in y_arr.columns:
             y = y_arr[target].values
@@ -2905,7 +2869,6 @@ class MuSIC:
                 chunk_size = int(math.ceil(float(n_samples) / self.comm.size))
                 # Assign chunks to each process:
                 self.x_chunk = np.array(indices[self.comm.rank * chunk_size : (self.comm.rank + 1) * chunk_size])
-                self.x_chunk = self.comm.bcast(self.x_chunk, root=0)
 
             # Global relationship regularization (only for non-niche models):
             if self.mod_type != "niche":
@@ -2948,7 +2911,6 @@ class MuSIC:
                 self.clip = np.percentile(lim, 99.7)
             else:
                 self.clip = np.percentile(y, 99.7)
-            self.clip = self.comm.bcast(self.clip, root=0)
 
             if self.bw is not None:
                 if verbose:
@@ -2973,8 +2935,6 @@ class MuSIC:
                     )
                 self._set_search_range()
                 self.logger.info(f"Calculated bandwidth range over which to search: {self.minbw}-{self.maxbw}.")
-            self.minbw = self.comm.bcast(self.minbw, root=0)
-            self.maxbw = self.comm.bcast(self.maxbw, root=0)
 
             # Searching for optimal bandwidth- set final=False to return AICc for each run of the optimization
             # function:
@@ -2994,7 +2954,6 @@ class MuSIC:
                 self.logger.info(f"Issue fitting for target {target}. Skipping.")
                 continue
             self.optimal_bw = optimal_bw
-            self.optimal_bw = self.comm.bcast(self.optimal_bw, root=0)
             # self.logger.info(f"Discovered optimal bandwidth for {target}: {self.optimal_bw}")
             if self.bw_fixed:
                 optimal_bw = round(optimal_bw, 2)

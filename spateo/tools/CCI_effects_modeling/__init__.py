@@ -8,4 +8,4 @@ from .MuSIC import MuSIC
 from .MuSIC_downstream import MuSIC_Interpreter
 from .MuSIC_upstream import MuSIC_Molecule_Selector
 from .run_MuSIC import run
-from .SWR_mpi import define_spateo_argparse
+from .SWR import define_spateo_argparse
