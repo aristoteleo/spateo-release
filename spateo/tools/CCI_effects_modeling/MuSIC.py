@@ -1669,6 +1669,12 @@ class MuSIC:
             else:
                 raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
 
+        # Alphabetize the string in each column:
+        feature_names_mod = [
+            ":".join("/".join(sorted(part.split("/"))) for part in feat.split(":")) for feat in X_df.columns
+        ]
+        X_df.columns = feature_names_mod
+
         # Save design matrix and component dataframes:
         if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix")):
             os.makedirs(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix"))
@@ -1794,76 +1800,237 @@ class MuSIC:
             neighboring_unsampled: Dictionary containing a mapping between each unsampled point and the closest
                 sampled point
         """
-        # For subsampling by point selection (otherwise, these will not be dictionaries because they are the same for
-        # all targets):
-        # Dictionary to store both cell labels (:attr `subsampled_sample_names`) and numerical indices (:attr
-        # `subsampled_indices`) of subsampled points, :attr `n_samples_subsampled` (for setting :attr `x_chunk` later
-        # on, and :attr `neighboring_unsampled` to establish a mapping between each not-sampled point and the closest
-        # sampled point:
-        if self.group_subset is None:
-            (
-                self.subsampled_indices,
-                self.n_samples_subsampled,
-                self.subsampled_sample_names,
-                self.neighboring_unsampled,
-            ) = (
-                {},
-                {},
-                {},
-                {},
-            )
+        # Check for already-existing subsampling results:
+        parent_dir = os.path.dirname(self.output_path)
+        _, filename = os.path.split(self.output_path)
+        filename = os.path.splitext(filename)[0]
+        neighboring_unsampled_path = os.path.join(parent_dir, "subsampling", f"{filename}.json")
+        subsampled_sample_names_path = os.path.join(parent_dir, "subsampling", f"{filename}_cell_names.json")
 
-        if y is None:
-            y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
+        # Check if all of these files exist:
+        if os.path.exists(neighboring_unsampled_path) and os.path.exists(subsampled_sample_names_path):
+            self.subsampled_indices = {}
+            self.n_samples_subsampled = {}
+            self.logger.info("Loading existing subsampling results from previous run and resuming...")
+            with open(neighboring_unsampled_path, "r") as f:
+                self.neighboring_unsampled = json.load(f)
+            with open(subsampled_sample_names_path, "r") as f:
+                self.subsampled_sample_names = json.load(f)
+
+            for target in self.subsampled_sample_names.keys():
+                self.subsampled_indices[target] = [
+                    self.sample_names.get_loc(name) for name in self.subsampled_sample_names[target]
+                ]
+                self.n_samples_subsampled[target] = len(self.subsampled_indices[target])
+
         else:
-            y_arr = y
+            # For subsampling by point selection (otherwise, these will not be dictionaries because they are the same
+            # for all targets):
+            # Dictionary to store both cell labels (:attr `subsampled_sample_names`) and numerical indices (:attr
+            # `subsampled_indices`) of subsampled points, :attr `n_samples_subsampled` (for setting :attr `x_chunk`
+            # later on, and :attr `neighboring_unsampled` to establish a mapping between each not-sampled point and
+            # the closest sampled point:
+            if self.group_subset is None:
+                (
+                    self.subsampled_indices,
+                    self.n_samples_subsampled,
+                    self.subsampled_sample_names,
+                    self.neighboring_unsampled,
+                ) = (
+                    {},
+                    {},
+                    {},
+                    {},
+                )
 
-        # If :attr `group_subset` is not None, AnnData was subset to only include cell types of interest, as well as
-        # their neighboring cells. However, we only want to fit the model on the cell types of interest,
-        # so :attr `subsampled_indices` consists of the set of indices that don't correspond to the neighboring cells:
-        if self.group_subset is not None:
-            adata = self.adata[self.subsampled_sample_names].copy()
-            n_samples = adata.n_obs
-            sample_names = adata.obs_names
-            coords = adata.obsm[self.coords_key]
-        else:
-            adata = self.adata.copy()
-            n_samples = self.n_samples
-            sample_names = self.sample_names
-            coords = self.coords
+            if y is None:
+                y_arr = self.targets_expr if hasattr(self, "targets_expr") else self.target
+            else:
+                y_arr = y
 
-        if self.total_counts_threshold is not None:
-            self.logger.info(f"Subsetting to cells with greater than {self.total_counts_threshold} total counts...")
-            if self.total_counts_key not in self.adata.obs_keys():
-                raise KeyError(f"{self.total_counts_key} not found in .obs of AnnData.")
-            adata_high_qual = adata[adata.obs[self.total_counts_key] >= self.total_counts_threshold]
-            sampled_coords = adata_high_qual.obsm[self.coords_key]
-            sample_names_high_qual = adata_high_qual.obs_names
-            y_arr_high_qual = y_arr.loc[sample_names]
-            threshold_sampled_names = sample_names.intersection(sample_names_high_qual)
+            # If :attr `group_subset` is not None, AnnData was subset to only include cell types of interest, as well as
+            # their neighboring cells. However, we only want to fit the model on the cell types of interest,
+            # so :attr `subsampled_indices` consists of the set of indices that don't correspond to the neighboring
+            # cells:
+            if self.group_subset is not None:
+                adata = self.adata[self.subsampled_sample_names].copy()
+                n_samples = adata.n_obs
+                sample_names = adata.obs_names
+                coords = adata.obsm[self.coords_key]
+            else:
+                adata = self.adata.copy()
+                n_samples = self.n_samples
+                sample_names = self.sample_names
+                coords = self.coords
 
-            for target in y_arr_high_qual.columns:
-                all_values = y_arr[target].loc[sample_names].values.reshape(-1, 1)
-                sampled_values = y_arr_high_qual[target].loc[threshold_sampled_names].values.reshape(-1, 1)
+            if self.total_counts_threshold is not None:
+                self.logger.info(f"Subsetting to cells with greater than {self.total_counts_threshold} total counts...")
+                if self.total_counts_key not in self.adata.obs_keys():
+                    raise KeyError(f"{self.total_counts_key} not found in .obs of AnnData.")
+                adata_high_qual = adata[adata.obs[self.total_counts_key] >= self.total_counts_threshold]
+                sampled_coords = adata_high_qual.obsm[self.coords_key]
+                sample_names_high_qual = adata_high_qual.obs_names
+                y_arr_high_qual = y_arr.loc[sample_names]
+                threshold_sampled_names = sample_names.intersection(sample_names_high_qual)
 
-                data = np.concatenate((sampled_coords, sampled_values), axis=1)
-                if coords.shape[1] == 2:
-                    sampled_df = pd.DataFrame(data, columns=["x", "y", target], index=threshold_sampled_names)
-                else:
-                    sampled_df = pd.DataFrame(data, columns=["x", "y", "z", target], index=threshold_sampled_names)
+                for target in y_arr_high_qual.columns:
+                    all_values = y_arr[target].loc[sample_names].values.reshape(-1, 1)
+                    sampled_values = y_arr_high_qual[target].loc[threshold_sampled_names].values.reshape(-1, 1)
 
-                # Define relevant dictionaries- only if further subsampling by region will not be performed:
-                if self.spatial_subsample is False:
+                    data = np.concatenate((sampled_coords, sampled_values), axis=1)
+                    if coords.shape[1] == 2:
+                        sampled_df = pd.DataFrame(data, columns=["x", "y", target], index=threshold_sampled_names)
+                    else:
+                        sampled_df = pd.DataFrame(data, columns=["x", "y", "z", target], index=threshold_sampled_names)
+
+                    # Define relevant dictionaries- only if further subsampling by region will not be performed:
+                    if self.spatial_subsample is False:
+                        # Map each non-sampled point to its closest sampled point that matches the expression pattern
+                        # (zero/nonzero):
+                        if coords.shape[1] == 2:
+                            ref = sampled_df[["x", "y"]].values.astype(float)
+                        else:
+                            ref = sampled_df[["x", "y", "z"]].values.astype(float)
+                        distances = cdist(coords.astype(float), ref, "euclidean")
+
+                        # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
+                        all_expression = (all_values != 0).flatten()
+                        sampled_expression = sampled_df[target].values != 0
+                        mismatch_mask = all_expression[:, np.newaxis] != sampled_expression
+                        # Replace distances in the mismatch mask with a very large value:
+                        large_value = np.max(distances) + 1
+                        distances[mismatch_mask] = large_value
+
+                        closest_indices = np.argmin(distances, axis=1)
+
+                        # Dictionary where keys are indices of subsampled points and values are lists of indices of the
+                        # original points closest to them:
+                        closest_dict = {}
+                        for i, idx in enumerate(closest_indices):
+                            key = sampled_df.index[idx]
+                            if key not in closest_dict:
+                                closest_dict[key] = []
+                            if sample_names[i] not in sampled_df.index:
+                                closest_dict[key].append(sample_names[i])
+
+                        # If subsampling by total counts, the arrays of subsampled indices, number subsampled and
+                        # subsampled sample names (but notably not the unsampled-to-sampled mapping) are the same,
+                        # but subsequent computation will search through dictionary keys to get these, so we format
+                        # them as dictionaries anyways:
+                        self.subsampled_indices[target] = [
+                            self.sample_names.get_loc(name) for name in threshold_sampled_names
+                        ]
+                        self.n_samples_subsampled[target] = len(threshold_sampled_names)
+                        self.subsampled_sample_names[target] = threshold_sampled_names
+                        self.neighboring_unsampled[target] = closest_dict
+
+            # Subsampling by region:
+            if self.spatial_subsample:
+                self.logger.info("Performing stratified subsampling from different regions of the data...")
+                for target in y_arr.columns:
+                    if self.group_subset is None:
+                        values = y_arr[target].values.reshape(-1, 1)
+                    else:
+                        values = y_arr[target].loc[sample_names].values.reshape(-1, 1)
+
+                    # Spatial clustering:
+                    n_clust = int(0.05 * n_samples)
+                    kmeans = KMeans(n_clusters=n_clust, random_state=0).fit(coords)
+                    spatial_clusters = kmeans.predict(coords).astype(int).reshape(-1, 1)
+
+                    data = np.concatenate(
+                        (
+                            coords,
+                            spatial_clusters,
+                            values,
+                        ),
+                        axis=1,
+                    )
+
+                    if coords.shape[1] == 2:
+                        temp_df = pd.DataFrame(
+                            data,
+                            columns=["x", "y", "spatial_cluster", target],
+                            index=sample_names,
+                        )
+                    else:
+                        temp_df = pd.DataFrame(
+                            data,
+                            columns=["x", "y", "z", "spatial_cluster", target],
+                            index=sample_names,
+                        )
+
+                    temp_df[f"{target}_density"] = temp_df.groupby("spatial_cluster")[target].transform(
+                        lambda x: np.count_nonzero(x) / len(x)
+                    )
+
+                    # Stratified subsampling:
+                    sampled_df = pd.DataFrame()
+                    for stratum in temp_df["spatial_cluster"].unique():
+                        if len(set(temp_df[f"{target}_density"])) == 2:
+                            stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
+                            # Density of node feature in this stratum
+                            node_feature_density = stratum_df[f"{target}_density"].iloc[0]
+
+                            # Set total number of cells to subsample- sample at least the number of zero cells as
+                            # nonzeros:
+                            # Sample size proportional to stratum size and node feature density:
+                            n_sample_nonzeros = int(np.ceil((len(stratum_df) // 2) * node_feature_density))
+                            n_sample_zeros = n_sample_nonzeros
+                            sample_size = n_sample_zeros + n_sample_nonzeros
+                            sampled_stratum_df = stratum_df.sample(n=sample_size)
+                            sampled_df = pd.concat([sampled_df, sampled_stratum_df])
+
+                        else:
+                            stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
+                            # Density of node feature in this stratum
+                            node_feature_density = stratum_df[f"{target}_density"].iloc[0]
+
+                            # Proportional sample size based on number of nonzeros- or three zero cells, depending on
+                            # which is larger:
+                            num_nonzeros = len(stratum_df[stratum_df[f"{target}_density"] > 0])
+                            n_sample_nonzeros = int(np.ceil((num_nonzeros // 2) * node_feature_density))
+                            n_sample_zeros = np.maximum(n_sample_nonzeros, 3)
+                            sample_size = n_sample_zeros + n_sample_nonzeros
+
+                            # Sample at least n_sample_zeros zeros if possible:
+                            zero_sub = stratum_df[stratum_df[target] == 0]
+                            n_zeros_sample = np.minimum(n_sample_zeros, len(zero_sub))
+                            sampled_zero_stratum_df = zero_sub.sample(n=n_zeros_sample)
+
+                            # Check if any nonzeros exist
+                            stratum_nonzero_df = stratum_df[stratum_df[target] > 0]
+                            if not stratum_nonzero_df.empty:
+                                # Sample from nonzeros first
+                                num_nonzeros_sampled = min(len(stratum_nonzero_df), sample_size - n_sample_zeros)
+                                sampled_nonzero_stratum_df = stratum_nonzero_df.sample(n=num_nonzeros_sampled)
+
+                                # Concatenate zeros and nonzeros:
+                                sampled_stratum_df = pd.concat([sampled_nonzero_stratum_df, sampled_zero_stratum_df])
+                            else:
+                                sampled_stratum_df = sampled_zero_stratum_df
+
+                            sampled_df = pd.concat([sampled_df, sampled_stratum_df])
+
+                    # Check to see if counts-based subsampling was performed- if so, subset the sampled dataframe based
+                    # on the subset already generated from that:
+                    if "threshold_sampled_names" in locals():
+                        updated_sampled_names = set(threshold_sampled_names).intersection(sampled_df.index)
+                        sampled_df = sampled_df.loc[updated_sampled_names]
+
+                    self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
+
                     # Map each non-sampled point to its closest sampled point that matches the expression pattern
                     # (zero/nonzero):
                     if coords.shape[1] == 2:
                         ref = sampled_df[["x", "y"]].values.astype(float)
                     else:
                         ref = sampled_df[["x", "y", "z"]].values.astype(float)
+
                     distances = cdist(coords.astype(float), ref, "euclidean")
 
                     # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
-                    all_expression = (all_values != 0).flatten()
+                    all_expression = (values != 0).flatten()
                     sampled_expression = sampled_df[target].values != 0
                     mismatch_mask = all_expression[:, np.newaxis] != sampled_expression
                     # Replace distances in the mismatch mask with a very large value:
@@ -1872,8 +2039,8 @@ class MuSIC:
 
                     closest_indices = np.argmin(distances, axis=1)
 
-                    # Dictionary where keys are indices of subsampled points and values are lists of indices of the original
-                    # points closest to them:
+                    # Dictionary where keys are indices of subsampled points and values are lists of indices of the
+                    # original points closest to them:
                     closest_dict = {}
                     for i, idx in enumerate(closest_indices):
                         key = sampled_df.index[idx]
@@ -1882,159 +2049,27 @@ class MuSIC:
                         if sample_names[i] not in sampled_df.index:
                             closest_dict[key].append(sample_names[i])
 
-                    # If subsampling by total counts, the arrays of subsampled indices, number subsampled and subsampled
-                    # sample names (but notably not the unsampled-to-sampled mapping) are the same, but subsequent
-                    # computation will search through dictionary keys to get these, so we format them as dictionaries
-                    # anyways:
-                    self.subsampled_indices[target] = [
-                        self.sample_names.get_loc(name) for name in threshold_sampled_names
-                    ]
-                    self.n_samples_subsampled[target] = len(threshold_sampled_names)
-                    self.subsampled_sample_names[target] = threshold_sampled_names
+                    # Get index position in original AnnData object of each subsampled index:
+                    self.subsampled_indices[target] = [self.sample_names.get_loc(name) for name in sampled_df.index]
+                    self.n_samples_subsampled[target] = len(sampled_df)
+                    self.subsampled_sample_names[target] = list(sampled_df.index)
                     self.neighboring_unsampled[target] = closest_dict
 
-        # Subsampling by region:
-        if self.spatial_subsample:
-            self.logger.info("Performing stratified subsampling from different regions of the data...")
-            for target in y_arr.columns:
-                if self.group_subset is None:
-                    values = y_arr[target].values.reshape(-1, 1)
-                else:
-                    values = y_arr[target].loc[sample_names].values.reshape(-1, 1)
+            # Save dictionary mapping unsampled points to nearest sampled points, indices of sampled points and names of
+            # sampled points:
+            parent_dir = os.path.dirname(self.output_path)
+            if not os.path.exists(os.path.join(parent_dir, "subsampling")):
+                os.makedirs(os.path.join(parent_dir, "subsampling"))
+            if not os.path.exists(os.path.dirname(self.output_path)):
+                os.makedirs(os.path.dirname(self.output_path))
 
-                # Spatial clustering:
-                n_clust = int(0.05 * n_samples)
-                kmeans = KMeans(n_clusters=n_clust, random_state=0).fit(coords)
-                spatial_clusters = kmeans.predict(coords).astype(int).reshape(-1, 1)
+            _, filename = os.path.split(self.output_path)
+            filename = os.path.splitext(filename)[0]
 
-                data = np.concatenate(
-                    (
-                        coords,
-                        spatial_clusters,
-                        values,
-                    ),
-                    axis=1,
-                )
-
-                if coords.shape[1] == 2:
-                    temp_df = pd.DataFrame(
-                        data,
-                        columns=["x", "y", "spatial_cluster", target],
-                        index=sample_names,
-                    )
-                else:
-                    temp_df = pd.DataFrame(
-                        data,
-                        columns=["x", "y", "z", "spatial_cluster", target],
-                        index=sample_names,
-                    )
-
-                temp_df[f"{target}_density"] = temp_df.groupby("spatial_cluster")[target].transform(
-                    lambda x: np.count_nonzero(x) / len(x)
-                )
-
-                # Stratified subsampling:
-                sampled_df = pd.DataFrame()
-                for stratum in temp_df["spatial_cluster"].unique():
-                    if len(set(temp_df[f"{target}_density"])) == 2:
-                        stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
-                        # Density of node feature in this stratum
-                        node_feature_density = stratum_df[f"{target}_density"].iloc[0]
-
-                        # Set total number of cells to subsample- sample at least the number of zero cells as nonzeros:
-                        # Sample size proportional to stratum size and node feature density:
-                        n_sample_nonzeros = int(np.ceil((len(stratum_df) // 2) * node_feature_density))
-                        n_sample_zeros = n_sample_nonzeros
-                        sample_size = n_sample_zeros + n_sample_nonzeros
-                        sampled_stratum_df = stratum_df.sample(n=sample_size)
-                        sampled_df = pd.concat([sampled_df, sampled_stratum_df])
-
-                    else:
-                        stratum_df = temp_df[temp_df["spatial_cluster"] == stratum]
-                        # Density of node feature in this stratum
-                        node_feature_density = stratum_df[f"{target}_density"].iloc[0]
-
-                        # Proportional sample size based on number of nonzeros- or three zero cells, depending on which
-                        # is larger:
-                        num_nonzeros = len(stratum_df[stratum_df[f"{target}_density"] > 0])
-                        n_sample_nonzeros = int(np.ceil((num_nonzeros // 2) * node_feature_density))
-                        n_sample_zeros = np.maximum(n_sample_nonzeros, 3)
-                        sample_size = n_sample_zeros + n_sample_nonzeros
-
-                        # Sample at least n_sample_zeros zeros if possible:
-                        zero_sub = stratum_df[stratum_df[target] == 0]
-                        n_zeros_sample = np.minimum(n_sample_zeros, len(zero_sub))
-                        sampled_zero_stratum_df = zero_sub.sample(n=n_zeros_sample)
-
-                        # Check if any nonzeros exist
-                        stratum_nonzero_df = stratum_df[stratum_df[target] > 0]
-                        if not stratum_nonzero_df.empty:
-                            # Sample from nonzeros first
-                            num_nonzeros_sampled = min(len(stratum_nonzero_df), sample_size - n_sample_zeros)
-                            sampled_nonzero_stratum_df = stratum_nonzero_df.sample(n=num_nonzeros_sampled)
-
-                            # Concatenate zeros and nonzeros:
-                            sampled_stratum_df = pd.concat([sampled_nonzero_stratum_df, sampled_zero_stratum_df])
-                        else:
-                            sampled_stratum_df = sampled_zero_stratum_df
-
-                        sampled_df = pd.concat([sampled_df, sampled_stratum_df])
-
-                # Check to see if counts-based subsampling was performed- if so, subset the sampled dataframe based
-                # on the subset already generated from that:
-                if "threshold_sampled_names" in locals():
-                    updated_sampled_names = set(threshold_sampled_names).intersection(sampled_df.index)
-                    sampled_df = sampled_df.loc[updated_sampled_names]
-
-                self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
-
-                # Map each non-sampled point to its closest sampled point that matches the expression pattern
-                # (zero/nonzero):
-                if coords.shape[1] == 2:
-                    ref = sampled_df[["x", "y"]].values.astype(float)
-                else:
-                    ref = sampled_df[["x", "y", "z"]].values.astype(float)
-
-                distances = cdist(coords.astype(float), ref, "euclidean")
-
-                # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
-                all_expression = (values != 0).flatten()
-                sampled_expression = sampled_df[target].values != 0
-                mismatch_mask = all_expression[:, np.newaxis] != sampled_expression
-                # Replace distances in the mismatch mask with a very large value:
-                large_value = np.max(distances) + 1
-                distances[mismatch_mask] = large_value
-
-                closest_indices = np.argmin(distances, axis=1)
-
-                # Dictionary where keys are indices of subsampled points and values are lists of indices of the original
-                # points closest to them:
-                closest_dict = {}
-                for i, idx in enumerate(closest_indices):
-                    key = sampled_df.index[idx]
-                    if key not in closest_dict:
-                        closest_dict[key] = []
-                    if sample_names[i] not in sampled_df.index:
-                        closest_dict[key].append(sample_names[i])
-
-                # Get index position in original AnnData object of each subsampled index:
-                self.subsampled_indices[target] = [self.sample_names.get_loc(name) for name in sampled_df.index]
-                self.n_samples_subsampled[target] = len(sampled_df)
-                self.subsampled_sample_names[target] = sampled_df.index
-                self.neighboring_unsampled[target] = closest_dict
-
-        # Save dictionary mapping unsampled points to nearest sampled points:
-        parent_dir = os.path.dirname(self.output_path)
-        if not os.path.exists(os.path.join(parent_dir, "subsampling")):
-            os.makedirs(os.path.join(parent_dir, "subsampling"))
-        if not os.path.exists(os.path.dirname(self.output_path)):
-            os.makedirs(os.path.dirname(self.output_path))
-
-        _, filename = os.path.split(self.output_path)
-        filename = os.path.splitext(filename)[0]
-
-        with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "w") as file:
-            json.dump(self.neighboring_unsampled, file)
+            with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "w") as file:
+                json.dump(self.neighboring_unsampled, file)
+            with open(os.path.join(parent_dir, "subsampling", f"{filename}_cell_names.json"), "w") as file:
+                json.dump(self.subsampled_sample_names, file)
 
     def _set_search_range(self):
         """Set the search range for the bandwidth selection procedure.
@@ -2681,9 +2716,11 @@ class MuSIC:
             mask = ~all_nans
             num_valid = len(mask)
             number_of_nans = np.sum(~mask)
-            self.logger.info(
-                f"Bandwidth: {bw:.3f}, encountered issue getting pseudoinverse for {number_of_nans} cells."
-            )
+            if self.verbose:
+                self.logger.info(
+                    f"Bandwidth: {bw:.3f}, encountered issue getting pseudoinverse for {number_of_nans} cells (this "
+                    f"should not significantly effect result)."
+                )
             ll = self.distr_obj.log_likelihood(true[mask], all_y_pred[mask])
             norm_ll = ll / num_valid
 
@@ -2748,6 +2785,21 @@ class MuSIC:
         self.ct_vec = cell_types.map(cat_to_num).values
 
         for target in y_arr.columns:
+            # Check if model has already been fit for this target:
+            # Flag to indicate if a matching file name is found
+            found = False
+            parent_dir = os.path.dirname(self.output_path)
+            file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
+            for filename in file_list:
+                parts = filename.split("_")
+                if len(parts) > 1 and parts[-1].startswith(target + ".csv"):
+                    self.logger.info(f"Model has already been fit for target {target}. Moving on to next target.")
+                    found = True
+                    break
+
+            if found:
+                continue
+
             y = y_arr[target].values
             if y.ndim == 1:
                 y = y.reshape(-1, 1)
@@ -3168,8 +3220,16 @@ class MuSIC:
         pred_path = os.path.join(parent_dir, "predictions.csv")
         y_pred.to_csv(pred_path)
 
-    def return_outputs(self) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
-        """Return final coefficients for all fitted models."""
+    def return_outputs(self, downstream: bool = False) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
+        """Return final coefficients for all fitted models.
+
+        Args:
+            downstream: Set True to indicate that the model is a downstream analysis model, in which case the
+                coefficients will not be re-saved, presumably because they have already been saved.
+
+        Outputs:
+
+        """
         parent_dir = os.path.dirname(self.output_path)
         all_coeffs = {}
         all_se = {}
@@ -3187,38 +3247,40 @@ class MuSIC:
                 if isinstance(standard_errors.index[0], int) or isinstance(standard_errors.index[0], float):
                     standard_errors.index = [self.X_df.index[idx] for idx in standard_errors.index]
 
-                # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
-                # subsampling is not done by cell type group):
-                _, filename = os.path.split(self.output_path)
-                filename = os.path.splitext(filename)[0]
+                if not downstream:
+                    # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
+                    # subsampling is not done by cell type group):
+                    _, filename = os.path.split(self.output_path)
+                    filename = os.path.splitext(filename)[0]
 
-                if os.path.exists(os.path.join(parent_dir, "subsampling", f"{filename}.json")):
-                    with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "r") as dict_file:
-                        neighboring_unsampled = json.load(dict_file)
+                    if os.path.exists(os.path.join(parent_dir, "subsampling", f"{filename}.json")):
+                        with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "r") as dict_file:
+                            neighboring_unsampled = json.load(dict_file)
 
-                    sampled_to_nonsampled_map = neighboring_unsampled[target]
-                    betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
-                    standard_errors = standard_errors.reindex(
-                        self.X_df.index, columns=standard_errors.columns, fill_value=0
-                    )
-                    for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
-                        for nonsampled_idx in nonsampled_idxs:
-                            betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
-                            standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
-                            standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
+                        sampled_to_nonsampled_map = neighboring_unsampled[target]
+                        betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
+                        standard_errors = standard_errors.reindex(
+                            self.X_df.index, columns=standard_errors.columns, fill_value=0
+                        )
+                        for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
+                            for nonsampled_idx in nonsampled_idxs:
+                                betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
+                                standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
+                                standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
 
-                    # If this cell does not express the receptor(s) or doesn't have the ligand in neighborhood,
-                    # mask out the relevant element in "betas" and standard errors:
-                    mask_df = (self.X_df != 0).astype(int)
-                    mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
-                    mask_matrix = mask_df.values
-                    betas *= mask_matrix
-                    standard_errors *= mask_matrix
+                        # If this cell does not express the receptor(s) or doesn't have the ligand in neighborhood,
+                        # mask out the relevant element in "betas" and standard errors:
+                        mask_df = (self.X_df != 0).astype(int)
+                        mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
+                        mask_matrix = mask_df.values
+                        betas *= mask_matrix
+                        standard_errors *= mask_matrix
 
                 # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
                 # object, save back to file path:
                 all_outputs = pd.concat([betas, standard_errors], axis=1)
-                all_outputs.to_csv(os.path.join(parent_dir, file))
+                if not downstream:
+                    all_outputs.to_csv(os.path.join(parent_dir, file))
 
                 # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas

@@ -958,13 +958,22 @@ def smooth(
     else:
         # Incorporate cell type information
         if ct is not None:
-            if ct.ndim == 1:
-                ct = ct.reshape(-1, 1)
+            if not isinstance(ct, np.ndarray):
+                ct = np.array(ct)
+            if ct.ndim != 1:
+                ct = ct.flatten()
+
             logger.info(
                 "Conditioning smoothing on cell type- only information from cells of the same type will be used."
             )
-            ct_masks = ct == ct.transpose()
+            rows, cols = np.where(ct[:, None] == ct)
+            sparse_ct_matrix = scipy.sparse.coo_matrix((np.ones_like(rows), (rows, cols)), shape=(len(ct), len(ct)))
+            ct_masks = sparse_ct_matrix.tocsr()
+            logger.info("Modifying spatial weights considering cell type...")
             W = W.multiply(ct_masks)
+
+            # ct_masks can be quite large- delete to free up memory once it's no longer necessary
+            del ct_masks
 
         # Incorporate gene expression information
         if gene_expr_subset is not None:

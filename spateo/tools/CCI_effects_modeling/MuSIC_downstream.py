@@ -16,6 +16,7 @@ import math
 import os
 import re
 from collections import Counter
+from itertools import product
 from typing import List, Literal, Optional, Tuple, Union
 
 import anndata
@@ -31,7 +32,6 @@ import seaborn as sns
 import xarray as xr
 from joblib import Parallel, delayed
 from matplotlib import rcParams
-from mpi4py import MPI
 from pysal import explore, lib
 from scipy.stats import pearsonr, spearmanr, ttest_1samp
 from sklearn.decomposition import TruncatedSVD
@@ -42,6 +42,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.preprocessing import normalize
+from tqdm.auto import tqdm
 
 from ...configuration import config_spateo_rcParams
 from ...logging import logger_manager as lm
@@ -86,16 +87,13 @@ class MuSIC_Interpreter(MuSIC):
             # self.logger.info("Finished preprocessing, getting fitted coefficients and standard errors.")
 
         # Dictionary containing coefficients:
-        self.coeffs, self.standard_errors = self.return_outputs()
+        self.coeffs, self.standard_errors = self.return_outputs(downstream=True)
         # Design matrix:
         self.design_matrix = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
         )
 
-        self.predictions = self.predict(coeffs=self.coeffs)
-
-        chunk_size = int(math.ceil(float(len(range(self.n_samples)))))
-        self.x_chunk = np.arange(self.n_samples)
+        self.predictions = pd.read_csv(os.path.join(os.path.dirname(self.output_path), "predictions.csv"), index_col=0)
 
         # Save directory:
         parent_dir = os.path.dirname(self.output_path)
@@ -150,7 +148,18 @@ class MuSIC_Interpreter(MuSIC):
                 feature
         """
 
+        self.logger.info(
+            "Computing significance for all coefficients, note this may take a long time for large "
+            "datasets (> 10k cells)..."
+        )
+
         for target in self.coeffs.keys():
+            # Check for existing file:
+            parent_dir = os.path.dirname(self.output_path)
+            if os.path.exists(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv")):
+                self.logger.info(f"Significance already computed for target {target}, moving to the next...")
+                continue
+
             # Get coefficients and standard errors for this key
             coef = self.coeffs[target]
             columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
@@ -158,29 +167,36 @@ class MuSIC_Interpreter(MuSIC):
             se = self.standard_errors[target]
             se_feature_match = [c.replace("se_", "") for c in se.columns]
 
-            # Parallelize computations over observations and features:
-            local_p_values_all = np.zeros((len(self.x_chunk), self.n_features))
+            def compute_p_value(cell_name, feat):
+                return wald_test(coef.loc[cell_name, f"b_{feat}"], se.loc[cell_name, f"se_{feat}"])
 
-            # Compute p-values for local observations and features
-            for i, obs_index in enumerate(self.x_chunk):
-                for j in range(self.n_features):
-                    if self.feature_names[j] in se_feature_match:
-                        if se.iloc[obs_index][f"se_{self.feature_names[j]}"] == 0:
-                            local_p_values_all[i, j] = 1
-                        else:
-                            local_p_values_all[i, j] = wald_test(
-                                coef.iloc[obs_index][f"b_{self.feature_names[j]}"],
-                                se.iloc[obs_index][f"se_{self.feature_names[j]}"],
-                            )
-                    else:
-                        local_p_values_all[i, j] = 1
+            filtered_tasks = [
+                (cell_name, feat)
+                for cell_name, feat in product(self.sample_names, self.feature_names)
+                if feat in se_feature_match
+                and se.loc[cell_name, f"se_{feat}"] != 0
+                and coef.loc[cell_name, f"b_{feat}"] != 0
+            ]
 
-            p_values_all = np.concatenate(local_p_values_all, axis=0)
-            p_values_df = pd.DataFrame(p_values_all, index=self.sample_names, columns=self.feature_names)
+            # Parallelize computations for filtered tasks
+            results = Parallel(n_jobs=-1)(
+                delayed(compute_p_value)(cell_name, feat)
+                for cell_name, feat in tqdm(filtered_tasks, desc=f"Processing for target {target}")
+            )
+
+            # Convert results to a DataFrame
+            results_df = pd.DataFrame(
+                results, index=pd.MultiIndex.from_tuples(filtered_tasks, names=["sample", "feature"])
+            )
+            p_values_all = pd.DataFrame(1, index=self.sample_names, columns=self.feature_names)
+            p_values_all.update(results_df.unstack(level="feature").droplevel(0, axis=1))
+
             # Multiple testing correction for each observation:
-            qvals = np.zeros_like(p_values_all)
+            qvals = np.zeros_like(p_values_all.values)
             for i in range(p_values_all.shape[0]):
-                qvals[i, :] = multitesting_correction(p_values_all[i, :], method=method, alpha=significance_threshold)
+                qvals[i, :] = multitesting_correction(
+                    p_values_all.iloc[i, :], method=method, alpha=significance_threshold
+                )
             q_values_df = pd.DataFrame(qvals, index=self.sample_names, columns=self.feature_names)
 
             # Significance:
@@ -188,9 +204,11 @@ class MuSIC_Interpreter(MuSIC):
 
             # Save dataframes:
             parent_dir = os.path.dirname(self.output_path)
-            p_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_p_values.csv"))
+            p_values_all.to_csv(os.path.join(parent_dir, "significance", f"{target}_p_values.csv"))
             q_values_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_q_values.csv"))
             is_significant_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"))
+
+            self.logger.info(f"Finished computing significance for target {target}.")
 
     def compute_and_visualize_diagnostics(
         self, type: Literal["correlations", "confusion", "rmse"], n_genes_per_plot: int = 20
@@ -515,6 +533,7 @@ class MuSIC_Interpreter(MuSIC):
         normalize: bool = True,
         plot_significant: bool = False,
         metric_threshold: float = 0.05,
+        metric_cutoff: Optional[float] = None,
         cut_pvals: float = -5,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
@@ -554,6 +573,8 @@ class MuSIC_Interpreter(MuSIC):
             metric_threshold: Optional threshold for 'metric' used to filter plot elements. Any interactions below
                 this threshold will not be color coded. Will use 0.05 by default. Should be between 0 and 1. For
                 'metric' = "fc", this threshold will be interpreted as a distance from a fold-change of 1.
+            metric_cutoff: Optional threshold for 'metric' used to filter plot elements. Any interactions above this
+                value will be rounded to this value. Will use 0.5 by default.
             cut_pvals: For metric = "fc_qvals", the q-values are log-transformed. Any log10-transformed q-value that is
                 below this will be clipped to this value.
             fontsize: Size of font for x and y labels.
@@ -603,6 +624,7 @@ class MuSIC_Interpreter(MuSIC):
         all_targets = list(self.coeffs.keys())
         targets = all_targets if target_subset is None else target_subset
         feature_names = [feat for feat in self.feature_names if feat != "intercept"]
+
         df = pd.DataFrame(0, index=feature_names, columns=targets)
 
         # Colormap can be divergent for any option-
@@ -678,12 +700,19 @@ class MuSIC_Interpreter(MuSIC):
             n = len(targets) * 40 / 300
             figsize = (n, m)
 
-        for target in self.coeffs.keys():
+        for target in targets:
             # Get coefficients for this key
             if interaction_subset is not None:
                 if target not in interaction_subset:
                     continue
             coef = self.coeffs[target]
+            # Make sure coef columns are matched with :attr `feature_names`, which are sorted in alphabetical order:
+            coef.columns = [col.replace("b_", "") for col in coef.columns]
+            coef.columns = coef.columns.map(
+                lambda col: ":".join("/".join(sorted(section.split("/"))) for section in col.split(":", 1))
+            )
+            coef.columns = [f"b_{col}" for col in coef.columns]
+
             columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
             feat_names_target = [col.replace("b_", "") for col in columns]
 
@@ -705,7 +734,7 @@ class MuSIC_Interpreter(MuSIC):
             coef_target_tn = coef.iloc[target_true_neg_indices, :]
 
             # Compute total number of target-expressing cells:
-            n_target_expr_cells = len(target_true_pos_indices)
+            n_target_expr_cells = len(target_expr)
             n_nonzero_interactions = np.sum(coef_target_tp != 0, axis=0)
 
             # For fold-change, significance will be incorporated post-calculation:
@@ -727,14 +756,17 @@ class MuSIC_Interpreter(MuSIC):
                     is_significant_df = pd.read_csv(
                         os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
                     )
-                # Take the subset of the significance matrix that applies to the columns used for this target:
-                is_significant_df = is_significant_df.loc[:, feat_names_target]
+
                 # Convolve coefficients with significance matrix:
-                coef = coef * is_significant_df.values
+                coef = coef * is_significant_df[feat_names_target].values
+
+                # Extract only the rows of coef that correspond to target-expressing cells that are predicted to be
+                # positive:
+                coef_target_tp = coef.iloc[target_true_pos_indices, :]
+                # And the rows of coef that correspond to non-expressing cells that are predicted to be negative:
+                coef_target_tn = coef.iloc[target_true_neg_indices, :]
 
             if metric == "number":
-                # Compute number of nonzero interactions for each feature:
-                n_nonzero_interactions = np.sum(coef != 0, axis=0)
                 n_nonzero_interactions.index = [idx.replace("b_", "") for idx in n_nonzero_interactions.index]
                 # Compute proportion:
                 df.loc[feat_names_target, target] = n_nonzero_interactions
@@ -757,7 +789,8 @@ class MuSIC_Interpreter(MuSIC):
                 df.loc[feat_names_target, target] = proportions
             elif metric == "specificity":
                 # Design matrix will be used for this mode:
-                dm = self.design_matrix[feat_names_target]
+                feat_names_target_sub = [feat for feat in feat_names_target if feat in self.design_matrix.columns]
+                dm = self.design_matrix[feat_names_target_sub]
 
                 # Intersection of each interaction w/ target-expressing cells to determine the numerator for the
                 # proportion:
@@ -899,6 +932,16 @@ class MuSIC_Interpreter(MuSIC):
                     else "Proportion of cells w/ predicted effect \n on target for each interaction (normalized)"
                 )
 
+        if metric_cutoff is not None:
+            df[df > metric_cutoff] = metric_cutoff
+
+        # Remove rows that are all zero:
+        df = df.loc[~(df == 0).all(axis=1)]
+        # Remove rows with exactly one nonzero:
+        df = df.loc[df.ne(0).sum(axis=1) != 1]
+        if "df_pvals" in locals():
+            df_pvals = df_pvals.loc[~(df_pvals == 0).all(axis=1)]
+
         # Plot heatmap:
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
         if metric == "fc_qvals":
@@ -948,6 +991,8 @@ class MuSIC_Interpreter(MuSIC):
 
         plt.xlabel("Target gene", fontsize=fontsize * 1.1)
         plt.ylabel("Interaction", fontsize=fontsize * 1.1)
+        plt.xticks(fontsize=fontsize)
+        plt.yticks(fontsize=fontsize)
         plt.title(title, fontsize=fontsize * 1.25)
         plt.tight_layout()
 
@@ -1063,6 +1108,8 @@ class MuSIC_Interpreter(MuSIC):
             average_effects = average_effects[average_effects > effect_size_threshold]
             # Sort the average_expression in descending order
             average_effects = average_effects.sort_values(ascending=False)
+            average_effects.index = [replace_col_with_collagens(idx) for idx in average_effects.index]
+            average_effects.index = [replace_hla_with_hlas(idx) for idx in average_effects.index]
 
             # Plot:
             if figsize is None:
