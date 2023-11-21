@@ -41,6 +41,8 @@ def define_spateo_argparse(**kwargs):
                 - "receptor": Uses receptor expression in the "target" cell as independent variables.
                 - "downstream": For the purposes of downstream analysis, used to model ligand expression as a
                     function of upstream regulators
+        include_unpaired_lr: Only if :attr:`mod_type` is "lr"- if True, will include individual ligands/complexes and
+            individual receptors in the design matrix if their cognate interacting partners cannot also be found.
         cci_dir: Path to directory containing cell-cell interaction databases
         species: Selects the cell-cell communication database the relevant ligands will be drawn from. Options:
                 "human", "mouse".
@@ -178,7 +180,6 @@ def define_spateo_argparse(**kwargs):
             ligands/ligand-receptor interactions in a pathway.
 
     Returns:
-        comm: MPI comm object for parallel processing
         parser: Argparse object defining important arguments for model fitting and interpretation
         args_list: If argparse object is returned from a function, the parser must read in arguments in the form of a
             list- this return contains that processed list.
@@ -212,6 +213,12 @@ def define_spateo_argparse(**kwargs):
         "-mod_type": {
             "type": str,
             "default": "niche",
+        },
+        "-include_unpaired_lr": {
+            "action": "store_true",
+            "help": "Only if 'mod_type' is 'lr'- if True, will include individual ligands/complexes and individual "
+            "receptors/complexes together with L:R pairs if their cognate interacting partners cannot also be "
+            "found.",
         },
         "-cci_dir": {"type": str},
         "-species": {"type": str, "default": "human"},
@@ -535,6 +542,7 @@ if __name__ == "__main__":
         help="Recommended for large datasets (>5000 samples), otherwise model fitting is quite slow.",
     )
     parser.add_argument("-mod_type", type=str, default="niche")
+    parser.add_argument("-include_unpaired_lr", action="store_true")
     parser.add_argument("-cci_dir", type=str)
     parser.add_argument("-species", type=str, default="human")
     parser.add_argument(

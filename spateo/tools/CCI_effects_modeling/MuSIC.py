@@ -320,6 +320,7 @@ class MuSIC:
             self.arg_retrieve = self.parser.parse_args()
 
         self.mod_type = self.arg_retrieve.mod_type
+        self.include_unpaired_lr = self.arg_retrieve.include_unpaired_lr
         # Set flag to evenly subsample spatial data:
         self.spatial_subsample = self.arg_retrieve.spatial_subsample
 
@@ -1245,24 +1246,26 @@ class MuSIC:
 
                     pivoted_df = merged_df.pivot_table(values=["value_ligand", "value_receptor"], index=["from", "to"])
                     filtered_df = pivoted_df[pivoted_df.notna().all(axis=1)]
-                    # Filter ligand and receptor expression to those that have a matched pair:
-                    self.ligands_expr = self.ligands_expr[filtered_df.index.get_level_values("from").unique()]
-                    self.receptors_expr = self.receptors_expr[filtered_df.index.get_level_values("to").unique()]
-                    final_n_ligands = len(self.ligands_expr.columns)
-                    final_n_receptors = len(self.receptors_expr.columns)
+                    # Filter ligand and receptor expression to those that have a matched pair, if matched pairs are
+                    # necessary:
+                    if not self.include_unpaired_lr:
+                        self.ligands_expr = self.ligands_expr[filtered_df.index.get_level_values("from").unique()]
+                        self.receptors_expr = self.receptors_expr[filtered_df.index.get_level_values("to").unique()]
+                        final_n_ligands = len(self.ligands_expr.columns)
+                        final_n_receptors = len(self.receptors_expr.columns)
 
-                    if self.verbose:
-                        self.logger.info(
-                            f"Found {final_n_ligands} ligands and {final_n_receptors} receptors that have matched "
-                            f"pairs. {starting_n_ligands - final_n_ligands} ligands removed from the list and "
-                            f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the list due "
-                            f"to not having matched pairs among the corresponding set of receptors/ligands, "
-                            f"respectively."
-                            f"Remaining ligands: {self.ligands_expr.columns.tolist()}.\n"
-                            f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
-                        )
+                        if self.verbose:
+                            self.logger.info(
+                                f"Found {final_n_ligands} ligands and {final_n_receptors} receptors that have matched "
+                                f"pairs. {starting_n_ligands - final_n_ligands} ligands removed from the list and "
+                                f"{starting_n_receptors - final_n_receptors} receptors/complexes removed from the "
+                                f"list due to not having matched pairs among the corresponding set of "
+                                f"receptors/ligands, respectively."
+                                f"Remaining ligands: {self.ligands_expr.columns.tolist()}.\n"
+                                f"Remaining receptors: {self.receptors_expr.columns.tolist()}."
+                            )
 
-                        self.logger.info(f"Set of {len(self.lr_pairs)} ligand-receptor pairs: {self.lr_pairs}")
+                            self.logger.info(f"Set of {len(self.lr_pairs)} ligand-receptor pairs: {self.lr_pairs}")
 
             # ---------------------------------------------------------------------------------------------------
             # Get gene targets
@@ -1377,6 +1380,7 @@ class MuSIC:
                         scipy.sparse.save_npz(secreted_path, spatial_weights_secreted)
 
                 lagged_expr_mat = np.zeros_like(self.ligands_expr.values, dtype=float)
+
                 for i, ligand in enumerate(self.ligands_expr.columns):
                     expr = self.ligands_expr[ligand]
                     expr_sparse = scipy.sparse.csr_matrix(expr.values.reshape(-1, 1))
@@ -1458,11 +1462,13 @@ class MuSIC:
                     X_df = pd.DataFrame(dmat_neighbors, index=self.adata.obs_names, columns=feature_names)
 
             elif self.mod_type == "lr":
+                lr_pair_labels = [f"{lr_pair[0]}:{lr_pair[1]}" for lr_pair in self.lr_pairs]
+
                 # Use the ligand expression array and receptor expression array to compute the ligand-receptor pairing
                 # array across all cells in the sample:
                 X_df = pd.DataFrame(
                     np.zeros((self.n_samples, len(self.lr_pairs))),
-                    columns=[f"{lr_pair[0]}:{lr_pair[1]}" for lr_pair in self.lr_pairs],
+                    columns=lr_pair_labels,
                     index=self.adata.obs_names,
                 )
 
@@ -1509,7 +1515,7 @@ class MuSIC:
                 # For each receptor, compute the fraction of cells in which each cognate ligand is coupled to the
                 # receptor:
                 for receptor in unique_receptors:
-                    # Find all rows that correspond to this particular receptor
+                    # Find all rows (ligands) that correspond to this particular receptor
                     receptor_rows = [idx for idx in ligand_receptor if idx[1] == receptor]
                     receptor_cols = [f"{row[0]}:{row[1]}" for row in receptor_rows]
                     ligands = [row[0] for row in receptor_rows]
@@ -1625,12 +1631,50 @@ class MuSIC:
 
                         X_df = X_df[cols_to_keep]
 
-                # self.logger.info(f"\n\nAfter final processing, final set of L:R features:\n {list(X_df.columns)}")
+                # Add unpaired ligands and receptors to the design matrix:
+                if self.include_unpaired_lr:
+                    # Make note of which ligands are paired:
+                    paired_ligands = [pair[0] for pair in self.lr_pairs]
+                    # Add unpaired ligands to design matrix:
+                    unpaired_ligands = [lig for lig in self.ligands_expr.columns if lig not in paired_ligands]
+                    self.logger.info(
+                        f"Adding unpaired ligands {unpaired_ligands} to L:R design matrix, conditioning "
+                        f"on the presence of any present valid receptors and TFs (from database)."
+                    )
+                    for lig in unpaired_ligands:
+                        # Mask the ligand values by a Boolean mask, where element is a 1 if valid (cognate) receptors
+                        # or receptor-associated TFs are present in the cell.
+                        # Get all receptors that are paired with this ligand:
+                        associated_receptors = self.lr_db[self.lr_db["from"] == lig]["to"].unique().tolist()
+                        # Get all TFs that are associated with these receptors:
+                        associated_tfs = (
+                            self.r_tf_db[self.r_tf_db["receptor"].isin(associated_receptors)]["tf"].unique().tolist()
+                        )
+                        to_check = associated_receptors + associated_tfs
+                        to_check = [item for item in to_check if "_" not in item]
+                        to_check = [item for item in to_check if item in self.adata.var_names]
+                        mask = self.adata[:, to_check].X.sum(axis=1) > 0
+                        mask = np.array(mask).flatten()
+                        X_df[lig] = self.ligands_expr[lig] * mask
 
+                    # Make note of which receptors are paired:
+                    paired_receptors = [pair[1] for pair in self.lr_pairs]
+                    # Add unpaired receptors to design matrix:
+                    unpaired_receptors = [rec for rec in self.receptors_expr.columns if rec not in paired_receptors]
+                    self.logger.info(f"Adding unpaired receptors {unpaired_receptors} to L:R design matrix.")
+                    for rec in unpaired_receptors:
+                        X_df[rec] = self.receptors_expr[rec]
+
+                # Check for unpaired columns, round to counts to represent the average ligand value in the neighborhood:
+                if self.include_unpaired_lr:
+                    X_df[[c for c in X_df.columns if ":" not in c]] = X_df[
+                        [c for c in X_df.columns if ":" not in c]
+                    ].apply(np.rint)
                 # Log-scale to reduce the impact of "denser" neighborhoods:
                 X_df = X_df.applymap(np.log1p)
-                # Normalize the data to prevent numerical overflow:
-                # X_df = (X_df - X_df.min().min()) / (X_df.max().max() - X_df.min().min())
+
+                # Normalize the data for the L:R pairs to alleviate differences in scale induced by the
+                # multiplication operation:
                 X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
 
             elif self.mod_type == "ligand" or self.mod_type == "receptor":
@@ -1644,6 +1688,23 @@ class MuSIC:
 
                 # If applicable, drop all-zero columns:
                 X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
+
+                if self.mod_type == "ligand":
+                    for lig in X_df.columns:
+                        # Mask the ligand values by a Boolean mask, where element is a 1 if valid (cognate) receptors
+                        # or receptor-associated TFs are present in the cell.
+                        # Get all receptors that are paired with this ligand:
+                        associated_receptors = self.lr_db[self.lr_db["from"] == lig]["to"].unique().tolist()
+                        # Get all TFs that are associated with these receptors:
+                        associated_tfs = (
+                            self.r_tf_db[self.r_tf_db["receptor"].isin(associated_receptors)]["tf"].unique().tolist()
+                        )
+                        to_check = associated_receptors + associated_tfs
+                        to_check = [item for item in to_check if "_" not in item]
+                        to_check = [item for item in to_check if item in self.adata.var_names]
+                        mask = self.adata[:, to_check].X.sum(axis=1) > 0
+                        mask = np.array(mask).flatten()
+                        X_df[lig] = X_df[lig] * mask
 
                 if self.mod_type == "ligand":
                     self.logger.info(
@@ -1661,8 +1722,7 @@ class MuSIC:
                     X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
                 # Log-scale to reduce the impact of "denser" neighborhoods:
-                if self.mod_type == "ligand":
-                    X_df = X_df.applymap(np.log1p)
+                X_df = X_df.applymap(np.log1p)
                 # Normalize the data to prevent numerical overflow:
                 X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
 
@@ -1728,10 +1788,7 @@ class MuSIC:
             )
 
         self.X = X_df.values
-        if self.mod_type == "lr":
-            self.feature_names = [pair.split(":")[0] + ":" + pair.split(":")[1] for pair in X_df.columns]
-        else:
-            self.feature_names = list(X_df.columns)
+        self.feature_names = list(X_df.columns)
         # (For interpretability in downstream analyses) update ligand names/receptor names to reflect the final
         # molecules used:
         if self.mod_type == "ligand":
@@ -1740,7 +1797,9 @@ class MuSIC:
             self.receptors = self.feature_names
         elif self.mod_type == "lr":
             # Update :attr `lr_pairs` to reflect the final L:R pairs used:
-            self.lr_pairs = [tuple((pair.split(":")[0], pair.split(":")[1])) for pair in self.feature_names]
+            self.lr_pairs = [
+                tuple((pair.split(":")[0], pair.split(":")[1])) for pair in self.feature_names if ":" in pair
+            ]
             receptors = [p[1] for p in self.lr_pairs]
 
         # If applicable, add covariates:
@@ -2822,12 +2881,15 @@ class MuSIC:
 
                 temp = self.r_tf_db[self.r_tf_db["tf"].isin(target_TFs)]
                 target_receptors = temp["receptor"].unique().tolist()
+                # All of the possible ligands that are partners to any of these receptors:
+                lr_db_subset = self.lr_db[self.lr_db["to"].isin(target_receptors)]
+                target_ligands = lr_db_subset["from"].unique().tolist()
+                target_lr = target_receptors + target_ligands
 
                 if self.mod_type == "lr" or self.mod_type == "receptor":
-                    # Keep only the columns of X that contain any of the receptors for this target:
-                    keep_indices = [
-                        i for i, feat in enumerate(self.feature_names) if any(r in feat for r in target_receptors)
-                    ]
+                    # Keep only the columns of X that contain any of the receptors for this target, or any of the
+                    # ligands that can bind to receptors of this target:
+                    keep_indices = [i for i, feat in enumerate(self.feature_names) if any(m in feat for m in target_lr)]
                     X_labels = [self.feature_names[idx] for idx in keep_indices]
                     self.logger.info(
                         f"For target {target}, from {len(self.feature_names)} features, "

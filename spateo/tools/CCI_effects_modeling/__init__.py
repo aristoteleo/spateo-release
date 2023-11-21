@@ -7,5 +7,4 @@ st.tl.Niche_Model).
 from .MuSIC import MuSIC
 from .MuSIC_downstream import MuSIC_Interpreter
 from .MuSIC_upstream import MuSIC_Molecule_Selector
-from .run_MuSIC import run
 from .SWR import define_spateo_argparse
