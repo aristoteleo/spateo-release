@@ -11,10 +11,8 @@ These include:
 """
 import argparse
 import collections
-import itertools
 import math
 import os
-import re
 from collections import Counter
 from itertools import product
 from typing import List, Literal, Optional, Tuple, Union
@@ -26,13 +24,14 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import plotly
+import scipy.cluster.hierarchy as sch
 import scipy.sparse
 import scipy.stats
 import seaborn as sns
-import xarray as xr
 from joblib import Parallel, delayed
 from matplotlib import rcParams
-from pysal import explore, lib
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from scipy.stats import pearsonr, spearmanr, ttest_1samp
 from sklearn.decomposition import TruncatedSVD
 from sklearn.metrics import (
@@ -524,17 +523,22 @@ class MuSIC_Interpreter(MuSIC):
             plt.tight_layout()
             plt.show()
 
-    def visualize_enriched_interactions(
+    def cell_type_specific_interactions(
         self,
+        to_plot: Literal["mean", "percentage"] = "mean",
+        plot_type: Literal["heatmap", "barplot"] = "heatmap",
+        group_key: Optional[str] = None,
+        ct_subset: Optional[List[str]] = None,
         target_subset: Optional[List[str]] = None,
         interaction_subset: Optional[List[str]] = None,
-        cell_types: Optional[List[str]] = None,
-        metric: Literal["number", "multiplicity", "proportion", "specificity", "mean", "fc", "fc_qvals"] = "fc",
-        normalize: bool = True,
-        plot_significant: bool = False,
-        metric_threshold: float = 0.05,
-        metric_upper_cutoff: Optional[float] = None,
-        cut_pvals: float = -5,
+        lower_threshold: float = 0.3,
+        upper_threshold: float = 1.0,
+        effect_threshold: float = 0.0,
+        row_normalize: bool = False,
+        col_normalize: bool = False,
+        normalize_targets: bool = False,
+        hierarchical_cluster_y: bool = False,
+        group_y_cell_type: bool = False,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         center: Optional[float] = None,
@@ -543,40 +547,49 @@ class MuSIC_Interpreter(MuSIC):
         save_kwargs: Optional[dict] = {},
         save_df: bool = False,
     ):
-        """Given the target gene of interest, identify interaction features that are enriched for particular targets.
-        Visualized in heatmap form.
+        """Map interactions and interaction effects that are specific to particular cell type groupings. Returns a
+        heatmap representing the enrichment of the interaction/effect within cells of that grouping (if "to_plot" is
+        effect, this will be enrichment of the effect on cell type-specific expression). Enrichment determined by
+        mean effect size or expression.
 
         Args:
-            target_subset: List of targets to consider. If None, will use all targets used in model fitting.
+            to_plot: Whether to plot the mean effect size or the proportion of cells in a cell type w/ effect on
+                target. Options are "mean" or "percentage".
+            plot_type: Whether to plot the results as a heatmap or barplot. Options are "heatmap" or "barplot". If
+                "barplot", must provide a subset of up to three interactions to visualize.
+            group_key: Can be used to specify entry in adata.obs that contains cell type groupings. If None,
+                will use :attr `group_key` from model initialization.
+            ct_subset: Can be used to restrict the enrichment analysis to only cells of a particular type. If given,
+                will search for cell types in "group_key" attribute from model initialization. Recommended to use to
+                subset to cell types with sufficient numbers.
+            target_subset: List of targets to consider- only applicable if "to_plot" is "effect". If None, will use all
+                targets used in model fitting.
             interaction_subset: List of interactions to consider. If None, will use all interactions used in model.
-            cell_types: Can be used to restrict the enrichment analysis to only cells of a particular type. If given,
-                will search for cell types in "group_key" attribute from model initialization.
-            metric: Metric to display on plot. For all plot variants, the color will be determined by a combination
-            of the size & magnitude of the effect. Options:
-                - "number": Number of cells for which the interaction is predicted to have nonzero effect
-                - "multiplicity": For each interaction/target combination, gets the average number of additional
-                    interactions that are predicted in cells expressing that target
-                - "proportion": Percentage of interactions predicted to have nonzero effect over the number of cells
-                    that express each target.
-                - "specificity": Number of target-expressing cells for which a particular interaction is predicted to
-                    have nonzero effect over the total number of cells for which a particular interaction is
-                    present in (including target-expressing and non-expressing cells). Essentially, measures the
-                    degree to which an interaction is coupled to a particular target.
-                - "mean": Average effect size over all target-expressing cells.
-                - "fc": Fold change in mean expression of target-expressing cells with and without each specified
-                    interaction. Way of inferring that interaction may actually be repressive rather than activatory.
-                - "fc_qvals": Log-transformed significance of the fold change.
-            normalize: Whether to minmax scale the metric values. If True, will apply this scaling over all elements
-                of the array. Only used for 'metric' = "number", "proportion" or "specificity".
-            plot_significant: Whether to include only significant predicted interactions in the plot and metric
-                calculation.
-            metric_threshold: Optional threshold for 'metric' used to filter plot elements. Any interactions below
-                this threshold will not be color coded. Will use 0.05 by default. Should be between 0 and 1. For
-                'metric' = "fc", this threshold will be interpreted as a distance from a fold-change of 1.
-            metric_upper_cutoff: Optional threshold for 'metric' used to filter plot elements. Any interactions above
-                this value will be rounded to this value. Will use 0.5 by default.
-            cut_pvals: For metric = "fc_qvals", the q-values are log-transformed. Any log10-transformed q-value that is
-                below this will be clipped to this value.
+                Is necessary if "plot_type" is "barplot", since the barplot is only designed to accomodate up to three
+                interactions at once.
+            lower_threshold: Lower threshold for the proportion of cells in a cell type group that must express a
+                particular interaction/effect for it to be colored on the plot, as a proportion of the max value.
+                Threshold will be applied to the non-normalized values (if normalization is applicable). Defaults to
+                0.3.
+            upper_threshold: Upper threshold for the proportion of cells in a cell type group that must express a
+                particular interaction/effect for it to be colored on the plot, as a proportion of the max value.
+                Threshold will be applied to the non-normalized values (if normalization is applicable). Defaults to
+                1.0 (the max value).
+            effect_threshold: Threshold for the effect size of an interaction/effect to be considered significant;
+                only used if "to_plot" is "percentage". Defaults to 0.0.
+            row_normalize: Whether to minmax scale the metric values by row (i.e. for each interaction/effect). Helps
+                to alleviate visual differences that result from scale rather than differences in mean value across
+                cell types.
+            col_normalize: Whether to minmax scale the metric values by column (i.e. for each interaction/effect). Helps
+                to alleviate visual differences that result from scale rather than differences in mean value across
+                cell types.
+            normalize_targets: Whether to minmax scale the metric values by column for each target (i.e. for each
+                interaction/effect), to remove differences that occur as a result of scale of expression. Provides a
+                clearer picture of enrichment for each target.
+            hierarchical_cluster_y: Whether to cluster the y-axis (target gene in cell type) using hierarchical
+                clustering. If False, will order the y-axis by the order of the target genes for organization purposes.
+            group_y_cell_type: Whether to group the y-axis (target gene in cell type) by cell type. If False,
+                will group by target gene instead. Defaults to False.
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
             center: Optional, determines position of the colormap center. Between 0 and 1.
@@ -604,372 +617,271 @@ class MuSIC_Interpreter(MuSIC):
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder)
 
-        # Check inputs:
-        if metric not in ["number", "proportion", "specificity", "mean", "fc", "fc_qvals"]:
-            raise ValueError(
-                f"Unrecognized metric {metric}. Options are 'number', 'proportion', 'specificity', 'mean', "
-                f"'fc' or 'fc_qvals'."
-            )
+        if to_plot not in ["mean", "percentage"]:
+            raise ValueError(f"Unrecognized input for plotting. Options are 'mean' or 'percentage'.")
 
-        # Predictions:
-        parent_dir = os.path.dirname(self.output_path)
-        pred_path = os.path.join(parent_dir, "predictions.csv")
-        predictions = pd.read_csv(pred_path, index_col=0)
+        if self.mod_type not in ["lr", "ligand", "receptor"]:
+            raise ValueError(f"Model type must be one of 'lr', 'ligand', or 'receptor'.")
 
-        if cell_types is None:
+        # Colormap should be sequential:
+        sequential_colormaps = [
+            "Blues",
+            "BuGn",
+            "BuPu",
+            "GnBu",
+            "Greens",
+            "Greys",
+            "Oranges",
+            "OrRd",
+            "PuBu",
+            "PuBuGn",
+            "PuRd",
+            "Purples",
+            "RdPu",
+            "Reds",
+            "YlGn",
+            "YlGnBu",
+            "YlOrBr",
+            "YlOrRd",
+            "afmhot",
+            "autumn",
+            "bone",
+            "cool",
+            "copper",
+            "gist_heat",
+            "gray",
+            "hot",
+            "pink",
+            "spring",
+            "summer",
+            "winter",
+            "viridis",
+            "plasma",
+            "inferno",
+            "magma",
+            "cividis",
+        ]
+        if cmap not in sequential_colormaps:
+            logger.info(f"For option {to_plot}, colormap should be sequential: using 'viridis'.")
+            cmap = "viridis"
+
+        if group_key is None:
+            group_key = self.group_key
+
+        # Get appropriate adata:
+        if isinstance(ct_subset, str):
+            ct_subset = [ct_subset]
+
+        if ct_subset is None:
             adata = self.adata.copy()
         else:
-            adata = self.adata[self.adata.obs[self.group_key].isin(cell_types)].copy()
+            adata = self.adata[self.adata.obs[group_key].isin(ct_subset)].copy()
+        cell_types = adata.obs[group_key].unique()
 
         all_targets = list(self.coeffs.keys())
-        targets = all_targets if target_subset is None else target_subset
-        feature_names = [feat for feat in self.feature_names if feat != "intercept"]
-
-        df = pd.DataFrame(0, index=feature_names, columns=targets)
-
-        # Colormap can be divergent for any option-
-        diverging_colormaps = [
-            "PiYG",
-            "PRGn",
-            "BrBG",
-            "PuOr",
-            "RdGy",
-            "RdBu",
-            "RdYlBu",
-            "RdYlGn",
-            "Spectral",
-            "coolwarm",
-            "bwr",
-            "seismic",
-        ]
-
-        # For metric = fold change, significance of the fold-change:
-        if metric == "fc" or metric == "fc_qvals":
-            df_pvals = pd.DataFrame(1, index=feature_names, columns=targets)
-            if metric == "fc":
-                if cmap not in diverging_colormaps:
-                    logger.info("For metric fold-change, colormap should be divergent: using 'seismic'.")
-                    cmap = "seismic"
-        if metric != "fc":
-            sequential_colormaps = [
-                "Blues",
-                "BuGn",
-                "BuPu",
-                "GnBu",
-                "Greens",
-                "Greys",
-                "Oranges",
-                "OrRd",
-                "PuBu",
-                "PuBuGn",
-                "PuRd",
-                "Purples",
-                "RdPu",
-                "Reds",
-                "YlGn",
-                "YlGnBu",
-                "YlOrBr",
-                "YlOrRd",
-                "afmhot",
-                "autumn",
-                "bone",
-                "cool",
-                "copper",
-                "gist_heat",
-                "gray",
-                "hot",
-                "pink",
-                "spring",
-                "summer",
-                "winter",
-                "viridis",
-                "plasma",
-                "inferno",
-                "magma",
-                "cividis",
-            ]
-            if cmap not in sequential_colormaps and cmap not in diverging_colormaps:
-                logger.info(f"For metric {metric}, colormap should be sequential: using 'viridis'.")
-                cmap = "viridis"
+        all_feature_names = [feat for feat in self.feature_names if feat != "intercept"]
+        if isinstance(interaction_subset, str):
+            interaction_subset = [interaction_subset]
+        feature_names = all_feature_names if interaction_subset is None else interaction_subset
 
         if fontsize is None:
             fontsize = rcParams.get("font.size")
         if figsize is None:
             # Set figure size based on the number of interaction features and targets:
-            m = len(feature_names) * 40 / 300
-            n = len(targets) * 40 / 300
+            m = len(cell_types) * 40 / 300
+            n = len(feature_names) * 40 / 300
             figsize = (n, m)
 
-        for target in targets:
-            # Get coefficients for this key
-            if interaction_subset is not None:
-                if target not in interaction_subset:
-                    continue
-            coef = self.coeffs[target]
-            # Make sure coef columns are matched with :attr `feature_names`, which are sorted in alphabetical order:
-            coef.columns = [col.replace("b_", "") for col in coef.columns]
-            coef.columns = coef.columns.map(
-                lambda col: ":".join("/".join(sorted(section.split("/"))) for section in col.split(":", 1))
-            )
-            coef.columns = [f"b_{col}" for col in coef.columns]
+        if isinstance(target_subset, str):
+            target_subset = [target_subset]
+        targets = all_targets if target_subset is None else target_subset
+        combinations = product(cell_types, targets)
+        combinations = [f"{ct}-{target}" for ct, target in combinations]
 
-            columns = [col for col in coef.columns if col.startswith("b_") and "intercept" not in col]
-            feat_names_target = [col.replace("b_", "") for col in columns]
+        df = pd.DataFrame(0, index=combinations, columns=feature_names)
+        for ct in cell_types:
+            cell_type_mask = adata.obs[self.group_key] == ct
+            cell_type_mask = adata.obs[cell_type_mask].index
 
-            # All necessary variables for any option:
-            # Get actual expression for the target:
-            target_expr = adata[:, target].X.toarray().squeeze() > 0
-            # Get predicted expression for the target from the loaded predictions:
-            target_pred = predictions[target].values.astype(bool)
+            # Get appropriate coefficient arrays:
+            for target in targets:
+                if to_plot == "mean":
+                    mean_effects = []
+                    coef_target = self.coeffs[target]
 
-            # Indices of target-expressing cells that are predicted to be expressing target:
-            target_true_pos_indices = np.where(target_expr & target_pred)[0]
-            # Indices of non-expressing cells that are predicted not to be expressing target:
-            target_true_neg_indices = np.where(~target_expr & ~target_pred)[0]
+                    for feat in feature_names:
+                        if f"b_{feat}" in coef_target.columns:
+                            # Get mean effect size for each interaction feature in each cell type:
+                            mean_effects.append(coef_target.loc[cell_type_mask, f"b_{feat}"].values.mean())
+                        else:
+                            mean_effects.append(0)
+                    df.loc[f"{ct}-{target}", :] = mean_effects
+                elif to_plot == "percentage":
+                    percentages = []
+                    coef_target = self.coeffs[target]
 
-            # Extract only the rows of coef that correspond to target-expressing cells that are predicted to be
-            # positive:
-            coef_target_tp = coef.iloc[target_true_pos_indices, :]
-            # And the rows of coef that correspond to non-expressing cells that are predicted to be negative:
-            coef_target_tn = coef.iloc[target_true_neg_indices, :]
+                    for feat in feature_names:
+                        if f"b_{feat}" in coef_target.columns:
+                            # Get percentage of cells in each cell type that express each interaction feature:
+                            percentages.append(
+                                (coef_target.loc[cell_type_mask, f"b_{feat}"].values > effect_threshold).mean()
+                            )
+                        else:
+                            percentages.append(0)
+                    df.loc[f"{ct}-{target}", :] = percentages
 
-            # Compute total number of target-expressing cells:
-            n_target_expr_cells = len(target_expr)
-            n_nonzero_interactions = np.sum(coef_target_tp != 0, axis=0)
+        # Apply metric threshold (do this in a grouped manner, for each target):
+        # Split the index to get the targets portion of the tuples
+        grouping_element = df.index.map(lambda x: x.split("-")[1])
+        # Compute the maximum (and optionally used minimum) for each group
+        group_max = df.groupby(grouping_element).max()
+        # Apply the threshold in a grouped fashion
+        for group in group_max.index:
+            # Select the rows belonging to the current group
+            group_rows = df.index[df.index.str.contains(f"-{group}$")]
 
-            # For fold-change, significance will be incorporated post-calculation:
-            if plot_significant and metric != "fc":
-                # Adjust coefficients array to include only the significant coefficients:
-                # Try to load significance matrix, and if not found, compute it:
-                try:
-                    parent_dir = os.path.dirname(self.output_path)
-                    is_significant_df = pd.read_csv(
-                        os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
-                    )
-                except:
-                    self.logger.info(
-                        "Could not find significance matrix. Computing it now with the "
-                        "Benjamini-Hochberg correction and significance threshold of 0.05..."
-                    )
-                    self.compute_coeff_significance()
-                    parent_dir = os.path.dirname(self.output_path)
-                    is_significant_df = pd.read_csv(
-                        os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
-                    )
-
-                # Convolve coefficients with significance matrix:
-                coef = coef * is_significant_df[feat_names_target].values
-
-                # Extract only the rows of coef that correspond to target-expressing cells that are predicted to be
-                # positive:
-                coef_target_tp = coef.iloc[target_true_pos_indices, :]
-                # And the rows of coef that correspond to non-expressing cells that are predicted to be negative:
-                coef_target_tn = coef.iloc[target_true_neg_indices, :]
-
-            if metric == "number":
-                n_nonzero_interactions.index = [idx.replace("b_", "") for idx in n_nonzero_interactions.index]
-                # Compute proportion:
-                df.loc[feat_names_target, target] = n_nonzero_interactions
-            elif metric == "multiplicity":
-                multiplicity_series = pd.Series()
-
-                # For each interaction (each column), subset to nonzero rows:
-                for col in coef_target_tp.columns:
-                    nonzero_rows = coef_target_tp[coef_target_tp[col] != 0]
-                    # Count the number of predicted cooccurring interactions (exclude the current column and count
-                    # the number of nonzeros in each row):
-                    count_nonzero = (nonzero_rows.drop(columns=[col]) != 0).sum(axis=1)
-                    # Compute the multiplicity of the interaction as the mean number of cooccurring interactions:
-                    multiplicity_series[col.replace("b_", "")] = count_nonzero.mean()
-                df.loc[feat_names_target, target] = multiplicity_series
-            elif metric == "proportion":
-                proportions = n_nonzero_interactions / n_target_expr_cells
-                proportions.index = [idx.replace("b_", "") for idx in proportions.index]
-                # Compute proportion:
-                df.loc[feat_names_target, target] = proportions
-            elif metric == "specificity":
-                # Design matrix will be used for this mode:
-                feat_names_target_sub = [feat for feat in feat_names_target if feat in self.design_matrix.columns]
-                dm = self.design_matrix[feat_names_target_sub]
-
-                # Intersection of each interaction w/ target-expressing cells to determine the numerator for the
-                # proportion:
-                intersections = pd.Series(0, index=columns)
-                for col in columns:
-                    nz_indices = np.where(coef[col].values != 0)[0]
-                    intersection = np.intersect1d(target_true_pos_indices, nz_indices)
-                    intersections[col] = len(intersection)
-                intersections.index = [idx.replace("b_", "") for idx in intersections.index]
-
-                # Compute number of cells for which each interaction is inferred to be present to determine the
-                # denominator for the proportion:
-                n_nonzero_interactions = np.sum(dm != 0, axis=0)
-                proportions = intersections / n_nonzero_interactions
-
-                # Ratio of intersections to total number of nonzero values:
-                df.loc[feat_names_target, target] = proportions
-            elif metric == "mean":
-                means = np.mean(coef_target_tp, axis=0)
-                means.index = [idx.replace("b_", "") for idx in means.index]
-                df.loc[:, target] = means
-            elif metric == "fc":
-                # log1p transform AnnData to mitigate the effect of large numerical outliers:
-                adata.X = log1p(adata)
-
-                # Get indices of zero effect and predicted nonzero effect:
-                for col in columns:
-                    feat = col.replace("b_", "")
-                    nz_effect_indices = np.where(coef_target_tp[col].values != 0)[0]
-                    if len(nz_effect_indices) < 100:
-                        self.logger.info(f"Interaction {feat} has too few nonzero effects. Skipping...")
-                        df.loc[feat, target] = 0.0
-                        df_pvals.loc[feat, target] = 1.0
-                        continue
-                    zero_effect_indices = np.where(coef_target_tn[col].values == 0)[0]
-
-                    # Compute mean target expression for both subsets:
-                    mean_target_nonzero = adata[nz_effect_indices, target].X.mean()
-                    mean_target_zero = adata[zero_effect_indices, target].X.mean()
-
-                    # Compute fold-change:
-                    df.loc[feat, target] = mean_target_nonzero / mean_target_zero
-                    # Compute p-value:
-                    _, pval = scipy.stats.ranksums(
-                        adata[nz_effect_indices, target].X.toarray(), adata[zero_effect_indices, target].X.toarray()
-                    )
-                    df_pvals.loc[feat, target] = pval
-
-        # For metric = fold change, significance of the fold-change:
-        if metric == "fc":
-            # Multiple testing correction for each target using the Benjamin-Hochberg method:
-            for col in df_pvals.columns:
-                df_pvals[col] = multitesting_correction(df_pvals[col], method="fdr_bh")
-
-            # Optionally, for plotting, retain fold-changes w/ significant corrected p-values:
-            if plot_significant:
-                df[df_pvals > 0.05] = 0.0
-
-        # Formatting for visualization:
-        df.index = [replace_col_with_collagens(idx) for idx in df.index]
-        if metric == "fc" or metric == "fc_qvals":
-            df_pvals.index = [replace_col_with_collagens(idx) for idx in df_pvals.index]
-        df.index = [replace_hla_with_hlas(idx) for idx in df.index]
-        if metric == "fc" or metric == "fc_qvals":
-            df_pvals.index = [replace_hla_with_hlas(idx) for idx in df_pvals.index]
-
-        # Plot preprocessing:
-        # For metric = fold change q-values, compute the log-transformed fold change:
-        if metric == "fc_qvals":
-            df_log = np.log10(df_pvals.values)
-            df_log[df_log < cut_pvals] = cut_pvals
-            df_pvals = pd.DataFrame(df_log, index=df_pvals.index, columns=df_pvals.columns)
-            if center is None:
-                center = np.percentile(df_pvals.values.flatten(), 30)
-            else:
-                center = np.percentile(df_pvals.values.flatten(), center)
-            # Adjust cmap such that the value typically corresponding to the minimum is the max- the max p-value is
-            # the least significant:
-            cmap = f"{cmap}_r"
-            label = "$\log_{10}$ FDR-corrected pvalues"
-            title = "Significance of target gene expression \n fold-change for each interaction"
-        elif metric == "fc":
-            # Set values below cutoff to 1 (no fold-change):
-            df[(df < metric_threshold + 1) & (df > 1 - metric_threshold)] = 1.0
-            if center is None:
-                center = np.percentile(df.values.flatten(), 30)
-            else:
-                center = np.percentile(df.values.flatten(), center)
-            vmax = np.max(np.abs(df.values))
-            vmin = 0.0
-            label = "Fold-change, $\log_{e}$ expression"
-            title = "Target gene expression \n fold-change for each interaction"
-        elif metric == "mean":
-            df[np.abs(df) < metric_threshold] = 0.0
-            if center is None:
-                center = np.percentile(df.values.flatten(), 30)
-            else:
-                center = np.percentile(df.values.flatten(), center)
-            vmax = np.max(df.values)
-            vmin = np.min(df.values)
-            label = "Mean effect size"
-            title = "Mean effect size for \n each interaction on each target"
-        elif metric in ["number", "multiplicity", "proportion", "specificity"]:
-            if normalize:
-                df = (df - df.min()) / (df.max() - df.min() + 1e-8)
-                if center is None:
-                    center = 0.5
-            else:
-                if metric == "number" or metric == "multiplicity":
-                    if center is None:
-                        center = np.percentile(df.values.flatten(), 30)
-                    else:
-                        center = np.percentile(df.values.flatten(), center)
-                elif metric == "proportion" or metric == "specificity":
-                    if center is None:
-                        center = 0.3
-            df[df < metric_threshold] = 0.0
-            vmax = np.max(np.abs(df.values))
-            vmin = 0
-            if metric == "number":
-                label = "Number of cells" if not normalize else "Number of cells (normalized)"
-                title = (
-                    "Number of cells w/ predicted effect \n on target for each interaction"
-                    if not normalize
-                    else "Number of cells w/ predicted effect \n on target for each interaction (normalized)"
-                )
-            elif metric == "proportion":
-                label = "Proportion of cells" if not normalize else "Proportion of cells (normalized)"
-                title = (
-                    "Proportion of cells w/ predicted effect \n on target for each interaction"
-                    if not normalize
-                    else "Proportion of cells w/ predicted effect \n on target for each interaction (normalized)"
-                )
-            elif metric == "specificity":
-                label = "Specificity" if not normalize else "Specificity (normalized)"
-                title = (
-                    "Exclusivity of predicted effect \n on target for each interaction"
-                    if not normalize
-                    else "Proportion of cells w/ predicted effect \n on target for each interaction (normalized)"
-                )
-
-        if metric_upper_cutoff is not None:
-            df[df > metric_upper_cutoff] = metric_upper_cutoff
-
-        # Remove rows that are all zero:
-        df = df.loc[~(df == 0).all(axis=1)]
-        # Remove rows with exactly one nonzero:
-        df = df.loc[df.ne(0).sum(axis=1) != 1]
-        if "df_pvals" in locals():
-            df_pvals = df_pvals.loc[~(df_pvals == 0).all(axis=1)]
-
-        # Plot heatmap:
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-        if metric == "fc_qvals":
-            qv = sns.heatmap(
-                df_pvals,
-                square=True,
-                linecolor="grey",
-                linewidths=0.3,
-                cbar_kws={"label": label, "location": "top"},
-                cmap=cmap,
-                center=center,
-                vmin=cut_pvals,
-                vmax=0,
-                ax=ax,
+            # Apply the lower threshold specific to this group
+            df.loc[group_rows] = df.loc[group_rows].where(
+                df.loc[group_rows].ge(lower_threshold * group_max.loc[group]), 0
             )
 
-            # Outer frame:
-            for _, spine in qv.spines.items():
-                spine.set_visible(True)
-                spine.set_linewidth(0.75)
+            if normalize_targets:
+                # Take 0 to be the min. value in all cases:
+                df.loc[group_rows] = df.loc[group_rows] / group_max.loc[group]
+
+        if upper_threshold != 1.0:
+            df[df >= upper_threshold * df.max().max()] = df.max().max()
+
+        # Optionally, normalize each row by minmax scaling (to get an idea of the top effects for each target),
+        # or each column by minmax scaling:
+        if row_normalize or col_normalize or normalize_targets:
+            normalize = True
         else:
+            normalize = False
+
+        if row_normalize:
+            # Calculate row-wise min and max
+            row_min = df.min(axis=1).values.reshape(-1, 1)
+            row_max = df.max(axis=1).values.reshape(-1, 1)
+
+            df = (df - row_min) / (row_max - row_min)
+        elif col_normalize:
+            df = (df - df.min()) / (df.max() - df.min())
+        df.fillna(0, inplace=True)
+        # Hierarchical clustering- first to group interactions w/ similar patterns across cell types:
+        col_linkage = sch.linkage(df.transpose(), method="ward")
+        col_dendro = sch.dendrogram(col_linkage, no_plot=True)
+        col_clustered_order = col_dendro["leaves"]
+        df = df.iloc[:, col_clustered_order]
+
+        # Then to group cell types w/ similar interaction patterns, if specified:
+        if hierarchical_cluster_y:
+            row_linkage = sch.linkage(df, method="ward")
+            row_dendro = sch.dendrogram(row_linkage, no_plot=True)
+            row_clustered_order = row_dendro["leaves"]
+            df = df.iloc[row_clustered_order, :]
+        else:
+            # Sort by target:
+            # Create a temporary MultiIndex
+            df.index = pd.MultiIndex.from_tuples(df.index.str.split("-").map(tuple), names=["first", "second"])
+            if group_y_cell_type:
+                # Sort by the first element, then the second
+                df.sort_index(level=["first", "second"], inplace=True)
+            else:
+                # Sort by the second element, then the first
+                df.sort_index(level=["second", "first"], inplace=True)
+            # Revert to the original index format
+            df.index = df.index.map("-".join)
+        df = df.loc[:, ~(df == 0).all()]
+
+        if plot_type == "heatmap":
+            # Plot heatmap:
+            vmin = 0
+            vmax = 1 if normalize else df.max().max()
+
+            if normalize and to_plot == "mean":
+                label = (
+                    "Normalized avg. effect per cell type"
+                    if not normalize_targets
+                    else "Normalized avg. effect per cell type (normalized by target)"
+                )
+            elif normalize and to_plot == "percentage":
+                label = (
+                    "Normalized enrichment of effect per cell type"
+                    if not normalize_targets
+                    else "Normalized enrichment of effect per cell type (normalized by target)"
+                )
+            elif not normalize and to_plot == "mean":
+                label = "Avg. effect per cell type"
+            else:
+                label = "Enrichment of effect per cell type"
+
+            if self.mod_type == "lr":
+                x_label = "Interaction"
+                title = "Enrichment of L:R interaction in each cell type"
+            elif self.mod_type == "ligand":
+                x_label = "Neighboring ligand expression"
+                title = "Enrichment of neighboring ligand expression in each cell type for each target"
+            elif self.mod_type == "receptor":
+                x_label = "Receptor expression"
+                title = "Enrichment of receptor expression in each cell type"
+
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            # Formatting color legend:
+            target_colors = plt.cm.get_cmap("tab20").colors
+            if group_y_cell_type:
+                color_mapping = {
+                    annotation: target_colors[i % len(target_colors)] for i, annotation in enumerate(set(cell_types))
+                }
+            else:
+                color_mapping = {
+                    annotation: target_colors[i % len(target_colors)] for i, annotation in enumerate(set(targets))
+                }
+            max_annotation_length = max([len(annotation) for annotation in color_mapping.keys()])
+            if max_annotation_length > 30:
+                ax2_size = "30%"
+            elif max_annotation_length > 20:
+                ax2_size = "20%"
+            else:
+                ax2_size = "10%"
+
+            divider = make_axes_locatable(ax)
+            ax2 = divider.append_axes("right", size=ax2_size, pad=0)
+
+            # Keep track of groups:
+            current_group = None
+            group_start = None
+
+            # Color legend:
+            if group_y_cell_type:
+                group_labels = [idx.split("-")[0] for idx in df.index]
+            else:
+                group_labels = [idx.split("-")[1] for idx in df.index]
+            for i, annotation in enumerate(group_labels):
+                if annotation != current_group:
+                    if current_group is not None:
+                        group_center = len(df) - ((group_start + i - 1) / 2) - 1
+                        ax2.text(0.22, group_center, current_group, va="center", ha="left", fontsize=fontsize)
+
+                    current_group = annotation
+                    group_start = i
+
+                color = color_mapping[annotation]
+                ax2.add_patch(plt.Rectangle((0, i), 0.2, 1, color=color))
+            # Add label for the last group:
+            group_center = len(df) - ((group_start + len(df) - 1) / 2) - 1
+            ax2.text(0.22, group_center, current_group, va="center", ha="left", fontsize=fontsize)
+            ax2.set_ylim(0, len(df.index))
+            ax2.axis("off")
+
+            thickness = 0.3 * figsize[0] / 10
             mask = df == 0
             m = sns.heatmap(
                 df,
                 square=True,
                 linecolor="grey",
-                linewidths=0.3,
-                cbar_kws={"label": label, "location": "top"},
+                linewidths=thickness,
+                cbar_kws={"label": label, "location": "top", "pad": 0},
                 cmap=cmap,
                 center=center,
                 vmin=vmin,
@@ -981,25 +893,30 @@ class MuSIC_Interpreter(MuSIC):
             # Outer frame:
             for _, spine in m.spines.items():
                 spine.set_visible(True)
-                spine.set_linewidth(0.75)
+                spine.set_linewidth(thickness * 2.5)
 
-        # Adjust colorbar label font size
-        cbar = m.collections[0].colorbar
-        cbar.set_label(label, fontsize=fontsize * 1.1)
-        # Adjust colorbar tick font size
-        cbar.ax.tick_params(labelsize=fontsize)
+            # Adjust colorbar label font size
+            cbar = m.collections[0].colorbar
+            cbar.set_label(label, fontsize=fontsize * 1.5, labelpad=10)
+            # Adjust colorbar tick font size
+            cbar.ax.tick_params(labelsize=fontsize * 1.25)
+            cbar.ax.set_aspect(0.033)
 
-        plt.xlabel("Target gene", fontsize=fontsize * 1.1)
-        plt.ylabel("Interaction", fontsize=fontsize * 1.1)
-        plt.xticks(fontsize=fontsize)
-        plt.yticks(fontsize=fontsize)
-        plt.title(title, fontsize=fontsize * 1.25)
-        plt.tight_layout()
+            ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
+            ax.set_ylabel("Cell Type-Specific Target", fontsize=fontsize * 1.25)
+            ax.tick_params(axis="x", labelsize=fontsize, rotation=90)
+            ax.tick_params(axis="y", labelsize=fontsize)
+            ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
+            # fig.tight_layout()
 
-        # Use the saved name for the AnnData object to define part of the name of the saved file:
-        base_name = os.path.basename(self.adata_path)
-        adata_id = os.path.splitext(base_name)[0]
-        prefix = f"{adata_id}_{metric}"
+            # Use the saved name for the AnnData object to define part of the name of the saved file:
+            base_name = os.path.basename(self.adata_path)
+            adata_id = os.path.splitext(base_name)[0]
+            prefix = f"{adata_id}_{to_plot}_enrichment_cell_type"
+
+        else:
+            "Filler"
+
         # Save figure:
         save_return_show_fig_utils(
             save_show_or_return=save_show_or_return,
@@ -1015,10 +932,7 @@ class MuSIC_Interpreter(MuSIC):
         )
 
         if save_df:
-            if metric == "fc_qvals":
-                df_pvals.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
-            else:
-                df.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
+            df.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
 
     def enriched_interactions_barplot(
         self,
@@ -1108,8 +1022,9 @@ class MuSIC_Interpreter(MuSIC):
             average_effects = average_effects[average_effects > effect_size_threshold]
             # Sort the average_expression in descending order
             average_effects = average_effects.sort_values(ascending=False)
-            average_effects.index = [replace_col_with_collagens(idx) for idx in average_effects.index]
-            average_effects.index = [replace_hla_with_hlas(idx) for idx in average_effects.index]
+            if self.mod_type != "ligand":
+                average_effects.index = [replace_col_with_collagens(idx) for idx in average_effects.index]
+                average_effects.index = [replace_hla_with_hlas(idx) for idx in average_effects.index]
 
             # Plot:
             if figsize is None:
@@ -1128,7 +1043,7 @@ class MuSIC_Interpreter(MuSIC):
                 ax=ax,
             )
             ax.set_xticklabels(average_effects.index, rotation=90, fontsize=fontsize)
-            ax.set_yticklabels(["{:.1f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
+            ax.set_yticklabels(["{:.2f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
             ax.set_xlabel("Interaction (ligand(s):receptor(s))", fontsize=fontsize)
             ax.set_ylabel("Mean Coefficient \nMagnitude", fontsize=fontsize)
             ax.set_title(f"Average Predicted Interaction Effects on {target}", fontsize=fontsize)
@@ -1371,6 +1286,7 @@ class MuSIC_Interpreter(MuSIC):
         cbar.set_label("Partial correlation", fontsize=fontsize * 1.1)
         # Adjust colorbar tick font size
         cbar.ax.tick_params(labelsize=fontsize)
+        cbar.ax.set_aspect(0.05)
 
         plt.xlabel("Target gene", fontsize=fontsize * 1.1)
         plt.ylabel("Interaction", fontsize=fontsize * 1.1)
@@ -2890,6 +2806,7 @@ class MuSIC_Interpreter(MuSIC):
             cbar.set_label("Proportion of cells", fontsize=self.fontsize * 1.1)
             # Adjust colorbar tick font size
             cbar.ax.tick_params(labelsize=self.fontsize)
+            cbar.ax.set_aspect(0.05)
 
             # Outer frame:
             for _, spine in hmap.spines.items():
@@ -2947,6 +2864,7 @@ class MuSIC_Interpreter(MuSIC):
             cbar.set_label("Average effect size", fontsize=self.fontsize * 1.1)
             # Adjust colorbar tick font size
             cbar.ax.tick_params(labelsize=self.fontsize)
+            cbar.ax.set_aspect(0.05)
 
             # Outer frame:
             for _, spine in hmap.spines.items():
