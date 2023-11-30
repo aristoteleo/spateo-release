@@ -22,6 +22,7 @@ from patsy import dmatrix
 from scipy.spatial.distance import cdist
 from scipy.stats import spearmanr
 from sklearn.cluster import KMeans
+from tqdm import tqdm
 
 from ...logging import logger_manager as lm
 from ...preprocessing.normalize import factor_normalization
@@ -219,12 +220,11 @@ class MuSIC:
         self.subset = None
         self.subset_indices = None
         self.subset_sample_names = None
-        self.target = None
         self.targets_expr = None
         self.tf_tf_db = None
         self.x_chunk = None
 
-    def _set_up_model(self):
+    def _set_up_model(self, downstream: bool = False):
         if self.mod_type is None and self.adata_path is not None:
             raise ValueError(
                 "No model type provided; need to provide a model type to fit. Options: 'niche', 'lr', "
@@ -239,7 +239,7 @@ class MuSIC:
                     "No CCI directory provided; need to provide a CCI directory to fit a model with "
                     "ligand/receptor expression."
                 )
-            self.load_and_process()
+            self.load_and_process(downstream=downstream)
         else:
             if self.csv_path is None:
                 raise ValueError(
@@ -453,13 +453,15 @@ class MuSIC:
                 self.logger.info(f"Using provided list of target genes: {self.custom_targets}.")
             self.logger.info(f"Saving all outputs to this directory: {os.path.dirname(self.output_path)}.")
 
-    def load_and_process(self, upstream: bool = False):
+    def load_and_process(self, upstream: bool = False, downstream: bool = False):
         """
         Load AnnData object and process it for modeling.
 
         Args:
             upstream: Set False if performing the actual model fitting process, True to define only the AnnData
                 object for upstream purposes.
+            downstream: Set True if setting up a downstream model- in this case, ligand/receptor preprocessing will
+                be skipped.
         """
         try:
             self.adata = anndata.read_h5ad(self.adata_path)
@@ -752,8 +754,11 @@ class MuSIC:
             if self.multicollinear_threshold is not None:
                 X_df = multicollinearity_check(X_df, self.multicollinear_threshold, logger=self.logger)
 
-            # Base 2 log-transform design matrix to deal with the case that there are enormous numerical outliers:
-            X_df = np.log1p(X_df) / np.log(2)
+            # Log-scale to reduce the impact of "denser" neighborhoods:
+            X_df = X_df.applymap(np.log1p)
+
+            # Normalize to alleviate the impact of differences in scale:
+            X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
 
             # Save design matrix and component dataframes (here, target ligands dataframe):
             if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix")):
@@ -779,6 +784,7 @@ class MuSIC:
 
         self.X = X_df.values
         self.feature_names = [f.replace("regulator_", "") for f in X_df.columns]
+        self.logger.info(f"All possible regulatory factors: {self.feature_names}")
 
         # If applicable, add covariates:
         if self.covariate_keys is not None:
@@ -815,13 +821,9 @@ class MuSIC:
         self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
 
         # Compute distance in "signaling space":
-        # Check for dimensionality reduction in the source AnnData object
-        try:
-            self.feature_distance = self.adata.obsm["X_pca"]
-            self.bw_fixed = True
-        except:
-            # Binarize design matrix to encode presence/absence of signaling pairs:
-            self.feature_distance = np.where(self.X > 0, 1, 0)
+        # Binarize design matrix to encode presence/absence of signaling pairs:
+        self.feature_distance = np.where(self.X > 0, 1, 0)
+        self.logger.info(f"Avg. number of TFs: {np.mean(np.sum(self.feature_distance, axis=1)):.2f}")
 
     def define_sig_inputs(self, adata: Optional[anndata.AnnData] = None, recompute: bool = False):
         """For signaling-relevant models, define necessary quantities that will later be used to define the independent
@@ -1685,14 +1687,33 @@ class MuSIC:
                         # or receptor-associated TFs are present in the cell.
                         # Get all receptors that are paired with this ligand:
                         associated_receptors = self.lr_db[self.lr_db["from"] == lig]["to"].unique().tolist()
-                        # Get all TFs that are associated with these receptors:
-                        associated_tfs = (
-                            self.r_tf_db[self.r_tf_db["receptor"].isin(associated_receptors)]["tf"].unique().tolist()
-                        )
-                        to_check = associated_receptors + associated_tfs
-                        to_check = [item for item in to_check if "_" not in item]
-                        to_check = [item for item in to_check if item in self.adata.var_names]
-                        mask = self.adata[:, to_check].X.sum(axis=1) > 0
+                        associated_receptors = [
+                            component for item in associated_receptors for component in item.split("_")
+                        ]
+                        associated_receptors = [rec for rec in associated_receptors if rec in self.adata.var_names]
+                        # Check for receptors expressed in above threshold number of cells:
+                        n_cell_threshold = np.min([1000, self.target_expr_threshold * self.n_samples])
+                        # Filter receptors expressed in more than the threshold number of cells
+                        receptors_above_threshold = [
+                            r for r in associated_receptors if self.adata[:, r].X.sum() > n_cell_threshold
+                        ]
+
+                        if receptors_above_threshold:
+                            # If there are receptors above the threshold, only use these for checking
+                            to_check = receptors_above_threshold
+                        else:
+                            # Get all TFs that are associated with these receptors:
+                            associated_tfs = (
+                                self.r_tf_db[self.r_tf_db["receptor"].isin(associated_receptors)]["tf"]
+                                .unique()
+                                .tolist()
+                            )
+                            to_check = associated_receptors + associated_tfs
+                            to_check = [component for item in to_check for component in item.split("_")]
+                            to_check = [item for item in to_check if item in self.adata.var_names]
+
+                        threshold = 0 if receptors_above_threshold else 3
+                        mask = self.adata[:, to_check].X.sum(axis=1) > threshold
                         mask = np.array(mask).flatten()
                         X_df[lig] = self.ligands_expr[lig] * mask
 
@@ -1729,19 +1750,41 @@ class MuSIC:
                 X_df = X_df.loc[:, (X_df != 0).any(axis=0)]
 
                 if self.mod_type == "ligand":
+                    ligand_to_check_dict = {}
                     for lig in X_df.columns:
                         # Mask the ligand values by a Boolean mask, where element is a 1 if valid (cognate) receptors
                         # or receptor-associated TFs are present in the cell.
                         # Get all receptors that are paired with this ligand:
                         associated_receptors = self.lr_db[self.lr_db["from"] == lig]["to"].unique().tolist()
-                        # Get all TFs that are associated with these receptors:
-                        associated_tfs = (
-                            self.r_tf_db[self.r_tf_db["receptor"].isin(associated_receptors)]["tf"].unique().tolist()
-                        )
-                        to_check = associated_receptors + associated_tfs
-                        to_check = [item for item in to_check if "_" not in item]
-                        to_check = [item for item in to_check if item in self.adata.var_names]
-                        mask = self.adata[:, to_check].X.sum(axis=1) > 0
+                        associated_receptors = [
+                            component for item in associated_receptors for component in item.split("_")
+                        ]
+                        associated_receptors = [rec for rec in associated_receptors if rec in self.adata.var_names]
+                        # Check for receptors expressed in above threshold number of cells:
+                        n_cell_threshold = np.min([1000, self.target_expr_threshold * self.n_samples])
+                        # Filter receptors expressed in more than the threshold number of cells
+                        receptors_above_threshold = [
+                            r for r in associated_receptors if self.adata[:, r].X.sum() > n_cell_threshold
+                        ]
+
+                        if receptors_above_threshold:
+                            # If there are receptors above the threshold, only use these for checking
+                            to_check = receptors_above_threshold
+                        else:
+                            # Get all TFs that are associated with these receptors:
+                            associated_tfs = (
+                                self.r_tf_db[self.r_tf_db["receptor"].isin(associated_receptors)]["tf"]
+                                .unique()
+                                .tolist()
+                            )
+                            to_check = associated_receptors + associated_tfs
+                            to_check = [component for item in to_check for component in item.split("_")]
+                            to_check = [item for item in to_check if item in self.adata.var_names]
+                        ligand_to_check_dict[lig] = to_check
+                        # Arbitrary threshold, but set the number of supporting receptors/TFs to be at least 3 for
+                        # increased confidence:
+                        threshold = 0 if receptors_above_threshold else 3
+                        mask = self.adata[:, to_check].X.sum(axis=1) > threshold
                         mask = np.array(mask).flatten()
                         X_df[lig] = X_df[lig] * mask
 
@@ -1789,6 +1832,14 @@ class MuSIC:
                 X_df_full.to_csv(
                     os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix_full.csv")
                 )
+
+            if self.mod_type == "ligand":
+                # Save the list of receptors/TFs that were checked to allow each ligand to be included in the design:
+                with open(
+                    os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "ligand_to_check_dict.json"),
+                    "w",
+                ) as f:
+                    json.dump(ligand_to_check_dict, f)
 
             if self.mod_type == "ligand" or self.mod_type == "lr":
                 self.logger.info(
@@ -1974,51 +2025,53 @@ class MuSIC:
             sample_names_high_qual = adata_high_qual.obs_names
             y_arr_high_qual = y_arr.loc[sample_names]
             threshold_sampled_names = sample_names.intersection(sample_names_high_qual)
+            if self.spatial_subsample is False:
+                self.logger.info(f"For all targets subsampled from {n_samples} to {adata_high_qual.n_obs} cells.")
 
             for target in y_arr_high_qual.columns:
                 # Skip targets that have already been processed:
                 if target in existing_targets:
-                    self.logger.info(f"Skipping already processed target: {target}")
                     continue
 
                 all_values = y_arr[target].loc[sample_names].values.reshape(-1, 1)
                 sampled_values = y_arr_high_qual[target].loc[threshold_sampled_names].values.reshape(-1, 1)
 
                 data = np.concatenate((sampled_coords, sampled_values), axis=1)
-                if coords.shape[1] == 2:
-                    sampled_df = pd.DataFrame(data, columns=["x", "y", target], index=threshold_sampled_names)
-                else:
-                    sampled_df = pd.DataFrame(data, columns=["x", "y", "z", target], index=threshold_sampled_names)
+                num_dims = sampled_coords.shape[1]
+                dim_names = [f"dim_{i + 1}" for i in range(num_dims)]
+                column_names = dim_names + [target]
+
+                sampled_df = pd.DataFrame(data, columns=column_names, index=threshold_sampled_names)
 
                 # Define relevant dictionaries- only if further subsampling by region will not be performed:
                 if self.spatial_subsample is False:
-                    # Map each non-sampled point to its closest sampled point that matches the expression pattern
-                    # (zero/nonzero):
-                    if coords.shape[1] == 2:
-                        ref = sampled_df[["x", "y"]].values.astype(float)
-                    else:
-                        ref = sampled_df[["x", "y", "z"]].values.astype(float)
-                    distances = cdist(coords.astype(float), ref, "euclidean")
+                    # closest_dict will be the same for all targets:
+                    if "closest_dict" not in locals():
+                        # Use all columns except the last one (target column)
+                        dim_columns = sampled_df.columns[:-1]  # This excludes the target column
+                        ref = sampled_df[dim_columns].values.astype(float)
+                        distances = cdist(coords.astype(float), ref, "euclidean")
 
-                    # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
-                    all_expression = (all_values != 0).flatten()
-                    sampled_expression = sampled_df[target].values != 0
-                    mismatch_mask = all_expression[:, np.newaxis] != sampled_expression
-                    # Replace distances in the mismatch mask with a very large value:
-                    large_value = np.max(distances) + 1
-                    distances[mismatch_mask] = large_value
+                        # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
+                        all_expression = (all_values != 0).flatten()
+                        sampled_expression = sampled_df[target].values != 0
+                        mismatch_mask = all_expression[:, np.newaxis] != sampled_expression
+                        # Replace distances in the mismatch mask with a very large value:
+                        large_value = np.max(distances) + 1
+                        distances[mismatch_mask] = large_value
 
-                    closest_indices = np.argmin(distances, axis=1)
+                        closest_indices = np.argmin(distances, axis=1)
 
-                    # Dictionary where keys are indices of subsampled points and values are lists of indices of the
-                    # original points closest to them:
-                    closest_dict = {}
-                    for i, idx in enumerate(closest_indices):
-                        key = sampled_df.index[idx]
-                        if key not in closest_dict:
-                            closest_dict[key] = []
-                        if sample_names[i] not in sampled_df.index:
-                            closest_dict[key].append(sample_names[i])
+                        # Dictionary where keys are indices of subsampled points and values are lists of indices of the
+                        # original points closest to them:
+                        closest_dict = {}
+                        for i, idx in enumerate(closest_indices):
+                            key = sampled_df.index[idx]
+                            if key not in closest_dict:
+                                closest_dict[key] = []
+                            if sample_names[i] not in sampled_df.index:
+                                closest_dict[key].append(sample_names[i])
+                        self.logger.info("Finished compiling mapping from unsampled to sampled points...")
 
                     # If subsampling by total counts, the arrays of subsampled indices, number subsampled and
                     # subsampled sample names (but notably not the unsampled-to-sampled mapping) are the same,
@@ -2028,7 +2081,7 @@ class MuSIC:
                         self.sample_names.get_loc(name) for name in threshold_sampled_names
                     ]
                     self.n_samples_subsampled[target] = len(threshold_sampled_names)
-                    self.subsampled_sample_names[target] = threshold_sampled_names
+                    self.subsampled_sample_names[target] = list(threshold_sampled_names)
                     self.neighboring_unsampled[target] = closest_dict
 
         # Subsampling by region:
@@ -2217,41 +2270,35 @@ class MuSIC:
                     if "X_pca" in self.adata.obsm_keys():
                         coords_key = "X_pca"
                         initial_bw = 8
-                        alpha = 0.5
+                        alpha = 0.05
+
+                        # Use 0.2% of the total number of cells as the target number of neighbors for the lower
+                        # bandwidth:
+                        n_anchors = np.min((self.n_samples, 5000))
+                        self.minbw = find_bw_for_n_neighbors(
+                            self.adata,
+                            coords_key=coords_key,
+                            n_anchors=n_anchors,
+                            target_n_neighbors=int(0.002 * self.n_samples),
+                            verbose=False,
+                            initial_bw=initial_bw,
+                            alpha=alpha,
+                            normalize_distances=True,
+                        )
+
+                        self.maxbw = find_bw_for_n_neighbors(
+                            self.adata,
+                            coords_key=coords_key,
+                            n_anchors=n_anchors,
+                            target_n_neighbors=int(0.005 * self.n_samples),
+                            verbose=False,
+                            initial_bw=initial_bw,
+                            alpha=alpha,
+                            normalize_distances=True,
+                        )
                     else:
-                        coords_key = "X_jaccard"
-                        initial_bw = 0.2
-                        alpha = 0.1
-
-                    # Check over the 20-60 nearest neighbors- compute distances such that each cell has this number
-                    # on average:
-                    self.minbw = find_bw_for_n_neighbors(
-                        self.adata,
-                        coords_key=coords_key,
-                        target_n_neighbors=20,
-                        verbose=False,
-                        initial_bw=initial_bw,
-                        alpha=alpha,
-                        normalize_distances=True,
-                    )
-
-                    # Take the minimum value between the distance to the 50th nearest neighbor and the distance
-                    # beyond which the distance values to "nearest neighbors" start to become unreasonably large:
-                    max_a = find_threshold_distance(
-                        self.adata, coords_key=coords_key, n_neighbors=20, normalize_distances=True
-                    )
-
-                    max_b = find_bw_for_n_neighbors(
-                        self.adata,
-                        coords_key=coords_key,
-                        target_n_neighbors=60,
-                        verbose=False,
-                        initial_bw=initial_bw,
-                        alpha=alpha,
-                        normalize_distances=True,
-                    )
-
-                    self.maxbw = np.minimum(max_a, max_b)
+                        self.minbw = 0.2
+                        self.maxbw = 0.4
 
                 elif self.distance_membrane_bound is not None and self.distance_secreted is not None:
                     self.minbw = (
@@ -2272,10 +2319,9 @@ class MuSIC:
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
                 if self.mod_type == "downstream":
-                    # Check over the 10-50 nearest neighbors- compute distances such that each cell has this number
-                    # on average:
-                    self.minbw = 10
-                    self.maxbw = 50
+                    # Compute distances such that each cell has this number on average:
+                    self.minbw = int(0.002 * self.n_samples)
+                    self.maxbw = int(0.005 * self.n_samples)
 
                 if self.maxbw is None:
                     # If kernel decays with distance, larger bandwidth to capture more neighbors:
@@ -2673,7 +2719,8 @@ class MuSIC:
 
             # Fitting for each location, or each location that is among the subsampled points:
             pos = 0
-            for i in self.x_chunk:
+            # for i in self.x_chunk:
+            for pos, i in enumerate(tqdm(self.x_chunk, desc="Fitting using final bandwidth...")):
                 local_fit_outputs[pos] = self.local_fit(
                     i,
                     y,
@@ -2782,7 +2829,8 @@ class MuSIC:
             trace_hat = 0
             nan_count = 0
 
-            for i in self.x_chunk:
+            # for i in self.x_chunk:
+            for pos, i in enumerate(tqdm(self.x_chunk, desc="Fitting for each location...")):
                 fit_outputs = self.local_fit(
                     i,
                     y,
@@ -2814,7 +2862,8 @@ class MuSIC:
             pos = 0
             y_pred = np.empty(self.x_chunk.shape[0], dtype=np.float64)
 
-            for i in self.x_chunk:
+            # for i in self.x_chunk:
+            for pos, i in enumerate(tqdm(self.x_chunk, desc="Fitting for each location...")):
                 fit_outputs = self.local_fit(
                     i,
                     y,
@@ -2947,8 +2996,8 @@ class MuSIC:
                 target_TFs = target_row[target_row == 1].index.tolist()
                 if len(target_TFs) == 0:
                     self.logger.info(
-                        "None of the provided regulators could be found to have an association with the "
-                        "target gene. Skipping past this target."
+                        f"None of the provided regulators could be found to have an association with target gene "
+                        f"{target}. Skipping past this target."
                     )
                     continue
 
@@ -3003,8 +3052,8 @@ class MuSIC:
                     target_TFs = target_rows[target_rows == 1].index.tolist()
                 if len(target_TFs) == 0:
                     self.logger.info(
-                        "None of the provided regulators could be found to have an association with the "
-                        "target gene. Skipping past this target."
+                        f"None of the provided regulators could be found to have an association with target gene "
+                        f"{target}. Skipping past this target."
                     )
                     continue
 
@@ -3014,7 +3063,11 @@ class MuSIC:
                 # Other TFs that interact with these transcription factors:
                 target_TFs_i_int = [tf for tf in target_TFs if tf in self.tf_tf_db.columns]
                 intersecting_tf_subset = list(self.tf_tf_db[(self.tf_tf_db[target_TFs_i_int] == 1).any(axis=1)].index)
-                target_regulators = target_TFs + cof_subset + intersecting_tf_subset
+                # TFs that can regulate expression of the target-binding TFs:
+                primary_tf_rows = self.grn.loc[[tf for tf in target_TFs if tf in self.grn.index]]
+                secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
+
+                target_regulators = target_TFs + cof_subset + intersecting_tf_subset + secondary_TFs
                 # If there are no features, skip fitting for this gene and move on:
                 if len(target_regulators) == 0:
                     self.logger.info(
@@ -3024,6 +3077,10 @@ class MuSIC:
                     continue
 
                 keep_indices = [i for i, feat in enumerate(self.feature_names) if feat in target_regulators]
+                self.logger.info(
+                    f"For target {target}, from {len(self.feature_names)} features, kept {len(keep_indices)} to fit "
+                    f"model."
+                )
                 X_labels = [self.feature_names[idx] for idx in keep_indices]
                 X = X_orig[:, keep_indices]
             else:
@@ -3382,48 +3439,46 @@ class MuSIC:
                 if isinstance(standard_errors.index[0], int) or isinstance(standard_errors.index[0], float):
                     standard_errors.index = [self.X_df.index[idx] for idx in standard_errors.index]
 
-                if not downstream:
-                    # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
-                    # subsampling is not done by cell type group):
-                    _, filename = os.path.split(self.output_path)
-                    filename = os.path.splitext(filename)[0]
+                # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
+                # subsampling is not done by cell type group):
+                _, filename = os.path.split(self.output_path)
+                filename = os.path.splitext(filename)[0]
 
-                    if os.path.exists(os.path.join(parent_dir, "subsampling", f"{filename}.json")):
-                        with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "r") as dict_file:
-                            neighboring_unsampled = json.load(dict_file)
+                if os.path.exists(os.path.join(parent_dir, "subsampling", f"{filename}.json")):
+                    with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "r") as dict_file:
+                        neighboring_unsampled = json.load(dict_file)
 
-                        sampled_to_nonsampled_map = neighboring_unsampled[target]
-                        betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
-                        standard_errors = standard_errors.reindex(
-                            self.X_df.index, columns=standard_errors.columns, fill_value=0
-                        )
-                        for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
-                            for nonsampled_idx in nonsampled_idxs:
-                                betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
-                                standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
-                                standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
+                    sampled_to_nonsampled_map = neighboring_unsampled[target]
+                    betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
+                    standard_errors = standard_errors.reindex(
+                        self.X_df.index, columns=standard_errors.columns, fill_value=0
+                    )
+                    for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
+                        for nonsampled_idx in nonsampled_idxs:
+                            betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
+                            standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
+                            standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
 
-                        # If this cell does not express the receptor(s) or doesn't have the ligand in neighborhood,
-                        # mask out the relevant element in "betas" and standard errors- specifically for ligand and
-                        # receptor models, do not infer expression in cells that do not express the target because it
-                        # is unknown whether the ligand/receptor (the half of the interacting pair that is missing) is
-                        # present in the neighborhood of these cells:
-                        if self.mod_type in ["receptor", "ligand"]:
-                            mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
-                            betas *= mask_matrix
-                            standard_errors *= mask_matrix
-                        else:
-                            mask_df = (self.X_df != 0).astype(int)
-                            mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
-                            mask_matrix = mask_df.values
-                            betas *= mask_matrix
-                            standard_errors *= mask_matrix
+                    # If this cell does not express the receptor(s) or doesn't have the ligand in neighborhood,
+                    # mask out the relevant element in "betas" and standard errors- specifically for ligand and
+                    # receptor models, do not infer expression in cells that do not express the target because it
+                    # is unknown whether the ligand/receptor (the half of the interacting pair that is missing) is
+                    # present in the neighborhood of these cells:
+                    if self.mod_type in ["receptor", "ligand"]:
+                        mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
+                        betas *= mask_matrix
+                        standard_errors *= mask_matrix
+                    else:
+                        mask_df = (self.X_df != 0).astype(int)
+                        mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
+                        mask_matrix = mask_df.values
+                        betas *= mask_matrix
+                        standard_errors *= mask_matrix
 
                 # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
                 # object, save back to file path:
                 all_outputs = pd.concat([betas, standard_errors], axis=1)
-                if not downstream:
-                    all_outputs.to_csv(os.path.join(parent_dir, file))
+                all_outputs.to_csv(os.path.join(parent_dir, file))
 
                 # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas

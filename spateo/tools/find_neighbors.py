@@ -180,7 +180,11 @@ def compute_distances_and_connectivities(
 
 
 def calculate_distances_chunk(
-    coords_chunk: np.ndarray, chunk_start_idx: int, coords: np.ndarray, n_nonzeros: Optional[dict] = None
+    coords_chunk: np.ndarray,
+    chunk_start_idx: int,
+    coords: np.ndarray,
+    n_nonzeros: Optional[dict] = None,
+    metric: str = "euclidean",
 ) -> np.ndarray:
     """Pairwise distance computation, coupled with :func `find_bw`.
 
@@ -189,8 +193,10 @@ def calculate_distances_chunk(
         chunk_start_idx: Index of the first sample in the chunk. Required if `n_nonzeros` is not None.
         coords: Array of shape (n_samples, n_features) containing the coordinates of all points.
         n_nonzeros: Optional dictionary containing the number of non-zero columns for each row in the distance matrix.
+        metric: Distance metric to use for pairwise distance computation, can be any of the metrics supported by
+            :func `sklearn.metrics.pairwise_distances`.
     """
-    distances_chunk = pairwise_distances(coords_chunk, coords, metric="euclidean")
+    distances_chunk = pairwise_distances(coords_chunk, coords, metric=metric)
 
     # If n_nonzeros is not None, find the number of columns that are nonzero across both rows:
     if n_nonzeros is not None:
@@ -198,7 +204,7 @@ def calculate_distances_chunk(
         paired_nonzeros = np.zeros_like(distances_chunk)
         for i in range(distances_chunk.shape[0]):
             for j in range(distances_chunk.shape[1]):
-                paired_nonzeros[i, j] = len(n_nonzeros[chunk_start_idx + i] | n_nonzeros[j])
+                paired_nonzeros[i, j] = len(n_nonzeros[chunk_start_idx + i] & n_nonzeros[j])
         normalized_chunk = distances_chunk / paired_nonzeros
         distances_chunk = normalized_chunk
 
@@ -247,20 +253,29 @@ def find_bw_for_n_neighbors(
         anchor_coords = coords[anchor_indices]
         chunk_size = min(chunk_size, anchor_coords.shape[0])
     else:
+        anchor_indices = np.arange(coords.shape[0])
         anchor_coords = coords
 
-    # If normalize_distances is True, get the indices of nonzero columns for each row in the distance matrix:
-    if normalize_distances:
+    metric = "jaccard" if "jaccard" in coords_key else "euclidean"
+
+    # If normalize_distances is True, get the indices of nonzero columns for each row in the distance matrix- only
+    # used if metric is Euclidean distance:
+    if normalize_distances and metric == "euclidean":
         n_nonzeros = {}
-        for i in range(anchor_coords.shape[0]):
-            n_nonzeros[i] = set(np.nonzero(anchor_coords[i, :])[0])
+        for i in range(coords.shape[0]):
+            n_nonzeros[i] = set(np.nonzero(coords[i, :])[0])
     else:
         n_nonzeros = None
 
     # Compute distances in chunks, include start and end indices:
-    chunks_with_indices = [(anchor_coords[i : i + chunk_size], i) for i in range(0, anchor_coords.shape[0], chunk_size)]
+    chunks_with_indices = [
+        (anchor_coords[i : i + chunk_size], anchor_indices[i]) for i in range(0, anchor_coords.shape[0], chunk_size)
+    ]
     # Calculate pairwise distances for each chunk in parallel
-    partial_func = partial(calculate_distances_chunk, coords=coords, n_nonzeros=n_nonzeros)
+    if metric == "jaccard":
+        partial_func = partial(calculate_distances_chunk, coords=coords, metric=metric)
+    else:
+        partial_func = partial(calculate_distances_chunk, coords=coords, n_nonzeros=n_nonzeros, metric=metric)
     distances = Parallel(n_jobs=-1)(delayed(partial_func)(chunk, start_idx) for chunk, start_idx in chunks_with_indices)
     # Concatenate the results to get the full pairwise distance matrix
     distances = np.concatenate(distances, axis=0)

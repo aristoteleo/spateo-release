@@ -24,6 +24,7 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import plotly
+import plotly.graph_objs as go
 import scipy.cluster.hierarchy as sch
 import scipy.sparse
 import scipy.stats
@@ -31,8 +32,7 @@ import seaborn as sns
 from joblib import Parallel, delayed
 from matplotlib import rcParams
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-from scipy.stats import pearsonr, spearmanr, ttest_1samp
+from scipy.stats import pearsonr, spearmanr, ttest_1samp, ttest_ind
 from sklearn.decomposition import TruncatedSVD
 from sklearn.metrics import (
     confusion_matrix,
@@ -43,15 +43,16 @@ from sklearn.metrics import (
 from sklearn.preprocessing import normalize
 from tqdm.auto import tqdm
 
+import spateo.tools.find_neighbors
+
 from ...configuration import config_spateo_rcParams
 from ...logging import logger_manager as lm
 from ...plotting.static.networks import plot_network
 from ...plotting.static.utils import save_return_show_fig_utils
-from ...preprocessing.transform import log1p
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
 from ..utils import compute_corr_ci
 from .MuSIC import MuSIC
-from .regression_utils import multitesting_correction, permutation_testing, wald_test
+from .regression_utils import multitesting_correction, wald_test
 from .SWR import define_spateo_argparse
 
 
@@ -63,7 +64,6 @@ class MuSIC_Interpreter(MuSIC):
     Interpretation and downstream analysis of spatially weighted regression models.
 
     Args:
-        comm: MPI communicator object initialized with mpi4py, to control parallel processing operations
         parser: ArgumentParser object initialized with argparse, to parse command line arguments for arguments
             pertinent to modeling.
         args_list: If parser is provided by function call, the arguments to parse must be provided as a separate
@@ -75,7 +75,6 @@ class MuSIC_Interpreter(MuSIC):
 
         self.k = self.arg_retrieve.top_k_receivers
 
-        self.logger.info("Gathering all information from preliminary L:R model...")
         # Coefficients:
         if not self.set_up:
             self.logger.info(
@@ -92,7 +91,11 @@ class MuSIC_Interpreter(MuSIC):
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
         )
 
-        self.predictions = pd.read_csv(os.path.join(os.path.dirname(self.output_path), "predictions.csv"), index_col=0)
+        # If predictions of an L:R model have been computed, load these as well:
+        if os.path.exists(os.path.join(os.path.dirname(self.output_path), "predictions.csv")):
+            self.predictions = pd.read_csv(
+                os.path.join(os.path.dirname(self.output_path), "predictions.csv"), index_col=0
+            )
 
         # Save directory:
         parent_dir = os.path.dirname(self.output_path)
@@ -523,6 +526,667 @@ class MuSIC_Interpreter(MuSIC):
             plt.tight_layout()
             plt.show()
 
+    def visualize_effect_specificity(
+        self,
+        denominator: Literal["target", "interaction"] = "target",
+        n_cells_threshold: int = 200,
+        cell_type_specific: bool = False,
+        target_subset: Optional[List[str]] = None,
+        interaction_subset: Optional[List[str]] = None,
+        ct_subset: Optional[List[str]] = None,
+        group_key: Optional[str] = None,
+        effect_threshold: float = 0.05,
+        use_significant: bool = False,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        center: Optional[float] = None,
+        cmap: str = "Reds",
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+        save_df: bool = False,
+    ):
+        """Computes and visualizes the specificity of the effect of each interaction on each target. Specificity can
+        be defined as the proportion of cells expressing the target that also express the interaction,
+        or the proportion of cells expressing the interaction for which the interaction is predicted to effect a
+        particular target.
+
+        Args:
+            denominator: Either "target" or "interaction". If "target", specificity is defined as the proportion of
+                cells expressing the target that also express the interaction. If "interaction", specificity is defined
+                as the proportion of cells expressing the interaction for which the interaction is predicted to effect
+                a particular target.
+            n_cells_threshold: Minimum number of cells expressing the target or interaction, over all cells or over
+                cells of each type (if cell_type_specific is True). For interactions/targets below this threshold,
+                value will be set to 0.
+            cell_type_specific: Whether to factor in cell type-specific expression of each target
+            target_subset: List of targets to consider. If None, will use all targets used in model fitting.
+            interaction_subset: List of interactions to consider. If None, will use all interactions used in model.
+                Is necessary if "plot_type" is "barplot", since the barplot is only designed to accomodate up to three
+                interactions at once.
+            ct_subset: Only used if "cell_type_specific" is True. If given, will search for cell types in
+                "group_key" attribute from model initialization. Recommended to use to subset to cell types with
+                sufficient numbers. If not given, will use all cell types.
+            group_key: Can be used to specify entry in adata.obs that contains cell type groupings. If None,
+                will use :attr `group_key` from model initialization.
+            effect_threshold: Threshold minimum effect size to consider an effect for further analysis, as an absolute
+                value. Defaults to 0.05.
+            use_significant: Whether to use only significant effects in computing the specificity. If True,
+                will filter to cells + interactions where the interaction is significant for the target. Only valid
+                if :func `compute_coeff_significance()` has been run.
+            fontsize: Size of font for x and y labels.
+            figsize: Size of figure.
+            center: Optional, determines position of the colormap center. Between 0 and 1.
+            cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
+                the range is 0. It is recommended to use a sequential colormap (e.g. "Reds", "Blues", "Viridis",
+                etc.). For metric = "fc", if a divergent colormap is not provided, "seismic" will automatically be
+                used.
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+            save_df: Set True to save the metric dataframe in the end
+        """
+        logger = lm.get_main_logger()
+        config_spateo_rcParams()
+        # But set display DPI to 300:
+        plt.rcParams["figure.dpi"] = 300
+
+        if denominator not in ["target", "interaction"]:
+            raise ValueError(f"Input to 'denominator' must be either 'target' or 'interaction'")
+
+        # If cell type-specific, save the output rather than plotting all of them:
+        if cell_type_specific:
+            logger.info("Cell type-specific analysis: saving output rather than plotting.")
+            save_show_or_return = "save"
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
+        if save_df:
+            output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder)
+
+        # Colormap should be sequential:
+        sequential_colormaps = [
+            "Blues",
+            "BuGn",
+            "BuPu",
+            "GnBu",
+            "Greens",
+            "Greys",
+            "Oranges",
+            "OrRd",
+            "PuBu",
+            "PuBuGn",
+            "PuRd",
+            "Purples",
+            "RdPu",
+            "Reds",
+            "YlGn",
+            "YlGnBu",
+            "YlOrBr",
+            "YlOrRd",
+            "afmhot",
+            "autumn",
+            "bone",
+            "cool",
+            "copper",
+            "gist_heat",
+            "gray",
+            "hot",
+            "pink",
+            "spring",
+            "summer",
+            "winter",
+            "viridis",
+            "plasma",
+            "inferno",
+            "magma",
+            "cividis",
+        ]
+        if cmap not in sequential_colormaps:
+            logger.info("Colormap should be sequential: using 'viridis'.")
+            cmap = "viridis"
+
+        if cell_type_specific:
+            if group_key is None:
+                group_key = self.group_key
+
+            if isinstance(ct_subset, str):
+                ct_subset = [ct_subset]
+            if ct_subset is None:
+                adata = self.adata.copy()
+            else:
+                adata = self.adata[self.adata.obs[group_key].isin(ct_subset)].copy()
+            cell_types = adata.obs[group_key].unique()
+        else:
+            adata = self.adata.copy()
+
+        all_targets = list(self.coeffs.keys())
+        all_feature_names = [feat for feat in self.feature_names if feat != "intercept"]
+        if isinstance(interaction_subset, str):
+            interaction_subset = [interaction_subset]
+        feature_names = all_feature_names if interaction_subset is None else interaction_subset
+        # Filter out extremely uncommon interactions:
+        feature_names = [feature for feature in feature_names if np.sum(self.X_df[feature] > 0) > n_cells_threshold]
+
+        if isinstance(target_subset, str):
+            target_subset = [target_subset]
+        targets = all_targets if target_subset is None else target_subset
+        # Filter out extremely uncommon targets:
+        targets = [target for target in targets if np.sum(adata[:, target].X > 0) > n_cells_threshold]
+
+        if fontsize is None:
+            fontsize = rcParams.get("font.size")
+
+        if figsize is None:
+            # Set figure size based on the number of interaction features and cell type-target combos:
+            m = len(targets) * 40 / 300
+            n = len(feature_names) * 40 / 300
+            figsize = (n, m)
+
+        dfs = {}
+        if cell_type_specific:
+            # Create a dictionary to store information about which cells belong to which cell types:
+            cell_types_dict = {}
+
+            for ct in cell_types:
+                cell_type_mask = adata.obs[self.group_key] == ct
+                cell_type_mask = adata.obs[cell_type_mask].index
+                cell_types_dict[ct] = cell_type_mask
+                dfs[ct] = pd.DataFrame(0, index=targets, columns=feature_names)
+        else:
+            dfs["all"] = pd.DataFrame(0, index=targets, columns=feature_names)
+
+        expr = pd.DataFrame(adata[:, targets].X.toarray(), index=adata.obs.index, columns=targets)
+
+        # Fill in all dataframes:
+        for dict_name, df in dfs.items():
+            if denominator == "target":
+                # Get the number of cells expressing each target that are also affected by each interaction:
+                if dict_name == "all":
+                    cells_expressing_targets = expr > 0
+                    title = (
+                        "Number of target-expressing cells affected by interaction \n"
+                        "vs. total number of target-expressing cells"
+                    )
+                else:
+                    cell_type = dict_name
+                    cells_expressing_targets = expr.loc[cell_types_dict[cell_type], targets] > 0
+                    title = (
+                        f"Number of target-expressing cells affected by interaction \nvs. total "
+                        f"number of target-expressing cells of type {cell_type}"
+                    )
+
+                for i, target in enumerate(targets):
+                    cells_expressing_target = cells_expressing_targets.iloc[:, i]
+                    coeffs = (
+                        self.coeffs[target]
+                        if dict_name == "all"
+                        else self.coeffs[target].loc[cell_types_dict[cell_type]]
+                    )
+                    if use_significant:
+                        parent_dir = os.path.dirname(self.output_path)
+                        sig = pd.read_csv(
+                            os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
+                        )
+                        coeffs *= sig
+
+                    for j, feature in enumerate(feature_names):
+                        if f"b_{feature}" in coeffs.columns:
+                            cells_expressing_target_and_feature = cells_expressing_target & (
+                                coeffs[f"b_{feature}"] > effect_threshold
+                            )
+                            intersection = np.sum(cells_expressing_target_and_feature)
+                            denom = np.sum(cells_expressing_target)
+                            if denom != 0:
+                                df.loc[target, feature] = intersection / denom
+                            else:
+                                df.loc[target, feature] = 0
+                        else:
+                            df.loc[target, feature] = 0
+
+            else:
+                # Get the number of cells
+                "filler"
+
+            # Hiearchical clustering of both targets and interactions:
+            col_linkage = sch.linkage(df.transpose(), method="ward", metric="euclidean")
+            col_dendro = sch.dendrogram(col_linkage, no_plot=True)
+            col_clustered_order = col_dendro["leaves"]
+            df = df.iloc[:, col_clustered_order]
+
+            row_linkage = sch.linkage(df, method="ward")
+            row_dendro = sch.dendrogram(row_linkage, no_plot=True)
+            row_clustered_order = row_dendro["leaves"]
+            df = df.iloc[row_clustered_order, :]
+
+            dfs[dict_name] = df
+
+            # Set up heatmap for visualization:
+            if self.mod_type == "lr":
+                x_label = "L:R Interaction"
+            elif self.mod_type == "ligand":
+                x_label = "Ligand"
+            elif self.mod_type == "receptor":
+                x_label = "Receptor"
+
+            vmin = 0
+            vmax = 1
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            thickness = 0.3 * figsize[0] / 10
+            mask = df == 0
+            m = sns.heatmap(
+                df,
+                square=True,
+                linecolor="grey",
+                linewidths=thickness,
+                cbar_kws={"label": "Proportion", "location": "top"},
+                cmap=cmap,
+                center=center,
+                vmin=vmin,
+                vmax=vmax,
+                mask=mask,
+                ax=ax,
+            )
+
+            # Outer frame:
+            for _, spine in m.spines.items():
+                spine.set_visible(True)
+                spine.set_linewidth(thickness * 2.5)
+
+            # Adjust colorbar label font size
+            cbar = m.collections[0].colorbar
+            cbar.set_label("Proportion", fontsize=fontsize * 1.5, labelpad=20)
+            # Adjust colorbar tick font size
+            cbar.ax.tick_params(labelsize=fontsize * 1.25)
+            cbar.ax.set_aspect(0.033)
+
+            ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
+            ax.set_ylabel("Cell Type-Specific Target", fontsize=fontsize * 1.25)
+            ax.tick_params(axis="x", labelsize=fontsize, rotation=90)
+            ax.tick_params(axis="y", labelsize=fontsize)
+            ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
+
+            # Use the saved name for the AnnData object to define part of the name of the saved file:
+            base_name = os.path.basename(self.adata_path)
+            adata_id = os.path.splitext(base_name)[0]
+            prefix = f"{adata_id}_{dict_name}_{denominator}_specificity_of_effects"
+
+            save_kwargs["ext"] = "png"
+            save_kwargs["dpi"] = 300
+            save_kwargs["path"] = figure_folder
+            save_return_show_fig_utils(
+                save_show_or_return=save_show_or_return,
+                show_legend=False,
+                background="white",
+                prefix=prefix,
+                save_kwargs=save_kwargs,
+                total_panels=1,
+                fig=fig,
+                axes=ax,
+                return_all=False,
+                return_all_list=None,
+            )
+
+            if save_df:
+                df.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
+
+    def explore_interaction_effect_coverage(
+        self,
+        target: str,
+        reference_interactions: Optional[List[str]] = None,
+        effect_threshold: float = 0.05,
+        use_significant: bool = False,
+        upper_threshold: float = 0.5,
+        lower_cooccurence_threshold: float = 0.1,
+        lower_specificity_threshold: float = 0.1,
+    ) -> anndata.AnnData:
+        """Given a set of reference interaction(s), finds cells expressing the target in the absence of any reference
+        interactions and determines interaction effects that are enriched in the remainder of the cells,
+        in ranked order (with two lists- ranking determined first by highest enrichment in the remaining cells and
+        also by least amount of overlap with the reference interactions).
+
+        Args:
+            target: Target gene of interest
+            reference_interactions: List of reference interactions- will find cells for which the reference
+                interaction is predicted to have an effect and then find interactions that are enriched in the rest.
+            effect_threshold: Threshold for the effect size of an interaction/effect to be considered for analysis;
+                only used if "to_plot" is "percentage". Defaults to 0.0.
+            use_significant: Whether to use only significant effects in computing the specificity. If True,
+                will filter to cells + interactions where the interaction is significant for the target. Only valid
+                if :func `compute_coeff_significance()` has been run.
+            upper_threshold: Upper threshold for the proportion of cells affected by a particular interaction for the
+                interaction to be considered for this analysis. Defaults to 0.5.
+            lower_cooccurence_threshold: Lower threshold for the proportion of target-expressing cells that are
+                affected by a particular interaction to be included in the printed output. Defaults to 0.1.
+            lower_specificity_threshold: Lower threshold for the proportion of cells affected by a particular
+                interaction
+
+        Returns:
+            adata: Will store results in .obs entry "interaction_effect_coverage", which will label cells accordingly
+                based on the given reference interactions.
+        """
+        logger = lm.get_main_logger()
+        adata = self.adata.copy()
+        coef_target = self.coeffs[target]
+
+        if use_significant:
+            parent_dir = os.path.dirname(self.output_path)
+            sig = pd.read_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0)
+            coef_target *= sig
+
+        # Filter out interactions present in at least 50% of cells- although important they are less likely to be
+        # especially interesting:
+        coef_target = coef_target.loc[:, np.sum(coef_target > 0, axis=0) < upper_threshold * coef_target.shape[0]]
+
+        coeff_target_filter = coef_target > effect_threshold
+        coef_target *= coeff_target_filter
+        interaction_rows = coef_target[reference_interactions].any(axis=1)
+        cells_expressing_target = pd.DataFrame(adata[:, target].X.toarray().reshape(-1) > 0, index=adata.obs_names)
+        coef_ref_interaction_target = interaction_rows & cells_expressing_target[target]
+
+        # Cells expressing target in absence of reference interactions:
+        cells_expressing_target_no_ref = cells_expressing_target[target] & ~coef_ref_interaction_target
+        # Rank the most prevalent co-occurring interactions:
+        coef_non_ref = coef_target[[col for col in coef_target.columns if col not in reference_interactions]]
+        coef_non_ref_interaction_target = coef_non_ref.loc[cells_expressing_target_no_ref].astype(bool)
+        interaction_cooccurrence = coef_non_ref_interaction_target.sum() / cells_expressing_target_no_ref.sum()
+        interaction_cooccurrence.sort_values(ascending=False, inplace=True)
+        interaction_cooccurrence = interaction_cooccurrence[interaction_cooccurrence > lower_cooccurence_threshold]
+        logger.info(f"Top interactions affecting {target} in absence of reference interactions, ranked: ")
+        print(interaction_cooccurrence)
+
+        # And the co-occurring interactions that are most specific to these cells:
+        interactions_df = self.X_df.loc[cells_expressing_target_no_ref, coef_non_ref_interaction_target.columns].astype(
+            bool
+        )
+        interaction_specificity = coef_non_ref_interaction_target.sum() / interactions_df.sum()
+        interaction_specificity = interaction_specificity[interaction_specificity > lower_specificity_threshold]
+        if len(interaction_specificity) > 0:
+            logger.info(
+                f"No interactions are highly specific to target-expressing cells that are not affected by "
+                f"{reference_interactions}. Try lowering threshold from {lower_specificity_threshold}."
+            )
+        else:
+            interaction_specificity.sort_values(ascending=False, inplace=True)
+            logger.info(
+                f"Top interactions specific to {target}-expressing cells that are not affected by "
+                f"{reference_interactions}, ranked: "
+            )
+            print(interaction_specificity)
+
+        # Define AnnData .obs to label cells by their reference interactions:
+        # For each reference interaction, normalize the effect size by minmax scaling:
+        coef_target_mod = coef_target * coef_ref_interaction_target
+        percentile_997 = coef_target_mod.quantile(0.997)
+        coef_target_mod = coef_target_mod.clip(upper=percentile_997, axis=1)
+        coef_target_mod = (coef_target_mod - coef_target_mod.min()) / (coef_target_mod.max() - coef_target_mod.min())
+        max_interaction = coef_target_mod.idxmax(axis=1)
+        # If the second largest interaction effect is half the max, label as "Multiple interactions"
+        max_value = coef_target_mod.max(axis=1)
+        half_max_value = max_value / 2
+        mask_multiple_interactions = coef_target_mod.apply(
+            lambda row: row.nlargest(2).values[-1] >= half_max_value[row.name], axis=1
+        )
+        labels = [f"{interaction} effect region" for interaction in max_interaction]
+        labels = np.where(mask_multiple_interactions, "Multiple interactions", labels)
+        adata.obs[f"interaction_effect_on_{target}_coverage"] = labels
+        return adata
+
+    def visualize_neighborhood(
+        self,
+        target: str,
+        interaction: str,
+        use_significant: bool = False,
+        n_anchors: int = 100,
+        n_neighbors_expressing: int = 20,
+        display_plot: bool = True,
+    ) -> anndata.AnnData:
+        """Sets up AnnData object for visualization of interaction effects- cells will be colored by expression of
+        the target gene, potentially conditioned on receptor expression, and neighboring cells will be colored by
+        ligand expression.
+
+        Args:
+            target: Target gene of interest
+            interaction: Interaction feature to visualize, given in the same form as in the design matrix (if model
+                is a ligand-based model or receptor-based model, this will be of form "Col4a1". If model is a
+                ligand-receptor based model, this will be of form "Col4a1:Itgb1", for example).
+            use_significant: Whether to use only significant effects in computing the specificity. If True,
+                will filter to cells + interactions where the interaction is significant for the target. Only valid
+                if :func `compute_coeff_significance()` has been run.
+            n_anchors: Number of target gene-expressing cells to use as anchors for visualization. Will be selected
+                randomly from the set of target gene-expressing cells.
+            n_neighbors_expressing: Filters the set of cells that can be selected as anchors based on the number of
+                their neighbors that express the chosen ligand. Only used for models that incorporate ligand expression.
+            display_plot: Whether to save a plot. If False, will return the AnnData object without doing
+                anything else- this can then be visualized e.g. using spateo-viewer.
+
+        Returns:
+            adata: Modified AnnData object containing the expression information for the target gene and neighboring
+                ligand expression.
+        """
+        # Compute connectivity matrix if not already existing- only needed for ligand and L:R models:
+        from ..find_neighbors import neighbors
+
+        logger = lm.get_main_logger()
+
+        if display_plot:
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
+            path = os.path.join(figure_folder, f"{target}_example_neighborhoods.html")
+            logger.info(f"Saving plot to {path}")
+
+        if self.mod_type != "lr" and self.mod_type != "ligand":
+            logger.info("This function is only applicable for ligand-based models.")
+
+        if "spatial_connectivities" in self.adata.obsp.keys():
+            conn = self.adata.obsp["spatial_connectivities"]
+        else:
+            logger.info("Spatial graph not found, computing...")
+            conn = None
+
+        if conn is None:
+            _, adata = neighbors(
+                self.adata,
+                n_neighbors=self.n_neighbors_membrane_bound * 2,
+                basis="spatial",
+                spatial_key=self.coords_key,
+                n_neighbors_method="ball_tree",
+            )
+            conn = adata.obsp["spatial_connectivities"]
+
+        adata = self.adata.copy()
+        coef_target = self.coeffs[target]
+        if use_significant:
+            parent_dir = os.path.dirname(self.output_path)
+            sig = pd.read_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0)
+            coef_target *= sig
+
+        # Compute the multiple possible masks that can be used to subset to the cells of interest:
+        # Get the target gene expression:
+        target_expression = adata[:, target].X.toarray().reshape(-1)
+        # Get the interaction effect:
+        interaction_effect = coef_target[f"b_{interaction}"].values
+
+        # Get the cells expressing the target gene:
+        target_expressing_mask = target_expression > 0
+        target_expressing_cells = adata.obs_names[target_expressing_mask]
+        # Cells with significant interaction effect on target:
+        interaction_mask = interaction_effect > 0
+        interaction_cells = adata.obs_names[interaction_mask]
+
+        # If applicable, split the interaction feature and get the ligand and receptor- for features w/ multiple
+        # ligands or multiple receptors, process accordingly:
+        to_check = interaction.split(":")[0] if ":" in interaction else interaction
+        if "/" in to_check:
+            genes = to_check.split("/")
+            separator = "/"
+        elif "_" in to_check:
+            genes = to_check.split("_")
+            separator = "_"
+        else:
+            genes = [to_check]
+            separator = None
+
+        if separator == "/":
+            # Cells expressing any of the genes
+            ligand_expr_mask = np.zeros(len(adata), dtype=bool)
+            for gene in genes:
+                ligand_expr_mask |= adata[:, gene].X.toarray().squeeze() > 0
+        elif separator == "_":
+            # Cells expressing all of the genes
+            ligand_expr_mask = np.ones(len(adata), dtype=bool)
+            for gene in genes:
+                ligand_expr_mask &= adata[:, gene].X.toarray().squeeze() > 0
+        else:
+            # Single gene
+            ligand_expr_mask = adata[:, to_check].X.toarray().squeeze() > 0
+
+        # Check how many cells have sufficient number of neighbors expressing the ligand:
+        neighbor_counts = np.zeros(len(adata))
+        for i in range(len(adata)):
+            # Get neighbors
+            neighbors = conn[i].nonzero()[1]
+            neighbor_counts[i] = np.sum(ligand_expr_mask[neighbors])
+
+        # Get the cells with sufficient number of neighbors expressing the ligand:
+        cells_meeting_neighbor_ligand_threshold = adata.obs_names[neighbor_counts > n_neighbors_expressing]
+
+        if self.mod_type == "lr":
+            to_check = interaction.split(":")[1] if ":" in interaction else interaction
+            if "_" in to_check:
+                genes = to_check.split("_")
+                separator = "_"
+            else:
+                genes = [to_check]
+                separator = None
+
+            if separator == "_":
+                # Cells expressing all of the genes
+                receptor_expr_mask = np.ones(len(adata), dtype=bool)
+                for gene in genes:
+                    receptor_expr_mask &= adata[:, gene].X.toarray().squeeze() > 0
+            else:
+                # Single gene
+                receptor_expr_mask = adata[:, to_check].X.toarray().squeeze() > 0
+            # Get the cells expressing the receptor, to further subset the target-expressing cells to also :
+            receptor_expressing_cells = adata.obs_names[receptor_expr_mask]
+
+        if self.mod_type == "lr":
+            # Get the intersection of cells expressing target, predicted to be affected by interaction,
+            # with sufficient number of neighbors expressing the chosen ligand and expressing receptor:
+            adata_mask = (
+                target_expressing_cells
+                & interaction_cells
+                & cells_meeting_neighbor_ligand_threshold
+                & receptor_expressing_cells
+            )
+        else:
+            # Get the intersection of cells expressing target, predicted to be affected by interaction,
+            # and with sufficient number of neighbors expressing the chosen ligand:
+            adata_mask = target_expressing_cells & interaction_cells & cells_meeting_neighbor_ligand_threshold
+        adata_sub = adata[adata_mask].copy()
+
+        # Randomly choose a subset of target cells to use as anchors:
+        target_expressing_selected = np.random.choice(adata_sub.obs_names, size=n_anchors, replace=False)
+        selected_indices = [np.where(adata.obs_names == string)[0][0] for string in target_expressing_selected]
+        # Find the neighbors of these anchor cells:
+        neighbors = conn[selected_indices].nonzero()[1]
+        neighbors = np.unique(neighbors)
+        # Remove the anchor cells from the neighbors:
+        neighbors = neighbors[~np.isin(neighbors, selected_indices)]
+        neighbors_selected = adata.obs_names[neighbors]
+
+        # Target expression in the selected cells:
+        target_expression = adata_sub[target_expressing_selected, target].X.toarray().squeeze()
+        # Ligand expression in the neighbors:
+        ligand = interaction.split(":")[0] if ":" in interaction else interaction
+        genes = ligand.split("/")
+        gene_values = adata[neighbors_selected, genes].X.toarray()
+        if separator == "/":
+            # Arithmetic mean of the genes
+            ligand_expression = np.mean(gene_values, axis=1)
+        elif separator == "_":
+            # Geometric mean of the genes
+            # Replace zeros with np.nan
+            gene_values[gene_values == 0] = np.nan
+            # Compute product along the rows
+            products = np.nanprod(gene_values, axis=1)
+            # Count non-nan values in each row for nth root calculation
+            non_nan_counts = np.sum(~np.isnan(gene_values), axis=1)
+            # Avoid division by zero
+            non_nan_counts[non_nan_counts == 0] = np.nan
+            ligand_expression = np.power(products, 1 / non_nan_counts)
+        else:
+            ligand_expression = adata[neighbors_selected, ligand].X.toarray().squeeze()
+
+        adata.obs[f"{interaction}_{target}_example_points"] = 0.0
+        adata.obs.loc[target_expressing_selected, f"{interaction}_{target}_example_points"] = target_expression
+        adata.obs.loc[neighbors_selected, f"{interaction}_{target}_example_points"] = ligand_expression
+
+        if display_plot:
+            # plotly to create 3D scatter plot:
+            spatial_coords = adata.obsm[self.coords_key]
+            if spatial_coords.shape[1] == 2:
+                x, y = spatial_coords[:, 0], spatial_coords[:, 1]
+                z = np.zeros(len(x))
+            else:
+                x, y, z = spatial_coords[:, 0], spatial_coords[:, 1], spatial_coords[:, 2]
+
+            # Color assignment:
+            default_color = "#D3D3D3"
+            # Apply 'cool' colormap to target_expression
+            target_cmap = plt.cm.get_cmap("cool")
+            target_colors = target_cmap(
+                adata.obs.loc[target_expressing_selected, f"{interaction}" f"_{target}_example_points"]
+            )
+            scatter_target = go.Scatter3d(
+                x=x[selected_indices],
+                y=y[selected_indices],
+                z=z[selected_indices],
+                mode="markers",
+                marker=dict(color=target_colors, size=1.5, colorbar=dict(title=f"{target} Expression")),
+            )
+
+            # Apply 'hot' colormap to ligand_expression
+            ligand_cmap = plt.cm.get_cmap("hot")
+            ligand_colors = ligand_cmap(adata.obs.loc[neighbors_selected, f"{interaction}_{target}_example_points"])
+            scatter_ligand = go.Scatter3d(
+                x=x[neighbors],
+                y=y[neighbors],
+                z=z[neighbors],
+                mode="markers",
+                marker=dict(color=ligand_colors, size=1.5, colorbar=dict(title=f"{ligand} Expression")),
+            )
+
+            rest_indices = list(set(range(len(x))) - set(selected_indices) - set(neighbors))
+            scatter_rest = go.Scatter3d(
+                x=x[rest_indices],
+                y=y[rest_indices],
+                z=z[rest_indices],
+                mode="markers",
+                marker=dict(color=default_color, size=1.5),
+            )
+
+            # Create the figure and add the scatter plots
+            fig = go.Figure(data=[scatter_rest, scatter_target, scatter_ligand])
+
+            # Turn off the grid
+            fig.update_layout(
+                scene=dict(xaxis=dict(showgrid=False), yaxis=dict(showgrid=False), zaxis=dict(showgrid=False)),
+                margin=dict(l=0, r=0, b=0, t=30),  # Adjust margins to minimize spacing
+                title=dict(text=f"Target: {target}, Ligand: {ligand}", y=0.9, yanchor="top", x=0.5, xanchor="center"),
+            )
+            fig.write_html(path)
+
+        return adata
+
     def cell_type_specific_interactions(
         self,
         to_plot: Literal["mean", "percentage"] = "mean",
@@ -534,6 +1198,7 @@ class MuSIC_Interpreter(MuSIC):
         lower_threshold: float = 0.3,
         upper_threshold: float = 1.0,
         effect_threshold: float = 0.0,
+        use_significant: bool = False,
         row_normalize: bool = False,
         col_normalize: bool = False,
         normalize_targets: bool = False,
@@ -556,14 +1221,13 @@ class MuSIC_Interpreter(MuSIC):
             to_plot: Whether to plot the mean effect size or the proportion of cells in a cell type w/ effect on
                 target. Options are "mean" or "percentage".
             plot_type: Whether to plot the results as a heatmap or barplot. Options are "heatmap" or "barplot". If
-                "barplot", must provide a subset of up to three interactions to visualize.
+                "barplot", must provide a subset of up to four interactions to visualize.
             group_key: Can be used to specify entry in adata.obs that contains cell type groupings. If None,
                 will use :attr `group_key` from model initialization.
             ct_subset: Can be used to restrict the enrichment analysis to only cells of a particular type. If given,
                 will search for cell types in "group_key" attribute from model initialization. Recommended to use to
                 subset to cell types with sufficient numbers.
-            target_subset: List of targets to consider- only applicable if "to_plot" is "effect". If None, will use all
-                targets used in model fitting.
+            target_subset: List of targets to consider. If None, will use all targets used in model fitting.
             interaction_subset: List of interactions to consider. If None, will use all interactions used in model.
                 Is necessary if "plot_type" is "barplot", since the barplot is only designed to accomodate up to three
                 interactions at once.
@@ -575,8 +1239,11 @@ class MuSIC_Interpreter(MuSIC):
                 particular interaction/effect for it to be colored on the plot, as a proportion of the max value.
                 Threshold will be applied to the non-normalized values (if normalization is applicable). Defaults to
                 1.0 (the max value).
-            effect_threshold: Threshold for the effect size of an interaction/effect to be considered significant;
+            effect_threshold: Threshold for the effect size of an interaction/effect to be considered for analysis;
                 only used if "to_plot" is "percentage". Defaults to 0.0.
+            use_significant: Whether to use only significant effects in computing the specificity. If True,
+                will filter to cells + interactions where the interaction is significant for the target. Only valid
+                if :func `compute_coeff_significance()` has been run.
             row_normalize: Whether to minmax scale the metric values by row (i.e. for each interaction/effect). Helps
                 to alleviate visual differences that result from scale rather than differences in mean value across
                 cell types.
@@ -612,16 +1279,29 @@ class MuSIC_Interpreter(MuSIC):
         # But set display DPI to 300:
         plt.rcParams["figure.dpi"] = 300
 
+        if to_plot not in ["mean", "percentage"]:
+            raise ValueError("Unrecognized input for plotting. Options are 'mean' or 'percentage'.")
+
+        if plot_type == "barplot" and interaction_subset is None:
+            raise ValueError("Must provide a subset of interactions to visualize if 'plot_type' is 'barplot'.")
+        if plot_type == "barplot" and len(interaction_subset) > 4:
+            raise ValueError(
+                "Can only visualize up to four interactions at once with 'barplot' (for practical/plot "
+                "readability reasons)."
+            )
+
+        if self.mod_type not in ["lr", "ligand", "receptor"]:
+            raise ValueError("Model type must be one of 'lr', 'ligand', or 'receptor'.")
+
+        if save_show_or_return in ["save", "both", "all"]:
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
+
         if save_df:
             output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder)
-
-        if to_plot not in ["mean", "percentage"]:
-            raise ValueError(f"Unrecognized input for plotting. Options are 'mean' or 'percentage'.")
-
-        if self.mod_type not in ["lr", "ligand", "receptor"]:
-            raise ValueError(f"Model type must be one of 'lr', 'ligand', or 'receptor'.")
 
         # Colormap should be sequential:
         sequential_colormaps = [
@@ -686,17 +1366,23 @@ class MuSIC_Interpreter(MuSIC):
 
         if fontsize is None:
             fontsize = rcParams.get("font.size")
-        if figsize is None:
-            # Set figure size based on the number of interaction features and targets:
-            m = len(cell_types) * 40 / 300
-            n = len(feature_names) * 40 / 300
-            figsize = (n, m)
 
         if isinstance(target_subset, str):
             target_subset = [target_subset]
         targets = all_targets if target_subset is None else target_subset
         combinations = product(cell_types, targets)
         combinations = [f"{ct}-{target}" for ct, target in combinations]
+
+        if figsize is None:
+            if plot_type == "heatmap":
+                # Set figure size based on the number of interaction features and cell type-target combos:
+                m = len(combinations) * 40 / 300
+                n = len(feature_names) * 40 / 300
+            else:
+                # Set figure size based on the number of cell type-target combos:
+                n = len(combinations) * 40 / 300
+                m = (n / 3) * len(interaction_subset)
+            figsize = (n, m)
 
         df = pd.DataFrame(0, index=combinations, columns=feature_names)
         for ct in cell_types:
@@ -708,6 +1394,12 @@ class MuSIC_Interpreter(MuSIC):
                 if to_plot == "mean":
                     mean_effects = []
                     coef_target = self.coeffs[target]
+                    if use_significant:
+                        parent_dir = os.path.dirname(self.output_path)
+                        sig = pd.read_csv(
+                            os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
+                        )
+                        coef_target *= sig
 
                     for feat in feature_names:
                         if f"b_{feat}" in coef_target.columns:
@@ -794,57 +1486,80 @@ class MuSIC_Interpreter(MuSIC):
             df.index = df.index.map("-".join)
         df = df.loc[:, ~(df == 0).all()]
 
+        if normalize and to_plot == "mean":
+            if plot_type == "heatmap":
+                label = (
+                    "Normalized avg. effect per cell type"
+                    if not normalize_targets
+                    else "Normalized avg. effect per cell type (normalized within target)"
+                )
+            else:
+                label = (
+                    "Normalized avg. effect\n per cell type"
+                    if not normalize_targets
+                    else "Normalized avg. effect\n per cell type \n(normalized within target)"
+                )
+        elif normalize and to_plot == "percentage":
+            if plot_type == "heatmap":
+                label = (
+                    "Normalized enrichment of effect per cell type"
+                    if not normalize_targets
+                    else "Normalized enrichment of effect per cell type (normalized within target)"
+                )
+            else:
+                label = (
+                    "Normalized enrichment of\n effect per cell type"
+                    if not normalize_targets
+                    else "Normalized enrichment of\n effect per cell type\n (normalized within target)"
+                )
+        elif not normalize and to_plot == "mean":
+            label = "Avg. effect per cell type" if plot_type == "heatmap" else "Avg. effect\n per cell type"
+        else:
+            label = (
+                "Enrichment of effect per cell type"
+                if plot_type == "heatmap"
+                else "Enrichment of effect\n per cell type"
+            )
+
+        if self.mod_type == "lr":
+            x_label = "Interaction"
+            title = "Enrichment of L:R interaction in each cell type"
+        elif self.mod_type == "ligand":
+            x_label = "Neighboring ligand expression"
+            title = "Enrichment of neighboring ligand expression in each cell type for each target"
+        elif self.mod_type == "receptor":
+            x_label = "Receptor expression"
+            title = "Enrichment of receptor expression in each cell type"
+
+        # Formatting color legend:
+        if group_y_cell_type:
+            group_labels = [idx.split("-")[0] for idx in df.index]
+        else:
+            group_labels = [idx.split("-")[1] for idx in df.index]
+
+        target_colors = plt.cm.get_cmap("tab20").colors
+        if group_y_cell_type:
+            color_mapping = {
+                annotation: target_colors[i % len(target_colors)] for i, annotation in enumerate(set(cell_types))
+            }
+        else:
+            color_mapping = {
+                annotation: target_colors[i % len(target_colors)] for i, annotation in enumerate(set(targets))
+            }
+        max_annotation_length = max([len(annotation) for annotation in color_mapping.keys()])
+        if max_annotation_length > 30:
+            ax2_size = "30%"
+        elif max_annotation_length > 20:
+            ax2_size = "20%"
+        else:
+            ax2_size = "10%"
+
         if plot_type == "heatmap":
             # Plot heatmap:
             vmin = 0
             vmax = 1 if normalize else df.max().max()
 
-            if normalize and to_plot == "mean":
-                label = (
-                    "Normalized avg. effect per cell type"
-                    if not normalize_targets
-                    else "Normalized avg. effect per cell type (normalized by target)"
-                )
-            elif normalize and to_plot == "percentage":
-                label = (
-                    "Normalized enrichment of effect per cell type"
-                    if not normalize_targets
-                    else "Normalized enrichment of effect per cell type (normalized by target)"
-                )
-            elif not normalize and to_plot == "mean":
-                label = "Avg. effect per cell type"
-            else:
-                label = "Enrichment of effect per cell type"
-
-            if self.mod_type == "lr":
-                x_label = "Interaction"
-                title = "Enrichment of L:R interaction in each cell type"
-            elif self.mod_type == "ligand":
-                x_label = "Neighboring ligand expression"
-                title = "Enrichment of neighboring ligand expression in each cell type for each target"
-            elif self.mod_type == "receptor":
-                x_label = "Receptor expression"
-                title = "Enrichment of receptor expression in each cell type"
-
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-            # Formatting color legend:
-            target_colors = plt.cm.get_cmap("tab20").colors
-            if group_y_cell_type:
-                color_mapping = {
-                    annotation: target_colors[i % len(target_colors)] for i, annotation in enumerate(set(cell_types))
-                }
-            else:
-                color_mapping = {
-                    annotation: target_colors[i % len(target_colors)] for i, annotation in enumerate(set(targets))
-                }
-            max_annotation_length = max([len(annotation) for annotation in color_mapping.keys()])
-            if max_annotation_length > 30:
-                ax2_size = "30%"
-            elif max_annotation_length > 20:
-                ax2_size = "20%"
-            else:
-                ax2_size = "10%"
-
             divider = make_axes_locatable(ax)
             ax2 = divider.append_axes("right", size=ax2_size, pad=0)
 
@@ -853,10 +1568,6 @@ class MuSIC_Interpreter(MuSIC):
             group_start = None
 
             # Color legend:
-            if group_y_cell_type:
-                group_labels = [idx.split("-")[0] for idx in df.index]
-            else:
-                group_labels = [idx.split("-")[1] for idx in df.index]
             for i, annotation in enumerate(group_labels):
                 if annotation != current_group:
                     if current_group is not None:
@@ -907,17 +1618,85 @@ class MuSIC_Interpreter(MuSIC):
             ax.tick_params(axis="x", labelsize=fontsize, rotation=90)
             ax.tick_params(axis="y", labelsize=fontsize)
             ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
-            # fig.tight_layout()
+
+            # Use the saved name for the AnnData object to define part of the name of the saved file:
+            base_name = os.path.basename(self.adata_path)
+            adata_id = os.path.splitext(base_name)[0]
+            prefix = f"{adata_id}_{to_plot}_enrichment_cell_type"
+        else:
+            fig, axes = plt.subplots(nrows=len(interaction_subset), ncols=1, figsize=figsize)
+            colormap = plt.cm.get_cmap(cmap)
+            # Determine the order of the plot based on averaging over the chosen interactions (if there is more than
+            # one):
+            df_sub = df[interaction_subset]
+            df_sub["Group"] = group_labels
+            # Ranks within each group:
+            grouped_ranked_df = df_sub.groupby("Group").rank(ascending=False)
+            grouped_ranked_df.drop("Group", axis=1, inplace=True)
+            # Average rank across groups:
+            avg_ranked_df = grouped_ranked_df.mean()
+            # Sort by average rank:
+            sorted_features = avg_ranked_df.sort_values().index.tolist()
+            df = df[sorted_features]
+
+            # Color legend:
+            divider = make_axes_locatable(axes[0])
+            ax2 = divider.append_axes("top", size=ax2_size, pad=0)
+
+            current_group = None
+            group_start = None
+
+            for i, annotation in enumerate(group_labels):
+                if annotation != current_group:
+                    if current_group is not None:
+                        group_center = (group_start + i - 1) / 2
+                        ax2.text(group_center, 0.22, current_group, va="bottom", ha="center", fontsize=fontsize)
+
+                    current_group = annotation
+                    group_start = i
+
+                color = color_mapping[annotation]
+                ax2.add_patch(plt.Rectangle((i, 0.5), 1, 0.2, color=color))
+
+            # Add label for the last group:
+            group_center = (group_start + len(df) - 1) / 2
+            ax2.text(group_center, 0.22, current_group, va="bottom", ha="center", fontsize=fontsize)
+            ax2.set_xlim(0, len(df.index))
+            ax2.axis("off")
+
+            for i, ax in enumerate(axes):
+                # From the larger dataframe, get the column for the chosen interaction as a series:
+                interaction = interaction_subset[i]
+                interaction_series = df[interaction]
+
+                vmin = 0
+                vmax = 1 if normalize else interaction_series.max()
+                norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+                colors = [colormap(norm(val)) for val in interaction_series]
+                sns.barplot(
+                    x=interaction_series.index,
+                    y=interaction_series.values,
+                    edgecolor="black",
+                    linewidth=1,
+                    palette=colors,
+                    ax=ax,
+                )
+                ax.set_xlabel("Cell Type-Specific Target", fontsize=fontsize * 1.25)
+                ax.set_ylabel(label, fontsize=fontsize * 1.25)
+                ax.set_title(interaction, fontsize=fontsize * 1.5, pad=20)
+
+                if ax is axes[-1]:
+                    ax.tick_params(axis="x", labelsize=fontsize, rotation=90)
 
             # Use the saved name for the AnnData object to define part of the name of the saved file:
             base_name = os.path.basename(self.adata_path)
             adata_id = os.path.splitext(base_name)[0]
             prefix = f"{adata_id}_{to_plot}_enrichment_cell_type"
 
-        else:
-            "Filler"
-
         # Save figure:
+        save_kwargs["ext"] = "png"
+        save_kwargs["dpi"] = 300
+        save_kwargs["path"] = figure_folder
         save_return_show_fig_utils(
             save_show_or_return=save_show_or_return,
             show_legend=False,
@@ -933,6 +1712,208 @@ class MuSIC_Interpreter(MuSIC):
 
         if save_df:
             df.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
+
+    def cell_type_interaction_fold_change(
+        self,
+        ref_ct: str,
+        query_ct: str,
+        group_key: Optional[str] = None,
+        target_subset: Optional[List[str]] = None,
+        interaction_subset: Optional[List[str]] = None,
+        to_plot: Literal["mean", "percentage"] = "mean",
+        source_data: Literal["interaction", "effect", "target"] = "effect",
+        top_n_to_plot: Optional[int] = None,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = "seismic",
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+    ):
+        """Computes fold change in predicted interaction effects between two cell types, and visualizes result.
+
+        Args:
+            ref_ct: Label of the first cell type to consider. Fold change will be computed with respect to the level
+                in this cell type.
+            query_ct: Label of the second cell type to consider
+            group_key: Name of the key in .obs containing cell type information. If not given, will use
+                :attr `group_key` from model initialization.
+            target_subset: List of targets to consider. If None, will use all targets used in model fitting.
+            interaction_subset: List of interactions to consider. If None, will use all interactions used in model.
+            to_plot: Whether to plot the mean effect size or the proportion of cells in a cell type w/ effect on
+                target. Options are "mean" or "percentage".
+            source_data: Selects what to use in computing fold changes. Options:
+                - "interaction": will use the design matrix (e.g. neighboring ligand expression or L:R mapping)
+                - "effect": will use the coefficient arrays for each target
+                - "target": will use the target gene expression
+            top_n_to_plot: If given, will only include the top n features in the visualization. Recommended if
+                "source_data" is "effect", as all combinations of interaction and target will be considered in this
+                case.
+            fontsize: Size of font for x and y labels.
+            figsize: Size of figure.
+            cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
+                the range is 0. It is recommended to use a sequential colormap (e.g. "Reds", "Blues", "Viridis",
+                etc.). For metric = "fc", if a divergent colormap is not provided, "seismic" will automatically be
+                used.
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+            save_df: Set True to save the metric dataframe in the end
+
+        Returns:
+
+        """
+        config_spateo_rcParams()
+        # But set display DPI to 300:
+        plt.rcParams["figure.dpi"] = 300
+
+        parent_dir = os.path.dirname(self.output_path)
+        if save_show_or_return in ["save", "both", "all"]:
+            figure_folder = os.path.join(parent_dir, "figures")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
+
+        if fontsize is None:
+            fontsize = rcParams.get("font.size")
+
+        if group_key is None:
+            group_key = self.group_key
+
+        if target_subset is None:
+            target_subset = self.targets_expr.columns
+        if interaction_subset is None:
+            interaction_subset = self.feature_names
+
+        ref_names = self.adata[self.adata.obs[group_key] == ref_ct].obs_names
+        query_names = self.adata[self.adata.obs[group_key] == query_ct].obs_names
+
+        def assign_significance(row):
+            if row["qval"] < 0.0001:
+                return "****"
+            elif row["qval"] < 0.001:
+                return "***"
+            elif row["qval"] < 0.01:
+                return "**"
+            elif row["qval"] < 0.05:
+                return "*"
+            else:
+                return ""
+
+        # Series/dataframes for each group:
+        if source_data == "interaction":
+            ref_data = self.X_df.loc[ref_names, interaction_subset]
+            query_data = self.X_df.loc[query_names, interaction_subset]
+        elif source_data == "effect":
+            # Coefficients for all targets in subset:
+            for target in target_subset:
+                if target not in self.coeffs.keys():
+                    raise ValueError(f"Target {target} not found in model.")
+                else:
+                    coef_target = self.coeffs[target]
+                    coef_target.columns = coef_target.columns.str.replace("b_", "")
+                    coef_target = coef_target[[col for col in coef_target.columns if col != "intercept"]]
+                    coef_target.columns = [replace_col_with_collagens(col) for col in coef_target.columns]
+                    coef_target.columns = [f"{col}-> target {target}" for col in coef_target.columns]
+                    if "effect_df" not in locals():
+                        effect_df = self.coeffs[target].loc[:, interaction_subset]
+                    else:
+                        effect_df = pd.concat([effect_df, coef_target.loc[:, interaction_subset]], axis=1)
+
+            ref_data = effect_df.loc[ref_names, :]
+            query_data = effect_df.loc[query_names, :]
+        elif source_data == "target":
+            ref_data = self.targets_expr.loc[ref_names, target_subset]
+            query_data = self.targets_expr.loc[query_names, target_subset]
+
+        else:
+            raise ValueError(
+                f"Unrecognized input for source_data: {source_data}. Options are 'interaction', 'effect', or 'target'."
+            )
+
+        # Compute significance for each column:
+        pvals = []
+        for col in ref_data.columns:
+            pvals.append(ttest_ind(ref_data[col], query_data[col])[1])
+        # Correct for multiple hypothesis testing:
+        qvals = multitesting_correction(pvals, method="fdr_bh")
+        results = pd.DataFrame(qvals, index=ref_data.columns, columns=["qval"])
+        results["Significance"] = qvals.apply(assign_significance, axis=1)
+
+        if to_plot == "mean":
+            ref_data = ref_data.mean(axis=0)
+            query_data = query_data.mean(axis=0)
+
+            if source_data == "effect":
+                y_label = "filler"
+        elif to_plot == "percentage":
+            ref_data = (ref_data > 0).mean(axis=0)
+            query_data = (query_data > 0).mean(axis=0)
+
+        # Compute fold change:
+        fold_change = query_data / ref_data
+        results["Fold Change"] = fold_change
+        # For percentages, take the log fold change:
+        if to_plot == "percentage":
+            results["Fold Change"] = np.log2(results["Fold Change"])
+        results = results.sort_values("Fold Change")
+
+        # Plot:
+        if figsize is None:
+            # Set figure size based on the number of interaction features and targets:
+            m = len(results) / 2
+            n = m / 2
+            figsize = (n, m)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+
+        cmap = plt.cm.get_cmap(cmap)
+        # For fold change of means, center colormap at 1:
+        if to_plot == "mean":
+            max_distance = max(abs(results["Fold Change"] - 1).max(), abs(results["Fold Change"] - 1).min())
+            norm = plt.Normalize(1 - max_distance, 1 + max_distance)
+        # For fold change of percentages, center colormap at 0:
+        else:
+            max_distance = max(abs(results["Fold Change"]).max(), abs(results["Fold Change"]).min())
+            norm = plt.Normalize(-max_distance, max_distance)
+        colors = cmap(norm(results["Fold Change"]))
+
+        barplot = sns.barplot(
+            x="Fold Change", y=results.index, data=results, orient="h", palette=colors, edgecolor="black", linewidth=1
+        )
+        for index, row in results.iterrows():
+            barplot.text(row["Fold Change"], index, f"{row['Significance']}", color="black", ha="right")
+
+        ax.set_xlim(-max_distance * 1.1, max_distance * 1.1)
+        ax.set_xticklabels(results.index, fontsize=fontsize)
+        ax.set_yticklabels(["{:.2f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
+        ax.set_xlabel(f"Fold Change in \n{query_ct} vs. {ref_ct}", fontsize=fontsize * 1.25)
+        ax.set_xlabel("Interaction (ligand(s):receptor(s))", fontsize=fontsize)
+        ax.set_ylabel("Mean Coefficient \nMagnitude", fontsize=fontsize)
+        ax.set_title(f"Average Predicted Interaction Effects on {target}", fontsize=fontsize)
+
+        # Use the saved name for the AnnData object to define part of the name of the saved file:
+        base_name = os.path.basename(self.adata_path)
+        adata_id = os.path.splitext(base_name)[0]
+        prefix = f"{adata_id}_fold_changes_{source_data}_{ref_ct}_{query_ct}"
+        save_kwargs["ext"] = "png"
+        save_kwargs["dpi"] = 300
+        save_kwargs["path"] = figure_folder
+        # Save figure:
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=False,
+            background="white",
+            prefix=prefix,
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None,
+        )
 
     def enriched_interactions_barplot(
         self,
@@ -990,6 +1971,11 @@ class MuSIC_Interpreter(MuSIC):
         parent_dir = os.path.dirname(self.output_path)
         pred_path = os.path.join(parent_dir, "predictions.csv")
         predictions = pd.read_csv(pred_path, index_col=0)
+
+        if save_show_or_return in ["save", "both", "all"]:
+            figure_folder = os.path.join(parent_dir, "figures")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
 
         if targets is None:
             targets = self.custom_targets
@@ -1052,6 +2038,9 @@ class MuSIC_Interpreter(MuSIC):
             base_name = os.path.basename(self.adata_path)
             adata_id = os.path.splitext(base_name)[0]
             prefix = f"{adata_id}_interaction_barplot_{target}"
+            save_kwargs["ext"] = "png"
+            save_kwargs["dpi"] = 300
+            save_kwargs["path"] = figure_folder
             # Save figure:
             save_return_show_fig_utils(
                 save_show_or_return=save_show_or_return,
@@ -1135,6 +2124,11 @@ class MuSIC_Interpreter(MuSIC):
             "pearson",
             "spearman",
         ], 'only "pearson" and "spearman" are supported for partial correlation.'
+
+        if save_show_or_return in ["save", "both", "all"]:
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
 
         if save_df:
             output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
@@ -1294,6 +2288,9 @@ class MuSIC_Interpreter(MuSIC):
         plt.tight_layout()
 
         # Save figure:
+        save_kwargs["ext"] = "png"
+        save_kwargs["dpi"] = 300
+        save_kwargs["path"] = figure_folder
         save_return_show_fig_utils(
             save_show_or_return=save_show_or_return,
             show_legend=False,
@@ -1997,6 +2994,7 @@ class MuSIC_Interpreter(MuSIC):
     def CCI_deg_detection_setup(
         self,
         group_key: Optional[str] = None,
+        custom_tfs: Optional[List[str]] = None,
         sender_receiver_or_target_degs: Literal["sender", "receiver", "target"] = "sender",
         use_ligands: bool = True,
         use_receptors: bool = False,
@@ -2010,6 +3008,9 @@ class MuSIC_Interpreter(MuSIC):
         Args:
             group_key: Key to add to .obs of the AnnData object created by this function, containing cell type labels
                 for each cell. If not given, will use :attr `group_key`.
+            custom_tfs: Optional list of transcription factors to make sure to be included in analysis. If given,
+                these TFs will be included among the regulators regardless of the expression-based thresholding done in
+                preprocessing.
             sender_receiver_or_target_degs: Only makes a difference if 'use_pathways' or 'use_cell_types' is specified.
                 Determines whether to compute DEGs for ligands, receptors or target genes. If 'use_pathways' is True,
                 the value of this argument will determine whether ligands or receptors are used to define the model.
@@ -2083,21 +3084,13 @@ class MuSIC_Interpreter(MuSIC):
 
             if self.species == "human":
                 grn = pd.read_csv(os.path.join(self.cci_dir, "human_GRN.csv"), index_col=0)
-                rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "human_RBP_db.csv"), index_col=0)
-                cof_db = pd.read_csv(os.path.join(self.cci_dir, "human_cofactors.csv"), index_col=0)
-                tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "human_TF_TF_db.csv"), index_col=0)
                 lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_human.csv"), index_col=0)
             elif self.species == "mouse":
                 grn = pd.read_csv(os.path.join(self.cci_dir, "mouse_GRN.csv"), index_col=0)
-                rna_bp_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_RBP_db.csv"), index_col=0)
-                cof_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_cofactors.csv"), index_col=0)
-                tf_tf_db = pd.read_csv(os.path.join(self.cci_dir, "mouse_TF_TF_db.csv"), index_col=0)
                 lr_db = pd.read_csv(os.path.join(self.cci_dir, "lr_db_mouse.csv"), index_col=0)
 
             # Subset GRN and other databases to only include TFs that are in the adata object:
             grn = grn[[col for col in grn.columns if col in self.adata.var_names]]
-            cof_db = cof_db[[col for col in cof_db.columns if col in self.adata.var_names]]
-            tf_tf_db = tf_tf_db[[col for col in tf_tf_db.columns if col in self.adata.var_names]]
 
             analyze_pathway_ligands = sender_receiver_or_target_degs == "sender" and use_pathways
             analyze_pathway_receptors = sender_receiver_or_target_degs == "receiver" and use_pathways
@@ -2252,92 +3245,73 @@ class MuSIC_Interpreter(MuSIC):
                 signal_values = signal[subset_key].values
                 adata = subsets[subset_key]
 
-                self.logger.info(
-                    "Selecting transcription factors, cofactors and RNA-binding proteins for analysis of differential "
-                    "expression."
-                )
+                self.logger.info("Selecting transcription factors for analysis of differential expression.")
 
                 # Further subset list of additional factors to those that are expressed in at least n% of the cells
                 # that are nonzero in cells of interest (use the user input 'target_expr_threshold'):
-                indices = np.any(signal_values != 0, axis=0).nonzero()[0]
-                nz_signal = list(self.sample_names[indices])
-                adata_subset = adata[nz_signal, :]
-                n_cells_threshold = int(self.target_expr_threshold * adata_subset.n_obs)
+                n_cells_threshold = int(self.target_expr_threshold * adata.n_obs)
 
                 all_TFs = list(grn.columns)
-                all_TFs = [tf for tf in all_TFs if tf in cof_db.columns and tf in tf_tf_db.columns]
                 if scipy.sparse.issparse(adata.X):
-                    nnz_counts = np.array(adata_subset[:, all_TFs].X.getnnz(axis=0)).flatten()
+                    nnz_counts = np.array(adata[:, all_TFs].X.getnnz(axis=0)).flatten()
                 else:
-                    nnz_counts = np.array(adata_subset[:, all_TFs].X.getnnz(axis=0)).flatten()
+                    nnz_counts = np.array(adata[:, all_TFs].X.getnnz(axis=0)).flatten()
                 all_TFs = [tf for tf, nnz in zip(all_TFs, nnz_counts) if nnz >= n_cells_threshold]
+                if custom_tfs is not None:
+                    all_TFs.extend(custom_tfs)
 
-                # Get the set of transcription cofactors that correspond to these transcription factors, in addition to
-                # interacting transcription factors that may not themselves have passed the threshold:
-                cof_subset = list(cof_db[(cof_db[all_TFs] == 1).any(axis=1)].index)
-                cof_subset = [cof for cof in cof_subset if cof in self.feature_names]
-                intersecting_tf_subset = list(tf_tf_db[(tf_tf_db[all_TFs] == 1).any(axis=1)].index)
-                intersecting_tf_subset = [tf for tf in intersecting_tf_subset if tf in self.feature_names]
+                # Also add all TFs that can bind these TFs:
+                primary_tf_rows = grn.loc[all_TFs]
+                secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
+                if scipy.sparse.issparse(adata.X):
+                    nnz_counts = np.array(adata[:, secondary_TFs].X.getnnz(axis=0)).flatten()
+                else:
+                    nnz_counts = np.array(adata[:, secondary_TFs].X.getnnz(axis=0)).flatten()
+                secondary_TFs = [
+                    tf for tf, nnz in zip(secondary_TFs, nnz_counts) if nnz >= int(0.5 * n_cells_threshold)
+                ]
+                secondary_TFs = [tf for tf in secondary_TFs if tf not in all_TFs]
 
-                # Subset to cofactors for which enough signal is present- filter to those expressed in at least n% of
-                # the cells that express at least one of the TFs associated with the cofactor:
-                all_cofactors = []
-                for cofactor in cof_subset:
-                    cof_row = cof_db.loc[cofactor, :]
-                    cof_TFs = cof_row[cof_row == 1].index
-                    tfs_expr_subset_indices = np.where(adata_subset[:, cof_TFs].X.sum(axis=1) > 0)[0]
-                    tf_subset_cells = adata_subset[tfs_expr_subset_indices, :]
-                    n_cells_threshold = int(self.target_expr_threshold * tf_subset_cells.n_obs)
-                    if scipy.sparse.issparse(adata.X):
-                        nnz_counts = np.array(tf_subset_cells[:, cofactor].X.getnnz(axis=0)).flatten()
-                    else:
-                        nnz_counts = np.array(tf_subset_cells[:, cofactor].X.getnnz(axis=0)).flatten()
-
-                    if nnz_counts >= n_cells_threshold:
-                        all_cofactors.append(cofactor)
-
-                # And extend the set of transcription factors using interacting pairs that may also be present in the
-                # same cells upstream transcription factors are:
-                all_interacting_tfs = []
-                for tf in intersecting_tf_subset:
-                    tf_row = tf_tf_db.loc[tf, :]
-                    tf_TFs = tf_row[tf_row == 1].index
-                    tfs_expr_subset_indices = np.where(adata_subset[:, tf_TFs].X.sum(axis=1) > 0)[0]
-                    tf_subset_cells = adata_subset[tfs_expr_subset_indices, :]
-                    n_cells_threshold = int(self.target_expr_threshold * tf_subset_cells.n_obs)
-                    if scipy.sparse.issparse(adata.X):
-                        nnz_counts = np.array(tf_subset_cells[:, tf].X.getnnz(axis=0)).flatten()
-                    else:
-                        nnz_counts = np.array(tf_subset_cells[:, tf].X.getnnz(axis=0)).flatten()
-
-                    if nnz_counts >= n_cells_threshold:
-                        all_interacting_tfs.append(tf)
-
-                # Do the same for RNA-binding proteins:
-                all_RBPs = list(rna_bp_db["Gene_Name"].values)
-                all_RBPs = [r for r in all_RBPs if r in self.feature_names]
-                if len(all_RBPs) > 0:
-                    if scipy.sparse.issparse(adata.X):
-                        nnz_counts = np.array(adata_subset[:, all_RBPs].X.getnnz(axis=0)).flatten()
-                    else:
-                        nnz_counts = np.array(adata_subset[:, all_RBPs].X.getnnz(axis=0)).flatten()
-                    all_RBPs = [tf for tf, nnz in zip(all_RBPs, nnz_counts) if nnz >= n_cells_threshold]
-                    # Remove RBPs if any happen to be TFs or cofactors:
-                    all_RBPs = [
-                        r
-                        for r in all_RBPs
-                        if r not in all_TFs and r not in all_interacting_tfs and r not in all_cofactors
-                    ]
-
-                self.logger.info(f"For this dataset, marked {len(all_TFs)} of interest.")
-                self.logger.info(
-                    f"For this dataset, marked {len(all_cofactors)} transcriptional cofactors of interest."
+                regulator_features = all_TFs + secondary_TFs
+                # Prioritize those that are most coexpressed with at least one target:
+                regulator_expr = pd.DataFrame(
+                    adata[:, regulator_features].X.A, index=signal[subset_key].index, columns=regulator_features
                 )
-                if len(all_RBPs) > 0:
-                    self.logger.info(f"For this dataset, marked {len(all_RBPs)} RNA-binding proteins of interest.")
+                # Dataframe containing target expression:
+                ds_targets_df = signal[subset_key]
 
-                # Get feature names- for the singleton factors:
-                regulator_features = all_TFs + all_interacting_tfs + all_cofactors + all_RBPs
+                def intersection_ratio(signal_col, regulator_col):
+                    signal_nonzero = set(signal_col[signal_col != 0].index)
+                    regulator_nonzero = set(regulator_col[regulator_col != 0].index)
+                    intersection = signal_nonzero.intersection(regulator_nonzero)
+                    if len(regulator_nonzero) == 0:
+                        return 0
+                    return len(intersection) / len(regulator_nonzero)
+
+                # Calculating the intersection ratios and finding top 10 regulators for each signal
+                top_regulators = {}
+
+                for signal_column in ds_targets_df.columns:
+                    ratios = {
+                        regulator_column: intersection_ratio(
+                            ds_targets_df[signal_column], regulator_expr[regulator_column]
+                        )
+                        for regulator_column in regulator_expr.columns
+                    }
+                    sorted_regulators = sorted(ratios, key=ratios.get, reverse=True)[:10]
+                    top_regulators[signal_column] = sorted_regulators
+
+                # Final set of top regulators:
+                regulator_features = list(set(reg for regs in top_regulators.values() for reg in regs))
+
+                # If custom TFs were filtered out this way, re-add them:
+                if custom_tfs is not None:
+                    regulator_features.extend(custom_tfs)
+                    regulator_features = list(set(regulator_features))
+
+                self.logger.info(
+                    f"For this dataset, marked {len(regulator_features)} transcription factors of interest."
+                )
 
                 # Take subset of AnnData object corresponding to these regulators:
                 counts = adata[:, regulator_features].copy()
@@ -2387,6 +3361,11 @@ class MuSIC_Interpreter(MuSIC):
                 counts_targets.obsm["X_jaccard"] = np.where(signal[subset_key].values > 0, 1, 0)
                 cell_types = self.adata.obs.loc[signal[subset_key].index, self.group_key]
                 counts_targets.obs[group_key] = cell_types
+
+                if self.total_counts_key is not None:
+                    counts_targets.obs[self.total_counts_key] = self.adata.obs.loc[
+                        signal[subset_key].index, self.total_counts_key
+                    ]
 
                 # Iterate over regulators:
                 regulators = counts_df.columns
@@ -2482,9 +3461,12 @@ class MuSIC_Interpreter(MuSIC):
 
         kwargs["mod_type"] = "downstream"
         kwargs["cci_dir"] = cci_dir_path
+        kwargs["species"] = self.species
         kwargs["group_key"] = group_key
         kwargs["coords_key"] = "X_pca" if use_dim_reduction else "X_jaccard"
         kwargs["bw_fixed"] = True
+        kwargs["total_counts_threshold"] = self.total_counts_threshold
+        kwargs["total_counts_key"] = self.total_counts_key
 
         # Use the same output directory as the main model, add folder demarcating results from downstream task:
         output_dir = os.path.dirname(self.output_path)
@@ -2542,8 +3524,8 @@ class MuSIC_Interpreter(MuSIC):
                 raise ValueError("One of 'use_ligands', 'use_receptors', 'use_pathways' or 'use_targets' must be True.")
 
             # Create new instance of MuSIC:
-            comm, parser, args_list = define_spateo_argparse(**kwargs)
-            downstream_model = MuSIC(comm, parser, args_list)
+            parser, args_list = define_spateo_argparse(**kwargs)
+            downstream_model = MuSIC(parser, args_list)
             downstream_model._set_up_model()
             downstream_model.fit()
             downstream_model.predict_and_save()
@@ -2588,8 +3570,8 @@ class MuSIC_Interpreter(MuSIC):
                 logger.info(f"Using target genes stored at {kwargs['targets_path']}.")
 
             # Create new instance of MuSIC:
-            comm, parser, args_list = define_spateo_argparse(**kwargs)
-            downstream_model = MuSIC(comm, parser, args_list)
+            parser, args_list = define_spateo_argparse(**kwargs)
+            downstream_model = MuSIC(parser, args_list)
             downstream_model._set_up_model()
             downstream_model.fit()
             downstream_model.predict_and_save()
@@ -2656,6 +3638,10 @@ class MuSIC_Interpreter(MuSIC):
 
         output_dir = os.path.dirname(self.output_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
+        if save_show_or_return in ["save", "both", "all"]:
+            figure_folder = os.path.join(output_dir, "cci_deg_detection", "figures")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
 
         if use_pathways and self.species != "human":
             raise ValueError("Pathway analysis is only available for human samples.")
@@ -2883,6 +3869,9 @@ class MuSIC_Interpreter(MuSIC):
             )
             plt.tight_layout()
 
+            save_kwargs["ext"] = "png"
+            save_kwargs["dpi"] = 300
+            save_kwargs["path"] = figure_folder
             save_return_show_fig_utils(
                 save_show_or_return=save_show_or_return,
                 show_legend=True,
@@ -3622,8 +4611,8 @@ class MuSIC_Interpreter(MuSIC):
         kwargs["bw_fixed"] = self.bw_fixed
         kwargs["kernel"] = self.kernel
 
-        comm, parser, args_list = define_spateo_argparse(**kwargs)
-        permutation_model = MuSIC(comm, parser, args_list)
+        parser, args_list = define_spateo_argparse(**kwargs)
+        permutation_model = MuSIC(parser, args_list)
         permutation_model._set_up_model()
         permutation_model.fit()
         permutation_model.predict_and_save()
