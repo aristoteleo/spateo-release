@@ -1721,13 +1721,17 @@ class MuSIC_Interpreter(MuSIC):
         target_subset: Optional[List[str]] = None,
         interaction_subset: Optional[List[str]] = None,
         to_plot: Literal["mean", "percentage"] = "mean",
+        plot_type: Literal["volcano", "barplot"] = "barplot",
         source_data: Literal["interaction", "effect", "target"] = "effect",
         top_n_to_plot: Optional[int] = None,
+        significance_cutoff: float = 1.3,
+        fold_change_cutoff: float = 1.5,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         cmap: str = "seismic",
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
+        save_df: bool = False,
     ):
         """Computes fold change in predicted interaction effects between two cell types, and visualizes result.
 
@@ -1741,6 +1745,7 @@ class MuSIC_Interpreter(MuSIC):
             interaction_subset: List of interactions to consider. If None, will use all interactions used in model.
             to_plot: Whether to plot the mean effect size or the proportion of cells in a cell type w/ effect on
                 target. Options are "mean" or "percentage".
+            plot_type: Whether to plot the results as a volcano plot or barplot. Options are "volcano" or "barplot".
             source_data: Selects what to use in computing fold changes. Options:
                 - "interaction": will use the design matrix (e.g. neighboring ligand expression or L:R mapping)
                 - "effect": will use the coefficient arrays for each target
@@ -1748,6 +1753,10 @@ class MuSIC_Interpreter(MuSIC):
             top_n_to_plot: If given, will only include the top n features in the visualization. Recommended if
                 "source_data" is "effect", as all combinations of interaction and target will be considered in this
                 case.
+            significance_cutoff: Cutoff for negative log-10 q-value to consider an interaction/effect significant. Only
+                used if "plot_type" is "volcano". Defaults to 1.3 (corresponding to an approximate q-value of 0.05).
+            fold_change_cutoff: Cutoff for fold change to consider an interaction/effect significant. Only used if
+                "plot_type" is "volcano". Defaults to 1.5.
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
             cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
@@ -1763,9 +1772,6 @@ class MuSIC_Interpreter(MuSIC):
                 "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
                 keys according to your needs.
             save_df: Set True to save the metric dataframe in the end
-
-        Returns:
-
         """
         config_spateo_rcParams()
         # But set display DPI to 300:
@@ -1776,6 +1782,11 @@ class MuSIC_Interpreter(MuSIC):
             figure_folder = os.path.join(parent_dir, "figures")
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
+
+        if save_df:
+            output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder)
 
         if fontsize is None:
             fontsize = rcParams.get("font.size")
@@ -1842,24 +1853,45 @@ class MuSIC_Interpreter(MuSIC):
         qvals = multitesting_correction(pvals, method="fdr_bh")
         results = pd.DataFrame(qvals, index=ref_data.columns, columns=["qval"])
         results["Significance"] = qvals.apply(assign_significance, axis=1)
+        # Negative log q-value (in the case of volcano plot):
+        results["-log10(qval)"] = -np.log10(qvals)
+        # Cut off values larger than 8:
+        results.loc[results["-log10(qval)"] > 8, "-log10(qval)"] = 8
 
         if to_plot == "mean":
             ref_data = ref_data.mean(axis=0)
             query_data = query_data.mean(axis=0)
-
-            if source_data == "effect":
-                y_label = "filler"
         elif to_plot == "percentage":
             ref_data = (ref_data > 0).mean(axis=0)
             query_data = (query_data > 0).mean(axis=0)
 
+        if source_data == "effect":
+            x_label = f"$\\log_2$(Fold change effect on {target} \n{ref_ct} and {query_ct})"
+            title = f"Fold change effect on {target} \n{ref_ct} and {query_ct}"
+            if self.mod_type == "lr":
+                y_label = f"L:R effect on {target}"
+            elif self.mod_type == "ligand":
+                y_label = f"Ligand effect on {target}"
+        elif source_data == "interaction":
+            x_label = f"$\\log_2$(Fold change interaction enrichment \n {ref_ct} and {query_ct})"
+            title = f"Fold change interaction enrichment \n{ref_ct} and {query_ct}"
+            if self.mod_type == "lr":
+                y_label = "L:R interaction"
+            elif self.mod_type == "ligand":
+                y_label = "Ligand"
+        elif source_data == "target":
+            x_label = f"$\\log_2$(Fold change target expression \n {ref_ct} and {query_ct})"
+            title = f"Fold change target expression \n {ref_ct} and {query_ct}"
+            y_label = "Target"
+
         # Compute fold change:
         fold_change = query_data / ref_data
         results["Fold Change"] = fold_change
-        # For percentages, take the log fold change:
-        if to_plot == "percentage":
-            results["Fold Change"] = np.log2(results["Fold Change"])
+        # Take the log of the fold change:
+        results["Fold Change"] = np.log2(results["Fold Change"])
         results = results.sort_values("Fold Change")
+        if top_n_to_plot is not None:
+            results = results.iloc[:top_n_to_plot, :]
 
         # Plot:
         if figsize is None:
@@ -1870,29 +1902,80 @@ class MuSIC_Interpreter(MuSIC):
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
 
         cmap = plt.cm.get_cmap(cmap)
-        # For fold change of means, center colormap at 1:
-        if to_plot == "mean":
-            max_distance = max(abs(results["Fold Change"] - 1).max(), abs(results["Fold Change"] - 1).min())
-            norm = plt.Normalize(1 - max_distance, 1 + max_distance)
-        # For fold change of percentages, center colormap at 0:
-        else:
-            max_distance = max(abs(results["Fold Change"]).max(), abs(results["Fold Change"]).min())
-            norm = plt.Normalize(-max_distance, max_distance)
+        # Center colormap at 0:
+        max_distance = max(abs(results["Fold Change"]).max(), abs(results["Fold Change"]).min())
+        norm = plt.Normalize(-max_distance, max_distance)
         colors = cmap(norm(results["Fold Change"]))
 
-        barplot = sns.barplot(
-            x="Fold Change", y=results.index, data=results, orient="h", palette=colors, edgecolor="black", linewidth=1
-        )
-        for index, row in results.iterrows():
-            barplot.text(row["Fold Change"], index, f"{row['Significance']}", color="black", ha="right")
+        if plot_type == "barplot":
+            barplot = sns.barplot(
+                x="Fold Change",
+                y=results.index,
+                data=results,
+                orient="h",
+                palette=colors,
+                edgecolor="black",
+                linewidth=1,
+                ax=ax,
+            )
+            for index, row in results.iterrows():
+                ax.text(row["Fold Change"], index, f"{row['Significance']}", color="black", ha="right")
 
-        ax.set_xlim(-max_distance * 1.1, max_distance * 1.1)
-        ax.set_xticklabels(results.index, fontsize=fontsize)
-        ax.set_yticklabels(["{:.2f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
-        ax.set_xlabel(f"Fold Change in \n{query_ct} vs. {ref_ct}", fontsize=fontsize * 1.25)
-        ax.set_xlabel("Interaction (ligand(s):receptor(s))", fontsize=fontsize)
-        ax.set_ylabel("Mean Coefficient \nMagnitude", fontsize=fontsize)
-        ax.set_title(f"Average Predicted Interaction Effects on {target}", fontsize=fontsize)
+            ax.axvline(x=0, color="grey", linestyle="--", linewidth=2)
+            ax.set_xlim(-max_distance * 1.1, max_distance * 1.1)
+            ax.set_xticklabels(results.index, fontsize=fontsize)
+            ax.set_yticklabels(["{:.2f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
+            ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
+            ax.set_ylabel(y_label, fontsize=fontsize * 1.25)
+            ax.set_title(title, fontsize=fontsize * 1.5)
+        elif plot_type == "volcano":
+            if len(results) > 20:
+                size = 20
+            else:
+                size = 40
+
+            significant = results["-log10(qval)"] > significance_cutoff
+            significant_up = results["Fold Change"] > fold_change_cutoff
+            significant_down = results["Fold Change"] < -fold_change_cutoff
+
+            sns.scatterplot(
+                x=results["Fold Change"][significant & significant_up],
+                y=results["-log10(qval)"][significant & significant_up],
+                hue=results["Fold Change"][significant & significant_up],
+                palette="Reds",
+                edgecolor="black",
+                ax=ax,
+                s=size,
+            )
+
+            sns.scatterplot(
+                x=results["Fold Change"][significant & significant_down],
+                y=results["-log10(qval)"][significant & significant_down],
+                hue=results["Fold Change"][significant & significant_down],
+                palette="Blues",
+                edgecolor="black",
+                ax=ax,
+                s=size,
+            )
+
+            sns.scatterplot(
+                x=results["Fold Change"][~(significant & (significant_up | significant_down))],
+                y=results["-log10(qval)"][~(significant & (significant_up | significant_down))],
+                color="grey",
+                edgecolor="black",
+                ax=ax,
+                s=size,
+            )
+
+            ax.axhline(y=significance_cutoff, color="grey", linestyle="--", linewidth=1.5)
+            ax.axvline(x=fold_change_cutoff, color="grey", linestyle="--", linewidth=1.5)
+            ax.axvline(x=-fold_change_cutoff, color="grey", linestyle="--", linewidth=1.5)
+            ax.set_xlim(-max_distance * 1.1, max_distance * 1.1)
+            ax.set_xticklabels(["{:.2f}".format(x) for x in ax.get_xticks()], fontsize=fontsize)
+            ax.set_yticklabels(["{:.2f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
+            ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
+            ax.set_ylabel(r"$-log_10$(qval)", fontsize=fontsize * 1.25)
+            ax.set_title(title, fontsize=fontsize * 1.5)
 
         # Use the saved name for the AnnData object to define part of the name of the saved file:
         base_name = os.path.basename(self.adata_path)
