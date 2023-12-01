@@ -29,6 +29,7 @@ import scipy.cluster.hierarchy as sch
 import scipy.sparse
 import scipy.stats
 import seaborn as sns
+from adjustText import adjust_text
 from joblib import Parallel, delayed
 from matplotlib import rcParams
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -85,7 +86,7 @@ class MuSIC_Interpreter(MuSIC):
             # self.logger.info("Finished preprocessing, getting fitted coefficients and standard errors.")
 
         # Dictionary containing coefficients:
-        self.coeffs, self.standard_errors = self.return_outputs(downstream=True)
+        self.coeffs, self.standard_errors = self.return_outputs(adjust_for_subsampling=False)
         # Design matrix:
         self.design_matrix = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
@@ -529,6 +530,7 @@ class MuSIC_Interpreter(MuSIC):
     def visualize_effect_specificity(
         self,
         denominator: Literal["target", "interaction"] = "target",
+        condition_on_receptors: bool = False,
         n_cells_threshold: int = 200,
         cell_type_specific: bool = False,
         target_subset: Optional[List[str]] = None,
@@ -555,6 +557,8 @@ class MuSIC_Interpreter(MuSIC):
                 cells expressing the target that also express the interaction. If "interaction", specificity is defined
                 as the proportion of cells expressing the interaction for which the interaction is predicted to effect
                 a particular target.
+            condition_on_receptors: Only used if :attr `mod_type` is "ligand". Sets whether to condition on the
+                expression of receptors. If True, will only consider
             n_cells_threshold: Minimum number of cells expressing the target or interaction, over all cells or over
                 cells of each type (if cell_type_specific is True). For interactions/targets below this threshold,
                 value will be set to 0.
@@ -602,7 +606,9 @@ class MuSIC_Interpreter(MuSIC):
         if cell_type_specific:
             logger.info("Cell type-specific analysis: saving output rather than plotting.")
             save_show_or_return = "save"
-            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures")
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
         if save_df:
@@ -710,6 +716,7 @@ class MuSIC_Interpreter(MuSIC):
                 # Get the number of cells expressing each target that are also affected by each interaction:
                 if dict_name == "all":
                     cells_expressing_targets = expr > 0
+
                     title = (
                         "Number of target-expressing cells affected by interaction \n"
                         "vs. total number of target-expressing cells"
@@ -738,9 +745,9 @@ class MuSIC_Interpreter(MuSIC):
 
                     for j, feature in enumerate(feature_names):
                         if f"b_{feature}" in coeffs.columns:
-                            cells_expressing_target_and_feature = cells_expressing_target & (
-                                coeffs[f"b_{feature}"] > effect_threshold
-                            )
+                            cells_w_interaction_effect = coeffs[f"b_{feature}"] > effect_threshold
+
+                            cells_expressing_target_and_feature = cells_expressing_target & cells_w_interaction_effect
                             intersection = np.sum(cells_expressing_target_and_feature)
                             denom = np.sum(cells_expressing_target)
                             if denom != 0:
@@ -751,8 +758,47 @@ class MuSIC_Interpreter(MuSIC):
                             df.loc[target, feature] = 0
 
             else:
-                # Get the number of cells
-                "filler"
+                # Number of cells where the interaction is present:
+                if dict_name == "all":
+                    cells_expressing_interactions = self.X_df[feature_names] > 0
+                    title = (
+                        "Number of cells w/ interaction effect \n" "vs. total number of cells potentially interacting"
+                    )
+                else:
+                    cell_type = dict_name
+                    cells_expressing_interactions = self.X_df.loc[cell_types_dict[cell_type], feature_names] > 0
+                    title = (
+                        f"Number of cells w/ effect on target \nvs. total "
+                        f"number of cells potentially interacting of type {cell_type}"
+                    )
+
+                for i, target in enumerate(targets):
+                    cells_expressing_interaction = cells_expressing_interactions.iloc[:, i]
+                    coeffs = (
+                        self.coeffs[target]
+                        if dict_name == "all"
+                        else self.coeffs[target].loc[cell_types_dict[cell_type]]
+                    )
+                    if use_significant:
+                        parent_dir = os.path.dirname(self.output_path)
+                        sig = pd.read_csv(
+                            os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
+                        )
+                        coeffs *= sig
+
+                    for j, feature in enumerate(feature_names):
+                        if f"b_{feature}" in coeffs.columns:
+                            cells_expressing_interaction_and_effect = cells_expressing_interaction & (
+                                coeffs[f"b_{feature}"] > effect_threshold
+                            )
+                            intersection = np.sum(cells_expressing_interaction_and_effect)
+                            denom = np.sum(cells_expressing_interaction)
+                            if denom != 0:
+                                df.loc[target, feature] = intersection / denom
+                            else:
+                                df.loc[target, feature] = 0
+                        else:
+                            df.loc[target, feature] = 0
 
             # Hiearchical clustering of both targets and interactions:
             col_linkage = sch.linkage(df.transpose(), method="ward", metric="euclidean")
@@ -764,6 +810,11 @@ class MuSIC_Interpreter(MuSIC):
             row_dendro = sch.dendrogram(row_linkage, no_plot=True)
             row_clustered_order = row_dendro["leaves"]
             df = df.iloc[row_clustered_order, :]
+
+            # Delete all-zero rows and all-zero columns:
+            df = df.loc[:, ~(df == 0).all()]
+            df = df.loc[~(df == 0).all(axis=1), :]
+            logger.info(f"Final dataframe for {dict_name} shape: {df.shape}")
 
             dfs[dict_name] = df
 
@@ -819,7 +870,8 @@ class MuSIC_Interpreter(MuSIC):
 
             save_kwargs["ext"] = "png"
             save_kwargs["dpi"] = 300
-            save_kwargs["path"] = figure_folder
+            if "figure_folder" in locals():
+                save_kwargs["path"] = figure_folder
             save_return_show_fig_utils(
                 save_show_or_return=save_show_or_return,
                 show_legend=False,
@@ -942,6 +994,8 @@ class MuSIC_Interpreter(MuSIC):
         self,
         target: str,
         interaction: str,
+        cell_type: Optional[str] = None,
+        group_key: Optional[str] = None,
         use_significant: bool = False,
         n_anchors: int = 100,
         n_neighbors_expressing: int = 20,
@@ -956,6 +1010,10 @@ class MuSIC_Interpreter(MuSIC):
             interaction: Interaction feature to visualize, given in the same form as in the design matrix (if model
                 is a ligand-based model or receptor-based model, this will be of form "Col4a1". If model is a
                 ligand-receptor based model, this will be of form "Col4a1:Itgb1", for example).
+            cell_type: Optional, can be used to select anchor cells from only a particular cell type. If None,
+                will select from all cells.
+            group_key: Can be used to specify entry in adata.obs that contains cell type groupings. If None,
+                will use :attr `group_key` from model initialization. Only used if "cell_type" is not None.
             use_significant: Whether to use only significant effects in computing the specificity. If True,
                 will filter to cells + interactions where the interaction is significant for the target. Only valid
                 if :func `compute_coeff_significance()` has been run.
@@ -1093,6 +1151,11 @@ class MuSIC_Interpreter(MuSIC):
             adata_mask = target_expressing_cells & interaction_cells & cells_meeting_neighbor_ligand_threshold
         adata_sub = adata[adata_mask].copy()
 
+        if cell_type is not None:
+            if group_key is None:
+                group_key = self.group_key
+            adata_sub = adata_sub[adata_sub.obs[group_key] == cell_type].copy()
+
         # Randomly choose a subset of target cells to use as anchors:
         target_expressing_selected = np.random.choice(adata_sub.obs_names, size=n_anchors, replace=False)
         selected_indices = [np.where(adata.obs_names == string)[0][0] for string in target_expressing_selected]
@@ -1143,6 +1206,8 @@ class MuSIC_Interpreter(MuSIC):
             default_color = "#D3D3D3"
             # Apply 'cool' colormap to target_expression
             target_cmap = plt.cm.get_cmap("cool")
+            data = adata.obs.loc[target_expressing_selected, f"{interaction}" f"_{target}_example_points"]
+            norm = matplotlib.colors.Normalize(data.min(), data.max())
             target_colors = target_cmap(
                 adata.obs.loc[target_expressing_selected, f"{interaction}" f"_{target}_example_points"]
             )
@@ -1157,6 +1222,7 @@ class MuSIC_Interpreter(MuSIC):
             # Apply 'hot' colormap to ligand_expression
             ligand_cmap = plt.cm.get_cmap("hot")
             ligand_colors = ligand_cmap(adata.obs.loc[neighbors_selected, f"{interaction}_{target}_example_points"])
+            print(ligand_colors)
             scatter_ligand = go.Scatter3d(
                 x=x[neighbors],
                 y=y[neighbors],
@@ -1179,6 +1245,8 @@ class MuSIC_Interpreter(MuSIC):
 
             # Turn off the grid
             fig.update_layout(
+                paper_bgcolor="white",
+                plot_bgcolor="white",
                 scene=dict(xaxis=dict(showgrid=False), yaxis=dict(showgrid=False), zaxis=dict(showgrid=False)),
                 margin=dict(l=0, r=0, b=0, t=30),  # Adjust margins to minimize spacing
                 title=dict(text=f"Target: {target}, Ligand: {ligand}", y=0.9, yanchor="top", x=0.5, xanchor="center"),
@@ -1294,7 +1362,9 @@ class MuSIC_Interpreter(MuSIC):
             raise ValueError("Model type must be one of 'lr', 'ligand', or 'receptor'.")
 
         if save_show_or_return in ["save", "both", "all"]:
-            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures")
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
 
@@ -1376,21 +1446,26 @@ class MuSIC_Interpreter(MuSIC):
         if figsize is None:
             if plot_type == "heatmap":
                 # Set figure size based on the number of interaction features and cell type-target combos:
-                m = len(combinations) * 40 / 300
-                n = len(feature_names) * 40 / 300
+                m = len(combinations) * 50 / 200
+                n = len(feature_names) * 50 / 200
             else:
                 # Set figure size based on the number of cell type-target combos:
-                n = len(combinations) * 40 / 300
-                m = (n / 3) * len(interaction_subset)
+                n = len(combinations) * 50 / 200
+                m = 3 * len(feature_names)
             figsize = (n, m)
 
         df = pd.DataFrame(0, index=combinations, columns=feature_names)
         for ct in cell_types:
-            cell_type_mask = adata.obs[self.group_key] == ct
-            cell_type_mask = adata.obs[cell_type_mask].index
+            cell_type_mask = adata.obs[group_key] == ct
 
             # Get appropriate coefficient arrays:
             for target in targets:
+                expressing_target = pd.DataFrame(
+                    adata[:, target].X.toarray().reshape(-1) > 0, index=adata.obs_names, columns=[target]
+                )
+                total_mask = cell_type_mask & expressing_target[target]
+                total_mask = total_mask[total_mask].index
+
                 if to_plot == "mean":
                     mean_effects = []
                     coef_target = self.coeffs[target]
@@ -1403,8 +1478,9 @@ class MuSIC_Interpreter(MuSIC):
 
                     for feat in feature_names:
                         if f"b_{feat}" in coef_target.columns:
-                            # Get mean effect size for each interaction feature in each cell type:
-                            mean_effects.append(coef_target.loc[cell_type_mask, f"b_{feat}"].values.mean())
+                            # Get mean effect size for each interaction feature in each cell type, from among the
+                            # cells that express the target gene:
+                            mean_effects.append(coef_target.loc[total_mask, f"b_{feat}"].values.mean())
                         else:
                             mean_effects.append(0)
                     df.loc[f"{ct}-{target}", :] = mean_effects
@@ -1416,7 +1492,7 @@ class MuSIC_Interpreter(MuSIC):
                         if f"b_{feat}" in coef_target.columns:
                             # Get percentage of cells in each cell type that express each interaction feature:
                             percentages.append(
-                                (coef_target.loc[cell_type_mask, f"b_{feat}"].values > effect_threshold).mean()
+                                (coef_target.loc[total_mask, f"b_{feat}"].values > effect_threshold).mean()
                             )
                         else:
                             percentages.append(0)
@@ -1460,6 +1536,7 @@ class MuSIC_Interpreter(MuSIC):
         elif col_normalize:
             df = (df - df.min()) / (df.max() - df.min())
         df.fillna(0, inplace=True)
+
         # Hierarchical clustering- first to group interactions w/ similar patterns across cell types:
         col_linkage = sch.linkage(df.transpose(), method="ward")
         col_dendro = sch.dendrogram(col_linkage, no_plot=True)
@@ -1484,7 +1561,10 @@ class MuSIC_Interpreter(MuSIC):
                 df.sort_index(level=["second", "first"], inplace=True)
             # Revert to the original index format
             df.index = df.index.map("-".join)
+
+        # Delete all-zero rows and all-zero columns:
         df = df.loc[:, ~(df == 0).all()]
+        logger.info(f"Final dataframe for {ct} shape: {df.shape}")
 
         if normalize and to_plot == "mean":
             if plot_type == "heatmap":
@@ -1510,7 +1590,7 @@ class MuSIC_Interpreter(MuSIC):
                 label = (
                     "Normalized enrichment of\n effect per cell type"
                     if not normalize_targets
-                    else "Normalized enrichment of\n effect per cell type\n (normalized within target)"
+                    else "Normalized enrichment \nof effect per cell type\n (normalized within target)"
                 )
         elif not normalize and to_plot == "mean":
             label = "Avg. effect per cell type" if plot_type == "heatmap" else "Avg. effect\n per cell type"
@@ -1625,6 +1705,7 @@ class MuSIC_Interpreter(MuSIC):
             prefix = f"{adata_id}_{to_plot}_enrichment_cell_type"
         else:
             fig, axes = plt.subplots(nrows=len(interaction_subset), ncols=1, figsize=figsize)
+            fig.subplots_adjust(hspace=0.4)
             colormap = plt.cm.get_cmap(cmap)
             # Determine the order of the plot based on averaging over the chosen interactions (if there is more than
             # one):
@@ -1632,7 +1713,6 @@ class MuSIC_Interpreter(MuSIC):
             df_sub["Group"] = group_labels
             # Ranks within each group:
             grouped_ranked_df = df_sub.groupby("Group").rank(ascending=False)
-            grouped_ranked_df.drop("Group", axis=1, inplace=True)
             # Average rank across groups:
             avg_ranked_df = grouped_ranked_df.mean()
             # Sort by average rank:
@@ -1656,7 +1736,7 @@ class MuSIC_Interpreter(MuSIC):
                     group_start = i
 
                 color = color_mapping[annotation]
-                ax2.add_patch(plt.Rectangle((i, 0.5), 1, 0.2, color=color))
+                ax2.add_patch(plt.Rectangle((i, 0), 1, 0.2, color=color))
 
             # Add label for the last group:
             group_center = (group_start + len(df) - 1) / 2
@@ -1681,12 +1761,19 @@ class MuSIC_Interpreter(MuSIC):
                     palette=colors,
                     ax=ax,
                 )
-                ax.set_xlabel("Cell Type-Specific Target", fontsize=fontsize * 1.25)
-                ax.set_ylabel(label, fontsize=fontsize * 1.25)
-                ax.set_title(interaction, fontsize=fontsize * 1.5, pad=20)
+
+                if ax is axes[0]:
+                    ax.set_title(interaction, fontsize=fontsize * 1.5, pad=35)
+                else:
+                    ax.set_title(interaction, fontsize=fontsize * 1.5, pad=10)
+                ax.set_xlabel("Cell Type-Specific Target", fontsize=fontsize)
+                ax.set_ylabel(label, fontsize=fontsize)
+                ax.tick_params(axis="y", labelsize=fontsize * 1.1)
 
                 if ax is axes[-1]:
-                    ax.tick_params(axis="x", labelsize=fontsize, rotation=90)
+                    ax.tick_params(axis="x", labelsize=fontsize * 0.9, rotation=90)
+                else:
+                    ax.tick_params(axis="x", labelbottom=False)
 
             # Use the saved name for the AnnData object to define part of the name of the saved file:
             base_name = os.path.basename(self.adata_path)
@@ -1696,7 +1783,8 @@ class MuSIC_Interpreter(MuSIC):
         # Save figure:
         save_kwargs["ext"] = "png"
         save_kwargs["dpi"] = 300
-        save_kwargs["path"] = figure_folder
+        if "figure_folder" in locals():
+            save_kwargs["path"] = figure_folder
         save_return_show_fig_utils(
             save_show_or_return=save_show_or_return,
             show_legend=False,
@@ -1726,6 +1814,7 @@ class MuSIC_Interpreter(MuSIC):
         top_n_to_plot: Optional[int] = None,
         significance_cutoff: float = 1.3,
         fold_change_cutoff: float = 1.5,
+        fold_change_cutoff_for_labels: float = 3.0,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         cmap: str = "seismic",
@@ -1757,6 +1846,8 @@ class MuSIC_Interpreter(MuSIC):
                 used if "plot_type" is "volcano". Defaults to 1.3 (corresponding to an approximate q-value of 0.05).
             fold_change_cutoff: Cutoff for fold change to consider an interaction/effect significant. Only used if
                 "plot_type" is "volcano". Defaults to 1.5.
+            fold_change_cutoff_for_labels: Cutoff for fold change to include the label for an interaction/effect.
+                Only used if "plot_type" is "volcano". Defaults to 3.0.
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
             cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
@@ -1779,7 +1870,9 @@ class MuSIC_Interpreter(MuSIC):
 
         parent_dir = os.path.dirname(self.output_path)
         if save_show_or_return in ["save", "both", "all"]:
-            figure_folder = os.path.join(parent_dir, "figures")
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
 
@@ -1967,6 +2060,27 @@ class MuSIC_Interpreter(MuSIC):
                 s=size,
             )
 
+            # Add text for most significant interactions:
+            # Get the highest fold changes:
+            high_fold_change = results[abs(results["Fold Change"]) > fold_change_cutoff_for_labels]
+            text_labels = high_fold_change.index.tolist()
+            x_coord_text_labels = high_fold_change["Fold Change"].tolist()
+            y_coord_text_labels = high_fold_change["-log10(qval)"].tolist()
+            text_objects = []
+            for i, label in enumerate(text_labels):
+                t = ax.text(
+                    x_coord_text_labels[i],
+                    y_coord_text_labels[i],
+                    label,
+                    fontsize=fontsize,
+                    color="black",
+                    ha="center",
+                    va="center",
+                )
+                text_objects.append(t)
+
+            adjust_text(text_objects, ax=ax, arrowprops=dict(arrowstyle="-", color="black", lw=0.5))
+
             ax.axhline(y=significance_cutoff, color="grey", linestyle="--", linewidth=1.5)
             ax.axvline(x=fold_change_cutoff, color="grey", linestyle="--", linewidth=1.5)
             ax.axvline(x=-fold_change_cutoff, color="grey", linestyle="--", linewidth=1.5)
@@ -1983,7 +2097,8 @@ class MuSIC_Interpreter(MuSIC):
         prefix = f"{adata_id}_fold_changes_{source_data}_{ref_ct}_{query_ct}"
         save_kwargs["ext"] = "png"
         save_kwargs["dpi"] = 300
-        save_kwargs["path"] = figure_folder
+        if "figure_folder" in locals():
+            save_kwargs["path"] = figure_folder
         # Save figure:
         save_return_show_fig_utils(
             save_show_or_return=save_show_or_return,
@@ -2056,7 +2171,9 @@ class MuSIC_Interpreter(MuSIC):
         predictions = pd.read_csv(pred_path, index_col=0)
 
         if save_show_or_return in ["save", "both", "all"]:
-            figure_folder = os.path.join(parent_dir, "figures")
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
 
@@ -2123,7 +2240,8 @@ class MuSIC_Interpreter(MuSIC):
             prefix = f"{adata_id}_interaction_barplot_{target}"
             save_kwargs["ext"] = "png"
             save_kwargs["dpi"] = 300
-            save_kwargs["path"] = figure_folder
+            if "figure_folder" in locals():
+                save_kwargs["path"] = figure_folder
             # Save figure:
             save_return_show_fig_utils(
                 save_show_or_return=save_show_or_return,
@@ -2209,7 +2327,9 @@ class MuSIC_Interpreter(MuSIC):
         ], 'only "pearson" and "spearman" are supported for partial correlation.'
 
         if save_show_or_return in ["save", "both", "all"]:
-            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures")
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
 
@@ -2373,7 +2493,8 @@ class MuSIC_Interpreter(MuSIC):
         # Save figure:
         save_kwargs["ext"] = "png"
         save_kwargs["dpi"] = 300
-        save_kwargs["path"] = figure_folder
+        if "figure_folder" in locals():
+            save_kwargs["path"] = figure_folder
         save_return_show_fig_utils(
             save_show_or_return=save_show_or_return,
             show_legend=False,
@@ -3722,7 +3843,9 @@ class MuSIC_Interpreter(MuSIC):
         output_dir = os.path.dirname(self.output_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
         if save_show_or_return in ["save", "both", "all"]:
-            figure_folder = os.path.join(output_dir, "cci_deg_detection", "figures")
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
 
@@ -3954,7 +4077,8 @@ class MuSIC_Interpreter(MuSIC):
 
             save_kwargs["ext"] = "png"
             save_kwargs["dpi"] = 300
-            save_kwargs["path"] = figure_folder
+            if "figure_folder" in locals():
+                save_kwargs["path"] = figure_folder
             save_return_show_fig_utils(
                 save_show_or_return=save_show_or_return,
                 show_legend=True,

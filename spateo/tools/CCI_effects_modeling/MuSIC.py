@@ -1702,12 +1702,14 @@ class MuSIC:
                             # If there are receptors above the threshold, only use these for checking
                             to_check = receptors_above_threshold
                         else:
-                            # Get all TFs that are associated with these receptors:
+                            # Get all TFs that are associated with these receptors, any TFs that are bound by these
+                            # TFs, and any of the primary TFs in the MAPK/ERK, PI3K/AKT, and JAK/STAT pathways:
                             associated_tfs = (
                                 self.r_tf_db[self.r_tf_db["receptor"].isin(associated_receptors)]["tf"]
                                 .unique()
                                 .tolist()
                             )
+
                             to_check = associated_receptors + associated_tfs
                             to_check = [component for item in to_check for component in item.split("_")]
                             to_check = [item for item in to_check if item in self.adata.var_names]
@@ -1761,7 +1763,7 @@ class MuSIC:
                         ]
                         associated_receptors = [rec for rec in associated_receptors if rec in self.adata.var_names]
                         # Check for receptors expressed in above threshold number of cells:
-                        n_cell_threshold = np.min([1000, self.target_expr_threshold * self.n_samples])
+                        n_cell_threshold = np.min([2000, self.target_expr_threshold * self.n_samples])
                         # Filter receptors expressed in more than the threshold number of cells
                         receptors_above_threshold = [
                             r for r in associated_receptors if self.adata[:, r].X.sum() > n_cell_threshold
@@ -1771,15 +1773,72 @@ class MuSIC:
                             # If there are receptors above the threshold, only use these for checking
                             to_check = receptors_above_threshold
                         else:
-                            # Get all TFs that are associated with these receptors:
+                            # Get all TFs that are associated with these receptors, any TFs that are bound by these
+                            # TFs, and any of the primary TFs in the MAPK/ERK, NFKB, PI3K/AKT, and JAK/STAT pathways:
                             associated_tfs = (
                                 self.r_tf_db[self.r_tf_db["receptor"].isin(associated_receptors)]["tf"]
                                 .unique()
                                 .tolist()
                             )
+
+                            if self.species == "mouse":
+                                additional_tfs = [
+                                    "Elk1",
+                                    "Fos",
+                                    "Myc",
+                                    "Sp1",
+                                    "Jun",
+                                    "Atf2",
+                                    "Nfkb1",
+                                    "Rela",
+                                    "Ets1",
+                                    "Srebf1",
+                                    "Srebf2",
+                                    "Creb1",
+                                    "Foxo1",
+                                    "Foxo3",
+                                    "Foxo4",
+                                    "Stat1",
+                                    "Stat2",
+                                    "Stat3",
+                                    "Stat4",
+                                    "Stat5a",
+                                    "Stat5b",
+                                    "Stat6",
+                                ]
+                            elif self.species == "human":
+                                additional_tfs = [
+                                    "ELK1",
+                                    "FOS",
+                                    "MYC",
+                                    "SP1",
+                                    "JUN",
+                                    "ATF2",
+                                    # NFkB Family
+                                    "NFKB1",  # NFKB1, p50/p105 subunit
+                                    "RELA",  # RELA, p65 subunit
+                                    "ETS1",
+                                    "SREBF1",
+                                    "SREBF2",
+                                    "CREB1",
+                                    # FOXO factors in the PI3K/AKT pathway
+                                    "FOXO1",
+                                    "FOXO3",
+                                    "FOXO4",
+                                    # STAT family TFs
+                                    "STAT1",
+                                    "STAT2",
+                                    "STAT3",
+                                    "STAT4",
+                                    "STAT5A",
+                                    "STAT5B",
+                                    "STAT6",
+                                ]
+                            associated_tfs.extend(additional_tfs)
+
                             to_check = associated_receptors + associated_tfs
-                            to_check = [component for item in to_check for component in item.split("_")]
-                            to_check = [item for item in to_check if item in self.adata.var_names]
+                        to_check = [component for item in to_check for component in item.split("_")]
+                        to_check = [item for item in to_check if item in self.adata.var_names]
                         ligand_to_check_dict[lig] = to_check
                         # Arbitrary threshold, but set the number of supporting receptors/TFs to be at least 3 for
                         # increased confidence:
@@ -3024,6 +3083,7 @@ class MuSIC:
                         filtered_df = self.lr_db[self.lr_db["to"] == receptor]
                         ligands = list(set(filtered_df["from"]))
                         target_ligands.extend(ligands)
+
                     keep_indices = [
                         i for i, feat in enumerate(self.feature_names) if any(l in feat for l in target_ligands)
                     ]
@@ -3213,6 +3273,7 @@ class MuSIC:
         self,
         input: Optional[pd.DataFrame] = None,
         coeffs: Optional[Union[np.ndarray, Dict[str, pd.DataFrame]]] = None,
+        adjust_for_subsampling: bool = False,
     ) -> pd.DataFrame:
         """Given input data and learned coefficients, predict the dependent variables.
 
@@ -3228,7 +3289,7 @@ class MuSIC:
         #     input_all = input
 
         if coeffs is None:
-            coeffs, _ = self.return_outputs()
+            coeffs, _ = self.return_outputs(adjust_for_subsampling=adjust_for_subsampling)
 
         # If dictionary, compute outputs for the multiple dependent variables and concatenate together:
         if isinstance(coeffs, Dict):
@@ -3397,7 +3458,10 @@ class MuSIC:
         np.savetxt(path, data, delimiter=",", header=header[:-1], comments="")
 
     def predict_and_save(
-        self, input: Optional[np.ndarray] = None, coeffs: Optional[Union[np.ndarray, Dict[str, pd.DataFrame]]] = None
+        self,
+        input: Optional[np.ndarray] = None,
+        coeffs: Optional[Union[np.ndarray, Dict[str, pd.DataFrame]]] = None,
+        adjust_for_subsampling: bool = True,
     ):
         """Given input data and learned coefficients, predict the dependent variables and then save the output.
 
@@ -3405,19 +3469,23 @@ class MuSIC:
             input: Input data to be predicted on.
             coeffs: Coefficients to be used in the prediction. If None, will attempt to load the coefficients learned
                 in the fitting process from file.
+            adjust_for_subsampling: Set True if subsampling was performed; this indicates that the coefficients for
+                the subsampled points need to be extended to the neighboring non-sampled points.
         """
-        y_pred = self.predict(input, coeffs)
+        y_pred = self.predict(input, coeffs, adjust_for_subsampling=adjust_for_subsampling)
         # Save to parent directory of the output path:
         parent_dir = os.path.dirname(self.output_path)
         pred_path = os.path.join(parent_dir, "predictions.csv")
         y_pred.to_csv(pred_path)
 
-    def return_outputs(self, downstream: bool = False) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
+    def return_outputs(
+        self, adjust_for_subsampling: bool = True
+    ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
         """Return final coefficients for all fitted models.
 
         Args:
-            downstream: Set True to indicate that the model is a downstream analysis model, in which case the
-                coefficients will not be re-saved, presumably because they have already been saved.
+            adjust_for_subsampling: Set True if subsampling was performed; this indicates that the coefficients for
+                the subsampled points need to be extended to the neighboring non-sampled points.
 
         Outputs:
 
@@ -3439,46 +3507,46 @@ class MuSIC:
                 if isinstance(standard_errors.index[0], int) or isinstance(standard_errors.index[0], float):
                     standard_errors.index = [self.X_df.index[idx] for idx in standard_errors.index]
 
-                # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
-                # subsampling is not done by cell type group):
-                _, filename = os.path.split(self.output_path)
-                filename = os.path.splitext(filename)[0]
+                if adjust_for_subsampling:
+                    # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
+                    # subsampling is not done by cell type group):
+                    _, filename = os.path.split(self.output_path)
+                    filename = os.path.splitext(filename)[0]
 
-                if os.path.exists(os.path.join(parent_dir, "subsampling", f"{filename}.json")):
-                    with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "r") as dict_file:
-                        neighboring_unsampled = json.load(dict_file)
+                    if os.path.exists(os.path.join(parent_dir, "subsampling", f"{filename}.json")):
+                        with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "r") as dict_file:
+                            neighboring_unsampled = json.load(dict_file)
 
-                    sampled_to_nonsampled_map = neighboring_unsampled[target]
-                    betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
-                    standard_errors = standard_errors.reindex(
-                        self.X_df.index, columns=standard_errors.columns, fill_value=0
-                    )
-                    for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
-                        for nonsampled_idx in nonsampled_idxs:
-                            betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
-                            standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
-                            standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
+                        sampled_to_nonsampled_map = neighboring_unsampled[target]
+                        betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
+                        standard_errors = standard_errors.reindex(
+                            self.X_df.index, columns=standard_errors.columns, fill_value=0
+                        )
+                        for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
+                            for nonsampled_idx in nonsampled_idxs:
+                                betas.loc[nonsampled_idx] = betas.loc[sampled_idx]
+                                standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
+                                standard_errors.loc[nonsampled_idx] = standard_errors.loc[sampled_idx]
 
-                    # If this cell does not express the receptor(s) or doesn't have the ligand in neighborhood,
-                    # mask out the relevant element in "betas" and standard errors- specifically for ligand and
-                    # receptor models, do not infer expression in cells that do not express the target because it
-                    # is unknown whether the ligand/receptor (the half of the interacting pair that is missing) is
-                    # present in the neighborhood of these cells:
-                    if self.mod_type in ["receptor", "ligand"]:
-                        mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
-                        betas *= mask_matrix
-                        standard_errors *= mask_matrix
-                    else:
+                        # If this cell does not express the receptor(s) or doesn't have the ligand in neighborhood,
+                        # mask out the relevant element in "betas" and standard errors- specifically for ligand and
+                        # receptor models, do not infer expression in cells that do not express the target because it
+                        # is unknown whether the ligand/receptor (the half of the interacting pair that is missing) is
+                        # present in the neighborhood of these cells:
+                        if self.mod_type in ["receptor", "ligand"]:
+                            mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
+                            betas *= mask_matrix
+                            standard_errors *= mask_matrix
                         mask_df = (self.X_df != 0).astype(int)
                         mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
                         mask_matrix = mask_df.values
                         betas *= mask_matrix
                         standard_errors *= mask_matrix
 
-                # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
-                # object, save back to file path:
-                all_outputs = pd.concat([betas, standard_errors], axis=1)
-                all_outputs.to_csv(os.path.join(parent_dir, file))
+                    # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
+                    # object, save back to file path:
+                    all_outputs = pd.concat([betas, standard_errors], axis=1)
+                    all_outputs.to_csv(os.path.join(parent_dir, file))
 
                 # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas
