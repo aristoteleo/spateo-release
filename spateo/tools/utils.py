@@ -1,12 +1,15 @@
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from anndata import AnnData
 from pyvista import PolyData
 from scipy.sparse import csr_matrix, diags, issparse, lil_matrix, spmatrix
 from scipy.spatial import ConvexHull, Delaunay, cKDTree
 from scipy.stats import norm
+
+from ..configuration import SKM
 
 
 def rescaling(mat: Union[np.ndarray, spmatrix], new_shape: Union[List, Tuple]) -> Union[np.ndarray, spmatrix]:
@@ -213,3 +216,76 @@ def in_hull(p: np.ndarray, hull: Tuple[Delaunay, np.ndarray]) -> np.ndarray:
 
     res = hull.find_simplex(p) >= 0
     return res
+
+
+# ---------------------------------------------------------------------------------------------------
+# For filtering dataframe by written instructions
+# ---------------------------------------------------------------------------------------------------
+def parse_instruction(instruction: str, axis_map: Optional[Dict[str, str]] = None):
+    """
+    Parses a single filtering instruction and returns the equivalent pandas query string.
+
+    Args:
+        instruction: Filtering condition, in a form similar to the following: "x less than 950 and z less than or
+            equal to 350". This is equivalent to ((x < 950) & (z <= 350)). Here, x is the name of one dataframe column
+            and z is the name of another.
+        axis_map: In the case that an alias can be used for the dataframe column names (e.g. "x-axis" -> "x"),
+            this dictionary maps these optional aliases to column names.
+
+    Returns:
+        query: The equivalent pandas query string.
+    """
+    # Replace the axis names with the corresponding column names
+    for axis, col in axis_map.items():
+        instruction = instruction.replace(axis, col)
+
+    # Replace the human-readable operators with their Python equivalents
+    instruction = instruction.replace("less than or equal to", "<=")
+    instruction = instruction.replace("less than", "<")
+    instruction = instruction.replace("greater than or equal to", ">=")
+    instruction = instruction.replace("greater than", ">")
+    instruction = instruction.replace("equal to", "==")
+    instruction = instruction.replace("not (", "~(")
+
+    return instruction
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def filter_adata_spatial(
+    adata: AnnData, coords_key: str, instructions: List[str], col_alias_map: Optional[Dict[str, str]] = None
+):
+    """Filters the AnnData object by spatial coordinates based on the provided instructions list, to be executed
+    sequentially.
+
+    Args:
+        adata: AnnData object containing spatial coordinates in .obsm
+        coords_key: Key in .obsm containing spatial coordinates
+        instructions: List of filtering instructions, in a form similar to the following: "x less than 950 and z less
+            than or equal to 350". This is equivalent to ((x < 950) & (z <= 350)). Here, x is the name of one dataframe
+            column and z is the name of another.
+        col_alias_dict: In the case that an alias can be used for the dataframe column names (e.g. "x-axis" is used
+            to refer to the dataframe column "x"), this dictionary maps these optional aliases to column names.
+
+    Returns:
+        adata: Filtered AnnData object
+    """
+    # Default alias map will map "x" -> "points_x", "y" -> "points_y", etc.
+    if col_alias_map is None:
+        col_alias_map = {"x": "points_x", "y": "points_y", "z": "points_z"}
+
+    coordinates = adata.obsm[coords_key]
+    if coordinates.shape[1] == 2:
+        df = pd.DataFrame(coordinates, columns=["points_x", "points_y"])
+    elif coordinates.shape[1] == 3:
+        df = pd.DataFrame(coordinates, columns=["points_x", "points_y", "points_z"])
+    else:
+        raise ValueError(f"Coordinates must be 2D or 3D. Given shape: {coordinates.shape}.")
+
+    # Process each instruction:
+    for instruction in instructions:
+        query = parse_instruction(instruction, col_alias_map)
+        df = df.query(query)
+
+    # Filter AnnData object:
+    adata = adata[df.index, :].copy()
+    return adata

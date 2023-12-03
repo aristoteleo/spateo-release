@@ -44,12 +44,11 @@ from sklearn.metrics import (
 from sklearn.preprocessing import normalize
 from tqdm.auto import tqdm
 
-import spateo.tools.find_neighbors
-
 from ...configuration import config_spateo_rcParams
 from ...logging import logger_manager as lm
 from ...plotting.static.networks import plot_network
 from ...plotting.static.utils import save_return_show_fig_utils
+from ...tools.utils import filter_adata_spatial
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
 from ..utils import compute_corr_ci
 from .MuSIC import MuSIC
@@ -212,6 +211,19 @@ class MuSIC_Interpreter(MuSIC):
             is_significant_df.to_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"))
 
             self.logger.info(f"Finished computing significance for target {target}.")
+
+    def filter_adata_spatial(self, instructions: List[str]):
+        """Based on spatial coordinates, filter the adata object to only include cells that meet the criteria.
+        Criteria provided in the form of a list of instructions of the form "x less than 0.5 and y greater than 0.5",
+        etc., where each instruction is executed sequentially.
+
+        Args:
+            instructions: List of instructions to filter adata object by. Each instruction is a string of the form
+                "x less than 0.5 and y greater than 0.5", etc., where each instruction is executed sequentially.
+        """
+        adata_filt = filter_adata_spatial(self.adata, self.coords_key, instructions)
+        # Cells still left post-filter
+        self.remaining_cells = adata_filt.obs_names
 
     def compute_and_visualize_diagnostics(
         self, type: Literal["correlations", "confusion", "rmse"], n_genes_per_plot: int = 20
@@ -1254,11 +1266,14 @@ class MuSIC_Interpreter(MuSIC):
             sig = pd.read_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0)
             coef_target *= sig
 
+        if hasattr(self, "remaining_cells"):
+            adata = adata[self.remaining_cells, :].copy()
+
         # Compute the multiple possible masks that can be used to subset to the cells of interest:
         # Get the target gene expression:
         target_expression = adata[:, target].X.toarray().reshape(-1)
         # Get the interaction effect:
-        interaction_effect = coef_target[f"b_{interaction}"].values
+        interaction_effect = coef_target.loc[adata.obs_names, f"b_{interaction}"].values
 
         # Get the cells expressing the target gene:
         target_expressing_mask = target_expression > 0
