@@ -10,6 +10,7 @@ from scipy.spatial import ConvexHull, Delaunay, cKDTree
 from scipy.stats import norm
 
 from ..configuration import SKM
+from ..logging import logger_manager as lm
 
 
 def rescaling(mat: Union[np.ndarray, spmatrix], new_shape: Union[List, Tuple]) -> Union[np.ndarray, spmatrix]:
@@ -228,7 +229,7 @@ def parse_instruction(instruction: str, axis_map: Optional[Dict[str, str]] = Non
     Args:
         instruction: Filtering condition, in a form similar to the following: "x less than 950 and z less than or
             equal to 350". This is equivalent to ((x < 950) & (z <= 350)). Here, x is the name of one dataframe column
-            and z is the name of another.
+            and z is the name of another. For negation, use "not (x less than 950)".
         axis_map: In the case that an alias can be used for the dataframe column names (e.g. "x-axis" -> "x"),
             this dictionary maps these optional aliases to column names.
 
@@ -262,22 +263,24 @@ def filter_adata_spatial(
         coords_key: Key in .obsm containing spatial coordinates
         instructions: List of filtering instructions, in a form similar to the following: "x less than 950 and z less
             than or equal to 350". This is equivalent to ((x < 950) & (z <= 350)). Here, x is the name of one dataframe
-            column and z is the name of another.
+            column and z is the name of another. For negation, use "not (x less than 950)".
         col_alias_dict: In the case that an alias can be used for the dataframe column names (e.g. "x-axis" is used
             to refer to the dataframe column "x"), this dictionary maps these optional aliases to column names.
 
     Returns:
         adata: Filtered AnnData object
     """
+    logger = lm.get_main_logger()
+
     # Default alias map will map "x" -> "points_x", "y" -> "points_y", etc.
     if col_alias_map is None:
         col_alias_map = {"x": "points_x", "y": "points_y", "z": "points_z"}
 
     coordinates = adata.obsm[coords_key]
     if coordinates.shape[1] == 2:
-        df = pd.DataFrame(coordinates, columns=["points_x", "points_y"])
+        df = pd.DataFrame(coordinates, index=adata.obs_names, columns=["points_x", "points_y"])
     elif coordinates.shape[1] == 3:
-        df = pd.DataFrame(coordinates, columns=["points_x", "points_y", "points_z"])
+        df = pd.DataFrame(coordinates, index=adata.obs_names, columns=["points_x", "points_y", "points_z"])
     else:
         raise ValueError(f"Coordinates must be 2D or 3D. Given shape: {coordinates.shape}.")
 
@@ -285,6 +288,7 @@ def filter_adata_spatial(
     for instruction in instructions:
         query = parse_instruction(instruction, col_alias_map)
         df = df.query(query)
+    logger.info(f"Filtered {len(adata)} cells to {len(df)} cells.")
 
     # Filter AnnData object:
     adata = adata[df.index, :].copy()

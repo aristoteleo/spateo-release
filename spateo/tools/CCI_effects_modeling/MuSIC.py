@@ -27,6 +27,7 @@ from tqdm import tqdm
 from ...logging import logger_manager as lm
 from ...preprocessing.normalize import factor_normalization
 from ...preprocessing.transform import log1p
+from ...tools.spatial_smooth import smooth
 from ..find_neighbors import (
     find_bw_for_n_neighbors,
     find_threshold_distance,
@@ -35,7 +36,7 @@ from ..find_neighbors import (
 )
 from ..spatial_degs import moran_i
 from .distributions import Gaussian, NegativeBinomial, Poisson
-from .regression_utils import compute_betas_local, iwls, multicollinearity_check, smooth
+from .regression_utils import compute_betas_local, iwls, multicollinearity_check
 
 
 # ---------------------------------------------------------------------------------------------------

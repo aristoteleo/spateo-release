@@ -224,6 +224,7 @@ class MuSIC_Interpreter(MuSIC):
         adata_filt = filter_adata_spatial(self.adata, self.coords_key, instructions)
         # Cells still left post-filter
         self.remaining_cells = adata_filt.obs_names
+        self.remaining_indices = np.where(self.adata.obs_names.isin(self.remaining_cells))[0]
 
     def compute_and_visualize_diagnostics(
         self, type: Literal["correlations", "confusion", "rmse"], n_genes_per_plot: int = 20
@@ -749,6 +750,8 @@ class MuSIC_Interpreter(MuSIC):
             # Define interaction-specific masks: (optionally, if L:R model) for cells expressing receptor,
             # for cells predicted to be affected by an interaction and all of the neighbors of these cells:
             for interaction in feature_names:
+                if interaction not in coef_target.columns:
+                    continue
                 if self.mod_type == "lr":
                     ligand, receptor = interaction.split(":")
                     receptor_expressing_mask = np.ones(query_adata.shape[0], dtype=bool)
@@ -1260,6 +1263,14 @@ class MuSIC_Interpreter(MuSIC):
             raise ValueError("Invalid interaction type. Options: 'secreted', 'membrane-bound'.")
 
         adata = self.adata.copy()
+        if cell_type is not None:
+            if group_key is None:
+                group_key = self.group_key
+            # Get the cells of the specified cell type:
+            cell_type_mask = adata.obs[group_key] == cell_type
+            adata_ct = adata[cell_type_mask, :].copy()
+            adata_ct_cells = adata_ct.obs_names
+
         coef_target = self.coeffs[target]
         if use_significant:
             parent_dir = os.path.dirname(self.output_path)
@@ -1268,6 +1279,7 @@ class MuSIC_Interpreter(MuSIC):
 
         if hasattr(self, "remaining_cells"):
             adata = adata[self.remaining_cells, :].copy()
+            conn = conn[self.remaining_indices, :][:, self.remaining_indices].copy()
 
         # Compute the multiple possible masks that can be used to subset to the cells of interest:
         # Get the target gene expression:
@@ -1355,8 +1367,6 @@ class MuSIC_Interpreter(MuSIC):
         adata_sub = adata[adata_mask].copy()
 
         if cell_type is not None:
-            if group_key is None:
-                group_key = self.group_key
             adata_sub = adata_sub[adata_sub.obs[group_key] == cell_type].copy()
 
         logger.info(
@@ -1382,6 +1392,12 @@ class MuSIC_Interpreter(MuSIC):
         # Remove the anchor cells from the neighbors:
         neighbors = neighbors[~np.isin(neighbors, selected_indices)]
         neighbors_selected = adata.obs_names[neighbors]
+
+        # Also make note of the nonselected cells & their neighbors if cell type parameter was given:
+        if cell_type is not None:
+            selected_and_neighbors = target_expressing_selected.tolist() + neighbors_selected.tolist()
+            ct_other_cells = [cell for cell in adata_ct_cells if cell not in selected_and_neighbors]
+            ct_other_indices = [np.where(adata.obs_names == string)[0][0] for string in ct_other_cells]
 
         # Target expression in the selected cells:
         target_expression = adata_sub[target_expressing_selected, target].X.toarray().squeeze()
@@ -1422,24 +1438,31 @@ class MuSIC_Interpreter(MuSIC):
 
             # Color assignment:
             default_color = "#D3D3D3"
-            target_data = adata.obs.loc[target_expressing_selected, f"{interaction}_{target}_example_points"]
-            p997 = np.percentile(target_data.values, 99.7)
-            target_data[target_data > p997] = p997
-            plot_vals = target_data.values
+            if cell_type is not None:
+                ct_other_color = "#71797E"
+
+            target_color = "#39FF14"
+            # target_data = adata.obs.loc[target_expressing_selected, f"{interaction}_{target}_example_points"]
+            # p997 = np.percentile(target_data.values, 99.7)
+            # target_data[target_data > p997] = p997
+            # plot_vals = target_data.values
             scatter_target = go.Scatter3d(
                 x=x[selected_indices],
                 y=y[selected_indices],
                 z=z[selected_indices],
                 mode="markers",
                 # Draw target cells larger
-                marker=dict(
-                    color=plot_vals, colorscale="Plotly3", size=6, colorbar=dict(title=f"{target} Expression", x=1.05)
-                ),
+                marker=dict(color=target_color, size=6.5),
+                showlegend=False,
+                # marker=dict(
+                #     color=plot_vals, colorscale="Plotly3", size=6, colorbar=dict(title=f"{target} Expression", x=1.05)
+                # ),
             )
 
             nbr_data = adata.obs.loc[neighbors_selected, f"{interaction}_{target}_example_points"]
-            p997 = np.percentile(nbr_data.values, 99.7)
-            nbr_data[nbr_data > p997] = p997
+            # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
+            p95 = np.percentile(nbr_data.values, 95)
+            nbr_data[nbr_data > p95] = p95
             plot_vals = nbr_data.values
             scatter_ligand = go.Scatter3d(
                 x=x[neighbors],
@@ -1448,10 +1471,11 @@ class MuSIC_Interpreter(MuSIC):
                 mode="markers",
                 marker=dict(
                     color=plot_vals,
-                    colorscale="Blackbody",
+                    colorscale="BlackBody",
                     size=2.5,
-                    colorbar=dict(title=f"{ligand} Expression", x=1.15),
+                    colorbar=dict(title=f"{ligand} Expression", x=0.8),
                 ),
+                showlegend=False,
             )
 
             rest_indices = list(set(range(len(x))) - set(selected_indices) - set(neighbors))
@@ -1461,21 +1485,99 @@ class MuSIC_Interpreter(MuSIC):
                 z=z[rest_indices],
                 mode="markers",
                 marker=dict(color=default_color, size=1.5),
+                name="Other Cells",
+                showlegend=False,
+            )
+
+            if cell_type is not None:
+                scatter_ct = go.Scatter3d(
+                    x=x[ct_other_indices],
+                    y=y[ct_other_indices],
+                    z=z[ct_other_indices],
+                    mode="markers",
+                    marker=dict(color=ct_other_color, size=1.5),
+                    name=f"Other Cells of Type {cell_type}",
+                    showlegend=False,
+                )
+
+                # Invisible traces for the legend
+                legend_ct = go.Scatter3d(
+                    x=[None],
+                    y=[None],
+                    z=[None],
+                    mode="markers",
+                    marker=dict(size=10, color=ct_other_color),  # Adjust size as needed
+                    name=f"Other Cells of Type <br>{cell_type}",
+                    showlegend=True,
+                )
+
+            # Invisible traces for the legend
+            legend_target = go.Scatter3d(
+                x=[None],
+                y=[None],
+                z=[None],
+                mode="markers",
+                marker=dict(size=30, color=target_color),  # Adjust size as needed
+                name=f"{target}-Expressing Cells",
+                showlegend=True,
+            )
+
+            legend_rest = go.Scatter3d(
+                x=[None],
+                y=[None],
+                z=[None],
+                mode="markers",
+                marker=dict(size=15, color=default_color),  # Adjust size as needed
+                name="Other Cells",
+                showlegend=True,
             )
 
             # Create the figure and add the scatter plots
-            fig = go.Figure(data=[scatter_rest, scatter_target, scatter_ligand])
+            if cell_type is not None:
+                fig = go.Figure(
+                    data=[
+                        scatter_rest,
+                        scatter_target,
+                        scatter_ligand,
+                        scatter_ct,
+                        legend_target,
+                        legend_rest,
+                        legend_ct,
+                    ]
+                )
+            else:
+                fig = go.Figure(data=[scatter_rest, scatter_target, scatter_ligand, legend_target, legend_rest])
+
+            if cell_type is None:
+                title_dict = dict(
+                    text=f"Target: {target}, Ligand: {ligand} (Example Points)",
+                    y=0.9,
+                    yanchor="top",
+                    x=0.5,
+                    xanchor="center",
+                    font=dict(size=28),
+                )
+            else:
+                title_dict = dict(
+                    text=f"Target: {target}, Ligand: {ligand}, <br>Cell Type: {cell_type} (Example Points)",
+                    y=0.9,
+                    yanchor="top",
+                    x=0.5,
+                    xanchor="center",
+                    font=dict(size=28),
+                )
 
             # Turn off the grid
             fig.update_layout(
-                showlegend=False,
+                showlegend=True,
+                legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
                 scene=dict(
-                    xaxis=dict(showgrid=False, showline=True, backgroundcolor="white"),
-                    yaxis=dict(showgrid=False, showline=True, backgroundcolor="white"),
-                    zaxis=dict(showgrid=False, showline=True, backgroundcolor="white"),
+                    xaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+                    yaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+                    zaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
                 ),
-                margin=dict(l=0, r=0, b=0, t=30),  # Adjust margins to minimize spacing
-                title=dict(text=f"Target: {target}, Ligand: {ligand}", y=1.0, yanchor="top", x=0.5, xanchor="center"),
+                margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+                title=title_dict,
             )
             fig.write_html(path)
 
