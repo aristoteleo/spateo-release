@@ -2956,11 +2956,6 @@ class MuSIC:
             mask = ~all_nans
             num_valid = len(mask)
             number_of_nans = np.sum(~mask)
-            if self.verbose:
-                self.logger.info(
-                    f"Bandwidth: {bw:.3f}, encountered issue getting pseudoinverse for {number_of_nans} cells (this "
-                    f"should not significantly effect result)."
-                )
             ll = self.distr_obj.log_likelihood(true[mask], all_y_pred[mask])
             norm_ll = ll / num_valid
 
@@ -3053,6 +3048,10 @@ class MuSIC:
                     gene_query = target
                 target_row = self.grn.loc[gene_query]
                 target_TFs = target_row[target_row == 1].index.tolist()
+                # TFs that can regulate expression of the target-binding TFs:
+                primary_tf_rows = self.grn.loc[[tf for tf in target_TFs if tf in self.grn.index]]
+                secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
+                target_TFs = list(set(target_TFs + secondary_TFs))
                 if len(target_TFs) == 0:
                     self.logger.info(
                         f"None of the provided regulators could be found to have an association with target gene "
@@ -3123,11 +3122,8 @@ class MuSIC:
                 # Other TFs that interact with these transcription factors:
                 target_TFs_i_int = [tf for tf in target_TFs if tf in self.tf_tf_db.columns]
                 intersecting_tf_subset = list(self.tf_tf_db[(self.tf_tf_db[target_TFs_i_int] == 1).any(axis=1)].index)
-                # TFs that can regulate expression of the target-binding TFs:
-                primary_tf_rows = self.grn.loc[[tf for tf in target_TFs if tf in self.grn.index]]
-                secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
 
-                target_regulators = target_TFs + cof_subset + intersecting_tf_subset + secondary_TFs
+                target_regulators = target_TFs + cof_subset + intersecting_tf_subset
                 # If there are no features, skip fitting for this gene and move on:
                 if len(target_regulators) == 0:
                     self.logger.info(

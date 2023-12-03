@@ -3,6 +3,7 @@ import copy
 import math
 import os
 import warnings
+from inspect import signature
 from typing import Any, Collection, Dict, List, Optional, Tuple, Union
 
 with warnings.catch_warnings():
@@ -2356,3 +2357,47 @@ def plot_dendrogram(
     dendro_ax.spines["top"].set_visible(False)
     dendro_ax.spines["left"].set_visible(False)
     dendro_ax.spines["bottom"].set_visible(False)
+
+
+# ---------------------------------------------------------------------------------------------------
+# For filtering dataframe by written instructions
+# ---------------------------------------------------------------------------------------------------
+def parse_instruction(instruction: str, axis_map: Optional[Dict[str, str]] = None):
+    """
+    Parses a single filtering instruction and returns the equivalent pandas query string.
+
+    Args:
+        instruction: Filtering condition, in a form similar to the following: "x less than 950 and z less than or
+            equal to 350". This is equivalent to ((x < 950) & (z <= 350)). Here, x is the name of one dataframe column
+            and z is the name of another.
+        axis_map: In the case that an alias can be used for the dataframe column names (e.g. "x-axis" -> "x"),
+            this dictionary maps these optional aliases to column names.
+
+    Returns:
+        query: The equivalent pandas query string.
+    """
+    # Replace the axis names with the corresponding column names
+    for axis, col in axis_map.items():
+        instruction = instruction.replace(axis, col)
+
+    # Replace the human-readable operators with their Python equivalents
+    instruction = instruction.replace("less than or equal to", "<=")
+    instruction = instruction.replace("less than", "<")
+    instruction = instruction.replace("greater than or equal to", ">=")
+    instruction = instruction.replace("greater than", ">")
+    instruction = instruction.replace("equal to", "==")
+    instruction = instruction.replace("not (", "~(")
+
+    return instruction
+
+
+def filter_dataframe(df: pd.DataFrame, instructions: List[str]):
+    """Filters the DataFrame based on the provided instructions list, to be executed sequentially.
+
+    Args:
+        df:
+        instructions:
+
+    Returns:
+
+    """

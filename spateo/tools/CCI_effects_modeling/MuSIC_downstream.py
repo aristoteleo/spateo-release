@@ -33,7 +33,7 @@ from adjustText import adjust_text
 from joblib import Parallel, delayed
 from matplotlib import rcParams
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from scipy.stats import pearsonr, spearmanr, ttest_1samp, ttest_ind
+from scipy.stats import mannwhitneyu, pearsonr, spearmanr, ttest_1samp, ttest_ind
 from sklearn.decomposition import TruncatedSVD
 from sklearn.metrics import (
     confusion_matrix,
@@ -53,7 +53,7 @@ from ...plotting.static.utils import save_return_show_fig_utils
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
 from ..utils import compute_corr_ci
 from .MuSIC import MuSIC
-from .regression_utils import multitesting_correction, wald_test
+from .regression_utils import assign_significance, multitesting_correction, wald_test
 from .SWR import define_spateo_argparse
 
 
@@ -529,61 +529,62 @@ class MuSIC_Interpreter(MuSIC):
 
     def visualize_effect_specificity(
         self,
-        denominator: Literal["target", "interaction"] = "target",
-        condition_on_receptors: bool = False,
-        n_cells_threshold: int = 200,
-        cell_type_specific: bool = False,
+        agg_method: Literal["mean", "percentage"] = "mean",
+        plot_type: Literal["heatmap", "volcano"] = "heatmap",
         target_subset: Optional[List[str]] = None,
         interaction_subset: Optional[List[str]] = None,
         ct_subset: Optional[List[str]] = None,
         group_key: Optional[str] = None,
-        effect_threshold: float = 0.05,
+        n_anchors: Optional[int] = None,
+        effect_threshold: float = 0.0,
         use_significant: bool = False,
+        significance_cutoff: float = 1.3,
+        fold_change_cutoff: float = 1.5,
+        fold_change_cutoff_for_labels: float = 3.0,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
-        center: Optional[float] = None,
-        cmap: str = "Reds",
+        cmap: str = "seismic",
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
         save_df: bool = False,
     ):
-        """Computes and visualizes the specificity of the effect of each interaction on each target. Specificity can
-        be defined as the proportion of cells expressing the target that also express the interaction,
-        or the proportion of cells expressing the interaction for which the interaction is predicted to effect a
-        particular target.
+        """Computes and visualizes the specificity of each interaction on each target. This is done by first
+        separating the target-expressing cells (and their neighbors) from the rest of the cells (conditioned on
+        predicted effect and also conditioned on receptor expression if L:R model is used). Then, computing the
+        fold change of the average expression of the ligand in the neighborhood of the first subset vs. the
+        neighborhoods of the second subset.
 
         Args:
-            denominator: Either "target" or "interaction". If "target", specificity is defined as the proportion of
-                cells expressing the target that also express the interaction. If "interaction", specificity is defined
-                as the proportion of cells expressing the interaction for which the interaction is predicted to effect
-                a particular target.
-            condition_on_receptors: Only used if :attr `mod_type` is "ligand". Sets whether to condition on the
-                expression of receptors. If True, will only consider
-            n_cells_threshold: Minimum number of cells expressing the target or interaction, over all cells or over
-                cells of each type (if cell_type_specific is True). For interactions/targets below this threshold,
-                value will be set to 0.
-            cell_type_specific: Whether to factor in cell type-specific expression of each target
+            agg_method: Method to use for aggregating the specificity of each interaction on each target. Options:
+                "mean" for mean ligand expression, "percentage" for the percentage of cells expressing the ligand.
+            plot_type: Type of plot to use for visualization. Options: "heatmap" for heatmap, "volcano" for volcano
+                plot.
             target_subset: List of targets to consider. If None, will use all targets used in model fitting.
             interaction_subset: List of interactions to consider. If None, will use all interactions used in model.
-                Is necessary if "plot_type" is "barplot", since the barplot is only designed to accomodate up to three
-                interactions at once.
-            ct_subset: Only used if "cell_type_specific" is True. If given, will search for cell types in
-                "group_key" attribute from model initialization. Recommended to use to subset to cell types with
-                sufficient numbers. If not given, will use all cell types.
+            ct_subset: Can be used to constrain the first group of cells (the query group) to the target-expressing
+                cells of a particular type (conditioned on any other relevant variables). If given, will search
+                for cell types in "group_key" attribute from model initialization. If not given, will use all cell
+                types.
             group_key: Can be used to specify entry in adata.obs that contains cell type groupings. If None,
                 will use :attr `group_key` from model initialization.
+            n_anchors: Optional, number of target gene-expressing cells to use as anchors for analysis. Will be
+                selected randomly from the set of target gene-expressing cells (conditioned on any other relevant
+                values).
             effect_threshold: Threshold minimum effect size to consider an effect for further analysis, as an absolute
-                value. Defaults to 0.05.
+                value. Use this to choose only the cells for which an interaction is predicted to have a strong effect.
+                Defaults to 0.0.
             use_significant: Whether to use only significant effects in computing the specificity. If True,
                 will filter to cells + interactions where the interaction is significant for the target. Only valid
                 if :func `compute_coeff_significance()` has been run.
+            significance_cutoff: Cutoff for negative log-10 q-value to consider an interaction/effect significant. Only
+                        used if "plot_type" is "volcano". Defaults to 1.3 (corresponding to an approximate q-value of 0.05).
+                    fold_change_cutoff: Cutoff for fold change to consider an interaction/effect significant. Only used if
+                            "plot_type" is "volcano". Defaults to 1.5.
+                    fold_change_cutoff_for_labels: Cutoff for fold change to include the label for an interaction/effect.
+                            Only used if "plot_type" is "volcano". Defaults to 3.0.
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
-            center: Optional, determines position of the colormap center. Between 0 and 1.
-            cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
-                the range is 0. It is recommended to use a sequential colormap (e.g. "Reds", "Blues", "Viridis",
-                etc.). For metric = "fc", if a divergent colormap is not provided, "seismic" will automatically be
-                used.
+            cmap: Colormap to use. Options: Any divergent matplotlib colormap.
             save_show_or_return: Whether to save, show or return the figure.
                 If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
                 displayed and the associated axis and other object will be return.
@@ -594,251 +595,413 @@ class MuSIC_Interpreter(MuSIC):
                 keys according to your needs.
             save_df: Set True to save the metric dataframe in the end
         """
+        from ..find_neighbors import neighbors
+
         logger = lm.get_main_logger()
         config_spateo_rcParams()
         # But set display DPI to 300:
         plt.rcParams["figure.dpi"] = 300
 
-        if denominator not in ["target", "interaction"]:
-            raise ValueError(f"Input to 'denominator' must be either 'target' or 'interaction'")
+        if self.mod_type != "lr" and self.mod_type != "ligand":
+            raise ValueError("This function is only applicable for ligand-based models.")
 
-        # If cell type-specific, save the output rather than plotting all of them:
-        if cell_type_specific:
-            logger.info("Cell type-specific analysis: saving output rather than plotting.")
-            save_show_or_return = "save"
+        if save_show_or_return in ["save", "both", "all"]:
             if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
                 os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
             figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
+
         if save_df:
             output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder)
 
-        # Colormap should be sequential:
-        sequential_colormaps = [
-            "Blues",
-            "BuGn",
-            "BuPu",
-            "GnBu",
-            "Greens",
-            "Greys",
-            "Oranges",
-            "OrRd",
-            "PuBu",
-            "PuBuGn",
-            "PuRd",
-            "Purples",
-            "RdPu",
-            "Reds",
-            "YlGn",
-            "YlGnBu",
-            "YlOrBr",
-            "YlOrRd",
-            "afmhot",
-            "autumn",
-            "bone",
-            "cool",
-            "copper",
-            "gist_heat",
-            "gray",
-            "hot",
-            "pink",
-            "spring",
-            "summer",
-            "winter",
-            "viridis",
-            "plasma",
-            "inferno",
-            "magma",
-            "cividis",
+        # Colormap should be divergent:
+        divergent_cmaps = [
+            "seismic",
+            "coolwarm",
+            "bwr",
+            "RdBu",
+            "RdGy",
+            "PuOr",
+            "PiYG",
+            "PRGn",
+            "BrBG",
+            "RdYlBu",
+            "RdYlGn",
+            "Spectral",
         ]
-        if cmap not in sequential_colormaps:
-            logger.info("Colormap should be sequential: using 'viridis'.")
-            cmap = "viridis"
+        if cmap not in divergent_cmaps:
+            logger.warning(
+                f"Colormap {cmap} is not divergent, which is recommended for this plot type. Using 'seismic' instead."
+            )
+            cmap = "seismic"
 
-        if cell_type_specific:
-            if group_key is None:
-                group_key = self.group_key
-
-            if isinstance(ct_subset, str):
-                ct_subset = [ct_subset]
-            if ct_subset is None:
-                adata = self.adata.copy()
-            else:
-                adata = self.adata[self.adata.obs[group_key].isin(ct_subset)].copy()
-            cell_types = adata.obs[group_key].unique()
+        if (
+            "spatial_connectivities_secreted" in self.adata.obsp.keys()
+            and "spatial_connectivities_membrane_bound" in self.adata.obsp.keys()
+        ):
+            conn_secreted = self.adata.obsp["spatial_connectivities_secreted"]
+            conn_membrane_bound = self.adata.obsp["spatial_connectivities_membrane_bound"]
         else:
+            logger.info("Spatial graph not found, computing...")
             adata = self.adata.copy()
+            _, adata_secreted = neighbors(
+                adata,
+                n_neighbors=self.n_neighbors_secreted,
+                basis="spatial",
+                spatial_key=self.coords_key,
+                n_neighbors_method="ball_tree",
+            )
+            conn_secreted = adata_secreted.obsp["spatial_connectivities"]
 
-        all_targets = list(self.coeffs.keys())
+            adata = self.adata.copy()
+            _, adata_membrane_bound = neighbors(
+                adata,
+                n_neighbors=self.n_neighbors_membrane_bound,
+                basis="spatial",
+                spatial_key=self.coords_key,
+                n_neighbors_method="ball_tree",
+            )
+            conn_membrane_bound = adata_membrane_bound.obsp["spatial_connectivities"]
+
+            self.adata.obsp["spatial_connectivities_secreted"] = conn_secreted
+            self.adata.obsp["spatial_connectivities_membrane_bound"] = conn_membrane_bound
+            del adata_secreted, adata_membrane_bound
+
+        if target_subset is None:
+            target_subset = list(self.coeffs.keys())
+        else:
+            target_subset = [t for t in target_subset if t in self.coeffs.keys()]
+            removed = [t for t in target_subset if t not in self.coeffs.keys()]
+            if len(removed) > 0:
+                logger.warning(
+                    f"Targets {removed} were not found in the model, and will be removed from the target subset."
+                )
+
         all_feature_names = [feat for feat in self.feature_names if feat != "intercept"]
-        if isinstance(interaction_subset, str):
-            interaction_subset = [interaction_subset]
-        feature_names = all_feature_names if interaction_subset is None else interaction_subset
-        # Filter out extremely uncommon interactions:
-        feature_names = [feature for feature in feature_names if np.sum(self.X_df[feature] > 0) > n_cells_threshold]
+        if interaction_subset is None:
+            feature_names = all_feature_names
+        else:
+            feature_names = [feat for feat in all_feature_names if feat in interaction_subset]
+            removed = [feat for feat in interaction_subset if feat not in all_feature_names]
+            if len(removed) > 0:
+                logger.warning(
+                    f"Interactions {removed} were not found in the model, and will be removed from the interaction "
+                    f"subset."
+                )
 
-        if isinstance(target_subset, str):
-            target_subset = [target_subset]
-        targets = all_targets if target_subset is None else target_subset
-        # Filter out extremely uncommon targets:
-        targets = [target for target in targets if np.sum(adata[:, target].X > 0) > n_cells_threshold]
+        if ct_subset is not None and group_key is None:
+            group_key = self.group_key
 
         if fontsize is None:
             fontsize = rcParams.get("font.size")
 
-        if figsize is None:
-            # Set figure size based on the number of interaction features and cell type-target combos:
-            m = len(targets) * 40 / 300
-            n = len(feature_names) * 40 / 300
-            figsize = (n, m)
-
-        dfs = {}
-        if cell_type_specific:
-            # Create a dictionary to store information about which cells belong to which cell types:
-            cell_types_dict = {}
-
-            for ct in cell_types:
-                cell_type_mask = adata.obs[self.group_key] == ct
-                cell_type_mask = adata.obs[cell_type_mask].index
-                cell_types_dict[ct] = cell_type_mask
-                dfs[ct] = pd.DataFrame(0, index=targets, columns=feature_names)
+        if plot_type == "heatmap":
+            df = pd.DataFrame(index=target_subset, columns=feature_names)
+            x_label = "Neighboring Ligand" if self.mod_type == "ligand" else "L:R Interaction"
+            y_label = "Target Gene"
+            title = "Fold Change Interaction Enrichment \n Target-Expressing Cells vs. Rest"
+            cbar_label = "$\\log_2$(Fold change Interaction Enrichment \n Target-Expressing Cells vs. Rest"
         else:
-            dfs["all"] = pd.DataFrame(0, index=targets, columns=feature_names)
+            combinations = product(feature_names, target_subset)
+            combinations = [f"{feature}-{target}" for feature, target in combinations]
+            df = pd.DataFrame(
+                index=combinations, columns=["log2FC", "p-value", "q-value", "Significance", "-log10(qval)"]
+            )
+            x_label = "$\\log_2$(Fold change Interaction Enrichment \n Target-Expressing Cells vs. Rest"
+            y_label = r"$-log_10$(qval)"
+            title = "Fold Change Interaction Enrichment \n Target-Expressing Cells vs. Rest"
 
-        expr = pd.DataFrame(adata[:, targets].X.toarray(), index=adata.obs.index, columns=targets)
+        # For each target, split cells into two groups: target-expressing and all neighbors of target-expressing
+        # cells, and the remainder.
+        for target in target_subset:
+            coef_target = self.coeffs[target]
+            if use_significant:
+                parent_dir = os.path.dirname(self.output_path)
+                sig = pd.read_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0)
+                coef_target *= sig
 
-        # Fill in all dataframes:
-        for dict_name, df in dfs.items():
-            if denominator == "target":
-                # Get the number of cells expressing each target that are also affected by each interaction:
-                if dict_name == "all":
-                    cells_expressing_targets = expr > 0
-
-                    title = (
-                        "Number of target-expressing cells affected by interaction \n"
-                        "vs. total number of target-expressing cells"
-                    )
-                else:
-                    cell_type = dict_name
-                    cells_expressing_targets = expr.loc[cell_types_dict[cell_type], targets] > 0
-                    title = (
-                        f"Number of target-expressing cells affected by interaction \nvs. total "
-                        f"number of target-expressing cells of type {cell_type}"
-                    )
-
-                for i, target in enumerate(targets):
-                    cells_expressing_target = cells_expressing_targets.iloc[:, i]
-                    coeffs = (
-                        self.coeffs[target]
-                        if dict_name == "all"
-                        else self.coeffs[target].loc[cell_types_dict[cell_type]]
-                    )
-                    if use_significant:
-                        parent_dir = os.path.dirname(self.output_path)
-                        sig = pd.read_csv(
-                            os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
-                        )
-                        coeffs *= sig
-
-                    for j, feature in enumerate(feature_names):
-                        if f"b_{feature}" in coeffs.columns:
-                            cells_w_interaction_effect = coeffs[f"b_{feature}"] > effect_threshold
-
-                            cells_expressing_target_and_feature = cells_expressing_target & cells_w_interaction_effect
-                            intersection = np.sum(cells_expressing_target_and_feature)
-                            denom = np.sum(cells_expressing_target)
-                            if denom != 0:
-                                df.loc[target, feature] = intersection / denom
-                            else:
-                                df.loc[target, feature] = 0
-                        else:
-                            df.loc[target, feature] = 0
-
+            # Taking the first group (the query group)- first subset to cell types of interest, if given:
+            if ct_subset is not None:
+                query_adata = self.adata[self.adata.obs[group_key].isin(ct_subset)].copy()
             else:
-                # Number of cells where the interaction is present:
-                if dict_name == "all":
-                    cells_expressing_interactions = self.X_df[feature_names] > 0
-                    title = (
-                        "Number of cells w/ interaction effect \n" "vs. total number of cells potentially interacting"
-                    )
+                query_adata = self.adata.copy()
+
+            # Define masks for target expression:
+            target_expression = query_adata[:, target].X.toarray().reshape(-1)
+            target_expressing_mask = target_expression > 0
+            target_expressing_cells = query_adata.obs_names[target_expressing_mask]
+
+            # Define interaction-specific masks: (optionally, if L:R model) for cells expressing receptor,
+            # for cells predicted to be affected by an interaction and all of the neighbors of these cells:
+            for interaction in feature_names:
+                if self.mod_type == "lr":
+                    ligand, receptor = interaction.split(":")
+                    receptor_expressing_mask = np.ones(query_adata.shape[0], dtype=bool)
+                    for r in receptor.split("_"):
+                        receptor_expression = query_adata[:, r].X.toarray().reshape(-1)
+                        receptor_expressing_mask &= receptor_expression > 0
+                    receptor_expressing_cells = query_adata.obs_names[receptor_expressing_mask]
+
+                coef_interaction_target = coef_target[interaction]
+                coef_interaction_target_mask = coef_interaction_target > effect_threshold
+                coef_interaction_target_cells = query_adata.obs_names[coef_interaction_target_mask]
+
+                # Get mask for any neighbors of these cells:
+                # Check whether to use the neighbors found for membrane-bound interaction or those for secreted
+                # interactions:
+                to_check = interaction.split(":")[0] if ":" in interaction else interaction
+                if "/" in to_check:
+                    interaction_components = to_check.split("/")
+                    separator = "/"
+                elif "_" in to_check:
+                    interaction_components = to_check.split("_")
+                    separator = "_"
                 else:
-                    cell_type = dict_name
-                    cells_expressing_interactions = self.X_df.loc[cell_types_dict[cell_type], feature_names] > 0
-                    title = (
-                        f"Number of cells w/ effect on target \nvs. total "
-                        f"number of cells potentially interacting of type {cell_type}"
-                    )
+                    interaction_components = [to_check]
+                    separator = None
+                matching_rows = self.lr_db[self.lr_db["from"].isin(interaction_components)]
+                if (
+                    matching_rows["type"].str.contains("Secreted Signaling").any()
+                    or matching_rows["type"].str.contains("ECM-Receptor").any()
+                ):
+                    conn = conn_secreted
+                else:
+                    conn = conn_membrane_bound
 
-                for i, target in enumerate(targets):
-                    cells_expressing_interaction = cells_expressing_interactions.iloc[:, i]
-                    coeffs = (
-                        self.coeffs[target]
-                        if dict_name == "all"
-                        else self.coeffs[target].loc[cell_types_dict[cell_type]]
-                    )
-                    if use_significant:
-                        parent_dir = os.path.dirname(self.output_path)
-                        sig = pd.read_csv(
-                            os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
+                if self.mod_type == "lr":
+                    # Get the intersection of cells expressing target and predicted to be affected by the interaction:
+                    adata_mask = target_expressing_cells & coef_interaction_target_cells
+                else:
+                    # Get the intersection of cells expressing target and receptor and are predicted to be affected by
+                    # interaction:
+                    adata_mask = target_expressing_cells & receptor_expressing_cells & coef_interaction_target_cells
+                # This object contains samples that can constitute the query group:
+                query_adata_sub = query_adata[adata_mask].copy()
+                # This object contains the other samples, that can constitute the reference:
+                reference_adata_sub = self.adata[~adata_mask].copy()
+
+                # Query group:
+                # If applicable, select a subset of these cells to use as anchors:
+                if n_anchors is not None:
+                    if query_adata_sub.n_obs < n_anchors:
+                        logger.warning(
+                            f"Number of anchors ({n_anchors}) is greater than number of target-expressing cells "
+                            f"({query_adata_sub.n_obs}). Using all cells as anchors."
                         )
-                        coeffs *= sig
+                        n_anchors = query_adata_sub.n_obs
 
-                    for j, feature in enumerate(feature_names):
-                        if f"b_{feature}" in coeffs.columns:
-                            cells_expressing_interaction_and_effect = cells_expressing_interaction & (
-                                coeffs[f"b_{feature}"] > effect_threshold
-                            )
-                            intersection = np.sum(cells_expressing_interaction_and_effect)
-                            denom = np.sum(cells_expressing_interaction)
-                            if denom != 0:
-                                df.loc[target, feature] = intersection / denom
-                            else:
-                                df.loc[target, feature] = 0
-                        else:
-                            df.loc[target, feature] = 0
+                if n_anchors == query_adata_sub.n_obs:
+                    anchors = query_adata_sub.obs_names
+                else:
+                    anchors = np.random.choice(query_adata_sub.obs_names, size=n_anchors, replace=False)
+                selected_indices = [np.where(self.adata.obs_names == string)[0][0] for string in anchors]
 
-            # Hiearchical clustering of both targets and interactions:
-            col_linkage = sch.linkage(df.transpose(), method="ward", metric="euclidean")
+                # Get neighbors of these cells:
+                neighbors = conn[selected_indices].nonzero()[1]
+                neighbors = np.unique(neighbors)
+                # Remove the anchor cells from the neighbors:
+                neighbors = neighbors[~np.isin(neighbors, selected_indices)]
+                neighbors_selected = self.adata.obs_names[neighbors]
+                # The query group: anchors and their neighbors:
+                query_group = anchors.tolist() + neighbors_selected.tolist()
+
+                # Reference group:
+                # If applicable, select a subset of these cells to use as anchors:
+                if n_anchors is not None:
+                    if reference_adata_sub.n_obs < n_anchors:
+                        logger.warning(
+                            f"Number of anchors ({n_anchors}) is greater than number of reference cells "
+                            f"({reference_adata_sub.n_obs}). Using all cells as anchors."
+                        )
+                        n_anchors = reference_adata_sub.n_obs
+
+                if n_anchors == reference_adata_sub.n_obs:
+                    anchors = reference_adata_sub.obs_names
+                else:
+                    anchors = np.random.choice(reference_adata_sub.obs_names, size=n_anchors, replace=False)
+                selected_indices = [np.where(self.adata.obs_names == string)[0][0] for string in anchors]
+
+                # Get neighbors of these cells:
+                neighbors = conn[selected_indices].nonzero()[1]
+                neighbors = np.unique(neighbors)
+                # Remove the anchor cells from the neighbors:
+                neighbors = neighbors[~np.isin(neighbors, selected_indices)]
+                neighbors_selected = self.adata.obs_names[neighbors]
+                # The reference group: anchors and their neighbors:
+                reference_group = anchors.tolist() + neighbors_selected.tolist()
+
+                # Ligand expression in the selected cells:
+                ligand = interaction.split(":")[0] if ":" in interaction else interaction
+                components = ligand.split(separator) if separator is not None else [ligand]
+                # Compute ligand values for query + reference together before separating them for fold change
+                # calculation:
+                ligand_values = self.adata[query_group + reference_group, components].X.toarray()
+                if separator == "/":
+                    # Arithmetic mean of the genes
+                    ligand_values = np.mean(ligand_values, axis=1)
+                elif separator == "_":
+                    # Geometric mean of the genes
+                    # Replace zeros with np.nan
+                    ligand_values[ligand_values == 0] = np.nan
+                    # Compute product along the rows
+                    products = np.nanprod(ligand_values, axis=1)
+                    # Count non-nan values in each row for nth root calculation
+                    non_nan_counts = np.sum(~np.isnan(ligand_values), axis=1)
+                    # Avoid division by zero
+                    non_nan_counts[non_nan_counts == 0] = np.nan
+                    ligand_values = np.power(products, 1 / non_nan_counts)
+                ligand_values = pd.DataFrame(ligand_values, index=query_group + reference_group, columns=[ligand])
+
+                ligand_query = ligand_values.loc[query_group, :]
+                ligand_reference = ligand_values.loc[reference_group, :]
+                # Significance for this interaction-target combination:
+                if plot_type == "volcano":
+                    df.loc[f"{interaction}-{target}", "p-value"] = mannwhitneyu(ligand_query, ligand_reference)[1]
+
+                if agg_method == "mean":
+                    ligand_query = ligand_query.mean()
+                    ligand_reference = ligand_reference.mean()
+                elif agg_method == "percentage":
+                    ligand_query = (ligand_query > 0).mean()
+                    ligand_reference = (ligand_reference > 0).mean()
+
+                fold_change = np.log2(ligand_query / ligand_reference)
+                df.loc[f"{interaction}-{target}", "log2FC"] = fold_change
+
+        # If relevant, compute adjusted p-values:
+        if plot_type == "volcano":
+            df["q-value"] = multitesting_correction(df["p-value"].values, method="fdr_bh")
+            df["Significance"] = df["q-value"] < 0.05
+            df["-log10(qval)"] = -np.log10(df["q-value"])
+            # Cut off values larger than 8:
+            df.loc[df["-log10(qval)"] > 8, "-log10(qval)"] = 8
+
+        # And if relevant, perform hierarchical clustering- first to group interactions w/ similar fold changes
+        # across targets:
+        if plot_type == "heatmap":
+            col_linkage = sch.linkage(df.transpose(), method="ward")
             col_dendro = sch.dendrogram(col_linkage, no_plot=True)
             col_clustered_order = col_dendro["leaves"]
             df = df.iloc[:, col_clustered_order]
 
+            # Then to group targets w/ similar fold changes across interactions:
             row_linkage = sch.linkage(df, method="ward")
             row_dendro = sch.dendrogram(row_linkage, no_plot=True)
             row_clustered_order = row_dendro["leaves"]
             df = df.iloc[row_clustered_order, :]
 
-            # Delete all-zero rows and all-zero columns:
-            df = df.loc[:, ~(df == 0).all()]
-            df = df.loc[~(df == 0).all(axis=1), :]
-            logger.info(f"Final dataframe for {dict_name} shape: {df.shape}")
+        # Plot:
+        if figsize is None:
+            if plot_type == "heatmap":
+                # Set figure size based on the number of interaction features and targets:
+                m = len(target_subset) * 50 / 200
+                n = len(feature_names) * 50 / 200
+            else:
+                m = 10
+                n = m / 2
+            figsize = (n, m)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+        cmap = plt.cm.get_cmap(cmap)
 
-            dfs[dict_name] = df
+        # Use the saved name for the AnnData object to define part of the name of the saved file:
+        base_name = os.path.basename(self.adata_path)
+        adata_id = os.path.splitext(base_name)[0]
 
-            # Set up heatmap for visualization:
-            if self.mod_type == "lr":
-                x_label = "L:R Interaction"
-            elif self.mod_type == "ligand":
-                x_label = "Ligand"
-            elif self.mod_type == "receptor":
-                x_label = "Receptor"
+        # Center colormap at 0 for heatmap:
+        if plot_type == "heatmap":
+            max_distance = max(abs(df.max().max()), abs(df.min().min()))
+            norm = plt.Normalize(-max_distance, max_distance)
+            colors = cmap(norm(df))
+            custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("custom", colors)
+        else:
+            max_distance = max(abs(df["log2FC"].max()), abs(df["log2FC"].min()))
 
-            vmin = 0
-            vmax = 1
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+        if plot_type == "volcano":
+            if len(df) > 20:
+                size = 20
+            else:
+                size = 40
+
+            significant = df["-log10(qval)"] > significance_cutoff
+            significant_up = df["Fold Change"] > fold_change_cutoff
+            significant_down = df["Fold Change"] < -fold_change_cutoff
+
+            sns.scatterplot(
+                x=df["Fold Change"][significant & significant_up],
+                y=df["-log10(qval)"][significant & significant_up],
+                hue=df["Fold Change"][significant & significant_up],
+                palette="Reds",
+                edgecolor="black",
+                ax=ax,
+                s=size,
+            )
+
+            sns.scatterplot(
+                x=df["Fold Change"][significant & significant_down],
+                y=df["-log10(qval)"][significant & significant_down],
+                hue=df["Fold Change"][significant & significant_down],
+                palette="Blues",
+                edgecolor="black",
+                ax=ax,
+                s=size,
+            )
+
+            sns.scatterplot(
+                x=df["Fold Change"][~(significant & (significant_up | significant_down))],
+                y=df["-log10(qval)"][~(significant & (significant_up | significant_down))],
+                color="grey",
+                edgecolor="black",
+                ax=ax,
+                s=size,
+            )
+
+            # Add labels for significant interactions:
+            high_fold_change = df[abs(df["Fold Change"]) > fold_change_cutoff_for_labels]
+            text_labels = high_fold_change.index.tolist()
+            x_coord_text_labels = high_fold_change["log2FC"].tolist()
+            y_coord_text_labels = high_fold_change["-log10(qval)"].tolist()
+            text_objects = []
+            for i, label in enumerate(text_labels):
+                t = ax.text(
+                    x_coord_text_labels[i],
+                    y_coord_text_labels[i],
+                    label,
+                    fontsize=fontsize * 0.75,
+                    color="black",
+                    ha="center",
+                    va="center",
+                )
+                text_objects.append(t)
+
+            adjust_text(text_objects, ax=ax, arrowprops=dict(arrowstyle="-", color="black", lw=0.5))
+
+            ax.axhline(y=significance_cutoff, color="grey", linestyle="--", linewidth=1.5)
+            ax.axvline(x=fold_change_cutoff, color="grey", linestyle="--", linewidth=1.5)
+            ax.axvline(x=-fold_change_cutoff, color="grey", linestyle="--", linewidth=1.5)
+            ax.set_xlim(-max_distance * 1.1, max_distance * 1.1)
+            ax.set_xticklabels(["{:.2f}".format(x) for x in ax.get_xticks()], fontsize=fontsize)
+            ax.set_yticklabels(["{:.2f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
+            ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
+            ax.set_ylabel(y_label, fontsize=fontsize * 1.25)
+            ax.set_title(title, fontsize=fontsize * 1.5)
+            prefix = f"{adata_id}_interaction_enrichment_fold_change_target_expressing_v_nonexpressing_volcano"
+
+        elif plot_type == "heatmap":
+            vmin = -max_distance
+            vmax = max_distance
+
             thickness = 0.3 * figsize[0] / 10
-            mask = df == 0
+            mask = np.abs(df) < 0.1
             m = sns.heatmap(
                 df,
                 square=True,
                 linecolor="grey",
                 linewidths=thickness,
-                cbar_kws={"label": "Proportion", "location": "top"},
-                cmap=cmap,
-                center=center,
+                cbar_kws={"label": cbar_label, "location": "top", "pad": 0},
+                cmap=custom_cmap,
                 vmin=vmin,
                 vmax=vmax,
                 mask=mask,
@@ -852,7 +1015,7 @@ class MuSIC_Interpreter(MuSIC):
 
             # Adjust colorbar label font size
             cbar = m.collections[0].colorbar
-            cbar.set_label("Proportion", fontsize=fontsize * 1.5, labelpad=20)
+            cbar.set_label(cbar_label, fontsize=fontsize * 1.5, labelpad=10)
             # Adjust colorbar tick font size
             cbar.ax.tick_params(labelsize=fontsize * 1.25)
             cbar.ax.set_aspect(0.033)
@@ -862,16 +1025,14 @@ class MuSIC_Interpreter(MuSIC):
             ax.tick_params(axis="x", labelsize=fontsize, rotation=90)
             ax.tick_params(axis="y", labelsize=fontsize)
             ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
+            prefix = f"{adata_id}_interaction_enrichment_fold_change_target_expressing_v_nonexpressing_heatmap"
 
-            # Use the saved name for the AnnData object to define part of the name of the saved file:
-            base_name = os.path.basename(self.adata_path)
-            adata_id = os.path.splitext(base_name)[0]
-            prefix = f"{adata_id}_{dict_name}_{denominator}_specificity_of_effects"
-
+        if save_show_or_return in ["save", "both", "all"]:
             save_kwargs["ext"] = "png"
             save_kwargs["dpi"] = 300
             if "figure_folder" in locals():
                 save_kwargs["path"] = figure_folder
+            # Save figure:
             save_return_show_fig_utils(
                 save_show_or_return=save_show_or_return,
                 show_legend=False,
@@ -884,9 +1045,6 @@ class MuSIC_Interpreter(MuSIC):
                 return_all=False,
                 return_all_list=None,
             )
-
-            if save_df:
-                df.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
 
     def explore_interaction_effect_coverage(
         self,
@@ -994,6 +1152,7 @@ class MuSIC_Interpreter(MuSIC):
         self,
         target: str,
         interaction: str,
+        interaction_type: Literal["secreted", "membrane-bound"],
         cell_type: Optional[str] = None,
         group_key: Optional[str] = None,
         use_significant: bool = False,
@@ -1010,6 +1169,8 @@ class MuSIC_Interpreter(MuSIC):
             interaction: Interaction feature to visualize, given in the same form as in the design matrix (if model
                 is a ligand-based model or receptor-based model, this will be of form "Col4a1". If model is a
                 ligand-receptor based model, this will be of form "Col4a1:Itgb1", for example).
+            interaction_type: Specifies whether the chosen interaction is secreted or membrane-bound. Options:
+                "secreted" or "membrane-bound".
             cell_type: Optional, can be used to select anchor cells from only a particular cell type. If None,
                 will select from all cells.
             group_key: Can be used to specify entry in adata.obs that contains cell type groupings. If None,
@@ -1041,23 +1202,50 @@ class MuSIC_Interpreter(MuSIC):
             logger.info(f"Saving plot to {path}")
 
         if self.mod_type != "lr" and self.mod_type != "ligand":
-            logger.info("This function is only applicable for ligand-based models.")
+            raise ValueError("This function is only applicable for ligand-based models.")
 
-        if "spatial_connectivities" in self.adata.obsp.keys():
-            conn = self.adata.obsp["spatial_connectivities"]
+        if (
+            "spatial_connectivities_secreted" in self.adata.obsp.keys()
+            and "spatial_connectivities_membrane_bound" in self.adata.obsp.keys()
+        ):
+            conn_secreted = self.adata.obsp["spatial_connectivities_secreted"]
+            conn_membrane_bound = self.adata.obsp["spatial_connectivities_membrane_bound"]
         else:
             logger.info("Spatial graph not found, computing...")
-            conn = None
 
-        if conn is None:
-            _, adata = neighbors(
-                self.adata,
-                n_neighbors=self.n_neighbors_membrane_bound * 2,
-                basis="spatial",
-                spatial_key=self.coords_key,
-                n_neighbors_method="ball_tree",
-            )
-            conn = adata.obsp["spatial_connectivities"]
+            if interaction_type == "secreted":
+                adata = self.adata.copy()
+                _, adata_secreted = neighbors(
+                    adata,
+                    n_neighbors=self.n_neighbors_secreted,
+                    basis="spatial",
+                    spatial_key=self.coords_key,
+                    n_neighbors_method="ball_tree",
+                )
+                conn_secreted = adata_secreted.obsp["spatial_connectivities"]
+                self.adata.obsp["spatial_connectivities_secreted"] = conn_secreted
+                conn = conn_secreted
+            elif interaction_type == "membrane-bound":
+                adata = self.adata.copy()
+                _, adata_membrane_bound = neighbors(
+                    adata,
+                    n_neighbors=self.n_neighbors_membrane_bound,
+                    basis="spatial",
+                    spatial_key=self.coords_key,
+                    n_neighbors_method="ball_tree",
+                )
+                conn_membrane_bound = adata_membrane_bound.obsp["spatial_connectivities"]
+                self.adata.obsp["spatial_connectivities_membrane_bound"] = conn_membrane_bound
+                conn = conn_membrane_bound
+            else:
+                raise ValueError("Invalid interaction type. Options: 'secreted', 'membrane-bound'.")
+
+        if interaction_type == "secreted":
+            conn = conn_secreted
+        elif interaction_type == "membrane-bound":
+            conn = conn_membrane_bound
+        else:
+            raise ValueError("Invalid interaction type. Options: 'secreted', 'membrane-bound'.")
 
         adata = self.adata.copy()
         coef_target = self.coeffs[target]
@@ -1156,8 +1344,22 @@ class MuSIC_Interpreter(MuSIC):
                 group_key = self.group_key
             adata_sub = adata_sub[adata_sub.obs[group_key] == cell_type].copy()
 
+        logger.info(
+            f"Randomly selecting cells from a pool of {adata_sub.n_obs} for target {target} and interaction"
+            f" {interaction}."
+        )
+        if adata_sub.n_obs < n_anchors:
+            logger.info(
+                f"Given the constraints, not enough cells remain to choose {n_anchors} cells. Selecting all "
+                f"{adata_sub.n_obs} eligible cells instead."
+            )
+        n_anchors = min(n_anchors, adata_sub.n_obs)
+
         # Randomly choose a subset of target cells to use as anchors:
-        target_expressing_selected = np.random.choice(adata_sub.obs_names, size=n_anchors, replace=False)
+        if n_anchors == adata_sub.n_obs:
+            target_expressing_selected = adata_sub.obs_names
+        else:
+            target_expressing_selected = np.random.choice(adata_sub.obs_names, size=n_anchors, replace=False)
         selected_indices = [np.where(adata.obs_names == string)[0][0] for string in target_expressing_selected]
         # Find the neighbors of these anchor cells:
         neighbors = conn[selected_indices].nonzero()[1]
@@ -1170,7 +1372,7 @@ class MuSIC_Interpreter(MuSIC):
         target_expression = adata_sub[target_expressing_selected, target].X.toarray().squeeze()
         # Ligand expression in the neighbors:
         ligand = interaction.split(":")[0] if ":" in interaction else interaction
-        genes = ligand.split("/")
+        genes = ligand.split(separator) if separator is not None else [ligand]
         gene_values = adata[neighbors_selected, genes].X.toarray()
         if separator == "/":
             # Arithmetic mean of the genes
@@ -1188,6 +1390,7 @@ class MuSIC_Interpreter(MuSIC):
             ligand_expression = np.power(products, 1 / non_nan_counts)
         else:
             ligand_expression = adata[neighbors_selected, ligand].X.toarray().squeeze()
+        logger.info(f"Storing ligand expression in {ligand_expression.shape[0]} total cells.")
 
         adata.obs[f"{interaction}_{target}_example_points"] = 0.0
         adata.obs.loc[target_expressing_selected, f"{interaction}_{target}_example_points"] = target_expression
@@ -1204,31 +1407,36 @@ class MuSIC_Interpreter(MuSIC):
 
             # Color assignment:
             default_color = "#D3D3D3"
-            # Apply 'cool' colormap to target_expression
-            target_cmap = plt.cm.get_cmap("cool")
-            data = adata.obs.loc[target_expressing_selected, f"{interaction}" f"_{target}_example_points"]
-            norm = matplotlib.colors.Normalize(data.min(), data.max())
-            target_colors = target_cmap(
-                adata.obs.loc[target_expressing_selected, f"{interaction}" f"_{target}_example_points"]
-            )
+            target_data = adata.obs.loc[target_expressing_selected, f"{interaction}_{target}_example_points"]
+            p997 = np.percentile(target_data.values, 99.7)
+            target_data[target_data > p997] = p997
+            plot_vals = target_data.values
             scatter_target = go.Scatter3d(
                 x=x[selected_indices],
                 y=y[selected_indices],
                 z=z[selected_indices],
                 mode="markers",
-                marker=dict(color=target_colors, size=1.5, colorbar=dict(title=f"{target} Expression")),
+                # Draw target cells larger
+                marker=dict(
+                    color=plot_vals, colorscale="Plotly3", size=6, colorbar=dict(title=f"{target} Expression", x=1.05)
+                ),
             )
 
-            # Apply 'hot' colormap to ligand_expression
-            ligand_cmap = plt.cm.get_cmap("hot")
-            ligand_colors = ligand_cmap(adata.obs.loc[neighbors_selected, f"{interaction}_{target}_example_points"])
-            print(ligand_colors)
+            nbr_data = adata.obs.loc[neighbors_selected, f"{interaction}_{target}_example_points"]
+            p997 = np.percentile(nbr_data.values, 99.7)
+            nbr_data[nbr_data > p997] = p997
+            plot_vals = nbr_data.values
             scatter_ligand = go.Scatter3d(
                 x=x[neighbors],
                 y=y[neighbors],
                 z=z[neighbors],
                 mode="markers",
-                marker=dict(color=ligand_colors, size=1.5, colorbar=dict(title=f"{ligand} Expression")),
+                marker=dict(
+                    color=plot_vals,
+                    colorscale="Blackbody",
+                    size=2.5,
+                    colorbar=dict(title=f"{ligand} Expression", x=1.15),
+                ),
             )
 
             rest_indices = list(set(range(len(x))) - set(selected_indices) - set(neighbors))
@@ -1245,11 +1453,14 @@ class MuSIC_Interpreter(MuSIC):
 
             # Turn off the grid
             fig.update_layout(
-                paper_bgcolor="white",
-                plot_bgcolor="white",
-                scene=dict(xaxis=dict(showgrid=False), yaxis=dict(showgrid=False), zaxis=dict(showgrid=False)),
+                showlegend=False,
+                scene=dict(
+                    xaxis=dict(showgrid=False, showline=True, backgroundcolor="white"),
+                    yaxis=dict(showgrid=False, showline=True, backgroundcolor="white"),
+                    zaxis=dict(showgrid=False, showline=True, backgroundcolor="white"),
+                ),
                 margin=dict(l=0, r=0, b=0, t=30),  # Adjust margins to minimize spacing
-                title=dict(text=f"Target: {target}, Ligand: {ligand}", y=0.9, yanchor="top", x=0.5, xanchor="center"),
+                title=dict(text=f"Target: {target}, Ligand: {ligand}", y=1.0, yanchor="top", x=0.5, xanchor="center"),
             )
             fig.write_html(path)
 
@@ -1730,17 +1941,17 @@ class MuSIC_Interpreter(MuSIC):
                 if annotation != current_group:
                     if current_group is not None:
                         group_center = (group_start + i - 1) / 2
-                        ax2.text(group_center, 0.22, current_group, va="bottom", ha="center", fontsize=fontsize)
+                        ax2.text(group_center, 0.42, current_group, va="bottom", ha="center", fontsize=fontsize)
 
                     current_group = annotation
                     group_start = i
 
                 color = color_mapping[annotation]
-                ax2.add_patch(plt.Rectangle((i, 0), 1, 0.2, color=color))
+                ax2.add_patch(plt.Rectangle((i, 0), 1, 0.4, color=color))
 
             # Add label for the last group:
             group_center = (group_start + len(df) - 1) / 2
-            ax2.text(group_center, 0.22, current_group, va="bottom", ha="center", fontsize=fontsize)
+            ax2.text(group_center, 0.42, current_group, va="bottom", ha="center", fontsize=fontsize)
             ax2.set_xlim(0, len(df.index))
             ax2.axis("off")
 
@@ -1895,18 +2106,6 @@ class MuSIC_Interpreter(MuSIC):
         ref_names = self.adata[self.adata.obs[group_key] == ref_ct].obs_names
         query_names = self.adata[self.adata.obs[group_key] == query_ct].obs_names
 
-        def assign_significance(row):
-            if row["qval"] < 0.0001:
-                return "****"
-            elif row["qval"] < 0.001:
-                return "***"
-            elif row["qval"] < 0.01:
-                return "**"
-            elif row["qval"] < 0.05:
-                return "*"
-            else:
-                return ""
-
         # Series/dataframes for each group:
         if source_data == "interaction":
             ref_data = self.X_df.loc[ref_names, interaction_subset]
@@ -1941,7 +2140,10 @@ class MuSIC_Interpreter(MuSIC):
         # Compute significance for each column:
         pvals = []
         for col in ref_data.columns:
-            pvals.append(ttest_ind(ref_data[col], query_data[col])[1])
+            if source_data == "effect" or source_data == "interaction":
+                pvals.append(ttest_ind(ref_data[col], query_data[col])[1])
+            elif source_data == "target":
+                pvals.append(mannwhitneyu(ref_data[col], query_data[col])[1])
         # Correct for multiple hypothesis testing:
         qvals = multitesting_correction(pvals, method="fdr_bh")
         results = pd.DataFrame(qvals, index=ref_data.columns, columns=["qval"])
@@ -1989,7 +2191,7 @@ class MuSIC_Interpreter(MuSIC):
         # Plot:
         if figsize is None:
             # Set figure size based on the number of interaction features and targets:
-            m = len(results) / 2
+            m = len(results) / 2 if plot_type == "barplot" else 10
             n = m / 2
             figsize = (n, m)
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
@@ -2072,7 +2274,7 @@ class MuSIC_Interpreter(MuSIC):
                     x_coord_text_labels[i],
                     y_coord_text_labels[i],
                     label,
-                    fontsize=fontsize,
+                    fontsize=fontsize * 0.75,
                     color="black",
                     ha="center",
                     va="center",
