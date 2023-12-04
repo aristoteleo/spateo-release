@@ -11,6 +11,7 @@ These include:
 """
 import argparse
 import collections
+import json
 import math
 import os
 from collections import Counter
@@ -549,7 +550,7 @@ class MuSIC_Interpreter(MuSIC):
         ct_subset: Optional[List[str]] = None,
         group_key: Optional[str] = None,
         n_anchors: Optional[int] = None,
-        effect_threshold: float = 0.0,
+        effect_threshold: Optional[float] = None,
         use_significant: bool = False,
         significance_cutoff: float = 1.3,
         fold_change_cutoff: float = 1.5,
@@ -583,9 +584,9 @@ class MuSIC_Interpreter(MuSIC):
             n_anchors: Optional, number of target gene-expressing cells to use as anchors for analysis. Will be
                 selected randomly from the set of target gene-expressing cells (conditioned on any other relevant
                 values).
-            effect_threshold: Threshold minimum effect size to consider an effect for further analysis, as an absolute
-                value. Use this to choose only the cells for which an interaction is predicted to have a strong effect.
-                Defaults to 0.0.
+            effect_threshold: Optional threshold minimum effect size to consider an effect for further analysis,
+                as an absolute value. Use this to choose only the cells for which an interaction is predicted to
+                have a strong effect. If None, use the median interaction effect.
             use_significant: Whether to use only significant effects in computing the specificity. If True,
                 will filter to cells + interactions where the interaction is significant for the target. Only valid
                 if :func `compute_coeff_significance()` has been run.
@@ -660,28 +661,28 @@ class MuSIC_Interpreter(MuSIC):
         else:
             logger.info("Spatial graph not found, computing...")
             adata = self.adata.copy()
-            _, adata_secreted = neighbors(
+            _, adata = neighbors(
                 adata,
                 n_neighbors=self.n_neighbors_secreted,
                 basis="spatial",
                 spatial_key=self.coords_key,
                 n_neighbors_method="ball_tree",
             )
-            conn_secreted = adata_secreted.obsp["spatial_connectivities"]
+            conn_secreted = adata.obsp["spatial_connectivities"]
 
             adata = self.adata.copy()
-            _, adata_membrane_bound = neighbors(
+            _, adata = neighbors(
                 adata,
                 n_neighbors=self.n_neighbors_membrane_bound,
                 basis="spatial",
                 spatial_key=self.coords_key,
                 n_neighbors_method="ball_tree",
             )
-            conn_membrane_bound = adata_membrane_bound.obsp["spatial_connectivities"]
+            conn_membrane_bound = adata.obsp["spatial_connectivities"]
 
             self.adata.obsp["spatial_connectivities_secreted"] = conn_secreted
             self.adata.obsp["spatial_connectivities_membrane_bound"] = conn_membrane_bound
-            del adata_secreted, adata_membrane_bound
+            del adata
 
         if target_subset is None:
             target_subset = list(self.coeffs.keys())
@@ -730,7 +731,12 @@ class MuSIC_Interpreter(MuSIC):
         # For each target, split cells into two groups: target-expressing and all neighbors of target-expressing
         # cells, and the remainder.
         for target in target_subset:
-            coef_target = self.coeffs[target]
+            coef_target = self.coeffs[target].loc[adata.obs_names]
+            if effect_threshold is None:
+                nonzero_values = coef_target.values.flatten()
+                nonzero_values = nonzero_values[nonzero_values != 0]
+                effect_threshold = pd.Series(nonzero_values).quantile(0.75)
+
             if use_significant:
                 parent_dir = os.path.dirname(self.output_path)
                 sig = pd.read_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0)
@@ -750,8 +756,15 @@ class MuSIC_Interpreter(MuSIC):
             # Define interaction-specific masks: (optionally, if L:R model) for cells expressing receptor,
             # for cells predicted to be affected by an interaction and all of the neighbors of these cells:
             for interaction in feature_names:
-                if interaction not in coef_target.columns:
+                if f"b_{interaction}" not in coef_target.columns:
+                    # Significance for this interaction-target combination:
+                    if plot_type == "volcano":
+                        df.loc[f"{interaction}-{target}", "p-value"] = 1.0
+                        df.loc[f"{interaction}-{target}", "log2FC"] = 0.0
+                    else:
+                        df.loc[target, interaction] = 0.0
                     continue
+
                 if self.mod_type == "lr":
                     ligand, receptor = interaction.split(":")
                     receptor_expressing_mask = np.ones(query_adata.shape[0], dtype=bool)
@@ -760,7 +773,7 @@ class MuSIC_Interpreter(MuSIC):
                         receptor_expressing_mask &= receptor_expression > 0
                     receptor_expressing_cells = query_adata.obs_names[receptor_expressing_mask]
 
-                coef_interaction_target = coef_target[interaction]
+                coef_interaction_target = coef_target[f"b_{interaction}"]
                 coef_interaction_target_mask = coef_interaction_target > effect_threshold
                 coef_interaction_target_cells = query_adata.obs_names[coef_interaction_target_mask]
 
@@ -786,17 +799,33 @@ class MuSIC_Interpreter(MuSIC):
                 else:
                     conn = conn_membrane_bound
 
-                if self.mod_type == "lr":
+                if self.mod_type != "lr":
                     # Get the intersection of cells expressing target and predicted to be affected by the interaction:
-                    adata_mask = target_expressing_cells & coef_interaction_target_cells
+                    adata_mask = target_expressing_cells.intersection(coef_interaction_target_cells)
                 else:
                     # Get the intersection of cells expressing target and receptor and are predicted to be affected by
                     # interaction:
-                    adata_mask = target_expressing_cells & receptor_expressing_cells & coef_interaction_target_cells
+                    adata_mask = target_expressing_cells.intersection(receptor_expressing_cells)
+                    adata_mask = adata_mask.intersection(coef_interaction_target_cells)
                 # This object contains samples that can constitute the query group:
                 query_adata_sub = query_adata[adata_mask].copy()
                 # This object contains the other samples, that can constitute the reference:
-                reference_adata_sub = self.adata[~adata_mask].copy()
+                neg_mask = [
+                    n
+                    for n in self.adata.obs_names
+                    if n not in target_expressing_cells and n not in coef_interaction_target_cells
+                ]
+                reference_adata_sub = self.adata[neg_mask].copy()
+
+                if query_adata_sub.n_obs <= 30:
+                    logger.info(
+                        "Insufficient query cells found for this interaction-target combination (likely based on "
+                        "absence of strong interaction effect). Skipping."
+                    )
+                    if plot_type == "volcano":
+                        df.loc[f"{interaction}-{target}", "p-value"] = 1
+                        df.loc[f"{interaction}-{target}", "log2FC"] = 0.0
+                    continue
 
                 # Query group:
                 # If applicable, select a subset of these cells to use as anchors:
@@ -804,14 +833,19 @@ class MuSIC_Interpreter(MuSIC):
                     if query_adata_sub.n_obs < n_anchors:
                         logger.warning(
                             f"Number of anchors ({n_anchors}) is greater than number of target-expressing cells "
-                            f"({query_adata_sub.n_obs}). Using all cells as anchors."
+                            f"({query_adata_sub.n_obs}) for target {target} and interaction {interaction}. Using all "
+                            f"cells as anchors."
                         )
-                        n_anchors = query_adata_sub.n_obs
+                        n_anchors_temp = query_adata_sub.n_obs
+                    else:
+                        n_anchors_temp = n_anchors
+                else:
+                    n_anchors_temp = query_adata_sub.n_obs
 
-                if n_anchors == query_adata_sub.n_obs:
+                if n_anchors_temp == query_adata_sub.n_obs:
                     anchors = query_adata_sub.obs_names
                 else:
-                    anchors = np.random.choice(query_adata_sub.obs_names, size=n_anchors, replace=False)
+                    anchors = np.random.choice(query_adata_sub.obs_names, size=n_anchors_temp, replace=False)
                 selected_indices = [np.where(self.adata.obs_names == string)[0][0] for string in anchors]
 
                 # Get neighbors of these cells:
@@ -831,12 +865,16 @@ class MuSIC_Interpreter(MuSIC):
                             f"Number of anchors ({n_anchors}) is greater than number of reference cells "
                             f"({reference_adata_sub.n_obs}). Using all cells as anchors."
                         )
-                        n_anchors = reference_adata_sub.n_obs
+                        n_anchors_temp = reference_adata_sub.n_obs
+                    else:
+                        n_anchors_temp = n_anchors
+                else:
+                    n_anchors_temp = reference_adata_sub.n_obs
 
-                if n_anchors == reference_adata_sub.n_obs:
+                if n_anchors_temp == reference_adata_sub.n_obs:
                     anchors = reference_adata_sub.obs_names
                 else:
-                    anchors = np.random.choice(reference_adata_sub.obs_names, size=n_anchors, replace=False)
+                    anchors = np.random.choice(reference_adata_sub.obs_names, size=n_anchors_temp, replace=False)
                 selected_indices = [np.where(self.adata.obs_names == string)[0][0] for string in anchors]
 
                 # Get neighbors of these cells:
@@ -874,17 +912,28 @@ class MuSIC_Interpreter(MuSIC):
                 ligand_reference = ligand_values.loc[reference_group, :]
                 # Significance for this interaction-target combination:
                 if plot_type == "volcano":
-                    df.loc[f"{interaction}-{target}", "p-value"] = mannwhitneyu(ligand_query, ligand_reference)[1]
+                    if (ligand_reference == 0).all().all():
+                        df.loc[f"{interaction}-{target}", "p-value"] = 0
+                    else:
+                        df.loc[f"{interaction}-{target}", "p-value"] = mannwhitneyu(ligand_query, ligand_reference)[1]
 
                 if agg_method == "mean":
-                    ligand_query = ligand_query.mean()
-                    ligand_reference = ligand_reference.mean()
+                    ligand_query = ligand_query.mean().values
+                    ligand_reference = ligand_reference.mean().values
                 elif agg_method == "percentage":
-                    ligand_query = (ligand_query > 0).mean()
-                    ligand_reference = (ligand_reference > 0).mean()
+                    ligand_query = (ligand_query > 0).mean().values
+                    ligand_reference = (ligand_reference > 0).mean().values
 
+                if ligand_reference == 0:
+                    # Prevent division by zero, this will get set to the max threshold anyways:
+                    ligand_reference = 0.001
                 fold_change = np.log2(ligand_query / ligand_reference)
-                df.loc[f"{interaction}-{target}", "log2FC"] = fold_change
+                if plot_type == "volcano":
+                    df.loc[f"{interaction}-{target}", "log2FC"] = fold_change
+                else:
+                    df.loc[target, interaction] = fold_change
+
+            logger.info(f"Finished computing specificity for target {target}.")
 
         # If relevant, compute adjusted p-values:
         if plot_type == "volcano":
@@ -1002,7 +1051,7 @@ class MuSIC_Interpreter(MuSIC):
             ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
             ax.set_ylabel(y_label, fontsize=fontsize * 1.25)
             ax.set_title(title, fontsize=fontsize * 1.5)
-            prefix = f"{adata_id}_interaction_enrichment_fold_change_target_expressing_v_nonexpressing_volcano"
+            prefix = "volcano"
 
         elif plot_type == "heatmap":
             vmin = -max_distance
@@ -1040,7 +1089,15 @@ class MuSIC_Interpreter(MuSIC):
             ax.tick_params(axis="x", labelsize=fontsize, rotation=90)
             ax.tick_params(axis="y", labelsize=fontsize)
             ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
-            prefix = f"{adata_id}_interaction_enrichment_fold_change_target_expressing_v_nonexpressing_heatmap"
+            prefix = "heatmap"
+
+        if save_df:
+            df.to_csv(
+                os.path.join(
+                    output_folder,
+                    f"{prefix}_{adata_id}_interaction_enrichment_fold_change_target_expressing_v_nonexpressing.csv",
+                )
+            )
 
         if save_show_or_return in ["save", "both", "all"]:
             save_kwargs["ext"] = "png"
@@ -1065,7 +1122,7 @@ class MuSIC_Interpreter(MuSIC):
         self,
         target: str,
         reference_interactions: Optional[List[str]] = None,
-        effect_threshold: float = 0.05,
+        effect_threshold: Optional[float] = None,
         use_significant: bool = False,
         upper_threshold: float = 0.5,
         lower_cooccurence_threshold: float = 0.1,
@@ -1080,8 +1137,9 @@ class MuSIC_Interpreter(MuSIC):
             target: Target gene of interest
             reference_interactions: List of reference interactions- will find cells for which the reference
                 interaction is predicted to have an effect and then find interactions that are enriched in the rest.
-            effect_threshold: Threshold for the effect size of an interaction/effect to be considered for analysis;
-                only used if "to_plot" is "percentage". Defaults to 0.0.
+            effect_threshold: Optional threshold for the effect size of an interaction/effect to be considered for
+                analysis; only used if "to_plot" is "percentage". If not given, will use the upper quartile value
+                among all interaction effect values to determine the threshold.
             use_significant: Whether to use only significant effects in computing the specificity. If True,
                 will filter to cells + interactions where the interaction is significant for the target. Only valid
                 if :func `compute_coeff_significance()` has been run.
@@ -1098,7 +1156,11 @@ class MuSIC_Interpreter(MuSIC):
         """
         logger = lm.get_main_logger()
         adata = self.adata.copy()
-        coef_target = self.coeffs[target]
+        coef_target = self.coeffs[target].loc[adata.obs_names]
+        if effect_threshold is None:
+            nonzero_values = coef_target.values.flatten()
+            nonzero_values = nonzero_values[nonzero_values != 0]
+            effect_threshold = pd.Series(nonzero_values).quantile(0.75)
 
         if use_significant:
             parent_dir = os.path.dirname(self.output_path)
@@ -1143,7 +1205,6 @@ class MuSIC_Interpreter(MuSIC):
                 f"Top interactions specific to {target}-expressing cells that are not affected by "
                 f"{reference_interactions}, ranked: "
             )
-            print(interaction_specificity)
 
         # Define AnnData .obs to label cells by their reference interactions:
         # For each reference interaction, normalize the effect size by minmax scaling:
@@ -1168,6 +1229,8 @@ class MuSIC_Interpreter(MuSIC):
         target: str,
         interaction: str,
         interaction_type: Literal["secreted", "membrane-bound"],
+        select_examples_criterion: Literal["positive", "negative"] = "positive",
+        effect_threshold: Optional[float] = None,
         cell_type: Optional[str] = None,
         group_key: Optional[str] = None,
         use_significant: bool = False,
@@ -1186,6 +1249,13 @@ class MuSIC_Interpreter(MuSIC):
                 ligand-receptor based model, this will be of form "Col4a1:Itgb1", for example).
             interaction_type: Specifies whether the chosen interaction is secreted or membrane-bound. Options:
                 "secreted" or "membrane-bound".
+            select_examples_criterion: Whether to select cells with positive or negative interaction effects for
+                visualization. Defaults to "positive", which searches for cells for which the predicted interaction
+                effect is above the given threshold. "Negative" will select cells for which the predicted interaction
+                has no effect on the target expression.
+            effect_threshold: Optional threshold for the effect size of an interaction/effect to be considered for
+                analysis; only used if "to_plot" is "percentage". If not given, will use the upper quartile value
+                among all interaction effect values to determine the threshold.
             cell_type: Optional, can be used to select anchor cells from only a particular cell type. If None,
                 will select from all cells.
             group_key: Can be used to specify entry in adata.obs that contains cell type groupings. If None,
@@ -1213,47 +1283,64 @@ class MuSIC_Interpreter(MuSIC):
             figure_folder = os.path.join(os.path.dirname(self.output_path), "figures")
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
-            path = os.path.join(figure_folder, f"{target}_example_neighborhoods.html")
+            path = os.path.join(
+                figure_folder, f"{target}_{select_examples_criterion}_cells_example_neighborhoods_{interaction}.html"
+            )
             logger.info(f"Saving plot to {path}")
 
         if self.mod_type != "lr" and self.mod_type != "ligand":
             raise ValueError("This function is only applicable for ligand-based models.")
+        if select_examples_criterion not in ["positive", "negative"]:
+            raise ValueError("Invalid criterion for selecting examples. Options: 'positive', 'negative'.")
 
-        if (
-            "spatial_connectivities_secreted" in self.adata.obsp.keys()
-            and "spatial_connectivities_membrane_bound" in self.adata.obsp.keys()
-        ):
-            conn_secreted = self.adata.obsp["spatial_connectivities_secreted"]
-            conn_membrane_bound = self.adata.obsp["spatial_connectivities_membrane_bound"]
-        else:
-            logger.info("Spatial graph not found, computing...")
+        try:
+            membrane_bound_path = os.path.join(
+                os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_membrane_bound.npz"
+            )
+            secreted_path = os.path.join(
+                os.path.splitext(self.output_path)[0], "spatial_weights", "spatial_weights_secreted.npz"
+            )
 
-            if interaction_type == "secreted":
-                adata = self.adata.copy()
-                _, adata_secreted = neighbors(
-                    adata,
-                    n_neighbors=self.n_neighbors_secreted,
-                    basis="spatial",
-                    spatial_key=self.coords_key,
-                    n_neighbors_method="ball_tree",
-                )
-                conn_secreted = adata_secreted.obsp["spatial_connectivities"]
-                self.adata.obsp["spatial_connectivities_secreted"] = conn_secreted
-                conn = conn_secreted
-            elif interaction_type == "membrane-bound":
-                adata = self.adata.copy()
-                _, adata_membrane_bound = neighbors(
-                    adata,
-                    n_neighbors=self.n_neighbors_membrane_bound,
-                    basis="spatial",
-                    spatial_key=self.coords_key,
-                    n_neighbors_method="ball_tree",
-                )
-                conn_membrane_bound = adata_membrane_bound.obsp["spatial_connectivities"]
-                self.adata.obsp["spatial_connectivities_membrane_bound"] = conn_membrane_bound
-                conn = conn_membrane_bound
+            spatial_weights_membrane_bound = scipy.sparse.load_npz(membrane_bound_path)
+            conn_membrane_bound = spatial_weights_membrane_bound > 0
+            spatial_weights_secreted = scipy.sparse.load_npz(secreted_path)
+            conn_secreted = spatial_weights_secreted > 0
+        except:
+            if (
+                "spatial_connectivities_secreted" in self.adata.obsp.keys()
+                and "spatial_connectivities_membrane_bound" in self.adata.obsp.keys()
+            ):
+                conn_secreted = self.adata.obsp["spatial_connectivities_secreted"]
+                conn_membrane_bound = self.adata.obsp["spatial_connectivities_membrane_bound"]
             else:
-                raise ValueError("Invalid interaction type. Options: 'secreted', 'membrane-bound'.")
+                logger.info("Spatial graph not found, computing...")
+
+                if interaction_type == "secreted":
+                    adata = self.adata.copy()
+                    _, adata_secreted = neighbors(
+                        adata,
+                        n_neighbors=self.n_neighbors_secreted,
+                        basis="spatial",
+                        spatial_key=self.coords_key,
+                        n_neighbors_method="ball_tree",
+                    )
+                    conn_secreted = adata_secreted.obsp["spatial_connectivities"]
+                    self.adata.obsp["spatial_connectivities_secreted"] = conn_secreted
+                    conn = conn_secreted
+                elif interaction_type == "membrane-bound":
+                    adata = self.adata.copy()
+                    _, adata_membrane_bound = neighbors(
+                        adata,
+                        n_neighbors=self.n_neighbors_membrane_bound,
+                        basis="spatial",
+                        spatial_key=self.coords_key,
+                        n_neighbors_method="ball_tree",
+                    )
+                    conn_membrane_bound = adata_membrane_bound.obsp["spatial_connectivities"]
+                    self.adata.obsp["spatial_connectivities_membrane_bound"] = conn_membrane_bound
+                    conn = conn_membrane_bound
+                else:
+                    raise ValueError("Invalid interaction type. Options: 'secreted', 'membrane-bound'.")
 
         if interaction_type == "secreted":
             conn = conn_secreted
@@ -1271,7 +1358,12 @@ class MuSIC_Interpreter(MuSIC):
             adata_ct = adata[cell_type_mask, :].copy()
             adata_ct_cells = adata_ct.obs_names
 
-        coef_target = self.coeffs[target]
+        coef_target = self.coeffs[target].loc[adata.obs_names]
+        if effect_threshold is None:
+            nonzero_values = coef_target.values.flatten()
+            nonzero_values = nonzero_values[nonzero_values != 0]
+            effect_threshold = pd.Series(nonzero_values).quantile(0.75)
+
         if use_significant:
             parent_dir = os.path.dirname(self.output_path)
             sig = pd.read_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0)
@@ -1291,7 +1383,10 @@ class MuSIC_Interpreter(MuSIC):
         target_expressing_mask = target_expression > 0
         target_expressing_cells = adata.obs_names[target_expressing_mask]
         # Cells with significant interaction effect on target:
-        interaction_mask = interaction_effect > 0
+        if select_examples_criterion == "positive":
+            interaction_mask = np.abs(interaction_effect) > effect_threshold
+        else:
+            interaction_mask = interaction_effect == 0
         interaction_cells = adata.obs_names[interaction_mask]
 
         # If applicable, split the interaction feature and get the ligand and receptor- for features w/ multiple
@@ -1351,27 +1446,51 @@ class MuSIC_Interpreter(MuSIC):
             # Get the cells expressing the receptor, to further subset the target-expressing cells to also :
             receptor_expressing_cells = adata.obs_names[receptor_expr_mask]
 
-        if self.mod_type == "lr":
-            # Get the intersection of cells expressing target, predicted to be affected by interaction,
-            # with sufficient number of neighbors expressing the chosen ligand and expressing receptor:
-            adata_mask = (
-                target_expressing_cells
-                & interaction_cells
-                & cells_meeting_neighbor_ligand_threshold
-                & receptor_expressing_cells
+        elif self.mod_type == "ligand":
+            # True negative examples will express the target, but not be predicted to be affected by the interaction
+            # and either not have evidence of receptor/TF expression or not have ligand expression in the neighborhood:
+            X_df = pd.read_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
             )
+            if select_examples_criterion == "positive":
+                factor_expr_mask = X_df.loc[adata.obs_names, interaction] > 0
+            else:
+                factor_expr_mask = X_df.loc[adata.obs_names, interaction] == 0
+            factor_expr_cells = adata.obs_names[factor_expr_mask]
+
+        if select_examples_criterion == "positive":
+            if self.mod_type == "lr":
+                # Get the intersection of cells expressing target, predicted to be affected by interaction,
+                # with sufficient number of neighbors expressing the chosen ligand and expressing receptor:
+                adata_mask = (
+                    target_expressing_cells
+                    & interaction_cells
+                    & cells_meeting_neighbor_ligand_threshold
+                    & receptor_expressing_cells
+                )
+            else:
+                # Get the intersection of cells expressing target, predicted to be affected by interaction,
+                # with sufficient number of neighbors expressing the chosen ligand and expressing the receptor or the
+                # downstream factors of the receptor:
+                adata_mask = (
+                    target_expressing_cells
+                    & interaction_cells
+                    & cells_meeting_neighbor_ligand_threshold
+                    & factor_expr_cells
+                )
         else:
-            # Get the intersection of cells expressing target, predicted to be affected by interaction,
-            # and with sufficient number of neighbors expressing the chosen ligand:
-            adata_mask = target_expressing_cells & interaction_cells & cells_meeting_neighbor_ligand_threshold
+            # In this case, note that "interaction_cells" are actually those cells that are predicted not to be
+            # affected by the interaction (and "factor_expr_cells" are actually those that don't express any of the
+            # key downstream factors or the receptor):
+            adata_mask = target_expressing_cells & interaction_cells & factor_expr_cells
         adata_sub = adata[adata_mask].copy()
 
         if cell_type is not None:
             adata_sub = adata_sub[adata_sub.obs[group_key] == cell_type].copy()
 
         logger.info(
-            f"Randomly selecting cells from a pool of {adata_sub.n_obs} for target {target} and interaction"
-            f" {interaction}."
+            f"Randomly selecting {select_examples_criterion} example cells from a pool of {adata_sub.n_obs} for target"
+            f" {target} and interaction {interaction}."
         )
         if adata_sub.n_obs < n_anchors:
             logger.info(
@@ -1421,11 +1540,14 @@ class MuSIC_Interpreter(MuSIC):
             ligand_expression = np.power(products, 1 / non_nan_counts)
         else:
             ligand_expression = adata[neighbors_selected, ligand].X.toarray().squeeze()
-        logger.info(f"Storing ligand expression in {ligand_expression.shape[0]} total cells.")
 
-        adata.obs[f"{interaction}_{target}_example_points"] = 0.0
-        adata.obs.loc[target_expressing_selected, f"{interaction}_{target}_example_points"] = target_expression
-        adata.obs.loc[neighbors_selected, f"{interaction}_{target}_example_points"] = ligand_expression
+        adata.obs[f"{interaction}_{target}_{select_examples_criterion}_example_points"] = 0.0
+        adata.obs.loc[
+            target_expressing_selected, f"{interaction}_{target}_{select_examples_criterion}_example_points"
+        ] = target_expression
+        adata.obs.loc[
+            neighbors_selected, f"{interaction}_{target}_{select_examples_criterion}_example_points"
+        ] = ligand_expression
 
         if display_plot:
             # plotly to create 3D scatter plot:
@@ -1459,7 +1581,9 @@ class MuSIC_Interpreter(MuSIC):
                 # ),
             )
 
-            nbr_data = adata.obs.loc[neighbors_selected, f"{interaction}_{target}_example_points"]
+            nbr_data = adata.obs.loc[
+                neighbors_selected, f"{interaction}_{target}_{select_examples_criterion}_example_points"
+            ]
             # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
             p95 = np.percentile(nbr_data.values, 95)
             nbr_data[nbr_data > p95] = p95
@@ -1473,7 +1597,7 @@ class MuSIC_Interpreter(MuSIC):
                     color=plot_vals,
                     colorscale="BlackBody",
                     size=2.5,
-                    colorbar=dict(title=f"{ligand} Expression", x=0.8),
+                    colorbar=dict(title=f"{ligand} Expression", x=0.8, titlefont=dict(size=16), tickfont=dict(size=18)),
                 ),
                 showlegend=False,
             )
@@ -1512,13 +1636,18 @@ class MuSIC_Interpreter(MuSIC):
                 )
 
             # Invisible traces for the legend
+            name = (
+                f"{target}-Expressing Cells <br>(w/ Receptor Expression)"
+                if select_examples_criterion == "positive"
+                else f"{target}-Expressing Cells <br>(w/o Receptor Expression)"
+            )
             legend_target = go.Scatter3d(
                 x=[None],
                 y=[None],
                 z=[None],
                 mode="markers",
                 marker=dict(size=30, color=target_color),  # Adjust size as needed
-                name=f"{target}-Expressing Cells",
+                name=name,
                 showlegend=True,
             )
 
@@ -1550,7 +1679,8 @@ class MuSIC_Interpreter(MuSIC):
 
             if cell_type is None:
                 title_dict = dict(
-                    text=f"Target: {target}, Ligand: {ligand} (Example Points)",
+                    text=f"Target: {target}, Ligand: {ligand} "
+                    f"<br>(Example {select_examples_criterion.title()} Predicted Effects)",
                     y=0.9,
                     yanchor="top",
                     x=0.5,
@@ -1559,7 +1689,8 @@ class MuSIC_Interpreter(MuSIC):
                 )
             else:
                 title_dict = dict(
-                    text=f"Target: {target}, Ligand: {ligand}, <br>Cell Type: {cell_type} (Example Points)",
+                    text=f"Target: {target}, Ligand: {ligand}, <br>Cell Type: {cell_type} "
+                    f"(Example {select_examples_criterion.title()} Predicted Effects)",
                     y=0.9,
                     yanchor="top",
                     x=0.5,
@@ -1593,7 +1724,7 @@ class MuSIC_Interpreter(MuSIC):
         interaction_subset: Optional[List[str]] = None,
         lower_threshold: float = 0.3,
         upper_threshold: float = 1.0,
-        effect_threshold: float = 0.0,
+        effect_threshold: Optional[float] = None,
         use_significant: bool = False,
         row_normalize: bool = False,
         col_normalize: bool = False,
@@ -1635,8 +1766,9 @@ class MuSIC_Interpreter(MuSIC):
                 particular interaction/effect for it to be colored on the plot, as a proportion of the max value.
                 Threshold will be applied to the non-normalized values (if normalization is applicable). Defaults to
                 1.0 (the max value).
-            effect_threshold: Threshold for the effect size of an interaction/effect to be considered for analysis;
-                only used if "to_plot" is "percentage". Defaults to 0.0.
+            effect_threshold: Optional threshold for the effect size of an interaction/effect to be considered for
+                analysis; only used if "to_plot" is "percentage". If not given, will use the upper quartile value
+                among all interaction effect values to determine the threshold.
             use_significant: Whether to use only significant effects in computing the specificity. If True,
                 will filter to cells + interactions where the interaction is significant for the target. Only valid
                 if :func `compute_coeff_significance()` has been run.
@@ -1796,7 +1928,18 @@ class MuSIC_Interpreter(MuSIC):
 
                 if to_plot == "mean":
                     mean_effects = []
-                    coef_target = self.coeffs[target]
+                    coef_target = self.coeffs[target].loc[adata.obs_names]
+                    coef_target = coef_target[[c for c in coef_target.columns if "intercept" not in c]]
+
+                    if effect_threshold is None:
+                        # Cell type-specific threshold:
+                        nonzero_values = coef_target.loc[cell_type_mask].values.flatten()
+                        nonzero_values = nonzero_values[nonzero_values != 0]
+                        target_effect_threshold = pd.Series(nonzero_values).quantile(0.75)
+                    else:
+                        target_effect_threshold = effect_threshold
+                    coef_target[coef_target < target_effect_threshold] = 0
+
                     if use_significant:
                         parent_dir = os.path.dirname(self.output_path)
                         sig = pd.read_csv(
@@ -1814,13 +1957,23 @@ class MuSIC_Interpreter(MuSIC):
                     df.loc[f"{ct}-{target}", :] = mean_effects
                 elif to_plot == "percentage":
                     percentages = []
-                    coef_target = self.coeffs[target]
+                    coef_target = self.coeffs[target].loc[adata.obs_names]
+                    coef_target = coef_target[[c for c in coef_target.columns if "intercept" not in c]]
+
+                    if effect_threshold is None:
+                        # Cell type-specific threshold:
+                        nonzero_values = coef_target.loc[cell_type_mask].values.flatten()
+                        nonzero_values = nonzero_values[nonzero_values != 0]
+                        target_effect_threshold = pd.Series(nonzero_values).quantile(0.75)
+                    else:
+                        target_effect_threshold = effect_threshold
+                    coef_target[coef_target < target_effect_threshold] = 0
 
                     for feat in feature_names:
                         if f"b_{feat}" in coef_target.columns:
                             # Get percentage of cells in each cell type that express each interaction feature:
                             percentages.append(
-                                (coef_target.loc[total_mask, f"b_{feat}"].values > effect_threshold).mean()
+                                (coef_target.loc[total_mask, f"b_{feat}"].values > target_effect_threshold).mean()
                             )
                         else:
                             percentages.append(0)
@@ -2032,12 +2185,13 @@ class MuSIC_Interpreter(MuSIC):
             adata_id = os.path.splitext(base_name)[0]
             prefix = f"{adata_id}_{to_plot}_enrichment_cell_type"
         else:
-            fig, axes = plt.subplots(nrows=len(interaction_subset), ncols=1, figsize=figsize)
+            rem_interactions = [i for i in interaction_subset if i in df.columns]
+            fig, axes = plt.subplots(nrows=len(rem_interactions), ncols=1, figsize=figsize)
             fig.subplots_adjust(hspace=0.4)
             colormap = plt.cm.get_cmap(cmap)
             # Determine the order of the plot based on averaging over the chosen interactions (if there is more than
             # one):
-            df_sub = df[interaction_subset]
+            df_sub = df[rem_interactions]
             df_sub["Group"] = group_labels
             # Ranks within each group:
             grouped_ranked_df = df_sub.groupby("Group").rank(ascending=False)
@@ -2233,7 +2387,7 @@ class MuSIC_Interpreter(MuSIC):
                 if target not in self.coeffs.keys():
                     raise ValueError(f"Target {target} not found in model.")
                 else:
-                    coef_target = self.coeffs[target]
+                    coef_target = self.coeffs[target].loc[self.adata.obs_names]
                     coef_target.columns = coef_target.columns.str.replace("b_", "")
                     coef_target = coef_target[[col for col in coef_target.columns if col != "intercept"]]
                     coef_target.columns = [replace_col_with_collagens(col) for col in coef_target.columns]

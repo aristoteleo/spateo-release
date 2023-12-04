@@ -982,6 +982,12 @@ class MuSIC:
                     else:
                         ligands = self.custom_ligands
                     ligands = [l for l in ligands if l in database_ligands]
+                    # Some ligands in the mouse database are questionable from current knowledge:
+                    ligands = [
+                        l
+                        for l in ligands
+                        if l not in ["Lta4h", "Fdx1", "Tfrc", "Trf", "Lamc1", "Aldh1a2", "Dhcr24", "Rnaset2a"]
+                    ]
                     l_complexes = [elem for elem in ligands if "_" in elem]
                     # Get individual components if any complexes are included in this list:
                     ligands = [l for item in ligands for l in item.split("_")]
@@ -1840,7 +1846,7 @@ class MuSIC:
                             to_check = associated_receptors + associated_tfs
                         to_check = [component for item in to_check for component in item.split("_")]
                         to_check = [item for item in to_check if item in self.adata.var_names]
-                        ligand_to_check_dict[lig] = to_check
+                        ligand_to_check_dict[lig] = list(set(to_check))
                         # Arbitrary threshold, but set the number of supporting receptors/TFs to be at least 3 for
                         # increased confidence:
                         threshold = 0 if receptors_above_threshold else 3
