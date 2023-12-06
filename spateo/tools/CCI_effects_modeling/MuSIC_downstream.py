@@ -651,6 +651,218 @@ class MuSIC_Interpreter(MuSIC):
             plt.tight_layout()
             plt.show()
 
+    def effect_distribution_heatmap(
+        self,
+        target_subset: Optional[List[str]] = None,
+        interaction_subset: Optional[List[str]] = None,
+        position_key: str = "spatial",
+        coord_column: Optional[Union[int, str]] = None,
+        effect_threshold: Optional[float] = None,
+        use_significant: bool = False,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = "magma",
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+        save_df: bool = False,
+    ):
+        """Visualize the distribution of interaction effects across cells in the spatial coordinates of cells;
+        provides an idea of the simultaneous relative positions of different interaction effects.
+
+        Args:
+            target_subset: List of targets to consider. If None, will use all targets used in model fitting.
+            interaction_subset: List of interactions to consider. If None, will use all interactions used in model.
+            position_key: Key in adata.obs or adata.obsm that provides a relative indication of the position of
+                cells. i.e. spatial coordinates. Defaults to "spatial". For each value in the position array (each
+                coordinate, each category), multiple cells must have the same value.
+            coord_column: Optional, only used if "position_key" points to an entry in .obsm. In this case,
+                this is the index or name of the column to be used to provide the positional context.
+            effect_threshold: Optional threshold minimum effect size to consider an effect for further analysis,
+                as an absolute value. Use this to choose only the cells for which an interaction is predicted to
+                have a strong effect. If None, use the median interaction effect.
+            use_significant: Whether to use only significant effects in computing the specificity. If True,
+                will filter to cells + interactions where the interaction is significant for the target. Only valid
+                if :func `compute_coeff_significance()` has been run.
+            fontsize: Size of font for x and y labels.
+            figsize: Size of figure.
+            cmap: Colormap to use. Options: Any divergent matplotlib colormap.
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+            save_df: Set True to save the metric dataframe in the end
+        """
+        logger = lm.get_main_logger()
+
+        if position_key not in self.adata.obsm.keys() and position_key not in self.adata.obs.keys():
+            raise ValueError(
+                f"Position key {position_key} not found in adata.obsm or adata.obs. Please provide a valid key."
+            )
+
+        if position_key in self.adata.obsm.keys():
+            if coord_column is not None and isinstance(coord_column, str):
+                if not isinstance(self.adata.obsm[position_key], pd.DataFrame):
+                    raise ValueError(
+                        f"Array stored at position key {position_key} has no column names; provide the column index."
+                    )
+                else:
+                    pos = self.adata.obsm[position_key][coord_column]
+            elif coord_column is not None and isinstance(coord_column, int):
+                if isinstance(self.adata.obsm[position_key], pd.DataFrame):
+                    pos = self.adata.obsm[position_key].iloc[:, coord_column]
+                    x_label = f"Relative position along {coord_column}"
+                else:
+                    pos = pd.Series(self.adata.obsm[position_key][:, coord_column], index=self.adata.obs_names)
+                    if coord_column == 0:
+                        x_label = "Relative position along X"
+                    elif coord_column == 1:
+                        x_label = "Relative position along Y"
+                    elif coord_column == 2:
+                        x_label = "Relative position along Z"
+            elif self.adata.obsm[position_key].shape[1] != 1:
+                raise ValueError(
+                    f"Array stored at position key {position_key} has more than one column; provide the column index."
+                )
+            else:
+                pos = (
+                    pd.Series(self.adata.obsm[position_key].flatten(), index=self.adata.obs_names)
+                    if isinstance(self.adata.obsm[position_key], np.ndarray)
+                    else self.adata.obsm[position_key]
+                )
+        else:
+            pos = self.adata.obs[position_key]
+        # If position array is numerical, there may not be an exact match- convert the data type to integer:
+        if pos.dtype == float:
+            pos = pos.astype(int)
+
+        if save_show_or_return in ["save", "both", "all"]:
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
+
+        if save_df:
+            output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder)
+
+        # Use the saved name for the AnnData object to define part of the name of the saved file:
+        base_name = os.path.basename(self.adata_path)
+        adata_id = os.path.splitext(base_name)[0]
+
+        # If divergent colormap is specified, center the colormap at 0:
+        divergent_cmaps = [
+            "seismic",
+            "coolwarm",
+            "bwr",
+            "RdBu",
+            "RdGy",
+            "PuOr",
+            "PiYG",
+            "PRGn",
+            "BrBG",
+            "RdYlBu",
+            "RdYlGn",
+            "Spectral",
+        ]
+
+        if target_subset is None:
+            target_subset = list(self.coeffs.keys())
+        else:
+            target_subset = [t for t in target_subset if t in self.coeffs.keys()]
+            removed = [t for t in target_subset if t not in self.coeffs.keys()]
+            if len(removed) > 0:
+                logger.warning(
+                    f"Targets {removed} were not found in the model, and will be removed from the target subset."
+                )
+
+        all_feature_names = [feat for feat in self.feature_names if feat != "intercept"]
+        if interaction_subset is None:
+            feature_names = all_feature_names
+        else:
+            feature_names = [feat for feat in all_feature_names if feat in interaction_subset]
+            removed = [feat for feat in interaction_subset if feat not in all_feature_names]
+            if len(removed) > 0:
+                logger.warning(
+                    f"Interactions {removed} were not found in the model, and will be removed from the interaction "
+                    f"subset."
+                )
+
+        all_coeffs = self.coeffs.copy()
+        if use_significant:
+            for target in target_subset:
+                parent_dir = os.path.dirname(self.output_path)
+                sig = pd.read_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0)
+                all_coeffs[target] *= sig
+
+        if effect_threshold is not None:
+            for target in target_subset:
+                all_coeffs[target] = all_coeffs["target"].clip(lower=effect_threshold)
+
+        # For each feature-target combination, compute the mean effect across cells:
+        combinations = list(product(target_subset, feature_names))
+        combinations = [f"{target}-{feature}" for target, feature in combinations]
+        combinations = [
+            f"{target}-{feature}" for target, feature in combinations if f"b_{feature}" in all_coeffs[target].columns
+        ]
+        # Remove combinations where the effect is hardly present (arbitrarily defined at 0.5% of cells):
+        combinations = [
+            f"{target}-{feature}"
+            for target, feature in combinations
+            if (all_coeffs[target][f"b_{feature}"] != 0).mean() >= 0.005
+        ]
+        mean_effect = pd.Series(index=combinations)
+        for combo in combinations:
+            target, feature = combo.split("-")
+            target_coefs = all_coeffs[target][f"b_{feature}"]
+            mean_effect[combo] = target_coefs.mean()
+
+        # For each cell, compute the fold change over the average for each combination:
+        all_fc = pd.DataFrame(index=self.adata.obs_names, columns=combinations)
+        for combo in combinations:
+            target, feature = combo.split("-")
+            target_coefs = all_coeffs[target][f"b_{feature}"]
+            all_fc[combo] = target_coefs / mean_effect[combo]
+
+        # z-score the fold change values:
+        all_fc = all_fc.apply(scipy.stats.zscore, axis=0)
+        all_fc["pos"] = pos
+        all_fc_coord_sorted = all_fc.sort_values(by="pos")
+        # Mean z-score at each coordinate position:
+        all_fc_coord_sorted = all_fc_coord_sorted.groupby("pos").mean()
+        # Smooth in the case of dropouts:
+        all_fc_coord_sorted = all_fc_coord_sorted.rolling(3, center=True, min_periods=1).mean()
+        # For each unique value in 'pos', find the top features with the highest mean z-score
+        top_combinations = all_fc_coord_sorted.apply(lambda x: x.nlargest(30).index.tolist(), axis=1)
+        # Find interesting interaction effects by position- get features that are in the top features for at least
+        # five consecutive positions:
+        consecutive_counts = {feature: 0 for feature in combinations}
+        feats_of_interest = set()
+
+        for pos in top_combinations.index:
+            for feature in top_combinations[pos]:
+                consecutive_counts[feature] += 1
+                if consecutive_counts[feature] >= 5:
+                    feats_of_interest.add(feature)
+            for feature in combinations:
+                if feature not in top_combinations[pos]:
+                    consecutive_counts[feature] = 0
+
+        to_plot = all_fc_coord_sorted[feats_of_interest]
+        if to_plot.index.is_numeric():
+            # Minmax scale to normalize positional context:
+            to_plot.index = (to_plot.index - to_plot.index.min()) / (to_plot.index.max() - to_plot.index.min())
+
+        if figsize is None:
+            m = len(feats_of_interest) * 50 / 200
+            n = 5
+            figsize = (m, n)
+
     def visualize_effect_specificity(
         self,
         agg_method: Literal["mean", "percentage"] = "mean",
