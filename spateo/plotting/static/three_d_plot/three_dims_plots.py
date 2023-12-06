@@ -3,8 +3,10 @@ import os
 import re
 from typing import List, Optional, Union
 
+import anndata
 import matplotlib as mpl
 import numpy as np
+import plotly.graph_objs as go
 from pyvista import MultiBlock, Plotter, PolyData, UnstructuredGrid
 
 try:
@@ -796,3 +798,91 @@ def merge_animations(
 
     final_clip = concatenate_videoclips(clips)
     final_clip.write_videofile(filename)
+
+
+def quick_plot_3D_celltypes(
+    adata: anndata.AnnData,
+    save_path: str,
+    coords_key: str = "spatial",
+    group_key: str = "celltype",
+    title: Optional[str] = None,
+    ct_subset: Optional[list] = None,
+):
+    """Using plotly, save a 3D plot where cells are drawn as points and colored by their cell type.
+
+    Args:
+        adata: AnnData object containing spatial coordinates and cell type labels
+        save_path: Path to save the plot
+        coords_key: Key in adata.obsm where spatial coordinates are stored
+        group_key: Key in adata.obs where cell type labels are stored
+        title: Optional, can be used to provide a title for the plot
+        ct_subset: Optional, used to specify cell types of interest. If given, only cells with these types will be
+            plotted, and other cells will be labeled "Other". If None, all cell types will be plotted.
+    """
+    from ..colorlabel import godsnot_102
+
+    if coords_key not in adata.obsm.keys():
+        raise ValueError(f"adata.obsm does not contain {coords_key}- spatial coordinates could not be found.")
+    if group_key not in adata.obs.keys():
+        raise ValueError(f"adata.obs does not contain {group_key}- cell type labels could not be found.")
+
+    if adata.obsm[coords_key].shape[1] != 3:
+        raise ValueError(f"{coords_key} must be 3-dimensional.")
+
+    spatial_coords = adata.obsm[coords_key]
+    x, y, z = spatial_coords[:, 0], spatial_coords[:, 1], spatial_coords[:, 2]
+
+    all_cts = adata.obs[group_key].unique()
+    if ct_subset is not None:
+        if len(ct_subset) < len(all_cts):
+            adata.obs["temp"] = adata.obs[group_key].apply(lambda x: x if x in ct_subset else "Other")
+            group_key = "temp"
+
+    # Dictionary mapping cell types to colors:
+    ct_color_mapping = dict(zip(adata.obs[group_key].value_counts().index, godsnot_102))
+    if group_key == "temp":
+        ct_color_mapping["Other"] = "#D3D3D3"
+
+    traces = []
+    for ct, color in ct_color_mapping.items():
+        ct_mask = adata.obs[group_key] == ct
+        scatter = go.Scatter3d(
+            x=x[ct_mask], y=y[ct_mask], z=z[ct_mask], mode="markers", marker=dict(size=2, color=color), showlegend=False
+        )
+        traces.append(scatter)
+
+        # Invisible trace for the legend (so the colored point is larger than the plot points):
+        legend_target = go.Scatter3d(
+            x=[None],
+            y=[None],
+            z=[None],
+            mode="markers",
+            marker=dict(size=30, color=color),  # Adjust size as needed
+            name=ct,
+            showlegend=True,
+        )
+        traces.append(legend_target)
+
+    fig = go.Figure(data=traces)
+    if title is None:
+        title = "Cell Types of Interest" if ct_subset is not None else f"Cells, Colored by Type"
+    title_dict = dict(
+        text=title,
+        y=0.9,
+        yanchor="top",
+        x=0.5,
+        xanchor="center",
+        font=dict(size=28),
+    )
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
+        scene=dict(
+            xaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+            yaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+            zaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+        ),
+        margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+        title=title_dict,
+    )
+    fig.write_html(save_path)

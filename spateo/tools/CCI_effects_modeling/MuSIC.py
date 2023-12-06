@@ -986,7 +986,19 @@ class MuSIC:
                     ligands = [
                         l
                         for l in ligands
-                        if l not in ["Lta4h", "Fdx1", "Tfrc", "Trf", "Lamc1", "Aldh1a2", "Dhcr24", "Rnaset2a"]
+                        if l
+                        not in [
+                            "Lta4h",
+                            "Fdx1",
+                            "Tfrc",
+                            "Trf",
+                            "Lamc1",
+                            "Aldh1a2",
+                            "Dhcr24",
+                            "Rnaset2a",
+                            "Ptges3",
+                            "Nampt",
+                        ]
                     ]
                     l_complexes = [elem for elem in ligands if "_" in elem]
                     # Get individual components if any complexes are included in this list:
