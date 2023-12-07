@@ -12,6 +12,7 @@ These include:
 import argparse
 import collections
 import gc
+import itertools
 import math
 import os
 from collections import Counter
@@ -21,6 +22,7 @@ from typing import List, Literal, Optional, Tuple, Union
 import anndata
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -665,9 +667,11 @@ class MuSIC_Interpreter(MuSIC):
             interaction: Interaction to visualize (e.g. "Igf1:Igf1r" for L:R model, "Igf1" for ligand model)
             save_path: Path to save the figure to (will save as HTML file)
         """
+        from ...plotting.static.colorlabel import godsnot_102
+
         targets = pd.read_csv(
-                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
-            )
+            os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
+        )
         if target not in targets.columns:
             raise ValueError(f"Target {target} not found in this model's directory. Please provide a valid target.")
         if interaction not in self.X_df.columns:
@@ -682,13 +686,247 @@ class MuSIC_Interpreter(MuSIC):
         x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
 
         # Label cells expressing target:
+        target_expressing = adata.obs_names[adata[:, target].X.toarray().reshape(-1) != 0]
 
         # Label cells and with nonzero interaction feature value (for ligand model, cells that have expression of the
         # ligand in their neighborhood (in addition to other caveats incorported in model setup), for L:R model,
         # cells that have expression of the ligand in their neighborhood and expression of the receptor):
+        interaction_expressing = self.X_df[self.X_df[interaction] != 0].index
 
         # Label cells expressing target and with nonzero interaction feature value:
+        overlap = target_expressing.intersection(interaction_expressing)
 
+        adata.obs[f"{interaction}_{target}"] = "Other"
+        adata.obs.loc[target_expressing, f"{interaction}_{target}"] = target
+        if self.mod_type == "lr":
+            ligand, receptor = interaction.split(":")
+            adata.obs.loc[
+                interaction_expressing, f"{interaction}_{target}"
+            ] = f"{ligand.title()} in Neighborhood and {receptor}"
+            adata.obs.loc[
+                overlap, f"{interaction}_{target}"
+            ] = f"{ligand.title()} in Neighborhood, {receptor} and {target}"
+        elif self.mod_type == "ligand":
+            adata.obs.loc[interaction_expressing, f"{interaction}_{target}"] = (
+                f"{interaction.title()} in " f"Neighborhood and Receptor"
+            )
+            adata.obs.loc[overlap, f"{interaction}_{target}"] = (
+                f"{interaction.title()} in Neighborhood, Receptor and" f" {target}"
+            )
+
+        color_mapping = dict(zip(adata.obs[f"{interaction}_{target}"].value_counts().index, godsnot_102))
+        color_mapping["Other"] = "#D3D3D3"
+
+        traces = []
+        for group, color in color_mapping.items():
+            mask = adata.obs[f"{interaction}_{target}"] == group
+            marker_size = 2 if group == "Other" else 3.5
+            scatter = go.Scatter3d(
+                x=x[mask],
+                y=y[mask],
+                z=z[mask],
+                mode="markers",
+                marker=dict(size=marker_size, color=color),
+                showlegend=False,
+            )
+            traces.append(scatter)
+
+            # Invisible trace for the legend (so the colored point is larger than the plot points):
+            legend_target = go.Scatter3d(
+                x=[None],
+                y=[None],
+                z=[None],
+                mode="markers",
+                marker=dict(size=30, color=color),  # Adjust size as needed
+                name=group,
+                showlegend=True,
+            )
+            traces.append(legend_target)
+
+        fig = go.Figure(data=traces)
+        title_dict = dict(
+            text=f"{interaction} and {target}",
+            y=0.9,
+            yanchor="top",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=28),
+        )
+        fig.update_layout(
+            showlegend=True,
+            legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
+            scene=dict(
+                xaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+                yaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+                zaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+            ),
+            margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+            title=title_dict,
+        )
+        fig.write_html(save_path)
+
+    def visualize_multiple_interaction_effects_3D(self, effects: List[str], save_path: str):
+        """Given interaction effects on targets in the form {interaction}-{target}, visualize the spatial
+        distribution of each. For example, "Igf1:Igf2r-Vim" for L:R model, "Igf1-Vim" for ligand model. It is
+        recommended not to include more than six simultaneous effects, as the combinatorial complexity beyond
+        this can be difficult to set up computationally and to visualize/interpret.
+
+        Args:
+            effects: List of interaction effects to visualize. Examples of the form these should be given in:
+                "Igf1:Igf2r-Vim" for L:R model, "Igf1-Vim" for ligand model.
+            save_path: Path to save the figure to (will save as HTML file)
+        """
+        from ...plotting.static.colorlabel import godsnot_102
+
+        if len(effects) > 6:
+            raise ValueError("Cannot include more than six effects.")
+        elif len(effects) > 4:
+            self.logger.warn(
+                "More than four effects may be difficult to visualize and interpret due to the number of"
+                "simultaneous colors."
+            )
+
+        for effect in effects:
+            if "-" not in effect:
+                raise ValueError(
+                    f"Effect {effect} not in the correct format. Please provide an effect in the form "
+                    f"'interaction-target'."
+                )
+
+        # Check that all interactions and targets are valid:
+        targets = pd.read_csv(
+            os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
+        )
+
+        for effect in effects:
+            interaction, target = effect.split("-")
+
+            if target not in targets.columns:
+                raise ValueError(f"Target {target} not found in this model's directory. Please provide a valid target.")
+            if interaction not in self.X_df.columns:
+                raise ValueError(f"Interaction {interaction} not found in this model's directory.")
+
+        if hasattr(self, "remaining_cells"):
+            adata = self.adata[self.remaining_cells, :].copy()
+        else:
+            adata = self.adata.copy()
+
+        coords = adata.obsm[self.coords_key]
+        x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+
+        adata.obs["effects"] = "Other"
+
+        if len(effects) > 1:
+            all_combinations = {}
+            all_combinations[2] = list(itertools.combinations(effects, 2))
+            if len(effects) > 2:
+                all_combinations[3] = list(itertools.combinations(effects, 3))
+
+            for r in all_combinations.keys():
+                for tup_list in all_combinations[r]:
+                    cell_mask = np.ones(len(adata.obs_names), dtype=bool)
+                    # Include cells affected by all interactions in the combination:
+                    for interaction in tup_list:
+                        interaction, target = interaction.split("-")
+                        coef_target = self.coeffs[target]
+                        coef_target_interaction = coef_target[f"b_{interaction}"]
+                        cell_mask = cell_mask & (coef_target_interaction != 0)
+
+                    # Exclude cells w/ given effects that are not in this combination:
+                    for effect in effects:
+                        interaction, target = effect.split("-")
+                        coef_target = self.coeffs[target]
+                        coef_target_interaction = coef_target[f"b_{interaction}"]
+                        cell_mask = cell_mask & (coef_target_interaction == 0)
+
+                    cell_names = adata.obs_names[cell_mask]
+                    adata.obs.loc[cell_names, "effects"] = ", ".join(tup_list)
+
+        # Fill in the rest of the cells:
+        all_effects_coefs = pd.DataFrame(index=adata.obs_names, columns=effects)
+        for effect in effects:
+            interaction, target = effect.split("-")
+            coef_target = self.coeffs[target]
+            coef_target_interaction = coef_target[f"b_{interaction}"]
+            all_effects_coefs[effect] = coef_target_interaction
+        all_effects_coefs = all_effects_coefs != 0
+        all_effects_coefs["num_effects"] = all_effects_coefs.sum(axis=1)
+
+        # Fill in the remaining cells with more than one effect (since the above filters through all exclusive
+        # combinations of 2 and 3, these are affected by at least 4 effects):
+        if len(effects) > 3:
+            cells_to_fill = all_effects_coefs[all_effects_coefs["num_effects"] > 1]
+            # Ignore cells that have already been assigned to a combination:
+            cells_to_fill = cells_to_fill[adata.obs.loc[cells_to_fill, "effects"] == "Other"].index
+            adata.obs.loc[cells_to_fill, "effects"] = "Multiple (>3)"
+
+        # Fill in cells only affected by one interaction:
+        one_effect = all_effects_coefs[all_effects_coefs["num_effects"] == 1]
+        one_effect["effect"] = one_effect.idxmax(axis=1)
+        # Ignore cells that have already been assigned to a combination:
+        one_effect = one_effect[adata.obs.loc[one_effect.index, "effects"] == "Other"]
+        adata.obs.loc[one_effect.index, "effects"] = one_effect["effect"]
+
+        self.logger.info(
+            f"Number of cells affected by each combination of effects: {adata.obs['effects'].value_counts()}"
+        )
+
+        # Color mapping:
+        color_mapping = dict(zip(adata.obs["effects"].value_counts().index, godsnot_102))
+        color_mapping["Other"] = "#D3D3D3"
+
+        traces = []
+        for group, color in color_mapping.items():
+            marker_size = 2 if group == "Other" else 3.5
+            mask = adata.obs["effects"] == group
+            scatter = go.Scatter3d(
+                x=x[mask],
+                y=y[mask],
+                z=z[mask],
+                mode="markers",
+                marker=dict(size=marker_size, color=color),
+                showlegend=False,
+            )
+            traces.append(scatter)
+
+            # Invisible trace for the legend (so the colored point is larger than the plot points):
+            legend_target = go.Scatter3d(
+                x=[None],
+                y=[None],
+                z=[None],
+                mode="markers",
+                marker=dict(size=30, color=color),  # Adjust size as needed
+                name=group,
+                showlegend=True,
+            )
+            traces.append(legend_target)
+
+        fig = go.Figure(data=traces)
+        title = (
+            "L:R Interaction Effect on Target (format Ligand:Receptor-Target)"
+            if self.mod_type == "lr"
+            else "Ligand Effect on Target (format Ligand-Target)"
+        )
+        title_dict = dict(
+            text=title,
+            y=0.9,
+            yanchor="top",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=28),
+        )
+        fig.update_layout(
+            showlegend=True,
+            legend=dict(x=0.7, y=0.85, orientation="v", font=dict(size=14)),
+            scene=dict(
+                xaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+                yaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+                zaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+            ),
+            margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+            title=title_dict,
+        )
+        fig.write_html(save_path)
 
     def effect_distribution_heatmap(
         self,
@@ -829,9 +1067,12 @@ class MuSIC_Interpreter(MuSIC):
         # Check for existing dataframe:
         if os.path.exists(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv"):
             to_plot = pd.read_csv(
-                os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_" f"{save_id}.csv"),
+                os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv"),
                 index_col=0,
             )
+
+            if interaction_subset is not None:
+                to_plot = to_plot[interaction_subset]
         else:
             if target_subset is None:
                 target_subset = list(self.coeffs.keys())
@@ -930,7 +1171,7 @@ class MuSIC_Interpreter(MuSIC):
                 row_clustered_order = row_dendro["leaves"]
                 to_plot = to_plot.iloc[row_clustered_order, :]
             else:
-                to_plot["temp"] = to_plot.index.to_series().apply(lambda x: x.split('-')[1])
+                to_plot["temp"] = to_plot.index.to_series().apply(lambda x: x.split("-")[1])
                 to_plot = to_plot.sort_values(by="temp")
                 to_plot = to_plot.drop(columns="temp")
 
@@ -953,6 +1194,7 @@ class MuSIC_Interpreter(MuSIC):
 
         ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
         ax.set_ylabel("Interaction Effect on Target", fontsize=fontsize * 1.25)
+        ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.2f"))
         ax.tick_params(axis="x", labelsize=fontsize)
         ax.tick_params(axis="y", labelsize=fontsize)
         ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
