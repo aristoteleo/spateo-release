@@ -259,6 +259,8 @@ class MuSIC_Interpreter(MuSIC):
 
         if hasattr(self, "remaining_indices"):
             adata = self.adata[self.remaining_cells, :].copy()
+        else:
+            adata = self.adata.copy()
 
         combinations = list(product(targets, interactions))
         for target, interaction in combinations:
@@ -267,7 +269,10 @@ class MuSIC_Interpreter(MuSIC):
                     f"Information for interaction {interaction} not found for target {target}, " f"skipping..."
                 )
                 continue
-            target_coefs = self.coeffs[target].loc[self.remaining_cells, f"b_{interaction}"]
+            if hasattr(self, "remaining_indices"):
+                target_coefs = self.coeffs[target].loc[self.remaining_cells, f"b_{interaction}"]
+            else:
+                target_coefs = self.coeffs[target][f"b_{interaction}"]
             # Add to adata:
             adata.obs[f"{target}_{interaction}_effect"] = target_coefs
 
@@ -651,6 +656,40 @@ class MuSIC_Interpreter(MuSIC):
             plt.tight_layout()
             plt.show()
 
+    def visualize_overlap_between_interacting_components_3D(self, target: str, interaction: str, save_path: str):
+        """Visualize the spatial distribution of signaling features (ligand, receptor, or L:R field) and target gene,
+        as well as the overlapping region. Intended for use with 3D spatial coordinates.
+
+        Args:
+            target: Target gene to visualize
+            interaction: Interaction to visualize (e.g. "Igf1:Igf1r" for L:R model, "Igf1" for ligand model)
+            save_path: Path to save the figure to (will save as HTML file)
+        """
+        targets = pd.read_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
+            )
+        if target not in targets.columns:
+            raise ValueError(f"Target {target} not found in this model's directory. Please provide a valid target.")
+        if interaction not in self.X_df.columns:
+            raise ValueError(f"Interaction {interaction} not found in this model's directory.")
+
+        if hasattr(self, "remaining_cells"):
+            adata = self.adata[self.remaining_cells, :].copy()
+        else:
+            adata = self.adata.copy()
+
+        coords = adata.obsm[self.coords_key]
+        x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+
+        # Label cells expressing target:
+
+        # Label cells and with nonzero interaction feature value (for ligand model, cells that have expression of the
+        # ligand in their neighborhood (in addition to other caveats incorported in model setup), for L:R model,
+        # cells that have expression of the ligand in their neighborhood and expression of the receptor):
+
+        # Label cells expressing target and with nonzero interaction feature value:
+
+
     def effect_distribution_heatmap(
         self,
         target_subset: Optional[List[str]] = None,
@@ -659,6 +698,7 @@ class MuSIC_Interpreter(MuSIC):
         coord_column: Optional[Union[int, str]] = None,
         effect_threshold: Optional[float] = None,
         use_significant: bool = False,
+        hierarchically_cluster_y: bool = True,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         cmap: str = "magma",
@@ -683,6 +723,10 @@ class MuSIC_Interpreter(MuSIC):
             use_significant: Whether to use only significant effects in computing the specificity. If True,
                 will filter to cells + interactions where the interaction is significant for the target. Only valid
                 if :func `compute_coeff_significance()` has been run.
+            hierarchically_cluster_y: Set True to cluster the y-axis (interaction-target pairs) hierarchically. Used
+                for a more uniform plot where similarly patterned interaction-target pairs are grouped together. If
+                False, will sort this axis by the identity of the interaction (i.e. all "Fgf1" rows will be grouped
+                together).
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
             cmap: Colormap to use. Options: Any divergent matplotlib colormap.
@@ -715,14 +759,22 @@ class MuSIC_Interpreter(MuSIC):
                 if isinstance(self.adata.obsm[position_key], pd.DataFrame):
                     pos = self.adata.obsm[position_key].iloc[:, coord_column]
                     x_label = f"Relative position along {coord_column}"
+                    title = f"Signaling effect distribution along {coord_column}"
+                    save_id = coord_column
                 else:
                     pos = pd.Series(self.adata.obsm[position_key][:, coord_column], index=self.adata.obs_names)
                     if coord_column == 0:
                         x_label = "Relative position along X"
+                        title = "Signaling effect distribution along X"
+                        save_id = "x_axis"
                     elif coord_column == 1:
                         x_label = "Relative position along Y"
+                        title = "Signaling effect distribution along Y"
+                        save_id = "y_axis"
                     elif coord_column == 2:
                         x_label = "Relative position along Z"
+                        title = "Signaling effect distribution along Z"
+                        save_id = "z_axis"
             elif self.adata.obsm[position_key].shape[1] != 1:
                 raise ValueError(
                     f"Array stored at position key {position_key} has more than one column; provide the column index."
@@ -733,6 +785,9 @@ class MuSIC_Interpreter(MuSIC):
                     if isinstance(self.adata.obsm[position_key], np.ndarray)
                     else self.adata.obsm[position_key]
                 )
+                x_label = "Relative position"
+                title = f"Signaling effect distribution along axis given by {position_key} key"
+                save_id = position_key
         else:
             pos = self.adata.obs[position_key]
         # If position array is numerical, there may not be an exact match- convert the data type to integer:
@@ -771,97 +826,163 @@ class MuSIC_Interpreter(MuSIC):
             "Spectral",
         ]
 
-        if target_subset is None:
-            target_subset = list(self.coeffs.keys())
+        # Check for existing dataframe:
+        if os.path.exists(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv"):
+            to_plot = pd.read_csv(
+                os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_" f"{save_id}.csv"),
+                index_col=0,
+            )
         else:
-            target_subset = [t for t in target_subset if t in self.coeffs.keys()]
-            removed = [t for t in target_subset if t not in self.coeffs.keys()]
-            if len(removed) > 0:
-                logger.warning(
-                    f"Targets {removed} were not found in the model, and will be removed from the target subset."
-                )
+            if target_subset is None:
+                target_subset = list(self.coeffs.keys())
+            else:
+                target_subset = [t for t in target_subset if t in self.coeffs.keys()]
+                removed = [t for t in target_subset if t not in self.coeffs.keys()]
+                if len(removed) > 0:
+                    logger.warning(
+                        f"Targets {removed} were not found in the model, and will be removed from the target subset."
+                    )
 
-        all_feature_names = [feat for feat in self.feature_names if feat != "intercept"]
-        if interaction_subset is None:
-            feature_names = all_feature_names
-        else:
-            feature_names = [feat for feat in all_feature_names if feat in interaction_subset]
-            removed = [feat for feat in interaction_subset if feat not in all_feature_names]
-            if len(removed) > 0:
-                logger.warning(
-                    f"Interactions {removed} were not found in the model, and will be removed from the interaction "
-                    f"subset."
-                )
+            all_feature_names = [feat for feat in self.feature_names if feat != "intercept"]
+            if interaction_subset is None:
+                feature_names = all_feature_names
+            else:
+                feature_names = [feat for feat in all_feature_names if feat in interaction_subset]
+                removed = [feat for feat in interaction_subset if feat not in all_feature_names]
+                if len(removed) > 0:
+                    logger.warning(
+                        f"Interactions {removed} were not found in the model, and will be removed from the interaction "
+                        f"subset."
+                    )
 
-        all_coeffs = self.coeffs.copy()
-        if use_significant:
-            for target in target_subset:
-                parent_dir = os.path.dirname(self.output_path)
-                sig = pd.read_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0)
-                all_coeffs[target] *= sig
+            all_coeffs = self.coeffs.copy()
+            if use_significant:
+                for target in target_subset:
+                    parent_dir = os.path.dirname(self.output_path)
+                    sig = pd.read_csv(
+                        os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0
+                    )
+                    all_coeffs[target] *= sig
 
-        if effect_threshold is not None:
-            for target in target_subset:
-                all_coeffs[target] = all_coeffs["target"].clip(lower=effect_threshold)
+            if effect_threshold is not None:
+                for target in target_subset:
+                    all_coeffs[target] = all_coeffs[target].clip(lower=effect_threshold)
 
-        # For each feature-target combination, compute the mean effect across cells:
-        combinations = list(product(target_subset, feature_names))
-        combinations = [f"{target}-{feature}" for target, feature in combinations]
-        combinations = [
-            f"{target}-{feature}" for target, feature in combinations if f"b_{feature}" in all_coeffs[target].columns
-        ]
-        # Remove combinations where the effect is hardly present (arbitrarily defined at 0.5% of cells):
-        combinations = [
-            f"{target}-{feature}"
-            for target, feature in combinations
-            if (all_coeffs[target][f"b_{feature}"] != 0).mean() >= 0.005
-        ]
-        mean_effect = pd.Series(index=combinations)
-        for combo in combinations:
-            target, feature = combo.split("-")
-            target_coefs = all_coeffs[target][f"b_{feature}"]
-            mean_effect[combo] = target_coefs.mean()
+            # For each feature-target combination, compute the mean effect across cells:
+            combinations = list(product(target_subset, feature_names))
+            combinations = [
+                (target, feature) for target, feature in combinations if f"b_{feature}" in all_coeffs[target].columns
+            ]
+            # Remove combinations where the effect is hardly present (arbitrarily defined at 0.5% of cells):
+            combinations = [
+                f"{target}-{feature}"
+                for target, feature in combinations
+                if (all_coeffs[target][f"b_{feature}"] != 0).mean() >= 0.005
+            ]
+            mean_effect = pd.Series(index=combinations)
+            for combo in combinations:
+                target, feature = combo.split("-")
+                target_coefs = all_coeffs[target][f"b_{feature}"]
+                mean_effect[combo] = target_coefs.mean()
 
-        # For each cell, compute the fold change over the average for each combination:
-        all_fc = pd.DataFrame(index=self.adata.obs_names, columns=combinations)
-        for combo in combinations:
-            target, feature = combo.split("-")
-            target_coefs = all_coeffs[target][f"b_{feature}"]
-            all_fc[combo] = target_coefs / mean_effect[combo]
+            # For each cell, compute the fold change over the average for each combination:
+            all_fc = pd.DataFrame(index=self.adata.obs_names, columns=combinations)
+            for combo in combinations:
+                target, feature = combo.split("-")
+                target_coefs = all_coeffs[target][f"b_{feature}"]
+                all_fc[combo] = target_coefs / mean_effect[combo]
+            # Log fold change:
+            all_fc = np.log1p(all_fc)
 
-        # z-score the fold change values:
-        all_fc = all_fc.apply(scipy.stats.zscore, axis=0)
-        all_fc["pos"] = pos
-        all_fc_coord_sorted = all_fc.sort_values(by="pos")
-        # Mean z-score at each coordinate position:
-        all_fc_coord_sorted = all_fc_coord_sorted.groupby("pos").mean()
-        # Smooth in the case of dropouts:
-        all_fc_coord_sorted = all_fc_coord_sorted.rolling(3, center=True, min_periods=1).mean()
-        # For each unique value in 'pos', find the top features with the highest mean z-score
-        top_combinations = all_fc_coord_sorted.apply(lambda x: x.nlargest(30).index.tolist(), axis=1)
-        # Find interesting interaction effects by position- get features that are in the top features for at least
-        # five consecutive positions:
-        consecutive_counts = {feature: 0 for feature in combinations}
-        feats_of_interest = set()
+            # z-score the fold change values:
+            all_fc = all_fc.apply(scipy.stats.zscore, axis=0)
+            all_fc["pos"] = pos
+            all_fc_coord_sorted = all_fc.sort_values(by="pos")
+            # Mean z-score at each coordinate position:
+            all_fc_coord_sorted = all_fc_coord_sorted.groupby("pos").mean()
+            # Smooth in the case of dropouts:
+            all_fc_coord_sorted = all_fc_coord_sorted.rolling(3, center=True, min_periods=1).mean()
+            # For each unique value in 'pos', find the top features with the highest mean z-score
+            top_combinations = all_fc_coord_sorted.apply(lambda x: x.nlargest(30).index.tolist(), axis=1)
+            # Find interesting interaction effects by position- get features that are in the top features for at least
+            # five consecutive positions:
+            consecutive_counts = {feature: 0 for feature in combinations}
+            feats_of_interest = set()
 
-        for pos in top_combinations.index:
-            for feature in top_combinations[pos]:
-                consecutive_counts[feature] += 1
-                if consecutive_counts[feature] >= 5:
-                    feats_of_interest.add(feature)
-            for feature in combinations:
-                if feature not in top_combinations[pos]:
-                    consecutive_counts[feature] = 0
+            for pos in top_combinations.index:
+                for feature in top_combinations[pos]:
+                    consecutive_counts[feature] += 1
+                    if consecutive_counts[feature] >= 5:
+                        feats_of_interest.add(feature)
+                for feature in combinations:
+                    if feature not in top_combinations[pos]:
+                        consecutive_counts[feature] = 0
 
-        to_plot = all_fc_coord_sorted[feats_of_interest]
-        if to_plot.index.is_numeric():
-            # Minmax scale to normalize positional context:
-            to_plot.index = (to_plot.index - to_plot.index.min()) / (to_plot.index.max() - to_plot.index.min())
+            to_plot = all_fc_coord_sorted[feats_of_interest]
+            if to_plot.index.is_numeric():
+                # Minmax scale to normalize positional context:
+                to_plot.index = (to_plot.index - to_plot.index.min()) / (to_plot.index.max() - to_plot.index.min())
+            to_plot = to_plot.T  # so that the features are labeled along the y-axis
+            # Hierarchically cluster if applicable, and if not sort by interaction:
+            if hierarchically_cluster_y:
+                row_linkage = sch.linkage(to_plot, method="ward")
+                row_dendro = sch.dendrogram(row_linkage, no_plot=True)
+                row_clustered_order = row_dendro["leaves"]
+                to_plot = to_plot.iloc[row_clustered_order, :]
+            else:
+                to_plot["temp"] = to_plot.index.to_series().apply(lambda x: x.split('-')[1])
+                to_plot = to_plot.sort_values(by="temp")
+                to_plot = to_plot.drop(columns="temp")
 
         if figsize is None:
-            m = len(feats_of_interest) * 50 / 200
+            m = len(to_plot) * 30 / 200
             n = 5
-            figsize = (m, n)
+            figsize = (n, m)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+
+        if fontsize is None:
+            fontsize = rcParams.get("font.size")
+
+        m = sns.heatmap(to_plot)
+
+        cbar = m.collections[0].colorbar
+        cbar.set_label("Z-score", fontsize=fontsize * 1.5, labelpad=10)
+        # Adjust colorbar tick font size
+        cbar.ax.tick_params(labelsize=fontsize * 1.25)
+        cbar.ax.set_aspect(30)
+
+        ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
+        ax.set_ylabel("Interaction Effect on Target", fontsize=fontsize * 1.25)
+        ax.tick_params(axis="x", labelsize=fontsize)
+        ax.tick_params(axis="y", labelsize=fontsize)
+        ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
+
+        if save_df:
+            to_plot.to_csv(
+                os.path.join(
+                    output_folder,
+                    f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv",
+                )
+            )
+
+        if save_show_or_return in ["save", "both", "all"]:
+            save_kwargs["ext"] = "png"
+            save_kwargs["dpi"] = 300
+            if "figure_folder" in locals():
+                save_kwargs["path"] = figure_folder
+            # Save figure:
+            save_return_show_fig_utils(
+                save_show_or_return=save_show_or_return,
+                show_legend=False,
+                background="white",
+                prefix=f"distribution_interaction_effects_along_{save_id}",
+                save_kwargs=save_kwargs,
+                total_panels=1,
+                fig=fig,
+                axes=ax,
+                return_all=False,
+                return_all_list=None,
+            )
 
     def visualize_effect_specificity(
         self,
@@ -1963,7 +2084,7 @@ class MuSIC_Interpreter(MuSIC):
                 mode="markers",
                 marker=dict(
                     color=plot_vals,
-                    colorscale="BlackBody",
+                    colorscale="OrRd",
                     size=2.5,
                     colorbar=dict(title=f"{ligand} Expression", x=0.8, titlefont=dict(size=16), tickfont=dict(size=18)),
                 ),
@@ -1976,7 +2097,7 @@ class MuSIC_Interpreter(MuSIC):
                 y=y[rest_indices],
                 z=z[rest_indices],
                 mode="markers",
-                marker=dict(color=default_color, size=1.5),
+                marker=dict(color=default_color, size=2),
                 name="Other Cells",
                 showlegend=False,
             )
@@ -1987,7 +2108,7 @@ class MuSIC_Interpreter(MuSIC):
                     y=y[ct_other_indices],
                     z=z[ct_other_indices],
                     mode="markers",
-                    marker=dict(color=ct_other_color, size=1.5),
+                    marker=dict(color=ct_other_color, size=2),
                     name=f"Other Cells of Type {cell_type}",
                     showlegend=False,
                 )
@@ -2097,7 +2218,7 @@ class MuSIC_Interpreter(MuSIC):
         row_normalize: bool = False,
         col_normalize: bool = False,
         normalize_targets: bool = False,
-        hierarchical_cluster_y: bool = False,
+        hierarchical_cluster_ct: bool = False,
         group_y_cell_type: bool = False,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
@@ -2149,8 +2270,8 @@ class MuSIC_Interpreter(MuSIC):
             normalize_targets: Whether to minmax scale the metric values by column for each target (i.e. for each
                 interaction/effect), to remove differences that occur as a result of scale of expression. Provides a
                 clearer picture of enrichment for each target.
-            hierarchical_cluster_y: Whether to cluster the y-axis (target gene in cell type) using hierarchical
-                clustering. If False, will order the y-axis by the order of the target genes for organization purposes.
+            hierarchical_cluster_ct: Whether to cluster the x-axis (target gene in cell type) using hierarchical
+                clustering. If False, will order the x-axis by the order of the target genes for organization purposes.
             group_y_cell_type: Whether to group the y-axis (target gene in cell type) by cell type. If False,
                 will group by target gene instead. Defaults to False.
             fontsize: Size of font for x and y labels.
@@ -2285,6 +2406,7 @@ class MuSIC_Interpreter(MuSIC):
         df = pd.DataFrame(0, index=combinations, columns=feature_names)
         for ct in cell_types:
             cell_type_mask = adata.obs[group_key] == ct
+            cell_in_ct = adata[cell_type_mask].copy()
 
             # Get appropriate coefficient arrays:
             for target in targets:
@@ -2317,9 +2439,14 @@ class MuSIC_Interpreter(MuSIC):
 
                     for feat in feature_names:
                         if f"b_{feat}" in coef_target.columns:
-                            # Get mean effect size for each interaction feature in each cell type, from among the
-                            # cells that express the target gene:
-                            mean_effects.append(coef_target.loc[total_mask, f"b_{feat}"].values.mean())
+                            # If a given cell type does not have much expression of the target gene, mask out the
+                            # mean effect (use an arbitrary cutoff of 2% of cells):
+                            if len(total_mask) < 0.02 * cell_in_ct.n_obs:
+                                mean_effects.append(0)
+                            else:
+                                # Get mean effect size for each interaction feature in each cell type, from among the
+                                # cells that express the target gene:
+                                mean_effects.append(coef_target.loc[total_mask, f"b_{feat}"].values.mean())
                         else:
                             mean_effects.append(0)
                     df.loc[f"{ct}-{target}", :] = mean_effects
@@ -2339,10 +2466,15 @@ class MuSIC_Interpreter(MuSIC):
 
                     for feat in feature_names:
                         if f"b_{feat}" in coef_target.columns:
-                            # Get percentage of cells in each cell type that express each interaction feature:
-                            percentages.append(
-                                (coef_target.loc[total_mask, f"b_{feat}"].values > target_effect_threshold).mean()
-                            )
+                            # If a given cell type does not have much expression of the target gene, mask out the
+                            # mean effect (use an arbitrary cutoff of 2% of cells):
+                            if len(total_mask) < 0.02 * cell_in_ct.n_obs:
+                                percentages.append(0)
+                            else:
+                                # Get percentage of cells in each cell type that express each interaction feature:
+                                percentages.append(
+                                    (coef_target.loc[total_mask, f"b_{feat}"].values > target_effect_threshold).mean()
+                                )
                         else:
                             percentages.append(0)
                     df.loc[f"{ct}-{target}", :] = percentages
@@ -2386,18 +2518,31 @@ class MuSIC_Interpreter(MuSIC):
             df = (df - df.min()) / (df.max() - df.min())
         df.fillna(0, inplace=True)
 
-        # Hierarchical clustering- first to group interactions w/ similar patterns across cell types:
-        col_linkage = sch.linkage(df.transpose(), method="ward")
-        col_dendro = sch.dendrogram(col_linkage, no_plot=True)
-        col_clustered_order = col_dendro["leaves"]
-        df = df.iloc[:, col_clustered_order]
+        if plot_type == "heatmap":
+            # Hierarchical clustering- first to group interactions w/ similar patterns across cell types:
+            col_linkage = sch.linkage(df.transpose(), method="ward")
+            col_dendro = sch.dendrogram(col_linkage, no_plot=True)
+            col_clustered_order = col_dendro["leaves"]
+            df = df.iloc[:, col_clustered_order]
 
-        # Then to group cell types w/ similar interaction patterns, if specified:
-        if hierarchical_cluster_y:
-            row_linkage = sch.linkage(df, method="ward")
-            row_dendro = sch.dendrogram(row_linkage, no_plot=True)
-            row_clustered_order = row_dendro["leaves"]
-            df = df.iloc[row_clustered_order, :]
+            # Then to group cell types w/ similar interaction patterns, if specified:
+            if hierarchical_cluster_ct:
+                row_linkage = sch.linkage(df, method="ward")
+                row_dendro = sch.dendrogram(row_linkage, no_plot=True)
+                row_clustered_order = row_dendro["leaves"]
+                df = df.iloc[row_clustered_order, :]
+            else:
+                # Sort by target:
+                # Create a temporary MultiIndex
+                df.index = pd.MultiIndex.from_tuples(df.index.str.split("-").map(tuple), names=["first", "second"])
+                if group_y_cell_type:
+                    # Sort by the first element, then the second
+                    df.sort_index(level=["first", "second"], inplace=True)
+                else:
+                    # Sort by the second element, then the first
+                    df.sort_index(level=["second", "first"], inplace=True)
+                # Revert to the original index format
+                df.index = df.index.map("-".join)
         else:
             # Sort by target:
             # Create a temporary MultiIndex
@@ -2418,36 +2563,43 @@ class MuSIC_Interpreter(MuSIC):
         if normalize and to_plot == "mean":
             if plot_type == "heatmap":
                 label = (
-                    "Normalized avg. effect per cell type"
+                    "Normalized avg. effect per cell type for cells expressing target"
                     if not normalize_targets
-                    else "Normalized avg. effect per cell type (normalized within target)"
+                    else "Normalized avg. effect per cell type \nfor cells expressing target (normalized within target)"
                 )
             else:
                 label = (
-                    "Normalized avg. effect\n per cell type"
+                    "Normalized avg. effect\n per cell type \nfor cells expressing target"
                     if not normalize_targets
-                    else "Normalized avg. effect\n per cell type \n(normalized within target)"
+                    else "Normalized avg. effect\n per cell type \nfor cells expressing target \n(normalized within "
+                    "target)"
                 )
         elif normalize and to_plot == "percentage":
             if plot_type == "heatmap":
                 label = (
-                    "Normalized enrichment of effect per cell type"
+                    "Normalized enrichment of effect per cell type \nfor cells expressing target"
                     if not normalize_targets
-                    else "Normalized enrichment of effect per cell type (normalized within target)"
+                    else "Normalized enrichment of effect per cell type \nfor cells expressing target (normalized "
+                    "within target)"
                 )
             else:
                 label = (
-                    "Normalized enrichment of\n effect per cell type"
+                    "Normalized enrichment of\n effect per cell type \nfor cells expressing target"
                     if not normalize_targets
-                    else "Normalized enrichment \nof effect per cell type\n (normalized within target)"
+                    else "Normalized enrichment \nof effect per cell type\n for cells expressing target\n(normalized "
+                    "within target)"
                 )
         elif not normalize and to_plot == "mean":
-            label = "Avg. effect per cell type" if plot_type == "heatmap" else "Avg. effect\n per cell type"
+            label = (
+                "Avg. effect per cell type \nfor cells expressing target"
+                if plot_type == "heatmap"
+                else "Avg. effect\n per cell type \nfor cells expressing target"
+            )
         else:
             label = (
-                "Enrichment of effect per cell type"
+                "Enrichment of effect per cell type \nfor cells expressing target"
                 if plot_type == "heatmap"
-                else "Enrichment of effect\n per cell type"
+                else "Enrichment of effect\n per cell type \nfor cells expressing target"
             )
 
         if self.mod_type == "lr":
@@ -2570,7 +2722,14 @@ class MuSIC_Interpreter(MuSIC):
             df = df[sorted_features]
 
             # Color legend:
-            divider = make_axes_locatable(axes[0])
+            if not isinstance(axes, (list, np.ndarray)):
+                divider = make_axes_locatable(axes)
+            else:
+                # If 'axes' is an array, and we want to apply to the first one
+                if len(axes) > 0:
+                    divider = make_axes_locatable(axes[0])
+                else:
+                    raise ValueError("No axes found in the 'axes' array")
             ax2 = divider.append_axes("top", size=ax2_size, pad=0)
 
             current_group = None
@@ -2594,36 +2753,58 @@ class MuSIC_Interpreter(MuSIC):
             ax2.set_xlim(0, len(df.index))
             ax2.axis("off")
 
-            for i, ax in enumerate(axes):
-                # From the larger dataframe, get the column for the chosen interaction as a series:
-                interaction = interaction_subset[i]
-                interaction_series = df[interaction]
-
+            if not isinstance(axes, (list, np.ndarray)):
                 vmin = 0
-                vmax = 1 if normalize else interaction_series.max()
+                vmax = 1 if normalize else df[interaction_subset].max().values
+
                 norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-                colors = [colormap(norm(val)) for val in interaction_series]
+                colors = [colormap(norm(val)) for val in df[interaction_subset].values]
                 sns.barplot(
-                    x=interaction_series.index,
-                    y=interaction_series.values,
+                    x=df[interaction_subset].index,
+                    y=df[interaction_subset].values.flatten(),
                     edgecolor="black",
                     linewidth=1,
                     palette=colors,
-                    ax=ax,
+                    ax=axes,
                 )
 
-                if ax is axes[0]:
-                    ax.set_title(interaction, fontsize=fontsize * 1.5, pad=35)
-                else:
-                    ax.set_title(interaction, fontsize=fontsize * 1.5, pad=10)
-                ax.set_xlabel("Cell Type-Specific Target", fontsize=fontsize)
-                ax.set_ylabel(label, fontsize=fontsize)
-                ax.tick_params(axis="y", labelsize=fontsize * 1.1)
+                axes.set_title(interaction_subset[0], fontsize=fontsize * 1.5, pad=35)
+                axes.set_xlabel("Cell Type-Specific Target", fontsize=fontsize)
+                axes.set_ylabel(label, fontsize=fontsize)
+                axes.tick_params(axis="y", labelsize=fontsize * 1.1)
 
-                if ax is axes[-1]:
-                    ax.tick_params(axis="x", labelsize=fontsize * 0.9, rotation=90)
-                else:
-                    ax.tick_params(axis="x", labelbottom=False)
+                axes.tick_params(axis="x", labelsize=fontsize * 0.9, rotation=90)
+            else:
+                for i, ax in enumerate(axes):
+                    # From the larger dataframe, get the column for the chosen interaction as a series:
+                    interaction = interaction_subset[i]
+                    interaction_series = df[interaction]
+
+                    vmin = 0
+                    vmax = 1 if normalize else interaction_series.max()
+                    norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+                    colors = [colormap(norm(val)) for val in interaction_series]
+                    sns.barplot(
+                        x=interaction_series.index,
+                        y=interaction_series.values,
+                        edgecolor="black",
+                        linewidth=1,
+                        palette=colors,
+                        ax=ax,
+                    )
+
+                    if ax is axes[0]:
+                        ax.set_title(interaction, fontsize=fontsize * 1.5, pad=35)
+                    else:
+                        ax.set_title(interaction, fontsize=fontsize * 1.5, pad=10)
+                    ax.set_xlabel("Cell Type-Specific Target", fontsize=fontsize)
+                    ax.set_ylabel(label, fontsize=fontsize)
+                    ax.tick_params(axis="y", labelsize=fontsize * 1.1)
+
+                    if ax is axes[-1]:
+                        ax.tick_params(axis="x", labelsize=fontsize * 0.9, rotation=90)
+                    else:
+                        ax.tick_params(axis="x", labelbottom=False)
 
             # Use the saved name for the AnnData object to define part of the name of the saved file:
             base_name = os.path.basename(self.adata_path)
@@ -2643,7 +2824,7 @@ class MuSIC_Interpreter(MuSIC):
             save_kwargs=save_kwargs,
             total_panels=1,
             fig=fig,
-            axes=ax,
+            axes=axes,
             return_all=False,
             return_all_list=None,
         )

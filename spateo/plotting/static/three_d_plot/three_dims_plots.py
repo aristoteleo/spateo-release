@@ -6,6 +6,7 @@ from typing import List, Optional, Union
 import anndata
 import matplotlib as mpl
 import numpy as np
+import pandas as pd
 import plotly.graph_objs as go
 from pyvista import MultiBlock, Plotter, PolyData, UnstructuredGrid
 
@@ -865,7 +866,7 @@ def quick_plot_3D_celltypes(
 
     fig = go.Figure(data=traces)
     if title is None:
-        title = "Cell Types of Interest" if ct_subset is not None else f"Cells, Colored by Type"
+        title = "Cell Types of Interest" if ct_subset is not None else "Cells, Colored by Type"
     title_dict = dict(
         text=title,
         y=0.9,
@@ -874,6 +875,97 @@ def quick_plot_3D_celltypes(
         xanchor="center",
         font=dict(size=28),
     )
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
+        scene=dict(
+            xaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+            yaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+            zaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+        ),
+        margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+        title=title_dict,
+    )
+    fig.write_html(save_path)
+
+
+def visualize_3D_increasing_direction_gradient(
+    adata: anndata.AnnData,
+    save_path: str,
+    color_key: str = "spatial",
+    coord_key: str = "spatial",
+    coord_column: int = 0,
+    cmap: str = "viridis",
+    center: float = 0.5,
+    title: Optional[str] = None,
+):
+    """Given a key in adata.obsm or adata.obs and optionally a column index, plot a 3D scatterplot where points
+    are colored according to increasing value in the specified column (typically, a coordinate axis,
+    e.g. the y-axis).
+
+    Args:
+        adata: AnnData object containing all required information
+        save_path: Save the figure as an HTML file to this path
+        color_key: Key in adata.obs or adata.obsm containing numerical information that will be used to color the
+            cells with gradient. Defaults to "spatial" (the default assumption also for the key in .obsm
+            containing spatial coordinates).
+        coord_key: Key in adata.obsm specifying the coordinates of each point in 3D space. Defaults to "spatial".
+        coord_column: Column index to use for plotting
+        cmap: Colormap to use for plotting
+        center: Coordinates will be normalized to [0, 1] and centered around this value. Defaults to 0.5. Larger
+            values will result in more points being colored in the upper half of the colormap, and vice versa.
+        title: Optional, can be used to provide a title for the plot
+    """
+    if color_key not in adata.obsm.keys() and color_key not in adata.obs.keys():
+        raise ValueError(f"Key {color_key} not found in adata.obsm or adata.obs.")
+    if coord_key not in adata.obsm.keys():
+        raise ValueError(f"Key {coord_key} pointing to array containing 3D coordinates not found in adata.obsm.")
+
+    if color_key in adata.obsm.keys():
+        coords = adata.obsm[color_key]
+        if isinstance(coords, pd.DataFrame):
+            coords = coords.values[:, coord_column]
+        else:
+            coords = coords[:, coord_column]
+    else:
+        coords = adata.obs[color_key].values.reshape(-1, 1)
+
+    coords_norm = (coords - np.min(coords)) / (np.max(coords) - np.min(coords))
+    # Shift center if necessary
+    if center != 0.5:
+        new_center = center
+        coords_norm = np.where(
+            coords_norm <= 0.5,
+            coords_norm * new_center / 0.5,  # Expand the lower half
+            1 - (1 - coords_norm) * (1 - new_center) / 0.5,  # Compress the upper half
+        )
+
+    colors = mpl.cm.get_cmap(cmap)(coords_norm)
+    # Convert colors to hex format:
+    colors = ["#" + "".join([f"{int(c * 255):02x}" for c in color[:3]]) for color in colors]
+
+    fig = go.Figure(
+        data=[
+            go.Scatter3d(
+                x=adata.obsm[coord_key][:, 0],
+                y=adata.obsm[coord_key][:, 1],
+                z=adata.obsm[coord_key][:, 2],
+                mode="markers",
+                marker=dict(size=2, color=colors, opacity=0.8),
+                showlegend=False,
+            )
+        ]
+    )
+
+    if title is not None:
+        title_dict = dict(
+            text=title,
+            y=0.9,
+            yanchor="top",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=28),
+        )
     fig.update_layout(
         showlegend=True,
         legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
