@@ -889,6 +889,93 @@ def quick_plot_3D_celltypes(
     fig.write_html(save_path)
 
 
+def plot_expression_3D(
+    adata: anndata.AnnData,
+    save_path: str,
+    gene: str,
+    coords_key: str = "spatial",
+    group_key: Optional[str] = None,
+    ct_subset: Optional[list] = None,
+):
+    """Quick-visualize the magnitude of the predicted effect on target for a given interaction.
+
+    Args:
+        target: Target gene to visualize
+        interaction: Interaction to visualize (e.g. "Igf1:Igf1r" for L:R model, "Igf1" for ligand model)
+        save_path: Path to save the figure to (will save as HTML file)
+    """
+    if group_key is not None:
+        if group_key not in adata.obs.keys():
+            raise ValueError(f"adata.obs does not contain {group_key}- cell type labels could not be found.")
+        adata = adata[adata.obs[group_key].isin(ct_subset), :].copy()
+
+    coords = adata.obsm[coords_key]
+    x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+
+    gene_expr = adata[:, gene].X.toarray().flatten()
+
+    # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
+    p997 = np.percentile(gene_expr, 99.7)
+    gene_expr[gene_expr > p997] = p997
+    scatter_effect = go.Scatter3d(
+        x=x,
+        y=y,
+        z=z,
+        mode="markers",
+        marker=dict(
+            color=gene_expr,
+            colorscale="Hot",
+            size=2,
+            colorbar=dict(title=f"{gene}", x=0.75, titlefont=dict(size=24), tickfont=dict(size=24)),
+        ),
+        showlegend=False,
+    )
+
+    fig = go.Figure(data=[scatter_effect])
+    title_dict = dict(
+        text=f"{gene}",
+        y=0.9,
+        yanchor="top",
+        x=0.5,
+        xanchor="center",
+        font=dict(size=36),
+    )
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(
+                showgrid=False,
+                showline=True,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title_font=dict(size=36),
+                tickfont=dict(size=14),
+            ),
+            yaxis=dict(
+                showgrid=False,
+                showline=True,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title_font=dict(size=36),
+                tickfont=dict(size=14),
+            ),
+            zaxis=dict(
+                showgrid=False,
+                showline=True,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title_font=dict(size=36),
+                tickfont=dict(size=14),
+            ),
+        ),
+        margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+        title=title_dict,
+    )
+    fig.write_html(save_path)
+
+
 def visualize_3D_increasing_direction_gradient(
     adata: anndata.AnnData,
     save_path: str,
@@ -897,6 +984,7 @@ def visualize_3D_increasing_direction_gradient(
     coord_column: int = 0,
     cmap: str = "viridis",
     center: float = 0.5,
+    opacity: float = 1.0,
     title: Optional[str] = None,
 ):
     """Given a key in adata.obsm or adata.obs and optionally a column index, plot a 3D scatterplot where points
@@ -914,6 +1002,7 @@ def visualize_3D_increasing_direction_gradient(
         cmap: Colormap to use for plotting
         center: Coordinates will be normalized to [0, 1] and centered around this value. Defaults to 0.5. Larger
             values will result in more points being colored in the upper half of the colormap, and vice versa.
+        opacity: Transparency of the points
         title: Optional, can be used to provide a title for the plot
     """
     if color_key not in adata.obsm.keys() and color_key not in adata.obs.keys():
@@ -951,7 +1040,7 @@ def visualize_3D_increasing_direction_gradient(
                 y=adata.obsm[coord_key][:, 1],
                 z=adata.obsm[coord_key][:, 2],
                 mode="markers",
-                marker=dict(size=2, color=colors, opacity=0.8),
+                marker=dict(size=2, color=colors, opacity=opacity),
                 showlegend=False,
             )
         ]

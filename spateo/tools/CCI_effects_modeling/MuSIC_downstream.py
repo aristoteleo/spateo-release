@@ -658,6 +658,99 @@ class MuSIC_Interpreter(MuSIC):
             plt.tight_layout()
             plt.show()
 
+    def plot_interaction_effect_3D(self, target: str, interaction: str, save_path: str):
+        """Quick-visualize the magnitude of the predicted effect on target for a given interaction.
+
+        Args:
+            target: Target gene to visualize
+            interaction: Interaction to visualize (e.g. "Igf1:Igf1r" for L:R model, "Igf1" for ligand model)
+            save_path: Path to save the figure to (will save as HTML file)
+        """
+        targets = pd.read_csv(
+            os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
+        )
+        if target not in targets.columns:
+            raise ValueError(f"Target {target} not found in this model's directory. Please provide a valid target.")
+        if interaction not in self.X_df.columns:
+            raise ValueError(f"Interaction {interaction} not found in this model's directory.")
+
+        if hasattr(self, "remaining_cells"):
+            adata = self.adata[self.remaining_cells, :].copy()
+        else:
+            adata = self.adata.copy()
+
+        coords = adata.obsm[self.coords_key]
+        x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+
+        target_interaction_coef = self.coeffs[target][f"b_{interaction}"]
+
+        # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
+        p997 = np.percentile(target_interaction_coef.values, 99.7)
+        target_interaction_coef[target_interaction_coef > p997] = p997
+        plot_vals = target_interaction_coef.values
+        scatter_effect = go.Scatter3d(
+            x=x,
+            y=y,
+            z=z,
+            mode="markers",
+            marker=dict(
+                color=plot_vals,
+                colorscale="Hot",
+                size=2,
+                colorbar=dict(
+                    title=f"{interaction.title()} Effect on {target.title()}",
+                    x=0.75,
+                    titlefont=dict(size=24),
+                    tickfont=dict(size=24),
+                ),
+            ),
+            showlegend=False,
+        )
+
+        fig = go.Figure(data=[scatter_effect])
+        title_dict = dict(
+            text=f"{interaction.title()} Effect on {target.title()}",
+            y=0.9,
+            yanchor="top",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=36),
+        )
+        fig.update_layout(
+            scene=dict(
+                xaxis=dict(
+                    showgrid=False,
+                    showline=True,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title_font=dict(size=36),
+                    tickfont=dict(size=14),
+                ),
+                yaxis=dict(
+                    showgrid=False,
+                    showline=True,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title_font=dict(size=36),
+                    tickfont=dict(size=14),
+                ),
+                zaxis=dict(
+                    showgrid=False,
+                    showline=True,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title_font=dict(size=36),
+                    tickfont=dict(size=14),
+                ),
+            ),
+            margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+            title=title_dict,
+        )
+        fig.write_html(save_path)
+
     def visualize_overlap_between_interacting_components_3D(self, target: str, interaction: str, save_path: str):
         """Visualize the spatial distribution of signaling features (ligand, receptor, or L:R field) and target gene,
         as well as the overlapping region. Intended for use with 3D spatial coordinates.
@@ -668,6 +761,11 @@ class MuSIC_Interpreter(MuSIC):
             save_path: Path to save the figure to (will save as HTML file)
         """
         from ...plotting.static.colorlabel import godsnot_102
+
+        # Rearrange slightly:
+        godsnot_102[1] = "#B200ED"
+        godsnot_102[2] = "#FFA500"
+        godsnot_102[3] = "#1CE6FF"
 
         targets = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
@@ -697,30 +795,32 @@ class MuSIC_Interpreter(MuSIC):
         overlap = target_expressing.intersection(interaction_expressing)
 
         adata.obs[f"{interaction}_{target}"] = "Other"
-        adata.obs.loc[target_expressing, f"{interaction}_{target}"] = target
+        adata.obs.loc[
+            target_expressing, f"{interaction}_{target}"
+        ] = f"{target} only (no {interaction} in neighborhood and/or receptor)"
         if self.mod_type == "lr":
             ligand, receptor = interaction.split(":")
             adata.obs.loc[
                 interaction_expressing, f"{interaction}_{target}"
-            ] = f"{ligand.title()} in Neighborhood and {receptor}"
+            ] = f"{ligand.title()} in Neighborhood and {receptor}, no {target}"
             adata.obs.loc[
                 overlap, f"{interaction}_{target}"
             ] = f"{ligand.title()} in Neighborhood, {receptor} and {target}"
         elif self.mod_type == "ligand":
-            adata.obs.loc[interaction_expressing, f"{interaction}_{target}"] = (
-                f"{interaction.title()} in " f"Neighborhood and Receptor"
-            )
-            adata.obs.loc[overlap, f"{interaction}_{target}"] = (
-                f"{interaction.title()} in Neighborhood, Receptor and" f" {target}"
-            )
+            adata.obs.loc[
+                interaction_expressing, f"{interaction}_{target}"
+            ] = f"{interaction.title()} in Neighborhood and Receptor, no {target}"
+            adata.obs.loc[
+                overlap, f"{interaction}_{target}"
+            ] = f"{interaction.title()} in Neighborhood, Receptor and {target}"
 
         color_mapping = dict(zip(adata.obs[f"{interaction}_{target}"].value_counts().index, godsnot_102))
         color_mapping["Other"] = "#D3D3D3"
 
         traces = []
         for group, color in color_mapping.items():
+            marker_size = 1.25 if group == "Other" else 2
             mask = adata.obs[f"{interaction}_{target}"] == group
-            marker_size = 2 if group == "Other" else 3.5
             scatter = go.Scatter3d(
                 x=x[mask],
                 y=y[mask],
@@ -744,21 +844,52 @@ class MuSIC_Interpreter(MuSIC):
             traces.append(legend_target)
 
         fig = go.Figure(data=traces)
+        if self.mod_type == "lr":
+            title = f"Distribution of interacting components: <br>{interaction} and {target}"
+        elif self.mod_type == "ligand":
+            title = (
+                f"Distribution of interacting components: <br>{interaction}, {interaction} receptor/downstream "
+                f"components and {target}"
+            )
         title_dict = dict(
-            text=f"{interaction} and {target}",
+            text=title,
             y=0.9,
             yanchor="top",
             x=0.5,
             xanchor="center",
-            font=dict(size=28),
+            font=dict(size=36),
         )
         fig.update_layout(
             showlegend=True,
             legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
             scene=dict(
-                xaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
-                yaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
-                zaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+                xaxis=dict(
+                    showgrid=False,
+                    showline=True,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title_font=dict(size=36),
+                    tickfont=dict(size=14),
+                ),
+                yaxis=dict(
+                    showgrid=False,
+                    showline=True,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title_font=dict(size=36),
+                    tickfont=dict(size=14),
+                ),
+                zaxis=dict(
+                    showgrid=False,
+                    showline=True,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title_font=dict(size=36),
+                    tickfont=dict(size=14),
+                ),
             ),
             margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
             title=title_dict,
@@ -777,6 +908,11 @@ class MuSIC_Interpreter(MuSIC):
             save_path: Path to save the figure to (will save as HTML file)
         """
         from ...plotting.static.colorlabel import godsnot_102
+
+        # Rearrange slightly:
+        godsnot_102[1] = "#B200ED"
+        godsnot_102[2] = "#FFA500"
+        godsnot_102[3] = "#1CE6FF"
 
         if len(effects) > 6:
             raise ValueError("Cannot include more than six effects.")
@@ -877,7 +1013,7 @@ class MuSIC_Interpreter(MuSIC):
 
         traces = []
         for group, color in color_mapping.items():
-            marker_size = 2 if group == "Other" else 3.5
+            marker_size = 1.25 if group == "Other" else 2
             mask = adata.obs["effects"] == group
             scatter = go.Scatter3d(
                 x=x[mask],
@@ -1065,7 +1201,9 @@ class MuSIC_Interpreter(MuSIC):
         ]
 
         # Check for existing dataframe:
-        if os.path.exists(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv"):
+        if os.path.exists(
+            os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv")
+        ):
             to_plot = pd.read_csv(
                 os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv"),
                 index_col=0,
@@ -1128,7 +1266,7 @@ class MuSIC_Interpreter(MuSIC):
 
             # For each cell, compute the fold change over the average for each combination:
             all_fc = pd.DataFrame(index=self.adata.obs_names, columns=combinations)
-            for combo in combinations:
+            for combo in tqdm(combinations, desc="Computing fold changes for interaction-target combinations..."):
                 target, feature = combo.split("-")
                 target_coefs = all_coeffs[target][f"b_{feature}"]
                 all_fc[combo] = target_coefs / mean_effect[combo]
@@ -2326,7 +2464,7 @@ class MuSIC_Interpreter(MuSIC):
                 mode="markers",
                 marker=dict(
                     color=plot_vals,
-                    colorscale="OrRd",
+                    colorscale="Hot",
                     size=2.5,
                     colorbar=dict(title=f"{ligand} Expression", x=0.8, titlefont=dict(size=16), tickfont=dict(size=18)),
                 ),

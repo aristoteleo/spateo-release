@@ -998,6 +998,11 @@ class MuSIC:
                             "Rnaset2a",
                             "Ptges3",
                             "Nampt",
+                            "Trf",
+                            "Fdx1",
+                            "Kdr",
+                            "Apoa2",
+                            "Apoe",
                         ]
                     ]
                     l_complexes = [elem for elem in ligands if "_" in elem]
@@ -3322,6 +3327,8 @@ class MuSIC:
                     for col in coeffs[target].columns
                     if col.startswith("b_") and "intercept" not in col
                 ]
+                feats = [feat for feat in feats if feat in input.columns]
+                coeffs[target] = coeffs[target].loc[:, [c for c in coeffs[target].columns if c.split("b_")[1] in feats]]
 
                 y_pred = np.sum(input.loc[:, feats].values * coeffs[target].values, axis=1)
                 if self.distr != "gaussian":
@@ -3554,6 +3561,12 @@ class MuSIC:
                             standard_errors *= mask_matrix
                         mask_df = (self.X_df != 0).astype(int)
                         mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
+                        for col in betas.columns:
+                            if col.replace("b_", "") not in mask_df.columns:
+                                mask_df[col] = 0
+                        # Make sure the columns are in the same order:
+                        betas_columns = [col.replace("b_", "") for col in betas.columns]
+                        mask_df = mask_df.reindex(columns=betas_columns)
                         mask_matrix = mask_df.values
                         betas *= mask_matrix
                         standard_errors *= mask_matrix
