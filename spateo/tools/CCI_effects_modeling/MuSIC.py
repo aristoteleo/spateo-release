@@ -1716,7 +1716,7 @@ class MuSIC:
                         ]
                         associated_receptors = [rec for rec in associated_receptors if rec in self.adata.var_names]
                         # Check for receptors expressed in above threshold number of cells:
-                        n_cell_threshold = np.min([1000, self.target_expr_threshold * self.n_samples])
+                        n_cell_threshold = np.min([100, self.target_expr_threshold * self.n_samples])
                         # Filter receptors expressed in more than the threshold number of cells
                         receptors_above_threshold = [
                             r for r in associated_receptors if self.adata[:, r].X.sum() > n_cell_threshold
@@ -1787,7 +1787,7 @@ class MuSIC:
                         ]
                         associated_receptors = [rec for rec in associated_receptors if rec in self.adata.var_names]
                         # Check for receptors expressed in above threshold number of cells:
-                        n_cell_threshold = np.min([2000, self.target_expr_threshold * self.n_samples])
+                        n_cell_threshold = np.min([100, self.target_expr_threshold * self.n_samples])
                         # Filter receptors expressed in more than the threshold number of cells
                         receptors_above_threshold = [
                             r for r in associated_receptors if self.adata[:, r].X.sum() > n_cell_threshold
