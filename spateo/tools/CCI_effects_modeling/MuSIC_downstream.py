@@ -22,7 +22,6 @@ from typing import List, Literal, Optional, Tuple, Union
 import anndata
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -53,7 +52,7 @@ from ...plotting.static.networks import plot_network
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...tools.utils import filter_adata_spatial
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
-from ..utils import compute_corr_ci
+from ..utils import compute_corr_ci, create_new_coordinate
 from .MuSIC import MuSIC
 from .regression_utils import assign_significance, multitesting_correction, wald_test
 from .SWR import define_spateo_argparse
@@ -71,9 +70,18 @@ class MuSIC_Interpreter(MuSIC):
             pertinent to modeling.
         args_list: If parser is provided by function call, the arguments to parse must be provided as a separate
             list. It is recommended to use the return from :func `define_spateo_argparse()` for this.
+        keep_coeff_threshold_proportion_cells: If provided, will threshold columns to only keep those that are
+            nonzero in a proportion of cells greater than this threshold. For example, if this is set to 0.5,
+            more than half of the cells must have a nonzero value for a given column for it to be retained for
+            further inspection. Intended to be used to filter out likely false positives.
     """
 
-    def __init__(self, parser: argparse.ArgumentParser, args_list: Optional[List[str]] = None):
+    def __init__(
+        self,
+        parser: argparse.ArgumentParser,
+        args_list: Optional[List[str]] = None,
+        keep_column_threshold_proportion_cells: Optional[float] = None,
+    ):
         super().__init__(parser, args_list, verbose=False)
 
         self.k = self.arg_retrieve.top_k_receivers
@@ -89,6 +97,19 @@ class MuSIC_Interpreter(MuSIC):
 
         # Dictionary containing coefficients:
         self.coeffs, self.standard_errors = self.return_outputs(adjust_for_subsampling=False)
+        n_cells_expressing_targets = self.targets_expr.apply(lambda x: sum(x > 0), axis=0)
+        if keep_column_threshold_proportion_cells is not None:
+            keep_column_threshold_proportion_cells = 0.01
+            for target, df in self.coeffs.items():
+                # Threshold columns to only keep those that are nonzero in a proportion of cells greater than this
+                # threshold:
+                threshold = int(keep_column_threshold_proportion_cells * n_cells_expressing_targets[target])
+                for col in df.columns:
+                    if sum(df[col] != 0) < threshold:
+                        df[col] = 0
+                        self.standard_errors[target][col] = 0
+                self.coeffs[target] = df
+
         # Design matrix:
         self.design_matrix = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
@@ -1072,7 +1093,8 @@ class MuSIC_Interpreter(MuSIC):
         coord_column: Optional[Union[int, str]] = None,
         effect_threshold: Optional[float] = None,
         use_significant: bool = False,
-        hierarchically_cluster_y: bool = True,
+        sort_by_target: bool = False,
+        neatly_arrange_y: bool = True,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         cmap: str = "magma",
@@ -1090,17 +1112,24 @@ class MuSIC_Interpreter(MuSIC):
                 cells. i.e. spatial coordinates. Defaults to "spatial". For each value in the position array (each
                 coordinate, each category), multiple cells must have the same value.
             coord_column: Optional, only used if "position_key" points to an entry in .obsm. In this case,
-                this is the index or name of the column to be used to provide the positional context.
+                this is the index or name of the column to be used to provide the positional context. Can also
+                provide "xy", "yz", "xz", "-xy", "-yz", "-xz" to draw a line between the two coordinate axes. "xy"
+                will extend the new axis in the direction of increasing x and increasing y starting from x=0 and y=0 (or
+                min. x/min. y), "-xy" will extend the new axis in the direction of decreasing x and increasing y
+                starting from x=minimum x and y=maximum y, and so on.
             effect_threshold: Optional threshold minimum effect size to consider an effect for further analysis,
                 as an absolute value. Use this to choose only the cells for which an interaction is predicted to
                 have a strong effect. If None, use the median interaction effect.
             use_significant: Whether to use only significant effects in computing the specificity. If True,
                 will filter to cells + interactions where the interaction is significant for the target. Only valid
                 if :func `compute_coeff_significance()` has been run.
-            hierarchically_cluster_y: Set True to cluster the y-axis (interaction-target pairs) hierarchically. Used
-                for a more uniform plot where similarly patterned interaction-target pairs are grouped together. If
-                False, will sort this axis by the identity of the interaction (i.e. all "Fgf1" rows will be grouped
-                together).
+            sort_by_target: Set True to order the y-axis in terms of the identity of the target gene. Incompatible
+                with "neatly_arrange_y". If both this and "neatly_arrange_y" are False, will sort this axis by the
+                identity of the interaction (i.e. all "Fgf1" rows will be grouped together).
+            neatly_arrange_y: Set True to order the y-axis in terms of how early along the position axis the max
+                z-scores for each row occur in. Used for a more uniform plot where similarly patterned
+                interaction-target pairs are grouped together. If False, will sort this axis by the identity of the
+                interaction (i.e. all "Fgf1" rows will be grouped together).
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
             cmap: Colormap to use. Options: Any divergent matplotlib colormap.
@@ -1122,46 +1151,53 @@ class MuSIC_Interpreter(MuSIC):
             )
 
         if position_key in self.adata.obsm.keys():
-            if coord_column is not None and isinstance(coord_column, str):
-                if not isinstance(self.adata.obsm[position_key], pd.DataFrame):
+            if coord_column in ["xy", "yz", "xz", "-xy", "-yz", "-xz"]:
+                self.adata = create_new_coordinate(self.adata, position_key, coord_column)
+                pos = self.adata.obs[f"{coord_column} Coordinate"]
+
+            else:
+                if coord_column is not None and isinstance(coord_column, str):
+                    if not isinstance(self.adata.obsm[position_key], pd.DataFrame):
+                        raise ValueError(
+                            f"Array stored at position key {position_key} has no column names; provide the column "
+                            f"index."
+                        )
+                    else:
+                        pos = self.adata.obsm[position_key][coord_column]
+                elif coord_column is not None and isinstance(coord_column, int):
+                    if isinstance(self.adata.obsm[position_key], pd.DataFrame):
+                        pos = self.adata.obsm[position_key].iloc[:, coord_column]
+                        x_label = f"Relative position along {coord_column}"
+                        title = f"Signaling effect distribution along {coord_column}"
+                        save_id = coord_column
+                    else:
+                        pos = pd.Series(self.adata.obsm[position_key][:, coord_column], index=self.adata.obs_names)
+                        if coord_column == 0:
+                            x_label = "Relative position along X"
+                            title = "Signaling effect distribution along X"
+                            save_id = "x_axis"
+                        elif coord_column == 1:
+                            x_label = "Relative position along Y"
+                            title = "Signaling effect distribution along Y"
+                            save_id = "y_axis"
+                        elif coord_column == 2:
+                            x_label = "Relative position along Z"
+                            title = "Signaling effect distribution along Z"
+                            save_id = "z_axis"
+                elif self.adata.obsm[position_key].shape[1] != 1:
                     raise ValueError(
-                        f"Array stored at position key {position_key} has no column names; provide the column index."
+                        f"Array stored at position key {position_key} has more than one column; provide the column "
+                        f"index."
                     )
                 else:
-                    pos = self.adata.obsm[position_key][coord_column]
-            elif coord_column is not None and isinstance(coord_column, int):
-                if isinstance(self.adata.obsm[position_key], pd.DataFrame):
-                    pos = self.adata.obsm[position_key].iloc[:, coord_column]
-                    x_label = f"Relative position along {coord_column}"
-                    title = f"Signaling effect distribution along {coord_column}"
-                    save_id = coord_column
-                else:
-                    pos = pd.Series(self.adata.obsm[position_key][:, coord_column], index=self.adata.obs_names)
-                    if coord_column == 0:
-                        x_label = "Relative position along X"
-                        title = "Signaling effect distribution along X"
-                        save_id = "x_axis"
-                    elif coord_column == 1:
-                        x_label = "Relative position along Y"
-                        title = "Signaling effect distribution along Y"
-                        save_id = "y_axis"
-                    elif coord_column == 2:
-                        x_label = "Relative position along Z"
-                        title = "Signaling effect distribution along Z"
-                        save_id = "z_axis"
-            elif self.adata.obsm[position_key].shape[1] != 1:
-                raise ValueError(
-                    f"Array stored at position key {position_key} has more than one column; provide the column index."
-                )
-            else:
-                pos = (
-                    pd.Series(self.adata.obsm[position_key].flatten(), index=self.adata.obs_names)
-                    if isinstance(self.adata.obsm[position_key], np.ndarray)
-                    else self.adata.obsm[position_key]
-                )
-                x_label = "Relative position"
-                title = f"Signaling effect distribution along axis given by {position_key} key"
-                save_id = position_key
+                    pos = (
+                        pd.Series(self.adata.obsm[position_key].flatten(), index=self.adata.obs_names)
+                        if isinstance(self.adata.obsm[position_key], np.ndarray)
+                        else self.adata.obsm[position_key]
+                    )
+                    x_label = "Relative position"
+                    title = f"Signaling effect distribution along axis given by {position_key} key"
+                    save_id = position_key
         else:
             pos = self.adata.obs[position_key]
         # If position array is numerical, there may not be an exact match- convert the data type to integer:
@@ -1175,10 +1211,9 @@ class MuSIC_Interpreter(MuSIC):
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
 
-        if save_df:
-            output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
-            if not os.path.exists(output_folder):
-                os.makedirs(output_folder)
+        output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
 
         # Use the saved name for the AnnData object to define part of the name of the saved file:
         base_name = os.path.basename(self.adata_path)
@@ -1210,7 +1245,11 @@ class MuSIC_Interpreter(MuSIC):
             )
 
             if interaction_subset is not None:
-                to_plot = to_plot[interaction_subset]
+                selected_interactions = [i for i in to_plot.index if i.split("-")[1] in interaction_subset]
+                to_plot = to_plot.loc[selected_interactions]
+            if target_subset is not None:
+                selected_targets = [t for t in to_plot.index if t.split("-")[0] if t in target_subset]
+                to_plot = to_plot.loc[selected_targets]
         else:
             if target_subset is None:
                 target_subset = list(self.coeffs.keys())
@@ -1302,48 +1341,103 @@ class MuSIC_Interpreter(MuSIC):
                 # Minmax scale to normalize positional context:
                 to_plot.index = (to_plot.index - to_plot.index.min()) / (to_plot.index.max() - to_plot.index.min())
             to_plot = to_plot.T  # so that the features are labeled along the y-axis
-            # Hierarchically cluster if applicable, and if not sort by interaction:
-            if hierarchically_cluster_y:
-                row_linkage = sch.linkage(to_plot, method="ward")
-                row_dendro = sch.dendrogram(row_linkage, no_plot=True)
-                row_clustered_order = row_dendro["leaves"]
-                to_plot = to_plot.iloc[row_clustered_order, :]
-            else:
-                to_plot["temp"] = to_plot.index.to_series().apply(lambda x: x.split("-")[1])
-                to_plot = to_plot.sort_values(by="temp")
-                to_plot = to_plot.drop(columns="temp")
 
+        if sort_by_target:
+            logger.info("Sorting by target gene...")
+            to_plot["temp"] = to_plot.index.to_series().apply(lambda x: x.split("-")[0])
+            to_plot = to_plot.sort_values(by="temp")
+            to_plot = to_plot.drop(columns="temp")
+        # Sort by "heat" if applicable (i.e. in order roughly determined by how early along the relative position
+        # the highest z-scores occur in for each interaction-target pair):
+        elif neatly_arrange_y:
+            logger.info("Sorting by position of enrichment along axis...")
+            column_indices = np.tile(np.arange(len(to_plot.columns)), (len(to_plot), 1))  # Column indices array
+            # Look only at the indices corresponding to the highest changes:
+            percentile_95 = to_plot.apply(
+                lambda row: np.percentile(row[row > 0], 95) if row[row > 0].size > 0 else 0, axis=1
+            )
+            # Create a DataFrame that replicates the shape of to_plot
+            weights_matrix = to_plot.gt(percentile_95, axis=0) * to_plot
+
+            weighted_sum = np.sum(weights_matrix.values * column_indices, axis=1)
+            total_weight = np.sum(weights_matrix.values, axis=1)
+            weighted_avg = pd.Series(np.where(total_weight != 0, weighted_sum / total_weight, 0), index=to_plot.index)
+
+            top_cols_sorted = weighted_avg.sort_values().index
+            to_plot = to_plot.loc[top_cols_sorted]
+        else:
+            logger.info("Sorting by interaction...")
+            to_plot["temp"] = to_plot.index.to_series().apply(lambda x: x.split("-")[1])
+            to_plot = to_plot.sort_values(by="temp")
+            to_plot = to_plot.drop(columns="temp")
+
+        flattened = to_plot.values.flatten()
+        flattened_series = pd.Series(flattened)
+        percentile_95 = flattened_series.quantile(0.95)
+        max_val = percentile_95
         if figsize is None:
-            m = len(to_plot) * 30 / 200
-            n = 5
+            m = len(to_plot) * 40 / 200
+            n = 8
             figsize = (n, m)
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
 
         if fontsize is None:
             fontsize = rcParams.get("font.size")
 
-        m = sns.heatmap(to_plot)
+        # Format the numerical columns for the plot:
+        # First check whether the columns contain duplicates:
+        if any([name.count(".") > 1 for name in to_plot.columns]):
+            to_plot.columns = [".".join(name.split(".")[:2]) for name in to_plot.columns]
+        to_plot.columns = [float(col) for col in to_plot.columns]
+        col_series = pd.Series(to_plot.columns)
+        if set(col_series) != len(col_series):
+            unique_values, counts = np.unique(col_series, return_counts=True)
+            # Iterate through unique values
+            for value, count in zip(unique_values, counts):
+                if count > 1:
+                    # Find indices of the repeated value
+                    indices = col_series[col_series == value].index
+
+                    # Calculate step size
+                    if value == unique_values[-1]:
+                        next_value = value + (value - unique_values[-2])
+                    else:
+                        next_index = np.where(unique_values == value)[0][0] + 1
+                        next_value = unique_values[next_index]
+                    step = (next_value - value) / count
+
+                    # Update the values
+                    for i in range(count):
+                        col_series.iloc[indices[i]] = value + step * i
+            to_plot.columns = col_series.values
+
+        to_plot.columns = [f"{float(col):.3f}" for col in to_plot.columns]
+        to_plot.columns = [str(col) for col in to_plot.columns]
+        m = sns.heatmap(to_plot, vmin=-max_val, vmax=max_val, ax=ax, cmap=cmap)
 
         cbar = m.collections[0].colorbar
         cbar.set_label("Z-score", fontsize=fontsize * 1.5, labelpad=10)
         # Adjust colorbar tick font size
         cbar.ax.tick_params(labelsize=fontsize * 1.25)
-        cbar.ax.set_aspect(30)
+        cbar.ax.set_aspect(np.min([len(to_plot), 70]))
 
         ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
-        ax.set_ylabel("Interaction Effect on Target", fontsize=fontsize * 1.25)
-        ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.2f"))
+        ax.set_ylabel("Interaction Effect on Target (formatted target-interaction)", fontsize=fontsize * 1.25)
         ax.tick_params(axis="x", labelsize=fontsize)
         ax.tick_params(axis="y", labelsize=fontsize)
         ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
 
         if save_df:
-            to_plot.to_csv(
-                os.path.join(
-                    output_folder,
-                    f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv",
+            # Don't save if already existing:
+            if not os.path.exists(
+                os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv")
+            ):
+                to_plot.to_csv(
+                    os.path.join(
+                        output_folder,
+                        f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv",
+                    )
                 )
-            )
 
         if save_show_or_return in ["save", "both", "all"]:
             save_kwargs["ext"] = "png"

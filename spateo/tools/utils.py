@@ -1,5 +1,6 @@
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
+import anndata
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -293,3 +294,91 @@ def filter_adata_spatial(
     # Filter AnnData object:
     adata = adata[df.index, :].copy()
     return adata
+
+
+# ---------------------------------------------------------------------------------------------------
+# For creating arbitrary axes between two existing axes
+# ---------------------------------------------------------------------------------------------------
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def create_new_coordinate(
+    adata: anndata.AnnData, position_key: str = "spatial", plane: Literal["xy", "yz", "xz", "-xy", "-yz", "-xz"] = "xy"
+):
+    """Projects points from an AnnData object onto a specified plane and direction, calculate the distances along this
+    projection, and add the results to the AnnData object.
+
+    Args:
+        adata: AnnData object containing spatial coordinates in .obsm
+        position_key: Key in .obsm containing spatial coordinates. Defaults to "spatial".
+        plane: Plane to project points onto. Must be one of "xy", "yz", "xz", "-xy", "-yz", "-xz". The "-" prefix
+            indicates that the direction along the first axis is reversed (i.e. instead of starting from the minimum
+            value, it starts from the maximum value). Defaults to "xy".
+
+    Returns:
+        adata: AnnData object with new column added to .obs
+    """
+    if "z" in plane and adata.obsm[position_key].shape[1] < 3:
+        raise ValueError("Cannot project onto z-axis if there are only 2 spatial dimensions.")
+
+    if position_key in adata.obsm.keys():
+        if adata.obsm[position_key].shape[1] == 2:
+            pos_df = pd.DataFrame(adata.obsm[position_key], index=adata.obs_names, columns=["X", "Y"])
+        else:
+            pos_df = pd.DataFrame(adata.obsm[position_key], index=adata.obs_names, columns=["X", "Y", "Z"])
+
+        # Extracting the relevant columns based on the plane
+        if plane in ["xy", "-xy"]:
+            cols = ["X", "Y"]
+        elif plane in ["yz", "-yz"]:
+            cols = ["Y", "Z"]
+        elif plane in ["xz", "-xz"]:
+            cols = ["X", "Z"]
+        else:
+            raise ValueError("Invalid coord_column")
+
+        # Projection and calculation of distance
+        if plane in ["xy", "yz", "xz"]:  # Positive planes
+            min_point = pos_df[cols].min()
+            max_point = pos_df[cols].max()
+        else:  # Negative planes
+            min_point = pos_df[cols].copy()
+            max_point = pos_df[cols].copy()
+            min_point[cols[1]] = pos_df[cols[1]].max()
+            max_point[cols[1]] = pos_df[cols[1]].min()
+        reverse = "-" in plane
+        adata.obs[f"{plane} Coordinate"] = pos_df.apply(
+            lambda row: project_and_calculate_distance(row, cols, min_point, max_point, reverse), axis=1
+        )
+
+        return adata
+
+
+def project_and_calculate_distance(
+    row: pd.Series, cols: list, min_point: pd.Series, max_point: pd.Series, reverse: bool = False
+):
+    """Project a point onto a line with a slope of either 1 or -1, and calculate the distance along the new line for
+    the projected point to establish its coordinate.
+
+    Args:
+        row: A row from the dataframe that contains the spatial coordinates
+        cols: The list of two columns that define the plane, e.g. ["X", "Y"]
+        min_point: The minimum point that defines the "start" of the new coordinate axis
+        max_point: The maximum point that defines the "end" of the new coordinate axis
+        reverse: Flag that indicates whether the projection starts from the minimum along the x-axis or the maximum
+            along the x-axis (or y-axis or z-axis, depending on which axis is used as the reference).
+
+    Returns:
+        distance: The distance along the new coordinate axis for the projected point
+    """
+    if reverse:
+        # For -xy, -yz, -xz (slope -1)
+        x_proj = (row[cols[0]] - row[cols[1]]) / 2
+        y_proj = -x_proj
+        reference_point = max_point
+    else:
+        # For xy, yz, xz (slope 1)
+        x_proj = (row[cols[0]] + row[cols[1]]) / 2
+        y_proj = x_proj
+        reference_point = min_point
+
+    distance = np.sqrt((x_proj - reference_point[cols[0]]) ** 2 + (y_proj - reference_point[cols[1]]) ** 2)
+    return distance

@@ -1762,6 +1762,9 @@ class MuSIC:
                 # Normalize the data for the L:R pairs to alleviate differences in scale induced by the
                 # multiplication operation:
                 X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
+                # The above operation will tend to exaggerate the presence of ligand in sparser neighborhoods- set
+                # threshold to ignore these cells/avoid potential false positives:
+                X_df[X_df < 0.3] = 0
 
             elif self.mod_type == "ligand" or self.mod_type == "receptor":
                 if self.mod_type == "ligand":
@@ -1890,6 +1893,9 @@ class MuSIC:
                 X_df = X_df.applymap(np.log1p)
                 # Normalize the data to prevent numerical overflow:
                 X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
+                # The above operation will tend to exaggerate the presence of ligand in sparser neighborhoods- set
+                # threshold to ignore these cells/avoid potential false positives:
+                X_df[X_df < 0.3] = 0
 
             else:
                 raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
