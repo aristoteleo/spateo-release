@@ -48,6 +48,7 @@ from tqdm.auto import tqdm
 
 from ...configuration import config_spateo_rcParams
 from ...logging import logger_manager as lm
+from ...plotting.static.colorlabel import vega_20
 from ...plotting.static.networks import plot_network
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...tools.utils import filter_adata_spatial
@@ -1095,12 +1096,12 @@ class MuSIC_Interpreter(MuSIC):
         use_significant: bool = False,
         sort_by_target: bool = False,
         neatly_arrange_y: bool = True,
+        title: Optional[str] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         cmap: str = "magma",
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
-        save_df: bool = False,
     ):
         """Visualize the distribution of interaction effects across cells in the spatial coordinates of cells;
         provides an idea of the simultaneous relative positions of different interaction effects.
@@ -1130,6 +1131,7 @@ class MuSIC_Interpreter(MuSIC):
                 z-scores for each row occur in. Used for a more uniform plot where similarly patterned
                 interaction-target pairs are grouped together. If False, will sort this axis by the identity of the
                 interaction (i.e. all "Fgf1" rows will be grouped together).
+            title: Optional, can be used to provide title for plot
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
             cmap: Colormap to use. Options: Any divergent matplotlib colormap.
@@ -1141,7 +1143,6 @@ class MuSIC_Interpreter(MuSIC):
                 {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
                 "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
                 keys according to your needs.
-            save_df: Set True to save the metric dataframe in the end
         """
         logger = lm.get_main_logger()
 
@@ -1154,6 +1155,10 @@ class MuSIC_Interpreter(MuSIC):
             if coord_column in ["xy", "yz", "xz", "-xy", "-yz", "-xz"]:
                 self.adata = create_new_coordinate(self.adata, position_key, coord_column)
                 pos = self.adata.obs[f"{coord_column} Coordinate"]
+                x_label = f"Relative position along custom {coord_column} axis"
+                if title is None:
+                    title = f"Signaling effect distribution along {coord_column} axis"
+                save_id = f"{coord_column}_axis"
 
             else:
                 if coord_column is not None and isinstance(coord_column, str):
@@ -1168,21 +1173,25 @@ class MuSIC_Interpreter(MuSIC):
                     if isinstance(self.adata.obsm[position_key], pd.DataFrame):
                         pos = self.adata.obsm[position_key].iloc[:, coord_column]
                         x_label = f"Relative position along {coord_column}"
-                        title = f"Signaling effect distribution along {coord_column}"
+                        if title is None:
+                            title = f"Signaling effect distribution along {coord_column}"
                         save_id = coord_column
                     else:
                         pos = pd.Series(self.adata.obsm[position_key][:, coord_column], index=self.adata.obs_names)
                         if coord_column == 0:
                             x_label = "Relative position along X"
-                            title = "Signaling effect distribution along X"
+                            if title is None:
+                                title = "Signaling effect distribution along X"
                             save_id = "x_axis"
                         elif coord_column == 1:
                             x_label = "Relative position along Y"
-                            title = "Signaling effect distribution along Y"
+                            if title is None:
+                                title = "Signaling effect distribution along Y"
                             save_id = "y_axis"
                         elif coord_column == 2:
                             x_label = "Relative position along Z"
-                            title = "Signaling effect distribution along Z"
+                            if title is None:
+                                title = "Signaling effect distribution along Z"
                             save_id = "z_axis"
                 elif self.adata.obsm[position_key].shape[1] != 1:
                     raise ValueError(
@@ -1196,10 +1205,15 @@ class MuSIC_Interpreter(MuSIC):
                         else self.adata.obsm[position_key]
                     )
                     x_label = "Relative position"
-                    title = f"Signaling effect distribution along axis given by {position_key} key"
+                    if title is None:
+                        title = f"Signaling effect distribution along axis given by {position_key} key"
                     save_id = position_key
         else:
             pos = self.adata.obs[position_key]
+            x_label = "Relative position"
+            if title is None:
+                title = f"Signaling effect distribution along axis given by {position_key} key"
+            save_id = position_key
         # If position array is numerical, there may not be an exact match- convert the data type to integer:
         if pos.dtype == float:
             pos = pos.astype(int)
@@ -1386,9 +1400,10 @@ class MuSIC_Interpreter(MuSIC):
 
         # Format the numerical columns for the plot:
         # First check whether the columns contain duplicates:
-        if any([name.count(".") > 1 for name in to_plot.columns]):
-            to_plot.columns = [".".join(name.split(".")[:2]) for name in to_plot.columns]
-        to_plot.columns = [float(col) for col in to_plot.columns]
+        if all(isinstance(name, str) for name in to_plot.columns):
+            if any([name.count(".") > 1 for name in to_plot.columns]):
+                to_plot.columns = [".".join(name.split(".")[:2]) for name in to_plot.columns]
+            to_plot.columns = [float(col) for col in to_plot.columns]
         col_series = pd.Series(to_plot.columns)
         if set(col_series) != len(col_series):
             unique_values, counts = np.unique(col_series, return_counts=True)
@@ -1411,8 +1426,9 @@ class MuSIC_Interpreter(MuSIC):
                         col_series.iloc[indices[i]] = value + step * i
             to_plot.columns = col_series.values
 
-        to_plot.columns = [f"{float(col):.3f}" for col in to_plot.columns]
-        to_plot.columns = [str(col) for col in to_plot.columns]
+        if all(isinstance(name, float) for name in to_plot.columns):
+            to_plot.columns = [f"{float(col):.3f}" for col in to_plot.columns]
+            to_plot.columns = [str(col) for col in to_plot.columns]
         m = sns.heatmap(to_plot, vmin=-max_val, vmax=max_val, ax=ax, cmap=cmap)
 
         cbar = m.collections[0].colorbar
@@ -1427,17 +1443,15 @@ class MuSIC_Interpreter(MuSIC):
         ax.tick_params(axis="y", labelsize=fontsize)
         ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
 
-        if save_df:
-            # Don't save if already existing:
-            if not os.path.exists(
-                os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv")
-            ):
-                to_plot.to_csv(
-                    os.path.join(
-                        output_folder,
-                        f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv",
-                    )
+        if not os.path.exists(
+            os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv")
+        ):
+            to_plot.to_csv(
+                os.path.join(
+                    output_folder,
+                    f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv",
                 )
+            )
 
         if save_show_or_return in ["save", "both", "all"]:
             save_kwargs["ext"] = "png"
@@ -1450,6 +1464,211 @@ class MuSIC_Interpreter(MuSIC):
                 show_legend=False,
                 background="white",
                 prefix=f"distribution_interaction_effects_along_{save_id}",
+                save_kwargs=save_kwargs,
+                total_panels=1,
+                fig=fig,
+                axes=ax,
+                return_all=False,
+                return_all_list=None,
+            )
+
+    def effect_distribution_density(
+        self,
+        effect_names: List[str],
+        position_key: str = "spatial",
+        coord_column: Optional[Union[int, str]] = None,
+        title: Optional[str] = None,
+        x_label: Optional[str] = None,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+    ):
+        """Visualize the spatial enrichment of cell-cell interaction effects using density plots over spatial
+        coordinates. Uses existing dataframe saved by :func:`effect_distribution_heatmap()`, which must be run first.
+
+        Args:
+            effect_names: List of interaction effects to include in plot, in format "Ligand:Receptor-Target"
+                (for L:R models) or "Ligand-Target" (for ligand models).
+            position_key: Key in adata.obs or adata.obsm that provides a relative indication of the position of
+                cells. i.e. spatial coordinates. Defaults to "spatial". For each value in the position array (each
+                coordinate, each category), multiple cells must have the same value.
+            coord_column: Optional, only used if "position_key" points to an entry in .obsm. In this case,
+                this is the index or name of the column to be used to provide the positional context. Can also
+                provide "xy", "yz", "xz", "-xy", "-yz", "-xz" to draw a line between the two coordinate axes. "xy"
+                will extend the new axis in the direction of increasing x and increasing y starting from x=0 and y=0 (or
+                min. x/min. y), "-xy" will extend the new axis in the direction of decreasing x and increasing y
+                starting from x=minimum x and y=maximum y, and so on.
+            title: Optional, can be used to provide title for plot
+            x_label: Optional, can be used to provide x-axis label for plot
+            fontsize: Size of font for x and y labels.
+            figsize: Size of figure.
+            cmap: Colormap to use. Options: Any divergent matplotlib colormap.
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+        """
+        logger = lm.get_main_logger()
+
+        if position_key not in self.adata.obsm.keys() and position_key not in self.adata.obs.keys():
+            raise ValueError(
+                f"Position key {position_key} not found in adata.obsm or adata.obs. Please provide a valid key."
+            )
+
+        if position_key in self.adata.obsm.keys():
+            if coord_column in ["xy", "yz", "xz", "-xy", "-yz", "-xz"]:
+                if title is None:
+                    title = f"Signaling effect density along {coord_column} axis"
+                if x_label is None:
+                    x_label = f"Relative position along custom {coord_column} axis"
+                save_id = f"{coord_column}_axis"
+
+            else:
+                if coord_column is not None and isinstance(coord_column, int):
+                    if not isinstance(self.adata.obsm[position_key], pd.DataFrame):
+                        raise ValueError(
+                            f"Array stored at position key {position_key} has no column names; provide the column "
+                            f"index."
+                        )
+                elif coord_column is not None and isinstance(coord_column, int):
+                    if isinstance(self.adata.obsm[position_key], pd.DataFrame):
+                        if x_label is None:
+                            x_label = f"Relative position along {coord_column}"
+                        if title is None:
+                            title = f"Signaling effect density along {coord_column}"
+                        save_id = coord_column
+                    else:
+                        if coord_column == 0:
+                            if x_label is None:
+                                x_label = "Relative position along X"
+                            if title is None:
+                                title = "Signaling effect density along X"
+                            save_id = "x_axis"
+                        elif coord_column == 1:
+                            if x_label is None:
+                                x_label = "Relative position along Y"
+                            if title is None:
+                                title = "Signaling effect density along Y"
+                            save_id = "y_axis"
+                        elif coord_column == 2:
+                            if x_label is None:
+                                x_label = "Relative position along Z"
+                            if title is None:
+                                title = "Signaling effect density along Z"
+                            save_id = "z_axis"
+                elif self.adata.obsm[position_key].shape[1] != 1:
+                    raise ValueError(
+                        f"Array stored at position key {position_key} has more than one column; provide the column "
+                        f"index."
+                    )
+                else:
+                    if x_label is None:
+                        x_label = "Relative position"
+                    if title is None:
+                        title = f"Signaling effect density along axis given by {position_key} key"
+                    save_id = position_key
+        else:
+            if x_label is None:
+                x_label = "Relative position"
+            if title is None:
+                title = f"Signaling effect density along axis given by {position_key} key"
+            save_id = position_key
+
+        # Check for existing dataframe:
+        output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
+        # Use the saved name for the AnnData object to define part of the name of the saved file:
+        base_name = os.path.basename(self.adata_path)
+        adata_id = os.path.splitext(base_name)[0]
+        if not os.path.exists(
+            os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv")
+        ):
+            raise ValueError(
+                f"Could not find dataframe saved by effect_distribution_heatmap() for position key {position_key}. "
+                f"Please run effect_distribution_heatmap() before running this function."
+            )
+
+        to_plot = pd.read_csv(
+            os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv"),
+            index_col=0,
+        )
+        # Format the numerical columns for the plot:
+        # First check whether the columns contain duplicates:
+        if all(isinstance(name, str) for name in to_plot.columns):
+            if any([name.count(".") > 1 for name in to_plot.columns]):
+                to_plot.columns = [".".join(name.split(".")[:2]) for name in to_plot.columns]
+            to_plot.columns = [float(col) for col in to_plot.columns]
+        col_series = pd.Series(to_plot.columns)
+        if set(col_series) != len(col_series):
+            unique_values, counts = np.unique(col_series, return_counts=True)
+            # Iterate through unique values
+            for value, count in zip(unique_values, counts):
+                if count > 1:
+                    # Find indices of the repeated value
+                    indices = col_series[col_series == value].index
+
+                    # Calculate step size
+                    if value == unique_values[-1]:
+                        next_value = value + (value - unique_values[-2])
+                    else:
+                        next_index = np.where(unique_values == value)[0][0] + 1
+                        next_value = unique_values[next_index]
+                    step = (next_value - value) / count
+
+                    # Update the values
+                    for i in range(count):
+                        col_series.iloc[indices[i]] = value + step * i
+            to_plot.columns = col_series.values
+
+        if all(isinstance(name, float) for name in to_plot.columns):
+            to_plot.columns = [f"{float(col):.3f}" for col in to_plot.columns]
+            to_plot.columns = [str(col) for col in to_plot.columns]
+        # Rearrange dataframe such that each interaction is its own column:
+        to_plot = to_plot.T
+        # Check if any inputs are not included in the dataframe:
+        missing = [name for name in effect_names if name not in to_plot.columns]
+        if len(missing) > 0:
+            logger.warning(
+                f"Interactions {missing} were not found in the dataframe. They will be removed from the plot."
+            )
+            effect_names = [name for name in effect_names if name in to_plot.columns]
+
+        if figsize is None:
+            figsize = (8, 6)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+        if fontsize is None:
+            fontsize = rcParams.get("font.size")
+        sns.set_style("whitegrid")
+
+        for effect, color in zip(effect_names, vega_20):
+            sns.kdeplot(to_plot[effect], label=effect, lw=2, ax=ax)
+
+        ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
+        ax.set_ylabel("Density", fontsize=fontsize * 1.25)
+        ax.tick_params(axis="x", labelsize=fontsize)
+        ax.tick_params(axis="y", labelsize=fontsize)
+        ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
+        ax.legend(fontsize=fontsize * 1.25)
+
+        if save_show_or_return in ["save", "both", "all"]:
+            save_kwargs["ext"] = "png"
+            save_kwargs["dpi"] = 300
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
+            save_kwargs["path"] = figure_folder
+            # Save figure:
+            save_return_show_fig_utils(
+                save_show_or_return=save_show_or_return,
+                show_legend=True,
+                background="white",
+                prefix=f"density_interaction_effects_along_{save_id}",
                 save_kwargs=save_kwargs,
                 total_panels=1,
                 fig=fig,
@@ -3415,10 +3634,20 @@ class MuSIC_Interpreter(MuSIC):
                     coef_target = coef_target[[col for col in coef_target.columns if col != "intercept"]]
                     coef_target.columns = [replace_col_with_collagens(col) for col in coef_target.columns]
                     coef_target.columns = [f"{col}-> target {target}" for col in coef_target.columns]
+                    duplicates = coef_target.columns[coef_target.columns.duplicated(keep=False)]
+                    for item in duplicates.unique():
+                        # Calculate mean for collagens:
+                        mean_series = coef_target.filter(like=item).mean(axis=1)
+                        coef_target.drop(columns=coef_target.filter(like=item).columns, inplace=True)
+                        coef_target[item] = mean_series
+
+                    target_interaction_subset = [replace_col_with_collagens(i) for i in interaction_subset]
+                    target_interaction_subset = list(set([f"{i}-> target {target}" for i in target_interaction_subset]))
+                    target_interaction_subset = [i for i in target_interaction_subset if i in coef_target.columns]
                     if "effect_df" not in locals():
-                        effect_df = self.coeffs[target].loc[:, interaction_subset]
+                        effect_df = coef_target.loc[:, target_interaction_subset]
                     else:
-                        effect_df = pd.concat([effect_df, coef_target.loc[:, interaction_subset]], axis=1)
+                        effect_df = pd.concat([effect_df, coef_target.loc[:, target_interaction_subset]], axis=1)
 
             ref_data = effect_df.loc[ref_names, :]
             query_data = effect_df.loc[query_names, :]
@@ -3433,7 +3662,7 @@ class MuSIC_Interpreter(MuSIC):
 
         # Compute significance for each column:
         pvals = []
-        for col in ref_data.columns:
+        for col in tqdm(ref_data.columns, desc="Computing significance..."):
             if source_data == "effect" or source_data == "interaction":
                 pvals.append(ttest_ind(ref_data[col], query_data[col])[1])
             elif source_data == "target":
@@ -3442,9 +3671,12 @@ class MuSIC_Interpreter(MuSIC):
         qvals = multitesting_correction(pvals, method="fdr_bh")
         results = pd.DataFrame(qvals, index=ref_data.columns, columns=["qval"])
         results["qval"] = results["qval"].apply(lambda x: x[0] if isinstance(x, np.ndarray) else x)
-        results["Significance"] = qvals.apply(assign_significance, axis=1)
+        results["Significance"] = results.apply(assign_significance, axis=1)
         # Negative log q-value (in the case of volcano plot):
         results["-log10(qval)"] = -np.log10(qvals)
+        # Threshold at the highest non-infinity q-value:
+        max_non_inf = results[results["-log10(qval)"] != np.inf]["-log10(qval)"].max()
+        results["-log10(qval)"] = results["-log10(qval)"].apply(lambda x: x if x != np.inf else 0)
 
         if to_plot == "mean":
             ref_data = ref_data.mean(axis=0)
@@ -3452,6 +3684,9 @@ class MuSIC_Interpreter(MuSIC):
         elif to_plot == "percentage":
             ref_data = (ref_data > 0).mean(axis=0)
             query_data = (query_data > 0).mean(axis=0)
+        # Add small offset to ensure reference value is not 0:
+        ref_data += 1e-3
+        query_data += 1e-3
 
         if source_data == "effect":
             x_label = f"$\\log_2$(Fold change effect on {target} \n{ref_ct} and {query_ct})"
@@ -3478,6 +3713,8 @@ class MuSIC_Interpreter(MuSIC):
         results["Fold Change"] = results["Fold Change"].apply(lambda x: x[0] if isinstance(x, np.ndarray) else x)
         # Take the log of the fold change:
         results["Fold Change"] = np.log2(results["Fold Change"])
+        # Remove NaNs:
+        results = results[~results["Fold Change"].isna()]
         results = results.sort_values("Fold Change")
         if top_n_to_plot is not None:
             results = results.iloc[:top_n_to_plot, :]
@@ -3486,7 +3723,7 @@ class MuSIC_Interpreter(MuSIC):
         if figsize is None:
             # Set figure size based on the number of interaction features and targets:
             m = len(results) / 2 if plot_type == "barplot" else 10
-            n = m / 2
+            n = m / 2 if plot_type == "barplot" else m
             figsize = (n, m)
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
 
@@ -3532,34 +3769,37 @@ class MuSIC_Interpreter(MuSIC):
             significant_up = results["Fold Change"] > fold_change_cutoff
             significant_down = results["Fold Change"] < -fold_change_cutoff
 
-            sns.scatterplot(
+            fc_up = ax.scatter(
                 x=results["Fold Change"][significant & significant_up],
                 y=results["-log10(qval)"][significant & significant_up],
-                hue=results["Fold Change"][significant & significant_up],
-                palette="Reds",
+                c=results["Fold Change"][significant & significant_up],
+                cmap="Reds",
                 edgecolor="black",
-                ax=ax,
                 s=size,
             )
 
-            sns.scatterplot(
+            fc_down = ax.scatter(
                 x=results["Fold Change"][significant & significant_down],
                 y=results["-log10(qval)"][significant & significant_down],
-                hue=results["Fold Change"][significant & significant_down],
-                palette="Blues",
+                c=results["Fold Change"][significant & significant_down],
+                cmap="Blues_r",
                 edgecolor="black",
-                ax=ax,
                 s=size,
             )
 
-            sns.scatterplot(
+            ax.scatter(
                 x=results["Fold Change"][~(significant & (significant_up | significant_down))],
                 y=results["-log10(qval)"][~(significant & (significant_up | significant_down))],
                 color="grey",
                 edgecolor="black",
-                ax=ax,
                 s=size,
             )
+
+            # Add color bars
+            cbar_red = fig.colorbar(fc_up, ax=ax, orientation="vertical", pad=0.1, aspect=40)
+            cbar_red.ax.set_ylabel(f"Fold Changes- {query_ct} over {ref_ct}", rotation=270, labelpad=15)
+            cbar_blue = fig.colorbar(fc_down, ax=ax, orientation="vertical", pad=0.1, aspect=40)
+            cbar_blue.ax.set_ylabel(f"Fold Changes- {ref_ct} over {query_ct}", rotation=270, labelpad=15)
 
             # Add text for most significant interactions:
             # Get the highest fold changes:
@@ -3567,6 +3807,11 @@ class MuSIC_Interpreter(MuSIC):
             while high_fold_change.empty:
                 fold_change_cutoff_for_labels /= 2  # Halve the cutoff
                 high_fold_change = results[abs(results["Fold Change"]) > fold_change_cutoff_for_labels]
+            # Take only the top few (it is impossible to view all at once clearly):
+            if len(high_fold_change) > 5:
+                high_fold_change = high_fold_change.sort_values(by="Fold Change", ascending=False)
+                high_fold_change = high_fold_change.iloc[:5, :]
+
             text_labels = high_fold_change.index.tolist()
             x_coord_text_labels = high_fold_change["Fold Change"].tolist()
             y_coord_text_labels = high_fold_change["-log10(qval)"].tolist()
