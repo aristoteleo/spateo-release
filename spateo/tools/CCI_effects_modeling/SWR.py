@@ -303,11 +303,13 @@ def define_spateo_argparse(**kwargs):
             "the model as covariates.",
         },
         "-total_counts_key": {
+            "default": "total_counts",
             "type": str,
             "help": "Key to entry in .obs containing total counts per cell. Will be used if 'total_counts_threshold' "
             "is provided.",
         },
         "-total_counts_threshold": {
+            "default": 0.0,
             "type": float,
             "help": "If provided, cells with total counts below this threshold will be removed in preprocessing.",
         },
@@ -640,6 +642,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-total_counts_threshold",
+        default=0.0,
         type=float,
         help="If provided, cells with total counts below this threshold will be removed.",
     )

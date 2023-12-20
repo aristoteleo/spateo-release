@@ -48,7 +48,7 @@ from tqdm.auto import tqdm
 
 from ...configuration import config_spateo_rcParams
 from ...logging import logger_manager as lm
-from ...plotting.static.colorlabel import vega_20
+from ...plotting.static.colorlabel import godsnot_102, vega_10
 from ...plotting.static.networks import plot_network
 from ...plotting.static.utils import save_return_show_fig_utils
 from ...tools.utils import filter_adata_spatial
@@ -83,7 +83,8 @@ class MuSIC_Interpreter(MuSIC):
         args_list: Optional[List[str]] = None,
         keep_column_threshold_proportion_cells: Optional[float] = None,
     ):
-        super().__init__(parser, args_list, verbose=False)
+        # Don't need to re-save the subsampling results, they have already been defined:
+        super().__init__(parser, args_list, verbose=False, save_subsampling=False)
 
         self.k = self.arg_retrieve.top_k_receivers
 
@@ -349,13 +350,34 @@ class MuSIC_Interpreter(MuSIC):
                     legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
                     scene=dict(
                         xaxis=dict(
-                            showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"
+                            showgrid=False,
+                            showline=False,
+                            linewidth=2,
+                            linecolor="black",
+                            backgroundcolor="white",
+                            title="",
+                            showticklabels=False,
+                            ticks="",
                         ),
                         yaxis=dict(
-                            showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"
+                            showgrid=False,
+                            showline=False,
+                            linewidth=2,
+                            linecolor="black",
+                            backgroundcolor="white",
+                            title="",
+                            showticklabels=False,
+                            ticks="",
                         ),
                         zaxis=dict(
-                            showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"
+                            showgrid=False,
+                            showline=False,
+                            linewidth=2,
+                            linecolor="black",
+                            backgroundcolor="white",
+                            title="",
+                            showticklabels=False,
+                            ticks="",
                         ),
                     ),
                     margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
@@ -742,30 +764,181 @@ class MuSIC_Interpreter(MuSIC):
             scene=dict(
                 xaxis=dict(
                     showgrid=False,
-                    showline=True,
+                    showline=False,
                     linewidth=2,
                     linecolor="black",
                     backgroundcolor="white",
-                    title_font=dict(size=36),
-                    tickfont=dict(size=14),
+                    title="",
+                    showticklabels=False,
+                    ticks="",
                 ),
                 yaxis=dict(
                     showgrid=False,
-                    showline=True,
+                    showline=False,
                     linewidth=2,
                     linecolor="black",
                     backgroundcolor="white",
-                    title_font=dict(size=36),
-                    tickfont=dict(size=14),
+                    title="",
+                    showticklabels=False,
+                    ticks="",
                 ),
                 zaxis=dict(
                     showgrid=False,
-                    showline=True,
+                    showline=False,
                     linewidth=2,
                     linecolor="black",
                     backgroundcolor="white",
-                    title_font=dict(size=36),
-                    tickfont=dict(size=14),
+                    title="",
+                    showticklabels=False,
+                    ticks="",
+                ),
+            ),
+            margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+            title=title_dict,
+        )
+        fig.write_html(save_path)
+
+    def plot_multiple_interaction_effects_3D(
+        self, effects: List[str], save_path: str, include_combos_of_two: bool = False
+    ):
+        """Quick-visualize the magnitude of the predicted effect on target for a given interaction.
+
+        Args:
+            effects: List of effects to visualize (e.g. ["Igf1:Igf1r", "Igf1:InsR"] for L:R model,
+                ["Igf1"] for ligand model)
+            save_path: Path to save the figure to (will save as HTML file)
+            include_combos_of_two: Whether to include paired combinations of effects (e.g. "Igf1:Igf1r and
+                Igf1:InsR") as separate categories. If False, will include these in the generic "Multiple interactions"
+                category.
+        """
+        if hasattr(self, "remaining_cells"):
+            adata = self.adata[self.remaining_cells, :].copy()
+        else:
+            adata = self.adata.copy()
+
+        coords = adata.obsm[self.coords_key]
+        x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+
+        mean_values = {}
+        adata.obs["interaction_categories"] = "Other"
+        for effect in effects:
+            interaction, target = effect.split(":")
+            if target not in self.coeffs.keys():
+                self.logger.info(
+                    f"{target} not found in this model's directory. Skipping this interaction-target pair."
+                )
+                continue
+            if f"b_{interaction}" not in self.coeffs[target].columns:
+                self.logger.info(f"{interaction} not found for {target}. Skipping this interaction-target pair.")
+                continue
+            target_interaction_coef = self.coeffs[target][f"b_{interaction}"]
+            mean_values[effect] = np.mean(target_interaction_coef[target_interaction_coef > 0])
+            adata.obs[f"{effect} nonzero"] = target_interaction_coef > 0
+            # Temporarily, the key labeled with the effect name stores whether the interaction is nonzero to a
+            # substantial degree:
+            adata.obs.loc[target_interaction_coef >= mean_values[effect], effect] = True
+
+        # Categorize cells based on their interaction effects
+        for idx, row in tqdm(adata.obs.iterrows(), total=len(adata.obs_names), desc="Categorizing cells..."):
+            active_effects = [effect for effect in effects if row[f"{effect} nonzero"]]
+            strong_active_effects = [effect for effect in effects if row[effect]]
+            if include_combos_of_two:
+                if len(strong_active_effects) >= 3:
+                    adata.obs.loc[idx, "interaction_categories"] = "Multiple interactions"
+                elif len(strong_active_effects) == 2:
+                    adata.obs.loc[
+                        idx, "interaction_categories"
+                    ] = f"{strong_active_effects[0]} and {strong_active_effects[1]}"
+                elif len(active_effects) == 1:
+                    adata.obs.loc[idx, "interaction_categories"] = active_effects[0]
+            else:
+                if len(strong_active_effects) >= 2:
+                    adata.obs.loc[idx, "interaction_categories"] = "Multiple interactions"
+                elif len(active_effects) == 1:
+                    adata.obs.loc[idx, "interaction_categories"] = active_effects[0]
+        cat_counts = adata.obs["interaction_categories"].value_counts()
+
+        # Map each category to color:
+        if include_combos_of_two:
+            color_mapping = dict(zip(cat_counts.index, godsnot_102))
+        else:
+            color_mapping = dict(zip(cat_counts.index, vega_10))
+        color_mapping["Multiple interactions"] = "#71797E"
+        color_mapping["Other"] = "#D3D3D3"
+
+        traces = []
+        for group, color in color_mapping.items():
+            marker_size = 1.25 if group == "Other" else 2
+            mask = adata.obs["interaction_categories"] == group
+            scatter = go.Scatter3d(
+                x=x[mask],
+                y=y[mask],
+                z=z[mask],
+                mode="markers",
+                marker=dict(size=marker_size, color=color),
+                showlegend=False,
+            )
+            traces.append(scatter)
+
+            # Invisible trace for the legend (so the colored point is larger than the plot points):
+            legend_target = go.Scatter3d(
+                x=[None],
+                y=[None],
+                z=[None],
+                mode="markers",
+                marker=dict(size=30, color=color),  # Adjust size as needed
+                name=group,
+                showlegend=True,
+            )
+            traces.append(legend_target)
+
+        fig = go.Figure(data=traces)
+        title = (
+            "L:R Interaction Effect on Target (format Ligand:Receptor-Target)"
+            if self.mod_type == "lr"
+            else "Ligand Effect on Target (format Ligand-Target)"
+        )
+        title_dict = dict(
+            text=title,
+            y=0.9,
+            yanchor="top",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=28),
+        )
+        fig.update_layout(
+            showlegend=True,
+            legend=dict(x=0.7, y=0.85, orientation="v", font=dict(size=14)),
+            scene=dict(
+                xaxis=dict(
+                    showgrid=False,
+                    showline=False,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title="",
+                    showticklabels=False,
+                    ticks="",
+                ),
+                yaxis=dict(
+                    showgrid=False,
+                    showline=False,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title="",
+                    showticklabels=False,
+                    ticks="",
+                ),
+                zaxis=dict(
+                    showgrid=False,
+                    showline=False,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title="",
+                    showticklabels=False,
+                    ticks="",
                 ),
             ),
             margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
@@ -887,199 +1060,34 @@ class MuSIC_Interpreter(MuSIC):
             scene=dict(
                 xaxis=dict(
                     showgrid=False,
-                    showline=True,
+                    showline=False,
                     linewidth=2,
                     linecolor="black",
                     backgroundcolor="white",
-                    title_font=dict(size=36),
-                    tickfont=dict(size=14),
+                    title="",
+                    showticklabels=False,
+                    ticks="",
                 ),
                 yaxis=dict(
                     showgrid=False,
-                    showline=True,
+                    showline=False,
                     linewidth=2,
                     linecolor="black",
                     backgroundcolor="white",
-                    title_font=dict(size=36),
-                    tickfont=dict(size=14),
+                    title="",
+                    showticklabels=False,
+                    ticks="",
                 ),
                 zaxis=dict(
                     showgrid=False,
-                    showline=True,
+                    showline=False,
                     linewidth=2,
                     linecolor="black",
                     backgroundcolor="white",
-                    title_font=dict(size=36),
-                    tickfont=dict(size=14),
+                    title="",
+                    showticklabels=False,
+                    ticks="",
                 ),
-            ),
-            margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
-            title=title_dict,
-        )
-        fig.write_html(save_path)
-
-    def visualize_multiple_interaction_effects_3D(self, effects: List[str], save_path: str):
-        """Given interaction effects on targets in the form {interaction}-{target}, visualize the spatial
-        distribution of each. For example, "Igf1:Igf2r-Vim" for L:R model, "Igf1-Vim" for ligand model. It is
-        recommended not to include more than six simultaneous effects, as the combinatorial complexity beyond
-        this can be difficult to set up computationally and to visualize/interpret.
-
-        Args:
-            effects: List of interaction effects to visualize. Examples of the form these should be given in:
-                "Igf1:Igf2r-Vim" for L:R model, "Igf1-Vim" for ligand model.
-            save_path: Path to save the figure to (will save as HTML file)
-        """
-        from ...plotting.static.colorlabel import godsnot_102
-
-        # Rearrange slightly:
-        godsnot_102[1] = "#B200ED"
-        godsnot_102[2] = "#FFA500"
-        godsnot_102[3] = "#1CE6FF"
-
-        if len(effects) > 6:
-            raise ValueError("Cannot include more than six effects.")
-        elif len(effects) > 4:
-            self.logger.warn(
-                "More than four effects may be difficult to visualize and interpret due to the number of"
-                "simultaneous colors."
-            )
-
-        for effect in effects:
-            if "-" not in effect:
-                raise ValueError(
-                    f"Effect {effect} not in the correct format. Please provide an effect in the form "
-                    f"'interaction-target'."
-                )
-
-        # Check that all interactions and targets are valid:
-        targets = pd.read_csv(
-            os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
-        )
-
-        for effect in effects:
-            interaction, target = effect.split("-")
-
-            if target not in targets.columns:
-                raise ValueError(f"Target {target} not found in this model's directory. Please provide a valid target.")
-            if interaction not in self.X_df.columns:
-                raise ValueError(f"Interaction {interaction} not found in this model's directory.")
-
-        if hasattr(self, "remaining_cells"):
-            adata = self.adata[self.remaining_cells, :].copy()
-        else:
-            adata = self.adata.copy()
-
-        coords = adata.obsm[self.coords_key]
-        x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
-
-        adata.obs["effects"] = "Other"
-
-        if len(effects) > 1:
-            all_combinations = {}
-            all_combinations[2] = list(itertools.combinations(effects, 2))
-            if len(effects) > 2:
-                all_combinations[3] = list(itertools.combinations(effects, 3))
-
-            for r in all_combinations.keys():
-                for tup_list in all_combinations[r]:
-                    cell_mask = np.ones(len(adata.obs_names), dtype=bool)
-                    # Include cells affected by all interactions in the combination:
-                    for interaction in tup_list:
-                        interaction, target = interaction.split("-")
-                        coef_target = self.coeffs[target]
-                        coef_target_interaction = coef_target[f"b_{interaction}"]
-                        cell_mask = cell_mask & (coef_target_interaction != 0)
-
-                    # Exclude cells w/ given effects that are not in this combination:
-                    for effect in effects:
-                        interaction, target = effect.split("-")
-                        coef_target = self.coeffs[target]
-                        coef_target_interaction = coef_target[f"b_{interaction}"]
-                        cell_mask = cell_mask & (coef_target_interaction == 0)
-
-                    cell_names = adata.obs_names[cell_mask]
-                    adata.obs.loc[cell_names, "effects"] = ", ".join(tup_list)
-
-        # Fill in the rest of the cells:
-        all_effects_coefs = pd.DataFrame(index=adata.obs_names, columns=effects)
-        for effect in effects:
-            interaction, target = effect.split("-")
-            coef_target = self.coeffs[target]
-            coef_target_interaction = coef_target[f"b_{interaction}"]
-            all_effects_coefs[effect] = coef_target_interaction
-        all_effects_coefs = all_effects_coefs != 0
-        all_effects_coefs["num_effects"] = all_effects_coefs.sum(axis=1)
-
-        # Fill in the remaining cells with more than one effect (since the above filters through all exclusive
-        # combinations of 2 and 3, these are affected by at least 4 effects):
-        if len(effects) > 3:
-            cells_to_fill = all_effects_coefs[all_effects_coefs["num_effects"] > 1]
-            # Ignore cells that have already been assigned to a combination:
-            cells_to_fill = cells_to_fill[adata.obs.loc[cells_to_fill, "effects"] == "Other"].index
-            adata.obs.loc[cells_to_fill, "effects"] = "Multiple (>3)"
-
-        # Fill in cells only affected by one interaction:
-        one_effect = all_effects_coefs[all_effects_coefs["num_effects"] == 1]
-        one_effect["effect"] = one_effect.idxmax(axis=1)
-        # Ignore cells that have already been assigned to a combination:
-        one_effect = one_effect[adata.obs.loc[one_effect.index, "effects"] == "Other"]
-        adata.obs.loc[one_effect.index, "effects"] = one_effect["effect"]
-
-        self.logger.info(
-            f"Number of cells affected by each combination of effects: {adata.obs['effects'].value_counts()}"
-        )
-
-        # Color mapping:
-        color_mapping = dict(zip(adata.obs["effects"].value_counts().index, godsnot_102))
-        color_mapping["Other"] = "#D3D3D3"
-
-        traces = []
-        for group, color in color_mapping.items():
-            marker_size = 1.25 if group == "Other" else 2
-            mask = adata.obs["effects"] == group
-            scatter = go.Scatter3d(
-                x=x[mask],
-                y=y[mask],
-                z=z[mask],
-                mode="markers",
-                marker=dict(size=marker_size, color=color),
-                showlegend=False,
-            )
-            traces.append(scatter)
-
-            # Invisible trace for the legend (so the colored point is larger than the plot points):
-            legend_target = go.Scatter3d(
-                x=[None],
-                y=[None],
-                z=[None],
-                mode="markers",
-                marker=dict(size=30, color=color),  # Adjust size as needed
-                name=group,
-                showlegend=True,
-            )
-            traces.append(legend_target)
-
-        fig = go.Figure(data=traces)
-        title = (
-            "L:R Interaction Effect on Target (format Ligand:Receptor-Target)"
-            if self.mod_type == "lr"
-            else "Ligand Effect on Target (format Ligand-Target)"
-        )
-        title_dict = dict(
-            text=title,
-            y=0.9,
-            yanchor="top",
-            x=0.5,
-            xanchor="center",
-            font=dict(size=28),
-        )
-        fig.update_layout(
-            showlegend=True,
-            legend=dict(x=0.7, y=0.85, orientation="v", font=dict(size=14)),
-            scene=dict(
-                xaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
-                yaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
-                zaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
             ),
             margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
             title=title_dict,
@@ -1477,6 +1485,7 @@ class MuSIC_Interpreter(MuSIC):
         effect_names: List[str],
         position_key: str = "spatial",
         coord_column: Optional[Union[int, str]] = None,
+        max_coord_val: float = 1.0,
         title: Optional[str] = None,
         x_label: Optional[str] = None,
         fontsize: Union[None, int] = None,
@@ -1488,8 +1497,8 @@ class MuSIC_Interpreter(MuSIC):
         coordinates. Uses existing dataframe saved by :func:`effect_distribution_heatmap()`, which must be run first.
 
         Args:
-            effect_names: List of interaction effects to include in plot, in format "Ligand:Receptor-Target"
-                (for L:R models) or "Ligand-Target" (for ligand models).
+            effect_names: List of interaction effects to include in plot, in format "Target-Ligand:Receptor"
+                (for L:R models) or "Target-Ligand" (for ligand models).
             position_key: Key in adata.obs or adata.obsm that provides a relative indication of the position of
                 cells. i.e. spatial coordinates. Defaults to "spatial". For each value in the position array (each
                 coordinate, each category), multiple cells must have the same value.
@@ -1499,6 +1508,8 @@ class MuSIC_Interpreter(MuSIC):
                 will extend the new axis in the direction of increasing x and increasing y starting from x=0 and y=0 (or
                 min. x/min. y), "-xy" will extend the new axis in the direction of decreasing x and increasing y
                 starting from x=minimum x and y=maximum y, and so on.
+            max_coord_val: Optional, can be used to adjust the numbers displayed along the x-axis for the relative
+                position along the coordinate axis. Defaults to 1.0.
             title: Optional, can be used to provide title for plot
             x_label: Optional, can be used to provide x-axis label for plot
             fontsize: Size of font for x and y labels.
@@ -1529,7 +1540,7 @@ class MuSIC_Interpreter(MuSIC):
                 save_id = f"{coord_column}_axis"
 
             else:
-                if coord_column is not None and isinstance(coord_column, int):
+                if coord_column is not None and not isinstance(coord_column, int):
                     if not isinstance(self.adata.obsm[position_key], pd.DataFrame):
                         raise ValueError(
                             f"Array stored at position key {position_key} has no column names; provide the column "
@@ -1626,9 +1637,22 @@ class MuSIC_Interpreter(MuSIC):
 
         if all(isinstance(name, float) for name in to_plot.columns):
             to_plot.columns = [f"{float(col):.3f}" for col in to_plot.columns]
-            to_plot.columns = [str(col) for col in to_plot.columns]
+            # Normalize to custom max value if desired:
+            float_columns = [float(col) for col in to_plot.columns]
+            current_min = min(float_columns)
+            current_max = max(float_columns)
+            normalized_columns = [
+                (col - current_min) / (current_max - current_min) * max_coord_val for col in float_columns
+            ]
+            to_plot.columns = [f"{col:.3f}" for col in normalized_columns]
         # Rearrange dataframe such that each interaction is its own column:
         to_plot = to_plot.T
+        if not pd.api.types.is_numeric_dtype(to_plot.index):
+            to_plot.index = pd.to_numeric(to_plot.index)
+        # For this function, weights cannot be negative, so set all negative values to 0:
+        to_plot[to_plot < 0] = 0
+        to_plot["Coord"] = to_plot.index
+
         # Check if any inputs are not included in the dataframe:
         missing = [name for name in effect_names if name not in to_plot.columns]
         if len(missing) > 0:
@@ -1642,17 +1666,17 @@ class MuSIC_Interpreter(MuSIC):
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
         if fontsize is None:
             fontsize = rcParams.get("font.size")
-        sns.set_style("whitegrid")
+        sns.set_style("white")
 
-        for effect, color in zip(effect_names, vega_20):
-            sns.kdeplot(to_plot[effect], label=effect, lw=2, ax=ax)
+        for effect, color in zip(effect_names, godsnot_102):
+            sns.kdeplot(x="Coord", weights=effect, data=to_plot, color=color, label=effect, lw=2, ax=ax)
 
         ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
         ax.set_ylabel("Density", fontsize=fontsize * 1.25)
         ax.tick_params(axis="x", labelsize=fontsize)
-        ax.tick_params(axis="y", labelsize=fontsize)
+        ax.tick_params(axis="y", labelsize=fontsize, labelleft=False, left=False)
         ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
-        ax.legend(fontsize=fontsize * 1.25)
+        ax.legend(loc="upper left", bbox_to_anchor=(1, 1), fontsize=fontsize * 1.25)
 
         if save_show_or_return in ["save", "both", "all"]:
             save_kwargs["ext"] = "png"
@@ -2885,9 +2909,36 @@ class MuSIC_Interpreter(MuSIC):
                 showlegend=True,
                 legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
                 scene=dict(
-                    xaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
-                    yaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
-                    zaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+                    xaxis=dict(
+                        showgrid=False,
+                        showline=False,
+                        linewidth=2,
+                        linecolor="black",
+                        backgroundcolor="white",
+                        title="",
+                        showticklabels=False,
+                        ticks="",
+                    ),
+                    yaxis=dict(
+                        showgrid=False,
+                        showline=False,
+                        linewidth=2,
+                        linecolor="black",
+                        backgroundcolor="white",
+                        title="",
+                        showticklabels=False,
+                        ticks="",
+                    ),
+                    zaxis=dict(
+                        showgrid=False,
+                        showline=False,
+                        linewidth=2,
+                        linecolor="black",
+                        backgroundcolor="white",
+                        title="",
+                        showticklabels=False,
+                        ticks="",
+                    ),
                 ),
                 margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
                 title=title_dict,
@@ -3539,6 +3590,8 @@ class MuSIC_Interpreter(MuSIC):
         significance_cutoff: float = 1.3,
         fold_change_cutoff: float = 1.5,
         fold_change_cutoff_for_labels: float = 3.0,
+        plot_query_over_ref: bool = False,
+        plot_ref_over_query: bool = False,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         cmap: str = "seismic",
@@ -3572,6 +3625,14 @@ class MuSIC_Interpreter(MuSIC):
                 "plot_type" is "volcano". Defaults to 1.5.
             fold_change_cutoff_for_labels: Cutoff for fold change to include the label for an interaction/effect.
                 Only used if "plot_type" is "volcano". Defaults to 3.0.
+            plot_query_over_ref: Whether to plot/visualize only the portion that corresponds to the fold change of
+                the query cell type over the reference cell type (and the portion that is significant). If False (and
+                "plot_ref_over_query" is False), will plot the entire volcano plot. Only used if "plot_type" is
+                "volcano".
+            plot_ref_over_query: Whether to plot/visualize only the portion that corresponds to the fold change of
+                the reference cell type over the query cell type (and the portion that is significant). If False (and
+                "plot_query_over_ref" is False), will plot the entire volcano plot. Only used if "plot_type" is
+                "volcano".
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
             cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
@@ -3676,7 +3737,7 @@ class MuSIC_Interpreter(MuSIC):
         results["-log10(qval)"] = -np.log10(qvals)
         # Threshold at the highest non-infinity q-value:
         max_non_inf = results[results["-log10(qval)"] != np.inf]["-log10(qval)"].max()
-        results["-log10(qval)"] = results["-log10(qval)"].apply(lambda x: x if x != np.inf else 0)
+        results["-log10(qval)"] = results["-log10(qval)"].apply(lambda x: x if x != np.inf else max_non_inf)
 
         if to_plot == "mean":
             ref_data = ref_data.mean(axis=0)
@@ -3689,8 +3750,8 @@ class MuSIC_Interpreter(MuSIC):
         query_data += 1e-3
 
         if source_data == "effect":
-            x_label = f"$\\log_2$(Fold change effect on {target} \n{ref_ct} and {query_ct})"
-            title = f"Fold change effect on {target} \n{ref_ct} and {query_ct}"
+            x_label = f"$\\log_2$(Fold change effect on target- \n{ref_ct} and {query_ct})"
+            title = f"Fold change effect on target \n{ref_ct} and {query_ct}"
             if self.mod_type == "lr":
                 y_label = f"L:R effect on {target}"
             elif self.mod_type == "ligand":
@@ -3796,10 +3857,20 @@ class MuSIC_Interpreter(MuSIC):
             )
 
             # Add color bars
-            cbar_red = fig.colorbar(fc_up, ax=ax, orientation="vertical", pad=0.1, aspect=40)
-            cbar_red.ax.set_ylabel(f"Fold Changes- {query_ct} over {ref_ct}", rotation=270, labelpad=15)
+            cbar_red = fig.colorbar(fc_up, ax=ax, orientation="vertical", pad=0.0, aspect=40)
+            cbar_red.ax.set_ylabel(
+                f"Fold Changes- {query_ct} over {ref_ct}", rotation=90, labelpad=15, fontsize=fontsize
+            )
+            cbar_red.ax.yaxis.set_label_position("left")
+            cbar_red.ax.yaxis.label.set_horizontalalignment("right")
+            cbar_red.ax.yaxis.label.set_position((0, 0.75))
             cbar_blue = fig.colorbar(fc_down, ax=ax, orientation="vertical", pad=0.1, aspect=40)
-            cbar_blue.ax.set_ylabel(f"Fold Changes- {ref_ct} over {query_ct}", rotation=270, labelpad=15)
+            cbar_blue.ax.set_ylabel(
+                f"Fold Changes- {ref_ct} over {query_ct}", rotation=90, labelpad=15, fontsize=fontsize
+            )
+            cbar_blue.ax.yaxis.set_label_position("left")
+            cbar_blue.ax.yaxis.label.set_horizontalalignment("right")
+            cbar_blue.ax.yaxis.label.set_position((0, 0.75))
 
             # Add text for most significant interactions:
             # Get the highest fold changes:
@@ -3808,13 +3879,37 @@ class MuSIC_Interpreter(MuSIC):
                 fold_change_cutoff_for_labels /= 2  # Halve the cutoff
                 high_fold_change = results[abs(results["Fold Change"]) > fold_change_cutoff_for_labels]
             # Take only the top few (it is impossible to view all at once clearly):
-            if len(high_fold_change) > 5:
+            if len(high_fold_change) > 3:
                 high_fold_change = high_fold_change.sort_values(by="Fold Change", ascending=False)
-                high_fold_change = high_fold_change.iloc[:5, :]
+                high_fold_change_selected = high_fold_change.iloc[:3, :]
+            else:
+                high_fold_change_selected = high_fold_change
+            # And a few more from not as high but still significant q-values:
+            max_log10_qval = high_fold_change["-log10(qval)"].max()
+            log10_qval_steps = []
+            i = 0
+            current_value = max_log10_qval
 
-            text_labels = high_fold_change.index.tolist()
-            x_coord_text_labels = high_fold_change["Fold Change"].tolist()
-            y_coord_text_labels = high_fold_change["-log10(qval)"].tolist()
+            while current_value >= 10:
+                log10_qval_steps.append(current_value)
+                i += 1
+                current_value = max_log10_qval / (2**i)
+            selected_rows = []
+            for value in log10_qval_steps:
+                # Find the row closest to the current value without duplicates
+                closest_index = abs(high_fold_change["-log10(qval)"] - value).idxmin()
+                if closest_index not in high_fold_change_selected.index:
+                    selected_rows.append(high_fold_change.loc[closest_index])
+
+            high_fold_change_log10_qval = pd.DataFrame(selected_rows)
+            # Combine with high_fold_change and remove duplicates
+            high_fold_change_selected = pd.concat(
+                [high_fold_change_selected, high_fold_change_log10_qval]
+            ).drop_duplicates()
+
+            text_labels = high_fold_change_selected.index.tolist()
+            x_coord_text_labels = high_fold_change_selected["Fold Change"].tolist()
+            y_coord_text_labels = high_fold_change_selected["-log10(qval)"].tolist()
             text_objects = []
             for i, label in enumerate(text_labels):
                 t = ax.text(
@@ -5091,6 +5186,41 @@ class MuSIC_Interpreter(MuSIC):
                                 gene_expr = self.adata[:, l].X
                             sig_df[l] = gene_expr
 
+                nonzero_expr = (sig_df != 0).sum() / len(sig_df) * 100
+                # Filter out columns that don't meet the threshold- expression in 1% of cells
+                sig_df = sig_df.loc[:, nonzero_expr > 1]
+                sig_df = sig_df[
+                    [
+                        l
+                        for l in sig_df.columns
+                        if l
+                        not in [
+                            "Lta4h",
+                            "Fdx1",
+                            "Tfrc",
+                            "Trf",
+                            "Lamc1",
+                            "Aldh1a2",
+                            "Dhcr24",
+                            "Rnaset2a",
+                            "Ptges3",
+                            "Nampt",
+                            "Trf",
+                            "Fdx1",
+                            "Kdr",
+                            "Apoa2",
+                            "Apoe",
+                            "Dhcr7",
+                            "Enho",
+                            "Ptgr1",
+                            "Agrp",
+                            "Akr1b3",
+                            "Daglb",
+                            "Ubash3d",
+                        ]
+                    ]
+                ]
+
                 signal["all"] = sig_df
                 subsets["all"] = self.adata
             elif use_receptors:
@@ -5112,6 +5242,10 @@ class MuSIC_Interpreter(MuSIC):
                             else:
                                 gene_expr = self.adata[:, r].X
                             sig_df[r] = gene_expr
+
+                nonzero_expr = (sig_df != 0).sum() / len(sig_df) * 100
+                # Filter out columns that don't meet the threshold- expression in 1% of cells
+                sig_df = sig_df.loc[:, nonzero_expr > 1]
 
                 signal["all"] = sig_df
                 subsets["all"] = self.adata

@@ -17,6 +17,7 @@ except ImportError:
 
 from spateo.tdr import collect_models
 
+from ..colorlabel import vega_10
 from .three_dims_plotter import (
     _set_jupyter,
     add_legend,
@@ -879,9 +880,36 @@ def quick_plot_3D_celltypes(
         showlegend=True,
         legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
         scene=dict(
-            xaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
-            yaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
-            zaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+            xaxis=dict(
+                showgrid=False,
+                showline=False,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title="",
+                showticklabels=False,
+                ticks="",
+            ),
+            yaxis=dict(
+                showgrid=False,
+                showline=False,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title="",
+                showticklabels=False,
+                ticks="",
+            ),
+            zaxis=dict(
+                showgrid=False,
+                showline=False,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title="",
+                showticklabels=False,
+                ticks="",
+            ),
         ),
         margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
         title=title_dict,
@@ -897,7 +925,7 @@ def plot_expression_3D(
     group_key: Optional[str] = None,
     ct_subset: Optional[list] = None,
 ):
-    """Quick-visualize the magnitude of the predicted effect on target for a given interaction.
+    """Visualize gene expression in a 3D space.
 
     Args:
         target: Target gene to visualize
@@ -944,33 +972,160 @@ def plot_expression_3D(
         scene=dict(
             xaxis=dict(
                 showgrid=False,
-                showline=True,
+                showline=False,
                 linewidth=2,
                 linecolor="black",
                 backgroundcolor="white",
-                title_font=dict(size=36),
-                tickfont=dict(size=14),
+                title="",
+                showticklabels=False,
+                ticks="",
             ),
             yaxis=dict(
                 showgrid=False,
-                showline=True,
+                showline=False,
                 linewidth=2,
                 linecolor="black",
                 backgroundcolor="white",
-                title_font=dict(size=36),
-                tickfont=dict(size=14),
+                title="",
+                showticklabels=False,
+                ticks="",
             ),
             zaxis=dict(
                 showgrid=False,
-                showline=True,
+                showline=False,
                 linewidth=2,
                 linecolor="black",
                 backgroundcolor="white",
-                title_font=dict(size=36),
-                tickfont=dict(size=14),
+                title="",
+                showticklabels=False,
+                ticks="",
             ),
         ),
         margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+        title=title_dict,
+    )
+    fig.write_html(save_path)
+
+
+def plot_multiple_genes_3D(
+    adata: anndata.AnnData,
+    genes: list,
+    save_path: str,
+    colors: Optional[list] = None,
+    coords_key: str = "spatial",
+    group_key: Optional[str] = None,
+    ct_subset: Optional[list] = None,
+):
+    """Visualize the exclusivity or overlap of multiple gene expression patterns in 3D space.
+
+    Args:
+        adata: An AnnData object containing gene expression data.
+        genes: List of genes to visualize (e.g., ["gene1", "gene2", "gene3"]).
+        save_path: Path to save the figure to (will save as HTML file).
+        colors: Optional, list of colors to use for each gene. If None, will use a default Spateo color palette. Must be
+            at least the same length as "genes", plus one.
+        coords_key: Key for spatial coordinates in adata.obsm.
+        group_key: Optional key for grouping in adata.obs, but needed if "ct_subset" is provided.
+        ct_subset: Optional list of cell types to include in the plot. If None, all cell types will be included.
+    """
+    if colors is None:
+        colors = vega_10
+
+    if group_key is not None:
+        if group_key not in adata.obs.keys():
+            raise ValueError(f"adata.obs does not contain {group_key} - cell type labels could not be found.")
+        adata = adata[adata.obs[group_key].isin(ct_subset), :].copy()
+
+    coords = adata.obsm[coords_key]
+    x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+
+    for gene in genes:
+        adata.obs.loc[adata[:, gene].X.toarray().flatten() > 0, gene] = True
+    adata.obs["gene_expressed"] = adata.obs[genes].sum(axis=1)
+
+    adata.obs["gene_expr_category"] = "None"
+    # Assign multiple genes expressed category:
+    adata.obs.loc[adata.obs["gene_expressed"] > 1, "gene_expr_category"] = "Multiple genes"
+
+    # Assign individual gene labels where only one gene is expressed:
+    for gene in genes:
+        adata.obs.loc[
+            (adata.obs[gene] == True) & (adata.obs["gene_expr_category"] == "None"), "gene_expr_category"
+        ] = gene
+
+    traces = []
+    for gene, color in zip(genes + ["Multiple genes"], colors):
+        mask = adata.obs["gene_expr_category"] == gene
+        if gene == "Multiple genes":
+            color = "#D3D3D3"
+        scatter = go.Scatter3d(
+            x=x[mask],
+            y=y[mask],
+            z=z[mask],
+            mode="markers",
+            marker=dict(color=color, size=2),
+            name=gene,
+            showlegend=False,
+        )
+        traces.append(scatter)
+
+        # Invisible trace for the legend (so the colored point is larger than the plot points):
+        legend_target = go.Scatter3d(
+            x=[None],
+            y=[None],
+            z=[None],
+            mode="markers",
+            marker=dict(size=30, color=color),  # Adjust size as needed
+            name=gene,
+            showlegend=True,
+        )
+        traces.append(legend_target)
+
+    fig = go.Figure(data=traces)
+    title_dict = dict(
+        text="Expression Patterns",
+        y=0.9,
+        yanchor="top",
+        x=0.5,
+        xanchor="center",
+        font=dict(size=36),
+    )
+
+    fig.update_layout(
+        legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=24)),
+        scene=dict(
+            xaxis=dict(
+                showgrid=False,
+                showline=False,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title="",
+                showticklabels=False,
+                ticks="",
+            ),
+            yaxis=dict(
+                showgrid=False,
+                showline=False,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title="",
+                showticklabels=False,
+                ticks="",
+            ),
+            zaxis=dict(
+                showgrid=False,
+                showline=False,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title="",
+                showticklabels=False,
+                ticks="",
+            ),
+        ),
+        margin=dict(l=0, r=0, b=0, t=50),
         title=title_dict,
     )
     fig.write_html(save_path)
@@ -1059,9 +1214,36 @@ def visualize_3D_increasing_direction_gradient(
         showlegend=True,
         legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
         scene=dict(
-            xaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
-            yaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
-            zaxis=dict(showgrid=False, showline=True, linewidth=2, linecolor="black", backgroundcolor="white"),
+            xaxis=dict(
+                showgrid=False,
+                showline=False,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title="",
+                showticklabels=False,
+                ticks="",
+            ),
+            yaxis=dict(
+                showgrid=False,
+                showline=False,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title="",
+                showticklabels=False,
+                ticks="",
+            ),
+            zaxis=dict(
+                showgrid=False,
+                showline=False,
+                linewidth=2,
+                linecolor="black",
+                backgroundcolor="white",
+                title="",
+                showticklabels=False,
+                ticks="",
+            ),
         ),
         margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
         title=title_dict,

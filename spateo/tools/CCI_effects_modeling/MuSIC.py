@@ -54,6 +54,8 @@ class MuSIC:
             list. It is recommended to use the return from :func `define_spateo_argparse()` for this.
         verbose: Set True to print updates to screen. Will be set False when initializing downstream analysis object,
             which inherits from this class but for which the information is generally not as useful.
+        save_subsampling: Set True to save the subsampled data to a .json file. Defaults to True, recommended to set
+            True for ease of access to the subsampling results.
 
     Attributes:
         mod_type: The type of model that will be employed- this dictates how the data will be processed and
@@ -159,12 +161,14 @@ class MuSIC:
         parser: argparse.ArgumentParser,
         args_list: Optional[List[str]] = None,
         verbose: bool = True,
+        save_subsampling: bool = True,
     ):
         self.logger = lm.get_main_logger()
 
         self.parser = parser
         self.args_list = args_list
         self.verbose = verbose
+        self.save_subsampling = save_subsampling
 
         self.mod_type = None
         self.species = None
@@ -297,7 +301,7 @@ class MuSIC:
         else:
             self.subset = False
 
-        if self.spatial_subsample or self.total_counts_threshold is not None or self.group_subset is not None:
+        if self.spatial_subsample or self.total_counts_threshold != 0.0 or self.group_subset is not None:
             self.run_subsample()
             # Indicate model has been subsampled:
             self.subsampled = True
@@ -982,7 +986,8 @@ class MuSIC:
                     else:
                         ligands = self.custom_ligands
                     ligands = [l for l in ligands if l in database_ligands]
-                    # Some ligands in the mouse database are questionable from current knowledge:
+                    # Some ligands in the mouse database are not ligands, but internal factors that interact w/ i.e.
+                    # the hormone receptors:
                     ligands = [
                         l
                         for l in ligands
@@ -1003,6 +1008,13 @@ class MuSIC:
                             "Kdr",
                             "Apoa2",
                             "Apoe",
+                            "Dhcr7",
+                            "Enho",
+                            "Ptgr1",
+                            "Agrp",
+                            "Akr1b3",
+                            "Daglb",
+                            "Ubash3d",
                         ]
                     ]
                     l_complexes = [elem for elem in ligands if "_" in elem]
@@ -2038,7 +2050,10 @@ class MuSIC:
             neighboring_unsampled: Dictionary containing a mapping between each unsampled point and the closest
                 sampled point
         """
-        parent_dir = os.path.dirname(self.output_path)
+        if self.mod_type == "downstream":
+            parent_dir = os.path.join(os.path.dirname(self.output_path), "downstream")
+        else:
+            parent_dir = os.path.dirname(self.output_path)
         if not os.path.exists(os.path.join(parent_dir, "subsampling")):
             os.makedirs(os.path.join(parent_dir, "subsampling"))
         if not os.path.exists(os.path.dirname(self.output_path)):
@@ -2105,7 +2120,7 @@ class MuSIC:
             sample_names = self.sample_names
             coords = self.coords
 
-        if self.total_counts_threshold is not None:
+        if self.total_counts_threshold != 0.0:
             self.logger.info(f"Subsetting to cells with greater than {self.total_counts_threshold} total counts...")
             if self.total_counts_key not in self.adata.obs_keys():
                 raise KeyError(f"{self.total_counts_key} not found in .obs of AnnData.")
@@ -2340,10 +2355,11 @@ class MuSIC:
         _, filename = os.path.split(self.output_path)
         filename = os.path.splitext(filename)[0]
 
-        with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "w") as file:
-            json.dump(self.neighboring_unsampled, file)
-        with open(os.path.join(parent_dir, "subsampling", f"{filename}_cell_names.json"), "w") as file:
-            json.dump(self.subsampled_sample_names, file)
+        if self.save_subsampling:
+            with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "w") as file:
+                json.dump(self.neighboring_unsampled, file)
+            with open(os.path.join(parent_dir, "subsampling", f"{filename}_cell_names.json"), "w") as file:
+                json.dump(self.subsampled_sample_names, file)
 
     def _set_search_range(self):
         """Set the search range for the bandwidth selection procedure.
@@ -2355,7 +2371,7 @@ class MuSIC:
         if self.minbw is None:
             if self.bw_fixed:
                 if self.mod_type == "downstream":
-                    # Check for dimensionality reduction- if not present, use the Jaccard distance:
+                    # Check for dimensionality reduction:
                     if "X_pca" in self.adata.obsm_keys():
                         coords_key = "X_pca"
                         initial_bw = 8
@@ -2385,9 +2401,6 @@ class MuSIC:
                             alpha=alpha,
                             normalize_distances=True,
                         )
-                    else:
-                        self.minbw = 0.2
-                        self.maxbw = 0.4
 
                 elif self.distance_membrane_bound is not None and self.distance_secreted is not None:
                     self.minbw = (
@@ -2407,11 +2420,6 @@ class MuSIC:
 
             # If the bandwidth is defined by a fixed number of neighbors (and thus adaptive in terms of radius):
             else:
-                if self.mod_type == "downstream":
-                    # Compute distances such that each cell has this number on average:
-                    self.minbw = int(0.002 * self.n_samples)
-                    self.maxbw = int(0.005 * self.n_samples)
-
                 if self.maxbw is None:
                     # If kernel decays with distance, larger bandwidth to capture more neighbors:
                     self.maxbw = (
@@ -3053,7 +3061,10 @@ class MuSIC:
             # Check if model has already been fit for this target:
             # Flag to indicate if a matching file name is found
             found = False
-            parent_dir = os.path.dirname(self.output_path)
+            if self.mod_type == "downstream" and "downstream" not in self.output_path:
+                parent_dir = os.path.join(os.path.dirname(self.output_path), "downstream")
+            else:
+                parent_dir = os.path.dirname(self.output_path)
             file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
             for filename in file_list:
                 parts = filename.split("_")
@@ -3139,6 +3150,10 @@ class MuSIC:
                     target_TFs = target_rows.columns[(target_rows == 1).any()].tolist()
                 else:
                     target_TFs = target_rows[target_rows == 1].index.tolist()
+                # TFs that can regulate expression of the target-binding TFs:
+                primary_tf_rows = self.grn.loc[[tf for tf in target_TFs if tf in self.grn.index]]
+                secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
+                target_TFs = list(set(target_TFs + secondary_TFs))
                 if len(target_TFs) == 0:
                     self.logger.info(
                         f"None of the provided regulators could be found to have an association with target gene "
@@ -3238,9 +3253,15 @@ class MuSIC:
             else:
                 self.clip = np.percentile(y, 99.7)
 
+            if self.mod_type == "downstream" and self.bw_fixed:
+                if "X_pca" not in self.adata.obsm_keys():
+                    self.bw = 0.3
+            else:
+                self.bw = int(0.005 * self.n_samples)
+
             if self.bw is not None:
                 if verbose:
-                    self.logger.info(f"Starting fitting process for target {target}. Initial bandwidth: {self.bw}.")
+                    self.logger.info(f"Starting fitting process for target {target}. Bandwidth: {self.bw}.")
                 # If bandwidth is already known, run the main fit function:
                 self.mpi_fit(
                     y,
@@ -3252,7 +3273,7 @@ class MuSIC:
                     feature_mask=feature_mask,
                     final=True,
                 )
-                return
+                continue
 
             if verbose:
                 self.logger.info(
@@ -3516,13 +3537,17 @@ class MuSIC:
                 the subsampled points need to be extended to the neighboring non-sampled points.
 
         Outputs:
-
+            all_coeffs: Dictionary containing dataframe consisting of coefficients for each target gene
+            all_se: Dictionary containing dataframe consisting of standard errors for each target gene
         """
         parent_dir = os.path.dirname(self.output_path)
         all_coeffs = {}
         all_se = {}
 
+        if self.mod_type == "downstream":
+            parent_dir = os.path.join(parent_dir, "downstream")
         file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
+
         for file in file_list:
             if not "predictions" in file:
                 target = file.split("_")[-1][:-4]
@@ -3561,7 +3586,7 @@ class MuSIC:
                         # receptor models, do not infer expression in cells that do not express the target because it
                         # is unknown whether the ligand/receptor (the half of the interacting pair that is missing) is
                         # present in the neighborhood of these cells:
-                        if self.mod_type in ["receptor", "ligand"]:
+                        if self.mod_type in ["receptor", "ligand", "downstream"]:
                             mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
                             betas *= mask_matrix
                             standard_errors *= mask_matrix
