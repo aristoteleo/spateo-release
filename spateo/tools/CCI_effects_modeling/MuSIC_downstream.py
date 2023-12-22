@@ -252,6 +252,15 @@ class MuSIC_Interpreter(MuSIC):
         self.remaining_cells = adata_filt.obs_names
         self.remaining_indices = np.where(self.adata.obs_names.isin(self.remaining_cells))[0]
 
+    def filter_adata_custom(self, cell_ids: List[str]):
+        """Filter AnnData object to only the cells specified by the custom list.
+
+        Args:
+            cell_ids: List of cell IDs to keep. Each ID must be found in adata.obs_names
+        """
+        self.remaining_cells = cell_ids
+        self.remaining_indices = np.where(self.adata.obs_names.isin(self.remaining_cells))[0]
+
     def add_interaction_effect_to_adata(
         self,
         targets: Union[str, List[str]],
@@ -909,6 +918,157 @@ class MuSIC_Interpreter(MuSIC):
         fig.update_layout(
             showlegend=True,
             legend=dict(x=0.7, y=0.85, orientation="v", font=dict(size=14)),
+            scene=dict(
+                xaxis=dict(
+                    showgrid=False,
+                    showline=False,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title="",
+                    showticklabels=False,
+                    ticks="",
+                ),
+                yaxis=dict(
+                    showgrid=False,
+                    showline=False,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title="",
+                    showticklabels=False,
+                    ticks="",
+                ),
+                zaxis=dict(
+                    showgrid=False,
+                    showline=False,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title="",
+                    showticklabels=False,
+                    ticks="",
+                ),
+            ),
+            margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+            title=title_dict,
+        )
+        fig.write_html(save_path)
+
+    def plot_tf_effect_3D(
+        self,
+        target: str,
+        tf: str,
+        save_path: str,
+        ligand_targets: bool = True,
+        receptor_targets: bool = False,
+        target_gene_targets: bool = False,
+    ):
+        """Quick-visualize the magnitude of the predicted effect on target for a given TF. Can only find the files
+        necessary for this if :func `CCI_deg_detection()` has been run.
+
+        Args:
+            target: Target gene of interest
+            tf: TF of interest (e.g. "Foxo1")
+            save_path: Path to save the figure to (will save as HTML file)
+            ligand_targets: Set True if ligands were used as the target genes for the :func `CCI_deg_detection()`
+                model.
+            receptor_targets: Set True if receptors were used as the target genes for the :func `CCI_deg_detection()`
+                model.
+            target_gene_targets: Set True if target genes were used as the target genes for the :func
+                `CCI_deg_detection()` model.
+        """
+        downstream_parent_dir = os.path.dirname(os.path.splitext(self.output_path)[0])
+        id = os.path.splitext(os.path.basename(self.output_path))[0]
+        if ligand_targets:
+            target_type = "ligand"
+            folder = "ligand_analysis"
+        elif receptor_targets:
+            target_type = "receptor"
+            folder = "receptor_analysis"
+        elif target_gene_targets:
+            target_type = "target_gene"
+            folder = "target_gene_analysis"
+        else:
+            raise ValueError(
+                "Please set either 'ligand_targets', 'receptor_targets', or 'target_gene_targets' to True."
+            )
+        targets = pd.read_csv(
+            os.path.join(
+                downstream_parent_dir,
+                "cci_deg_detection",
+                folder,
+                id,
+                "downstream_design_matrix",
+                "targets.csv",
+            ),
+            index_col=0,
+        )
+
+        regulators = pd.read_csv(
+            os.path.join(
+                downstream_parent_dir,
+                "cci_deg_detection",
+                folder,
+                id,
+                "downstream_design_matrix",
+                "design_matrix.csv",
+            ),
+            index_col=0,
+        )
+        regulators.columns = [col.replace("regulator_", "") for col in regulators.columns]
+
+        if target not in targets.columns:
+            raise ValueError(f"Target {target} not found in this model's directory. Please provide a valid target.")
+        if tf not in regulators.columns:
+            raise ValueError(f"TF {tf} not found in this model's directory.")
+
+        if hasattr(self, "remaining_cells"):
+            adata = self.adata[self.remaining_cells, :].copy()
+        else:
+            adata = self.adata.copy()
+
+        coords = adata.obsm[self.coords_key]
+        x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+
+        downstream_coeffs, downstream_standard_errors = self.return_outputs(
+            adjust_for_subsampling=False, load_from_downstream=target_type
+        )
+
+        target_tf_coef = downstream_coeffs[target][f"b_{tf}"]
+        # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
+        p997 = np.percentile(target_tf_coef.values, 99.7)
+        target_tf_coef[target_tf_coef > p997] = p997
+        plot_vals = target_tf_coef.values
+        scatter_effect = go.Scatter3d(
+            x=x,
+            y=y,
+            z=z,
+            mode="markers",
+            marker=dict(
+                color=plot_vals,
+                colorscale="Hot",
+                size=2,
+                colorbar=dict(
+                    title=f"{tf.title()} Effect on {target.title()}",
+                    x=0.75,
+                    titlefont=dict(size=24),
+                    tickfont=dict(size=24),
+                ),
+            ),
+            showlegend=False,
+        )
+
+        fig = go.Figure(data=[scatter_effect])
+        title_dict = dict(
+            text=f"{tf.title()} Effect on {target.title()}",
+            y=0.9,
+            yanchor="top",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=36),
+        )
+        fig.update_layout(
             scene=dict(
                 xaxis=dict(
                     showgrid=False,
@@ -2323,112 +2483,6 @@ class MuSIC_Interpreter(MuSIC):
                 return_all=False,
                 return_all_list=None,
             )
-
-    def explore_interaction_effect_coverage(
-        self,
-        target: str,
-        reference_interactions: Optional[List[str]] = None,
-        effect_threshold: Optional[float] = None,
-        use_significant: bool = False,
-        upper_threshold: float = 0.5,
-        lower_cooccurence_threshold: float = 0.1,
-        lower_specificity_threshold: float = 0.1,
-    ) -> anndata.AnnData:
-        """Given a set of reference interaction(s), finds cells expressing the target in the absence of any reference
-        interactions and determines interaction effects that are enriched in the remainder of the cells,
-        in ranked order (with two lists- ranking determined first by highest enrichment in the remaining cells and
-        also by least amount of overlap with the reference interactions).
-
-        Args:
-            target: Target gene of interest
-            reference_interactions: List of reference interactions- will find cells for which the reference
-                interaction is predicted to have an effect and then find interactions that are enriched in the rest.
-            effect_threshold: Optional threshold for the effect size of an interaction/effect to be considered for
-                analysis; only used if "to_plot" is "percentage". If not given, will use the upper quartile value
-                among all interaction effect values to determine the threshold.
-            use_significant: Whether to use only significant effects in computing the specificity. If True,
-                will filter to cells + interactions where the interaction is significant for the target. Only valid
-                if :func `compute_coeff_significance()` has been run.
-            upper_threshold: Upper threshold for the proportion of cells affected by a particular interaction for the
-                interaction to be considered for this analysis. Defaults to 0.5.
-            lower_cooccurence_threshold: Lower threshold for the proportion of target-expressing cells that are
-                affected by a particular interaction to be included in the printed output. Defaults to 0.1.
-            lower_specificity_threshold: Lower threshold for the proportion of cells affected by a particular
-                interaction
-
-        Returns:
-            adata: Will store results in .obs entry "interaction_effect_coverage", which will label cells accordingly
-                based on the given reference interactions.
-        """
-        logger = lm.get_main_logger()
-        adata = self.adata.copy()
-        coef_target = self.coeffs[target].loc[adata.obs_names]
-        if effect_threshold is None:
-            nonzero_values = coef_target.values.flatten()
-            nonzero_values = nonzero_values[nonzero_values != 0]
-            effect_threshold = pd.Series(nonzero_values).quantile(0.75)
-
-        if use_significant:
-            parent_dir = os.path.dirname(self.output_path)
-            sig = pd.read_csv(os.path.join(parent_dir, "significance", f"{target}_is_significant.csv"), index_col=0)
-            coef_target *= sig
-
-        # Filter out interactions present in at least 50% of cells- although important they are less likely to be
-        # especially interesting:
-        coef_target = coef_target.loc[:, np.sum(coef_target > 0, axis=0) < upper_threshold * coef_target.shape[0]]
-
-        coeff_target_filter = coef_target > effect_threshold
-        coef_target *= coeff_target_filter
-        interaction_rows = coef_target[reference_interactions].any(axis=1)
-        cells_expressing_target = pd.DataFrame(adata[:, target].X.toarray().reshape(-1) > 0, index=adata.obs_names)
-        coef_ref_interaction_target = interaction_rows & cells_expressing_target[target]
-
-        # Cells expressing target in absence of reference interactions:
-        cells_expressing_target_no_ref = cells_expressing_target[target] & ~coef_ref_interaction_target
-        # Rank the most prevalent co-occurring interactions:
-        coef_non_ref = coef_target[[col for col in coef_target.columns if col not in reference_interactions]]
-        coef_non_ref_interaction_target = coef_non_ref.loc[cells_expressing_target_no_ref].astype(bool)
-        interaction_cooccurrence = coef_non_ref_interaction_target.sum() / cells_expressing_target_no_ref.sum()
-        interaction_cooccurrence.sort_values(ascending=False, inplace=True)
-        interaction_cooccurrence = interaction_cooccurrence[interaction_cooccurrence > lower_cooccurence_threshold]
-        logger.info(f"Top interactions affecting {target} in absence of reference interactions, ranked: ")
-        print(interaction_cooccurrence)
-
-        # And the co-occurring interactions that are most specific to these cells:
-        interactions_df = self.X_df.loc[cells_expressing_target_no_ref, coef_non_ref_interaction_target.columns].astype(
-            bool
-        )
-        interaction_specificity = coef_non_ref_interaction_target.sum() / interactions_df.sum()
-        interaction_specificity = interaction_specificity[interaction_specificity > lower_specificity_threshold]
-        if len(interaction_specificity) > 0:
-            logger.info(
-                f"No interactions are highly specific to target-expressing cells that are not affected by "
-                f"{reference_interactions}. Try lowering threshold from {lower_specificity_threshold}."
-            )
-        else:
-            interaction_specificity.sort_values(ascending=False, inplace=True)
-            logger.info(
-                f"Top interactions specific to {target}-expressing cells that are not affected by "
-                f"{reference_interactions}, ranked: "
-            )
-
-        # Define AnnData .obs to label cells by their reference interactions:
-        # For each reference interaction, normalize the effect size by minmax scaling:
-        coef_target_mod = coef_target * coef_ref_interaction_target
-        percentile_997 = coef_target_mod.quantile(0.997)
-        coef_target_mod = coef_target_mod.clip(upper=percentile_997, axis=1)
-        coef_target_mod = (coef_target_mod - coef_target_mod.min()) / (coef_target_mod.max() - coef_target_mod.min())
-        max_interaction = coef_target_mod.idxmax(axis=1)
-        # If the second largest interaction effect is half the max, label as "Multiple interactions"
-        max_value = coef_target_mod.max(axis=1)
-        half_max_value = max_value / 2
-        mask_multiple_interactions = coef_target_mod.apply(
-            lambda row: row.nlargest(2).values[-1] >= half_max_value[row.name], axis=1
-        )
-        labels = [f"{interaction} effect region" for interaction in max_interaction]
-        labels = np.where(mask_multiple_interactions, "Multiple interactions", labels)
-        adata.obs[f"interaction_effect_on_{target}_coverage"] = labels
-        return adata
 
     def visualize_neighborhood(
         self,
@@ -5804,7 +5858,7 @@ class MuSIC_Interpreter(MuSIC):
             predictions = pd.read_csv(
                 os.path.join(output_dir, "cci_deg_detection", file_id, "predictions.csv"), index_col=0
             )
-            pearson_dict = {}
+            corr_dict = {}
             for target in targets:
                 if target not in predictions.columns:
                     self.logger.info(
@@ -5814,10 +5868,10 @@ class MuSIC_Interpreter(MuSIC):
                 observed = self.adata[:, target].X.toarray().reshape(-1)
                 predicted = predictions[target].values.reshape(-1)
 
-                rp, _ = pearsonr(observed, predicted)
-                pearson_dict[target] = rp
+                rs, _ = spearmanr(observed, predicted)
+                corr_dict[target] = rs
 
-            targets = [target for target in predictions.columns if pearson_dict[target] > self.filter_target_threshold]
+            targets = [target for target in predictions.columns if corr_dict[target] > self.filter_target_threshold]
 
         # Complete list of regulatory factors- search through .obs of the AnnData object:
         if cell_type is None:

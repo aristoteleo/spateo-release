@@ -11,7 +11,7 @@ import re
 from functools import partial
 from itertools import product
 from multiprocessing import Pool
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import anndata
 import numpy as np
@@ -290,6 +290,19 @@ class MuSIC:
                 self.n_samples = self.X.shape[0]
                 self.n_features = self.X.shape[1]
                 self.sample_names = custom_data.index
+
+        # Check if this AnnData object contains cells that have already been fit to, but also contains additional
+        # cells that have not been fit to:
+        parent_dir = os.path.dirname(self.output_path)
+        file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
+
+        if len(file_list) > 0:
+            for file in file_list:
+                if not "predictions" in file:
+                    check = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
+                    if any([name not in check.index for name in self.sample_names]):
+                        self.map_new_cells()
+                    break
 
         # Perform subsampling if applicable:
         if self.group_subset:
@@ -682,8 +695,19 @@ class MuSIC:
                 os.path.join(os.path.splitext(self.output_path)[0], "downstream_design_matrix", "targets.csv"),
                 index_col=0,
             )
-
+            if X_df.shape[0] != self.adata.n_obs:
+                self.logger.info(
+                    "Found existing independent variable matrix, but the given AnnData object contains "
+                    "additional/different rows compared to the one used for the prior model. "
+                    "Re-processing for new cells."
+                )
+                loaded_previously_processed = False
+            else:
+                loaded_previously_processed = True
         else:
+            loaded_previously_processed = False
+
+        if not loaded_previously_processed:
             # Targets = ligands
             if self.custom_ligands_path is not None or self.custom_ligands is not None:
                 if self.custom_ligands_path is not None:
@@ -954,8 +978,19 @@ class MuSIC:
                     os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "cell_categories.csv"),
                     index_col=0,
                 )
-
+            if X_df.shape[0] != self.adata.n_obs:
+                self.logger.info(
+                    "Found existing independent variable matrix, but the given AnnData object contains "
+                    "additional/different rows compared to the one used for the prior model."
+                    "Re-processing for new cells."
+                )
+                loaded_previously_processed = False
+            else:
+                loaded_previously_processed = True
         else:
+            loaded_previously_processed = False
+
+        if not loaded_previously_processed:
             # One-hot cell type array (or other category):
             if self.mod_type == "niche":
                 group_name = adata.obs[self.group_key]
@@ -1422,9 +1457,16 @@ class MuSIC:
 
                 # Compute separate set of spatial weights for membrane-bound and secreted ligands:
                 if "spatial_weights_membrane_bound" not in locals():
-                    try:
+                    if os.path.exists(membrane_bound_path):
                         spatial_weights_membrane_bound = scipy.sparse.load_npz(membrane_bound_path)
-                    except:
+                        if spatial_weights_membrane_bound.shape[0] != self.adata.n_obs:
+                            loaded_previously_processed = False
+                        else:
+                            loaded_previously_processed = True
+                    else:
+                        loaded_previously_processed = False
+
+                    if not loaded_previously_processed:
                         bw = (
                             self.n_neighbors_membrane_bound
                             if self.distance_membrane_bound is None
@@ -1441,9 +1483,16 @@ class MuSIC:
                         scipy.sparse.save_npz(membrane_bound_path, spatial_weights_membrane_bound)
 
                 if "spatial_weights_secreted" not in locals():
-                    try:
+                    if os.path.exists(secreted_path):
                         spatial_weights_secreted = scipy.sparse.load_npz(secreted_path)
-                    except:
+                        if spatial_weights_secreted.shape[0] != self.adata.n_obs:
+                            loaded_previously_processed = False
+                        else:
+                            loaded_previously_processed = True
+                    else:
+                        loaded_previously_processed = False
+
+                    if not loaded_previously_processed:
                         bw = self.n_neighbors_secreted if self.distance_secreted is None else self.distance_secreted
                         bw_fixed = True if self.distance_secreted is not None else False
                         # Autocrine signaling is much easier with secreted signals:
@@ -2026,7 +2075,8 @@ class MuSIC:
 
         # Broadcast independent variables and feature names:
         self.n_features = self.X.shape[1]
-        self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
+        self.X_df = X_df
+        # self.X_df = pd.DataFrame(self.X, columns=self.feature_names, index=self.adata.obs_names)
 
         # Compute distance in "signaling space":
         if self.mod_type != "niche":
@@ -2198,11 +2248,9 @@ class MuSIC:
                     continue
 
                 # Check if target-specific files exist:
-                closest_dict_path = os.path.join(
-                    parent_dir, "subsampling", f"{filename}_" f"{target}_closest_dict.json"
-                )
+                closest_dict_path = os.path.join(parent_dir, "subsampling", f"{filename}_{target}_closest_dict.json")
                 subsampled_names_path = os.path.join(
-                    parent_dir, "subsampling", f"{filename}_" f"{target}_subsampled_names.txt"
+                    parent_dir, "subsampling", f"{filename}_{target}_subsampled_names.txt"
                 )
 
                 if os.path.exists(closest_dict_path) and os.path.exists(subsampled_names_path):
@@ -2360,6 +2408,111 @@ class MuSIC:
                 json.dump(self.neighboring_unsampled, file)
             with open(os.path.join(parent_dir, "subsampling", f"{filename}_cell_names.json"), "w") as file:
                 json.dump(self.subsampled_sample_names, file)
+
+    def map_new_cells(self):
+        """There may be instances where new cells are added to an AnnData object that has already been fit to- in
+        this instance, accelerate the process by using neighboring results to project model fit to the new cells.
+        """
+        sample_names = self.sample_names
+
+        if self.mod_type == "downstream":
+            parent_dir = os.path.join(os.path.dirname(self.output_path), "downstream")
+        else:
+            parent_dir = os.path.dirname(self.output_path)
+        if not os.path.exists(os.path.join(parent_dir, "subsampling")):
+            os.makedirs(os.path.join(parent_dir, "subsampling"))
+        if not os.path.exists(os.path.dirname(self.output_path)):
+            os.makedirs(os.path.dirname(self.output_path))
+
+        # Check for already-existing subsampling results:
+        _, filename = os.path.split(self.output_path)
+        filename = os.path.splitext(filename)[0]
+        neighboring_unsampled_path = os.path.join(parent_dir, "subsampling", f"{filename}.json")
+        subsampled_sample_names_path = os.path.join(parent_dir, "subsampling", f"{filename}_cell_names.json")
+
+        # Load existing subsampling results if existent- if not create them from all cells in the initial model fit:
+        if os.path.exists(neighboring_unsampled_path):
+            with open(neighboring_unsampled_path, "r") as f:
+                self.neighboring_unsampled = json.load(f)
+            with open(subsampled_sample_names_path, "r") as f:
+                self.subsampled_sample_names = json.load(f)
+        else:
+            self.neighboring_unsampled = {}
+
+        # Map each new point to the closest existing point that matches the expression pattern
+        parent_dir = os.path.dirname(self.output_path)
+        file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
+
+        for file in file_list:
+            if not "predictions" in file:
+                check = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
+                break
+        new_samples = list(set(sample_names).difference(check.index))
+        self.logger.info(f"Getting mapping information for {len(new_samples)} new cells in this AnnData object...")
+
+        if self.coords.shape[1] == 2:
+            query = pd.DataFrame(
+                self.adata[new_samples, :].obsm[self.coords_key], index=new_samples, columns=["x", "y"]
+            )
+            ref = pd.DataFrame(self.adata[check.index, :].obsm[self.coords_key], index=check.index, columns=["x", "y"])
+        else:
+            query = pd.DataFrame(
+                self.adata[new_samples, :].obsm[self.coords_key], index=new_samples, columns=["x", "y", "z"]
+            )
+            ref = pd.DataFrame(
+                self.adata[check.index, :].obsm[self.coords_key], index=check.index, columns=["x", "y", "z"]
+            )
+
+        distances = cdist(query.values.astype(float), ref.values.astype(float), "euclidean")
+
+        if hasattr(self, "targets_expr"):
+            targets = self.targets_expr.columns
+            y_arr = pd.DataFrame(
+                self.adata[:, targets].X.A if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
+                index=self.sample_names,
+                columns=targets,
+            )
+        else:
+            y_arr = self.target
+
+        for target in y_arr.columns:
+            closest_dict_path = os.path.join(parent_dir, "subsampling", f"{filename}_{target}_closest_dict.json")
+
+            ref_values = y_arr[target].loc[check.index].values
+            query_values = y_arr[target].loc[new_samples].values
+
+            # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
+            ref_expression = (ref_values != 0).flatten()
+            query_expression = (query_values != 0).flatten()
+            mismatch_mask = query_expression[:, np.newaxis] != ref_expression
+            # Replace distances in the mismatch mask with a very large value:
+            large_value = np.max(distances) + 1
+            distances[mismatch_mask] = large_value
+
+            closest_indices = np.argmin(distances, axis=1)
+
+            # Dictionary where keys are indices of subsampled points and values are lists of indices of the
+            # original points closest to them:
+            closest_dict = self.neighboring_unsampled.get(target, {})
+            if closest_dict == {}:
+                for i, key in enumerate(closest_indices):
+                    closest_dict[key].append(new_samples[i])
+            else:
+                for i, idx in enumerate(closest_indices):
+                    key = ref.index[idx]
+                    if key not in closest_dict:
+                        closest_dict[key] = []
+                    closest_dict[key].append(new_samples[i])
+
+            self.neighboring_unsampled[target] = closest_dict
+            # # Save target-specific files:
+            # with open(closest_dict_path, "w") as file:
+            #     json.dump(self.neighboring_unsampled[target], file)
+            self.logger.info(f"Got mapping information for new cells for target {target}.")
+
+        # Save dictionary mapping unsampled points to nearest sampled points:
+        with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "w") as file:
+            json.dump(self.neighboring_unsampled, file)
 
     def _set_search_range(self):
         """Set the search range for the bandwidth selection procedure.
@@ -3505,6 +3658,7 @@ class MuSIC:
 
         # Save to .csv:
         np.savetxt(path, data, delimiter=",", header=header[:-1], comments="")
+        self.save = True
 
     def predict_and_save(
         self,
@@ -3528,13 +3682,18 @@ class MuSIC:
         y_pred.to_csv(pred_path)
 
     def return_outputs(
-        self, adjust_for_subsampling: bool = True
+        self,
+        adjust_for_subsampling: bool = True,
+        load_from_downstream: Optional[Literal["ligand", "receptor", "target_gene"]] = None,
     ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
         """Return final coefficients for all fitted models.
 
         Args:
             adjust_for_subsampling: Set True if subsampling was performed; this indicates that the coefficients for
                 the subsampled points need to be extended to the neighboring non-sampled points.
+            load_from_downstream: Set to "ligand", "receptor", or "target_gene" to load coefficients from downstream
+                models where targets are ligands, receptors or target genes. Can be used to load downstream model
+                coefficients from CCI models.
 
         Outputs:
             all_coeffs: Dictionary containing dataframe consisting of coefficients for each target gene
@@ -3544,7 +3703,21 @@ class MuSIC:
         all_coeffs = {}
         all_se = {}
 
-        if self.mod_type == "downstream":
+        if load_from_downstream is not None:
+            downstream_parent_dir = os.path.dirname(os.path.splitext(self.output_path)[0])
+            if load_from_downstream == "ligand":
+                folder = "ligand_analysis"
+            elif load_from_downstream == "receptor":
+                folder = "receptor_analysis"
+            elif load_from_downstream == "target_gene":
+                folder = "target_gene_analysis"
+            else:
+                raise ValueError(
+                    "Argument `load_from_downstream` must be one of 'ligand', 'receptor', or 'target_gene'."
+                )
+            parent_dir = os.path.join(downstream_parent_dir, "cci_deg_detection", folder, "downstream")
+
+        elif self.mod_type == "downstream" and not hasattr(self, "saved"):
             parent_dir = os.path.join(parent_dir, "downstream")
         file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
 
@@ -3571,9 +3744,9 @@ class MuSIC:
                             neighboring_unsampled = json.load(dict_file)
 
                         sampled_to_nonsampled_map = neighboring_unsampled[target]
-                        betas = betas.reindex(self.X_df.index, columns=betas.columns, fill_value=0)
+                        betas = betas.reindex(self.sample_names, columns=betas.columns, fill_value=0)
                         standard_errors = standard_errors.reindex(
-                            self.X_df.index, columns=standard_errors.columns, fill_value=0
+                            self.sample_names, columns=standard_errors.columns, fill_value=0
                         )
                         for sampled_idx, nonsampled_idxs in sampled_to_nonsampled_map.items():
                             for nonsampled_idx in nonsampled_idxs:
