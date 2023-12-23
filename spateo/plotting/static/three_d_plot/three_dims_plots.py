@@ -807,6 +807,7 @@ def quick_plot_3D_celltypes(
     save_path: str,
     coords_key: str = "spatial",
     group_key: str = "celltype",
+    opacity: float = 1.0,
     title: Optional[str] = None,
     ct_subset: Optional[list] = None,
 ):
@@ -817,6 +818,7 @@ def quick_plot_3D_celltypes(
         save_path: Path to save the plot
         coords_key: Key in adata.obsm where spatial coordinates are stored
         group_key: Key in adata.obs where cell type labels are stored
+        opacity: Sets only the transparency of the "Other" labeled points. Default is 1.0 (fully opaque).
         title: Optional, can be used to provide a title for the plot
         ct_subset: Optional, used to specify cell types of interest. If given, only cells with these types will be
             plotted, and other cells will be labeled "Other". If None, all cell types will be plotted.
@@ -848,8 +850,15 @@ def quick_plot_3D_celltypes(
     traces = []
     for ct, color in ct_color_mapping.items():
         ct_mask = adata.obs[group_key] == ct
+        if ct == "Other":
+            opacity = opacity
         scatter = go.Scatter3d(
-            x=x[ct_mask], y=y[ct_mask], z=z[ct_mask], mode="markers", marker=dict(size=2, color=color), showlegend=False
+            x=x[ct_mask],
+            y=y[ct_mask],
+            z=z[ct_mask],
+            mode="markers",
+            marker=dict(size=2, color=color, opacity=opacity),
+            showlegend=False,
         )
         traces.append(scatter)
 

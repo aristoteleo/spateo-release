@@ -1648,6 +1648,9 @@ class MuSIC_Interpreter(MuSIC):
         max_coord_val: float = 1.0,
         title: Optional[str] = None,
         x_label: Optional[str] = None,
+        region_lower_bound: Optional[float] = None,
+        region_upper_bound: Optional[float] = None,
+        region_label: Optional[str] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
@@ -1672,6 +1675,11 @@ class MuSIC_Interpreter(MuSIC):
                 position along the coordinate axis. Defaults to 1.0.
             title: Optional, can be used to provide title for plot
             x_label: Optional, can be used to provide x-axis label for plot
+            region_lower_bound: Optional, can be used to provide a lower bound for the region of interest to label on
+                the plot- this can correspond to a spatial domain, etc.
+            region_upper_bound: Optional, can be used to provide an upper bound for the region of interest to label on
+                the plot- this can correspond to a spatial domain, etc.
+            region_label: Optional, can be used to provide a label for the region of interest to label on the plot
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
             cmap: Colormap to use. Options: Any divergent matplotlib colormap.
@@ -1831,12 +1839,31 @@ class MuSIC_Interpreter(MuSIC):
         for effect, color in zip(effect_names, godsnot_102):
             sns.kdeplot(x="Coord", weights=effect, data=to_plot, color=color, label=effect, lw=2, ax=ax)
 
+        if region_lower_bound is not None and region_upper_bound is not None:
+            width = region_upper_bound - region_lower_bound
+            region_box = matplotlib.patches.Rectangle(
+                (region_lower_bound, ax.get_ylim()[0]),
+                width,
+                ax.get_ylim()[1] - ax.get_ylim()[0],
+                linewidth=1,
+                edgecolor="#1CE6FF",
+                facecolor="#1CE6FF",
+                alpha=0.2,
+            )
+            ax.add_patch(region_box)
+            region_box_legend = matplotlib.patches.Patch(color="#1CE6FF", alpha=0.2, label=region_label)
+            handles, labels = ax.get_legend_handles_labels()
+            handles.append(region_box_legend)
+            labels.append(region_label)
+            ax.legend(handles=handles, labels=labels, loc="upper left", bbox_to_anchor=(1, 1), fontsize=fontsize * 1.25)
+        else:
+            ax.legend(loc="upper left", bbox_to_anchor=(1, 1), fontsize=fontsize * 1.25)
+
         ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
         ax.set_ylabel("Density", fontsize=fontsize * 1.25)
         ax.tick_params(axis="x", labelsize=fontsize)
         ax.tick_params(axis="y", labelsize=fontsize, labelleft=False, left=False)
         ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
-        ax.legend(loc="upper left", bbox_to_anchor=(1, 1), fontsize=fontsize * 1.25)
 
         if save_show_or_return in ["save", "both", "all"]:
             save_kwargs["ext"] = "png"
@@ -3715,6 +3742,11 @@ class MuSIC_Interpreter(MuSIC):
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
 
+        # Use the saved name for the AnnData object to define part of the name of the saved figure & file (if
+        # applicable):
+        base_name = os.path.basename(self.adata_path)
+        adata_id = os.path.splitext(base_name)[0]
+        prefix = f"{adata_id}_fold_changes_{source_data}_{ref_ct}_{query_ct}"
         if save_df:
             output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
             if not os.path.exists(output_folder):
@@ -3731,85 +3763,14 @@ class MuSIC_Interpreter(MuSIC):
         if interaction_subset is None:
             interaction_subset = self.feature_names
 
-        ref_names = self.adata[self.adata.obs[group_key] == ref_ct].obs_names
-        query_names = self.adata[self.adata.obs[group_key] == query_ct].obs_names
-
-        # Series/dataframes for each group:
-        if source_data == "interaction":
-            ref_data = self.X_df.loc[ref_names, interaction_subset]
-            query_data = self.X_df.loc[query_names, interaction_subset]
-        elif source_data == "effect":
-            # Coefficients for all targets in subset:
-            for target in target_subset:
-                if target not in self.coeffs.keys():
-                    raise ValueError(f"Target {target} not found in model.")
-                else:
-                    coef_target = self.coeffs[target].loc[self.adata.obs_names]
-                    coef_target.columns = coef_target.columns.str.replace("b_", "")
-                    coef_target = coef_target[[col for col in coef_target.columns if col != "intercept"]]
-                    coef_target.columns = [replace_col_with_collagens(col) for col in coef_target.columns]
-                    coef_target.columns = [f"{col}-> target {target}" for col in coef_target.columns]
-                    duplicates = coef_target.columns[coef_target.columns.duplicated(keep=False)]
-                    for item in duplicates.unique():
-                        # Calculate mean for collagens:
-                        mean_series = coef_target.filter(like=item).mean(axis=1)
-                        coef_target.drop(columns=coef_target.filter(like=item).columns, inplace=True)
-                        coef_target[item] = mean_series
-
-                    target_interaction_subset = [replace_col_with_collagens(i) for i in interaction_subset]
-                    target_interaction_subset = list(set([f"{i}-> target {target}" for i in target_interaction_subset]))
-                    target_interaction_subset = [i for i in target_interaction_subset if i in coef_target.columns]
-                    if "effect_df" not in locals():
-                        effect_df = coef_target.loc[:, target_interaction_subset]
-                    else:
-                        effect_df = pd.concat([effect_df, coef_target.loc[:, target_interaction_subset]], axis=1)
-
-            ref_data = effect_df.loc[ref_names, :]
-            query_data = effect_df.loc[query_names, :]
-        elif source_data == "target":
-            ref_data = self.targets_expr.loc[ref_names, target_subset]
-            query_data = self.targets_expr.loc[query_names, target_subset]
-
-        else:
-            raise ValueError(
-                f"Unrecognized input for source_data: {source_data}. Options are 'interaction', 'effect', or 'target'."
-            )
-
-        # Compute significance for each column:
-        pvals = []
-        for col in tqdm(ref_data.columns, desc="Computing significance..."):
-            if source_data == "effect" or source_data == "interaction":
-                pvals.append(ttest_ind(ref_data[col], query_data[col])[1])
-            elif source_data == "target":
-                pvals.append(mannwhitneyu(ref_data[col], query_data[col])[1])
-        # Correct for multiple hypothesis testing:
-        qvals = multitesting_correction(pvals, method="fdr_bh")
-        results = pd.DataFrame(qvals, index=ref_data.columns, columns=["qval"])
-        results["qval"] = results["qval"].apply(lambda x: x[0] if isinstance(x, np.ndarray) else x)
-        results["Significance"] = results.apply(assign_significance, axis=1)
-        # Negative log q-value (in the case of volcano plot):
-        results["-log10(qval)"] = -np.log10(qvals)
-        # Threshold at the highest non-infinity q-value:
-        max_non_inf = results[results["-log10(qval)"] != np.inf]["-log10(qval)"].max()
-        results["-log10(qval)"] = results["-log10(qval)"].apply(lambda x: x if x != np.inf else max_non_inf)
-
-        if to_plot == "mean":
-            ref_data = ref_data.mean(axis=0)
-            query_data = query_data.mean(axis=0)
-        elif to_plot == "percentage":
-            ref_data = (ref_data > 0).mean(axis=0)
-            query_data = (query_data > 0).mean(axis=0)
-        # Add small offset to ensure reference value is not 0:
-        ref_data += 1e-3
-        query_data += 1e-3
-
+        # Formatting:
         if source_data == "effect":
             x_label = f"$\\log_2$(Fold change effect on target- \n{ref_ct} and {query_ct})"
             title = f"Fold change effect on target \n{ref_ct} and {query_ct}"
             if self.mod_type == "lr":
-                y_label = f"L:R effect on {target}"
+                y_label = "L:R effect on target"
             elif self.mod_type == "ligand":
-                y_label = f"Ligand effect on {target}"
+                y_label = "Ligand effect on target"
         elif source_data == "interaction":
             x_label = f"$\\log_2$(Fold change interaction enrichment \n {ref_ct} and {query_ct})"
             title = f"Fold change interaction enrichment \n{ref_ct} and {query_ct}"
@@ -3822,17 +3783,96 @@ class MuSIC_Interpreter(MuSIC):
             title = f"Fold change target expression \n {ref_ct} and {query_ct}"
             y_label = "Target"
 
-        # Compute fold change:
-        fold_change = query_data / ref_data
-        results["Fold Change"] = fold_change
-        results["Fold Change"] = results["Fold Change"].apply(lambda x: x[0] if isinstance(x, np.ndarray) else x)
-        # Take the log of the fold change:
-        results["Fold Change"] = np.log2(results["Fold Change"])
-        # Remove NaNs:
-        results = results[~results["Fold Change"].isna()]
-        results = results.sort_values("Fold Change")
-        if top_n_to_plot is not None:
-            results = results.iloc[:top_n_to_plot, :]
+        # Check for already-existing dataframe:
+        if os.path.exists(os.path.join(parent_dir, "fold_changes", f"{prefix}.csv")):
+            results = pd.read_csv(os.path.join(parent_dir, "fold_changes", f"{prefix}.csv"), index_col=0)
+        else:
+            ref_names = self.adata[self.adata.obs[group_key] == ref_ct].obs_names
+            query_names = self.adata[self.adata.obs[group_key] == query_ct].obs_names
+
+            # Series/dataframes for each group:
+            if source_data == "interaction":
+                ref_data = self.X_df.loc[ref_names, interaction_subset]
+                query_data = self.X_df.loc[query_names, interaction_subset]
+            elif source_data == "effect":
+                # Coefficients for all targets in subset:
+                for target in target_subset:
+                    if target not in self.coeffs.keys():
+                        raise ValueError(f"Target {target} not found in model.")
+                    else:
+                        coef_target = self.coeffs[target].loc[self.adata.obs_names]
+                        coef_target.columns = coef_target.columns.str.replace("b_", "")
+                        coef_target = coef_target[[col for col in coef_target.columns if col != "intercept"]]
+                        coef_target.columns = [replace_col_with_collagens(col) for col in coef_target.columns]
+                        coef_target.columns = [f"{col}-> target {target}" for col in coef_target.columns]
+                        duplicates = coef_target.columns[coef_target.columns.duplicated(keep=False)]
+                        for item in duplicates.unique():
+                            # Calculate mean for collagens:
+                            mean_series = coef_target.filter(like=item).mean(axis=1)
+                            coef_target.drop(columns=coef_target.filter(like=item).columns, inplace=True)
+                            coef_target[item] = mean_series
+
+                        target_interaction_subset = [replace_col_with_collagens(i) for i in interaction_subset]
+                        target_interaction_subset = list(
+                            set([f"{i}-> target {target}" for i in target_interaction_subset])
+                        )
+                        target_interaction_subset = [i for i in target_interaction_subset if i in coef_target.columns]
+                        if "effect_df" not in locals():
+                            effect_df = coef_target.loc[:, target_interaction_subset]
+                        else:
+                            effect_df = pd.concat([effect_df, coef_target.loc[:, target_interaction_subset]], axis=1)
+
+                ref_data = effect_df.loc[ref_names, :]
+                query_data = effect_df.loc[query_names, :]
+            elif source_data == "target":
+                ref_data = self.targets_expr.loc[ref_names, target_subset]
+                query_data = self.targets_expr.loc[query_names, target_subset]
+
+            else:
+                raise ValueError(
+                    f"Unrecognized input for source_data: {source_data}. Options are 'interaction', 'effect', or "
+                    f"'target'."
+                )
+
+            # Compute significance for each column:
+            pvals = []
+            for col in tqdm(ref_data.columns, desc="Computing significance..."):
+                if source_data == "effect" or source_data == "interaction":
+                    pvals.append(ttest_ind(ref_data[col], query_data[col])[1])
+                elif source_data == "target":
+                    pvals.append(mannwhitneyu(ref_data[col], query_data[col])[1])
+            # Correct for multiple hypothesis testing:
+            qvals = multitesting_correction(pvals, method="fdr_bh")
+            results = pd.DataFrame(qvals, index=ref_data.columns, columns=["qval"])
+            results["qval"] = results["qval"].apply(lambda x: x[0] if isinstance(x, np.ndarray) else x)
+            results["Significance"] = results.apply(assign_significance, axis=1)
+            # Negative log q-value (in the case of volcano plot):
+            results["-log10(qval)"] = -np.log10(qvals)
+            # Threshold at the highest non-infinity q-value:
+            max_non_inf = results[results["-log10(qval)"] != np.inf]["-log10(qval)"].max()
+            results["-log10(qval)"] = results["-log10(qval)"].apply(lambda x: x if x != np.inf else max_non_inf)
+
+            if to_plot == "mean":
+                ref_data = ref_data.mean(axis=0)
+                query_data = query_data.mean(axis=0)
+            elif to_plot == "percentage":
+                ref_data = (ref_data > 0).mean(axis=0)
+                query_data = (query_data > 0).mean(axis=0)
+            # Add small offset to ensure reference value is not 0:
+            ref_data += 1e-3
+            query_data += 1e-3
+
+            # Compute fold change:
+            fold_change = query_data / ref_data
+            results["Fold Change"] = fold_change
+            results["Fold Change"] = results["Fold Change"].apply(lambda x: x[0] if isinstance(x, np.ndarray) else x)
+            # Take the log of the fold change:
+            results["Fold Change"] = np.log2(results["Fold Change"])
+            # Remove NaNs:
+            results = results[~results["Fold Change"].isna()]
+            results = results.sort_values("Fold Change")
+            if top_n_to_plot is not None:
+                results = results.iloc[:top_n_to_plot, :]
 
         # Plot:
         if figsize is None:
@@ -3884,53 +3924,79 @@ class MuSIC_Interpreter(MuSIC):
             significant_up = results["Fold Change"] > fold_change_cutoff
             significant_down = results["Fold Change"] < -fold_change_cutoff
 
-            fc_up = ax.scatter(
-                x=results["Fold Change"][significant & significant_up],
-                y=results["-log10(qval)"][significant & significant_up],
-                c=results["Fold Change"][significant & significant_up],
-                cmap="Reds",
-                edgecolor="black",
-                s=size,
-            )
+            positive_fold_change = results["Fold Change"] > 0
+            negative_fold_change = results["Fold Change"] < 0
 
-            fc_down = ax.scatter(
-                x=results["Fold Change"][significant & significant_down],
-                y=results["-log10(qval)"][significant & significant_down],
-                c=results["Fold Change"][significant & significant_down],
-                cmap="Blues_r",
-                edgecolor="black",
-                s=size,
-            )
+            # Check if only plotting query over ref or ref over query:
+            if plot_query_over_ref:
+                fc_up = ax.scatter(
+                    x=results["Fold Change"][significant & significant_up & positive_fold_change],
+                    y=results["-log10(qval)"][significant & significant_up & positive_fold_change],
+                    c=results["Fold Change"][significant & significant_up & positive_fold_change],
+                    cmap="Reds",
+                    edgecolor="black",
+                    s=size,
+                )
+            elif plot_ref_over_query:
+                fc_down = ax.scatter(
+                    x=results["Fold Change"][significant & significant_down & negative_fold_change],
+                    y=results["-log10(qval)"][significant & significant_down & negative_fold_change],
+                    c=results["Fold Change"][significant & significant_down & negative_fold_change],
+                    cmap="Blues_r",
+                    edgecolor="black",
+                    s=size,
+                )
+            else:
+                fc_up = ax.scatter(
+                    x=results["Fold Change"][significant & significant_up],
+                    y=results["-log10(qval)"][significant & significant_up],
+                    c=results["Fold Change"][significant & significant_up],
+                    cmap="Reds",
+                    edgecolor="black",
+                    s=size,
+                )
 
-            ax.scatter(
-                x=results["Fold Change"][~(significant & (significant_up | significant_down))],
-                y=results["-log10(qval)"][~(significant & (significant_up | significant_down))],
-                color="grey",
-                edgecolor="black",
-                s=size,
-            )
+                fc_down = ax.scatter(
+                    x=results["Fold Change"][significant & significant_down],
+                    y=results["-log10(qval)"][significant & significant_down],
+                    c=results["Fold Change"][significant & significant_down],
+                    cmap="Blues_r",
+                    edgecolor="black",
+                    s=size,
+                )
+
+                ax.scatter(
+                    x=results["Fold Change"][~(significant & (significant_up | significant_down))],
+                    y=results["-log10(qval)"][~(significant & (significant_up | significant_down))],
+                    color="grey",
+                    edgecolor="black",
+                    s=size,
+                )
 
             # Add color bars
-            cbar_red = fig.colorbar(fc_up, ax=ax, orientation="vertical", pad=0.0, aspect=40)
-            cbar_red.ax.set_ylabel(
-                f"Fold Changes- {query_ct} over {ref_ct}", rotation=90, labelpad=15, fontsize=fontsize
-            )
-            cbar_red.ax.yaxis.set_label_position("left")
-            cbar_red.ax.yaxis.label.set_horizontalalignment("right")
-            cbar_red.ax.yaxis.label.set_position((0, 0.75))
-            cbar_blue = fig.colorbar(fc_down, ax=ax, orientation="vertical", pad=0.1, aspect=40)
-            cbar_blue.ax.set_ylabel(
-                f"Fold Changes- {ref_ct} over {query_ct}", rotation=90, labelpad=15, fontsize=fontsize
-            )
-            cbar_blue.ax.yaxis.set_label_position("left")
-            cbar_blue.ax.yaxis.label.set_horizontalalignment("right")
-            cbar_blue.ax.yaxis.label.set_position((0, 0.75))
+            if "fc_up" in locals():
+                cbar_red = fig.colorbar(fc_up, ax=ax, orientation="vertical", pad=0.0, aspect=40)
+                cbar_red.ax.set_ylabel(
+                    f"Fold Changes- {query_ct} over {ref_ct}", rotation=90, labelpad=15, fontsize=fontsize
+                )
+                cbar_red.ax.yaxis.set_label_position("left")
+                cbar_red.ax.yaxis.label.set_horizontalalignment("right")
+                cbar_red.ax.yaxis.label.set_position((0, 0.75))
+
+            if "fc_down" in locals():
+                cbar_blue = fig.colorbar(fc_down, ax=ax, orientation="vertical", pad=0.1, aspect=40)
+                cbar_blue.ax.set_ylabel(
+                    f"Fold Changes- {ref_ct} over {query_ct}", rotation=90, labelpad=15, fontsize=fontsize
+                )
+                cbar_blue.ax.yaxis.set_label_position("left")
+                cbar_blue.ax.yaxis.label.set_horizontalalignment("right")
+                cbar_blue.ax.yaxis.label.set_position((0, 0.75))
 
             # Add text for most significant interactions:
             # Get the highest fold changes:
             high_fold_change = results[abs(results["Fold Change"]) > fold_change_cutoff_for_labels]
             while high_fold_change.empty:
-                fold_change_cutoff_for_labels /= 2  # Halve the cutoff
+                fold_change_cutoff_for_labels /= 2
                 high_fold_change = results[abs(results["Fold Change"]) > fold_change_cutoff_for_labels]
             # Take only the top few (it is impossible to view all at once clearly):
             if len(high_fold_change) > 3:
@@ -3947,7 +4013,13 @@ class MuSIC_Interpreter(MuSIC):
             while current_value >= 10:
                 log10_qval_steps.append(current_value)
                 i += 1
-                current_value = max_log10_qval / (2**i)
+                # Add to labels in descending half steps, with smaller steps taken if only visualizing the positive
+                # or the negative fold changes:
+                if plot_query_over_ref or plot_ref_over_query:
+                    step_size = 1.5
+                else:
+                    step_size = 2
+                current_value = max_log10_qval / (step_size**i)
             selected_rows = []
             for value in log10_qval_steps:
                 # Find the row closest to the current value without duplicates
@@ -3990,10 +4062,6 @@ class MuSIC_Interpreter(MuSIC):
             ax.set_ylabel(y_label, fontsize=fontsize * 1.25)
             ax.set_title(title, fontsize=fontsize * 1.5)
 
-        # Use the saved name for the AnnData object to define part of the name of the saved file:
-        base_name = os.path.basename(self.adata_path)
-        adata_id = os.path.splitext(base_name)[0]
-        prefix = f"{adata_id}_fold_changes_{source_data}_{ref_ct}_{query_ct}"
         save_kwargs["ext"] = "png"
         save_kwargs["dpi"] = 300
         if "figure_folder" in locals():
@@ -4011,6 +4079,9 @@ class MuSIC_Interpreter(MuSIC):
             return_all=False,
             return_all_list=None,
         )
+
+        if save_df:
+            results.to_csv(os.path.join(output_folder, f"{prefix}.csv"))
 
     def enriched_interactions_barplot(
         self,
