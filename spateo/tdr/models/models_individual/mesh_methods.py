@@ -143,13 +143,17 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_f
     raw_points = np.asarray(pc.points)
     pc.points = new_points = raw_points - np.min(raw_points, axis=0)
 
-    # Generate new models for calculation. Downsampling for computation efficiency.
-    
-    rand_idx = np.random.choice(new_points.shape[0], dist_sample_num) if new_points.shape[0] > dist_sample_num else np.arange(new_points.shape[0])
-    dist = cdist(XA=new_points[rand_idx,:], XB=new_points, metric="euclidean")
+
+    # Generate new models for calculatation.
+    # dist = cdist(XA=new_points, XB=new_points, metric="euclidean")
+    # row, col = np.diag_indices_from(dist)
+    # dist[row, col] = None
+    rand_idx = (
+        np.random.choice(new_points.shape[0], 100) if new_points.shape[0] >= 100 else np.arange(new_points.shape[0])
+    )
+    dist = cdist(XA=new_points[rand_idx, :], XB=new_points, metric="euclidean")
     dist[np.arange(rand_idx.shape[0]), rand_idx] = None
     max_dist = np.nanmin(dist, axis=1).max()
-    
     mc_sf = max_dist * mc_scale_factor
 
     scale_pc = scale_model(model=pc, scale_factor=1 / mc_sf, scale_center=(0,0,0))
