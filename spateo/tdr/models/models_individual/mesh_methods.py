@@ -113,7 +113,7 @@ def rigid_transform(
     return new_coords[:, :2] if coords_dim == 2 else new_coords
 
 
-def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_factor: Union[int, float] = 1.0):
+def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_factor: Union[int, float] = 1.0, dist_sample_num: int = 100):
     """
     Computes a triangle mesh from a point cloud based on the marching cube algorithm.
     Algorithm Overview:
@@ -125,6 +125,7 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_f
         pc: A point cloud model.
         levelset: The levelset of iso-surface. It is recommended to set levelset to 0 or 0.5.
         mc_scale_factor: The scale of the model. The scaled model is used to construct the mesh model.
+        dist_sample_num: The down-sampling number when calculating the scaling factor using the minimum distance. Set to 100 for computation efficiency.
 
     Returns:
         A mesh model.
@@ -142,14 +143,16 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_f
     raw_points = np.asarray(pc.points)
     pc.points = new_points = raw_points - np.min(raw_points, axis=0)
 
-    # Generate new models for calculatation.
-    dist = cdist(XA=new_points, XB=new_points, metric="euclidean")
-    row, col = np.diag_indices_from(dist)
-    dist[row, col] = None
+    # Generate new models for calculation. Downsampling for computation efficiency.
+    
+    rand_idx = np.random.choice(new_points.shape[0], dist_sample_num) if new_points.shape[0] > dist_sample_num else np.arange(new_points.shape[0])
+    dist = cdist(XA=new_points[rand_idx,:], XB=new_points, metric="euclidean")
+    dist[np.arange(rand_idx.shape[0]), rand_idx] = None
     max_dist = np.nanmin(dist, axis=1).max()
+    
     mc_sf = max_dist * mc_scale_factor
 
-    scale_pc = scale_model(model=pc, scale_factor=1 / mc_sf)
+    scale_pc = scale_model(model=pc, scale_factor=1 / mc_sf, scale_center=(0,0,0))
     scale_pc_points = scale_pc.points = np.ceil(np.asarray(scale_pc.points)).astype(np.int64)
 
     # Generate grid for calculatation based on new model.
@@ -176,10 +179,10 @@ def marching_cube_mesh(pc: PolyData, levelset: Union[int, float] = 0, mc_scale_f
     # Generate mesh model.
     mesh = pv.PolyData(v, f.ravel()).extract_surface().triangulate()
     mesh.clean(inplace=True)
-    mesh = scale_model(model=mesh, scale_factor=mc_sf)
+    mesh = scale_model(model=mesh, scale_factor=mc_sf, scale_center=(0,0,0))
 
     # Transform.
-    scale_pc = scale_model(model=scale_pc, scale_factor=mc_sf)
+    scale_pc = scale_model(model=scale_pc, scale_factor=mc_sf, scale_center=(0,0,0))
     mesh.points = rigid_transform(
         coords=np.asarray(mesh.points), coords_refA=np.asarray(scale_pc.points), coords_refB=raw_points
     )
