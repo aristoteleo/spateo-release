@@ -14,4 +14,3 @@ from .morphopath_model import (
     construct_trajectory,
     construct_trajectory_X,
 )
-from .uniform_model import construct_bounding_box, construct_space
