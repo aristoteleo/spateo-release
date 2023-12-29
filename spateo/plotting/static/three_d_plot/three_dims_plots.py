@@ -805,6 +805,7 @@ def merge_animations(
 def quick_plot_3D_celltypes(
     adata: anndata.AnnData,
     save_path: str,
+    colors: Optional[list] = None,
     coords_key: str = "spatial",
     group_key: str = "celltype",
     opacity: float = 1.0,
@@ -816,6 +817,9 @@ def quick_plot_3D_celltypes(
     Args:
         adata: AnnData object containing spatial coordinates and cell type labels
         save_path: Path to save the plot
+        colors: Optional, used to specify colors for each cell type, given as a list that is at least as long as the
+            set of cell types (in the AnnData object if all cell types are used, and in "ct_subset" if "ct_subset"
+            is given). If None, a default color palette will be used.
         coords_key: Key in adata.obsm where spatial coordinates are stored
         group_key: Key in adata.obs where cell type labels are stored
         opacity: Sets only the transparency of the "Other" labeled points. Default is 1.0 (fully opaque).
@@ -824,6 +828,9 @@ def quick_plot_3D_celltypes(
             plotted, and other cells will be labeled "Other". If None, all cell types will be plotted.
     """
     from ..colorlabel import godsnot_102
+
+    if colors is None:
+        colors = godsnot_102
 
     if coords_key not in adata.obsm.keys():
         raise ValueError(f"adata.obsm does not contain {coords_key}- spatial coordinates could not be found.")
@@ -843,7 +850,7 @@ def quick_plot_3D_celltypes(
             group_key = "temp"
 
     # Dictionary mapping cell types to colors:
-    ct_color_mapping = dict(zip(adata.obs[group_key].value_counts().index, godsnot_102))
+    ct_color_mapping = dict(zip(adata.obs[group_key].value_counts().index, colors))
     if group_key == "temp":
         ct_color_mapping["Other"] = "#D3D3D3"
 

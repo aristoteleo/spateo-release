@@ -51,6 +51,7 @@ from ...logging import logger_manager as lm
 from ...plotting.static.colorlabel import godsnot_102, vega_10
 from ...plotting.static.networks import plot_network
 from ...plotting.static.utils import save_return_show_fig_utils
+from ...tools.find_neighbors import neighbors
 from ...tools.utils import filter_adata_spatial
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
 from ..utils import compute_corr_ci, create_new_coordinate
@@ -3673,6 +3674,7 @@ class MuSIC_Interpreter(MuSIC):
         fold_change_cutoff_for_labels: float = 3.0,
         plot_query_over_ref: bool = False,
         plot_ref_over_query: bool = False,
+        plot_only_significant: bool = False,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         cmap: str = "seismic",
@@ -3714,6 +3716,8 @@ class MuSIC_Interpreter(MuSIC):
                 the reference cell type over the query cell type (and the portion that is significant). If False (and
                 "plot_query_over_ref" is False), will plot the entire volcano plot. Only used if "plot_type" is
                 "volcano".
+            plot_only_significant: Whether to plot/visualize only the portion that passes the "significance_cutoff"
+                p-value threshold. Only used if "plot_type" is "volcano".
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
             cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
@@ -3747,10 +3751,9 @@ class MuSIC_Interpreter(MuSIC):
         base_name = os.path.basename(self.adata_path)
         adata_id = os.path.splitext(base_name)[0]
         prefix = f"{adata_id}_fold_changes_{source_data}_{ref_ct}_{query_ct}"
-        if save_df:
-            output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
-            if not os.path.exists(output_folder):
-                os.makedirs(output_folder)
+        output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
 
         if fontsize is None:
             fontsize = rcParams.get("font.size")
@@ -3784,8 +3787,8 @@ class MuSIC_Interpreter(MuSIC):
             y_label = "Target"
 
         # Check for already-existing dataframe:
-        if os.path.exists(os.path.join(parent_dir, "fold_changes", f"{prefix}.csv")):
-            results = pd.read_csv(os.path.join(parent_dir, "fold_changes", f"{prefix}.csv"), index_col=0)
+        if os.path.exists(os.path.join(parent_dir, output_folder, f"{prefix}.csv")):
+            results = pd.read_csv(os.path.join(parent_dir, output_folder, f"{prefix}.csv"), index_col=0)
         else:
             ref_names = self.adata[self.adata.obs[group_key] == ref_ct].obs_names
             query_names = self.adata[self.adata.obs[group_key] == query_ct].obs_names
@@ -3877,14 +3880,23 @@ class MuSIC_Interpreter(MuSIC):
         # Plot:
         if figsize is None:
             # Set figure size based on the number of interaction features and targets:
-            m = len(results) / 2 if plot_type == "barplot" else 10
-            n = m / 2 if plot_type == "barplot" else m
+            if plot_type == "barplot":
+                m = len(results) / 2
+                n = m / 2
+            elif plot_only_significant or plot_query_over_ref or plot_ref_over_query:
+                m = 7
+                n = m * 2
+            else:
+                m = 10
+                n = m
             figsize = (n, m)
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
 
         cmap = plt.cm.get_cmap(cmap)
         # Center colormap at 0:
         max_distance = max(abs(results["Fold Change"]).max(), abs(results["Fold Change"]).min())
+        max_pos = results["Fold Change"].max()
+        max_neg = results["Fold Change"].min()
         norm = plt.Normalize(-max_distance, max_distance)
         colors = cmap(norm(results["Fold Change"]))
 
@@ -3903,7 +3915,7 @@ class MuSIC_Interpreter(MuSIC):
                 ax.text(row["Fold Change"], index, f"{row['Significance']}", color="black", ha="right")
 
             ax.axvline(x=0, color="grey", linestyle="--", linewidth=2)
-            ax.set_xlim(-max_distance * 1.1, max_distance * 1.1)
+            ax.set_xlim(max_neg * 1.1, max_pos * 1.1)
             ax.set_xticklabels(results.index, fontsize=fontsize)
             ax.set_yticklabels(["{:.2f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
             ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
@@ -3918,17 +3930,23 @@ class MuSIC_Interpreter(MuSIC):
             # Check if max -log10(qval) is greater than 8
             if results["-log10(qval)"].max() > 8:
                 ax.set_yscale("log", base=2)  # Set y-axis to log
-                y_label = r"$-log_10$(qval) ($log_2$ scale)"
+                y_label = r"$-log_{10}$(qval) ($log_2$ scale)"
+            else:
+                y_label = r"$-log_{10}$(qval)"
 
             significant = results["-log10(qval)"] > significance_cutoff
             significant_up = results["Fold Change"] > fold_change_cutoff
             significant_down = results["Fold Change"] < -fold_change_cutoff
+            if plot_only_significant:
+                results = results[significant]
+                size *= 1.5
 
             positive_fold_change = results["Fold Change"] > 0
             negative_fold_change = results["Fold Change"] < 0
 
             # Check if only plotting query over ref or ref over query:
             if plot_query_over_ref:
+                size *= 1.5
                 fc_up = ax.scatter(
                     x=results["Fold Change"][significant & significant_up & positive_fold_change],
                     y=results["-log10(qval)"][significant & significant_up & positive_fold_change],
@@ -3938,6 +3956,7 @@ class MuSIC_Interpreter(MuSIC):
                     s=size,
                 )
             elif plot_ref_over_query:
+                size *= 1.5
                 fc_down = ax.scatter(
                     x=results["Fold Change"][significant & significant_down & negative_fold_change],
                     y=results["-log10(qval)"][significant & significant_down & negative_fold_change],
@@ -3981,7 +4000,9 @@ class MuSIC_Interpreter(MuSIC):
                 )
                 cbar_red.ax.yaxis.set_label_position("left")
                 cbar_red.ax.yaxis.label.set_horizontalalignment("right")
-                cbar_red.ax.yaxis.label.set_position((0, 0.75))
+                cbar_red.ax.yaxis.label.set_position((0, 1.0))
+                for label in cbar_red.ax.get_yticklabels():
+                    label.set_fontsize(fontsize)
 
             if "fc_down" in locals():
                 cbar_blue = fig.colorbar(fc_down, ax=ax, orientation="vertical", pad=0.1, aspect=40)
@@ -3990,7 +4011,9 @@ class MuSIC_Interpreter(MuSIC):
                 )
                 cbar_blue.ax.yaxis.set_label_position("left")
                 cbar_blue.ax.yaxis.label.set_horizontalalignment("right")
-                cbar_blue.ax.yaxis.label.set_position((0, 0.75))
+                cbar_blue.ax.yaxis.label.set_position((0, 1.0))
+                for label in cbar_blue.ax.get_yticklabels():
+                    label.set_fontsize(fontsize)
 
             # Add text for most significant interactions:
             # Get the highest fold changes:
@@ -4015,10 +4038,10 @@ class MuSIC_Interpreter(MuSIC):
                 i += 1
                 # Add to labels in descending half steps, with smaller steps taken if only visualizing the positive
                 # or the negative fold changes:
-                if plot_query_over_ref or plot_ref_over_query:
-                    step_size = 1.5
+                if plot_query_over_ref or plot_ref_over_query or plot_only_significant:
+                    step_size = 1.25
                 else:
-                    step_size = 2
+                    step_size = 1.5
                 current_value = max_log10_qval / (step_size**i)
             selected_rows = []
             for value in log10_qval_steps:
@@ -4049,13 +4072,13 @@ class MuSIC_Interpreter(MuSIC):
                 )
                 text_objects.append(t)
 
-            adjust_text(text_objects, ax=ax, arrowprops=dict(arrowstyle="-", color="black", lw=0.5))
+            adjust_text(text_objects, ax=ax, arrowprops=dict(arrowstyle="<|-", color="black", lw=1.0))
 
             y_label = r"$-log_{10}$(qval)" if "y_label" not in locals() else y_label
             ax.axhline(y=significance_cutoff, color="grey", linestyle="--", linewidth=1.5)
             ax.axvline(x=fold_change_cutoff, color="grey", linestyle="--", linewidth=1.5)
             ax.axvline(x=-fold_change_cutoff, color="grey", linestyle="--", linewidth=1.5)
-            ax.set_xlim(-max_distance * 1.1, max_distance * 1.1)
+            ax.set_xlim(max_neg * 1.1, max_pos * 1.1)
             ax.set_xticklabels(["{:.2f}".format(x) for x in ax.get_xticks()], fontsize=fontsize)
             ax.set_yticklabels(["{:.2f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
             ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
@@ -5161,6 +5184,231 @@ class MuSIC_Interpreter(MuSIC):
 
         self.adata.obsm[f"spatial_effect_sender_vf_{sig}_{target}"] = sending_vf
         self.adata.obsm[f"spatial_effect_receiver_vf_{sig}_{target}"] = receiving_vf
+
+    def visualize_effect_vf_3D(
+        self, interaction: str, target: str, bin_size: float = 5.0, save_path: Optional[str] = None
+    ):
+        """Visualize the directionality of the effect on target for a given interaction, overlaid onto the 3D spatial
+        plot. Can only be used for models that use ligand expression (:attr `mod_type` is 'ligand' or 'lr').
+
+        Args:
+            interaction: Interaction to incorporate into the visualization (e.g. "Igf1:Igf1r" for L:R model, "Igf1" for
+                ligand model)
+            target: Name of the target gene of interest. Will search key "spatial_effect_sender_vf_{interaction}_{
+                target}" to create vector field plot.
+            bin_size: In most cases, the number of cells is far larger than is convenient for vector plotting.
+                The direction and magnitude of the vector will be averaged over a bin. This arguments sets the size
+                of the bins for averaging vectors; each bin will have size "bin_size" along all two/three dimensions.
+            save_path: Path to save the figure to (will save as HTML file)
+        """
+        targets = pd.read_csv(
+            os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
+        )
+        if target not in targets.columns:
+            raise ValueError(f"Target {target} not found in this model's directory. Please provide a valid target.")
+        if interaction not in self.X_df.columns:
+            raise ValueError(f"Interaction {interaction} not found in this model's directory.")
+
+        # Check if chosen interaction is membrane-bound or secreted to determine which cells qualify as neighbors:
+        if self.mod_type == "lr":
+            ligand = interaction.split(":")[0]
+        elif self.mod_type == "ligand":
+            ligand = interaction
+        else:
+            raise ValueError("Invalid model type for this functionality. Must be 'ligand' or 'lr'.")
+
+        if hasattr(self, "remaining_cells"):
+            adata = self.adata[self.remaining_cells, :].copy()
+        else:
+            adata = self.adata.copy()
+        target_col = adata[:, target].X.toarray().flatten()
+
+        coords = adata.obsm[self.coords_key]
+        x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+
+        # Get the vector field for the given interaction:
+        sending_vf = adata.obsm[f"spatial_effect_sender_vf_{interaction}_{target}"]
+
+        # Use the connectivity graph and the length scale of the coordinate system to determine the scaling of the
+        # vectors:
+        matching_rows = self.lr_db[self.lr_db["from"] == ligand]
+        if (
+            matching_rows["type"].str.contains("Secreted Signaling").any()
+            or matching_rows["type"].str.contains("ECM-Receptor").any()
+        ):
+            if "spatial_connectivities_secreted" in adata.obsp.keys():
+                conn = adata.obsp["spatial_connectivities_secreted"]
+                pairwise_distances = adata.obsp["spatial_distances_secreted"]
+            else:
+                self.logger.info("Spatial graph not found, computing...")
+                adata = self.adata.copy()
+                _, adata = neighbors(
+                    adata,
+                    n_neighbors=self.n_neighbors_secreted,
+                    basis="spatial",
+                    spatial_key=self.coords_key,
+                    n_neighbors_method="ball_tree",
+                )
+                conn = adata.obsp["spatial_connectivities"]
+                pairwise_distances = adata.obsp["spatial_distances"]
+        else:
+            if "spatial_connectivities_membrane_bound" in adata.obsp.keys():
+                conn = self.adata.obsp["spatial_connectivities_membrane_bound"]
+                pairwise_distances = self.adata.obsp["spatial_distances_membrane_bound"]
+            else:
+                self.logger.info("Spatial graph not found, computing...")
+                adata = self.adata.copy()
+                _, adata = neighbors(
+                    adata,
+                    n_neighbors=self.n_neighbors_membrane_bound,
+                    basis="spatial",
+                    spatial_key=self.coords_key,
+                    n_neighbors_method="ball_tree",
+                )
+                conn = adata.obsp["spatial_connectivities"]
+                pairwise_distances = adata.obsp["spatial_distances"]
+
+        # Bin the space:
+        x_bins = np.arange(np.min(x), np.max(x) + bin_size, bin_size)
+        y_bins = np.arange(np.min(y), np.max(y) + bin_size, bin_size)
+        z_bins = np.arange(np.min(z), np.max(z) + bin_size, bin_size)
+
+        # Average vectors that fall into each bin:
+        average_bin_vectors = np.zeros((len(x_bins) - 1, len(y_bins) - 1, len(z_bins) - 1, 3))
+        for i in tqdm(range(len(x_bins) - 1), desc="Creating bins..."):
+            for j in range(len(y_bins) - 1):
+                for k in range(len(z_bins) - 1):
+                    # Get indices of cells that fall into this bin:
+                    x_idx = np.where((x >= x_bins[i]) & (x < x_bins[i + 1]))[0]
+                    y_idx = np.where((y >= y_bins[j]) & (y < y_bins[j + 1]))[0]
+                    z_idx = np.where((z >= z_bins[k]) & (z < z_bins[k + 1]))[0]
+                    bin_idx = np.intersect1d(np.intersect1d(x_idx, y_idx), z_idx)
+
+                    # Average vectors in this bin:
+                    if len(bin_idx) > 0:
+                        average_bin_vectors[i, j, k, :] = np.mean(sending_vf[bin_idx, :], axis=0)
+
+        # Scale vectors based on the length scale of the coordinate system:
+        max_distances = np.zeros(conn.shape[0])
+        for i in tqdm(range(conn.shape[0]), desc="Scaling vectors..."):
+            connected_samples = conn[i, :].nonzero()[1]
+            if len(connected_samples) > 0:
+                max_distances[i] = np.max(pairwise_distances[i, connected_samples])
+
+        average_max_distance = max_distances.mean()
+        scale_factor = average_max_distance
+        magnitudes = np.linalg.norm(average_bin_vectors, axis=3)
+        log_magnitudes = np.log(magnitudes + 1e-6)
+
+        # Normalize:
+        max_log_magnitude = np.max(log_magnitudes)
+        if max_log_magnitude > 0:
+            scale_ratio = scale_factor / max_log_magnitude
+            scaled_magnitudes = log_magnitudes * scale_ratio
+
+            for i in range(average_bin_vectors.shape[0]):
+                for j in range(average_bin_vectors.shape[1]):
+                    for k in range(average_bin_vectors.shape[2]):
+                        if magnitudes[i, j, k] > 0:
+                            average_bin_vectors[i, j, k, :] *= scaled_magnitudes[i, j, k] / magnitudes[i, j, k]
+
+        # Preparing data for plotting vectors:
+        x_vec, y_vec, z_vec, u, v, w = [], [], [], [], [], []
+        for i in range(len(x_bins) - 1):
+            for j in range(len(y_bins) - 1):
+                for k in range(len(z_bins) - 1):
+                    x_vec.append((x_bins[i] + x_bins[i + 1]) / 2)
+                    y_vec.append((y_bins[j] + y_bins[j + 1]) / 2)
+                    z_vec.append((z_bins[k] + z_bins[k + 1]) / 2)
+                    u.append(average_bin_vectors[i, j, k, 0])
+                    v.append(average_bin_vectors[i, j, k, 1])
+                    w.append(average_bin_vectors[i, j, k, 2])
+
+        # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
+        p997 = np.percentile(target_col, 99.7)
+        target_col[target_col > p997] = p997
+
+        # Separate visualization for zeros and nonzeros:
+        zeros = target_col == 0
+        nonzeros = target_col > 0
+
+        scatters_zeros = go.Scatter3d(
+            x=x[zeros],
+            y=y[zeros],
+            z=z[zeros],
+            mode="markers",
+            marker=dict(
+                color="#4B2991",
+                size=3,
+                opacity=0.5,
+            ),
+            showlegend=False,
+        )
+
+        scatters_nonzeros = go.Scatter3d(
+            x=x[nonzeros],
+            y=y[nonzeros],
+            z=z[nonzeros],
+            mode="markers",
+            marker=dict(
+                color="#FFDF00",
+                size=3,
+                opacity=0.9,
+            ),
+            showlegend=False,
+        )
+
+        quiver = go.Cone(
+            x=x_vec, y=y_vec, z=z_vec, u=u, v=v, w=w, colorscale="Reds", sizemode="scaled", sizeref=1.5, showscale=False
+        )
+
+        fig = go.Figure(data=[scatters_zeros, scatters_nonzeros, quiver])
+        title_dict = dict(
+            text=f"{interaction.title()} Effect on {target.title()}",
+            y=0.9,
+            yanchor="top",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=36),
+        )
+
+        fig.update_layout(
+            scene=dict(
+                xaxis=dict(
+                    showgrid=False,
+                    showline=False,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title="",
+                    showticklabels=False,
+                    ticks="",
+                ),
+                yaxis=dict(
+                    showgrid=False,
+                    showline=False,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title="",
+                    showticklabels=False,
+                    ticks="",
+                ),
+                zaxis=dict(
+                    showgrid=False,
+                    showline=False,
+                    linewidth=2,
+                    linecolor="black",
+                    backgroundcolor="white",
+                    title="",
+                    showticklabels=False,
+                    ticks="",
+                ),
+            ),
+            margin=dict(l=0, r=0, b=0, t=50),  # Adjust margins to minimize spacing
+            title=title_dict,
+        )
+        fig.write_html(save_path)
 
     # ---------------------------------------------------------------------------------------------------
     # Constructing gene regulatory networks
