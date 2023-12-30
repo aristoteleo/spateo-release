@@ -740,6 +740,8 @@ class MuSIC_Interpreter(MuSIC):
 
         # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
         p997 = np.percentile(target_interaction_coef.values, 99.7)
+        if p997 == 0:
+            p997 = np.percentile(target_interaction_coef.values, 99.9)
         target_interaction_coef[target_interaction_coef > p997] = p997
         plot_vals = target_interaction_coef.values
         scatter_effect = go.Scatter3d(
@@ -5339,8 +5341,8 @@ class MuSIC_Interpreter(MuSIC):
             mode="markers",
             marker=dict(
                 color="#4B2991",
-                size=3,
-                opacity=0.5,
+                size=2.5,
+                opacity=0.15,
             ),
             showlegend=False,
         )
@@ -5359,7 +5361,16 @@ class MuSIC_Interpreter(MuSIC):
         )
 
         quiver = go.Cone(
-            x=x_vec, y=y_vec, z=z_vec, u=u, v=v, w=w, colorscale="Reds", sizemode="scaled", sizeref=1.5, showscale=False
+            x=x_vec,
+            y=y_vec,
+            z=z_vec,
+            u=u,
+            v=v,
+            w=w,
+            colorscale="Reds",
+            sizemode="scaled",
+            sizeref=1.5,
+            showscale=False,
         )
 
         fig = go.Figure(data=[scatters_zeros, scatters_nonzeros, quiver])
