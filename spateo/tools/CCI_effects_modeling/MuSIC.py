@@ -3409,7 +3409,7 @@ class MuSIC:
             if self.mod_type == "downstream" and self.bw_fixed:
                 if "X_pca" not in self.adata.obsm_keys():
                     self.bw = 0.3
-            else:
+            elif self.mod_type == "downstream" and not self.bw_fixed:
                 self.bw = int(0.005 * self.n_samples)
 
             if self.bw is not None:

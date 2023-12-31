@@ -1257,6 +1257,370 @@ class MuSIC_Interpreter(MuSIC):
         )
         fig.write_html(save_path)
 
+    def gene_expression_heatmap(
+        self,
+        use_ligands: bool = False,
+        use_receptors: bool = False,
+        use_target_genes: bool = False,
+        genes: Optional[List[str]] = None,
+        position_key: str = "spatial",
+        coord_column: Optional[Union[int, str]] = None,
+        reprocess: bool = False,
+        neatly_arrange_y: bool = True,
+        title: Optional[str] = None,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = "magma",
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+    ):
+        """Visualize the distribution of gene expression across cells in the spatial coordinates of cells; provides
+        an idea of the simultaneous relative positions/patternings of different genes.
+
+        Args:
+            use_ligands: Set True to use ligands as the genes to visualize. If True, will ignore "genes" argument.
+                "ligands_expr" file must be present in the model's directory.
+            use_receptors: Set True to use receptors as the genes to visualize. If True, will ignore "genes" argument.
+                "receptors_expr" file must be present in the model's directory.
+            use_target_genes: Set True to use target genes as the genes to visualize. If True, will ignore "genes"
+                argument. "targets" file must be present in the model's directory.
+            genes: Optional list of genes to visualize. If "use_ligands", "use_receptors", and "use_target_genes" are
+                all False, this must be given.
+            position_key: Key in adata.obs or adata.obsm that provides a relative indication of the position of
+                cells. i.e. spatial coordinates. Defaults to "spatial". For each value in the position array (each
+                coordinate, each category), multiple cells must have the same value.
+            coord_column: Optional, only used if "position_key" points to an entry in .obsm. In this case,
+                this is the index or name of the column to be used to provide the positional context. Can also
+                provide "xy", "yz", "xz", "-xy", "-yz", "-xz" to draw a line between the two coordinate axes. "xy"
+                will extend the new axis in the direction of increasing x and increasing y starting from x=0 and y=0 (or
+                min. x/min. y), "-xy" will extend the new axis in the direction of decreasing x and increasing y
+                starting from x=minimum x and y=maximum y, and so on.
+            reprocess: Set to True to reprocess the data and overwrite the existing files. Use if the genes to
+                visualize have changed compared to the saved file (if existing), e.g. if "use_ligands" is True when
+                the initial analysis used "use_target_genes".
+            neatly_arrange_y: Set True to order the y-axis in terms of how early along the position axis the max
+                z-scores for each row occur in. Used for a more uniform plot where similarly patterned
+                interaction-target pairs are grouped together. If False, will sort this axis by the identity of the
+                interaction (i.e. all "Fgf1" rows will be grouped together).
+            title: Optional, can be used to provide title for plot
+            fontsize: Size of font for x and y labels.
+            figsize: Size of figure.
+            cmap: Colormap to use. Options: Any divergent matplotlib colormap.
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+        """
+        logger = lm.get_main_logger()
+
+        if not use_ligands and not use_receptors and not use_target_genes and genes is None:
+            raise ValueError(
+                "Please set either 'use_ligands', 'use_receptors', or 'use_target_genes' to True, or provide a list "
+                "of genes to visualize."
+            )
+
+        if use_ligands:
+            if not os.path.exists(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "ligands_expr.csv")
+            ):
+                raise FileNotFoundError("ligands_expr.csv not found in this model's directory.")
+
+            expr_df = pd.read_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "ligands_expr.csv"), index_col=0
+            )
+            genes = expr_df.columns
+            file_id = "ligand_expression"
+        elif use_receptors:
+            if not os.path.exists(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "receptors_expr.csv")
+            ):
+                raise FileNotFoundError("receptors_expr.csv not found in this model's directory.")
+            expr_df = pd.read_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "receptors_expr.csv"), index_col=0
+            )
+            genes = expr_df.columns
+            file_id = "receptor_expression"
+        elif use_target_genes:
+            if not os.path.exists(os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv")):
+                raise FileNotFoundError("targets.csv not found in this model's directory.")
+            expr_df = pd.read_csv(
+                os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
+            )
+            genes = expr_df.columns
+            file_id = "target_gene_expression"
+        else:
+            expr_df = pd.DataFrame(self.adata[:, genes].X.toarray(), index=self.adata.obs_names, columns=genes)
+            file_id = "expression"
+
+        if hasattr(self, "remaining_cells"):
+            adata = self.adata[self.remaining_cells, :].copy()
+        else:
+            adata = self.adata.copy()
+
+        if position_key not in self.adata.obsm.keys() and position_key not in self.adata.obs.keys():
+            raise ValueError(
+                f"Position key {position_key} not found in adata.obsm or adata.obs. Please provide a valid key."
+            )
+
+        if position_key in self.adata.obsm.keys():
+            if coord_column in ["xy", "yz", "xz", "-xy", "-yz", "-xz"]:
+                self.adata = create_new_coordinate(self.adata, position_key, coord_column)
+                pos = self.adata.obs[f"{coord_column} Coordinate"]
+                x_label = f"Relative position along custom {coord_column} axis"
+                if title is None:
+                    title = f"Signaling effect distribution along {coord_column} axis"
+                save_id = f"{coord_column}_axis"
+
+            else:
+                if coord_column is not None and isinstance(coord_column, str):
+                    if not isinstance(self.adata.obsm[position_key], pd.DataFrame):
+                        raise ValueError(
+                            f"Array stored at position key {position_key} has no column names; provide the column "
+                            f"index."
+                        )
+                    else:
+                        pos = self.adata.obsm[position_key][coord_column]
+                elif coord_column is not None and isinstance(coord_column, int):
+                    if isinstance(self.adata.obsm[position_key], pd.DataFrame):
+                        pos = self.adata.obsm[position_key].iloc[:, coord_column]
+                        x_label = f"Relative position along {coord_column}"
+                        if title is None:
+                            title = f"Signaling effect distribution along {coord_column}"
+                        save_id = coord_column
+                    else:
+                        pos = pd.Series(self.adata.obsm[position_key][:, coord_column], index=self.adata.obs_names)
+                        if coord_column == 0:
+                            x_label = "Relative position along X"
+                            if title is None:
+                                title = "Signaling effect distribution along X"
+                            save_id = "x_axis"
+                        elif coord_column == 1:
+                            x_label = "Relative position along Y"
+                            if title is None:
+                                title = "Signaling effect distribution along Y"
+                            save_id = "y_axis"
+                        elif coord_column == 2:
+                            x_label = "Relative position along Z"
+                            if title is None:
+                                title = "Signaling effect distribution along Z"
+                            save_id = "z_axis"
+                elif self.adata.obsm[position_key].shape[1] != 1:
+                    raise ValueError(
+                        f"Array stored at position key {position_key} has more than one column; provide the column "
+                        f"index."
+                    )
+                else:
+                    pos = (
+                        pd.Series(self.adata.obsm[position_key].flatten(), index=self.adata.obs_names)
+                        if isinstance(self.adata.obsm[position_key], np.ndarray)
+                        else self.adata.obsm[position_key]
+                    )
+                    x_label = "Relative position"
+                    if title is None:
+                        title = f"Signaling effect distribution along axis given by {position_key} key"
+                    save_id = position_key
+        else:
+            pos = self.adata.obs[position_key]
+            x_label = "Relative position"
+            if title is None:
+                title = f"Signaling effect distribution along axis given by {position_key} key"
+            save_id = position_key
+        # If position array is numerical, there may not be an exact match- convert the data type to integer:
+        if pos.dtype == float:
+            pos = pos.astype(int)
+
+        if save_show_or_return in ["save", "both", "all"]:
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
+
+        output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+
+        # Use the saved name for the AnnData object to define part of the name of the saved file:
+        base_name = os.path.basename(self.adata_path)
+        adata_id = os.path.splitext(base_name)[0]
+
+        # If divergent colormap is specified, center the colormap at 0:
+        divergent_cmaps = [
+            "seismic",
+            "coolwarm",
+            "bwr",
+            "RdBu",
+            "RdGy",
+            "PuOr",
+            "PiYG",
+            "PRGn",
+            "BrBG",
+            "RdYlBu",
+            "RdYlGn",
+            "Spectral",
+        ]
+
+        # Check for existing dataframe:
+        if (
+            os.path.exists(os.path.join(output_folder, f"{adata_id}_distribution_{file_id}_along_{save_id}.csv"))
+            and not reprocess
+        ):
+            to_plot = pd.read_csv(
+                os.path.join(output_folder, f"{adata_id}_distribution_{file_id}_along_{save_id}.csv"),
+                index_col=0,
+            )
+        else:
+            # For each gene, compute the mean expression:
+            mean_expr = pd.Series(index=genes)
+            for g in genes:
+                mean_expr[g] = expr_df[g].mean()
+
+            # For each cell, compute the fold change over the average for each combination:
+            all_fc = pd.DataFrame(index=self.adata.obs_names, columns=genes)
+            for g in tqdm(genes, desc="Computing fold changes for each gene..."):
+                g_expr = expr_df[g]
+                all_fc[g] = g_expr / mean_expr[g]
+            # Log fold change:
+            all_fc = np.log1p(all_fc)
+
+            # z-score the fold change values:
+            all_fc = all_fc.apply(scipy.stats.zscore, axis=0)
+            all_fc["pos"] = pos
+            all_fc_coord_sorted = all_fc.sort_values(by="pos")
+            # Mean z-score at each coordinate position:
+            all_fc_coord_sorted = all_fc_coord_sorted.groupby("pos").mean()
+            # Smooth in the case of dropouts:
+            all_fc_coord_sorted = all_fc_coord_sorted.rolling(3, center=True, min_periods=1).mean()
+            # For each unique value in 'pos', find the top genes with the highest mean z-score
+            top_genes = all_fc_coord_sorted.apply(lambda x: x.nlargest(30).index.tolist(), axis=1)
+            # Find interesting interaction effects by position- get features that are in the top features for at least
+            # five consecutive positions:
+            consecutive_counts = {g: 0 for g in genes}
+            genes_of_interest = set()
+
+            for pos in top_genes.index:
+                for g in top_genes[pos]:
+                    consecutive_counts[g] += 1
+                    if consecutive_counts[g] >= 5:
+                        genes_of_interest.add(g)
+                for g in genes:
+                    if g not in top_genes[pos]:
+                        consecutive_counts[g] = 0
+
+            to_plot = all_fc_coord_sorted[genes_of_interest]
+            if to_plot.index.is_numeric():
+                # Minmax scale to normalize positional context:
+                to_plot.index = (to_plot.index - to_plot.index.min()) / (to_plot.index.max() - to_plot.index.min())
+            to_plot = to_plot.T  # so that the features are labeled along the y-axis
+
+        # Sort by "heat" if applicable (i.e. in order roughly determined by how early along the relative position
+        # the highest z-scores occur in for each interaction-target pair):
+        if neatly_arrange_y:
+            logger.info("Sorting by position of enrichment along axis...")
+            column_indices = np.tile(np.arange(len(to_plot.columns)), (len(to_plot), 1))  # Column indices array
+            # Look only at the indices corresponding to the highest changes:
+            percentile_95 = to_plot.apply(
+                lambda row: np.percentile(row[row > 0], 95) if row[row > 0].size > 0 else 0, axis=1
+            )
+            # Create a DataFrame that replicates the shape of to_plot
+            weights_matrix = to_plot.gt(percentile_95, axis=0) * to_plot
+
+            weighted_sum = np.sum(weights_matrix.values * column_indices, axis=1)
+            total_weight = np.sum(weights_matrix.values, axis=1)
+            weighted_avg = pd.Series(np.where(total_weight != 0, weighted_sum / total_weight, 0), index=to_plot.index)
+
+            top_cols_sorted = weighted_avg.sort_values().index
+            to_plot = to_plot.loc[top_cols_sorted]
+
+        flattened = to_plot.values.flatten()
+        flattened_series = pd.Series(flattened)
+        percentile_95 = flattened_series.quantile(0.95)
+        max_val = percentile_95
+        if figsize is None:
+            m = len(to_plot) * 40 / 200
+            n = 8
+            figsize = (n, m)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+
+        if fontsize is None:
+            fontsize = rcParams.get("font.size")
+
+        # Format the numerical columns for the plot:
+        # First check whether the columns contain duplicates:
+        if all(isinstance(name, str) for name in to_plot.columns):
+            if any([name.count(".") > 1 for name in to_plot.columns]):
+                to_plot.columns = [".".join(name.split(".")[:2]) for name in to_plot.columns]
+            to_plot.columns = [float(col) for col in to_plot.columns]
+        col_series = pd.Series(to_plot.columns)
+        if set(col_series) != len(col_series):
+            unique_values, counts = np.unique(col_series, return_counts=True)
+            # Iterate through unique values
+            for value, count in zip(unique_values, counts):
+                if count > 1:
+                    # Find indices of the repeated value
+                    indices = col_series[col_series == value].index
+
+                    # Calculate step size
+                    if value == unique_values[-1]:
+                        next_value = value + (value - unique_values[-2])
+                    else:
+                        next_index = np.where(unique_values == value)[0][0] + 1
+                        next_value = unique_values[next_index]
+                    step = (next_value - value) / count
+
+                    # Update the values
+                    for i in range(count):
+                        col_series.iloc[indices[i]] = value + step * i
+            to_plot.columns = col_series.values
+
+        if all(isinstance(name, float) for name in to_plot.columns):
+            to_plot.columns = [f"{float(col):.3f}" for col in to_plot.columns]
+            to_plot.columns = [str(col) for col in to_plot.columns]
+        m = sns.heatmap(to_plot, vmin=-max_val, vmax=max_val, ax=ax, cmap=cmap)
+
+        cbar = m.collections[0].colorbar
+        cbar.set_label("Z-score", fontsize=fontsize * 1.5, labelpad=10)
+        # Adjust colorbar tick font size
+        cbar.ax.tick_params(labelsize=fontsize * 1.25)
+        cbar.ax.set_aspect(np.min([len(to_plot), 70]))
+
+        ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
+        ax.set_ylabel("Gene", fontsize=fontsize * 1.25)
+        ax.tick_params(axis="x", labelsize=fontsize)
+        ax.tick_params(axis="y", labelsize=fontsize)
+        ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
+
+        if not os.path.exists(os.path.join(output_folder, f"{adata_id}_distribution_{file_id}_along_{save_id}.csv")):
+            to_plot.to_csv(
+                os.path.join(
+                    output_folder,
+                    f"{adata_id}_distribution_{file_id}_along_{save_id}.csv",
+                )
+            )
+
+        if save_show_or_return in ["save", "both", "all"]:
+            save_kwargs["ext"] = "png"
+            save_kwargs["dpi"] = 300
+            if "figure_folder" in locals():
+                save_kwargs["path"] = figure_folder
+            # Save figure:
+            save_return_show_fig_utils(
+                save_show_or_return=save_show_or_return,
+                show_legend=False,
+                background="white",
+                prefix=f"distribution_{file_id}_along_{save_id}",
+                save_kwargs=save_kwargs,
+                total_panels=1,
+                fig=fig,
+                axes=ax,
+                return_all=False,
+                return_all_list=None,
+            )
+
     def effect_distribution_heatmap(
         self,
         target_subset: Optional[List[str]] = None,
