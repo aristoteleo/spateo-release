@@ -12,7 +12,7 @@ from gpytorch.likelihoods import GaussianLikelihood
 from ...alignment.methods import _chunk, _unsqueeze
 from ...logging import logger_manager as lm
 
-from interpolation_gaussianprocesses import Dataset, GPModel, gp_train
+from .interpolation_gaussianprocesses import Dataset, GPModel, gp_train
 
 class BatchIndependentMultitaskGPModel(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood):

@@ -1,5 +1,5 @@
-from gp_dataloader import Dataset
-from tqdm import rqdm
+from .gp_dataloader import Dataset
+from tqdm import tqdm
 
 def gp_train(
     model,

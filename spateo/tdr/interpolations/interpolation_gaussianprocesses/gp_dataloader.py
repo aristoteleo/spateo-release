@@ -1,9 +1,11 @@
+from typing import List, Optional, Tuple, Union
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 import scanpy as sc
 import torch
 from scipy.sparse import issparse
 from ....logging import logger_manager as lm
+from anndata import AnnData
 
 # class Dataset(torch.utils.data.Dataset):
 #     def __init__(
