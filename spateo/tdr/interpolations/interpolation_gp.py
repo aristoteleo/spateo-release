@@ -7,10 +7,12 @@ import torch
 from anndata import AnnData
 from numpy import ndarray
 from scipy.sparse import issparse
+from gpytorch.likelihoods import GaussianLikelihood
 
 from ...alignment.methods import _chunk, _unsqueeze
 from ...logging import logger_manager as lm
 
+from interpolation_gaussianprocesses import Dataset, GPModel, gp_train
 
 class BatchIndependentMultitaskGPModel(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood):
@@ -218,3 +220,87 @@ def gp_interpolation(
 
     lm.main_finish_progress(progress_name="GaussianProcessInterpolation")
     return interp_adata
+
+def gp_interpolation_svi(
+    source_adata: AnnData,
+    target_points: Optional[ndarray] = None,
+    keys: Union[str, list] = None,
+    spatial_key: str = "spatial",
+    layer: str = "X",
+    training_iter: int = 50,
+    batch_size: int = 1024,
+    device: str = "cpu",
+    inducing_num: int = 512,
+    normalize_spatial: bool = True,
+) -> AnnData:
+    """
+    Learn a continuous mapping from space to gene expression pattern with the Gaussian Process method.
+
+    Args:
+        source_adata: AnnData object that contains spatial (numpy.ndarray) in the `obsm` attribute.
+        target_points: The spatial coordinates of new data point. If target_coords is None, generate new points based on grid_num.
+        keys: Gene list or info list in the `obs` attribute whose interpolate expression across space needs to learned.
+        spatial_key: The key in ``.obsm`` that corresponds to the spatial coordinate of each bucket.
+        layer: If ``'X'``, uses ``.X``, otherwise uses the representation given by ``.layers[layer]``.
+        training_iter:  Max number of iterations for training.
+        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
+
+    Returns:
+        interp_adata: an anndata object that has interpolated expression.
+    """
+    # Training
+    
+    # Setup the dataset
+    train_loader, inducing_points, normalize_param = Dataset(
+        adata=source_adata, 
+        keys=keys,
+        spatial_key=spatial_key,
+        batch_size=batch_size, 
+        layer=layer,
+        inducing_num=inducing_num,
+        normalize_spatial=normalize_spatial,
+    )
+    # Setup the models
+    gp_model = GPModel(inducing_points=inducing_points)
+    likelihood = GaussianLikelihood()
+    # Train the gp model
+    gp_train(
+        model=gp_model,
+        likelihood=likelihood,
+        train_loader=train_loader,
+        train_epochs=training_iter,
+    )
+    
+    gp_model.eval()
+    likelihood.eval()
+    
+    # Inference / Interpolation
+    target_info_data = gp_interpolate(
+        model=gp_model,
+        test_loader=train_loader,
+        normalize_param=normalize_param,
+    )
+    
+    # Output interpolated anndata
+    lm.main_info("Creating an adata object with the interpolated expression...")
+
+    obs_keys = GPR.info_keys["obs_keys"]
+    if len(obs_keys) != 0:
+        obs_data = target_info_data[:, : len(obs_keys)]
+        obs_data = pd.DataFrame(obs_data, columns=obs_keys)
+
+    var_keys = GPR.info_keys["var_keys"]
+    if len(var_keys) != 0:
+        X = target_info_data[:, len(obs_keys) :]
+        var_data = pd.DataFrame(index=var_keys)
+
+    interp_adata = AnnData(
+        X=X if len(var_keys) != 0 else None,
+        obs=obs_data if len(obs_keys) != 0 else None,
+        obsm={spatial_key: np.asarray(target_points)},
+        var=var_data if len(var_keys) != 0 else None,
+    )
+
+    lm.main_finish_progress(progress_name="GaussianProcessInterpolation")
+    return interp_adata
+    
