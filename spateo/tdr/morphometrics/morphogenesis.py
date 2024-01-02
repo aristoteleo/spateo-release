@@ -13,7 +13,7 @@ from spateo.alignment import get_optimal_mapping_relationship
 from spateo.alignment.methods import paste_pairwise_align
 from spateo.logging import logger_manager as lm
 from spateo.tdr.interpolations import get_X_Y_grid
-
+from .GP_velocity_field import GPVectorField
 
 def cell_directions(
     adataA: AnnData,
@@ -237,6 +237,32 @@ def morphofield_X(
     lm.main_finish_progress(progress_name="morphofield")
     return vf_dict
 
+def morphofield_morpho(
+    adata: AnnData,
+    X: np.ndarray,
+    vf_key: str,
+    NX: Optional[np.ndarray] = None,
+    grid_num: Optional[List[int]] = None,
+    
+) -> dict:
+    vf_dict = adata.uns[vf_key]
+    _method = adata.uns[vf_key]["method"]
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=_method)
+    V = vector_field_class.compute_velocity(X=X)
+    vf_dict["X"] = X
+    vf_dict["V"] = V
+    if not (NX is None):
+        predict_X = NX
+    else:
+        if grid_num is None:
+            grid_num = [50, 50, 50]
+            lm.main_warning(f"grid_num and NX are both None, using `grid_num = [50,50,50]`.", indent_level=1)
+        _, _, Grid, grid_in_hull = get_X_Y_grid(X=X.copy(), Y=V.copy(), grid_num=grid_num)
+        predict_X = Grid
+    vf_dict["grid"] = predict_X
+    vf_dict["grid_V"] = vector_field_class.compute_velocity(X=predict_X)
+    return vf_dict
+
 
 def morphofield(
     adata: AnnData,
@@ -255,7 +281,7 @@ def morphofield(
     **kwargs,
 ) -> Optional[AnnData]:
     """
-    Calculating and predicting the vector field during development by the Kernel method (sparseVFC).
+    Calculating and predicting the vector field during development by the Gaussian process method or kernel method (sparseVFC).
 
     Args:
         adata: AnnData object that contains the cell coordinates of the two states after alignment.
@@ -311,27 +337,46 @@ def morphofield(
     """
 
     adata = adata if inplace else adata.copy()
-    adata.uns[key_added] = morphofield_X(
-        X=np.asarray(adata.obsm[spatial_key], dtype=float),
-        V=np.asarray(adata.obsm[V_key], dtype=float),
-        NX=NX,
-        grid_num=grid_num,
-        M=M,
-        lambda_=lambda_,
-        lstsq_method=lstsq_method,
-        min_vel_corr=min_vel_corr,
-        restart_num=restart_num,
-        restart_seed=restart_seed,
-        **kwargs,
-    )
+    if key_added in adata.uns_keys() and adata.uns[key_added]["method"] == "morpho":
+        adata.uns[key_added]["X"] = adata.obsm[spatial_key]
+        adata.uns[key_added]["V"] = adata.obsm[spatial_key]
+        adata.uns[key_added] = morphofield_morpho(
+            adata=adata,
+            X=np.asarray(adata.obsm[spatial_key], dtype=float),
+            NX=NX,
+            grid_num=grid_num,
+            vf_key=key_added,
+        ) 
+    else:
+        adata.uns[key_added] = morphofield_X(
+            X=np.asarray(adata.obsm[spatial_key], dtype=float),
+            V=np.asarray(adata.obsm[V_key], dtype=float),
+            NX=NX,
+            grid_num=grid_num,
+            M=M,
+            lambda_=lambda_,
+            lstsq_method=lstsq_method,
+            min_vel_corr=min_vel_corr,
+            restart_num=restart_num,
+            restart_seed=restart_seed,
+            **kwargs,
+        )
 
     return None if inplace else adata
 
 
-def _generate_vf_class(adata: AnnData, vf_key: str):
-    from dynamo.vectorfield.scVectorField import SvcVectorField
-
-    vector_field_class = SvcVectorField()
+def _generate_vf_class(adata: AnnData, vf_key: str, method: str='morpho'):
+    if method == 'morpho':
+        from .GP_velocity_field import GPVectorField
+        vector_field_class = GPVectorField()
+        vector_field_class.from_adata(adata, basis=None, vf_key=vf_key)
+    elif method == 'sparsevfc':
+        from dynamo.vectorfield.scVectorField import SvcVectorField
+        vector_field_class = SvcVectorField()
+    else:
+        raise Exception(
+            f"Method should be ``morpho'' or ``sparsevfc''"
+        )
     vector_field_class.from_adata(adata, basis=None, vf_key=vf_key)
     return vector_field_class
 
@@ -355,7 +400,8 @@ def morphofield_velocity(
         An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obsm`` attribute which contains velocities.
     """
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+    _method = adata.uns[vf_key]["method"]
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=_method)
 
     init_states = adata.uns[vf_key]["X"]
     adata.obsm[key_added] = vector_field_class.func(init_states)
@@ -397,7 +443,8 @@ def morphofield_curvature(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+    _method = adata.uns[vf_key]["method"]
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=_method)
 
     X, V = vector_field_class.get_data()
     adata.obs[key_added], adata.obsm[key_added] = vector_field_class.compute_curvature(
@@ -436,7 +483,8 @@ def morphofield_acceleration(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+    _method = adata.uns[vf_key]["method"]
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=_method)
 
     X, V = vector_field_class.get_data()
     adata.obs[key_added], adata.obsm[key_added] = vector_field_class.compute_acceleration(X=X, method=method)
@@ -473,7 +521,8 @@ def morphofield_curl(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+    _method = adata.uns[vf_key]["method"]
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=_method)
 
     X, V = vector_field_class.get_data()
     curl = vector_field_class.compute_curl(X=X, method=method)
@@ -514,7 +563,8 @@ def morphofield_torsion(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+    _method = adata.uns[vf_key]["method"]
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=_method)
 
     X, V = vector_field_class.get_data()
     torsion_mat = vector_field_class.compute_torsion(X=X, method=method)
@@ -559,7 +609,8 @@ def morphofield_divergence(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+    _method = adata.uns[vf_key]["method"]
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=_method)
 
     X, V = vector_field_class.get_data()
     adata.obs[key_added] = vector_field_class.compute_divergence(X=X, method=method, vectorize_size=vectorize_size)
@@ -596,7 +647,8 @@ def morphofield_jacobian(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key)
+    _method = adata.uns[vf_key]["method"]
+    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=_method)
     X, V = vector_field_class.get_data()
     Jac_func = vector_field_class.get_Jacobian(method=method)
 
@@ -672,18 +724,40 @@ def morphopath(
     if f"X_{key_added}" not in fate_adata.obsm_keys():
         fate_adata.obsm[f"X_{key_added}"] = fate_adata.uns[f"VecFld_{key_added}"]["X"]
 
-    fate(
-        fate_adata,
-        init_cells=fate_adata.obs_names.tolist(),
-        basis=key_added,
-        layer=layer,
-        interpolation_num=interpolation_num,
-        t_end=t_end,
-        direction=direction,
-        average=average,
-        cores=cores,
-        **kwargs,
-    )
+    method = adata.uns[vf_key]["method"]
+    if method == "morpho":
+        vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=method)
+        VecFld_true = lambda x: vector_field_class.compute_velocity(X=x)
+        fate(
+            fate_adata,
+            init_cells=fate_adata.obs_names.tolist(),
+            basis=key_added,
+            layer=layer,
+            interpolation_num=interpolation_num,
+            t_end=t_end,
+            direction=direction,
+            average=average,
+            cores=cores,
+            VecFld_true=VecFld_true,
+            **kwargs,
+        )
+    elif method == 'sparsevfc':
+        fate(
+            fate_adata,
+            init_cells=fate_adata.obs_names.tolist(),
+            basis=key_added,
+            layer=layer,
+            interpolation_num=interpolation_num,
+            t_end=t_end,
+            direction=direction,
+            average=average,
+            cores=cores,
+            **kwargs,
+        )
+    else:
+        raise Exception(
+            f"Method should be ``morpho'' or ``sparsevfc''"
+        )
     adata.uns[key_added] = fate_adata.uns[f"fate_{key_added}"].copy()
 
     cells_states = adata.uns[key_added]["prediction"]
