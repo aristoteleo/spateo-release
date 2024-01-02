@@ -6,6 +6,7 @@ from .alignment import (
     get_optimal_mapping_relationship,
     grid_deformation,
     morpho_align,
+    morpho_align_sparse,
     morpho_align_ref,
     paste_align,
     paste_align_ref,

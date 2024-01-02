@@ -1,4 +1,5 @@
 from .morpho import BA_align
+from .morpho_sparse import BA_align_sparse
 from .paste import (
     generalized_procrustes_analysis,
     paste_center_align,

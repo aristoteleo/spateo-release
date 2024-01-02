@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 from anndata import AnnData
 
-from .methods import BA_align, empty_cache
+from .methods import BA_align, BA_align_sparse, empty_cache
 from .transform import BA_transform, BA_transform_and_assignment
 from .utils import _iteration, downsampling
 
@@ -94,6 +94,94 @@ def morpho_align(
             modelB.obsm[key_added] = modelB.obsm["Rigid_align_spatial"]
         elif mode == "SN-N":
             modelB.obsm[key_added] = modelB.obsm["Nonrigid_align_spatial"]
+        pis.append(P)
+        sigma2s.append(sigma2)
+        empty_cache(device=device)
+
+    return align_models, pis, sigma2s
+
+def morpho_align_sparse(
+    models: List[AnnData],
+    layer: str = "X",
+    genes: Optional[Union[list, np.ndarray]] = None,
+    spatial_key: str = "spatial",
+    key_added: str = "align_spatial",
+    iter_key_added: Optional[str] = "iter_spatial",
+    vecfld_key_added: str = "VecFld_morpho",
+    mode: Literal["SN-N", "SN-S"] = "SN-S",
+    dissimilarity: str = "kl",
+    max_iter: int = 100,
+    SVI_mode: bool = True,
+    dtype: str = "float32",
+    device: str = "cpu",
+    verbose: bool = True,
+    **kwargs,
+) -> Tuple[List[AnnData], List[np.ndarray], List[np.ndarray]]:
+    """
+    Continuous alignment of spatial transcriptomic coordinates based on Morpho.
+
+    Args:
+        models: List of models (AnnData Object).
+        layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
+        genes: Genes used for calculation. If None, use all common genes for calculation.
+        spatial_key: The key in ``.obsm`` that corresponds to the raw spatial coordinate.
+        key_added: ``.obsm`` key under which to add the aligned spatial coordinate.
+        iter_key_added: ``.uns`` key under which to add the result of each iteration of the iterative process. If ``iter_key_added``  is None, the results are not saved.
+        vecfld_key_added: The key that will be used for the vector field key in ``.uns``. If ``vecfld_key_added`` is None, the results are not saved.
+        mode: The method of alignment. Available ``mode`` are: ``'SN-N'``, and ``'SN-S'``.
+
+                * ``'SN-N'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a non-rigid aligned result;
+                * ``'SN-S'``: use both rigid and non-rigid alignment to keep the overall shape unchanged, while including local non-rigidity, and finally returns a rigid aligned result. The non-rigid is used here to solve the optimal mapping, thus returning a more accurate rigid transformation. The default is ``'SN-S'``.
+        dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
+        max_iter: Max number of iterations for morpho alignment.
+        SVI_mode: Whether to use stochastic variational inferential (SVI) optimization strategy.
+        dtype: The floating-point number type. Only ``float32`` and ``float64``.
+        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
+        verbose: If ``True``, print progress updates.
+        **kwargs: Additional parameters that will be passed to ``BA_align`` function.
+
+    Returns:
+        align_models: List of models (AnnData Object) after alignment.
+        pis: List of pi matrices.
+        sigma2s: List of sigma2.
+    """
+
+    align_models = [model.copy() for model in models]
+    for m in align_models:
+        m.obsm[key_added] = m.obsm[spatial_key]
+    for m in align_models:
+        m.obsm[key_added+"_rigid"] = m.obsm[spatial_key]
+    for m in align_models:
+        m.obsm[key_added+"_nonrigid"] = m.obsm[spatial_key]
+
+    pis, sigma2s = [], []
+    progress_name = f"Models alignment based on morpho, mode: {mode}."
+    for i in _iteration(n=len(align_models) - 1, progress_name=progress_name, verbose=True):
+        modelA = align_models[i]
+        modelB = align_models[i + 1]
+        _, P, sigma2 = BA_align_sparse(
+            sampleA=modelA,
+            sampleB=modelB,
+            genes=genes,
+            spatial_key=key_added,
+            key_added=key_added,
+            iter_key_added=iter_key_added,
+            vecfld_key_added=vecfld_key_added,
+            layer=layer,
+            dissimilarity=dissimilarity,
+            max_iter=max_iter,
+            dtype=dtype,
+            device=device,
+            inplace=True,
+            verbose=verbose,
+            SVI_mode=SVI_mode,
+            **kwargs,
+        )
+        if mode == "SN-S":
+            modelB.obsm[key_added] = modelB.obsm[key_added+"_rigid"]
+        elif mode == "SN-N":
+            modelB.obsm[key_added] = modelB.obsm[key_added+"_nonrigid"]
+        modelB.uns[vecfld_key_added]["X"] = modelB.obsm[spatial_key]
         pis.append(P)
         sigma2s.append(sigma2)
         empty_cache(device=device)
