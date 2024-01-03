@@ -3,15 +3,8 @@ import torch
 from tqdm import tqdm
 
 
-def gp_train(
-    model,
-    likelihood,
-    train_loader,
-    train_epochs,
-    method,
-    N,
-):
-    if torch.cuda.is_available():
+def gp_train(model, likelihood, train_loader, train_epochs, method, N, device):
+    if torch.cuda.is_available() and device != "cpu":
         model = model.cuda()
         likelihood = likelihood.cuda()
 

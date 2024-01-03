@@ -134,6 +134,7 @@ class Imputation_GPR:
             train_epochs=training_iter,
             method=self.method,
             N=self.N,
+            device=self.device,
         )
 
         self.GPR_model.eval()
