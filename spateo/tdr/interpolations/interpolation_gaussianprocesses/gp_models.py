@@ -1,3 +1,4 @@
+import gpytorch
 from gpytorch.models import ApproximateGP, ExactGP
 from gpytorch.variational import CholeskyVariationalDistribution
 from gpytorch.variational import VariationalStrategy
@@ -6,7 +7,7 @@ class Approx_GPModel(ApproximateGP):
     def __init__(self, inducing_points):
         variational_distribution = CholeskyVariationalDistribution(inducing_points.size(0))
         variational_strategy = VariationalStrategy(self, inducing_points, variational_distribution, learn_inducing_locations=True)
-        super(GPModel, self).__init__(variational_strategy)
+        super(Approx_GPModel, self).__init__(variational_strategy)
         self.mean_module = gpytorch.means.ConstantMean()
         self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
 

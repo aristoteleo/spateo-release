@@ -107,7 +107,8 @@ def Dataset(
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
     inducing_idx = np.random.choice(train_x.shape[0], inducing_num) if train_x.shape[0] > inducing_num else np.arange(train_x.shape[0])
     inducing_points = train_x[inducing_idx,:].clone()
-    return train_loader, inducing_points, normalize_param
+    N = train_x.shape[0]
+    return train_loader, inducing_points, normalize_param, N
 
 def normalize_coords(
     data: torch.Tensor,

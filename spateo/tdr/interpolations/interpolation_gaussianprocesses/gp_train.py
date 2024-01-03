@@ -1,5 +1,7 @@
 from .gp_dataloader import Dataset
 from tqdm import tqdm
+import torch
+import gpytorch
 
 def gp_train(
     model,
@@ -30,7 +32,7 @@ def gp_train(
     for i in epochs_iter:
         if method == 'SVGP':
             # Within each iteration, we will go over each minibatch of data
-            minibatch_iter = tqdm(train_loader, desc="Minibatch", leave=False)
+            minibatch_iter = tqdm(train_loader, desc="Minibatch", leave=True)
             for x_batch, y_batch in minibatch_iter:
                 optimizer.zero_grad()
                 output = model(x_batch)
