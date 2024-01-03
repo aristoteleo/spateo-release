@@ -1333,6 +1333,35 @@ class MuSIC_Interpreter(MuSIC):
                 os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "ligands_expr.csv"), index_col=0
             )
             genes = expr_df.columns
+            genes = [
+                g
+                for g in genes
+                if g
+                not in [
+                    "Lta4h",
+                    "Fdx1",
+                    "Tfrc",
+                    "Trf",
+                    "Lamc1",
+                    "Aldh1a2",
+                    "Dhcr24",
+                    "Rnaset2a",
+                    "Ptges3",
+                    "Nampt",
+                    "Trf",
+                    "Fdx1",
+                    "Kdr",
+                    "Apoa2",
+                    "Apoe",
+                    "Dhcr7",
+                    "Enho",
+                    "Ptgr1",
+                    "Agrp",
+                    "Akr1b3",
+                    "Daglb",
+                    "Ubash3d",
+                ]
+            ]
             file_id = "ligand_expression"
         elif use_receptors:
             if not os.path.exists(
@@ -5346,7 +5375,7 @@ class MuSIC_Interpreter(MuSIC):
             self.logger.info(f"Saving spatial weights for membrane-bound ligands to {membrane_bound_path}.")
             scipy.sparse.save_npz(membrane_bound_path, spatial_weights_membrane_bound)
 
-            bw_s = self.n_neighbors_membrane_bound if self.distance_secreted is None else self.distance_secreted
+            bw_s = self.n_neighbors_secreted if self.distance_secreted is None else self.distance_secreted
             bw_fixed = True if self.distance_secreted is not None else False
             # Autocrine signaling is much easier with secreted signals:
             spatial_weights_secreted = self._compute_all_wi(
@@ -5552,7 +5581,12 @@ class MuSIC_Interpreter(MuSIC):
         self.adata.obsm[f"spatial_effect_receiver_vf_{sig}_{target}"] = receiving_vf
 
     def visualize_effect_vf_3D(
-        self, interaction: str, target: str, bin_size: float = 5.0, save_path: Optional[str] = None
+        self,
+        interaction: str,
+        target: str,
+        vector_magnitude_lower_bound: float = 0.0,
+        only_view_effect_region: bool = False,
+        save_path: Optional[str] = None,
     ):
         """Visualize the directionality of the effect on target for a given interaction, overlaid onto the 3D spatial
         plot. Can only be used for models that use ligand expression (:attr `mod_type` is 'ligand' or 'lr').
@@ -5562,9 +5596,10 @@ class MuSIC_Interpreter(MuSIC):
                 ligand model)
             target: Name of the target gene of interest. Will search key "spatial_effect_sender_vf_{interaction}_{
                 target}" to create vector field plot.
-            bin_size: In most cases, the number of cells is far larger than is convenient for vector plotting.
-                The direction and magnitude of the vector will be averaged over a bin. This arguments sets the size
-                of the bins for averaging vectors; each bin will have size "bin_size" along all two/three dimensions.
+            vector_magnitude_lower_bound: Lower bound for the magnitude of the vector field vectors to be plotted,
+                as a fraction of the maximum vector magnitude. Defaults to 0.0.
+            only_view_effect_region: If True, will only plot the region where the effect is predicted to be found,
+                rather than the entire 3D object
             save_path: Path to save the figure to (will save as HTML file)
         """
         targets = pd.read_csv(
@@ -5587,6 +5622,7 @@ class MuSIC_Interpreter(MuSIC):
             adata = self.adata[self.remaining_cells, :].copy()
         else:
             adata = self.adata.copy()
+        # Gene expression vector for target gene:
         target_col = adata[:, target].X.toarray().flatten()
 
         coords = adata.obsm[self.coords_key]
@@ -5607,7 +5643,6 @@ class MuSIC_Interpreter(MuSIC):
                 pairwise_distances = adata.obsp["spatial_distances_secreted"]
             else:
                 self.logger.info("Spatial graph not found, computing...")
-                adata = self.adata.copy()
                 _, adata = neighbors(
                     adata,
                     n_neighbors=self.n_neighbors_secreted,
@@ -5623,7 +5658,6 @@ class MuSIC_Interpreter(MuSIC):
                 pairwise_distances = self.adata.obsp["spatial_distances_membrane_bound"]
             else:
                 self.logger.info("Spatial graph not found, computing...")
-                adata = self.adata.copy()
                 _, adata = neighbors(
                     adata,
                     n_neighbors=self.n_neighbors_membrane_bound,
@@ -5634,69 +5668,81 @@ class MuSIC_Interpreter(MuSIC):
                 conn = adata.obsp["spatial_connectivities"]
                 pairwise_distances = adata.obsp["spatial_distances"]
 
-        # Bin the space:
-        x_bins = np.arange(np.min(x), np.max(x) + bin_size, bin_size)
-        y_bins = np.arange(np.min(y), np.max(y) + bin_size, bin_size)
-        z_bins = np.arange(np.min(z), np.max(z) + bin_size, bin_size)
+        # Gene expression vector for the ligand (process to remove overlap between target expression and ligand)
+        nonzero_expr_indices = np.nonzero(target_col)[0]
+        # Find neighbors of these cells:
+        neighbor_indices = []
+        for i in nonzero_expr_indices:
+            row = conn[i].toarray()
+            neighbors_i = np.nonzero(row)[1]
+            neighbor_indices.extend(neighbors_i)
+        neighbor_indices = np.unique(np.concatenate((neighbor_indices, nonzero_expr_indices)))
 
-        # Average vectors that fall into each bin:
-        average_bin_vectors = np.zeros((len(x_bins) - 1, len(y_bins) - 1, len(z_bins) - 1, 3))
-        for i in tqdm(range(len(x_bins) - 1), desc="Creating bins..."):
-            for j in range(len(y_bins) - 1):
-                for k in range(len(z_bins) - 1):
-                    # Get indices of cells that fall into this bin:
-                    x_idx = np.where((x >= x_bins[i]) & (x < x_bins[i + 1]))[0]
-                    y_idx = np.where((y >= y_bins[j]) & (y < y_bins[j + 1]))[0]
-                    z_idx = np.where((z >= z_bins[k]) & (z < z_bins[k + 1]))[0]
-                    bin_idx = np.intersect1d(np.intersect1d(x_idx, y_idx), z_idx)
+        ligand_col = np.zeros_like(target_col)
+        overlap_col = np.zeros_like(target_col)
+        ligand_col[neighbor_indices] = adata[:, ligand].X.toarray().flatten()[neighbor_indices]
+        for i in range(len(ligand_col)):
+            if ligand_col[i] > 0 and target_col[i] > 0:
+                overlap_col[i] = 1
+                ligand_col[i] = 0
 
-                    # Average vectors in this bin:
-                    if len(bin_idx) > 0:
-                        average_bin_vectors[i, j, k, :] = np.mean(sending_vf[bin_idx, :], axis=0)
-
+        # Define vectors:
+        u, v, w = sending_vf[:, 0], sending_vf[:, 1], sending_vf[:, 2]
+        vector_lengths = np.sqrt(u**2 + v**2 + w**2)
         # Scale vectors based on the length scale of the coordinate system:
-        max_distances = np.zeros(conn.shape[0])
+        avg_distances = np.zeros(conn.shape[0])
         for i in tqdm(range(conn.shape[0]), desc="Scaling vectors..."):
             connected_samples = conn[i, :].nonzero()[1]
             if len(connected_samples) > 0:
-                max_distances[i] = np.max(pairwise_distances[i, connected_samples])
+                avg_distances[i] = np.mean(pairwise_distances[i, connected_samples])
 
-        average_max_distance = max_distances.mean()
-        scale_factor = average_max_distance
-        magnitudes = np.linalg.norm(average_bin_vectors, axis=3)
-        log_magnitudes = np.log(magnitudes + 1e-6)
+        average_mean_distance = avg_distances.mean()
+        for i in tqdm(range(conn.shape[0]), desc="Scaling vectors..."):
+            if vector_lengths[i] > 0:
+                scale_factor = average_mean_distance / vector_lengths[i]
+                u[i] *= scale_factor
+                v[i] *= scale_factor
+                w[i] *= scale_factor
 
-        # Normalize:
-        max_log_magnitude = np.max(log_magnitudes)
-        if max_log_magnitude > 0:
-            scale_ratio = scale_factor / max_log_magnitude
-            scaled_magnitudes = log_magnitudes * scale_ratio
+        # If only viewing effect region, find the region where the effect is predicted to be found and mask out only
+        # the sending cells and neighbors:
+        if only_view_effect_region:
+            magnitudes = np.linalg.norm(sending_vf, axis=1)
+            threshold = np.quantile(magnitudes[magnitudes > 0], vector_magnitude_lower_bound)
+            sending_cell_indices = np.where(magnitudes > threshold)[0]
 
-            for i in range(average_bin_vectors.shape[0]):
-                for j in range(average_bin_vectors.shape[1]):
-                    for k in range(average_bin_vectors.shape[2]):
-                        if magnitudes[i, j, k] > 0:
-                            average_bin_vectors[i, j, k, :] *= scaled_magnitudes[i, j, k] / magnitudes[i, j, k]
+            # For the visualization, use the 10 nearest neighbors:
+            _, adata = neighbors(
+                adata,
+                n_neighbors=10,
+                basis="spatial",
+                spatial_key=self.coords_key,
+                n_neighbors_method="ball_tree",
+            )
+            conn_10_nearest = adata.obsp["spatial_connectivities"]
 
-        # Preparing data for plotting vectors:
-        x_vec, y_vec, z_vec, u, v, w = [], [], [], [], [], []
-        for i in range(len(x_bins) - 1):
-            for j in range(len(y_bins) - 1):
-                for k in range(len(z_bins) - 1):
-                    x_vec.append((x_bins[i] + x_bins[i + 1]) / 2)
-                    y_vec.append((y_bins[j] + y_bins[j + 1]) / 2)
-                    z_vec.append((z_bins[k] + z_bins[k + 1]) / 2)
-                    u.append(average_bin_vectors[i, j, k, 0])
-                    v.append(average_bin_vectors[i, j, k, 1])
-                    w.append(average_bin_vectors[i, j, k, 2])
+            neighbor_indices = set()
+            for i in sending_cell_indices:
+                row = conn_10_nearest[i].toarray()
+                neighbors_i = np.nonzero(row)[1]
+                neighbor_indices.update(neighbors_i)
 
-        # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
-        p997 = np.percentile(target_col, 99.7)
-        target_col[target_col > p997] = p997
+            neighbor_mask = np.zeros(len(x), dtype=bool)
+            neighbor_mask[list(neighbor_indices)] = True
+            neighbor_mask[list(sending_cell_indices)] = True
+            in_effect_region = neighbor_mask
 
         # Separate visualization for zeros and nonzeros:
-        zeros = target_col == 0
-        nonzeros = target_col > 0
+        if not only_view_effect_region:
+            zeros = (target_col == 0) & (ligand_col == 0)
+            nonzeros = (target_col > 0) & (ligand_col == 0)
+            neighboring_ligand_nonzeros = (target_col == 0) & (ligand_col > 0)
+            overlap = overlap_col > 0
+        else:
+            zeros = (target_col == 0) & (ligand_col == 0) & in_effect_region
+            nonzeros = (target_col > 0) & (ligand_col == 0) & in_effect_region
+            neighboring_ligand_nonzeros = (target_col == 0) & (ligand_col > 0) & in_effect_region
+            overlap = overlap_col > 0 & in_effect_region
 
         scatters_zeros = go.Scatter3d(
             x=x[zeros],
@@ -5706,7 +5752,7 @@ class MuSIC_Interpreter(MuSIC):
             marker=dict(
                 color="#4B2991",
                 size=2.5,
-                opacity=0.15,
+                opacity=0.5,
             ),
             showlegend=False,
         )
@@ -5724,20 +5770,128 @@ class MuSIC_Interpreter(MuSIC):
             showlegend=False,
         )
 
+        scatters_ligand_nonzeros = go.Scatter3d(
+            x=x[neighboring_ligand_nonzeros],
+            y=y[neighboring_ligand_nonzeros],
+            z=z[neighboring_ligand_nonzeros],
+            mode="markers",
+            marker=dict(
+                color="#0BDA51",
+                size=3,
+                opacity=0.9,
+            ),
+            showlegend=False,
+        )
+
+        scatters_overlap_nonzeros = go.Scatter3d(
+            x=x[overlap],
+            y=y[overlap],
+            z=z[overlap],
+            mode="markers",
+            marker=dict(
+                color="#0096FF",
+                size=3,
+                opacity=0.9,
+            ),
+            showlegend=False,
+        )
+
+        # Invisible trace for the legend (so the colored point is larger than the plot points):
+        legend_scatters_zeros = go.Scatter3d(
+            x=[None],
+            y=[None],
+            z=[None],
+            mode="markers",
+            marker=dict(size=30, color="#4B2991", opacity=0.5),
+            name=f"Cells not expressing {target} or {ligand}",
+            showlegend=True,
+        )
+
+        legend_scatters_nonzeros = go.Scatter3d(
+            x=[None],
+            y=[None],
+            z=[None],
+            mode="markers",
+            marker=dict(size=30, color="#FFDF00"),
+            name=f"Cells expressing {target}",
+            showlegend=True,
+        )
+
+        legend_scatters_ligand_nonzeros = go.Scatter3d(
+            x=[None],
+            y=[None],
+            z=[None],
+            mode="markers",
+            marker=dict(size=30, color="#0BDA51"),
+            name=f"Cells expressing {ligand}",
+            showlegend=True,
+        )
+
+        legend_scatters_overlap_nonzeros = go.Scatter3d(
+            x=[None],
+            y=[None],
+            z=[None],
+            mode="markers",
+            marker=dict(size=30, color="#0096FF"),
+            name=f"Cells expressing both {target} and {ligand}",
+            showlegend=True,
+        )
+
+        # Offset cones slightly so they don't overlap with and obscure the sending cells:
+        if only_view_effect_region:
+            x = x[in_effect_region]
+            y = y[in_effect_region]
+            z = z[in_effect_region]
+            u = u[in_effect_region]
+            v = v[in_effect_region]
+            w = w[in_effect_region]
+        x_offset = x + 0.1 * u
+        y_offset = y + 0.1 * v
+        z_offset = z + 0.1 * w
+
         quiver = go.Cone(
-            x=x_vec,
-            y=y_vec,
-            z=z_vec,
+            x=x_offset,
+            y=y_offset,
+            z=z_offset,
             u=u,
             v=v,
             w=w,
             colorscale="Reds",
             sizemode="scaled",
-            sizeref=1.5,
+            sizeref=2.0,
             showscale=False,
         )
 
-        fig = go.Figure(data=[scatters_zeros, scatters_nonzeros, quiver])
+        # Add dotted lines connecting vectors to sending cells:
+        line_x = []
+        line_y = []
+        line_z = []
+
+        for i in range(len(x)):
+            line_x.extend([x[i], x_offset[i], None])
+            line_y.extend([y[i], y_offset[i], None])
+            line_z.extend([z[i], z_offset[i], None])
+
+        # Create a single trace for all dotted lines
+        dotted_lines = go.Scatter3d(
+            x=line_x, y=line_y, z=line_z, mode="lines", line=dict(color="black", dash="dot", width=4), showlegend=False
+        )
+
+        fig = go.Figure(
+            data=[
+                scatters_zeros,
+                legend_scatters_zeros,
+                scatters_nonzeros,
+                legend_scatters_nonzeros,
+                scatters_ligand_nonzeros,
+                legend_scatters_ligand_nonzeros,
+                scatters_overlap_nonzeros,
+                legend_scatters_overlap_nonzeros,
+                quiver,
+                dotted_lines,
+            ]
+        )
+
         title_dict = dict(
             text=f"{interaction.title()} Effect on {target.title()}",
             y=0.9,
@@ -5748,6 +5902,8 @@ class MuSIC_Interpreter(MuSIC):
         )
 
         fig.update_layout(
+            showlegend=True,
+            legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
             scene=dict(
                 xaxis=dict(
                     showgrid=False,

@@ -1050,6 +1050,7 @@ class MuSIC:
                             "Akr1b3",
                             "Daglb",
                             "Ubash3d",
+                            "Psap",
                         ]
                     ]
                     l_complexes = [elem for elem in ligands if "_" in elem]
@@ -3658,7 +3659,7 @@ class MuSIC:
 
         # Save to .csv:
         np.savetxt(path, data, delimiter=",", header=header[:-1], comments="")
-        self.save = True
+        self.saved = True
 
     def predict_and_save(
         self,

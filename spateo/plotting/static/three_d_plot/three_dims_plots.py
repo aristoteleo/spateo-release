@@ -875,7 +875,7 @@ def quick_plot_3D_celltypes(
             y=[None],
             z=[None],
             mode="markers",
-            marker=dict(size=30, color=color),  # Adjust size as needed
+            marker=dict(size=30, color=color),
             name=ct,
             showlegend=True,
         )
@@ -1091,7 +1091,7 @@ def plot_multiple_genes_3D(
             y=[None],
             z=[None],
             mode="markers",
-            marker=dict(size=30, color=color),  # Adjust size as needed
+            marker=dict(size=30, color=color),
             name=gene,
             showlegend=True,
         )
