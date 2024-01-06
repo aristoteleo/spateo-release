@@ -275,33 +275,32 @@ def calc_P_related(
         SpatialMat = _dist(XnAHat, XnB_chunk, "square_euc")
 
         # calculate spatial_P and keep K_NA_spatials
-        exp_SpatialMat = torch.exp(-SpatialMat / (2 * sigma2_robust))
-        spatial_term1 = exp_SpatialMat * col_mul.unsqueeze(-1)
+        exp_SpatialMat = nx.exp(-SpatialMat / (2 * sigma2_robust))
+        spatial_term1 = exp_SpatialMat * _unsqueeze(nx)(col_mul, -1)
         spatial_term1 = spatial_term1 * label_mask_chunk if label_mask_chunk is not None else spatial_term1
         spatial_term2 = spatial_outlier + spatial_term1.sum(0)
         spatial_P = spatial_term1 / _unsqueeze(nx)(spatial_term2, 0)
         K_NA_spatial += spatial_P.sum(1)
         del spatial_P
 
-        exp_SpatialMat = torch.exp(-SpatialMat / (2 * sigma2))
+        exp_SpatialMat = nx.exp(-SpatialMat / (2 * sigma2))
         spatial_inlier = 1 - spatial_outlier / (spatial_outlier + exp_SpatialMat.sum(0))
 
         # calculate sigma2_P
-        term1 = exp_SpatialMat * col_mul.unsqueeze(-1)
+        term1 = exp_SpatialMat * _unsqueeze(nx)(col_mul, -1)
         term1 = term1 * label_mask_chunk if label_mask_chunk is not None else term1
         sigma2_P = term1 / (_unsqueeze(nx)(term1.sum(0), 0) + 1e-8)
-        sigma2_P = sigma2_P * spatial_inlier.unsqueeze(0)
+        sigma2_P = sigma2_P * _unsqueeze(nx)(spatial_inlier, 0)
         K_NA_sigma2 += sigma2_P.sum(1)
         sigma2_temp += (sigma2_P * SpatialMat).sum()
         del sigma2_P
 
         # calculate P
         GeneDistMat = _dist(X_A, X_B_chunk, metric=dissimilarity)
-        exp_GeneMat = torch.exp(-GeneDistMat / (2 * beta2))
+        exp_GeneMat = nx.exp(-GeneDistMat / (2 * beta2))
         term1 = exp_GeneMat * term1
         P = term1 / (_unsqueeze(nx)(term1.sum(0), 0) + 1e-8)
-        P = P * spatial_inlier.unsqueeze(0)
-
+        P = P * _unsqueeze(nx)(spatial_inlier, 0)
         P = _dense_to_sparse(
             mat=P,
             sparse_method="topk",
@@ -309,7 +308,6 @@ def calc_P_related(
             axis=0,
             descending=True,
         )
-
         Ps.append(P)
 
     P = _sparse_concat(nx, Ps, axis=1)
@@ -358,12 +356,6 @@ def get_optimal_R_sparse(
     t = mu_XnB - mu_VnA - _dot(nx)(mu_XnA, R.T)
     optimal_RnA = _dot(nx)(coordsA, R.T) + t
     return optimal_RnA, R, t
-
-
-def _kernel_exp(DistMat, sigma2):
-    results = DistMat.clone()
-    results.storage._value = torch.exp(-results.storage._value / (2 * sigma2))
-    return results
 
 
 def _init_guess_sigma2(XA, XB, subsample=2000):
@@ -458,26 +450,6 @@ def _dense_to_sparse(
         val = DistMat[row, col]
 
     results = _SparseTensor(nx=nx, row=row, col=col, value=val, sparse_sizes=(NA, NB))
-    return results
-
-
-def _sparse_mul_same(
-    sparse_mat1,
-    sparse_mat2,
-):
-    # elemental-wise multiple two sparse tensor of the same shape and same sparse coordinates
-    results = sparse_mat1.clone()
-    results.storage._value = sparse_mat1.storage._value * sparse_mat2.storage._value
-    return results
-
-
-def _sparse_dense_mul(
-    sparse_mat1,
-    dense_mat2,
-):
-    # elemental-wise multiple a sparse mat and dense mat of the same shape
-    results = sparse_mat1.clone()
-    results.storage._value = sparse_mat1.storage._value * dense_mat2[sparse_mat1.storage._row, sparse_mat1.storage._col]
     return results
 
 

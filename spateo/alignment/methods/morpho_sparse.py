@@ -13,15 +13,13 @@ except ImportError:
 from typing import List, Optional, Tuple, Union
 
 import pandas as pd
-from torch_sparse import SparseTensor, spmm
+from torch_sparse import spmm
 
 from spateo.logging import logger_manager as lm
 
 from .morpho_sparse_utils import (
     _init_guess_beta2,
     _init_guess_sigma2,
-    _kernel_exp,
-    _sparse_mul_same,
     calc_distance,
     calc_P_related,
     get_optimal_R_sparse,
@@ -40,7 +38,6 @@ from .utils import (
     _randperm,
     _roll,
     _unique,
-    _unsqueeze,
     align_preprocess,
     cal_dist,
     coarse_rigid_alignment,
@@ -124,7 +121,7 @@ def get_P_sparse(
         batch_capacity=batch_capacity,
         top_k=top_k,
     )
-
+    print(P)
     K_NA = P.sum(1)
     K_NB = P.sum(0)
     Sp = P.sum()
@@ -175,9 +172,9 @@ def BA_align_sparse(
     label_key: Optional[str] = "cluster",
     label_transfer_prior: Optional[dict] = None,
     SVI_mode: bool = True,
-    batch_size: int = 1000,
-    use_sparse: bool = False,
-    pre_compute_dist: bool = True,
+    batch_size: int = 1024,
+    use_sparse: bool = True,
+    pre_compute_dist: bool = False,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
     empty_cache(device=device)
     # Preprocessing and extract the spatial and expression information
