@@ -244,7 +244,7 @@ class GPVectorField:
         f_jac = self.get_Jacobian(**kwargs)
         return compute_divergence(f_jac=f_jac, X=X)
 
-    def get_Jacobian(self, **kwargs) -> Callable:
+    def get_Jacobian(self, method: str = "analytical", **kwargs) -> Callable:
         """
         Get the Jacobian of the vector field function.
         The analytical Jacobian will be returned and it always take row vectors as input no
@@ -256,4 +256,5 @@ class GPVectorField:
                 df_3/dx_1   df_3/dx_2   df_3/dx_3   ...
                 ...         ...         ...         ...
         """
-        return lambda x: Jacobian_GP_gaussian_kernel(X=x, vf_dict=self.vf_dict, **kwargs)
+        if method == "analytical":
+            return lambda x: Jacobian_GP_gaussian_kernel(X=x, vf_dict=self.vf_dict)
