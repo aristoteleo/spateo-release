@@ -496,8 +496,7 @@ class Kernel(object):
         self.kernel = self._kernel_functions(bw_dist)
 
         # Bisquare and uniform need to be truncated if the sample is outside of the provided bandwidth:
-        if self.function in ["bisquare", "uniform"]:
-            self.kernel[bw_dist > 1] = 0
+        self.kernel[bw_dist > 1] = 0
 
         # Set density to zero if below threshold:
         self.kernel[self.kernel < threshold] = 0

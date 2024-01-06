@@ -5,7 +5,6 @@ the context-dependency of the relationships of) the response variable.
 import argparse
 import itertools
 import json
-import math
 import os
 import re
 from functools import partial
@@ -17,7 +16,6 @@ import anndata
 import numpy as np
 import pandas as pd
 import scipy
-from mpi4py import MPI
 from patsy import dmatrix
 from scipy.spatial.distance import cdist
 from scipy.stats import spearmanr
@@ -30,7 +28,6 @@ from ...preprocessing.transform import log1p
 from ...tools.spatial_smooth import smooth
 from ..find_neighbors import (
     find_bw_for_n_neighbors,
-    find_threshold_distance,
     get_wi,
     neighbors,
 )
@@ -2448,72 +2445,74 @@ class MuSIC:
             if not "predictions" in file:
                 check = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
                 break
-        new_samples = list(set(sample_names).difference(check.index))
-        self.logger.info(f"Getting mapping information for {len(new_samples)} new cells in this AnnData object...")
+        # Only check this if the initial run has already finished (i.e. postprocessing has already been performed):
+        if check.index.dtype != "float64" and check.index.dtype != "float32":
+            new_samples = list(set(sample_names).difference(check.index))
+            self.logger.info(f"Getting mapping information for {len(new_samples)} new cells in this AnnData object...")
 
-        if self.coords.shape[1] == 2:
-            query = pd.DataFrame(
-                self.adata[new_samples, :].obsm[self.coords_key], index=new_samples, columns=["x", "y"]
-            )
-            ref = pd.DataFrame(self.adata[check.index, :].obsm[self.coords_key], index=check.index, columns=["x", "y"])
-        else:
-            query = pd.DataFrame(
-                self.adata[new_samples, :].obsm[self.coords_key], index=new_samples, columns=["x", "y", "z"]
-            )
-            ref = pd.DataFrame(
-                self.adata[check.index, :].obsm[self.coords_key], index=check.index, columns=["x", "y", "z"]
-            )
-
-        distances = cdist(query.values.astype(float), ref.values.astype(float), "euclidean")
-
-        if hasattr(self, "targets_expr"):
-            targets = self.targets_expr.columns
-            y_arr = pd.DataFrame(
-                self.adata[:, targets].X.A if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
-                index=self.sample_names,
-                columns=targets,
-            )
-        else:
-            y_arr = self.target
-
-        for target in y_arr.columns:
-            closest_dict_path = os.path.join(parent_dir, "subsampling", f"{filename}_{target}_closest_dict.json")
-
-            ref_values = y_arr[target].loc[check.index].values
-            query_values = y_arr[target].loc[new_samples].values
-
-            # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
-            ref_expression = (ref_values != 0).flatten()
-            query_expression = (query_values != 0).flatten()
-            mismatch_mask = query_expression[:, np.newaxis] != ref_expression
-            # Replace distances in the mismatch mask with a very large value:
-            large_value = np.max(distances) + 1
-            distances[mismatch_mask] = large_value
-
-            closest_indices = np.argmin(distances, axis=1)
-
-            # Dictionary where keys are indices of subsampled points and values are lists of indices of the
-            # original points closest to them:
-            closest_dict = self.neighboring_unsampled.get(target, {})
-            if closest_dict == {}:
-                for i, key in enumerate(closest_indices):
-                    closest_dict[key].append(new_samples[i])
+            if self.coords.shape[1] == 2:
+                query = pd.DataFrame(
+                    self.adata[new_samples, :].obsm[self.coords_key], index=new_samples, columns=["x", "y"]
+                )
+                ref = pd.DataFrame(
+                    self.adata[check.index, :].obsm[self.coords_key], index=check.index, columns=["x", "y"]
+                )
             else:
-                for i, idx in enumerate(closest_indices):
-                    key = ref.index[idx]
-                    if key not in closest_dict:
-                        closest_dict[key] = []
-                    closest_dict[key].append(new_samples[i])
+                query = pd.DataFrame(
+                    self.adata[new_samples, :].obsm[self.coords_key], index=new_samples, columns=["x", "y", "z"]
+                )
+                ref = pd.DataFrame(
+                    self.adata[check.index, :].obsm[self.coords_key], index=check.index, columns=["x", "y", "z"]
+                )
 
-            self.neighboring_unsampled[target] = closest_dict
-            # # Save target-specific files:
-            # with open(closest_dict_path, "w") as file:
-            #     json.dump(self.neighboring_unsampled[target], file)
-            self.logger.info(f"Got mapping information for new cells for target {target}.")
+            distances = cdist(query.values.astype(float), ref.values.astype(float), "euclidean")
 
-        # Save dictionary mapping unsampled points to nearest sampled points:
-        with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "w") as file:
-            json.dump(self.neighboring_unsampled, file)
+            if hasattr(self, "targets_expr"):
+                targets = self.targets_expr.columns
+                y_arr = pd.DataFrame(
+                    self.adata[:, targets].X.A if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
+                    index=self.sample_names,
+                    columns=targets,
+                )
+            else:
+                y_arr = self.target
+
+            for target in y_arr.columns:
+                ref_values = y_arr[target].loc[check.index].values
+                query_values = y_arr[target].loc[new_samples].values
+
+                # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
+                ref_expression = (ref_values != 0).flatten()
+                query_expression = (query_values != 0).flatten()
+                mismatch_mask = query_expression[:, np.newaxis] != ref_expression
+                # Replace distances in the mismatch mask with a very large value:
+                large_value = np.max(distances) + 1
+                distances[mismatch_mask] = large_value
+
+                closest_indices = np.argmin(distances, axis=1)
+
+                # Dictionary where keys are indices of subsampled points and values are lists of indices of the
+                # original points closest to them:
+                closest_dict = self.neighboring_unsampled.get(target, {})
+                if closest_dict == {}:
+                    for i, key in enumerate(closest_indices):
+                        closest_dict[key].append(new_samples[i])
+                else:
+                    for i, idx in enumerate(closest_indices):
+                        key = ref.index[idx]
+                        if key not in closest_dict:
+                            closest_dict[key] = []
+                        closest_dict[key].append(new_samples[i])
+
+                self.neighboring_unsampled[target] = closest_dict
+                # # Save target-specific files:
+                # with open(closest_dict_path, "w") as file:
+                #     json.dump(self.neighboring_unsampled[target], file)
+                self.logger.info(f"Got mapping information for new cells for target {target}.")
+
+            # Save dictionary mapping unsampled points to nearest sampled points:
+            with open(os.path.join(parent_dir, "subsampling", f"{filename}.json"), "w") as file:
+                json.dump(self.neighboring_unsampled, file)
 
     def _set_search_range(self):
         """Set the search range for the bandwidth selection procedure.

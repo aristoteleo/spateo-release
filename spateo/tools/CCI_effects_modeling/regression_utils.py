@@ -397,7 +397,6 @@ def iwls(
     betas[betas == 1e-6] = 0.0
     # Threshold coefficients where appropriate:
     betas[np.abs(betas) < threshold] = 0.0
-    # For robustness, more than one feature is required to
 
     if mod_distr == "gaussian":
         if spatial_weights is not None:
