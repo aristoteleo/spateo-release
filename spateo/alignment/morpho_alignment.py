@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 from anndata import AnnData
 
-from .methods import BA_align, BA_align_sparse, empty_cache
+from .methods import BA_align, empty_cache
 from .transform import BA_transform, BA_transform_and_assignment
 from .utils import _iteration, downsampling
 
@@ -149,7 +149,7 @@ def morpho_align(
 #         pis: List of pi matrices.
 #         sigma2s: List of sigma2.
 #     """
-#
+#     from .methods import BA_align_sparse
 #     align_models = [model.copy() for model in models]
 #     for m in align_models:
 #         m.obsm[key_added] = m.obsm[spatial_key]
