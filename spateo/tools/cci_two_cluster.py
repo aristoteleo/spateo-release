@@ -7,6 +7,7 @@
 @Desc    :   spatial cell cell communication
 """
 
+import itertools
 import random
 from typing import Tuple
 
@@ -14,6 +15,8 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import issparse
+from scipy.stats import ttest_ind
+from sklearn.datasets import make_blobs
 from tqdm import tqdm as tqdm
 
 try:
@@ -36,6 +39,7 @@ def find_cci_two_group(
     lr_pair: list = None,
     sender_group: str = None,
     receiver_group: str = None,
+    mode: Literal["mode1", "mode2"] = "mode2",
     filter_lr: Literal["outer", "inner"] = "outer",
     top: int = 20,
     spatial_neighbors: str = "spatial_neighbors",
@@ -45,6 +49,7 @@ def find_cci_two_group(
     min_pairs_ratio: float = 0.01,
     num: int = 1000,
     pvalue: float = 0.05,
+    fdr: bool = False,
 ) -> dict:
     """Performing cell-cell transformation on an anndata object, while also
        limiting the nearest neighbor per cell to n_neighbors. This function returns
@@ -105,84 +110,7 @@ def find_cci_two_group(
 
     x_sparse = issparse(adata.X)
 
-    # filter lr
-
-    if lr_pair is None:
-        # expressed lr_network in our data
-        ligand = lr_network["from"].unique()
-        expressed_ligand = list(set(ligand) & set(adata.var_names))
-        if len(expressed_ligand) == 0:
-            raise ValueError(f"No intersected ligand between your adata object and lr_network dataset.")
-        lr_network = lr_network[lr_network["from"].isin(expressed_ligand)]
-        receptor = lr_network["to"].unique()
-        expressed_receptor = list(set(receptor) & set(adata.var_names))
-        if len(expressed_receptor) == 0:
-            raise ValueError(f"No intersected receptor between your adata object and lr_network dataset.")
-        lr_network = lr_network[lr_network["to"].isin(expressed_receptor)]
-
-        # ligand_sender_spec
-        adata_l = adata[:, list(set(lr_network["from"]))]
-        for g in adata.obs[group].unique():
-            # Of all cells expressing particular ligand, what proportion are group g:
-            frac = (adata_l[adata_l.obs[group] == g].X > 0).sum(axis=0) / (adata_l.X > 0).sum(axis=0)
-            adata_l.var[g + "_frac"] = np.asarray(frac.A1) if x_sparse else np.asarray(frac)
-
-        # Check if preprocessing has already been done:
-        if "n_cells_by_counts" not in adata_l.var_keys():
-            if issparse(adata_l.X):
-                adata_l.var["n_cells_by_counts"] = adata_l.X.getnnz(axis=0)
-            else:
-                adata_l.var["n_cells_by_counts"] = np.count_nonzero(adata_l.X, axis=0)
-
-        dfl = adata_l.var[adata_l.var[sender_group + "_frac"] > 0]
-        dfl = dfl[dfl["n_cells_by_counts"] > min_cells_by_counts]
-
-        ligand_sender_spec = dfl.sort_values(by=sender_group + "_frac", ascending=False)[:top].index
-        logger.info(
-            f"{top} ligands for cell type {sender_group} with highest fraction of prevalence: "
-            f"{list(ligand_sender_spec)}. Testing interactions involving these genes."
-        )
-        lr_network_l = lr_network.loc[lr_network["from"].isin(ligand_sender_spec.tolist())]
-
-        # receptor_receiver_spec
-        adata_r = adata[:, list(set(lr_network["to"]))]
-        for g in adata.obs[group].unique():
-            # Of all cells expressing particular receptor, what proportion are group g:
-            frac = (adata_r[adata_r.obs[group] == g].X > 0).sum(axis=0) / (adata_r.X > 0).sum(axis=0)
-            adata_r.var[g + "_frac"] = np.asarray(frac.A1) if x_sparse else np.asarray(frac)
-
-        # Check if preprocessing has already been done:
-        if "n_cells_by_counts" not in adata_r.var_keys():
-            if issparse(adata_r.X):
-                adata_r.var["n_cells_by_counts"] = adata_r.X.getnnz(axis=0)
-            else:
-                adata_r.var["n_cells_by_counts"] = np.count_nonzero(adata_r.X, axis=0)
-
-        dfr = adata_r.var[adata_r.var[receiver_group + "_frac"] > 0]
-        dfr = dfr[dfr["n_cells_by_counts"] > min_cells_by_counts]
-
-        receptor_receiver_spec = dfr.sort_values(by=receiver_group + "_frac", ascending=False)[:top].index
-        logger.info(
-            f"{top} receptors for cell type {receiver_group} with highest fraction of prevalence: "
-            f"{list(set(receptor_receiver_spec))}. Testing interactions involving these genes."
-        )
-        lr_network_r = lr_network.loc[lr_network["to"].isin(receptor_receiver_spec.tolist())]
-
-        if filter_lr == "inner":
-            # inner merge
-            lr_network_inner = lr_network_l.merge(lr_network_r, how="inner", on=["from", "to"])
-            lr_network = lr_network.loc[
-                lr_network["from"].isin(lr_network_inner["from"].tolist())
-                & lr_network["to"].isin(lr_network_inner["to"].tolist())
-            ]
-        elif filter_lr == "outer":
-            # outer merge
-            lr_network = pd.concat([lr_network_l, lr_network_r], axis=0, join="outer")
-            lr_network.drop_duplicates(keep="first", inplace=True)
-    else:
-        lr_network = lr_network.loc[lr_network["lr_pair"].isin(lr_pair)]
-
-    # find cell_pair
+    ### find cell_pair
 
     # cell_pair_all
     sender_id = adata[adata.obs[group].isin([sender_group])].obs.index
@@ -211,70 +139,231 @@ def find_cci_two_group(
     if cell_pair.shape[0] / cell_pair_all < min_pairs_ratio:
         raise ValueError(f"cell pairs found between", sender_group, "and", receiver_group, "less than min_pairs_ratio")
 
-    # calculate score
+    # spatial-distal subcluster
+    sender_dist = list(set(sender_id.tolist()) - set(cell_pair["cell_sender"]))
+    receiver_dist = list(set(receiver_id.tolist()) - set(cell_pair["cell_receiver"]))
 
-    # real lr_cp_exp_score
-    ligand_data = adata[cell_pair["cell_sender"], lr_network["from"]]
-    receptor_data = adata[cell_pair["cell_receiver"], lr_network["to"]]
-    lr_data = ligand_data.X.A * receptor_data.X.A if x_sparse else ligand_data.X * receptor_data.X
-    lr_data = np.array(lr_data)
-    if cell_pair.shape[0] == 0:
-        lr_prod = np.zeros(lr_network.shape[0])
-        lr_co_exp_ratio = np.zeros(lr_network.shape[0])
-        lr_co_exp_num = np.zeros(lr_network.shape[0])
-    else:
-        lr_prod = np.apply_along_axis(lambda x: np.mean(x), 0, lr_data)
-        lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, lr_data)
-        lr_co_exp_num = np.apply_along_axis(lambda x: np.sum(x > 0), 0, lr_data)
-    lr_network["lr_product"] = lr_prod
-    lr_network["lr_co_exp_num"] = lr_co_exp_num
-    lr_network["lr_co_exp_ratio"] = lr_co_exp_ratio
+    # spatial-proximal subcluster vs. spatial-distal subcluster
+    group_sp = group + "sp"
+    adata.obs[group_sp] = adata.obs[group]
+    adata.obs[group_sp].cat.add_categories(
+        [sender_group + "_prox", sender_group + "_dist", receiver_group + "_prox", receiver_group + "_dist"],
+        inplace=True,
+    )
 
-    # permutation test
-    per_data = np.zeros((lr_network.shape[0], num))
-    for i in tqdm(range(num)):
-        random.seed(i)
-        try:
-            cell_id = random.sample(adata.obs.index.tolist(), k=cell_pair.shape[0] * 2)
-            per_sender_id = cell_id[0 : cell_pair.shape[0]]
-            per_receiver_id = cell_id[cell_pair.shape[0] : cell_pair.shape[0] * 2]
-        except:
-            # If cell_pair * 2 is too large a number:
-            import itertools
+    adata.obs.loc[adata.obs.index.isin(cell_pair["cell_sender"].tolist()), group_sp] = sender_group + "_prox"
+    adata.obs.loc[adata.obs.index.isin(cell_pair["cell_receiver"].tolist()), group_sp] = receiver_group + "_prox"
 
-            combinations = itertools.permutations(adata.obs.index.tolist(), r=2)
-            pairs = random.sample(list(combinations), k=cell_pair.shape[0])
-            per_sender_id = [pair[0] for pair in pairs]
-            per_receiver_id = [pair[1] for pair in pairs]
+    adata.obs.loc[adata.obs.index.isin(sender_dist), group_sp] = sender_group + "_dist"
+    adata.obs.loc[adata.obs.index.isin(receiver_dist), group_sp] = receiver_group + "_dist"
 
-        per_ligand_data = adata[per_sender_id, lr_network["from"]]
-        per_receptor_data = adata[per_receiver_id, lr_network["to"]]
-        per_lr_data = (
-            per_ligand_data.X.A * per_receptor_data.X.A if x_sparse else per_ligand_data.X * per_receptor_data.X
+    ### filter lr
+    if lr_pair is None:
+        # expressed lr_network in our data
+        ligand = lr_network["from"].unique()
+        expressed_ligand = list(set(ligand) & set(adata.var_names))
+        if len(expressed_ligand) == 0:
+            raise ValueError(f"No intersected ligand between your adata object and lr_network dataset.")
+        lr_network = lr_network[lr_network["from"].isin(expressed_ligand)]
+        receptor = lr_network["to"].unique()
+        expressed_receptor = list(set(receptor) & set(adata.var_names))
+        if len(expressed_receptor) == 0:
+            raise ValueError(f"No intersected receptor between your adata object and lr_network dataset.")
+        lr_network = lr_network[lr_network["to"].isin(expressed_receptor)]
+
+        # ligand_sender_spec
+        adata_l = adata[:, list(set(lr_network["from"]))]
+        for g in adata.obs[group_sp].unique():
+            # Of all cells expressing particular ligand, what proportion are group g:
+            frac = (adata_l[adata_l.obs[group_sp] == g].X > 0).sum(axis=0) / (adata_l.X > 0).sum(axis=0)
+            adata_l.var[g + "_frac"] = np.asarray(frac.A1) if x_sparse else np.asarray(frac)
+
+        # Check if preprocessing has already been done:
+        if "n_cells_by_counts" not in adata_l.var_keys():
+            if issparse(adata_l.X):
+                adata_l.var["n_cells_by_counts"] = adata_l.X.getnnz(axis=0)
+            else:
+                adata_l.var["n_cells_by_counts"] = np.count_nonzero(adata_l.X, axis=0)
+
+        dfl = adata_l.var[adata_l.var[sender_group + "_prox" + "_frac"] > 0]
+        dfl = dfl[dfl["n_cells_by_counts"] > min_cells_by_counts]
+
+        ligand_sender_spec = dfl.sort_values(by=sender_group + "_prox" + "_frac", ascending=False)[:top].index
+        logger.info(
+            f"{top} ligands for cell type {sender_group+'_prox'} with highest fraction of prevalence: "
+            f"{list(ligand_sender_spec)}. Testing interactions involving these genes."
         )
-        per_lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, per_lr_data)
-        if np.isnan(per_lr_co_exp_ratio).all():
-            per_data[:, i] = np.zeros(lr_network.shape[0])
+        lr_network_l = lr_network.loc[lr_network["from"].isin(ligand_sender_spec.tolist())]
+
+        # receptor_receiver_spec
+        adata_r = adata[:, list(set(lr_network["to"]))]
+        for g in adata.obs[group_sp].unique():
+            # Of all cells expressing particular receptor, what proportion are group g:
+            frac = (adata_r[adata_r.obs[group_sp] == g].X > 0).sum(axis=0) / (adata_r.X > 0).sum(axis=0)
+            adata_r.var[g + "_frac"] = np.asarray(frac.A1) if x_sparse else np.asarray(frac)
+
+        # Check if preprocessing has already been done:
+        if "n_cells_by_counts" not in adata_r.var_keys():
+            if issparse(adata_r.X):
+                adata_r.var["n_cells_by_counts"] = adata_r.X.getnnz(axis=0)
+            else:
+                adata_r.var["n_cells_by_counts"] = np.count_nonzero(adata_r.X, axis=0)
+
+        dfr = adata_r.var[adata_r.var[receiver_group + "_prox" + "_frac"] > 0]
+        dfr = dfr[dfr["n_cells_by_counts"] > min_cells_by_counts]
+
+        receptor_receiver_spec = dfr.sort_values(by=receiver_group + "_prox" + "_frac", ascending=False)[:top].index
+        logger.info(
+            f"{top} receptors for cell type {receiver_group+'_prox'} with highest fraction of prevalence: "
+            f"{list(set(receptor_receiver_spec))}. Testing interactions involving these genes."
+        )
+        lr_network_r = lr_network.loc[lr_network["to"].isin(receptor_receiver_spec.tolist())]
+
+        if filter_lr == "inner":
+            # inner merge
+            lr_network_inner = lr_network_l.merge(lr_network_r, how="inner", on=["from", "to"])
+            lr_network = lr_network.loc[
+                lr_network["from"].isin(lr_network_inner["from"].tolist())
+                & lr_network["to"].isin(lr_network_inner["to"].tolist())
+            ]
+        elif filter_lr == "outer":
+            # outer merge
+            lr_network = pd.concat([lr_network_l, lr_network_r], axis=0, join="outer")
+            lr_network.drop_duplicates(keep="first", inplace=True)
+    else:
+        lr_network = lr_network.loc[lr_network["lr_pair"].isin(lr_pair)]
+
+    # mode1
+    # permutation annotation label
+    if mode == "mode1":
+        cols = adata.obs[group_sp].unique()
+        group_pairs = list(itertools.combinations(cols, 2))
+        # real mean result, each lr_pair expression in each group_pair.
+        mean_res = calculate_group_pair_lr_pair(adata, group_sp, group_pairs, cols, lr_network)
+
+        # permutation spot label.
+        df_list = []
+        group_list = adata.obs[group_sp].tolist()
+        for i in tqdm(range(num)):
+            np.random.shuffle(group_list)
+            adata.obs[group_sp] = group_list
+            df = calculate_group_pair_lr_pair(adata, group_sp, group_pairs, cols, lr_network)
+            df_list.append(df)
+            del df
+
+        # calculate p_value
+        combined_df = pd.DataFrame()
+        for i in range(num):
+            mean_i = (df_list[i].loc[:, :] > mean_res.loc[:, :]) * 1
+            if i == 0:
+                combined_df = mean_i
+            else:
+                combined_df = combined_df.add(mean_i)
+        pvalue = combined_df / num
+        significant = (combined_df / num) < pvalue
+
+        sig_num = significant.sum(axis=1)
+        sort_sig_num = sig_num.sort_values(axis=0, ascending=False, inplace=False, kind="quicksort", na_position="last")
+        sort_index = sort_sig_num.index.tolist()
+
+        # use this to plot heatmap.
+        res = pvalue.loc[sort_index]
+        return res
+
+    else:
+        # mode2
+        # calculate score
+        # real lr_cp_exp_score
+        ligand_data = adata[cell_pair["cell_sender"], lr_network["from"]]
+        receptor_data = adata[cell_pair["cell_receiver"], lr_network["to"]]
+        lr_data = ligand_data.X.A * receptor_data.X.A if x_sparse else ligand_data.X * receptor_data.X
+        lr_data = np.array(lr_data)
+        if cell_pair.shape[0] == 0:
+            lr_prod = np.zeros(lr_network.shape[0])
+            lr_co_exp_ratio = np.zeros(lr_network.shape[0])
+            lr_co_exp_num = np.zeros(lr_network.shape[0])
         else:
-            per_data[:, i] = per_lr_co_exp_ratio
+            lr_prod = np.apply_along_axis(lambda x: np.mean(x), 0, lr_data)
+            lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, lr_data)
+            lr_co_exp_num = np.apply_along_axis(lambda x: np.sum(x > 0), 0, lr_data)
+        lr_network["lr_product"] = lr_prod
+        lr_network["lr_co_exp_num"] = lr_co_exp_num
+        lr_network["lr_co_exp_ratio"] = lr_co_exp_ratio
 
-    per_data = pd.DataFrame(per_data)
-    per_data.index = lr_network["from"]
-    per_data["real"] = lr_network["lr_co_exp_ratio"].tolist()
-    lr_network["lr_co_exp_ratio_pvalue"] = per_data.apply(lambda x: sum(x[:num] >= x["real"]) / num, axis=1).tolist()
-    lr_network["is_significant"] = lr_network["lr_co_exp_ratio_pvalue"] < pvalue
+        # permutation test
+        per_data = np.zeros((lr_network.shape[0], num))
+        for i in tqdm(range(num)):
+            random.seed(i)
+            try:
+                cell_id = random.sample(adata.obs.index.tolist(), k=cell_pair.shape[0] * 2)
+                per_sender_id = cell_id[0 : cell_pair.shape[0]]
+                per_receiver_id = cell_id[cell_pair.shape[0] : cell_pair.shape[0] * 2]
+            except:
+                # If cell_pair * 2 is too large a number:
+                comb = itertools.permutations(adata.obs.index.tolist(), r=2)
+                pairs = random.sample(list(comb), k=cell_pair.shape[0])
+                per_sender_id = [pair[0] for pair in pairs]
+                per_receiver_id = [pair[1] for pair in pairs]
 
-    # Multiple hypothesis testing correction:
-    qvalues = fdr_correct(pd.DataFrame(lr_network["lr_co_exp_ratio_pvalue"]), corr_method="fdr_bh")
-    lr_network["lr_co_exp_ratio_qvalues"] = qvalues
+            per_ligand_data = adata[per_sender_id, lr_network["from"]]
+            per_receptor_data = adata[per_receiver_id, lr_network["to"]]
+            per_lr_data = (
+                per_ligand_data.X.A * per_receptor_data.X.A if x_sparse else per_ligand_data.X * per_receptor_data.X
+            )
+            per_lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, per_lr_data)
+            if np.isnan(per_lr_co_exp_ratio).all():
+                per_data[:, i] = np.zeros(lr_network.shape[0])
+            else:
+                per_data[:, i] = per_lr_co_exp_ratio
 
-    # After multiple testing correction:
-    lr_network["is_significant_fdr"] = qvalues < pvalue
-    # lr_network = lr_network.loc[lr_network["lr_co_exp_ratio_pvalue"] < pvalue]
-    lr_network["sr_pair"] = sender_group + "-" + receiver_group
+        per_data = pd.DataFrame(per_data)
+        per_data.index = lr_network["from"]
+        per_data["real"] = lr_network["lr_co_exp_ratio"].tolist()
+        lr_network["lr_co_exp_ratio_pvalue"] = per_data.apply(
+            lambda x: sum(x[:num] >= x["real"]) / num, axis=1
+        ).tolist()
+        lr_network["is_significant"] = lr_network["lr_co_exp_ratio_pvalue"] < pvalue
 
-    res = {"cell_pair": cell_pair, "lr_pair": lr_network}
-    return res
+        if fdr:
+            # Multiple hypothesis testing correction:
+            qvalues = fdr_correct(pd.DataFrame(lr_network["lr_co_exp_ratio_pvalue"]), corr_method="fdr_bh")
+            lr_network["lr_co_exp_ratio_qvalues"] = qvalues
+
+            # After multiple testing correction:
+            lr_network["is_significant_fdr"] = qvalues < pvalue
+        lr_network["sr_pair"] = sender_group + "-" + receiver_group
+        res = {"cell_pair": cell_pair, "lr_pair": lr_network}
+        return res
+
+
+# utils for mode1 significant test
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def calculate_group_pair_lr_pair(
+    adata,
+    group,
+    group_pairs,
+    cols,
+    lr_network,
+):
+    ## ligand-20 groups; receptor-20 groups
+    adata_l = adata[:, lr_network["from"].tolist()]
+    adata_r = adata[:, lr_network["to"].tolist()]
+
+    dfl = pd.DataFrame(index=lr_network["lr_pair"], columns=cols)
+    dfr = pd.DataFrame(index=lr_network["lr_pair"], columns=cols)
+    df = pd.DataFrame(index=lr_network["lr_pair"], columns=group_pairs)
+
+    ## ligand-20 groups; receptor-20 groups
+    for g in cols:
+        meanl = np.mean(adata_l[adata_l.obs[group] == g].X.A, axis=0)
+        dfl[g] = meanl
+        meanr = np.mean(adata_r[adata_r.obs[group] == g].X.A, axis=0)
+        dfr[g] = meanr
+
+    ## group_pairs
+    for i, group_pair in enumerate(group_pairs):
+        df[group_pair] = (dfl[group_pair[0]] + dfr[group_pair[1]]) / 2
+    return df
 
 
 # Wrapper for preprocessing for plotting:

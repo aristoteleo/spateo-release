@@ -15,6 +15,7 @@ from spateo.tdr import (
     collect_models,
     construct_pc,
     merge_models,
+    translate_model,
 )
 
 from .three_dims_plots import three_d_multi_plot
@@ -51,7 +52,7 @@ def multi_models(
     mode: Literal["single", "overlap", "both"] = "single",
     center_zero: bool = False,
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     cpo: Union[str, list] = "xy",
     shape: Union[str, list, tuple] = None,
@@ -64,6 +65,7 @@ def multi_models(
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_size: Union[float, list] = 3.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     text: Union[bool, str] = True,
@@ -89,13 +91,12 @@ def multi_models(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         cpo: Camera position of the active render window. Available ``cpo`` are:
 
@@ -129,6 +130,7 @@ def multi_models(
                  A string can also be specified to map the scalars range to a predefined opacity transfer function
                  (options include: 'linear', 'linear_r', 'geom', 'geom_r').
         model_size: The point size of any nodes in the dataset plotted.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
 
@@ -196,6 +198,7 @@ def multi_models(
             cpo=[cpo],
             model_style=["points"],
             model_size=[model_size],
+            show_axes=show_axes,
             show_legend=show_legend,
             legend_kwargs=legend_kwargs,
             text=[f"\nModel id: {id}" for id in ids] if text is True else text,
@@ -289,6 +292,7 @@ def multi_models(
             cpo=[cpo],
             model_style=["points"],
             model_size=[model_size],
+            show_axes=show_axes,
             show_legend=show_legend,
             legend_kwargs=legend_kwargs,
             text=[f"\nModel id: {id}" for id in overlap_ids] if text is True else text,
@@ -305,10 +309,10 @@ def deformation(
     spatial_key: str = "align_spatial",
     id_key: str = "slices",
     deformation_key: Optional[str] = "deformation",
-    center_zero: bool = True,
+    center_zero: bool = False,
     show_model: bool = True,
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     cpo: Union[str, list] = "xy",
     shape: Union[str, list, tuple] = None,
@@ -316,13 +320,14 @@ def deformation(
     background: str = "white",
     model_color: Union[str, list] = "red",
     model_alpha: Union[float, list, dict] = 1,
-    colormap: Union[str, list, dict] = "Blues",
+    colormap: Union[str, list, dict] = "black",
     alphamap: Union[float, list, dict] = 1.0,
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
     grid_size: Union[float, list] = 2.0,
     model_size: Union[float, list] = 3.0,
-    show_legend: bool = True,
+    show_axes: bool = True,
+    show_legend: bool = False,
     legend_kwargs: Optional[dict] = None,
     text: Union[bool, str] = True,
     text_kwargs: Optional[dict] = None,
@@ -339,7 +344,7 @@ def deformation(
     # Construct a point cloud model
     plot_models, ids, keys, cmaps = [], [], [], []
     for adata, grid in zip(adata_list, grid_list):
-        adata = adata.copy()
+        adata, raw_grid = adata.copy(), grid.copy()
         adata_id = str(adata.obs[id_key].unique().tolist()[0])
         group_key = id_key if group_key is None else group_key
 
@@ -373,7 +378,12 @@ def deformation(
                 alphamap=model_alpha,
             )
             if center_zero is True:
-                center_to_zero(model=pc, inplace=True)
+                translate_distance = (
+                    -raw_grid.center[0],
+                    -raw_grid.center[1],
+                    -raw_grid.center[2],
+                )
+                translate_model(model=pc, distance=translate_distance, inplace=True)
             plot_model = collect_models([pc, grid])
         else:
             plot_model = grid.copy()
@@ -402,6 +412,7 @@ def deformation(
         cpo=[cpo],
         model_style=[["points", "wireframe"]] if show_model else ["wireframe"],
         model_size=[[model_size, grid_size]] if show_model else [grid_size],
+        show_axes=show_axes,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
         text=[f"\nModel id: {id}" for id in ids] if text is True else text,

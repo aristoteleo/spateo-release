@@ -16,6 +16,18 @@ The following command will download and install the most recent release of Spate
 pip install spateo-release
 ```
 
+### MPI
+
+The cell-cell interaction modeling framework is dependent on the ```mpi4py``` package and a working MPI implementation. This is not automatically installed on install of the package.
+```conda``` can be used to install both. Within the same environment where ```spateo``` is installed (or where ```spateo``` will be installed), 
+
+```
+conda install mpi4py
+```
+
+This will simultaneously install an MPI implementation based on your computer system (OpenMPI for MacOS or Linux systems, MPICH/MS-MPI for Windows). To check whether the MPI implementation
+is successfully installed and on your path, run the ```mpiexec``` command. 
+
 ### GitHub
 
 To have access to the most up-to-date version (which may include features not yet in the PyPI version), Spateo can be installed directly from the `main` branch of our GitHub repository.

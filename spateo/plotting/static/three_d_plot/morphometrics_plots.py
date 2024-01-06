@@ -1,10 +1,8 @@
 from typing import Optional, Union
 
-import matplotlib as mpl
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from matplotlib.colors import LinearSegmentedColormap
 from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
 from ....tdr import add_model_labels, collect_models
@@ -14,15 +12,6 @@ try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal
-
-
-def _get_default_cmap():
-    if "default_cmap" not in mpl.colormaps():
-        colors = ["#4B0082", "#800080", "#F97306", "#FFA500", "#FFD700", "#FFFFCB"]
-        nodes = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-
-        mpl.colormaps.register(LinearSegmentedColormap.from_list("default_cmap", list(zip(nodes, colors))))
-    return "default_cmap"
 
 
 def _check_index_in_adata(adata, model):
@@ -68,7 +57,7 @@ def jacobian(
     model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
     jacobian_key: str = "jacobian",
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     shape: Union[str, list, tuple] = (3, 3),
     window_size: Optional[tuple] = (512 * 3, 512 * 3),
@@ -78,6 +67,7 @@ def jacobian(
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "points",
     model_size: Union[float, list] = 3.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
     text: Union[bool, str] = True,
@@ -95,15 +85,14 @@ def jacobian(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         shape: Number of sub-render windows inside the main window. By default, there are nine render window.
 
@@ -135,6 +124,7 @@ def jacobian(
         model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
 
                     If ``model_style = 'wireframe'``, thickness of lines.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
@@ -203,7 +193,6 @@ def jacobian(
 
     # Visualization.
     j_keys = [f"∂{f}/∂{i}" for f in ["fx", "fy", "fz"] for i in ["x", "y", "z"]]
-    colormap = _get_default_cmap() if colormap is None or colormap == "default_cmap" else colormap
     return three_d_multi_plot(
         model=collect_models([models]),
         key=j_keys,
@@ -218,6 +207,7 @@ def jacobian(
         opacity=opacity,
         model_style=[model_style],
         model_size=[model_size],
+        show_axes=show_axes,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
         text=[f"\njacobian: {i}" for i in j_keys] if text is True else text,
@@ -231,7 +221,7 @@ def feature(
     model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
     feature_key: str,
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     off_screen: bool = False,
     window_size: Optional[tuple] = (512, 512),
     background: str = "black",
@@ -240,6 +230,7 @@ def feature(
     opacity: Union[float, np.ndarray, list] = 1.0,
     model_style: Union[Literal["points", "surface", "wireframe"], list] = "points",
     model_size: Union[float, list] = 3.0,
+    show_axes: bool = True,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = dict(title=""),
     text: Union[bool, str] = True,
@@ -257,15 +248,14 @@ def feature(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         off_screen: Renders off-screen when True. Useful for automated screenshots.
         window_size: Window size in pixels. The default window_size is ``[512, 512]``.
         background: The background color of the window.
@@ -290,6 +280,7 @@ def feature(
         model_size: If ``model_style = 'points'``, point size of any nodes in the dataset plotted.
 
                     If ``model_style = 'wireframe'``, thickness of lines.
+        show_axes: Whether to add a camera orientation widget to the active renderer.
         show_legend: whether to add a legend to the plotter.
         legend_kwargs: A dictionary that will be pass to the ``add_legend`` function.
                        By default, it is an empty dictionary and the ``add_legend`` function will use the
@@ -347,7 +338,6 @@ def feature(
         )
 
     # Visualization.
-    colormap = _get_default_cmap() if colormap is None or colormap == "default_cmap" else colormap
     return three_d_plot(
         model=models,
         key=feature_key,
@@ -361,6 +351,7 @@ def feature(
         opacity=opacity,
         model_style=model_style,
         model_size=model_size,
+        show_axes=show_axes,
         show_legend=show_legend,
         legend_kwargs=legend_kwargs,
         text=f"\nFeature: {feature_key}" if text is True else text,
@@ -374,7 +365,7 @@ def torsion(
     model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
     torsion_key: str = "torsion",
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     colormap: Optional[Union[str, list]] = "default_cmap",
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
@@ -393,15 +384,14 @@ def torsion(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         colormap: Name of the Matplotlib colormap to use when mapping the scalars.
 
                   When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
@@ -479,7 +469,7 @@ def acceleration(
     model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
     acceleration_key: str = "acceleration",
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     colormap: Optional[Union[str, list]] = "default_cmap",
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
@@ -498,15 +488,14 @@ def acceleration(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         colormap: Name of the Matplotlib colormap to use when mapping the scalars.
 
                   When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
@@ -585,7 +574,7 @@ def curvature(
     model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
     curvature_key: str = "curvature",
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     colormap: Optional[Union[str, list]] = "default_cmap",
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
@@ -604,15 +593,14 @@ def curvature(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         colormap: Name of the Matplotlib colormap to use when mapping the scalars.
 
                   When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
@@ -691,7 +679,7 @@ def curl(
     model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
     curl_key: str = "curl",
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     colormap: Optional[Union[str, list]] = "default_cmap",
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
@@ -710,15 +698,14 @@ def curl(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:
 
                 * ``'none'`` - Do not display in the notebook.
-                * ``'pythreejs'`` - Show a pythreejs widget
+                * ``'trame'`` - Show a trame widget
                 * ``'static'`` - Display a static figure.
-                * ``'ipygany'`` - Show an ipygany widget
-                * ``'panel'`` - Show a panel widget.
         colormap: Name of the Matplotlib colormap to use when mapping the scalars.
 
                   When the colormap is None, use {key}_rgba to map the scalars, otherwise use the colormap to map scalars.
@@ -797,7 +784,7 @@ def divergence(
     model: Union[PolyData, UnstructuredGrid, MultiBlock, list],
     divergence_key: str = "divergence",
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
     colormap: Optional[Union[str, list]] = "default_cmap",
     ambient: Union[float, list] = 0.2,
     opacity: Union[float, np.ndarray, list] = 1.0,
@@ -816,6 +803,7 @@ def divergence(
 
                 * Output an image file,please enter a filename ending with
                   ``'.png', '.tif', '.tiff', '.bmp', '.jpeg', '.jpg', '.svg', '.eps', '.ps', '.pdf', '.tex'``.
+                  When ``jupyter=False``, if you want to save '.png' file, please ensure ``off_screen=True``.
                 * Output a gif file, please enter a filename ending with ``.gif``.
                 * Output a mp4 file, please enter a filename ending with ``.mp4``.
         jupyter: Whether to plot in jupyter notebook. Available ``jupyter`` are:

@@ -126,7 +126,6 @@ class LiveWireSegmentation(object):
             raise ImportError(
                 "You need to install the package `dijkstar`." "\nInstall dijkstar via `pip install --upgrade dijkstar`"
             )
-
         if self.image is None:
             raise AttributeError("Load an image first!")
 

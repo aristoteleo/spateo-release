@@ -33,7 +33,6 @@ On Linux, this can also be achieved using `sudo apt-get install libopenmpi-dev` 
 mpi4py can also be installed at this time using the same command, however the version Spateo uses may differ from
 the most current version. 
 
-
 # Citation
 Xiaojie Qiu1$\*, Daniel Y. Zhu3$, Jiajun Yao2, 4, 5, 6$, Zehua Jing2, 4,7$, Lulu Zuo8$, Mingyue Wang2, 4, 9, 10$, Kyung Hoi (Joseph) Min11, Hailin Pan2, 4, Shuai Wang2, 4, 7, Sha Liao4, Yiwei Lai4, Shijie Hao2, 4, 7, Yuancheng Ryan Lu1, Matthew Hill17, Jorge D. Martin-Rufino17, Chen Weng1, Anna Maria Riera-Escandell18, Mengnan Chen2, 4, Liang Wu4, Yong Zhang4, Xiaoyu Wei2, 4, Mei Li4, Xin Huang4, Rong Xiang2, 4, 7, Zhuoxuan Yang4, 12, Chao Liu4, Tianyi Xia4, Yingxin Liang10, Junqiang Xu4,7, Qinan Hu9, 10, Yuhui Hu9, 10, Hongmei Zhu8, Yuxiang Li4, Ao Chen4, Miguel A. Esteban4, Ying Gu2, 4,7, Douglas A. Lauffenburger3, Xun Xu2, 4, 13, Longqi Liu2, 4, 14, 15\*, Jonathan S. Weissman1,19, 20\*, Shiping Liu2, 4, 14, 15, 16\*, Yinqi Bai2, 4\*  $Co-first authors; *:Corresponding authors
  
@@ -89,3 +88,31 @@ pip install -r dev-requirements.txt
 make test
 ```
 Any failing tests will cause a check to fail.
+
+## Documentation
+We use `sphinx` to generate documentation. 
+Importantly, we used the submodule functionality to import documentation from a separate repository (https://github.com/aristoteleo/spateo-tutorials).
+It is important to keep the submodule up to date with the main repository and the following commands will help you do so.
+
+
+### Update All Submodules at Once:
+
+1. **Fetch and Merge Changes for All Submodules**:
+   
+   You can fetch the latest changes for all submodules and merge them into your current checkouts of the submodules:
+
+   ```bash
+   git submodule update --remote --merge
+   ```
+
+2. **Commit the Updated Submodules**:
+
+   This step is important because the parent repository tracks a specific commit of the submodule. By updating the submodule, the parent repository needs to be informed of the new commit to track.
+
+   ```bash
+   git add .
+   git commit -m "Updated all submodules"
+   git push
+   ```
+Once you are done the above, check the link directory (something like spateo-tutorials @ 8e372ee) under the `docs` folder to make sure the related commit (such as 8e372ee) is the same as the latest one in the spateo-tutorials repository. If not, you may need to redo the above procedure again. 
+```

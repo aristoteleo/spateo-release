@@ -4,7 +4,7 @@ import logging
 import os
 import warnings
 from functools import wraps
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import colorcet
 import matplotlib
@@ -42,7 +42,7 @@ class SpateoConfig:
         return self.__n_threads
 
     @logging_level.setter
-    def logging_level(self, level):
+    def logging_level(self, level: Union[str, int]):
         lm.main_debug(f"Setting logging level to {level}.")
         if isinstance(level, str):
             level = level.lower()
@@ -60,7 +60,7 @@ class SpateoConfig:
         self.__logging_level = level
 
     @n_threads.setter
-    def n_threads(self, n):
+    def n_threads(self, n: int):
         lm.main_debug(f"Setting n_threads to {n}.")
         try:
             import torch
@@ -89,7 +89,7 @@ config = SpateoConfig()
 
 class SpateoAdataKeyManager:
     # This key will be present in the .uns of the AnnData to indicate the type of
-    # information the AnnData holds..
+    # information the AnnData holds.
     ADATA_TYPE_KEY = "__type"
     ADATA_DEFAULT_TYPE = None
     ADATA_AGG_TYPE = "AGG"  # This is an AnnData containing aggregated UMI counts
@@ -117,10 +117,11 @@ class SpateoAdataKeyManager:
     EXPANDED_SUFFIX = "expanded"
     AUGMENTED_SUFFIX = "augmented"
     SELECTION_SUFFIX = "selection"
+    BOUNDARY_SUFFIX = "boundary"
 
     X_LAYER = "X"
 
-    def gen_new_layer_key(layer_name, key, sep="_") -> str:
+    def gen_new_layer_key(layer_name: str, key: str, sep: str = "_") -> str:
         if layer_name == "":
             return key
         if layer_name[-1] == sep:
@@ -245,27 +246,37 @@ SKM = SpateoAdataKeyManager
 
 
 # Means to shift the scale of colormaps:
-def shiftedColorMap(cmap, start=0, midpoint=0.5, stop=1.0, name="shiftedcmap"):
+def shiftedColorMap(
+    cmap: matplotlib.colors.ListedColormap,
+    start: float = 0,
+    midpoint: float = 0.5,
+    stop: float = 1.0,
+    name: str = "shiftedcmap",
+) -> matplotlib.colors.ListedColormap:
     """
     Function to offset the "center" of a colormap. Useful for
-    data with a negative min and positive max and you want the
+    data with a negative min and positive max, and you want the
     middle of the colormap's dynamic range to be at zero.
 
-    Input
-    -----
-      cmap : The matplotlib colormap to be altered
-      start : Offset from lowest point in the colormap's range.
+    Args:
+      cmap: The matplotlib colormap to be altered
+      start: Offset from the lowest point in the colormap's range.
           Defaults to 0.0 (no lower offset). Should be between
           0.0 and `midpoint`.
-      midpoint : The new center of the colormap. Defaults to
+      midpoint: The new center of the colormap. Defaults to
           0.5 (no shift). Should be between 0.0 and 1.0. In
           general, this should be  1 - vmax / (vmax + abs(vmin))
-          For example if your data range from -15.0 to +5.0 and
+          For example if your data range from -15.0 to +5.0, and
           you want the center of the colormap at 0.0, `midpoint`
           should be set to  1 - 5/(5 + 15)) or 0.75
-      stop : Offset from highest point in the colormap's range.
+      stop: Offset from the highest point in the colormap's range.
           Defaults to 1.0 (no upper offset). Should be between
           `midpoint` and 1.0.
+      name: the colormap name of the shifted colormap that will be registered.
+
+
+    Returns:
+        newcmap: a new colormap that has the middle point of the colormap shifted.
     """
     # Check for existing shifted colormap:
     matplotlib.cm.ColormapRegistry.unregister(plt.colormaps, name="shiftedcmap")
@@ -498,29 +509,24 @@ def spateo_theme(background="white"):
 
 
 def config_spateo_rcParams(
-    background="white",
-    prop_cycle=zebrafish_256,
-    fontsize=8,
-    color_map=None,
-    frameon=None,
-):
+    background: str = "white",
+    prop_cycle: List[str] = zebrafish_256,
+    fontsize: int = 8,
+    color_map: matplotlib.colors.ListedColormap = None,
+    frameon: Optional[bool] = None,
+) -> None:
     """Configure matplotlib.rcParams to spateo defaults (based on ggplot style and scanpy).
-    Parameters
-    ----------
-        background: `str` (default: `white`)
-            The background color of the plot. By default we use the white ground
+
+    Args:
+        background: The background color of the plot. By default, we use the white ground
             which is suitable for producing figures for publication. Setting it to `black` background will
             be great for presentation.
-        prop_cycle: `list` (default: zebrafish_256)
-            A list with hex color codes
-        fontsize: float (default: 6)
-            Size of font
-        color_map: `plt.cm` or None (default: None)
-            Color map
-        frameon: `bool` or None (default: None)
-            Whether to have frame for the figure.
-    Returns
-    -------
+        prop_cycle: A list with hex color codes
+        fontsize:  Size of font
+        color_map: Color map
+        frameon: Whether to have frame for the figure.
+
+    Returns:
         Nothing but configure the rcParams globally.
     """
 
@@ -635,23 +641,23 @@ def config_spateo_rcParams(
 
 
 def set_figure_params(
-    spateo=True,
-    background="white",
-    fontsize=8,
-    figsize=(6, 4),
-    dpi=None,
-    dpi_save=None,
-    frameon=None,
-    vector_friendly=True,
-    color_map=None,
-    format="pdf",
-    transparent=False,
-    ipython_format="png2x",
-):
+    spateo: bool = True,
+    background: str = "white",
+    fontsize: int = 8,
+    figsize: Tuple[int, int] = (6, 4),
+    dpi: Optional[float] = None,
+    dpi_save: Optional[int] = None,
+    frameon: Optional[bool] = None,
+    vector_friendly: bool = True,
+    color_map: Optional[str] = None,
+    format: str = "pdf",
+    transparent: bool = False,
+    ipython_format: str = "png2x",
+) -> None:
     """Set resolution/size, styling and format of figures.
        This function is adapted from: https://github.com/theislab/scanpy/blob/f539870d7484675876281eb1c475595bf4a69bdb/scanpy/_settings.py
-    Arguments
-    ---------
+
+    Args:
         spateo: `bool` (default: `True`)
             Init default values for :obj:`matplotlib.rcParams` suited for spateo.
         background: `str` (default: `white`)
@@ -679,6 +685,10 @@ def set_figure_params(
         ipython_format : list of `str` (default: 'png2x')
             Only concerns the notebook/IPython environment; see
             `IPython.core.display.set_matplotlib_formats` for more details.
+
+    Returns:
+        Nothing but update the figure configurations.
+
     """
 
     try:
@@ -713,8 +723,17 @@ def set_figure_params(
         _frameon = frameon
 
 
-def set_pub_style(scaler=1):
-    """formatting helper function that can be used to save publishable figures"""
+def set_pub_style(scaler: float = 1) -> None:
+    """
+    formatting helper function that can be used to save publishable figures
+
+    Args:
+        scaler: The multiplier to universally increase or decrease the font sizes.
+
+    Returns:
+        Nothing but set up the configuration for saving publishable figures.
+    """
+
     set_figure_params("spateo", background="white")
     matplotlib.use("cairo")
     matplotlib.rcParams.update({"font.size": 6 * scaler})

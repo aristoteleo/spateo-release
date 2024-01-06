@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from joblib import Parallel, delayed
-from pysal import explore, lib
 from scipy.sparse import issparse
 from statsmodels.sandbox.stats.multicomp import multipletests
 
@@ -69,6 +68,8 @@ def moran_i(
     -------
         A pandas DataFrame of the Moran' I test results.
     """
+    from pysal import explore, lib
+
     if layer is None:
         X_data = adata.X
     else:

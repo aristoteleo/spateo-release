@@ -13,12 +13,12 @@ class Discriminator(nn.Module):
     """Module that learns associations between graph embeddings and their positively-labeled augmentations
 
     Args:
-        nf: Dimensionality (along the feature axis) of the input array
+        dim: Dimensionality (along the feature axis) of the input array (e.g. of the graph embedding)
     """
 
-    def __init__(self, nf: int):
+    def __init__(self, dim: int):
         super(Discriminator, self).__init__()
-        self.f_k = nn.Bilinear(nf, nf, 1)
+        self.disc = nn.Bilinear(dim, dim, 1)
 
         for m in self.modules():
             self.weights_init(m)
@@ -42,38 +42,40 @@ class Discriminator(nn.Module):
         Returns:
              logits: Similarity score for the positive and negative paired graphs
         """
-        c_x = g_repr.expand_as(g_pos)
+        g_repr = g_repr.expand_as(g_pos)
 
-        sc_1 = self.f_k(g_pos, c_x)
-        sc_2 = self.f_k(g_neg, c_x)
+        pos_score = self.disc(g_pos, g_repr)
+        neg_score = self.disc(g_neg, g_repr)
 
-        logits = torch.cat((sc_1, sc_2), 1)
+        logits = torch.cat((pos_score, neg_score), 1)
 
         return logits
 
 
-class AvgReadout(nn.Module):
+class GlobalGraphReadout(nn.Module):
     """
     Aggregates graph embedding information over graph neighborhoods to obtain global representation of the graph
     """
 
     def __init__(self):
-        super(AvgReadout, self).__init__()
+        super(GlobalGraphReadout, self).__init__()
 
     def forward(self, emb: FloatTensor, mask: FloatTensor):
         """
         Args:
-            emb : float tensor
-                Graph embedding
-            mask : float tensor
-                Selects elements to aggregate for each row
-        """
-        vsum = torch.mm(mask, emb)
-        row_sum = torch.sum(mask, 1)
-        row_sum = row_sum.expand((vsum.shape[1], row_sum.shape[0])).T
-        global_emb = vsum / row_sum
+            emb: Graph embedding
+            mask: Adjacency matrix, indicates which elements are neighbors for each sample
 
-        return F.normalize(global_emb, p=2, dim=1)
+        Returns:
+            global_emb: Global graph embedding
+        """
+        neighbor_agg = torch.mm(mask, emb)
+        n_neighbors = torch.sum(mask, 1)
+        n_neighbors = n_neighbors.expand((neighbor_agg.shape[1], n_neighbors.shape[0])).T
+        global_emb = neighbor_agg / n_neighbors
+        global_emb = F.normalize(global_emb, p=2, dim=1)
+
+        return global_emb
 
 
 class Encoder(Module):
@@ -111,19 +113,19 @@ class Encoder(Module):
         self.reset_parameters()
 
         self.disc = Discriminator(self.out_features)
-
-        self.sigm = nn.Sigmoid()
-        self.read = AvgReadout()
+        self.get_readout = GlobalGraphReadout()
+        # Activation for the graph representation:
+        self.sigmoid = nn.Sigmoid()
 
     def reset_parameters(self):
         torch.nn.init.xavier_uniform_(self.weight1)
         torch.nn.init.xavier_uniform_(self.weight2)
 
-    def forward(self, feat: FloatTensor, feat_a: FloatTensor, adj: FloatTensor):
+    def forward(self, feat: FloatTensor, feat_permuted: FloatTensor, adj: FloatTensor):
         """
         Args:
             feat: Counts matrix
-            feat_a: Counts matrix following permutation and augmentation
+            feat_permuted: Counts matrix following permutation and augmentation
             adj: Pairwise distance matrix
         """
         z = F.dropout(feat, self.dropout, self.training)
@@ -144,21 +146,24 @@ class Encoder(Module):
         nz_mask = h < 0
         h[nz_mask] = 0
 
-        emb = self.act(z)
+        ground_truth_embedding = self.act(z)
 
         # Adversarial learning:
-        z_a = F.dropout(feat_a, self.dropout, self.training)
-        z_a = torch.mm(z_a, self.weight1)
-        z_a = torch.mm(adj, z_a)
-        emb_a = self.act(z_a)
+        z_permuted = F.dropout(feat_permuted, self.dropout, self.training)
+        z_permuted = torch.mm(z_permuted, self.weight1)
+        z_permuted = torch.mm(adj, z_permuted)
+        embedding_permuted = self.act(z_permuted)
 
-        g = self.read(emb, self.graph_neigh)
-        g = self.sigm(g)
+        # Graph representations:
+        g = self.get_readout(ground_truth_embedding, self.graph_neigh)
+        g = self.sigmoid(g)
 
-        g_a = self.read(emb_a, self.graph_neigh)
-        g_a = self.sigm(g_a)
+        g_permuted = self.get_readout(embedding_permuted, self.graph_neigh)
+        g_permuted = self.sigmoid(g_permuted)
 
-        ret = self.disc(g, emb, emb_a)
-        ret_a = self.disc(g_a, emb_a, emb)
+        # "Normal" graph: positive pair is the embedding for the input graph, negative pair is the permuted
+        # representation, and vice versa.
+        discriminator_out = self.disc(g, ground_truth_embedding, embedding_permuted)
+        discriminator_out_permuted = self.disc(g_permuted, embedding_permuted, ground_truth_embedding)
 
-        return hidden_emb, h, ret, ret_a
+        return hidden_emb, h, discriminator_out, discriminator_out_permuted

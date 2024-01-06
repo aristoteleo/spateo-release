@@ -143,7 +143,7 @@ def binary_morani_result(
                 p2 = p[tissue_mask > 0]
             else:
                 p2 = p.flatten()
-            pvalue_cutoff = threshold_otsu(hist=(np.bincount(p2), np.arange(256)))
+            pvalue_cutoff = threshold_otsu(hist=(np.bincount(p2), np.arange(len(np.bincount(p2)))))
             # print(f'pvalue_cutoff: {pvalue_cutoff}')
             p_cell_mask = np.where(p <= pvalue_cutoff, 255, 0).astype(np.uint8)
         if method == "edge-watershed":

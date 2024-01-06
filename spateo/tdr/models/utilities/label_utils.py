@@ -2,7 +2,7 @@ from typing import Optional, Tuple, Union
 
 import matplotlib as mpl
 import numpy as np
-from pyvista import PolyData, UniformGrid, UnstructuredGrid
+from pyvista import PolyData, UnstructuredGrid
 
 try:
     from typing import Literal
@@ -11,7 +11,7 @@ except ImportError:
 
 
 def add_model_labels(
-    model: Union[PolyData, UnstructuredGrid, UniformGrid],
+    model: Union[PolyData, UnstructuredGrid],
     labels: np.ndarray,
     key_added: str = "groups",
     where: Literal["point_data", "cell_data"] = "cell_data",
