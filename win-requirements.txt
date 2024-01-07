@@ -27,7 +27,7 @@ POT>=0.8.1
 pynndescent>=0.4.8
 pyro-ppl
 python-igraph>=0.7.1
-pyvista>=0.38.0
+pyvista>=0.39.1
 scipy>=1.0
 scikit-image>=0.18.0
 scikit-learn>=0.19.1
@@ -38,8 +38,10 @@ statsmodels>=0.9.0
 tensorflow
 tqdm>=4.62.3
 torch
+torch_scatter>=2.1.2
+torch_sparse>=0.6.18
 trame>=2.2.5
 trame-server>=2.7.0
 typing_extensions>=4.0.1
 umap-learn>=0.5.1
-vtk==9.2.2
+vtk>=9.2.2

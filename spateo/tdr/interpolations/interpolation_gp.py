@@ -3,20 +3,26 @@ try:
 except ImportError:
     from typing_extensions import Literal
 from typing import Optional, Union
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
+
 import gpytorch
 import numpy as np
+import ot
 import pandas as pd
 import torch
 from anndata import AnnData
+from gpytorch.likelihoods import GaussianLikelihood
 from numpy import ndarray
 from scipy.sparse import issparse
 from gpytorch.likelihoods import GaussianLikelihood
 
 from ...alignment.methods import _chunk, _unsqueeze
 from ...logging import logger_manager as lm
-
-from .interpolation_gaussianprocesses import Dataset, Approx_GPModel, Exact_GPModel, gp_train
-import ot
+from .interpolation_gaussianprocess import Approx_GPModel, Exact_GPModel, gp_train
 
 
 class Imputation_GPR:
@@ -67,28 +73,32 @@ class Imputation_GPR:
             self.train_x = self.train_x.cuda()
             self.train_y = self.train_y.cuda()
         self.train_y = self.train_y.squeeze()
-        
+
         self.nx = ot.backend.get_backend(self.train_x, self.train_y)
-        
+
         self.normalize_spatial = normalize_spatial
         if self.normalize_spatial:
             self.train_x = self.normalize_coords(self.train_x)
-            
+
         self.N = self.train_x.shape[0]
         # create training dataloader
         self.method = method
-        from torch.utils.data import TensorDataset, DataLoader
-        if method == 'SVGP':
+        from torch.utils.data import DataLoader, TensorDataset
+
+        if method == "SVGP":
             train_dataset = TensorDataset(self.train_x, self.train_y)
             self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
-            inducing_idx = np.random.choice(self.train_x.shape[0], inducing_num) if self.train_x.shape[0] > inducing_num else np.arange(self.train_x.shape[0])
-            self.inducing_points = self.train_x[inducing_idx,:].clone()
+            inducing_idx = (
+                np.random.choice(self.train_x.shape[0], inducing_num)
+                if self.train_x.shape[0] > inducing_num
+                else np.arange(self.train_x.shape[0])
+            )
+            self.inducing_points = self.train_x[inducing_idx, :].clone()
         else:
-            train_loader = {'train_x': self.train_x, 'train_y': self.train_y}
+            train_loader = {"train_x": self.train_x, "train_y": self.train_y}
             # TO-DO: add a dict that contains all the train_x and train_y
             # pass
 
-        
         self.PCA_reduction = False
         self.info_keys = {"obs_keys": obs_keys, "var_keys": var_keys}
         print(self.info_keys)
@@ -113,9 +123,8 @@ class Imputation_GPR:
     def inference(
         self,
         training_iter: int = 50,
-        
     ):
-        
+
         self.likelihood = GaussianLikelihood()
         if self.method == "SVGP":
             self.GPR_model = Approx_GPModel(inducing_points=self.inducing_points)
@@ -125,7 +134,6 @@ class Imputation_GPR:
         if self.device != "cpu":
             self.GPR_model = self.GPR_model.cuda()
             self.likelihood = self.likelihood.cuda()
-          
         # Start training to find optimal model hyperparameters
         gp_train(
             model=self.GPR_model,
@@ -134,11 +142,12 @@ class Imputation_GPR:
             train_epochs=training_iter,
             method=self.method,
             N=self.N,
+            device=self.device,
         )
-        
+
         self.GPR_model.eval()
         self.likelihood.eval()
-        
+
     def interpolate(
         self,
         use_chunk: bool = False,
@@ -210,97 +219,13 @@ def gp_interpolation(
         method=method,
         batch_size=batch_size,
         shuffle=shuffle,
-        inducing_num=inducing_num
+        inducing_num=inducing_num,
     )
     GPR.inference(training_iter=training_iter)
 
     # Interpolation
     target_info_data = GPR.interpolate(use_chunk=True)
-    target_info_data = target_info_data[:,None]
-    # Output interpolated anndata
-    lm.main_info("Creating an adata object with the interpolated expression...")
-
-    obs_keys = GPR.info_keys["obs_keys"]
-    if len(obs_keys) != 0:
-        obs_data = target_info_data[:, : len(obs_keys)]
-        obs_data = pd.DataFrame(obs_data, columns=obs_keys)
-
-    var_keys = GPR.info_keys["var_keys"]
-    if len(var_keys) != 0:
-        X = target_info_data[:, len(obs_keys) :]
-        var_data = pd.DataFrame(index=var_keys)
-
-    interp_adata = AnnData(
-        X=X if len(var_keys) != 0 else None,
-        obs=obs_data if len(obs_keys) != 0 else None,
-        obsm={spatial_key: np.asarray(target_points)},
-        var=var_data if len(var_keys) != 0 else None,
-    )
-
-    lm.main_finish_progress(progress_name="GaussianProcessInterpolation")
-    return interp_adata
-
-def gp_interpolation_svi(
-    source_adata: AnnData,
-    target_points: Optional[ndarray] = None,
-    keys: Union[str, list] = None,
-    spatial_key: str = "spatial",
-    layer: str = "X",
-    training_iter: int = 50,
-    batch_size: int = 1024,
-    device: str = "cpu",
-    inducing_num: int = 512,
-    normalize_spatial: bool = True,
-) -> AnnData:
-    """
-    Learn a continuous mapping from space to gene expression pattern with the Gaussian Process method.
-
-    Args:
-        source_adata: AnnData object that contains spatial (numpy.ndarray) in the `obsm` attribute.
-        target_points: The spatial coordinates of new data point. If target_coords is None, generate new points based on grid_num.
-        keys: Gene list or info list in the `obs` attribute whose interpolate expression across space needs to learned.
-        spatial_key: The key in ``.obsm`` that corresponds to the spatial coordinate of each bucket.
-        layer: If ``'X'``, uses ``.X``, otherwise uses the representation given by ``.layers[layer]``.
-        training_iter:  Max number of iterations for training.
-        device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
-
-    Returns:
-        interp_adata: an anndata object that has interpolated expression.
-    """
-    # Training
-    
-    # Setup the dataset
-    train_loader, inducing_points, normalize_param, N = Dataset(
-        adata=source_adata, 
-        keys=keys,
-        spatial_key=spatial_key,
-        batch_size=batch_size, 
-        layer=layer,
-        inducing_num=inducing_num,
-        normalize_spatial=normalize_spatial,
-    )
-    # Setup the models
-    gp_model = GPModel(inducing_points=inducing_points)
-    likelihood = GaussianLikelihood()
-    # Train the gp model
-    gp_train(
-        model=gp_model,
-        likelihood=likelihood,
-        train_loader=train_loader,
-        train_epochs=training_iter,
-        N=N,
-    )
-    
-    gp_model.eval()
-    likelihood.eval()
-    
-    # Inference / Interpolation
-    target_info_data = gp_interpolate(
-        model=gp_model,
-        test_loader=train_loader,
-        normalize_param=normalize_param,
-    )
-    
+    target_info_data = target_info_data[:, None]
     # Output interpolated anndata
     lm.main_info("Creating an adata object with the interpolated expression...")
 

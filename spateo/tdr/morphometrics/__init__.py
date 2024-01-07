@@ -1,6 +1,10 @@
-from .morphogenesis import (
+from .morphofield import (
     cell_directions,
-    morphofield,
+    morphofield_gp,
+    morphofield_sparsevfc,
+    morphopath,
+)
+from .morphofield_dg import (
     morphofield_acceleration,
     morphofield_curl,
     morphofield_curvature,
@@ -8,8 +12,6 @@ from .morphogenesis import (
     morphofield_jacobian,
     morphofield_torsion,
     morphofield_velocity,
-    morphofield_X,
-    morphopath,
 )
 from .morphology import model_morphology, pc_KDE
 from .shape_similarity import pairwise_shape_similarity

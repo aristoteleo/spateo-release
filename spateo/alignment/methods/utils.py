@@ -336,6 +336,39 @@ def _mask_from_label_prior(
     return label_mask
 
 
+def _mask_from_label_prior(
+    adataA: AnnData,
+    adataB: AnnData,
+    label_key: Optional[str] = "cluster",
+):
+    # check the label key
+    if label_key not in adataA.obs.keys():
+        raise ValueError(f"adataA does not have label key {label_key}.")
+    if label_key not in adataB.obs.keys():
+        raise ValueError(f"adataB does not have label key {label_key}.")
+    # get the label from anndata
+    labelA = pd.DataFrame(adataA.obs[label_key].values, columns=[label_key])
+    labelB = pd.DataFrame(adataB.obs[label_key].values, columns=[label_key])
+
+    # get the intersect and different label
+    cateA = labelA[label_key].astype("category").cat.categories
+    cateB = labelB[label_key].astype("category").cat.categories
+    intersect_cate = cateA.intersection(cateB)
+    cateA_unique = cateA.difference(cateB)
+    cateB_unique = cateB.difference(cateA)
+
+    # calculate the label mask
+    label_mask = np.zeros((len(labelA), len(labelB)), dtype="float32")
+    for cate in intersect_cate:
+        label_mask += (labelA[label_key] == cate).values[:, None] * (labelB[label_key] == cate).values[None, :]
+    for cate in cateA_unique:
+        label_mask += (labelA[label_key] == cate).values[:, None] * np.ones((1, len(labelB)))
+    for cate in cateB_unique:
+        label_mask += np.ones((len(labelA), 1)) * (labelB[label_key] == cate).values[None, :]
+    label_mask[label_mask > 0] = 1
+    return label_mask
+
+
 ######################################
 # Calculate expression dissimilarity #
 ######################################
