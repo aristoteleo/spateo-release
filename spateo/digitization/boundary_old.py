@@ -25,7 +25,6 @@ def identify_boundary(
     min_area=30,
     dilate_k_size: int = 3,
 ):
-
     lm.main_info(f"Setting up source and target area.")
     adata_tmp = adata.copy()
     adata_tmp.obs["tmp_boundary"] = 0
@@ -88,7 +87,6 @@ def boundary_gridding(
     spatial_key: str = "spatial",
     init: bool = False,
 ):
-
     bdl_seg_inner_list = []
     bdl_seg_outer_list = []
 

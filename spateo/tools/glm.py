@@ -6,7 +6,7 @@ import pandas as pd
 import patsy
 import statsmodels.api as sm
 from anndata import AnnData
-from patsy import bs, cr, dmatrix
+from patsy import dmatrix
 from scipy import stats
 from scipy.sparse import issparse
 from statsmodels.sandbox.stats.multicomp import multipletests

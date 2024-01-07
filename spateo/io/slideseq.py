@@ -1,6 +1,6 @@
 """IO functions for Slide-seq technology.
 """
-from typing import List, NamedTuple, Optional, Union
+from typing import NamedTuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -10,6 +10,7 @@ from typing_extensions import Literal
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
+from .utils import bin_indices, get_bin_props
 
 try:
     import ngs_tools as ngs

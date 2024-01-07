@@ -22,7 +22,6 @@ except ImportError:
     from typing_extensions import Literal
 
 from ..logging import logger_manager as lm
-from ..tools.spatial_smooth.run_smoothing import smooth_and_downsample
 from .utils import *
 
 

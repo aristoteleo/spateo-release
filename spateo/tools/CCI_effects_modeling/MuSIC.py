@@ -26,11 +26,7 @@ from ...logging import logger_manager as lm
 from ...preprocessing.normalize import factor_normalization
 from ...preprocessing.transform import log1p
 from ...tools.spatial_smooth import smooth
-from ..find_neighbors import (
-    find_bw_for_n_neighbors,
-    get_wi,
-    neighbors,
-)
+from ..find_neighbors import find_bw_for_n_neighbors, get_wi, neighbors
 from ..spatial_degs import moran_i
 from .distributions import Gaussian, NegativeBinomial, Poisson
 from .regression_utils import compute_betas_local, iwls, multicollinearity_check

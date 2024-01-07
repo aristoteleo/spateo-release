@@ -1,11 +1,3 @@
-from .alignment import (
-    get_align_labels,
-    get_optimal_mapping_connections,
-    models_align,
-    models_align_ref,
-    paste_transform,
-    rigid_transform,
-)
 from .architype import (
     archetypes,
     archetypes_genes,
@@ -32,9 +24,6 @@ from .cluster_lasso import *
 from .coarse_align import AffineTrans, align_slices_pca, pca_align, procrustes
 from .find_neighbors import construct_nn_graph
 from .glm import glm_degs
-
-# from .image import add_image_layer
-# from .interpolation_utils import *
 from .labels import Label, create_label_class
 from .lisa import GM_lag_model, lisa_geo_df, local_moran_i
 from .live_wire import LiveWireSegmentation, compute_shortest_path, live_wire

@@ -1,7 +1,8 @@
 """Interactive plotting functions for aggregated UMI counts.
 """
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
+import anndata
 import cv2
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -9,10 +10,8 @@ import numpy as np
 import plotly.graph_objects as go
 from anndata import AnnData
 from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from matplotlib.widgets import PolygonSelector
-from skimage.color.colorlabel import DEFAULT_COLORS, color_dict
-from typing_extensions import Literal
+from skimage.color.colorlabel import DEFAULT_COLORS
 
 from ...configuration import SKM
 from ...errors import PlottingError

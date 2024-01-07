@@ -19,7 +19,7 @@ from typing_extensions import Literal
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-from .utils import get_points_props
+from .utils import bin_indices, get_bin_props, get_points_props
 
 try:
     import ngs_tools as ngs

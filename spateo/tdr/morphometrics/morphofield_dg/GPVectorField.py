@@ -225,7 +225,6 @@ class GPVectorField:
     def compute_curl(
         self, X: Optional[np.ndarray] = None, dim1: int = 0, dim2: int = 1, dim3: int = 2, **kwargs
     ) -> np.ndarray:
-
         X = self.data["X"] if X is None else X
         if dim3 is None or X.shape[1] == 2:
             X = X[:, [dim1, dim2]]

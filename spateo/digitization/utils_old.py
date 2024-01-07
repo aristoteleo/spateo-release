@@ -24,7 +24,6 @@ def fill_grid_label(
     column_label_key: str = "column_label",
     init: bool = False,
 ):
-
     # mask image should be 2 pixels wider and higher, according to cv2.floodFill
     layer_grid_img = seg_grid_img.copy()
     layer_mask = np.zeros((layer_grid_img.shape[0] + 2, layer_grid_img.shape[1] + 2), dtype=np.uint8)
@@ -104,7 +103,6 @@ def draw_seg_grid(
     gridline_width=1,
     mode="grid",
 ):
-
     seg_grid_img = np.zeros_like(boundary_line_img, dtype=np.uint8)
 
     if len(bdl_seg_coor_x) != len(bdl_seg_coor_y):
@@ -187,7 +185,6 @@ def extend_layer(
     boundary_line_list,
     extend_width=10,
 ):
-
     lm.main_info(f"Generating layer area.")
     extend_layer_mask = np.zeros_like(boundary_line_img, dtype=np.uint8)
     extend_layer_img = np.zeros_like(boundary_line_img, dtype=np.uint8)
@@ -226,7 +223,6 @@ def field_contour_line(
     min_pnt,
     max_pnt,
 ):
-
     ctr_seq_rev = ctr_seq[::-1].copy()
     min_idx = ctr_seq.index(min_pnt)
     max_idx = ctr_seq.index(max_pnt) + 1

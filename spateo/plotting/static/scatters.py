@@ -858,7 +858,7 @@ def scatters(
                             color_dict[i] = j
 
                         adata.uns[cur_title + "_colors"] = color_dict
-                elif points.shape[0] <= figsize[0] * figsize[1] * 100000:
+                else:
                     # scatter plot using matplotlib
                     # main_debug("drawing with _matplotlib_points function")
                     ax, color_out = _matplotlib_points(
@@ -896,31 +896,6 @@ def scatters(
                             color_dict[i] = j
 
                         adata.uns[cur_title + "_colors"] = color_dict
-                else:
-                    # scatter plot using datashader
-                    # main_debug("drawing with _datashade_points function")
-                    ax = _datashade_points(
-                        # points.values,
-                        point_coords,
-                        ax,
-                        labels,
-                        values,
-                        highlights,
-                        _cmap,
-                        color_key,
-                        _color_key_cmap,
-                        _background,
-                        figsize[0],
-                        figsize[1],
-                        show_legend,
-                        sort=sort,
-                        frontier=frontier,
-                        contour=contour,
-                        ccmap=ccmap,
-                        calpha=calpha,
-                        sym_c=sym_c,
-                        **scatter_kwargs,
-                    )
 
                 if ax_index == 1 and show_arrowed_spines:
                     arrowed_spines(ax, points.columns[:2], _background)

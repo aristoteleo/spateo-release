@@ -180,7 +180,15 @@ def BA_align_sparse(
     # Preprocessing and extract the spatial and expression information
     normalize_g = False if dissimilarity == "kl" else normalize_g
     sampleA, sampleB = (sampleA, sampleB) if inplace else (sampleA.copy(), sampleB.copy())
-    (nx, type_as, new_samples, exp_matrices, spatial_coords, normalize_scale, normalize_mean_list,) = align_preprocess(
+    (
+        nx,
+        type_as,
+        new_samples,
+        exp_matrices,
+        spatial_coords,
+        normalize_scale,
+        normalize_mean_list,
+    ) = align_preprocess(
         samples=[sampleA, sampleB],
         layer=layer,
         genes=genes,
