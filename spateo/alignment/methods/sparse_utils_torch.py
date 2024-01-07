@@ -13,9 +13,10 @@ from sklearn.neighbors import KDTree
 
 from spateo.logging import logger_manager as lm
 
-from torch_sparse import SparseTensor
+# from torch_sparse import SparseTensor
 from scipy.sparse import coo_array
-from torch_sparse import spmm
+# from torch_sparse import spmm
+from torch import sparse_coo_tensor as SparseTensor
 
 from .utils import (
     _linalg,
@@ -140,6 +141,7 @@ def calc_distance(
     else:
         return DistMat
 
+# This function is not used anymore
 def calc_distance_mask(
     X_A: Union[np.ndarray, torch.Tensor],
     X_B: Union[np.ndarray, torch.Tensor],
@@ -226,6 +228,7 @@ def calc_distance_mask(
         DistMat = nx.concatenate(DistMats, axis=0)
     return DistMat
 
+# This function is not used anymore
 def calc_sparse_mask(
     X_A: Union[np.ndarray, torch.Tensor],
     X_B: Union[np.ndarray, torch.Tensor],
@@ -396,7 +399,7 @@ def calc_P_related(
         
         Ps.append(P)
     # empty_cache(device=device)
-    P = _sparse_concat(nx, Ps, axis=1)
+    P = torch.cat(Ps, axis=1)
     del Ps
     Sp_sigma2 = K_NA_sigma2.sum()
     sigma2_temp = sigma2_temp / (D * Sp_sigma2)
@@ -405,7 +408,6 @@ def calc_P_related(
         
         
         
-
 def get_optimal_R_sparse(
     coordsA: Union[np.ndarray, torch.Tensor],
     coordsB: Union[np.ndarray, torch.Tensor],
@@ -424,12 +426,9 @@ def get_optimal_R_sparse(
     """
     nx = ot.backend.get_backend(coordsA, coordsB, R_init)
     NA, NB, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
-    # Sp = nx.einsum("ij->", P)
-    # K_NA = nx.einsum("ij->i", P)
-    # K_NB = nx.einsum("ij->j", P)
     Sp = P.sum()
-    K_NA = P.sum(1)
-    K_NB = P.sum(0)
+    K_NA = P.sum(1).to_dense()
+    K_NB = P.sum(0).to_dense()
     VnA = nx.zeros(coordsA.shape, type_as=coordsA[0, 0])
     mu_XnA, mu_VnA, mu_XnB = (
         _dot(nx)(K_NA, coordsA) / Sp,
@@ -437,11 +436,8 @@ def get_optimal_R_sparse(
         _dot(nx)(K_NB, coordsB) / Sp,
     )
     XnABar, VnABar, XnBBar = coordsA - mu_XnA, VnA - mu_VnA, coordsB - mu_XnB
-    # A = -_dot(nx)(
-    #     nx.einsum("ij,i->ij", VnABar, K_NA).T - _dot(nx)(P, XnBBar).T, XnABar
-    # )
     A = -_dot(nx)(
-        nx.einsum("ij,i->ij", VnABar, K_NA).T - spmm(torch.vstack((P.storage._row, P.storage._col)),P.storage._value,P.storage._sparse_sizes[0],P.storage._sparse_sizes[1],XnBBar).T, XnABar
+        nx.einsum("ij,i->ij", VnABar, K_NA).T - _dot(nx)(P, XnBBar).T, XnABar
     )
     
     # get the optimal rotation matrix R
@@ -452,14 +448,17 @@ def get_optimal_R_sparse(
     t = mu_XnB - mu_VnA - _dot(nx)(mu_XnA, R.T)
     optimal_RnA = _dot(nx)(coordsA, R.T) + t
     return optimal_RnA, R, t
-                
-        
+                     
 def _kernel_exp(
     DistMat,
     sigma2,
 ):
-    results = DistMat.clone()
-    results.storage._value = torch.exp(-results.storage._value / (2 * sigma2))
+    results = SparseTensor(
+        indices=DistMat.indices(),
+        value=torch.exp(-DistMat.values() / (2 * sigma2)),
+        size=DistMat.size(),
+        device=DistMat.device,
+    )
     return results
         
         
@@ -519,11 +518,6 @@ def _construct_label_mask(
     labelB,
     label_transfer_prior,
 ):
-    # label_mask = []
-    # for labelB_i in labelB:
-    #     cur_P = labelA.map(label_transfer_prior[labelB_i]).values
-    #     label_mask.append(cur_P)
-    # label_mask = np.stack(label_mask)
     
     label_mask = np.zeros((labelB.shape[0], labelA.shape[0]))
     for k in label_transfer_prior.keys():
@@ -535,7 +529,6 @@ def _construct_label_mask(
     
     
 ## Sparse operation
-
 def _dense_to_sparse(
     mat: Union[np.ndarray, torch.Tensor],
     sparse_method: str = "topk",
@@ -555,7 +548,6 @@ def _dense_to_sparse(
     
     if sparse_method == 'topk':
         sorted_mat, sorted_idx = _sort(nx, mat, axis=axis, descending=descending)
-        # sorted_mat, sorted_idx = nx.sort2(mat, axis=axis)
         if axis == 0:
             col = _repeat_interleave(nx, nx.arange(NB, type_as=mat), threshold, axis=0)
             row = sorted_idx[:threshold,:].T.reshape(-1)
@@ -572,16 +564,20 @@ def _dense_to_sparse(
     return results
     
     
-    
 def _sparse_mul_same(
     sparse_mat1,
     sparse_mat2,
 ):
-    # elemental-wise multiple two sparse tensor of the same shape and same sparse coordinates
-    results = sparse_mat1.clone()
-    results.storage._value = sparse_mat1.storage._value * sparse_mat2.storage._value
+    
+    results = SparseTensor(
+        indices=sparse_mat1.indices(),
+        value=sparse_mat1.values() * sparse_mat2.values(),
+        size=sparse_mat1.size(),
+        device=sparse_mat1.device,
+    )
     return results
 
+# TO-DO: convert the torch_sparse format to pytorch format, currently not used
 def _sparse_dense_mul(
     sparse_mat1,
     dense_mat2,
@@ -591,7 +587,7 @@ def _sparse_dense_mul(
     results.storage._value = sparse_mat1.storage._value * dense_mat2[sparse_mat1.storage._row, sparse_mat1.storage._col]
     return results
     
-
+# TO-DO: convert the torch_sparse format to pytorch format, currently not used
 def _sparse_concat(
     nx,
     concat_mats,
@@ -633,7 +629,7 @@ def _SparseTensor(
     sparse_sizes
 ):
     if nx_torch(nx):
-        return SparseTensor(row=row, col=col, value=value, sparse_sizes=sparse_sizes)
+        return SparseTensor(indices=torch.vstack((row, col)), values=value, size=sparse_sizes)
     else:
         return coo_array((value, (row, col)), shape=sparse_sizes)
         

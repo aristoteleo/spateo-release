@@ -13,11 +13,10 @@ except ImportError:
 from typing import List, Optional, Tuple, Union
 
 import pandas as pd
-from torch_sparse import spmm
 
 from spateo.logging import logger_manager as lm
 
-from .morpho_sparse_utils import (
+from .sparse_utils_torch import (
     _init_guess_beta2,
     _init_guess_sigma2,
     calc_distance,
@@ -121,8 +120,8 @@ def get_P_sparse(
         top_k=top_k,
     )
     
-    K_NA = P.sum(1)
-    K_NB = P.sum(0)
+    K_NA = P.sum(1).to_dense()
+    K_NB = P.sum(0).to_dense()
     Sp = P.sum()
     Sp_spatial = K_NA_spatial.sum()
     Sp_sigma2 = K_NA_sigma2.sum()
@@ -402,13 +401,7 @@ def BA_align_sparse(
                 PXB_term = (
                     step_size
                     * (
-                        spmm(
-                            torch.vstack((P.storage._row, P.storage._col)),
-                            P.storage._value,
-                            P.storage._sparse_sizes[0],
-                            P.storage._sparse_sizes[1],
-                            randcoordsB,
-                        )
+                        _dot(nx)(P, randcoordsB)
                         - nx.einsum("ij,i->ij", RnA, K_NA)
                     )
                     + (1 - step_size) * PXB_term
@@ -428,13 +421,7 @@ def BA_align_sparse(
                 Coff = _dot(nx)(
                     term1,
                     (
-                        spmm(
-                            torch.vstack((P.storage._row, P.storage._col)),
-                            P.storage._value,
-                            P.storage._sparse_sizes[0],
-                            P.storage._sparse_sizes[1],
-                            coordsB,
-                        )
+                        _dot(nx)(P, coordsB)
                         - nx.einsum("ij,i->ij", RnA, K_NA)
                     ),
                 )
@@ -480,13 +467,7 @@ def BA_align_sparse(
                 + _dot(nx)(
                     coordsA.T,
                     nx.einsum("ij,i->ij", VnA, K_NA)
-                    - spmm(
-                        torch.vstack((P.storage._row, P.storage._col)),
-                        P.storage._value,
-                        P.storage._sparse_sizes[0],
-                        P.storage._sparse_sizes[1],
-                        randcoordsB,
-                    ),
+                    -_dot(nx)(P, randcoordsB),
                 )
                 + 2
                 * lambdaReg
@@ -499,13 +480,7 @@ def BA_align_sparse(
                 + _dot(nx)(
                     coordsA.T,
                     nx.einsum("ij,i->ij", VnA, K_NA)
-                    - spmm(
-                        torch.vstack((P.storage._row, P.storage._col)),
-                        P.storage._value,
-                        P.storage._sparse_sizes[0],
-                        P.storage._sparse_sizes[1],
-                        coordsB,
-                    ),
+                    -_dot(nx)(P, coordsB),
                 )
                 + 2
                 * lambdaReg
