@@ -13,7 +13,6 @@ except ImportError:
 from typing import List, Optional, Tuple, Union
 
 import pandas as pd
-from torch_sparse import spmm
 
 from spateo.logging import logger_manager as lm
 
@@ -104,7 +103,6 @@ def get_P_sparse(
         )
     outlier_s = samples_s * nx.sum(label_mask, axis=0) if label_mask is not None else samples_s * NA
     spatial_outlier = _power(nx)((2 * _pi(nx) * sigma2), _data(nx, D / 2, XnAHat)) * (1 - gamma) / (gamma * outlier_s)
-
     K_NA_spatial, K_NA_sigma2, P, sigma2_temp = calc_P_related(
         XnAHat=XnAHat,
         XnB=XnB,
@@ -121,9 +119,9 @@ def get_P_sparse(
         batch_capacity=batch_capacity,
         top_k=top_k,
     )
-    print(P)
-    K_NA = P.sum(1)
-    K_NB = P.sum(0)
+
+    K_NA = P.sum(1).to_dense()
+    K_NB = P.sum(0).to_dense()
     Sp = P.sum()
     Sp_spatial = K_NA_spatial.sum()
     Sp_sigma2 = K_NA_sigma2.sum()
@@ -195,7 +193,6 @@ def BA_align_sparse(
     X_A, X_B = exp_matrices[1], exp_matrices[0]
     del spatial_coords, exp_matrices
     NA, NB, D, G = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1], X_A.shape[1]
-
     # generate label mask by label consistency prior
     if use_label_prior:
         # check the label key
@@ -207,7 +204,6 @@ def BA_align_sparse(
         labelB = pd.Series(sampleA.obs[label_key].values)
     else:
         labelA, labelB = None, None
-
     # construct kernel for inducing variables
     Unique_coordsA = _unique(nx, coordsA, 0)
     idx = random.sample(range(Unique_coordsA.shape[0]), min(K, Unique_coordsA.shape[0]))
@@ -256,7 +252,6 @@ def BA_align_sparse(
         inlier_B = _data(nx, inlier_B, type_as)
         inlier_P = _data(nx, inlier_P, type_as)
     coarse_alignment = coordsA
-
     # Initialize optimization parameters
     kappa = nx.ones((NA), type_as=type_as)
     alpha = nx.ones((NA), type_as=type_as)
@@ -276,18 +271,15 @@ def BA_align_sparse(
     XAHat, RnA = coordsA, coordsA
     s = _data(nx, 1, type_as)
     R = _identity(nx, D, type_as)
-
     # calculate the initial values of sigma2 and beta2
     sigma2 = _init_guess_sigma2(XAHat, coordsB)
     beta2, beta2_end = _init_guess_beta2(nx, X_A, X_B, dissimilarity, partial_robust_level, beta2, beta2_end)
     empty_cache(device=device)
-
     # initial the sigma2 and beta2 temperature for better performance
     outlier_variance = 1
     max_outlier_variance = partial_robust_level  # 20
     outlier_variance_decrease = _power(nx)(_data(nx, max_outlier_variance, type_as), 1 / (max_iter / 2))
     beta2_decrease = _power(nx)(beta2_end / beta2, 1 / (50))
-
     # Initial calculation of the gene and spatial similarity (distance) matrix
     spatial_threshold = 6 * sigma2
     # if pre_compute_dist, we compute the full similarity of the expression (NA x NB) and store it, else we will compute this in each iteration.
@@ -325,7 +317,6 @@ def BA_align_sparse(
         sampleB.uns[iter_key_added]["sigma2"] = {}
         sampleB.uns[iter_key_added]["beta2"] = {}
         sampleB.uns[iter_key_added]["scale"] = {}
-
     # main iteration begin
     for iter in iteration:
         # save intermediate results
@@ -335,7 +326,6 @@ def BA_align_sparse(
             sampleB.uns[iter_key_added]["sigma2"][iter] = nx.to_numpy(sigma2)
             sampleB.uns[iter_key_added]["beta2"][iter] = nx.to_numpy(beta2)
             sampleB.uns[iter_key_added]["scale"][iter] = nx.to_numpy(s)
-
         # update the assignment matrix
         if SVI_mode:
             step_size = nx.minimum(_data(nx, 1.0, type_as), SVI_deacy / (iter + 1.0))
@@ -410,17 +400,7 @@ def BA_align_sparse(
                 )
                 term1 = _dot(nx)(_pinv(nx)(SigmaInv), U.T)
                 PXB_term = (
-                    step_size
-                    * (
-                        spmm(
-                            torch.vstack((P.storage._row, P.storage._col)),
-                            P.storage._value,
-                            P.storage._sparse_sizes[0],
-                            P.storage._sparse_sizes[1],
-                            randcoordsB,
-                        )
-                        - nx.einsum("ij,i->ij", RnA, K_NA)
-                    )
+                    step_size * (_dot(nx)(P, randcoordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
                     + (1 - step_size) * PXB_term
                 )
                 Coff = _dot(nx)(term1, PXB_term)
@@ -437,16 +417,7 @@ def BA_align_sparse(
                 SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
                 Coff = _dot(nx)(
                     term1,
-                    (
-                        spmm(
-                            torch.vstack((P.storage._row, P.storage._col)),
-                            P.storage._value,
-                            P.storage._sparse_sizes[0],
-                            P.storage._sparse_sizes[1],
-                            coordsB,
-                        )
-                        - nx.einsum("ij,i->ij", RnA, K_NA)
-                    ),
+                    (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)),
                 )
                 VnA = _dot(nx)(
                     U,
@@ -471,7 +442,6 @@ def BA_align_sparse(
             )
         # if nn_init:
         PCYC, PCXC = _dot(nx)(inlier_P.T, inlier_B), _dot(nx)(inlier_P.T, inlier_A)
-
         if SVI_mode and iter > 1:
             t = (
                 step_size
@@ -490,14 +460,7 @@ def BA_align_sparse(
                 _dot(nx)(PXA.T, t)
                 + _dot(nx)(
                     coordsA.T,
-                    nx.einsum("ij,i->ij", VnA, K_NA)
-                    - spmm(
-                        torch.vstack((P.storage._row, P.storage._col)),
-                        P.storage._value,
-                        P.storage._sparse_sizes[0],
-                        P.storage._sparse_sizes[1],
-                        randcoordsB,
-                    ),
+                    nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, randcoordsB),
                 )
                 + 2
                 * lambdaReg
@@ -509,14 +472,7 @@ def BA_align_sparse(
                 _dot(nx)(PXA.T, t)
                 + _dot(nx)(
                     coordsA.T,
-                    nx.einsum("ij,i->ij", VnA, K_NA)
-                    - spmm(
-                        torch.vstack((P.storage._row, P.storage._col)),
-                        P.storage._value,
-                        P.storage._sparse_sizes[0],
-                        P.storage._sparse_sizes[1],
-                        coordsB,
-                    ),
+                    nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, coordsB),
                 )
                 + 2
                 * lambdaReg
@@ -583,7 +539,6 @@ def BA_align_sparse(
         P=P,
         R_init=R,
     )
-
     # combine the initial rigid transformation and final rigid transformation
     t = _dot(nx)(init_t, R.T) + t
     R = _dot(nx)(R, init_R)
@@ -638,6 +593,6 @@ def BA_align_sparse(
     empty_cache(device=device)
     return (
         None if inplace else (sampleA, sampleB),
-        P,
+        nx.to_numpy(P.to_dense()),
         nx.to_numpy(sigma2),
     )
