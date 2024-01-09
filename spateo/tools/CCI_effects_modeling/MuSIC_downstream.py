@@ -1285,7 +1285,8 @@ class MuSIC_Interpreter(MuSIC):
             use_target_genes: Set True to use target genes as the genes to visualize. If True, will ignore "genes"
                 argument. "targets" file must be present in the model's directory.
             genes: Optional list of genes to visualize. If "use_ligands", "use_receptors", and "use_target_genes" are
-                all False, this must be given.
+                all False, this must be given. This can also be used to visualize only a subset of the genes once
+                processing & saving has already completed using e.g. "use_ligands", "use_receptors", etc.
             position_key: Key in adata.obs or adata.obsm that provides a relative indication of the position of
                 cells. i.e. spatial coordinates. Defaults to "spatial". For each value in the position array (each
                 coordinate, each category), multiple cells must have the same value.
@@ -1322,6 +1323,9 @@ class MuSIC_Interpreter(MuSIC):
                 "Please set either 'use_ligands', 'use_receptors', or 'use_target_genes' to True, or provide a list "
                 "of genes to visualize."
             )
+
+        # Check if custom genes are given:
+        custom_genes = genes
 
         if use_ligands:
             if not os.path.exists(
@@ -1502,6 +1506,9 @@ class MuSIC_Interpreter(MuSIC):
                 os.path.join(output_folder, f"{adata_id}_distribution_{file_id}_along_{save_id}.csv"),
                 index_col=0,
             )
+            # Can plot a subset once this is already processed & saved:
+            if custom_genes is not None:
+                to_plot = to_plot.loc[custom_genes]
         else:
             # For each gene, compute the mean expression:
             mean_expr = pd.Series(index=genes)

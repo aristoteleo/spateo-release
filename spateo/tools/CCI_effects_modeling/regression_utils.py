@@ -384,8 +384,6 @@ def iwls(
             mask = mask.reshape(-1, 1)
             neg_mask = (new_betas < 0) & (mask == -1.0) | (new_betas > 0)
             new_betas[~neg_mask] = 1e-6
-            mask[mask == -1.0] = 1
-            new_betas = np.multiply(new_betas, mask).astype(np.float32)
 
         linear_predictor = sparse_dot(x, new_betas)
         y_hat = distr.predict(linear_predictor)

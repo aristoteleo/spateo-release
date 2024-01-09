@@ -928,7 +928,7 @@ class MuSIC:
                 all_targets = [t for t in all_targets if t in self.grn.index]
 
                 self.targets_expr = pd.DataFrame(
-                    adata[:, all_targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
+                    adata[:, all_targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, all_targets].X,
                     index=adata.obs_names,
                     columns=targets,
                 )
@@ -3360,40 +3360,7 @@ class MuSIC:
                 indices = self.subsampled_indices[target]
                 self.x_chunk = np.array(indices)
 
-            # Global relationship regularization (only for non-niche models):
-            if self.mod_type != "niche":
-                correlations = []
-                for idx in range(X.shape[1]):
-                    # Create a boolean mask where both the current X column and y are nonzero
-                    mask = (X[:, idx].ravel() != 0) & (y.ravel() != 0)
-
-                    # Create a subset of the data using the mask
-                    X_subset = np.squeeze(X[mask, idx])
-                    y_subset = np.squeeze(y[mask])
-
-                    if X_subset.size <= 1:
-                        # X and y are not both nonzero anywhere
-                        correlation = 0.0
-                    else:
-                        # Compute the Pearson correlation coefficient for the subset
-                        if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
-                            correlation = spearmanr(X_subset, y_subset)[0]
-                        else:
-                            correlation = np.nan  # Not enough data points to compute correlation
-
-                        # Append the correlation to the correlations list
-                    correlations.append(correlation)
-                correlations = np.array(correlations)
-
-                threshold = np.abs(correlations) < 0.1
-                feature_mask = np.where(threshold, np.abs(correlations), 1.0)
-                # Repression is more difficult to detect than activation, so the criterion for calling a relationship
-                # repressive need to be more stringent- enable negative coefficients only where the global
-                # correlation is negative:
-                global_negative_relationship = correlations < -0.1
-                feature_mask = np.where(global_negative_relationship, feature_mask, -1.0)
-            else:
-                feature_mask = None
+            feature_mask = None
 
             # Use y to find the initial appropriate upper and lower bounds for coefficients:
             if self.distr != "gaussian":
