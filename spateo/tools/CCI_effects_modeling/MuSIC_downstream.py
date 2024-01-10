@@ -6251,6 +6251,7 @@ class MuSIC_Interpreter(MuSIC):
                 n_cells_threshold = int(self.target_expr_threshold * adata.n_obs)
 
                 all_TFs = list(grn.columns)
+
                 if scipy.sparse.issparse(adata.X):
                     nnz_counts = np.array(adata[:, all_TFs].X.getnnz(axis=0)).flatten()
                 else:

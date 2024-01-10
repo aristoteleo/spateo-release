@@ -3295,10 +3295,49 @@ class MuSIC:
 
                 # Transcription factors that have binding sites proximal to this target:
                 target_rows = self.grn.loc[gene_query]
+
                 if not isinstance(target_rows, pd.Series):
                     target_TFs = target_rows.columns[(target_rows == 1).any()].tolist()
                 else:
                     target_TFs = target_rows[target_rows == 1].index.tolist()
+
+                # For the given target, subset to the TFs that directly interact with receptors that can regulate the
+                # target:
+                self.logger.info(
+                    f"For target {target}, getting subset of TFs that can interact with "
+                    f"target-associated receptors."
+                )
+
+                # Access outputs from upstream model from the downstream directory- need to get parent directory of
+                # "cci_deg_detection":
+                parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(self.output_path)))
+                files = os.listdir(parent_dir)
+                csv_files = [file for file in files if file.endswith(".csv") and "prediction" not in file]
+                if csv_files:
+                    first_csv = csv_files[0]
+                    # Split the string at underscores and remove the last part (extension)
+                    id_tag = first_csv.rsplit("_", 1)[0]
+                else:
+                    raise FileNotFoundError(
+                        f"No files found in the parent directory of the upstream model: " f"{parent_dir}."
+                    )
+                path = os.path.join(parent_dir, id_tag + f"_{target}.csv")
+                target_file = pd.read_csv(path, index_col=0)
+                regulators = [c for c in target_file.columns if c.startswith("b_")]
+                regulators = [c.replace("b_", "") for c in regulators]
+                if self.mod_type == "lr":
+                    ligands = [r.split(":")[0] for r in regulators]
+                else:
+                    ligands = regulators
+
+                # All of the possible receptors that are partners to these ligands:
+                receptors_for_ligands = self.lr_db[self.lr_db["from"].isin(ligands)]["to"].unique().tolist()
+                tfs_for_receptors = (
+                    self.r_tf_db[self.r_tf_db["receptor"].isin(receptors_for_ligands)]["tf"].unique().tolist()
+                )
+                # Filter to the final set of primary TFs
+                target_TFs = [tf for tf in target_TFs if tf in tfs_for_receptors]
+
                 # TFs that can regulate expression of the target-binding TFs:
                 primary_tf_rows = self.grn.loc[[tf for tf in target_TFs if tf in self.grn.index]]
                 secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
