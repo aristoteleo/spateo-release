@@ -26,7 +26,6 @@ from ...tools.utils import (
     update_dict,
 )
 from .utils import (
-    _datashade_points,
     _get_adata_color_vec,
     _matplotlib_points,
     _select_font_color,
