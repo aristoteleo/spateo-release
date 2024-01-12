@@ -1656,7 +1656,7 @@ class MuSIC:
                         if len(receptor_cols) >= 5
                         else 1
                     )
-                    # If overlap is greater than 1/2 of cells, combine columns
+                    # If overlap is greater than threshold, combine columns
                     if len(receptor_cols) > 1 and overlap > threshold:
                         combined_ligand = "/".join(ligands)
                         combined_col = f"{combined_ligand}:{receptor}"
@@ -3576,11 +3576,7 @@ class MuSIC:
             n_samples = self.n_samples
         n_eff = n_samples - trace_hat
 
-        aicc = (
-            -2 * ll
-            + 2 * self.n_features
-            + (2 * self.n_features * (self.n_features + 1)) / (n_eff - self.n_features - 1)
-        )
+        aicc = -2 * ll + 2 * self.n_features + (2 * self.n_features * (self.n_features + 1)) / (n_eff - 1)
 
         return aicc
 
