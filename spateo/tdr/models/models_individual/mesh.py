@@ -131,7 +131,7 @@ def construct_surface(
                 * ``'alpha_shape'``: {'alpha': 2.0}
                 * ``'ball_pivoting'``: {'radii': [1]}
                 * ``'poisson'``: {'depth': 8, 'width'=0, 'scale'=1.1, 'linear_fit': False, 'density_threshold': 0.01}
-                * ``'marching_cube'``: {'levelset': 0, 'mc_scale_factor': 1}
+                * ``'marching_cube'``: {'levelset': 0, 'mc_scale_factor': 1, 'dist_sample_num': 100}
         nsub: Number of subdivisions. Each subdivision creates 4 new triangles, so the number of resulting triangles is
               nface*4**nsub where nface is the current number of faces.
         nclus: Number of voronoi clustering.
@@ -207,7 +207,7 @@ def construct_surface(
             density_threshold=_cs_args["density_threshold"],
         )
     elif cs_method == "marching_cube":
-        _cs_args = {"levelset": 0, "mc_scale_factor": 1}
+        _cs_args = {"levelset": 0, "mc_scale_factor": 1, "dist_sample_num": 100}
         if not (cs_args is None):
             _cs_args.update(cs_args)
 
