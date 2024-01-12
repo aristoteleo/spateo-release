@@ -26,6 +26,7 @@ pandas>=0.25.1
 paste-bio>=1.4.0
 plotly>=5.1.0
 POT>=0.8.1
+psutil>=5.6.3
 pynndescent>=0.4.8
 pysal>=1.14.4
 pyro-ppl
