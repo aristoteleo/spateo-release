@@ -119,7 +119,7 @@ def get_P_sparse(
         batch_capacity=batch_capacity,
         top_k=top_k,
     )
-    
+
     K_NA = P.sum(1).to_dense()
     K_NB = P.sum(0).to_dense()
     Sp = P.sum()
@@ -399,11 +399,7 @@ def BA_align_sparse(
                 )
                 term1 = _dot(nx)(_pinv(nx)(SigmaInv), U.T)
                 PXB_term = (
-                    step_size
-                    * (
-                        _dot(nx)(P, randcoordsB)
-                        - nx.einsum("ij,i->ij", RnA, K_NA)
-                    )
+                    step_size * (_dot(nx)(P, randcoordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
                     + (1 - step_size) * PXB_term
                 )
                 Coff = _dot(nx)(term1, PXB_term)
@@ -420,10 +416,7 @@ def BA_align_sparse(
                 SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
                 Coff = _dot(nx)(
                     term1,
-                    (
-                        _dot(nx)(P, coordsB)
-                        - nx.einsum("ij,i->ij", RnA, K_NA)
-                    ),
+                    (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)),
                 )
                 VnA = _dot(nx)(
                     U,
@@ -466,8 +459,7 @@ def BA_align_sparse(
                 _dot(nx)(PXA.T, t)
                 + _dot(nx)(
                     coordsA.T,
-                    nx.einsum("ij,i->ij", VnA, K_NA)
-                    -_dot(nx)(P, randcoordsB),
+                    nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, randcoordsB),
                 )
                 + 2
                 * lambdaReg
@@ -479,8 +471,7 @@ def BA_align_sparse(
                 _dot(nx)(PXA.T, t)
                 + _dot(nx)(
                     coordsA.T,
-                    nx.einsum("ij,i->ij", VnA, K_NA)
-                    -_dot(nx)(P, coordsB),
+                    nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, coordsB),
                 )
                 + 2
                 * lambdaReg
@@ -601,6 +592,6 @@ def BA_align_sparse(
     empty_cache(device=device)
     return (
         None if inplace else (sampleA, sampleB),
-        P,
+        nx.to_numpy(P.to_dense()),
         nx.to_numpy(sigma2),
     )

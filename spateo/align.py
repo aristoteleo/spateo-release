@@ -8,6 +8,7 @@ from .alignment import (
     morpho_align,
     morpho_align_sparse,
     morpho_align_ref,
+    morpho_align_sparse,
     paste_align,
     paste_align_ref,
     paste_transform,
