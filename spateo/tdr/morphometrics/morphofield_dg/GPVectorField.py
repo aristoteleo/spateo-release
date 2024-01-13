@@ -154,9 +154,9 @@ def Jacobian_GP_gaussian_kernel(X: np.ndarray, vf_dict: dict, vectorize: bool = 
             d is the number of dimensions and n the number of coordinates in x.
     """
     from ..morphofield.gaussian_process import _con_K, _con_K_geodist
-
-    pre_scale = vf_dict["pre_norm_scale"]
-    x_norm = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale"]
+    # pre_scale = 
+    pre_scale = vf_dict["norm_dict"]["scale_fixed"] / vf_dict["norm_dict"]["scale_transformed"]
+    x_norm = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
     if x_norm.ndim == 1:
         if vf_dict["kernel_dict"]["dist"] == "cdist":
             K, D = _con_K(x_norm[None, :], vf_dict["X_ctrl"], vf_dict["beta"], return_d=True)

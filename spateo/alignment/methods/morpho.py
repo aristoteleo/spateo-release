@@ -274,7 +274,7 @@ def BA_align(
     # Preprocessing
     normalize_g = False if dissimilarity == "kl" else normalize_g
     sampleA, sampleB = (sampleA, sampleB) if inplace else (sampleA.copy(), sampleB.copy())
-    (nx, type_as, new_samples, exp_matrices, spatial_coords, normalize_scale, normalize_mean_list,) = align_preprocess(
+    (nx, type_as, new_samples, exp_matrices, spatial_coords, normalize_scale_list, normalize_mean_list,) = align_preprocess(
         samples=[sampleA, sampleB],
         layer=layer,
         genes=genes,
@@ -425,7 +425,7 @@ def BA_align(
 
     for iter in iteration:
         if iter_key_added is not None:
-            iter_XAHat = XAHat * normalize_scale + normalize_mean_list[0] if normalize_c else XAHat
+            iter_XAHat = XAHat * normalize_scale_list[0] + normalize_mean_list[0] if normalize_c else XAHat
             sampleB.uns[iter_key_added][key_added][iter] = nx.to_numpy(iter_XAHat)
             sampleB.uns[iter_key_added]["sigma2"][iter] = nx.to_numpy(sigma2)
             sampleB.uns[iter_key_added]["beta2"][iter] = nx.to_numpy(beta2)
@@ -634,10 +634,10 @@ def BA_align(
         XAHat = XAHat * (area / area_after)
 
     if normalize_c:
-        XAHat = XAHat * normalize_scale + normalize_mean_list[0]
-        RnA = RnA * normalize_scale + normalize_mean_list[0]
-        optimal_RnA = optimal_RnA * normalize_scale + normalize_mean_list[0]
-        coarse_alignment = coarse_alignment * normalize_scale + normalize_mean_list[0]
+        XAHat = XAHat * normalize_scale_list[0] + normalize_mean_list[0]
+        RnA = RnA * normalize_scale_list[0] + normalize_mean_list[0]
+        optimal_RnA = optimal_RnA * normalize_scale_list[0] + normalize_mean_list[0]
+        coarse_alignment = coarse_alignment * normalize_scale_list[0] + normalize_mean_list[0]
 
     # Save aligned coordinates
     sampleB.obsm["Nonrigid_align_spatial"] = nx.to_numpy(XAHat).copy()
@@ -656,7 +656,7 @@ def BA_align(
             "beta": beta,
             "Coff": nx.to_numpy(Coff),
             "ctrl_pts": nx.to_numpy(ctrl_pts),
-            "normalize_scale": nx.to_numpy(normalize_scale) if normalize_c else None,
+            "normalize_scale": nx.to_numpy(normalize_scale_list[0]) if normalize_c else None,
             "normalize_mean_list": [nx.to_numpy(normalize_mean) for normalize_mean in normalize_mean_list]
             if normalize_c
             else None,
