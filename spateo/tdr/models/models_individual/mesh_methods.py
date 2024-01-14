@@ -114,7 +114,10 @@ def rigid_transform(
 
 
 def marching_cube_mesh(
-    pc: PolyData, levelset: Union[int, float] = 0, mc_scale_factor: Union[int, float] = 1.0, dist_sample_num: int = 100
+    pc: PolyData,
+    levelset: Union[int, float] = 0,
+    mc_scale_factor: Union[int, float] = 1.0,
+    dist_sample_num: Optional[int] = None,
 ):
     """
     Computes a triangle mesh from a point cloud based on the marching cube algorithm.
@@ -146,16 +149,18 @@ def marching_cube_mesh(
     pc.points = new_points = raw_points - np.min(raw_points, axis=0)
 
     # Generate new models for calculatation.
-    # dist = cdist(XA=new_points, XB=new_points, metric="euclidean")
-    # row, col = np.diag_indices_from(dist)
-    # dist[row, col] = None
-    rand_idx = (
-        np.random.choice(new_points.shape[0], dist_sample_num)
-        if new_points.shape[0] >= dist_sample_num
-        else np.arange(new_points.shape[0])
-    )
-    dist = cdist(XA=new_points[rand_idx, :], XB=new_points, metric="euclidean")
-    dist[np.arange(rand_idx.shape[0]), rand_idx] = None
+    if dist_sample_num is None:
+        dist = cdist(XA=new_points, XB=new_points, metric="euclidean")
+        row, col = np.diag_indices_from(dist)
+        dist[row, col] = None
+    else:
+        rand_idx = (
+            np.random.choice(new_points.shape[0], dist_sample_num)
+            if new_points.shape[0] >= dist_sample_num
+            else np.arange(new_points.shape[0])
+        )
+        dist = cdist(XA=new_points[rand_idx, :], XB=new_points, metric="euclidean")
+        dist[np.arange(rand_idx.shape[0]), rand_idx] = None
     max_dist = np.nanmin(dist, axis=1).max()
     mc_sf = max_dist * mc_scale_factor
 

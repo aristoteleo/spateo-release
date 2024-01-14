@@ -127,7 +127,7 @@ def normalize_coords(
     coords: Union[List[np.ndarray or torch.Tensor], np.ndarray, torch.Tensor],
     nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend] = ot.backend.NumpyBackend,
     verbose: bool = True,
-) -> Tuple[List[np.ndarray], float, List[np.ndarray]]:
+) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
     """Normalize the spatial coordinate.
 
     Args:
@@ -138,22 +138,26 @@ def normalize_coords(
     if type(coords) in [np.ndarray, torch.Tensor]:
         coords = [coords]
 
-    normalize_scale = 0
+    # normalize_scale now becomes to a list
+    normalize_scale_list = []
     normalize_mean_list = []
     for i in range(len(coords)):
         normalize_mean = nx.einsum("ij->j", coords[i]) / coords[i].shape[0]
         normalize_mean_list.append(normalize_mean)
         coords[i] -= normalize_mean
-        normalize_scale += nx.sqrt(nx.einsum("ij->", nx.einsum("ij,ij->ij", coords[i], coords[i])) / coords[i].shape[0])
+        normalize_scale = nx.sqrt(nx.einsum("ij->", nx.einsum("ij,ij->ij", coords[i], coords[i])) / coords[i].shape[0])
+        normalize_scale_list.append(normalize_scale)
 
-    normalize_scale /= len(coords)
+    if coords[0].shape[1] == 2:
+        normalize_scale = nx.mean(normalize_scale_list)
+        normalize_scale_list = [normalize_scale] * len(coords)
     for i in range(len(coords)):
-        coords[i] /= normalize_scale
+        coords[i] /= normalize_scale_list[i]
     if verbose:
         lm.main_info(message=f"Coordinates normalization params:", indent_level=1)
         lm.main_info(message=f"Scale: {normalize_scale}.", indent_level=2)
         # lm.main_info(message=f"Mean:  {normalize_mean_list}", indent_level=2)
-    return coords, normalize_scale, normalize_mean_list
+    return coords, normalize_scale_list, normalize_mean_list
 
 
 def normalize_exps(
@@ -258,9 +262,9 @@ def align_preprocess(
     # coords_dims = np.unique(np.asarray([c.shape[1] for c in spatial_coords]))
     assert len(coords_dims) == 1, "Spatial coordinate dimensions are different, please check again."
 
-    normalize_scale, normalize_mean_list = None, None
+    normalize_scale_list, normalize_mean_list = None, None
     if normalize_c:
-        spatial_coords, normalize_scale, normalize_mean_list = normalize_coords(
+        spatial_coords, normalize_scale_list, normalize_mean_list = normalize_coords(
             coords=spatial_coords, nx=nx, verbose=verbose
         )
     if normalize_g:
@@ -272,7 +276,7 @@ def align_preprocess(
         new_samples,
         exp_matrices,
         spatial_coords,
-        normalize_scale,
+        normalize_scale_list,
         normalize_mean_list,
     )
 

@@ -81,8 +81,8 @@ def _con_K_geodist(
 
 
 def _gp_velocity(X: np.ndarray, vf_dict: dict) -> np.ndarray:
-    pre_scale = vf_dict["pre_norm_scale"]
-    norm_x = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale"]
+    # pre_scale = vf_dict["pre_norm_scale"]
+    norm_x = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
     if vf_dict["kernel_dict"]["dist"] == "cdist":
         quary_kernel = _con_K(norm_x, vf_dict["X_ctrl"], vf_dict["beta"])
     elif vf_dict["kernel_dict"]["dist"] == "geodist":
@@ -90,9 +90,11 @@ def _gp_velocity(X: np.ndarray, vf_dict: dict) -> np.ndarray:
     else:
         raise ValueError(f"current only support cdist and geodist")
     quary_velocities = np.dot(quary_kernel, vf_dict["C"])
-    quary_velocities = quary_velocities * vf_dict["norm_dict"]["scale"]
-    quary_velocities = quary_velocities + (pre_scale - 1) * X
-    return quary_velocities / 10000
+    quary_rigid = np.dot(norm_x, vf_dict["R"].T) + vf_dict["t"]
+    quary_norm_x = quary_velocities + quary_rigid
+    quary_x = quary_norm_x * vf_dict["norm_dict"]["scale_fixed"] + vf_dict["norm_dict"]["mean_fixed"]
+    _velocities = quary_x - X
+    return _velocities / 10000
 
 
 def morphofield_gp(

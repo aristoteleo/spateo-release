@@ -164,7 +164,7 @@ def BA_align_sparse(
     device: str = "cpu",
     inplace: bool = True,
     verbose: bool = True,
-    nn_init: bool = True,
+    nn_init: bool = False,
     partial_robust_level: float = 25,
     use_label_prior: bool = False,
     label_key: Optional[str] = "cluster",
@@ -184,7 +184,7 @@ def BA_align_sparse(
         new_samples,
         exp_matrices,
         spatial_coords,
-        normalize_scale,
+        normalize_scale_list,
         normalize_mean_list,
     ) = align_preprocess(
         samples=[sampleA, sampleB],
@@ -329,7 +329,7 @@ def BA_align_sparse(
     for iter in iteration:
         # save intermediate results
         if iter_key_added is not None:
-            iter_XAHat = XAHat * normalize_scale + normalize_mean_list[0] if normalize_c else XAHat
+            iter_XAHat = XAHat * normalize_scale_list[0] + normalize_mean_list[0] if normalize_c else XAHat
             sampleB.uns[iter_key_added][key_added][iter] = nx.to_numpy(iter_XAHat)
             sampleB.uns[iter_key_added]["sigma2"][iter] = nx.to_numpy(sigma2)
             sampleB.uns[iter_key_added]["beta2"][iter] = nx.to_numpy(beta2)
@@ -559,12 +559,14 @@ def BA_align_sparse(
 
     # de-normalize
     if normalize_c:
-        XAHat = XAHat * normalize_scale + normalize_mean_list[0]
-        RnA = RnA * normalize_scale + normalize_mean_list[0]
-        optimal_RnA = optimal_RnA * normalize_scale + normalize_mean_list[0]
-        coarse_alignment = coarse_alignment * normalize_scale + normalize_mean_list[0]
+        XAHat = XAHat * normalize_scale_list[0] + normalize_mean_list[0]
+        RnA = RnA * normalize_scale_list[0] + normalize_mean_list[0]
+        optimal_RnA = optimal_RnA * normalize_scale_list[0] + normalize_mean_list[0]
+        coarse_alignment = coarse_alignment * normalize_scale_list[0] + normalize_mean_list[0]
         output_R = optimal_R
-        output_t = optimal_t * normalize_scale + normalize_mean_list[0] - _dot(nx)(normalize_mean_list[1], optimal_R.T)
+        output_t = (
+            optimal_t * normalize_scale_list[0] + normalize_mean_list[0] - _dot(nx)(normalize_mean_list[1], optimal_R.T)
+        )
 
     # Save aligned coordinates to adata
     sampleB.obsm[key_added + "_nonrigid"] = nx.to_numpy(XAHat).copy()
@@ -575,7 +577,9 @@ def BA_align_sparse(
         norm_dict = {
             "mean_transformed": nx.to_numpy(normalize_mean_list[1]),
             "mean_fixed": nx.to_numpy(normalize_mean_list[0]),
-            "scale": nx.to_numpy(normalize_scale),
+            "scale": nx.to_numpy(normalize_scale_list[1]),
+            "scale_transformed": nx.to_numpy(normalize_scale_list[1]),
+            "scale_fixed": nx.to_numpy(normalize_scale_list[0]),
         }
         sampleB.uns[vecfld_key_added] = {
             "R": nx.to_numpy(R),
