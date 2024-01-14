@@ -207,13 +207,18 @@ def construct_surface(
             density_threshold=_cs_args["density_threshold"],
         )
     elif cs_method == "marching_cube":
-        _cs_args = {"levelset": 0, "mc_scale_factor": 1, "dist_sample_num": 100}
+        _cs_args = {"levelset": 0, "mc_scale_factor": 1, "dist_sample_num": None}
         if not (cs_args is None):
             _cs_args.update(cs_args)
 
         from .mesh_methods import marching_cube_mesh
 
-        surf = marching_cube_mesh(pc=cloud, levelset=_cs_args["levelset"], mc_scale_factor=_cs_args["mc_scale_factor"])
+        surf = marching_cube_mesh(
+            pc=cloud,
+            levelset=_cs_args["levelset"],
+            mc_scale_factor=_cs_args["mc_scale_factor"],
+            dist_sample_num=_cs_args["dist_sample_num"],
+        )
 
     else:
         raise ValueError(

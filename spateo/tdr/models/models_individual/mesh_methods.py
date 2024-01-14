@@ -117,7 +117,7 @@ def marching_cube_mesh(
     pc: PolyData,
     levelset: Union[int, float] = 0,
     mc_scale_factor: Union[int, float] = 1.0,
-    dist_sample_num: Optional[int] = 100,
+    dist_sample_num: Optional[int] = None,
 ):
     """
     Computes a triangle mesh from a point cloud based on the marching cube algorithm.
