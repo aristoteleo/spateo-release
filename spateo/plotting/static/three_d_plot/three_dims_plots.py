@@ -961,7 +961,7 @@ def plot_expression_3D(
     # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
     p997 = np.percentile(gene_expr, 99.7)
     gene_expr[gene_expr > p997] = p997
-    scatter_effect = go.Scatter3d(
+    scatter_expr = go.Scatter3d(
         x=x,
         y=y,
         z=z,
@@ -975,7 +975,7 @@ def plot_expression_3D(
         showlegend=False,
     )
 
-    fig = go.Figure(data=[scatter_effect])
+    fig = go.Figure(data=[scatter_expr])
     title_dict = dict(
         text=f"{gene}",
         y=0.9,

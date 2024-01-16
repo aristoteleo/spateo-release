@@ -4952,7 +4952,7 @@ class MuSIC_Interpreter(MuSIC):
                 target = self.target_for_downstream
             else:
                 self.logger.info(
-                    "Target gene not provided for :func `get_effect_potential`. Using first target " "listed."
+                    "Target gene not provided for :func `get_effect_potential`. Using first target listed."
                 )
                 target = list(self.coeffs.keys())[0]
 

@@ -7,32 +7,6 @@
 
 [Installation](https://spateo-release.readthedocs.io/en/latest/installation.html) - [Tutorials](https://spateo-release.readthedocs.io/en/latest/tutorials/index.html) - [API](https://spateo-release.readthedocs.io/en/latest/autoapi/spateo/index.html) - [Citation](https://www.biorxiv.org/content/10.1101/2022.12.07.519417v1) - [Technical](https://spateo-release.readthedocs.io/en/latest/technicals/index.html)
 
-# Installation Notes
-A few notes on installation: Spateo utilizes the `mpi4py` package and a working MPI implementation.
-This can be most easily installed by first using `conda`. There are three options for MPI implementation:
-1. OpenMPI (Linux and macOS)
-2. MPICH (Linux and macOS)
-3. Microsoft MPI (Windows)
-
-To use MPICH:
-```
-conda install -c conda-forge mpich 
-```
-
-To use OpenMPI:
-```
-conda install -c conda-forge openmpi
-```
-
-To use Microsoft MPI:
-```
-conda install -c conda-forge msmpi
-```
-
-On Linux, this can also be achieved using `sudo apt-get install libopenmpi-dev` or `sudo apt-get install mpich`.
-mpi4py can also be installed at this time using the same command, however the version Spateo uses may differ from
-the most current version. 
-
 # Citation
 Xiaojie Qiu1$\*, Daniel Y. Zhu3$, Jiajun Yao2, 4, 5, 6$, Zehua Jing2, 4,7$, Lulu Zuo8$, Mingyue Wang2, 4, 9, 10$, Kyung Hoi (Joseph) Min11, Hailin Pan2, 4, Shuai Wang2, 4, 7, Sha Liao4, Yiwei Lai4, Shijie Hao2, 4, 7, Yuancheng Ryan Lu1, Matthew Hill17, Jorge D. Martin-Rufino17, Chen Weng1, Anna Maria Riera-Escandell18, Mengnan Chen2, 4, Liang Wu4, Yong Zhang4, Xiaoyu Wei2, 4, Mei Li4, Xin Huang4, Rong Xiang2, 4, 7, Zhuoxuan Yang4, 12, Chao Liu4, Tianyi Xia4, Yingxin Liang10, Junqiang Xu4,7, Qinan Hu9, 10, Yuhui Hu9, 10, Hongmei Zhu8, Yuxiang Li4, Ao Chen4, Miguel A. Esteban4, Ying Gu2, 4,7, Douglas A. Lauffenburger3, Xun Xu2, 4, 13, Longqi Liu2, 4, 14, 15\*, Jonathan S. Weissman1,19, 20\*, Shiping Liu2, 4, 14, 15, 16\*, Yinqi Bai2, 4\*  $Co-first authors; *:Corresponding authors
  

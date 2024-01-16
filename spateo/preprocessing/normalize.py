@@ -60,7 +60,10 @@ def _normalize_data(X, counts, after=None, copy=False, rows=True, round=False):
             X = np.divide(X, counts[None, :])
 
     if round:
-        X = np.around(X, decimals=3)
+        if scipy.sparse.issparse(X):
+            X.data = np.around(X.data, decimals=3)
+        else:
+            X = np.around(X, decimals=3)
 
     return X
 
@@ -224,7 +227,7 @@ def calcFactorRLE(data: np.ndarray) -> np.ndarray:
     return factors
 
 
-def calcFactorQuantile(data: np.ndarray, lib_size: float, p: float = 0.75) -> np.ndarray:
+def calcFactorQuantile(data: np.ndarray, lib_size: float, p: float = 0.95) -> np.ndarray:
     """
     Calculate scaling factors using the Quantile method. Python implementation of the same-named function from edgeR:
 
@@ -486,12 +489,12 @@ def calcNormFactors(
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
 
-                f75 = calcFactorQuantile(data=counts, lib_size=lib_size, p=0.75)
-                if np.median(f75) < 1e-20:
+                f95 = calcFactorQuantile(data=counts, lib_size=lib_size, p=0.95)
+                if np.median(f95) < 1e-20:
                     refColumn = np.argmax(np.sum(np.sqrt(counts), axis=1))
                 else:
-                    f75_mean_diff = np.abs(f75 - np.mean(f75))
-                    refColumn = np.argmin(f75_mean_diff)
+                    f95_mean_diff = np.abs(f95 - np.mean(f95))
+                    refColumn = np.argmin(f95_mean_diff)
 
             factors = np.empty(nsamples)
             for i in range(nsamples):
@@ -539,13 +542,16 @@ def calcNormFactors(
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
-def factor_normalization(adata: AnnData, norm_factors: Optional[np.ndarray] = None, **kwargs):
+def factor_normalization(
+    adata: AnnData, norm_factors: Optional[np.ndarray] = None, compute_norm_factors: bool = False, **kwargs
+):
     """Wrapper to apply factor normalization to AnnData object.
 
     Args:
         adata: The annotated data matrix of shape `n_obs` × `n_vars`. Rows correspond to cells and columns to genes.
         norm_factors: Array of shape (`n_obs`, ), the normalization factors for each sample. If not given,
             will compute using :func `calcNormFactors` and any arguments given to `kwargs`.
+        compute_norm_factors: Set True to compute (or recompute) normalization factors using :func `calcNormFactors`.
         **kwargs: Keyword arguments to pass to :func `calcNormFactors` or :func `normalize_total`. Options:
             lib_size: The library sizes for each sample.
             method: The normalization method. Can be:
@@ -553,7 +559,7 @@ def factor_normalization(adata: AnnData, norm_factors: Optional[np.ndarray] = No
                     -"TMMwsp": trimmed mean of M-values with singleton pairings,
                     -"RLE": relative log expression, or
                     -"upperquartile": using the quantile method
-                Defaults to "TMM".
+                Defaults to "TMM" if given.
             refColumn: Optional reference column for normalization
             logratioTrim: For TMM normalization, the fraction of extreme log-ratios to be trimmed (default: 0.3).
             sumTrim: For TMM normalization, the fraction of extreme log-ratios to be trimmed based on the absolute
@@ -599,7 +605,7 @@ def factor_normalization(adata: AnnData, norm_factors: Optional[np.ndarray] = No
         nearest_power = 10**power
         normalize_total_params["target_sum"] = nearest_power
 
-    if norm_factors is None:
+    if compute_norm_factors:
         norm_factors = calcNormFactors(adata.X, **calc_norm_factors_params)
 
     # If 'inplace' is False or 'copy' is True, get appropriate return from :func `normalize_total`

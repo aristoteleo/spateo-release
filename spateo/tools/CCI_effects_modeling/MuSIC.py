@@ -545,23 +545,32 @@ class MuSIC:
 
             if self.normalize:
                 if self.distr == "gaussian":
-                    self.logger.info(
-                        "Computing TMM factors and setting total counts in each cell to uniform target sum "
-                        "inplace..."
-                    )
+                    # self.logger.info(
+                    #     "Computing TMM factors and setting total counts in each cell to uniform target sum "
+                    #     "inplace..."
+                    # )
                     # target_sum to None to automatically determine suitable target sum:
-                    self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
+                    #self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
+                    self.logger.info(
+                        "Setting total counts in each cell to uniform target sum inplace..."
+                    )
+                    factor_normalization(self.adata, target_sum=1e4)
                 else:
-                    self.logger.info(
-                        "Computing TMM factors, setting total counts in each cell to uniform target sum and rounding "
-                        "nonintegers inplace..."
-                    )
+                    # self.logger.info(
+                    #     "Computing TMM factors, setting total counts in each cell to uniform target sum and rounding "
+                    #     "nonintegers inplace..."
+                    # )
                     # target_sum to None to automatically determine suitable target sum:
-                    self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
+                    #self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
+                    self.logger.info(
+                        "Setting total counts in each cell to uniform target sum and rounding nonintegers inplace..."
+                    )
+                    factor_normalization(self.adata, target_sum=1e4)
+
                     # Round, except for the case where data would round down to zero-
                     if scipy.sparse.issparse(self.adata.X):
-                        mask_less_than_1 = self.adata.X < 1
                         mask_greater_than_1 = self.adata.X >= 1
+                        mask_less_than_1 = self.adata.X.multiply(mask_greater_than_1) == 0
 
                         mask_less_than_1_values = self.adata.X.copy()
                         mask_greater_than_1_values = self.adata.X.copy()
@@ -576,6 +585,7 @@ class MuSIC:
 
                     else:
                         self.adata.X = np.where(self.adata.X < 1, np.ceil(self.adata.X), np.round(self.adata.X))
+                    self.logger.info("Finished normalization.")
 
             # Smooth data if 'smooth' is True and log-transform data matrix if 'log_transform' is True:
             if self.smooth:
@@ -933,7 +943,7 @@ class MuSIC:
                     columns=targets,
                 )
 
-                # Cap extreme numerical outliers (this can happen in cancer or just as technical error):
+                # Cap extreme numerical outliers:
                 for col in self.targets_expr.columns:
                     # Calculate the 99.7th percentile for each column
                     cap_value = np.percentile(self.targets_expr[col], 99.7)
@@ -1955,6 +1965,9 @@ class MuSIC:
             else:
                 raise ValueError("Invalid `mod_type` specified. Must be one of 'niche', 'lr', 'ligand' or 'receptor'.")
 
+        # Check for NaN/infinite- if present, set to 0:
+        X_df.fillna(0, inplace=True)
+        X_df.replace([np.inf, -np.inf], 0, inplace=True)
         # Alphabetize the string in each column:
         feature_names_mod = [
             ":".join("/".join(sorted(part.split("/"))) for part in feat.split(":")) for feat in X_df.columns
@@ -3311,6 +3324,8 @@ class MuSIC:
                 # Access outputs from upstream model from the downstream directory- need to get parent directory of
                 # "cci_deg_detection":
                 parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(self.output_path)))
+                if "cci_deg_detection" in parent_dir:
+                    parent_dir = os.path.dirname(parent_dir)
                 files = os.listdir(parent_dir)
                 csv_files = [file for file in files if file.endswith(".csv") and "prediction" not in file]
                 if csv_files:
@@ -3319,7 +3334,7 @@ class MuSIC:
                     id_tag = first_csv.rsplit("_", 1)[0]
                 else:
                     raise FileNotFoundError(
-                        f"No files found in the parent directory of the upstream model: " f"{parent_dir}."
+                        f"No files found in the parent directory of the upstream model: {parent_dir}."
                     )
                 path = os.path.join(parent_dir, id_tag + f"_{target}.csv")
                 target_file = pd.read_csv(path, index_col=0)
