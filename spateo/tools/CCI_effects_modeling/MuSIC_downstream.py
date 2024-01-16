@@ -1508,6 +1508,7 @@ class MuSIC_Interpreter(MuSIC):
             )
             # Can plot a subset once this is already processed & saved:
             if custom_genes is not None:
+                custom_genes = [g for g in custom_genes if g in to_plot.index]
                 to_plot = to_plot.loc[custom_genes]
         else:
             # For each gene, compute the mean expression:

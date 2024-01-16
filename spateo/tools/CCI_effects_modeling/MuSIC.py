@@ -550,10 +550,8 @@ class MuSIC:
                     #     "inplace..."
                     # )
                     # target_sum to None to automatically determine suitable target sum:
-                    #self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
-                    self.logger.info(
-                        "Setting total counts in each cell to uniform target sum inplace..."
-                    )
+                    # self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
+                    self.logger.info("Setting total counts in each cell to uniform target sum inplace...")
                     factor_normalization(self.adata, target_sum=1e4)
                 else:
                     # self.logger.info(
@@ -561,7 +559,7 @@ class MuSIC:
                     #     "nonintegers inplace..."
                     # )
                     # target_sum to None to automatically determine suitable target sum:
-                    #self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
+                    # self.adata = factor_normalization(self.adata, method="TMM", target_sum=None)
                     self.logger.info(
                         "Setting total counts in each cell to uniform target sum and rounding nonintegers inplace..."
                     )
@@ -3336,22 +3334,36 @@ class MuSIC:
                     raise FileNotFoundError(
                         f"No files found in the parent directory of the upstream model: {parent_dir}."
                     )
-                path = os.path.join(parent_dir, id_tag + f"_{target}.csv")
-                target_file = pd.read_csv(path, index_col=0)
-                regulators = [c for c in target_file.columns if c.startswith("b_")]
-                regulators = [c.replace("b_", "") for c in regulators]
-                if self.mod_type == "lr":
-                    ligands = [r.split(":")[0] for r in regulators]
-                else:
-                    ligands = regulators
 
-                # All of the possible receptors that are partners to these ligands:
-                receptors_for_ligands = self.lr_db[self.lr_db["from"].isin(ligands)]["to"].unique().tolist()
-                tfs_for_receptors = (
-                    self.r_tf_db[self.r_tf_db["receptor"].isin(receptors_for_ligands)]["tf"].unique().tolist()
-                )
-                # Filter to the final set of primary TFs
-                target_TFs = [tf for tf in target_TFs if tf in tfs_for_receptors]
+                # For target gene analysis, we want to filter to those TFs that are actually part of the relevant
+                # signaling pathway (not all TFs will interact w/ the signaling)- for ligand/receptor analysis,
+                # fine to look at all TFs that can putatively regulate expression.
+                path = os.path.join(parent_dir, id_tag + f"_{target}.csv")
+                targets_df = pd.read_csv(os.path.join(parent_dir, id_tag, "design_matrix", "targets.csv"), index_col=0)
+                if target in targets_df.columns:  # i.e. if this gene is among the target genes of the upstream model
+                    target_file = pd.read_csv(path, index_col=0)
+                    regulators = [c for c in target_file.columns if c.startswith("b_")]
+                    regulators = [c.replace("b_", "") for c in regulators]
+                    if self.mod_type == "lr":
+                        ligands = [r.split(":")[0] for r in regulators]
+                    else:
+                        ligands = regulators
+
+                    # All of the possible receptors that are partners to these ligands:
+                    receptors_for_ligands = self.lr_db[self.lr_db["from"].isin(ligands)]["to"].unique().tolist()
+                    tfs_for_receptors = (
+                        self.r_tf_db[self.r_tf_db["receptor"].isin(receptors_for_ligands)]["tf"].unique().tolist()
+                    )
+                    # Filter to the final set of primary TFs
+                    target_TFs = [tf for tf in target_TFs if tf in tfs_for_receptors]
+                else:
+                    if "_" in target:
+                        # Presume the gene name is first in the string:
+                        gene_query = target.split("_")[0]
+                    else:
+                        gene_query = target
+                    target_row = self.grn.loc[gene_query]
+                    target_TFs = target_row[target_row == 1].index.tolist()
 
                 # TFs that can regulate expression of the target-binding TFs:
                 primary_tf_rows = self.grn.loc[[tf for tf in target_TFs if tf in self.grn.index]]
