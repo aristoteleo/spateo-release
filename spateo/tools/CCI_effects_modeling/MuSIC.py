@@ -3741,6 +3741,12 @@ class MuSIC:
                     "Argument `load_from_downstream` must be one of 'ligand', 'receptor', or 'target_gene'."
                 )
             parent_dir = os.path.join(downstream_parent_dir, "cci_deg_detection", folder, "downstream")
+            if not os.path.exists(os.path.dirname(parent_dir)):
+                self.logger.info(
+                    f"Could not find downstream directory {parent_dir}, this type of downstream model "
+                    f"may not have been fit. Returning empty dictionaries."
+                )
+                return {}, {}
 
         elif self.mod_type == "downstream" and not hasattr(self, "saved"):
             parent_dir = os.path.join(parent_dir, "downstream")

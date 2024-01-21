@@ -113,6 +113,56 @@ class MuSIC_Interpreter(MuSIC):
                         self.standard_errors[target][col] = 0
                 self.coeffs[target] = df
 
+        # Check for coefficients and feature names of downstream models as well:
+        self.logger.info("Checking for coefficients of possible downstream models as well...")
+        downstream_parent_dir = os.path.dirname(os.path.splitext(self.output_path)[0])
+        id = os.path.basename(os.path.splitext(self.output_path)[0])
+
+        self.downstream_model_ligand_coeffs, self.downstream_model_ligand_standard_errors = self.return_outputs(
+            adjust_for_subsampling=False, load_from_downstream="ligand"
+        )
+        dm_dir = os.path.join(
+            downstream_parent_dir,
+            "cci_deg_detection",
+            "ligand_analysis",
+            id,
+            "downstream_design_matrix",
+            "design_matrix.csv",
+        )
+        self.downstream_model_ligand_design_matrix = (
+            pd.read_csv(dm_dir, index_col=0) if os.path.exists(dm_dir) else None
+        )
+
+        self.downstream_model_receptor_coeffs, self.downstream_model_receptor_standard_errors = self.return_outputs(
+            adjust_for_subsampling=False, load_from_downstream="receptor"
+        )
+        dm_dir = os.path.join(
+            downstream_parent_dir,
+            "cci_deg_detection",
+            "receptor_analysis",
+            id,
+            "downstream_design_matrix",
+            "design_matrix.csv",
+        )
+        self.downstream_model_receptor_design_matrix = (
+            pd.read_csv(dm_dir, index_col=0) if os.path.exists(dm_dir) else None
+        )
+
+        self.downstream_model_target_coeffs, self.downstream_model_target_standard_errors = self.return_outputs(
+            adjust_for_subsampling=False, load_from_downstream="target_gene"
+        )
+        dm_dir = os.path.join(
+            downstream_parent_dir,
+            "cci_deg_detection",
+            "target_gene_analysis",
+            id,
+            "downstream_design_matrix",
+            "design_matrix.csv",
+        )
+        self.downstream_model_target_design_matrix = (
+            pd.read_csv(dm_dir, index_col=0) if os.path.exists(dm_dir) else None
+        )
+
         # Design matrix:
         self.design_matrix = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "design_matrix.csv"), index_col=0
@@ -1665,6 +1715,9 @@ class MuSIC_Interpreter(MuSIC):
         position_key: str = "spatial",
         coord_column: Optional[Union[int, str]] = None,
         effect_threshold: Optional[float] = None,
+        check_downstream_ligand_effects: bool = False,
+        check_downstream_receptor_effects: bool = False,
+        check_downstream_target_effects: bool = False,
         use_significant: bool = False,
         sort_by_target: bool = False,
         neatly_arrange_y: bool = True,
@@ -1693,6 +1746,15 @@ class MuSIC_Interpreter(MuSIC):
             effect_threshold: Optional threshold minimum effect size to consider an effect for further analysis,
                 as an absolute value. Use this to choose only the cells for which an interaction is predicted to
                 have a strong effect. If None, use the median interaction effect.
+            check_downstream_ligand_effects: Set True to check the coefficients of downstream ligand models instead of
+                coefficients of the upstream CCI model. Note that this may not necessarily look nice because
+                TF-target relationships are not spatially dependent like L:R effects are.
+            check_downstream_receptor_effects: Set True to check the coefficients of downstream receptor models instead
+                of coefficients of the upstream CCI model. Note that this may not necessarily look nice because
+                TF-target relationships are not spatially dependent like L:R effects are.
+            check_downstream_target_effects: Set True to check the coefficients of downstream target models instead of
+                coefficients of the upstream CCI model. Note that this may not necessarily look nice because
+                TF-target relationships are not spatially dependent like L:R effects are.
             use_significant: Whether to use only significant effects in computing the specificity. If True,
                 will filter to cells + interactions where the interaction is significant for the target. Only valid
                 if :func `compute_coeff_significance()` has been run.
@@ -1822,13 +1884,35 @@ class MuSIC_Interpreter(MuSIC):
         ]
 
         # Check for existing dataframe:
-        if os.path.exists(
-            os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv")
-        ):
-            to_plot = pd.read_csv(
-                os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv"),
-                index_col=0,
+        if check_downstream_ligand_effects:
+            logger.info(
+                "Checking downstream TF-ligand effects...note that this may not look very nice because TF-target "
+                "relationships are not spatially dependent like L:R effects are."
             )
+            df_path = os.path.join(
+                output_folder, f"{adata_id}_distribution_downstream_ligand_effects_along_{save_id}.csv"
+            )
+        elif check_downstream_receptor_effects:
+            logger.info(
+                "Checking downstream TF-receptor effects...note that this may not look very nice because TF-target "
+                "relationships are not spatially dependent like L:R effects are."
+            )
+            df_path = os.path.join(
+                output_folder, f"{adata_id}_distribution_downstream_receptor_effects_along_{save_id}.csv"
+            )
+        elif check_downstream_target_effects:
+            logger.info(
+                "Checking downstream TF-target effects...note that this may not look very nice because TF-target "
+                "relationships are not spatially dependent like L:R effects are."
+            )
+            df_path = os.path.join(
+                output_folder, f"{adata_id}_distribution_downstream_target_effects_along_{save_id}.csv"
+            )
+        else:
+            df_path = os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv")
+
+        if os.path.exists(df_path):
+            to_plot = pd.read_csv(df_path, index_col=0)
 
             if interaction_subset is not None:
                 selected_interactions = [i for i in to_plot.index if i.split("-")[1] in interaction_subset]
@@ -1837,17 +1921,65 @@ class MuSIC_Interpreter(MuSIC):
                 selected_targets = [t for t in to_plot.index if t.split("-")[0] if t in target_subset]
                 to_plot = to_plot.loc[selected_targets]
         else:
-            if target_subset is None:
-                target_subset = list(self.coeffs.keys())
+            # Determine where to look for coefficients:
+            if check_downstream_ligand_effects:
+                all_coeffs = self.downstream_model_ligand_coeffs.copy()
+                if len(all_coeffs) == 0:
+                    raise ValueError("No downstream model results found for ligands.")
+            elif check_downstream_receptor_effects:
+                all_coeffs = self.downstream_model_receptor_coeffs.copy()
+                if len(all_coeffs) == 0:
+                    raise ValueError("No downstream model results found for receptors.")
+            elif check_downstream_target_effects:
+                all_coeffs = self.downstream_model_target_coeffs.copy()
+                if len(all_coeffs) == 0:
+                    raise ValueError("No downstream model results found for targets.")
             else:
-                target_subset = [t for t in target_subset if t in self.coeffs.keys()]
-                removed = [t for t in target_subset if t not in self.coeffs.keys()]
+                all_coeffs = self.coeffs.copy()
+
+            if target_subset is None:
+                target_subset = list(all_coeffs.keys())
+            else:
+                target_subset = [t for t in target_subset if t in all_coeffs.keys()]
+                removed = [t for t in target_subset if t not in all_coeffs.keys()]
                 if len(removed) > 0:
                     logger.warning(
                         f"Targets {removed} were not found in the model, and will be removed from the target subset."
                     )
 
-            all_feature_names = [feat for feat in self.feature_names if feat != "intercept"]
+            if check_downstream_ligand_effects:
+                if self.downstream_model_ligand_design_matrix is None:
+                    raise ValueError(
+                        "No downstream model design matrix found for ligands. Run "
+                        "`CCI_deg_detection_setup` with use_ligands=True first."
+                    )
+
+                all_feature_names = [
+                    feat.replace("regulator_", "") for feat in self.downstream_model_ligand_design_matrix.columns
+                ]
+            elif check_downstream_receptor_effects:
+                if self.downstream_model_receptor_design_matrix is None:
+                    raise ValueError(
+                        "No downstream model design matrix found for receptors. Run "
+                        "`CCI_deg_detection_setup` with use_receptors=True first."
+                    )
+
+                all_feature_names = [
+                    feat.replace("regulator_", "") for feat in self.downstream_model_receptor_design_matrix.columns
+                ]
+            elif check_downstream_target_effects:
+                if self.downstream_model_target_design_matrix is None:
+                    raise ValueError(
+                        "No downstream model design matrix found for target genes. Run "
+                        "`CCI_deg_detection_setup` with use_targets=True first."
+                    )
+
+                all_feature_names = [
+                    feat.replace("regulator_", "") for feat in self.downstream_model_target_design_matrix.columns
+                ]
+            else:
+                all_feature_names = [feat for feat in self.feature_names if feat != "intercept"]
+
             if interaction_subset is None:
                 feature_names = all_feature_names
             else:
@@ -1859,7 +1991,6 @@ class MuSIC_Interpreter(MuSIC):
                         f"subset."
                     )
 
-            all_coeffs = self.coeffs.copy()
             if use_significant:
                 for target in target_subset:
                     parent_dir = os.path.dirname(self.output_path)
@@ -1879,20 +2010,20 @@ class MuSIC_Interpreter(MuSIC):
             ]
             # Remove combinations where the effect is hardly present (arbitrarily defined at 0.5% of cells):
             combinations = [
-                f"{target}-{feature}"
+                f"{target}:{feature}"
                 for target, feature in combinations
                 if (all_coeffs[target][f"b_{feature}"] != 0).mean() >= 0.005
             ]
             mean_effect = pd.Series(index=combinations)
             for combo in combinations:
-                target, feature = combo.split("-")
+                target, feature = combo.split(":")
                 target_coefs = all_coeffs[target][f"b_{feature}"]
                 mean_effect[combo] = target_coefs.mean()
 
             # For each cell, compute the fold change over the average for each combination:
             all_fc = pd.DataFrame(index=self.adata.obs_names, columns=combinations)
             for combo in tqdm(combinations, desc="Computing fold changes for interaction-target combinations..."):
-                target, feature = combo.split("-")
+                target, feature = combo.split(":")
                 target_coefs = all_coeffs[target][f"b_{feature}"]
                 all_fc[combo] = target_coefs / mean_effect[combo]
             # Log fold change:
@@ -1953,7 +2084,7 @@ class MuSIC_Interpreter(MuSIC):
             to_plot = to_plot.loc[top_cols_sorted]
         else:
             logger.info("Sorting by interaction...")
-            to_plot["temp"] = to_plot.index.to_series().apply(lambda x: x.split("-")[1])
+            to_plot["temp"] = to_plot.index.to_series().apply(lambda x: x.split("-")[-1])
             to_plot = to_plot.sort_values(by="temp")
             to_plot = to_plot.drop(columns="temp")
 
@@ -2015,15 +2146,8 @@ class MuSIC_Interpreter(MuSIC):
         ax.tick_params(axis="y", labelsize=fontsize)
         ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
 
-        if not os.path.exists(
-            os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv")
-        ):
-            to_plot.to_csv(
-                os.path.join(
-                    output_folder,
-                    f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv",
-                )
-            )
+        if not os.path.exists(df_path):
+            to_plot.to_csv(df_path)
 
         if save_show_or_return in ["save", "both", "all"]:
             save_kwargs["ext"] = "png"
@@ -6580,43 +6704,26 @@ class MuSIC_Interpreter(MuSIC):
         else:
             raise ValueError("'use_ligands' and 'use_pathways' are both False, and 'cell_type' was not given.")
 
-    def visualize_CCI_degs(
+    def deg_effect_barplot(
         self,
-        plot_mode: Literal["proportion", "average"] = "proportion",
-        sender_receiver_or_target_degs: Literal["sender", "receiver", "target"] = "sender",
-        use_ligands: bool = True,
-        use_receptors: bool = False,
-        use_pathways: bool = False,
-        use_targets: bool = False,
-        cell_type: Optional[str] = None,
+        target: str,
+        interaction_subset: Optional[str] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
-        cmap: str = "seismic",
+        cmap: str = "Blues",
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
     ):
-        """Visualize the result of downstream model that maps TFs/other regulatory genes to target genes.
+        """Visualize the proportion of cells expressing a particular target (ligand, receptor, or target gene
+        involved in an upstream CCI model) that are predicted to be affected by a particular transcription factor.
 
         Args:
-            plot_mode: Specifies what gets plotted.
-                Options:
-                    - "proportion": elements of the plot represent the proportion of total target-expressing cells
-                        for which the given factor is predicted to have a nonzero effect
-                    - "average": elements of the plot represent the average effect size across all target-expressing
-                        cells
-            sender_receiver_or_target_degs: Only makes a difference if 'use_pathways' or 'use_cell_types' is specified.
-                Determines whether to compute DEGs for ligands, receptors or target genes. If 'use_pathways' is True,
-                the value of this argument will determine whether ligands or receptors are used to define the model.
-                Note that in either case, differential expression of TFs, binding factors, etc. will be computed in
-                association w/ ligands/receptors/target genes (only valid if 'use_cell_types' and not 'use_pathways'
-                is specified.
-            use_ligands: Set True if this was True for the original model. Used to find the correct output location.
-            use_receptors: Set True if this was True for the original model. Used to find the correct output location.
-            use_pathways: Set True if this was True for the original model. Used to find the correct output location.
-            use_targets: Set True if this was True for the original model. Used to find the correct output location.
-            cell_type: Cell type of interest- should be the same as was provided to :func `CCI_deg_detection`.
+            target: Target gene
+            interaction_subset: Optional, can be used to specify subset of interactions (transcription factors) to
+                visualize, e.g. ["Sox2", "Irx3"]. If not given, will use all TFs.
+            fontsize: Font size to determine size of the axis labels, ticks, title, etc.
             figsize: Width and height of plotting window
-            cmap: Name of matplotlib colormap specifying colormap to use
+            cmap: Name of matplotlib colormap specifying colormap to use. Must be a sequential colormap.
             save_show_or_return: Whether to save, show or return the figure.
                 If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
                 displayed and the associated axis and other object will be return.
@@ -6626,16 +6733,75 @@ class MuSIC_Interpreter(MuSIC):
                 "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
                 keys according to your needs.
         """
-        config_spateo_rcParams()
-
         if fontsize is None:
-            self.fontsize = rcParams.get("font.size")
-        else:
-            self.fontsize = fontsize
+            fontsize = rcParams.get("font.size")
         if figsize is None:
-            self.figsize = rcParams.get("figure.figsize")
+            figsize = rcParams.get("figure.figsize")
+
+        sequential_cmaps = [
+            "Greys",
+            "Purples",
+            "Blues",
+            "Greens",
+            "Oranges",
+            "Reds",
+            "YlOrBr",
+            "YlOrRd",
+            "OrRd",
+            "PuRd",
+            "RdPu",
+            "BuPu",
+            "GnBu",
+            "PuBu",
+            "YlGnBu",
+            "PuBuGn",
+            "BuGn",
+            "YlGn",
+            "binary",
+            "gist_yarg",
+            "gist_gray",
+            "gray",
+            "bone",
+            "pink",
+            "spring",
+            "summer",
+            "autumn",
+            "winter",
+            "cool",
+            "Wistia",
+            "hot",
+            "afmhot",
+            "gist_heat",
+            "copper",
+        ]
+        sequential_cmaps_r = [f"{c}_r" for c in sequential_cmaps]
+        if cmap not in sequential_cmaps and cmap not in sequential_cmaps_r:
+            raise ValueError(f"Colormap {cmap} is not a sequential colormap.")
+
+        # Check whether target is a ligand, receptor, or target gene:
+        if target in self.downstream_model_ligand_coeffs.keys():
+            all_coeffs = self.downstream_model_ligand_coeffs[target]
+            all_feature_names = [
+                f.replace("regulator_", "") for f in self.downstream_model_ligand_design_matrix.columns
+            ]
+        elif target in self.downstream_model_receptor_coeffs.keys():
+            all_coeffs = self.downstream_model_receptor_coeffs[target]
+            all_feature_names = [
+                f.replace("regulator_", "") for f in self.downstream_model_receptor_design_matrix.columns
+            ]
+        elif target in self.downstream_model_target_coeffs.keys():
+            all_coeffs = self.downstream_model_target_coeffs[target]
+            all_feature_names = [
+                f.replace("regulator_", "") for f in self.downstream_model_target_design_matrix.columns
+            ]
         else:
-            self.figsize = figsize
+            raise ValueError(f"Information for target {target} not found. {target} may not have been a model target.")
+        all_coeffs.columns = [f.replace("b_", "") for f in all_coeffs.columns]
+
+        if interaction_subset is not None:
+            all_feature_names = [f for f in all_feature_names if f in interaction_subset]
+        all_feature_names = [f for f in all_feature_names if f in all_coeffs.columns]
+        all_coeffs = all_coeffs[all_feature_names]
 
         output_dir = os.path.dirname(self.output_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
@@ -6646,248 +6812,35 @@ class MuSIC_Interpreter(MuSIC):
             if not os.path.exists(figure_folder):
                 os.makedirs(figure_folder)
 
-        if use_pathways and self.species != "human":
-            raise ValueError("Pathway analysis is only available for human samples.")
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+        nz_cells = np.where(self.adata[:, target].X.toarray() > 0)[0]
+        proportions = (all_coeffs.iloc[nz_cells] != 0).mean()
+        proportions = proportions.sort_values(ascending=False)
+        sns.barplot(x=proportions.index, y=proportions, palette=cmap, edgecolor="black", ax=ax)
+        plt.xlabel("Transcription factor", fontsize=fontsize * 1.1)
+        plt.ylabel(f"Proportion", fontsize=fontsize * 1.1)
+        plt.xticks(fontsize=fontsize, rotation=90)
+        plt.yticks(fontsize=fontsize)
+        plt.title(
+            f"Proportion of cells expressing {target} \naffected by transcription factors", fontsize=fontsize * 1.25
+        )
 
-        # Load files for all targets:
-        if use_ligands or use_receptors or use_pathways or use_targets:
-            if use_ligands:
-                file_id = "ligand_analysis"
-                adata_id = "ligand_regulators"
-                plot_id = "Target Ligand"
-                title_id = "ligand"
-                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt")
-            elif use_receptors:
-                file_id = "receptor_analysis"
-                adata_id = "receptor_regulators"
-                plot_id = "Target Receptor"
-                title_id = "receptor"
-                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt")
-            elif use_targets:
-                file_id = "target_gene_analysis"
-                adata_id = "target_gene_regulators"
-                plot_id = "Target Gene"
-                title_id = "target gene"
-                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_target_genes.txt")
-            elif use_pathways and sender_receiver_or_target_degs == "sender":
-                file_id = "pathway_analysis_ligands"
-                adata_id = "ligand_regulators"
-                plot_id = "Target Ligand"
-                title_id = "ligand"
-                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
-            elif use_pathways and sender_receiver_or_target_degs == "receiver":
-                file_id = "pathway_analysis_receptors"
-                adata_id = "receptor_regulators"
-                plot_id = "Target Receptor"
-                title_id = "receptor"
-                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt")
-        elif cell_type is not None:
-            if sender_receiver_or_target_degs == "sender":
-                file_id = "ligand_analysis"
-                adata_id = "ligand_regulators"
-                plot_id = "Target Ligand"
-                title_id = "ligand"
-                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_ligands.txt")
-            elif sender_receiver_or_target_degs == "receiver":
-                file_id = "receptor_analysis"
-                adata_id = "receptor_regulators"
-                plot_id = "Target Receptor"
-                title_id = "receptor"
-                targets_path = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_receptors.txt")
-            elif sender_receiver_or_target_degs == "target":
-                file_id = "target_analysis"
-                adata_id = "target_gene_regulators"
-                plot_id = "Target Gene"
-                title_id = "target"
-                targets_path = os.path.join(
-                    output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_target_genes.txt"
-                )
-        else:
-            raise ValueError(
-                "'use_ligands', 'use_receptors', 'use_pathways' are all False, and 'cell_type' was not given."
-            )
-        contents_folder = os.path.join(output_dir, "cci_deg_detection", file_id)
-
-        # Load list of targets:
-        with open(targets_path, "r") as f:
-            targets = [line.strip() for line in f.readlines()]
-
-        # Filter targets if desired:
-        if self.filter_targets:
-            predictions = pd.read_csv(
-                os.path.join(output_dir, "cci_deg_detection", file_id, "predictions.csv"), index_col=0
-            )
-            corr_dict = {}
-            for target in targets:
-                if target not in predictions.columns:
-                    self.logger.info(
-                        f"Model for target {target} ran into errors in the fitting process, so no predictions exist."
-                    )
-                    continue
-                observed = self.adata[:, target].X.toarray().reshape(-1)
-                predicted = predictions[target].values.reshape(-1)
-
-                rs, _ = spearmanr(observed, predicted)
-                corr_dict[target] = rs
-
-            targets = [target for target in predictions.columns if corr_dict[target] > self.filter_target_threshold]
-
-        # Complete list of regulatory factors- search through .obs of the AnnData object:
-        if cell_type is None:
-            adata = anndata.read_h5ad(os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_{adata_id}.h5ad"))
-        else:
-            adata = anndata.read_h5ad(
-                os.path.join(output_dir, "cci_deg_detection", f"{file_name}_{cell_type}_{adata_id}.h5ad")
-            )
-        regulator_cols = [col.replace("regulator_", "") for col in adata.obs.columns if "regulator_" in col]
-
-        # Compute proportion or average coefficients for all targets:
-        # Load all targets files:
-        target_files = {}
-
-        for filename in os.listdir(contents_folder):
-            # Check if any of the search strings are present in the filename
-            for t in targets:
-                if t in filename:
-                    filepath = os.path.join(contents_folder, filename)
-                    target_file = pd.read_csv(filepath, index_col=0)
-                    target_file = target_file[
-                        [c for c in target_file.columns if "b_" in c and "intercept" not in c]
-                    ].copy()
-                    target_file.columns = [c.replace("b_", "") for c in target_file.columns]
-                    target_files[t] = target_file
-
-        # Plot:
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=self.figsize)
-        if plot_mode == "proportion":
-            all_proportions = pd.DataFrame(0, index=regulator_cols, columns=targets)
-            for t, target_df in target_files.items():
-                nz_cells = np.where(adata[:, t].X.toarray() > 0)[0]
-                proportions = (target_df.iloc[nz_cells] != 0).mean()
-                all_proportions.loc[proportions.index, t] = proportions
-
-            if all_proportions.shape[0] < all_proportions.shape[1]:
-                to_plot = all_proportions.T
-                xlabel = "Regulatory factor"
-                ylabel = plot_id
-            else:
-                to_plot = all_proportions
-                xlabel = plot_id
-                ylabel = "Regulatory factor"
-
-            mask = to_plot < 0.1
-            hmap = sns.heatmap(
-                to_plot,
-                square=True,
-                linecolor="grey",
-                linewidths=0.3,
-                cbar_kws={"label": "Proportion of cells", "location": "top", "shrink": 0.5},
-                cmap=cmap,
-                center=0.3,
-                vmin=0.0,
-                vmax=1.0,
-                mask=mask,
-                ax=ax,
-            )
-
-            # Adjust colorbar label font size
-            cbar = hmap.collections[0].colorbar
-            cbar.set_label("Proportion of cells", fontsize=self.fontsize * 1.1)
-            # Adjust colorbar tick font size
-            cbar.ax.tick_params(labelsize=self.fontsize)
-            cbar.ax.set_aspect(0.05)
-
-            # Outer frame:
-            for _, spine in hmap.spines.items():
-                spine.set_visible(True)
-                spine.set_linewidth(0.75)
-
-            plt.xlabel(xlabel, fontsize=self.fontsize * 1.1)
-            plt.ylabel(ylabel, fontsize=self.fontsize * 1.1)
-            plt.xticks(fontsize=self.fontsize)
-            plt.yticks(fontsize=self.fontsize)
-            plt.title(
-                f"Preponderance of inferred \n regulatory effect on {title_id} expression",
-                fontsize=self.fontsize * 1.25,
-            ) if cell_type is None else plt.title(
-                f"Preponderance of inferred regulatory \n effect on {title_id} expression in {cell_type}",
-                fontsize=self.fontsize * 1.25,
-            )
-            plt.tight_layout()
-
-        elif plot_mode == "average":
-            all_averages = pd.DataFrame(0, index=regulator_cols, columns=targets)
-            for t, target_df in target_files.items():
-                nz_cells = np.where(adata[:, t].X.toarray() > 0)[0]
-                averages = target_df.iloc[nz_cells].mean()
-                all_averages.loc[averages.index, t] = averages
-
-            if all_averages.shape[0] < all_averages.shape[1]:
-                to_plot = all_averages.T
-                xlabel = "Regulatory factor"
-                ylabel = plot_id
-            else:
-                to_plot = all_averages
-                xlabel = plot_id
-                ylabel = "Regulatory factor"
-
-            q40 = np.percentile(all_averages.values.flatten(), 40)
-            q20 = np.percentile(all_averages.values.flatten(), 20)
-            mask = to_plot < q20
-            hmap = sns.heatmap(
-                to_plot,
-                square=True,
-                linecolor="grey",
-                linewidths=0.3,
-                cbar_kws={"label": "Average effect size", "location": "top", "shrink": 0.5},
-                cmap=cmap,
-                center=q40,
-                vmin=0.0,
-                vmax=1.0,
-                mask=mask,
-                ax=ax,
-            )
-
-            # Adjust colorbar label font size
-            cbar = hmap.collections[0].colorbar
-            cbar.set_label("Average effect size", fontsize=self.fontsize * 1.1)
-            # Adjust colorbar tick font size
-            cbar.ax.tick_params(labelsize=self.fontsize)
-            cbar.ax.set_aspect(0.05)
-
-            # Outer frame:
-            for _, spine in hmap.spines.items():
-                spine.set_visible(True)
-                spine.set_linewidth(0.75)
-
-            plt.xlabel(xlabel, fontsize=self.fontsize * 1.1)
-            plt.ylabel(ylabel, fontsize=self.fontsize * 1.1)
-            plt.xticks(fontsize=self.fontsize)
-            plt.yticks(fontsize=self.fontsize)
-            plt.title(
-                f"Average inferred \n regulatory effects on {title_id} expression", fontsize=self.fontsize * 1.25
-            ) if cell_type is None else plt.title(
-                f"Average inferred regulatory effects on {title_id} expression in {cell_type}",
-                fontsize=self.fontsize * 1.25,
-            )
-            plt.tight_layout()
-
-            save_kwargs["ext"] = "png"
-            save_kwargs["dpi"] = 300
-            if "figure_folder" in locals():
-                save_kwargs["path"] = figure_folder
-            save_return_show_fig_utils(
-                save_show_or_return=save_show_or_return,
-                show_legend=True,
-                background="white",
-                prefix=f"{plot_mode}_{file_name}_{file_id}",
-                save_kwargs=save_kwargs,
-                total_panels=1,
-                fig=fig,
-                axes=ax,
-                return_all=False,
-                return_all_list=None,
-            )
+        save_kwargs["ext"] = "png"
+        save_kwargs["dpi"] = 300
+        if "figure_folder" in locals():
+            save_kwargs["path"] = figure_folder
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=True,
+            background="white",
+            prefix=f"{target}_effect_barplot",
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None,
+        )
 
     def visualize_intercellular_network(
         self,
