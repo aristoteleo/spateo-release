@@ -11,7 +11,7 @@ sphinx_copybutton
 sphinx-gallery<0.10.1
 sphinx-remove-toctrees
 sphinx-design
-sphinxext-opengraph
+sphinxext-opengraph==0.8.2
 sphinx-autoapi
 gitpython
 myst-parser
