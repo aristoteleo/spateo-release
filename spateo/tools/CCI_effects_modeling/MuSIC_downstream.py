@@ -1317,6 +1317,8 @@ class MuSIC_Interpreter(MuSIC):
         coord_column: Optional[Union[int, str]] = None,
         reprocess: bool = False,
         neatly_arrange_y: bool = True,
+        window_size: int = 3,
+        recompute: bool = False,
         title: Optional[str] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
@@ -1353,6 +1355,8 @@ class MuSIC_Interpreter(MuSIC):
                 z-scores for each row occur in. Used for a more uniform plot where similarly patterned
                 interaction-target pairs are grouped together. If False, will sort this axis by the identity of the
                 interaction (i.e. all "Fgf1" rows will be grouped together).
+            window_size: Size of window to use for smoothing. Must be an odd integer. If 1, no smoothing is applied.
+            recompute: Set to True to recompute the data and overwrite the existing files
             title: Optional, can be used to provide title for plot
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
@@ -1367,6 +1371,9 @@ class MuSIC_Interpreter(MuSIC):
                 keys according to your needs.
         """
         logger = lm.get_main_logger()
+
+        if window_size % 2 == 0:
+            raise ValueError("Window size must be an odd integer.")
 
         if not use_ligands and not use_receptors and not use_target_genes and genes is None:
             raise ValueError(
@@ -1550,7 +1557,7 @@ class MuSIC_Interpreter(MuSIC):
         # Check for existing dataframe:
         if (
             os.path.exists(os.path.join(output_folder, f"{adata_id}_distribution_{file_id}_along_{save_id}.csv"))
-            and not reprocess
+            and not recompute
         ):
             to_plot = pd.read_csv(
                 os.path.join(output_folder, f"{adata_id}_distribution_{file_id}_along_{save_id}.csv"),
@@ -1581,7 +1588,7 @@ class MuSIC_Interpreter(MuSIC):
             # Mean z-score at each coordinate position:
             all_fc_coord_sorted = all_fc_coord_sorted.groupby("pos").mean()
             # Smooth in the case of dropouts:
-            all_fc_coord_sorted = all_fc_coord_sorted.rolling(3, center=True, min_periods=1).mean()
+            all_fc_coord_sorted = all_fc_coord_sorted.rolling(window_size, center=True, min_periods=1).mean()
             # For each unique value in 'pos', find the top genes with the highest mean z-score
             top_genes = all_fc_coord_sorted.apply(lambda x: x.nlargest(30).index.tolist(), axis=1)
             # Find interesting interaction effects by position- get features that are in the top features for at least
@@ -1667,6 +1674,9 @@ class MuSIC_Interpreter(MuSIC):
         if all(isinstance(name, float) for name in to_plot.columns):
             to_plot.columns = [f"{float(col):.3f}" for col in to_plot.columns]
             to_plot.columns = [str(col) for col in to_plot.columns]
+        if genes is not None and not neatly_arrange_y:
+            to_plot = to_plot.reindex(genes)
+
         m = sns.heatmap(to_plot, vmin=-max_val, vmax=max_val, ax=ax, cmap=cmap)
 
         cbar = m.collections[0].colorbar
@@ -1681,7 +1691,10 @@ class MuSIC_Interpreter(MuSIC):
         ax.tick_params(axis="y", labelsize=fontsize)
         ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
 
-        if not os.path.exists(os.path.join(output_folder, f"{adata_id}_distribution_{file_id}_along_{save_id}.csv")):
+        if (
+            not os.path.exists(os.path.join(output_folder, f"{adata_id}_distribution_{file_id}_along_{save_id}.csv"))
+            and not recompute
+        ):
             to_plot.to_csv(
                 os.path.join(
                     output_folder,
@@ -1721,6 +1734,8 @@ class MuSIC_Interpreter(MuSIC):
         use_significant: bool = False,
         sort_by_target: bool = False,
         neatly_arrange_y: bool = True,
+        window_size: int = 3,
+        recompute: bool = False,
         title: Optional[str] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
@@ -1765,6 +1780,8 @@ class MuSIC_Interpreter(MuSIC):
                 z-scores for each row occur in. Used for a more uniform plot where similarly patterned
                 interaction-target pairs are grouped together. If False, will sort this axis by the identity of the
                 interaction (i.e. all "Fgf1" rows will be grouped together).
+            window_size: Size of window to use for smoothing. Must be an odd integer. If 1, no smoothing is applied.
+            recompute: Set to True to recompute the data and overwrite the existing files
             title: Optional, can be used to provide title for plot
             fontsize: Size of font for x and y labels.
             figsize: Size of figure.
@@ -1779,6 +1796,9 @@ class MuSIC_Interpreter(MuSIC):
                 keys according to your needs.
         """
         logger = lm.get_main_logger()
+
+        if window_size % 2 == 0:
+            raise ValueError("Window size must be an odd integer.")
 
         if position_key not in self.adata.obsm.keys() and position_key not in self.adata.obs.keys():
             raise ValueError(
@@ -1911,7 +1931,7 @@ class MuSIC_Interpreter(MuSIC):
         else:
             df_path = os.path.join(output_folder, f"{adata_id}_distribution_interaction_effects_along_{save_id}.csv")
 
-        if os.path.exists(df_path):
+        if os.path.exists(df_path) and not recompute:
             to_plot = pd.read_csv(df_path, index_col=0)
 
             if interaction_subset is not None:
@@ -2036,18 +2056,18 @@ class MuSIC_Interpreter(MuSIC):
             # Mean z-score at each coordinate position:
             all_fc_coord_sorted = all_fc_coord_sorted.groupby("pos").mean()
             # Smooth in the case of dropouts:
-            all_fc_coord_sorted = all_fc_coord_sorted.rolling(3, center=True, min_periods=1).mean()
+            all_fc_coord_sorted = all_fc_coord_sorted.rolling(window_size, center=True, min_periods=1).mean()
             # For each unique value in 'pos', find the top features with the highest mean z-score
             top_combinations = all_fc_coord_sorted.apply(lambda x: x.nlargest(30).index.tolist(), axis=1)
             # Find interesting interaction effects by position- get features that are in the top features for at least
-            # five consecutive positions:
+            # window size positions:
             consecutive_counts = {feature: 0 for feature in combinations}
             feats_of_interest = set()
 
             for pos in top_combinations.index:
                 for feature in top_combinations[pos]:
                     consecutive_counts[feature] += 1
-                    if consecutive_counts[feature] >= 5:
+                    if consecutive_counts[feature] >= int(window_size * 1.67):
                         feats_of_interest.add(feature)
                 for feature in combinations:
                     if feature not in top_combinations[pos]:
@@ -2132,6 +2152,12 @@ class MuSIC_Interpreter(MuSIC):
         if all(isinstance(name, float) for name in to_plot.columns):
             to_plot.columns = [f"{float(col):.3f}" for col in to_plot.columns]
             to_plot.columns = [str(col) for col in to_plot.columns]
+        to_plot.index = [i.replace(":", "-") for i in to_plot.index]
+        if not sort_by_target and not neatly_arrange_y:
+            to_plot["sort"] = to_plot.index.to_series().apply(lambda x: x.split("-")[1])
+            to_plot = to_plot.sort_values(by="sort")
+            to_plot = to_plot.drop("sort", axis=1)
+
         m = sns.heatmap(to_plot, vmin=-max_val, vmax=max_val, ax=ax, cmap=cmap)
 
         cbar = m.collections[0].colorbar
