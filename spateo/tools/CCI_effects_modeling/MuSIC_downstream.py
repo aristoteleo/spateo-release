@@ -6741,12 +6741,14 @@ class MuSIC_Interpreter(MuSIC):
         save_kwargs: Optional[dict] = {},
     ):
         """Visualize the proportion of cells expressing a particular target (ligand, receptor, or target gene
-        involved in an upstream CCI model) that are predicted to be affected by a particular transcription factor.
+        involved in an upstream CCI model) that are predicted to be affected by each transcription factor,
+        or that are predicted to be affected by each L:R pair/ligand.
 
         Args:
             target: Target gene
-            interaction_subset: Optional, can be used to specify subset of interactions (transcription factors) to
-                visualize, e.g. ["Sox2", "Irx3"]. If not given, will use all TFs.
+            interaction_subset: Optional, can be used to specify subset of interactions (transcription factors,
+                L:R pairs, etc.) to visualize, e.g. ["Sox2", "Irx3"]. If not given, will default to all TFs,
+                L:R pairs, etc.
             fontsize: Font size to determine size of the axis labels, ticks, title, etc.
             figsize: Width and height of plotting window
             cmap: Name of matplotlib colormap specifying colormap to use. Must be a sequential colormap.
@@ -6805,7 +6807,10 @@ class MuSIC_Interpreter(MuSIC):
             raise ValueError(f"Colormap {cmap} is not a sequential colormap.")
 
         # Check whether target is a ligand, receptor, or target gene:
-        if target in self.downstream_model_ligand_coeffs.keys():
+        if target in self.coeffs.keys():
+            all_coeffs = self.coeffs[target]
+            all_feature_names = [f for f in self.design_matrix.columns]
+        elif target in self.downstream_model_ligand_coeffs.keys():
             all_coeffs = self.downstream_model_ligand_coeffs[target]
             all_feature_names = [
                 f.replace("regulator_", "") for f in self.downstream_model_ligand_design_matrix.columns
@@ -6860,6 +6865,156 @@ class MuSIC_Interpreter(MuSIC):
             show_legend=True,
             background="white",
             prefix=f"{target}_effect_barplot",
+            save_kwargs=save_kwargs,
+            total_panels=1,
+            fig=fig,
+            axes=ax,
+            return_all=False,
+            return_all_list=None,
+        )
+
+    def top_target_barplot(
+        self,
+        interaction: str,
+        target_subset: Optional[List[str]] = None,
+        use_ligand_targets: bool = False,
+        use_receptor_targets: bool = False,
+        use_target_gene_targets: bool = True,
+        top_n_targets: Optional[int] = 10,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = "Blues",
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+    ):
+        """Visualize the proportion of cells expressing each target (ligand, receptor, or target gene involved in an
+        upstream CCI model) that are predicted to be affected by a given interaction, i.e. transcription factor,
+        L:R pair/ligand.
+
+        Args:
+            interaction: The interaction to investigate, in the form specified in the design matrix, e.g. "Sox9" or
+                "Igf1:Igf1r".
+            target_subset: Optional, specify subset of target genes to visualize. If not given, defaults to all targets.
+            use_ligand_targets: Whether ligands should be used as targets, i.e. if "interaction" is a TF and the
+                target genes being influenced by the TF are ligands. If True, will ignore "use_receptor_targets" and
+                "use_target_gene_targets".
+            use_receptor_targets: Whether receptors should be used as targets, i.e. if "interaction" is a TF and the
+                target genes being influenced by the TF are receptors. If True, will ignore "use_target_gene_targets".
+            use_target_gene_targets: Whether target genes should be used as targets, i.e. if "interaction" is a TF and
+                the target genes being influenced by the TF are target genes (that are not ligands or receptors).
+            top_n_targets: Number of top targets to visualize. Defaults to 10.
+            fontsize: Font size to determine size of the axis labels, ticks, title, etc.
+            figsize: Width and height of plotting window
+            cmap: Name of matplotlib colormap specifying colormap to use. Must be a sequential colormap.
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+        """
+        if fontsize is None:
+            fontsize = rcParams.get("font.size")
+        if figsize is None:
+            figsize = rcParams.get("figure.figsize")
+
+        sequential_cmaps = [
+            "Greys",
+            "Purples",
+            "Blues",
+            "Greens",
+            "Oranges",
+            "Reds",
+            "YlOrBr",
+            "YlOrRd",
+            "OrRd",
+            "PuRd",
+            "RdPu",
+            "BuPu",
+            "GnBu",
+            "PuBu",
+            "YlGnBu",
+            "PuBuGn",
+            "BuGn",
+            "YlGn",
+            "binary",
+            "gist_yarg",
+            "gist_gray",
+            "gray",
+            "bone",
+            "pink",
+            "spring",
+            "summer",
+            "autumn",
+            "winter",
+            "cool",
+            "Wistia",
+            "hot",
+            "afmhot",
+            "gist_heat",
+            "copper",
+        ]
+        sequential_cmaps_r = [f"{c}_r" for c in sequential_cmaps]
+        if cmap not in sequential_cmaps and cmap not in sequential_cmaps_r:
+            raise ValueError(f"Colormap {cmap} is not a sequential colormap.")
+
+        # Check if interaction is present in the design matrix:
+        if use_ligand_targets:
+            if interaction not in self.downstream_model_ligand_design_matrix.columns:
+                raise ValueError(f"Feature {interaction} not found in design matrix.")
+            all_coeffs = self.downstream_model_ligand_coeffs
+        elif use_receptor_targets:
+            if interaction not in self.downstream_model_receptor_design_matrix.columns:
+                raise ValueError(f"Feature {interaction} not found in design matrix.")
+            all_coeffs = self.downstream_model_receptor_coeffs
+        # For target genes, the regulating features can be ligand/L:R, or TFs:
+        elif use_target_gene_targets and interaction in self.design_matrix.columns:
+            all_coeffs = self.coeffs
+        elif use_target_gene_targets and interaction in self.downstream_model_target_design_matrix.columns:
+            all_coeffs = self.downstream_model_target_coeffs
+        else:
+            raise ValueError(f"Feature {interaction} not found in design matrix.")
+
+        if target_subset is not None:
+            all_coeffs = {k: all_coeffs[k] for k in all_coeffs.keys() if k in target_subset}
+
+        prop_effects = {}
+        for target, df in all_coeffs.items():
+            if interaction in df.columns:
+                # Target-expressing cells predicted to be effected by interaction:
+                nz_cells = np.where(self.adata[:, target].X.toarray() > 0)[0]
+                prop_effects[target] = (df[interaction].iloc[nz_cells] != 0).mean()
+
+        targets, proportions = zip(*prop_effects.items())
+
+        output_dir = os.path.dirname(self.output_path)
+        file_name = os.path.basename(self.adata_path).split(".")[0]
+        if save_show_or_return in ["save", "both", "all"]:
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
+
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+        sns.barplot(x=list(targets), y=list(proportions), palette=cmap, edgecolor="black", ax=ax)
+        plt.xlabel("Target Gene", fontsize=fontsize * 1.1)
+        plt.ylabel("Proportion", fontsize=fontsize * 1.1)
+        plt.xticks(fontsize=fontsize, rotation=90)
+        plt.yticks(fontsize=fontsize)
+        plt.title(f"Proportion of cells expressing target \naffected by {interaction}", fontsize=fontsize * 1.25)
+
+        save_kwargs["ext"] = "png"
+        save_kwargs["dpi"] = 300
+        if "figure_folder" in locals():
+            save_kwargs["path"] = figure_folder
+        save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=True,
+            background="white",
+            prefix=f"effect_barplot_for_{interaction}",
             save_kwargs=save_kwargs,
             total_panels=1,
             fig=fig,
