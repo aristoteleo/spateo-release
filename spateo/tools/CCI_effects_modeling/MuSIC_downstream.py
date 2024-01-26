@@ -6962,17 +6962,19 @@ class MuSIC_Interpreter(MuSIC):
 
         # Check if interaction is present in the design matrix:
         if use_ligand_targets:
-            if interaction not in self.downstream_model_ligand_design_matrix.columns:
+            if f"regulator_{interaction}" not in self.downstream_model_ligand_design_matrix.columns:
                 raise ValueError(f"Feature {interaction} not found in design matrix.")
             all_coeffs = self.downstream_model_ligand_coeffs
         elif use_receptor_targets:
-            if interaction not in self.downstream_model_receptor_design_matrix.columns:
+            if f"regulator_{interaction}" not in self.downstream_model_receptor_design_matrix.columns:
                 raise ValueError(f"Feature {interaction} not found in design matrix.")
             all_coeffs = self.downstream_model_receptor_coeffs
         # For target genes, the regulating features can be ligand/L:R, or TFs:
         elif use_target_gene_targets and interaction in self.design_matrix.columns:
             all_coeffs = self.coeffs
-        elif use_target_gene_targets and interaction in self.downstream_model_target_design_matrix.columns:
+        elif (
+            use_target_gene_targets and f"regulator_{interaction}" in self.downstream_model_target_design_matrix.columns
+        ):
             all_coeffs = self.downstream_model_target_coeffs
         else:
             raise ValueError(f"Feature {interaction} not found in design matrix.")
@@ -6982,12 +6984,16 @@ class MuSIC_Interpreter(MuSIC):
 
         prop_effects = {}
         for target, df in all_coeffs.items():
-            if interaction in df.columns:
+            feats = [f.replace("b_", "") for f in df.columns]
+            if interaction in feats:
                 # Target-expressing cells predicted to be effected by interaction:
                 nz_cells = np.where(self.adata[:, target].X.toarray() > 0)[0]
-                prop_effects[target] = (df[interaction].iloc[nz_cells] != 0).mean()
+                prop_effects[target] = (df[f"b_{interaction}"].iloc[nz_cells] != 0).mean()
 
-        targets, proportions = zip(*prop_effects.items())
+        prop_effects = pd.Series(prop_effects)
+        prop_effects = prop_effects.sort_values(ascending=False)
+        if top_n_targets is None:
+            top_n_targets = len(prop_effects)
 
         output_dir = os.path.dirname(self.output_path)
         file_name = os.path.basename(self.adata_path).split(".")[0]
@@ -6999,7 +7005,9 @@ class MuSIC_Interpreter(MuSIC):
                 os.makedirs(figure_folder)
 
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-        sns.barplot(x=list(targets), y=list(proportions), palette=cmap, edgecolor="black", ax=ax)
+        sns.barplot(
+            x=prop_effects.index[:top_n_targets], y=prop_effects[:top_n_targets], palette=cmap, edgecolor="black", ax=ax
+        )
         plt.xlabel("Target Gene", fontsize=fontsize * 1.1)
         plt.ylabel("Proportion", fontsize=fontsize * 1.1)
         plt.xticks(fontsize=fontsize, rotation=90)
