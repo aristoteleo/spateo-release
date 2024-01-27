@@ -409,6 +409,7 @@ class MuSIC_Interpreter(MuSIC):
                     showlegend=True,
                     legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
                     scene=dict(
+                        aspectmode="data",
                         xaxis=dict(
                             showgrid=False,
                             showline=False,
@@ -762,13 +763,16 @@ class MuSIC_Interpreter(MuSIC):
             plt.tight_layout()
             plt.show()
 
-    def plot_interaction_effect_3D(self, target: str, interaction: str, save_path: str):
+    def plot_interaction_effect_3D(
+        self, target: str, interaction: str, save_path: str, pcutoff: Optional[float] = 99.7
+    ):
         """Quick-visualize the magnitude of the predicted effect on target for a given interaction.
 
         Args:
             target: Target gene to visualize
             interaction: Interaction to visualize (e.g. "Igf1:Igf1r" for L:R model, "Igf1" for ligand model)
             save_path: Path to save the figure to (will save as HTML file)
+            pcutoff: Percentile cutoff for the colorbar. Will set all values above this percentile to this value.
         """
         targets = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
@@ -786,13 +790,13 @@ class MuSIC_Interpreter(MuSIC):
         coords = adata.obsm[self.coords_key]
         x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
 
-        target_interaction_coef = self.coeffs[target][f"b_{interaction}"]
+        target_interaction_coef = self.coeffs[target].loc[adata.obs_names, f"b_{interaction}"]
 
         # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
-        p997 = np.percentile(target_interaction_coef.values, 99.7)
-        if p997 == 0:
-            p997 = np.percentile(target_interaction_coef.values, 99.9)
-        target_interaction_coef[target_interaction_coef > p997] = p997
+        cutoff = np.percentile(target_interaction_coef.values, pcutoff)
+        if pcutoff == 0:
+            cutoff = np.percentile(target_interaction_coef.values, 99.9)
+        target_interaction_coef[target_interaction_coef > cutoff] = cutoff
         plot_vals = target_interaction_coef.values
         scatter_effect = go.Scatter3d(
             x=x,
@@ -824,6 +828,7 @@ class MuSIC_Interpreter(MuSIC):
         )
         fig.update_layout(
             scene=dict(
+                aspectmode="data",
                 xaxis=dict(
                     showgrid=False,
                     showline=False,
@@ -893,7 +898,7 @@ class MuSIC_Interpreter(MuSIC):
             if f"b_{interaction}" not in self.coeffs[target].columns:
                 self.logger.info(f"{interaction} not found for {target}. Skipping this interaction-target pair.")
                 continue
-            target_interaction_coef = self.coeffs[target][f"b_{interaction}"]
+            target_interaction_coef = self.coeffs[target].loc[adata.obs_names, f"b_{interaction}"]
             mean_values[effect] = np.mean(target_interaction_coef[target_interaction_coef > 0])
             adata.obs[f"{effect} nonzero"] = target_interaction_coef > 0
             # Temporarily, the key labeled with the effect name stores whether the interaction is nonzero to a
@@ -972,6 +977,7 @@ class MuSIC_Interpreter(MuSIC):
             showlegend=True,
             legend=dict(x=0.7, y=0.85, orientation="v", font=dict(size=14)),
             scene=dict(
+                aspectmode="data",
                 xaxis=dict(
                     showgrid=False,
                     showline=False,
@@ -1088,7 +1094,7 @@ class MuSIC_Interpreter(MuSIC):
             adjust_for_subsampling=False, load_from_downstream=target_type
         )
 
-        target_tf_coef = downstream_coeffs[target][f"b_{tf}"]
+        target_tf_coef = downstream_coeffs[target].loc[adata.obs_names, f"b_{tf}"]
         # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
         p997 = np.percentile(target_tf_coef.values, 99.7)
         target_tf_coef[target_tf_coef > p997] = p997
@@ -1123,6 +1129,7 @@ class MuSIC_Interpreter(MuSIC):
         )
         fig.update_layout(
             scene=dict(
+                aspectmode="data",
                 xaxis=dict(
                     showgrid=False,
                     showline=False,
@@ -1271,6 +1278,7 @@ class MuSIC_Interpreter(MuSIC):
             showlegend=True,
             legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
             scene=dict(
+                aspectmode="data",
                 xaxis=dict(
                     showgrid=False,
                     showline=False,
@@ -3544,6 +3552,7 @@ class MuSIC_Interpreter(MuSIC):
                 showlegend=True,
                 legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
                 scene=dict(
+                    aspectmode="data",
                     xaxis=dict(
                         showgrid=False,
                         showline=False,
@@ -6063,6 +6072,7 @@ class MuSIC_Interpreter(MuSIC):
             showlegend=True,
             legend=dict(x=0.65, y=0.85, orientation="v", font=dict(size=18)),
             scene=dict(
+                aspectmode="data",
                 xaxis=dict(
                     showgrid=False,
                     showline=False,

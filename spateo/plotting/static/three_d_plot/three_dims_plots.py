@@ -940,6 +940,7 @@ def plot_expression_3D(
     coords_key: str = "spatial",
     group_key: Optional[str] = None,
     ct_subset: Optional[list] = None,
+    pcutoff: Optional[float] = 99.7,
 ):
     """Visualize gene expression in a 3D space.
 
@@ -947,6 +948,11 @@ def plot_expression_3D(
         target: Target gene to visualize
         interaction: Interaction to visualize (e.g. "Igf1:Igf1r" for L:R model, "Igf1" for ligand model)
         save_path: Path to save the figure to (will save as HTML file)
+        coords_key: Key for spatial coordinates in adata.obsm
+        group_key: Optional key for grouping in adata.obs, but needed if "ct_subset" is provided
+        ct_subset: Optional list of cell types to include in the plot. If None, all cell types will be included.
+        pcutoff: Percentile cutoff for gene expression. Default is 99.7, which will set the max value plotted to the
+            99.7th percentile of gene expression values.
     """
     if group_key is not None:
         if group_key not in adata.obs.keys():
@@ -959,8 +965,8 @@ def plot_expression_3D(
     gene_expr = adata[:, gene].X.toarray().flatten()
 
     # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
-    p997 = np.percentile(gene_expr, 99.7)
-    gene_expr[gene_expr > p997] = p997
+    cutoff = np.percentile(gene_expr, pcutoff)
+    gene_expr[gene_expr > cutoff] = cutoff
     scatter_expr = go.Scatter3d(
         x=x,
         y=y,
@@ -986,6 +992,7 @@ def plot_expression_3D(
     )
     fig.update_layout(
         scene=dict(
+            aspectmode="data",
             xaxis=dict(
                 showgrid=False,
                 showline=False,
