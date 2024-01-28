@@ -1863,68 +1863,12 @@ class MuSIC:
                             # If there are receptors above the threshold, only use these for checking
                             to_check = receptors_above_threshold
                         else:
-                            # Get all TFs that are associated with these receptors, any TFs that are bound by these
-                            # TFs, and any of the primary TFs in the MAPK/ERK, NFKB, PI3K/AKT, and JAK/STAT pathways:
+                            # Get all TFs that are associated with these receptors:
                             associated_tfs = (
                                 self.r_tf_db[self.r_tf_db["receptor"].isin(associated_receptors)]["tf"]
                                 .unique()
                                 .tolist()
                             )
-
-                            if self.species == "mouse":
-                                additional_tfs = [
-                                    "Elk1",
-                                    "Fos",
-                                    "Myc",
-                                    "Sp1",
-                                    "Jun",
-                                    "Atf2",
-                                    "Nfkb1",
-                                    "Rela",
-                                    "Ets1",
-                                    "Srebf1",
-                                    "Srebf2",
-                                    "Creb1",
-                                    "Foxo1",
-                                    "Foxo3",
-                                    "Foxo4",
-                                    "Stat1",
-                                    "Stat2",
-                                    "Stat3",
-                                    "Stat4",
-                                    "Stat5a",
-                                    "Stat5b",
-                                    "Stat6",
-                                ]
-                            elif self.species == "human":
-                                additional_tfs = [
-                                    "ELK1",
-                                    "FOS",
-                                    "MYC",
-                                    "SP1",
-                                    "JUN",
-                                    "ATF2",
-                                    # NFkB Family
-                                    "NFKB1",  # NFKB1, p50/p105 subunit
-                                    "RELA",  # RELA, p65 subunit
-                                    "ETS1",
-                                    "SREBF1",
-                                    "SREBF2",
-                                    "CREB1",
-                                    # FOXO factors in the PI3K/AKT pathway
-                                    "FOXO1",
-                                    "FOXO3",
-                                    "FOXO4",
-                                    # STAT family TFs
-                                    "STAT1",
-                                    "STAT2",
-                                    "STAT3",
-                                    "STAT4",
-                                    "STAT5A",
-                                    "STAT5B",
-                                    "STAT6",
-                                ]
-                            associated_tfs.extend(additional_tfs)
 
                             to_check = associated_receptors + associated_tfs
                         to_check = [component for item in to_check for component in item.split("_")]
