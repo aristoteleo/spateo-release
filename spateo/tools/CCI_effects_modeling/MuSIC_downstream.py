@@ -1022,6 +1022,7 @@ class MuSIC_Interpreter(MuSIC):
         ligand_targets: bool = True,
         receptor_targets: bool = False,
         target_gene_targets: bool = False,
+        pcutoff: float = 99.7,
     ):
         """Quick-visualize the magnitude of the predicted effect on target for a given TF. Can only find the files
         necessary for this if :func `CCI_deg_detection()` has been run.
@@ -1036,6 +1037,7 @@ class MuSIC_Interpreter(MuSIC):
                 model.
             target_gene_targets: Set True if target genes were used as the target genes for the :func
                 `CCI_deg_detection()` model.
+            pcutoff: Percentile cutoff for the colorbar. Will set all values above this percentile to this value.
         """
         downstream_parent_dir = os.path.dirname(os.path.splitext(self.output_path)[0])
         id = os.path.splitext(os.path.basename(self.output_path))[0]
@@ -1096,8 +1098,8 @@ class MuSIC_Interpreter(MuSIC):
 
         target_tf_coef = downstream_coeffs[target].loc[adata.obs_names, f"b_{tf}"]
         # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
-        p997 = np.percentile(target_tf_coef.values, 99.7)
-        target_tf_coef[target_tf_coef > p997] = p997
+        cutoff = np.percentile(target_tf_coef.values, pcutoff)
+        target_tf_coef[target_tf_coef > cutoff] = cutoff
         plot_vals = target_tf_coef.values
         scatter_effect = go.Scatter3d(
             x=x,
@@ -6744,6 +6746,7 @@ class MuSIC_Interpreter(MuSIC):
         self,
         target: str,
         interaction_subset: Optional[str] = None,
+        top_n_interactions: Optional[int] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         cmap: str = "Blues",
@@ -6759,6 +6762,8 @@ class MuSIC_Interpreter(MuSIC):
             interaction_subset: Optional, can be used to specify subset of interactions (transcription factors,
                 L:R pairs, etc.) to visualize, e.g. ["Sox2", "Irx3"]. If not given, will default to all TFs,
                 L:R pairs, etc.
+            top_n_interactions: Optional, can be used to specify the top n interactions (transcription factors,
+                L:R pair, ligand, etc.) to visualize. If not given, will default to all TFs, L:R pairs, etc.
             fontsize: Font size to determine size of the axis labels, ticks, title, etc.
             figsize: Width and height of plotting window
             cmap: Name of matplotlib colormap specifying colormap to use. Must be a sequential colormap.
@@ -6857,13 +6862,24 @@ class MuSIC_Interpreter(MuSIC):
         nz_cells = np.where(self.adata[:, target].X.toarray() > 0)[0]
         proportions = (all_coeffs.iloc[nz_cells] != 0).mean()
         proportions = proportions.sort_values(ascending=False)
-        sns.barplot(x=proportions.index, y=proportions, palette=cmap, edgecolor="black", ax=ax)
+        if top_n_interactions is None:
+            top_n_interactions = len(proportions)
+
+        sns.barplot(
+            x=proportions.index[:top_n_interactions],
+            y=proportions[:top_n_interactions],
+            palette=cmap,
+            edgecolor="black",
+            ax=ax,
+        )
+
         plt.xlabel("Transcription factor", fontsize=fontsize * 1.1)
         plt.ylabel(f"Proportion", fontsize=fontsize * 1.1)
         plt.xticks(fontsize=fontsize, rotation=90)
         plt.yticks(fontsize=fontsize)
         plt.title(
-            f"Proportion of cells expressing {target} \naffected by transcription factors", fontsize=fontsize * 1.25
+            f"Proportion of cells expressing {target} predicted \nto be affected by transcription factors",
+            fontsize=fontsize * 1.25,
         )
 
         save_kwargs["ext"] = "png"
@@ -6890,7 +6906,7 @@ class MuSIC_Interpreter(MuSIC):
         use_ligand_targets: bool = False,
         use_receptor_targets: bool = False,
         use_target_gene_targets: bool = True,
-        top_n_targets: Optional[int] = 10,
+        top_n_targets: Optional[int] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         cmap: str = "Blues",
