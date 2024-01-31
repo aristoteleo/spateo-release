@@ -88,10 +88,10 @@ def find_cci_two_group(
 
     # prior lr_network
     if species == "human":
-        lr_network = pd.read_csv(path + "lr_network_human.csv", index_col=0)
+        lr_network = pd.read_csv(path + "lr_db_human.csv", index_col=0)
         lr_network["lr_pair"] = lr_network["from"].str.cat(lr_network["to"], sep="-")
     elif species == "mouse":
-        lr_network = pd.read_csv(path + "lr_network_mouse.csv", index_col=0)
+        lr_network = pd.read_csv(path + "lr_db_mouse.csv", index_col=0)
         lr_network["lr_pair"] = lr_network["from"].str.cat(lr_network["to"], sep="-")
     elif species == "drosophila":
         lr_network = pd.read_csv(path + "lr_network_drosophila.csv", index_col=0)
