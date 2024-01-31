@@ -678,7 +678,7 @@ def neighbors(
     n_pca_components: int = 30,
     n_neighbors: int = 10,
 ) -> Tuple[NearestNeighbors, AnnData]:
-    """Given an AnnData object, compute pairwise connectivity matrix in transcriptomic space
+    """Given an AnnData object, compute pairwise connectivity matrix in transcriptomic or physical space
 
     Args:
         adata : an anndata object.
@@ -740,15 +740,23 @@ def neighbors(
     if basis != "spatial":
         logger.info_insert_adata("expression_connectivities", adata_attr="obsp")
         logger.info_insert_adata("expression_distances", adata_attr="obsp")
+        logger.info_insert_adata("expression_connectivities.indices", adata_attr="uns")
+        logger.info_insert_adata("expression_connectivities.params", adata_attr="uns")
 
         adata.obsp["expression_distances"] = distances
         adata.obsp["expression_connectivities"] = connectivities
+        adata.uns["expression_connectivities"]["indices"] = knn
+        adata.uns["expression_connectivities"]["params"] = {"n_neighbors": n_neighbors, "metric": "euclidean"}
     else:
         logger.info_insert_adata("spatial_distances", adata_attr="obsp")
         logger.info_insert_adata("spatial_connectivities", adata_attr="obsp")
+        logger.info_insert_adata("spatial_connectivities.indices", adata_attr="uns")
+        logger.info_insert_adata("spatial_connectivities.params", adata_attr="uns")
 
         adata.obsp["spatial_distances"] = distances
         adata.obsp["spatial_connectivities"] = connectivities
+        adata.uns["spatial_connectivities"]["indices"] = knn
+        adata.uns["spatial_connectivities"]["params"] = {"n_neighbors": n_neighbors, "metric": "euclidean"}
 
     return nbrs, adata
 
