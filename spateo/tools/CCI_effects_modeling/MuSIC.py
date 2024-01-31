@@ -3194,7 +3194,16 @@ class MuSIC:
                 target_row = self.grn.loc[gene_query]
                 target_TFs = target_row[target_row == 1].index.tolist()
                 # TFs that can regulate expression of the target-binding TFs:
-                primary_tf_rows = self.grn.loc[[tf for tf in target_TFs if tf in self.grn.index]]
+                # In finding secondary TFs, search for only those that regulate present target-binding TFs (i.e. the
+                # primary TFs must be expressed above a certain threshold):
+                subset_indices = np.nonzero(y_arr[target].values)[0]
+                subset_adata = self.adata[subset_indices].copy()
+                target_TF_sub = [tf for tf in target_TFs if tf in self.grn.index and tf in self.adata.var_names]
+                expression_data = subset_adata[:, target_TF_sub].X.toarray()
+                proportions = np.mean(expression_data > 0, axis=0)
+                mask = proportions > self.target_expr_threshold
+                target_TF_sub = np.array(target_TF_sub)[mask].tolist()
+                primary_tf_rows = self.grn.loc[target_TF_sub]
                 secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
                 target_TFs = list(set(target_TFs + secondary_TFs))
                 if len(target_TFs) == 0:
@@ -3310,7 +3319,16 @@ class MuSIC:
                     target_TFs = target_row[target_row == 1].index.tolist()
 
                 # TFs that can regulate expression of the target-binding TFs:
-                primary_tf_rows = self.grn.loc[[tf for tf in target_TFs if tf in self.grn.index]]
+                # In finding secondary TFs, search for only those that regulate present target-binding TFs (i.e. the
+                # primary TFs must be expressed above a certain threshold):
+                subset_indices = np.nonzero(y_arr[target].values)[0]
+                subset_adata = self.adata[subset_indices].copy()
+                target_TF_sub = [tf for tf in target_TFs if tf in self.grn.index and tf in self.adata.var_names]
+                expression_data = subset_adata[:, target_TF_sub].X.toarray()
+                proportions = np.mean(expression_data > 0, axis=0)
+                mask = proportions > self.target_expr_threshold
+                target_TF_sub = np.array(target_TF_sub)[mask].tolist()
+                primary_tf_rows = self.grn.loc[target_TF_sub]
                 secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
                 target_TFs = list(set(target_TFs + secondary_TFs))
                 if len(target_TFs) == 0:

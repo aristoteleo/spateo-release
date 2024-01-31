@@ -6578,6 +6578,9 @@ class MuSIC_Interpreter(MuSIC):
         use_receptors: bool = False,
         use_pathways: bool = False,
         use_targets: bool = False,
+        ligand_subset: Optional[List[str]] = None,
+        receptor_subset: Optional[List[str]] = None,
+        target_subset: Optional[List[str]] = None,
         cell_type: Optional[str] = None,
         use_dim_reduction: bool = False,
         **kwargs,
@@ -6602,6 +6605,12 @@ class MuSIC_Interpreter(MuSIC):
                 to collectively compute signaling potential score. Will take precedent over sender cell types if also
                 provided. Should match the input to :func `CCI_sender_deg_detection_setup`.
             use_targets: Use target genes array for differential expression analysis.
+            ligand_subset: Subset of ligands to use for differential expression analysis. If not given, will use all
+                ligands from the upstream model.
+            receptor_subset: Subset of receptors to use for differential expression analysis. If not given,
+                will use all receptors from the upstream model.
+            target_subset: Subset of target genes to use for differential expression analysis. If not given,
+                will use all target genes from the upstream model.
             cell_type: Cell type to use to use for differential expression analysis. If given, will use the
                 ligand/receptor subset obtained from :func ~`CCI_deg_detection_setup` and cells of the chosen
                 cell type in the model.
@@ -6665,23 +6674,56 @@ class MuSIC_Interpreter(MuSIC):
             )
             kwargs["adata_path"] = os.path.join(output_dir, "cci_deg_detection", f"{file_name}_all_{id}.h5ad")
             if use_ligands:
-                kwargs["custom_lig_path"] = os.path.join(
-                    output_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt"
-                )
+                if ligand_subset is not None:
+                    # Save ligand subset to file:
+                    with open(
+                        os.path.join(output_dir, "cci_deg_detection", f"{file_name}_ligand_subset.txt"), "w"
+                    ) as file:
+                        for l in ligand_subset:
+                            file.write(l + "\n")
+                    kwargs["custom_lig_path"] = os.path.join(
+                        output_dir, "cci_deg_detection", f"{file_name}_ligand_subset.txt"
+                    )
+                else:
+                    kwargs["custom_lig_path"] = os.path.join(
+                        output_dir, "cci_deg_detection", f"{file_name}_all_ligands.txt"
+                    )
                 logger.info(f"Using ligands stored at {kwargs['custom_lig_path']}.")
             elif use_receptors:
-                kwargs["custom_rec_path"] = os.path.join(
-                    output_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt"
-                )
+                if receptor_subset is not None:
+                    # Save receptor subset to file:
+                    with open(
+                        os.path.join(output_dir, "cci_deg_detection", f"{file_name}_receptor_subset.txt"), "w"
+                    ) as file:
+                        for r in receptor_subset:
+                            file.write(r + "\n")
+                    kwargs["custom_rec_path"] = os.path.join(
+                        output_dir, "cci_deg_detection", f"{file_name}_receptor_subset.txt"
+                    )
+                else:
+                    kwargs["custom_rec_path"] = os.path.join(
+                        output_dir, "cci_deg_detection", f"{file_name}_all_receptors.txt"
+                    )
             elif use_pathways:
                 kwargs["custom_pathways_path"] = os.path.join(
                     output_dir, "cci_deg_detection", f"{file_name}_all_pathways.txt"
                 )
                 logger.info(f"Using pathways stored at {kwargs['custom_pathways_path']}.")
             elif use_targets:
-                kwargs["targets_path"] = os.path.join(
-                    output_dir, "cci_deg_detection", f"{file_name}_all_target_genes.txt"
-                )
+                if target_subset is not None:
+                    # Save target subset to file:
+                    with open(
+                        os.path.join(output_dir, "cci_deg_detection", f"{file_name}_target_subset.txt"), "w"
+                    ) as file:
+                        for t in target_subset:
+                            file.write(t + "\n")
+                    kwargs["targets_path"] = os.path.join(
+                        output_dir, "cci_deg_detection", f"{file_name}_target_subset.txt"
+                    )
+                else:
+                    kwargs["targets_path"] = os.path.join(
+                        output_dir, "cci_deg_detection", f"{file_name}_all_target_genes.txt"
+                    )
                 logger.info(f"Using target genes stored at {kwargs['targets_path']}.")
             else:
                 raise ValueError("One of 'use_ligands', 'use_receptors', 'use_pathways' or 'use_targets' must be True.")
