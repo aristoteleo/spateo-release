@@ -70,11 +70,11 @@ def niches(
 
     # prior lr_network
     if species == "human":
-        lr_network = pd.read_csv(path + "lr_network_human.csv", index_col=0)
+        lr_network = pd.read_csv(path + "lr_db_human.csv", index_col=0)
         if system == "niches_n2c":
             lr_network[["from", "to"]] = lr_network[["to", "from"]]
     elif species == "mouse":
-        lr_network = pd.read_csv(path + "lr_network_mouse.csv", index_col=0)
+        lr_network = pd.read_csv(path + "lr_db_mouse.csv", index_col=0)
         if system == "niches_n2c":
             lr_network[["from", "to"]] = lr_network[["to", "from"]]
     elif species == "drosophila":
