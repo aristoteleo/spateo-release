@@ -100,9 +100,7 @@ class Lasso:
                 ]
 
                 Lasso.__sub_index = t.data[0].cells.values[0]
-                Lasso.sub_adata = self.adata[
-                    Lasso.__sub_index,
-                ]
+                Lasso.sub_adata = self.adata[Lasso.__sub_index,]
 
             scatter.on_selection(selection_fn)
 
