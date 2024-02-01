@@ -669,7 +669,7 @@ def neighbors(
         adata.obsp["expression_connectivities"] = connectivities
         adata.uns["expression_neighbors"] = {}
         adata.uns["expression_neighbors"]["indices"] = knn
-        adata.uns["expression_connectivities"]["params"] = {"n_neighbors": n_neighbors, "metric": "euclidean"}
+        adata.uns["expression_neighbors"]["params"] = {"n_neighbors": n_neighbors, "metric": "euclidean"}
     else:
         logger.info_insert_adata("spatial_distances", adata_attr="obsp")
         logger.info_insert_adata("spatial_connectivities", adata_attr="obsp")
@@ -681,7 +681,7 @@ def neighbors(
         adata.obsp["spatial_connectivities"] = connectivities
         adata.uns["spatial_neighbors"] = {}
         adata.uns["spatial_neighbors"]["indices"] = knn
-        adata.uns["spatial_connectivities"]["params"] = {"n_neighbors": n_neighbors, "metric": "euclidean"}
+        adata.uns["spatial_neighbors"]["params"] = {"n_neighbors": n_neighbors, "metric": "euclidean"}
 
     return nbrs, adata
 
