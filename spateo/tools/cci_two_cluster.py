@@ -128,7 +128,7 @@ def find_cci_two_group(
         cell_pair.append(str(adata.obs.index[i]) + ">-<" + adata.obs.index[cell_id])
     cell_pair = [i for j in cell_pair for i in j]
     cell_pair = pd.DataFrame({"cell_pair_name": cell_pair})
-    cell_pair[["cell_sender", "cell_receiver"]] = cell_pair["cell_pair_name"].str.split(">-<", 2, expand=True)
+    cell_pair[["cell_sender", "cell_receiver"]] = cell_pair["cell_pair_name"].str.split(">-<", n=2, expand=True)
     # cell_pair:sender_group
     cell_pair = cell_pair.loc[cell_pair["cell_sender"].isin(sender_id.tolist())]
     # cell_pair:receiver_group
@@ -146,13 +146,17 @@ def find_cci_two_group(
     # spatial-proximal subcluster vs. spatial-distal subcluster
     group_sp = group + "sp"
     adata.obs[group_sp] = adata.obs[group]
-    adata.obs[group_sp].cat.add_categories(
+    adata.obs[group_sp] = adata.obs[group_sp].cat.add_categories(
         [sender_group + "_prox", sender_group + "_dist", receiver_group + "_prox", receiver_group + "_dist"],
-        inplace=True,
     )
 
     adata.obs.loc[adata.obs.index.isin(cell_pair["cell_sender"].tolist()), group_sp] = sender_group + "_prox"
     adata.obs.loc[adata.obs.index.isin(cell_pair["cell_receiver"].tolist()), group_sp] = receiver_group + "_prox"
+    # If count sender_group_prox is 0, return None:
+    count_sender_prox = (adata.obs[group_sp] == sender_group + "_prox").sum()
+    if count_sender_prox == 0:
+        logger.info(f"No cells found in the category {sender_group + '_prox'}. Returning None.")
+        return None
 
     adata.obs.loc[adata.obs.index.isin(sender_dist), group_sp] = sender_group + "_dist"
     adata.obs.loc[adata.obs.index.isin(receiver_dist), group_sp] = receiver_group + "_dist"
