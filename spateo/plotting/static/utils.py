@@ -3,17 +3,17 @@ import copy
 import math
 import os
 import warnings
+from inspect import signature
 from typing import Any, Collection, Dict, List, Optional, Tuple, Union
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import geopandas as gpd
 
-from inspect import signature
-
 import matplotlib
 import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
+import mpl_toolkits
 import numba
 import numpy as np
 import pandas as pd
@@ -169,6 +169,63 @@ def _scatter_projection(ax, points, projection, **kwargs):
         ax.scatter(points[:, 0], points[:, 1], **kwargs)
 
 
+def _vector_projection(
+    ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", geo: bool = False, **kwargs
+):
+    """Plot a 2D field of arrows over spatial transcriptomics data
+
+    Args:
+        ax: Matplotlib axis object
+        points: Point coordinates of shape [n_samples, 2], either grid coordinates (for grid or streamlines plots) or
+            coordinates of the cells themselves (for cell plots)
+        vectors: Array of shape [n_samples, 2] or [n_samples, 3] containing the vector field
+        projection: Either '2d' or '3d' to indicate if plot is 2D or 3D
+        geo: Set True if plotting atop geometrical objects. If only generating a scatterplot, set False.
+        **kwargs: Additional keyword arguments provided to :func `ax.quiver()`
+    """
+    if geo and not isinstance(points, np.ndarray):
+        centroids = np.array([polygon.centroid.coords[0] for polygon in points])
+        if projection == "3d":
+            ax.quiver(
+                centroids[:, 0], centroids[:, 1], centroids[:, 2], vectors[:, 0], vectors[:, 1], vectors[:, 2], **kwargs
+            )
+        else:
+            ax.quiver(centroids[:, 0], centroids[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
+
+    else:
+        if projection == "3d":
+            ax.quiver(points[:, 0], points[:, 1], points[:, 2], vectors[:, 0], vectors[:, 1], vectors[:, 2], **kwargs)
+        else:
+            ax.quiver(points[:, 0], points[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
+
+
+def _streamlines_projection(
+    ax, points: np.ndarray, vectors: np.ndarray, projection: str = "2d", geo: bool = False, **kwargs
+):
+    """Plot streamlines over spatial transcriptomics data
+
+    Args:
+        ax: Matplotlib axis object
+        points: Point coordinates of shape [n_samples, 2], either grid coordinates (for grid or streamlines plots) or
+            coordinates of the cells themselves (for cell plots)
+        vectors: Array of shape [n_samples, 2] or [n_samples, 3] containing the vector field
+        projection: Either '2d' or '3d' to indicate if plot is 2D or 3D
+        geo: Set True if plotting atop geometrical objects. If only generating a scatterplot, set False.
+        **kwargs: Additional keyword arguments provided to :func `ax.streamplot()`
+    """
+    if geo and not isinstance(points, np.ndarray):
+        centroids = np.array([polygon.centroid.coords[0] for polygon in points])
+        if projection == "3d":
+            raise NotImplementedError("Streamlines are not supported in 3D")
+        else:
+            ax.streamplot(centroids[:, 0], centroids[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
+    else:
+        if projection == "3d":
+            raise NotImplementedError("Streamlines are not supported in 3D")
+        else:
+            ax.streamplot(points[:, 0], points[:, 1], vectors[:, 0], vectors[:, 1], **kwargs)
+
+
 def _geo_projection(ax, points, **kwargs):
     linecolor = kwargs.pop("linecolor")
     if "values" in kwargs:
@@ -188,31 +245,78 @@ def _geo_projection(ax, points, **kwargs):
     gdf.boundary.plot(ax=ax, color=linecolor, **kwargs)
 
 
+def plot_vectors(
+    ax: Union[plt.Axes, mpl_toolkits.mplot3d.Axes3D],
+    points: np.ndarray,
+    V: np.ndarray,
+    vf_plot_method: str = "cell",
+    projection: str = "2d",
+    geo: bool = False,
+    **kwargs,
+):
+    """Wrapper for plotting vector fields.
+
+    Args:
+        ax: Matplotlib axis object
+        points: Point coordinates of shape [n_samples, 2], either grid coordinates (for grid or streamlines plots) or
+            coordinates of the cells themselves (for cell plots)
+        V: Array of shape [n_samples, 2] or [n_samples, 3] containing the vector field
+        vf_plot_method: 'grid' or 'streamplot' to indicate if plot should be vectors coming from the cells themselves
+            ('cell'), vectors coming from vertices of a grid ('grid') or streamlines coming from vertices of a grid (
+            'streamplot')
+        geo: Set True if plotting atop geometrical objects. If only generating a scatterplot, set False.
+    """
+    if vf_plot_method == "grid" or vf_plot_method == "cell":
+        _vector_projection(
+            ax,
+            points,
+            V,
+            projection,
+            geo,
+            **kwargs,
+        )
+    elif vf_plot_method == "streamplot":
+        _streamlines_projection(
+            ax,
+            points,
+            V,
+            projection,
+            geo,
+            **kwargs,
+        )
+    else:
+        raise ValueError("vf_plot_method must be either 'grid' or 'streamplot', got {}".format(vf_plot_method))
+
+
 def _matplotlib_points(
     points,
     ax=None,
     labels=None,
     values=None,
     highlights=None,
-    cmap="Blues",
-    color_key=None,
-    color_key_cmap="Spectral",
-    background="white",
-    width=7,
-    height=5,
-    show_legend=True,
-    vmin=2,
-    vmax=98,
-    sort="raw",
-    frontier=False,
-    contour=False,
+    cmap: str = "Blues",
+    color_key: Optional[str] = None,
+    color_key_cmap: str = "Spectral",
+    background: str = "white",
+    width: int = 7,
+    height: int = 5,
+    show_legend: bool = True,
+    vmin: float = 2,
+    vmax: float = 98,
+    sort: str = "raw",
+    frontier: bool = False,
+    contour: bool = False,
     ccmap=None,
-    calpha=0.4,
-    sym_c=False,
+    calpha: float = 0.4,
+    sym_c: bool = False,
     inset_dict={},
-    show_colorbar=True,
+    show_colorbar: bool = True,
     projection=None,  # default in matplotlib
-    geo=False,
+    geo: bool = False,
+    X_grid: Optional[np.ndarray] = None,
+    V: Optional[np.ndarray] = None,
+    vf_plot_method: str = "cell",
+    vf_kwargs: Optional[Dict] = None,
     **kwargs,
 ):
     import matplotlib.pyplot as plt
@@ -235,6 +339,56 @@ def _matplotlib_points(
 
     # Color by labels
     unique_labels = []
+
+    # Separate keyword arguments used for scatter and quiver plots (if the latter is applicable):
+    if V is not None:
+        if vf_plot_method == "grid" or vf_plot_method == "cell":
+            quiver_params = [
+                "scale",
+                "scale_units",
+                "angles",
+                "width",
+                "color",
+                "pivot",
+                "headwidth",
+                "headlength",
+                "headaxislength",
+                "minshaft",
+                "minlength",
+                "linewidth",
+                "edgecolor",
+                "norm",
+                "cmap",
+            ]
+
+            quiver_kwargs = {}
+
+            for key, value in vf_kwargs.items():
+                if key in quiver_params:
+                    quiver_kwargs[key] = value
+
+        elif vf_plot_method == "stream":
+            streamplot_params = [
+                "density",
+                "linewidth",
+                "color",
+                "cmap",
+                "norm",
+                "arrowsize",
+                "arrowstyle",
+                "minlength",
+                "start_points",
+                "zorder",
+                "maxlength",
+                "integration_direction",
+                "data",
+            ]
+
+            streamplot_kwargs = {}
+
+            for key, value in vf_kwargs.items():
+                if key in streamplot_params:
+                    streamplot_kwargs[key] = value
 
     if labels is not None:
         # main_debug("labels are not None, drawing by labels")
@@ -271,6 +425,12 @@ def _matplotlib_points(
                     points["label"] != "other",
                     points["label"] == "other",
                 )
+
+                if V is not None and vf_plot_method == "cell":
+                    # Get the indices that would sort the DataFrame in ascending order
+                    sorted_indices = np.argsort(np.concatenate((background_ids.values, highlight_ids.values)))
+                    V = V[sorted_indices, :]
+
                 # reorder_data = points.copy(deep=True)
                 # (
                 #     reorder_data.loc[:(sum(background_ids) - 1), :],
@@ -352,38 +512,16 @@ def _matplotlib_points(
                 plotnonfinite=True,
                 **kwargs,
             )
+
+            if V is not None:
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
+
         elif contour:
-            # main_debug("drawing contour")
-            # try:
-            #     from shapely.geometry import Polygon, MultiPoint, Point
-            # except ImportError:
-            #     raise ImportError(
-            #         "If you want to use the tricontourf in plotting function, you need to install `shapely` "
-            #         "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
-            #     )
-            #
-            # x, y = points[:, :2].T
-            # triang = tri.Triangulation(x, y)
-            # concave_hull, edge_points = alpha_shape(x, y, alpha=calpha)
-            # ax = plot_polygon(concave_hull, ax=ax)
-            #
-            # # Use the mean distance between the triangulated x & y poitns
-            # x2 = x[triang.triangles].mean(axis=1)
-            # y2 = y[triang.triangles].mean(axis=1)
-            # ##note the very obscure mean command, which, if not present causes an error.
-            # ##now we need some masking condition.
-            #
-            # # Create an empty set to fill with zeros and ones
-            # cond = np.empty(len(x2))
-            # # iterate through points checking if the point lies within the polygon
-            # for i in range(len(x2)):
-            #     cond[i] = concave_hull.contains(Point(x2[i], y2[i]))
-            #
-            # mask = np.where(cond, 0, 1)
-            # # apply masking
-            # triang.set_mask(mask)
-            #
-            # # ax.tricontourf(triang, values, cmap=ccmap)
             import seaborn as sns
 
             ccmap = "viridis" if ccmap is None else ccmap
@@ -409,6 +547,15 @@ def _matplotlib_points(
                 zorder=21,
                 **kwargs,
             )
+
+            if V is not None:
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
+
         else:
             # main_debug("drawing without frontiers and contour")
             if geo:
@@ -418,6 +565,14 @@ def _matplotlib_points(
                     color=colors,
                     **kwargs,
                 )
+
+                if V is not None:
+                    vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                    vec_points = points if vf_plot_method == "cell" else X_grid
+                    if len(vf_kwargs) == 0:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True)
+                    else:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True, **vf_kwargs)
             else:
                 _scatter_projection(
                     ax,
@@ -427,6 +582,14 @@ def _matplotlib_points(
                     plotnonfinite=True,
                     **kwargs,
                 )
+
+                if V is not None:
+                    vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                    vec_points = points if vf_plot_method == "cell" else X_grid
+                    if len(vf_kwargs) == 0:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                    else:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
     # Color by values
     elif values is not None:
@@ -448,6 +611,8 @@ def _matplotlib_points(
             np.argsort(abs(values)) if sort == "abs" else np.argsort(-values) if sort == "neg" else np.argsort(values)
         )
         values, points = values[sorted_id], points[sorted_id]
+        if V is not None and vf_plot_method == "cell":
+            V = V[sorted_id]
 
         # if there are very few cells have expression, set the vmin/vmax only based on positive values to
         # get rid of outliers
@@ -519,37 +684,16 @@ def _matplotlib_points(
                 plotnonfinite=True,
                 **kwargs,
             )
-        elif contour:
-            # main_debug("drawing contour")
-            # try:
-            #     from shapely.geometry import Polygon, MultiPoint, Point
-            # except ImportError:
-            #     raise ImportError(
-            #         "If you want to use the tricontourf in plotting function, you need to install `shapely` "
-            #         "package via `pip install shapely` see more details at https://pypi.org/project/Shapely/,"
-            #     )
-            #
-            # x, y = points[:, :2].T
-            # triang = tri.Triangulation(x, y)
-            # concave_hull, edge_points = alpha_shape(x, y, alpha=calpha)
-            # ax = plot_polygon(concave_hull, ax=ax)
-            #
-            # # Use the mean distance between the triangulated x & y poitns
-            # x2 = x[triang.triangles].mean(axis=1)
-            # y2 = y[triang.triangles].mean(axis=1)
-            # ##note the very obscure mean command, which, if not present causes an error.
-            # ##now we need some masking condition.
-            #
-            # # Create an empty set to fill with zeros and ones
-            # cond = np.empty(len(x2))
-            # # iterate through points checking if the point lies within the polygon
-            # for i in range(len(x2)):
-            #     cond[i] = concave_hull.contains(Point(x2[i], y2[i]))
-            #
-            # mask = np.where(cond, 0, 1)
-            # # apply masking
-            # triang.set_mask(mask)
 
+            if V is not None:
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
+
+        elif contour:
             ccmap = "viridis" if ccmap is None else ccmap
             # # ax.tricontourf(triang, values, cmap=ccmap)
             # _scatter_projection(x, y,
@@ -582,6 +726,15 @@ def _matplotlib_points(
                 plotnonfinite=True,
                 **kwargs,
             )
+
+            if V is not None:
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
+
         else:
             # main_debug("drawing without frontiers and contour")
             # main_debug("using cmap: %s" % (str(cmap)))
@@ -595,6 +748,15 @@ def _matplotlib_points(
                     vmax=_vmax,
                     **kwargs,
                 )
+
+                if V is not None:
+                    vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                    vec_points = points if vf_plot_method == "cell" else X_grid
+                    if len(vf_kwargs) == 0:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True)
+                    else:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True, **vf_kwargs)
+
             else:
                 _scatter_projection(
                     ax,
@@ -606,6 +768,14 @@ def _matplotlib_points(
                     vmax=_vmax,
                     **kwargs,
                 )
+
+                if V is not None:
+                    vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                    vec_points = points if vf_plot_method == "cell" else X_grid
+                    if len(vf_kwargs) == 0:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                    else:
+                        plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
         if "norm" in kwargs:
             norm = kwargs["norm"]
@@ -629,8 +799,24 @@ def _matplotlib_points(
         colors = plt.get_cmap(cmap)(0.5)
         if geo:
             _geo_projection(ax, points, color=colors, **kwargs)
+
+            if V is not None:
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, geo=True, **vf_kwargs)
         else:
             _scatter_projection(ax, points, projection, c=colors, **kwargs)
+
+            if V is not None:
+                vf_kwargs = streamplot_kwargs if vf_plot_method == "stream" else quiver_kwargs
+                vec_points = points if vf_plot_method == "cell" else X_grid
+                if len(vf_kwargs) == 0:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method)
+                else:
+                    plot_vectors(ax, vec_points, V, vf_plot_method=vf_plot_method, **vf_kwargs)
 
     if show_legend and legend_elements is not None:
         if len(unique_labels) == 1 and show_legend == "on data":
@@ -680,408 +866,6 @@ def _matplotlib_points(
         pass
 
     return ax, colors
-
-
-def _datashade_points(
-    points,
-    ax=None,
-    labels=None,
-    values=None,
-    highlights=None,
-    cmap="blue",
-    color_key=None,
-    color_key_cmap="Spectral",
-    background="black",
-    width=7,
-    height=5,
-    show_legend=True,
-    vmin=2,
-    vmax=98,
-    sort="raw",
-    projection="2d",
-    **kwargs,
-):
-    import datashader as ds
-    import datashader.transfer_functions as tf
-    import matplotlib.pyplot as plt
-
-    dpi = plt.rcParams["figure.dpi"]
-    width, height = width * dpi, height * dpi
-
-    """Use datashader to plot points"""
-    extent = _get_extent(points)
-    canvas = ds.Canvas(
-        plot_width=int(width),
-        plot_height=int(height),
-        x_range=(extent[0], extent[1]),
-        y_range=(extent[2], extent[3]),
-    )
-    data = pd.DataFrame(points, columns=("x", "y"))
-
-    legend_elements = None
-
-    # Color by labels
-    if labels is not None:
-        if labels.shape[0] != points.shape[0]:
-            raise ValueError(
-                "Labels must have a label for "
-                "each sample (size mismatch: {} {})".format(labels.shape[0], points.shape[0])
-            )
-
-        labels = np.array(labels, dtype="str")
-        data["label"] = pd.Categorical(labels)
-        if color_key is None and color_key_cmap is None:
-            aggregation = canvas.points(data, "x", "y", agg=ds.count_cat("label"))
-            result = tf.shade(aggregation, how="eq_hist")
-        elif color_key is None:
-            cmap = matplotlib.cm.get_cmap(color_key_cmap)
-            cmap.set_bad("lightgray")
-            # add plotnonfinite=True to canvas.points
-
-            if highlights is None:
-                aggregation = canvas.points(data, "x", "y", agg=ds.count_cat("label"))
-                unique_labels = np.unique(labels)
-                num_labels = unique_labels.shape[0]
-                color_key = _to_hex(plt.get_cmap(color_key_cmap)(np.linspace(0, 1, num_labels)))
-            else:
-                highlights.append("other")
-                unique_labels = np.array(highlights)
-                num_labels = unique_labels.shape[0]
-                color_key = _to_hex(plt.get_cmap(color_key_cmap)(np.linspace(0, 1, num_labels)))
-                color_key[-1] = "#bdbdbd"  # lightgray hex code https://www.color-hex.com/color/d3d3d3
-
-                labels[[i not in highlights for i in labels]] = "other"
-                data["label"] = pd.Categorical(labels)
-
-                # reorder data so that highlighting points will be on top of background points
-                highlight_ids, background_ids = (
-                    data["label"] != "other",
-                    data["label"] == "other",
-                )
-                reorder_data = data.copy(deep=True)
-                (reorder_data.iloc[: sum(background_ids), :], reorder_data.iloc[sum(background_ids) :, :],) = (
-                    data.iloc[background_ids, :],
-                    data.iloc[highlight_ids, :],
-                )
-                aggregation = canvas.points(reorder_data, "x", "y", agg=ds.count_cat("label"))
-
-            legend_elements = [Patch(facecolor=color_key[i], label=k) for i, k in enumerate(unique_labels)]
-            result = tf.shade(aggregation, color_key=color_key, how="eq_hist")
-        else:
-            aggregation = canvas.points(data, "x", "y", agg=ds.count_cat("label"))
-
-            legend_elements = [Patch(facecolor=color_key[k], label=k) for k in color_key.keys()]
-            result = tf.shade(aggregation, color_key=color_key, how="eq_hist")
-
-    # Color by values
-    elif values is not None:
-        cmap_ = matplotlib.cm.get_cmap(cmap)
-        cmap_.set_bad("lightgray")
-
-        if values.shape[0] != points.shape[0]:
-            raise ValueError(
-                "Values must have a value for "
-                "each sample (size mismatch: {} {})".format(values.shape[0], points.shape[0])
-            )
-        # reorder data so that high values data will be on top of background data
-        sorted_id = np.argsort(abs(values)) if sort == "abs" else np.argsort(values)
-        values, data = values[sorted_id], data.iloc[sorted_id, :]
-
-        values[np.isnan(values)] = 0
-        _vmin = np.min(values) if vmin is None else np.percentile(values, vmin)
-        _vmax = np.min(values) if vmin is None else np.percentile(values, vmax)
-
-        values = np.clip(values, _vmin, _vmax)
-
-        unique_values = np.unique(values)
-        if unique_values.shape[0] >= 256:
-            min_val, max_val = np.min(values), np.max(values)
-            bin_size = (max_val - min_val) / 255.0
-            data["val_cat"] = pd.Categorical(np.round((values - min_val) / bin_size).astype(np.int16))
-            aggregation = canvas.points(data, "x", "y", agg=ds.count_cat("val_cat"))
-            color_key = _to_hex(plt.get_cmap(cmap)(np.linspace(0, 1, 256)))
-            result = tf.shade(aggregation, color_key=color_key, how="eq_hist")
-        else:
-            data["val_cat"] = pd.Categorical(values)
-            aggregation = canvas.points(data, "x", "y", agg=ds.count_cat("val_cat"))
-            color_key_cols = _to_hex(plt.get_cmap(cmap)(np.linspace(0, 1, unique_values.shape[0])))
-            color_key = dict(zip(unique_values, color_key_cols))
-            result = tf.shade(aggregation, color_key=color_key, how="eq_hist")
-
-    # Color by density (default datashader option)
-    else:
-        aggregation = canvas.points(data, "x", "y", agg=ds.count())
-        result = tf.shade(aggregation, cmap=plt.get_cmap(cmap))
-
-    if background is not None:
-        result = tf.set_background(result, background)
-
-    if ax is not None:
-        _embed_datashader_in_an_axis(result, ax)
-        if show_legend and legend_elements is not None:
-            if len(unique_labels) > 1 and show_legend == "on data":
-                font_color = "white" if background == "black" else "black"
-                for i in unique_labels:
-                    color_cnt = np.nanmedian(points.iloc[np.where(labels == i)[0], :2], 0)
-                    txt = plt.text(
-                        color_cnt[0],
-                        color_cnt[1],
-                        str(i),
-                        color=_select_font_color(font_color),
-                        zorder=1000,
-                        verticalalignment="center",
-                        horizontalalignment="center",
-                        weight="bold",
-                    )  #
-                    txt.set_path_effects(
-                        [
-                            PathEffects.Stroke(linewidth=1.5, foreground=font_color, alpha=0.8),
-                            PathEffects.Normal(),
-                        ]
-                    )
-            else:
-                if type(show_legend) == "str":
-                    ax.legend(
-                        handles=legend_elements,
-                        loc=show_legend,
-                        ncol=len(unique_labels) // 15 + 1,
-                    )
-                else:
-                    ax.legend(
-                        handles=legend_elements,
-                        loc="best",
-                        ncol=len(unique_labels) // 15 + 1,
-                    )
-        return ax
-    else:
-        return result
-
-
-def interactive(
-    umap_object,
-    labels=None,
-    values=None,
-    hover_data=None,
-    theme=None,
-    cmap="Blues",
-    color_key=None,
-    color_key_cmap="Spectral",
-    background="white",
-    width=7,
-    height=5,
-    point_size=None,
-):
-    """Create an interactive bokeh plot of a UMAP embedding.
-    While static plots are useful, sometimes a plot that
-    supports interactive zooming, and hover tooltips for
-    individual points is much more desireable. This function
-    provides a simple interface for creating such plots. The
-    result is a bokeh plot that will be displayed in a notebook.
-    Note that more complex tooltips etc. will require custom
-    code -- this is merely meant to provide fast and easy
-    access to interactive plotting.
-    Parameters
-    ----------
-    umap_object: trained UMAP object
-        A trained UMAP object that has a 2D embedding.
-    labels: array, shape (n_samples,) (optional, default None)
-        An array of labels (assumed integer or categorical),
-        one for each data sample.
-        This will be used for coloring the points in
-        the plot according to their label. Note that
-        this option is mutually exclusive to the ``values``
-        option.
-    values: array, shape (n_samples,) (optional, default None)
-        An array of values (assumed float or continuous),
-        one for each sample.
-        This will be used for coloring the points in
-        the plot according to a colorscale associated
-        to the total range of values. Note that this
-        option is mutually exclusive to the ``labels``
-        option.
-    hover_data: DataFrame, shape (n_samples, n_tooltip_features)
-    (optional, default None)
-        A dataframe of tooltip data. Each column of the dataframe
-        should be a Series of length ``n_samples`` providing a value
-        for each data point. Column names will be used for
-        identifying information within the tooltip.
-    theme: string (optional, default None)
-        A color theme to use for plotting. A small set of
-        predefined themes are provided which have relatively
-        good aesthetics. Available themes are:
-           * 'blue'
-           * 'red'
-           * 'green'
-           * 'inferno'
-           * 'fire'
-           * 'viridis'
-           * 'darkblue'
-           * 'darkred'
-           * 'darkgreen'
-    cmap: string (optional, default 'Blues')
-        The name of a matplotlib colormap to use for coloring
-        or shading points. If no labels or values are passed
-        this will be used for shading points according to
-        density (largely only of relevance for very large
-        datasets). If values are passed this will be used for
-        shading according the value. Note that if theme
-        is passed then this value will be overridden by the
-        corresponding option of the theme.
-    color_key: dict or array, shape (n_categories) (optional, default None)
-        A way to assign colors to categoricals. This can either be
-        an explicit dict mapping labels to colors (as strings of form
-        '#RRGGBB'), or an array like object providing one color for
-        each distinct category being provided in ``labels``. Either
-        way this mapping will be used to color points according to
-        the label. Note that if theme
-        is passed then this value will be overridden by the
-        corresponding option of the theme.
-    color_key_cmap: string (optional, default 'Spectral')
-        The name of a matplotlib colormap to use for categorical coloring.
-        If an explicit ``color_key`` is not given a color mapping for
-        categories can be generated from the label list and selecting
-        a matching list of colors from the given colormap. Note
-        that if theme
-        is passed then this value will be overridden by the
-        corresponding option of the theme.
-    background: string (optional, default 'white)
-        The color of the background. Usually this will be either
-        'white' or 'black', but any color name will work. Ideally
-        one wants to match this appropriately to the colors being
-        used for points etc. This is one of the things that themes
-        handle for you. Note that if theme
-        is passed then this value will be overridden by the
-        corresponding option of the theme.
-    width: int (optional, default 800)
-        The desired width of the plot in pixels.
-    height: int (optional, default 800)
-        The desired height of the plot in pixels
-    Returns
-    -------
-    """
-    import bokeh.plotting as bpl
-    import bokeh.transform as btr
-
-    # from bokeh.plotting import output_notebook, output_file, show
-    import datashader as ds
-    import holoviews as hv
-    import holoviews.operation.datashader as hd
-    import matplotlib.pyplot as plt
-
-    dpi = plt.rcParams["figure.dpi"]
-    width, height = width * dpi, height * dpi
-
-    if theme is not None:
-        cmap = _themes[theme]["cmap"]
-        color_key_cmap = _themes[theme]["color_key_cmap"]
-        background = _themes[theme]["background"]
-
-    if labels is not None and values is not None:
-        raise ValueError("Conflicting options; only one of labels or values should be set")
-
-    points = umap_object.embedding_
-
-    if points.shape[1] != 2:
-        raise ValueError("Plotting is currently only implemented for 2D embeddings")
-
-    if point_size is None:
-        point_size = 100.0 / np.sqrt(points.shape[0])
-
-    data = pd.DataFrame(umap_object.embedding_, columns=("x", "y"))
-
-    if labels is not None:
-        data["label"] = labels
-
-        if color_key is None:
-            unique_labels = np.unique(labels)
-            num_labels = unique_labels.shape[0]
-            color_key = _to_hex(plt.get_cmap(color_key_cmap)(np.linspace(0, 1, num_labels)))
-
-        if isinstance(color_key, dict):
-            data["color"] = pd.Series(labels).map(color_key)
-        else:
-            unique_labels = np.unique(labels)
-            if len(color_key) < unique_labels.shape[0]:
-                raise ValueError("Color key must have enough colors for the number of labels")
-
-            new_color_key = {k: color_key[i] for i, k in enumerate(unique_labels)}
-            data["color"] = pd.Series(labels).map(new_color_key)
-
-        colors = "color"
-
-    elif values is not None:
-        data["value"] = values
-        palette = _to_hex(plt.get_cmap(cmap)(np.linspace(0, 1, 256)))
-        colors = btr.linear_cmap("value", palette, low=np.min(values), high=np.max(values))
-
-    else:
-        colors = matplotlib.colors.rgb2hex(plt.get_cmap(cmap)(0.5))
-
-    if points.shape[0] <= width * height // 10:
-        if hover_data is not None:
-            tooltip_dict = {}
-            for col_name in hover_data:
-                data[col_name] = hover_data[col_name]
-                tooltip_dict[col_name] = "@" + col_name
-            tooltips = list(tooltip_dict.items())
-        else:
-            tooltips = None
-
-        # bpl.output_notebook(hide_banner=True) # this doesn't work for non-notebook use
-        data_source = bpl.ColumnDataSource(data)
-
-        plot = bpl.figure(
-            width=width,
-            height=height,
-            tooltips=tooltips,
-            background_fill_color=background,
-        )
-        plot.circle(x="x", y="y", source=data_source, color=colors, size=point_size)
-
-        plot.grid.visible = False
-        plot.axis.visible = False
-
-        # bpl.show(plot)
-    else:
-        if hover_data is not None:
-            warnings.warn(
-                "Too many points for hover data -- tooltips will not" "be displayed. Sorry; try subssampling your data."
-            )
-        hv.extension("bokeh")
-        hv.output(size=300)
-        hv.opts('RGB [bgcolor="{}", xaxis=None, yaxis=None]'.format(background))
-        if labels is not None:
-            point_plot = hv.Points(data, kdims=["x", "y"], vdims=["color"])
-            plot = hd.datashade(
-                point_plot,
-                aggregator=ds.count_cat("color"),
-                cmap=plt.get_cmap(cmap),
-                width=width,
-                height=height,
-            )
-        elif values is not None:
-            min_val = data.values.min()
-            val_range = data.values.max() - min_val
-            data["val_cat"] = pd.Categorical((data.values - min_val) // (val_range // 256))
-            point_plot = hv.Points(data, kdims=["x", "y"], vdims=["val_cat"])
-            plot = hd.datashade(
-                point_plot,
-                aggregator=ds.count_cat("val_cat"),
-                cmap=plt.get_cmap(cmap),
-                width=width,
-                height=height,
-            )
-        else:
-            point_plot = hv.Points(data, kdims=["x", "y"])
-            plot = hd.datashade(
-                point_plot,
-                aggregator=ds.count(),
-                cmap=plt.get_cmap(cmap),
-                width=width,
-                height=height,
-            )
-
-    return plot
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -1154,26 +938,26 @@ def set_spine_linewidth(ax, lw):
 # scatter plot utilities
 
 
-def scatter_with_colorbar(fig, ax, x, y, c, cmap, **scatter_kwargs):
+def scatter_with_colorbar(fig, ax, x, y, c, cmap, **kwargs):
     # https://stackoverflow.com/questions/32462881/add-colorbar-to-existing-axis
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
-    g = ax.scatter(x, y, c=c, cmap=cmap, **scatter_kwargs)
+    g = ax.scatter(x, y, c=c, cmap=cmap, **kwargs)
     fig.colorbar(g, cax=cax, orientation="vertical")
 
     return fig, ax
 
 
-def scatter_with_legend(fig, ax, df, font_color, x, y, c, cmap, legend, **scatter_kwargs):
+def scatter_with_legend(fig, ax, df, font_color, x, y, c, cmap, legend, **kwargs):
     import matplotlib.patheffects as PathEffects
     import seaborn as sns
 
     unique_labels = np.unique(c)
 
     if legend == "on data":
-        _ = sns.scatterplot(x, y, hue=c, palette=cmap, ax=ax, legend=False, **scatter_kwargs)
+        _ = sns.scatterplot(x, y, hue=c, palette=cmap, ax=ax, legend=False, **kwargs)
 
         for i in unique_labels:
             color_cnt = np.nanmedian(df.iloc[np.where(c == i)[0], :2], 0)
@@ -1194,7 +978,7 @@ def scatter_with_legend(fig, ax, df, font_color, x, y, c, cmap, legend, **scatte
                 ]  # 'w'
             )
     else:
-        _ = sns.scatterplot(x, y, hue=c, palette=cmap, ax=ax, legend="full", **scatter_kwargs)
+        _ = sns.scatterplot(x, y, hue=c, palette=cmap, ax=ax, legend="full", **kwargs)
         ax.legend(loc=legend, ncol=unique_labels // 15)
 
     return fig, ax

@@ -115,7 +115,6 @@ class Imputation_GPR:
         self,
         training_iter: int = 50,
     ):
-
         self.likelihood = GaussianLikelihood()
         if self.method == "SVGP":
             self.GPR_model = Approx_GPModel(inducing_points=self.inducing_points)

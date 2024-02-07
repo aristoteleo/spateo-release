@@ -1,5 +1,6 @@
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
+import anndata
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -7,6 +8,7 @@ from anndata import AnnData
 from pyvista import PolyData
 from scipy.sparse import csr_matrix, diags, issparse, lil_matrix, spmatrix
 from scipy.spatial import ConvexHull, Delaunay, cKDTree
+from scipy.stats import norm
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
@@ -63,6 +65,52 @@ def flatten(arr):
     return ret
 
 
+def compute_corr_ci(
+    r: float,
+    n: int,
+    confidence: float = 95,
+    decimals: int = 2,
+    alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+):
+    """Parametric confidence intervals around a correlation coefficient
+
+    Args:
+        r: Correlation coefficient
+        n: Length of x vector and y vector (the vectors used to compute the correlation)
+        confidence: Confidence level, as a percent (so 95 = 95% confidence interval). Must be between 0 and 100.
+        decimals: Number of rounded decimals
+        alternative: Defines the alternative hypothesis, or tail for the correlation coefficient. Must be one of
+            "two-sided" (default), "greater" or "less"
+
+    Returns:
+        ci: Confidence interval
+    """
+    assert alternative in [
+        "two-sided",
+        "greater",
+        "less",
+    ], "Alternative must be one of 'two-sided' (default), 'greater' or 'less'."
+
+    # r-to-z transform:
+    z = np.arctanh(r)
+    se = 1 / np.sqrt(n - 3)
+
+    if alternative == "two-sided":
+        critical_val = np.abs(norm.ppf((1 - confidence) / 2))
+        ci_z = np.array([z - critical_val * se, z + critical_val * se])
+    elif alternative == "greater":
+        critical_val = norm.ppf(confidence)
+        ci_z = np.array([z - critical_val * se, np.inf])
+    else:
+        critical_val = norm.ppf(confidence)
+        ci_z = np.array([-np.inf, z + critical_val * se])
+
+    # z-to-r transform:
+    ci = np.tanh(ci_z)
+    ci = np.round(ci, decimals)
+    return ci
+
+
 def calc_1nd_moment(X, W, normalize_W=True):
     if normalize_W:
         if type(W) == np.ndarray:
@@ -115,7 +163,7 @@ def compute_smallest_distance(
     if len(coords.shape) != 2:
         raise ValueError("Coordinates should be a NxM array.")
     if use_unique_coords:
-        # lm.main_info("using unique coordinates for computing smallest distance")
+        # main_info("using unique coordinates for computing smallest distance")
         coords = [tuple(coord) for coord in coords]
         coords = np.array(list(set(coords)))
     # use cKDTree which is implmented in C++ and is much faster than KDTree
@@ -172,32 +220,165 @@ def in_hull(p: np.ndarray, hull: Tuple[Delaunay, np.ndarray]) -> np.ndarray:
     return res
 
 
-@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE, "adata")
-@SKM.check_adata_is_type(SKM.ADATA_AGG_TYPE, "selection_adata")
-def cellbin_select(
-    adata: AnnData, selection_adata: AnnData, selection_key: str, spatial_key: str = "spatial", inplace: bool = False
-) -> Optional[AnnData]:
-    """Select cells from adata based on the cell binning of selection_adata.
+# ---------------------------------------------------------------------------------------------------
+# For filtering dataframe by written instructions
+# ---------------------------------------------------------------------------------------------------
+def parse_instruction(instruction: str, axis_map: Optional[Dict[str, str]] = None):
+    """
+    Parses a single filtering instruction and returns the equivalent pandas query string.
 
     Args:
-        adata: AnnData object whose cells of interests will be selected based on mask from selection_adata.
-        selection_adata: AnnData object whose spatial mask will be used to select cells from adata.
-        inplace: Whether to update adata or return a new AnnData object.
+        instruction: Filtering condition, in a form similar to the following: "x less than 950 and z less than or
+            equal to 350". This is equivalent to ((x < 950) & (z <= 350)). Here, x is the name of one dataframe column
+            and z is the name of another. For negation, use "not (x less than 950)".
+        axis_map: In the case that an alias can be used for the dataframe column names (e.g. "x-axis" -> "x"),
+            this dictionary maps these optional aliases to column names.
 
     Returns:
-        When inplace is set to be True, the adata object will be subset with only the selected cells, otherwise a new
-        AnnData object will be returned.
+        query: The equivalent pandas query string.
     """
-    within_inds = np.vstack(np.where(selection_adata.layers[selection_key])).T.tolist()
+    # Replace the axis names with the corresponding column names
+    for axis, col in axis_map.items():
+        instruction = instruction.replace(axis, col)
 
-    binsize = selection_adata.uns[spatial_key]["binsize"]
-    selection_area = [list((x - int(binsize)) // binsize) in within_inds for x in adata.obsm[spatial_key].astype("int")]
+    # Replace the human-readable operators with their Python equivalents
+    instruction = instruction.replace("less than or equal to", "<=")
+    instruction = instruction.replace("less than", "<")
+    instruction = instruction.replace("greater than or equal to", ">=")
+    instruction = instruction.replace("greater than", ">")
+    instruction = instruction.replace("equal to", "==")
+    instruction = instruction.replace("not (", "~(")
 
-    lm.main_info(f"Selecting {sum(selection_area)} cells from {adata.shape[0]} cells.")
+    return instruction
 
-    if inplace:
-        adata = adata[selection_area]
-        return adata
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def filter_adata_spatial(
+    adata: AnnData, coords_key: str, instructions: List[str], col_alias_map: Optional[Dict[str, str]] = None
+):
+    """Filters the AnnData object by spatial coordinates based on the provided instructions list, to be executed
+    sequentially.
+
+    Args:
+        adata: AnnData object containing spatial coordinates in .obsm
+        coords_key: Key in .obsm containing spatial coordinates
+        instructions: List of filtering instructions, in a form similar to the following: "x less than 950 and z less
+            than or equal to 350". This is equivalent to ((x < 950) & (z <= 350)). Here, x is the name of one dataframe
+            column and z is the name of another. For negation, use "not (x less than 950)".
+        col_alias_dict: In the case that an alias can be used for the dataframe column names (e.g. "x-axis" is used
+            to refer to the dataframe column "x"), this dictionary maps these optional aliases to column names.
+
+    Returns:
+        adata: Filtered AnnData object
+    """
+    logger = lm.get_main_logger()
+
+    # Default alias map will map "x" -> "points_x", "y" -> "points_y", etc.
+    if col_alias_map is None:
+        col_alias_map = {"x": "points_x", "y": "points_y", "z": "points_z"}
+
+    coordinates = adata.obsm[coords_key]
+    if coordinates.shape[1] == 2:
+        df = pd.DataFrame(coordinates, index=adata.obs_names, columns=["points_x", "points_y"])
+    elif coordinates.shape[1] == 3:
+        df = pd.DataFrame(coordinates, index=adata.obs_names, columns=["points_x", "points_y", "points_z"])
     else:
-        subset = adata[selection_area, :]
-        return subset
+        raise ValueError(f"Coordinates must be 2D or 3D. Given shape: {coordinates.shape}.")
+
+    # Process each instruction:
+    for instruction in instructions:
+        query = parse_instruction(instruction, col_alias_map)
+        df = df.query(query)
+    logger.info(f"Filtered {len(adata)} cells to {len(df)} cells.")
+
+    # Filter AnnData object:
+    adata = adata[df.index, :].copy()
+    return adata
+
+
+# ---------------------------------------------------------------------------------------------------
+# For creating arbitrary axes between two existing axes
+# ---------------------------------------------------------------------------------------------------
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE, "adata")
+def create_new_coordinate(
+    adata: anndata.AnnData, position_key: str = "spatial", plane: Literal["xy", "yz", "xz", "-xy", "-yz", "-xz"] = "xy"
+):
+    """Projects points from an AnnData object onto a specified plane and direction, calculate the distances along this
+    projection, and add the results to the AnnData object.
+
+    Args:
+        adata: AnnData object containing spatial coordinates in .obsm
+        position_key: Key in .obsm containing spatial coordinates. Defaults to "spatial".
+        plane: Plane to project points onto. Must be one of "xy", "yz", "xz", "-xy", "-yz", "-xz". The "-" prefix
+            indicates that the direction along the first axis is reversed (i.e. instead of starting from the minimum
+            value, it starts from the maximum value). Defaults to "xy".
+
+    Returns:
+        adata: AnnData object with new column added to .obs
+    """
+    if "z" in plane and adata.obsm[position_key].shape[1] < 3:
+        raise ValueError("Cannot project onto z-axis if there are only 2 spatial dimensions.")
+
+    if position_key in adata.obsm.keys():
+        if adata.obsm[position_key].shape[1] == 2:
+            pos_df = pd.DataFrame(adata.obsm[position_key], index=adata.obs_names, columns=["X", "Y"])
+        else:
+            pos_df = pd.DataFrame(adata.obsm[position_key], index=adata.obs_names, columns=["X", "Y", "Z"])
+
+        # Extracting the relevant columns based on the plane
+        if plane in ["xy", "-xy"]:
+            cols = ["X", "Y"]
+        elif plane in ["yz", "-yz"]:
+            cols = ["Y", "Z"]
+        elif plane in ["xz", "-xz"]:
+            cols = ["X", "Z"]
+        else:
+            raise ValueError("Invalid coord_column")
+
+        # Projection and calculation of distance
+        if plane in ["xy", "yz", "xz"]:  # Positive planes
+            min_point = pos_df[cols].min()
+            max_point = pos_df[cols].max()
+        else:  # Negative planes
+            min_point = pos_df[cols].copy()
+            max_point = pos_df[cols].copy()
+            min_point[cols[1]] = pos_df[cols[1]].max()
+            max_point[cols[1]] = pos_df[cols[1]].min()
+        reverse = "-" in plane
+        adata.obs[f"{plane} Coordinate"] = pos_df.apply(
+            lambda row: project_and_calculate_distance(row, cols, min_point, max_point, reverse), axis=1
+        )
+
+        return adata
+
+
+def project_and_calculate_distance(
+    row: pd.Series, cols: list, min_point: pd.Series, max_point: pd.Series, reverse: bool = False
+):
+    """Project a point onto a line with a slope of either 1 or -1, and calculate the distance along the new line for
+    the projected point to establish its coordinate.
+
+    Args:
+        row: A row from the dataframe that contains the spatial coordinates
+        cols: The list of two columns that define the plane, e.g. ["X", "Y"]
+        min_point: The minimum point that defines the "start" of the new coordinate axis
+        max_point: The maximum point that defines the "end" of the new coordinate axis
+        reverse: Flag that indicates whether the projection starts from the minimum along the x-axis or the maximum
+            along the x-axis (or y-axis or z-axis, depending on which axis is used as the reference).
+
+    Returns:
+        distance: The distance along the new coordinate axis for the projected point
+    """
+    if reverse:
+        # For -xy, -yz, -xz (slope -1)
+        x_proj = (row[cols[0]] - row[cols[1]]) / 2
+        y_proj = -x_proj
+        reference_point = max_point
+    else:
+        # For xy, yz, xz (slope 1)
+        x_proj = (row[cols[0]] + row[cols[1]]) / 2
+        y_proj = x_proj
+        reference_point = min_point
+
+    distance = np.sqrt((x_proj - reference_point[cols[0]]) ** 2 + (y_proj - reference_point[cols[1]]) ** 2)
+    return distance

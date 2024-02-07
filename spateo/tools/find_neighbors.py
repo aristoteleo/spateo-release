@@ -179,14 +179,35 @@ def compute_distances_and_connectivities(
     return distances, connectivities
 
 
-def calculate_distances_chunk(coords_chunk: np.ndarray, coords: np.ndarray) -> np.ndarray:
+def calculate_distances_chunk(
+    coords_chunk: np.ndarray,
+    chunk_start_idx: int,
+    coords: np.ndarray,
+    n_nonzeros: Optional[dict] = None,
+    metric: str = "euclidean",
+) -> np.ndarray:
     """Pairwise distance computation, coupled with :func `find_bw`.
 
     Args:
         coords_chunk: Array of shape (n_samples_chunk, n_features) containing coordinates of the chunk of interest.
+        chunk_start_idx: Index of the first sample in the chunk. Required if `n_nonzeros` is not None.
         coords: Array of shape (n_samples, n_features) containing the coordinates of all points.
+        n_nonzeros: Optional dictionary containing the number of non-zero columns for each row in the distance matrix.
+        metric: Distance metric to use for pairwise distance computation, can be any of the metrics supported by
+            :func `sklearn.metrics.pairwise_distances`.
     """
-    distances_chunk = pairwise_distances(coords_chunk, coords, metric="euclidean")
+    distances_chunk = pairwise_distances(coords_chunk, coords, metric=metric)
+
+    # If n_nonzeros is not None, find the number of columns that are nonzero across both rows:
+    if n_nonzeros is not None:
+        # Normalization factors:
+        paired_nonzeros = np.zeros_like(distances_chunk)
+        for i in range(distances_chunk.shape[0]):
+            for j in range(distances_chunk.shape[1]):
+                paired_nonzeros[i, j] = len(n_nonzeros[chunk_start_idx + i] & n_nonzeros[j])
+        normalized_chunk = distances_chunk / paired_nonzeros
+        distances_chunk = normalized_chunk
+
     return distances_chunk
 
 
@@ -194,11 +215,15 @@ def calculate_distances_chunk(coords_chunk: np.ndarray, coords: np.ndarray) -> n
 def find_bw_for_n_neighbors(
     adata: anndata.AnnData,
     coords_key: str = "spatial",
+    n_anchors: Optional[int] = None,
     target_n_neighbors: int = 6,
     initial_bw: Optional[float] = None,
     chunk_size: int = 1000,
     exclude_self: bool = False,
+    normalize_distances: bool = False,
     verbose: bool = True,
+    max_iterations: int = 100,
+    alpha: float = 0.5,
 ) -> float:
     """Finds the bandwidth such that on average, cells in the sample have n neighbors.
 
@@ -209,28 +234,66 @@ def find_bw_for_n_neighbors(
         initial_bw: Can optionally be used to set the starting distance for the bandwidth search
         chunk_size: Number of cells to compute pairwise distance for at once
         exclude_self: Whether to exclude self from the list of neighbors
+        normalize_distances: Whether to normalize the distances by the number of nonzero columns (should be used only
+            if the entry in .obs[coords_key] contains something other than x-, y-, z-coordinates).
         verbose: Whether to print the bandwidth at each iteration. If False, will only print the final bandwidth.
+        max_iterations: Will stop the process and return the bandwidth that results in the closest number of neighbors
+            to the specified target if it takes more than this number of iterations.
+        alpha: Factor used in determining the new bandwidth- ratio of found neighbors to target neighbors will be
+            raised to this power.
 
     Returns:
         bandwidth: Bandwidth in distance units
     """
     coords = adata.obsm[coords_key]
+    # Select n_anchors random indices if applicable:
+    if n_anchors is not None:
+        np.random.seed(0)  # Seed for reproducibility
+        anchor_indices = np.random.choice(coords.shape[0], size=n_anchors, replace=False)
+        anchor_coords = coords[anchor_indices]
+        chunk_size = min(chunk_size, anchor_coords.shape[0])
+    else:
+        anchor_indices = np.arange(coords.shape[0])
+        anchor_coords = coords
 
-    # Compute distances in chunks
-    chunks = [coords[i : i + chunk_size] for i in range(0, coords.shape[0], chunk_size)]
+    metric = "jaccard" if "jaccard" in coords_key else "euclidean"
+
+    # If normalize_distances is True, get the indices of nonzero columns for each row in the distance matrix- only
+    # used if metric is Euclidean distance:
+    if normalize_distances and metric == "euclidean":
+        n_nonzeros = {}
+        for i in range(coords.shape[0]):
+            n_nonzeros[i] = set(np.nonzero(coords[i, :])[0])
+    else:
+        n_nonzeros = None
+
+    # Compute distances in chunks, include start and end indices:
+    chunks_with_indices = [
+        (anchor_coords[i : i + chunk_size], anchor_indices[i]) for i in range(0, anchor_coords.shape[0], chunk_size)
+    ]
     # Calculate pairwise distances for each chunk in parallel
-    partial_func = partial(calculate_distances_chunk, coords=coords)
-    distances = Parallel(n_jobs=-1)(delayed(partial_func)(chunk) for chunk in chunks)
+    if metric == "jaccard":
+        partial_func = partial(calculate_distances_chunk, coords=coords, metric=metric)
+    else:
+        partial_func = partial(calculate_distances_chunk, coords=coords, n_nonzeros=n_nonzeros, metric=metric)
+    distances = Parallel(n_jobs=-1)(delayed(partial_func)(chunk, start_idx) for chunk, start_idx in chunks_with_indices)
     # Concatenate the results to get the full pairwise distance matrix
     distances = np.concatenate(distances, axis=0)
 
-    # Initialize bandwidth:
+    # Initialize bandwidth and iteration counter:
     bandwidth = 88 if initial_bw is None else initial_bw
+    iteration = 0
     if verbose:
         print(f"Initial bandwidth: {bandwidth}")
 
-    # Iteratively adjust bandwidth:
-    while True:
+    closest_bw = bandwidth
+    lower_bound = 0.9 * target_n_neighbors
+    upper_bound = 1.1 * target_n_neighbors
+
+    closest_avg_neighbors = float("inf")
+
+    while iteration < max_iterations:
+        iteration += 1
         bw_dist = distances / bandwidth
         if exclude_self:
             neighbor_counts = np.sum(bw_dist <= 1, axis=1) - 1
@@ -241,24 +304,41 @@ def find_bw_for_n_neighbors(
         avg_neighbors = np.mean(neighbor_counts)
         if verbose:
             print(f"For bandwidth {bandwidth}, found {avg_neighbors} neighbors on average.")
-        if np.round(avg_neighbors) == target_n_neighbors:
-            print(f"Final bandwidth: {bandwidth}")
-            break
 
-        # Adjust bandwidth if needed
-        if avg_neighbors > target_n_neighbors:
-            bandwidth *= 0.8  # decrease bandwidth
-        else:
-            bandwidth *= 1.2  # increase bandwidth
+        # Store the closest bandwidth and closest average neighbors:
+        if abs(target_n_neighbors - closest_avg_neighbors) > abs(target_n_neighbors - avg_neighbors):
+            closest_bw = bandwidth
+            closest_avg_neighbors = avg_neighbors
+
+        # Check for exit condition
+        if lower_bound <= avg_neighbors <= upper_bound:
+            if verbose:
+                print(f"Final bandwidth: {bandwidth}")
+            return bandwidth
+
+        # Dynamic adjustment of bandwidth
+        adjustment_factor = target_n_neighbors / avg_neighbors
+        bandwidth *= adjustment_factor**alpha
+
         if verbose:
-            print(f"New bandwidth: {bandwidth}")
+            print(f"Iteration {iteration}, new bandwidth: {bandwidth}")
 
-    return bandwidth
+    if verbose:
+        print(
+            f"Max iterations reached. Returning closest bandwidth: {closest_bw}, with average neighbors: "
+            f"{closest_avg_neighbors}"
+        )
+
+    return closest_bw
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
 def find_threshold_distance(
-    adata: anndata.AnnData, coords_key: str = "X_umap", n_neighbors: int = 10, chunk_size: int = 1000
+    adata: anndata.AnnData,
+    coords_key: str = "X_pca",
+    n_neighbors: int = 10,
+    chunk_size: int = 1000,
+    normalize_distances: bool = False,
 ) -> float:
     """Finds threshold distance beyond which there is a dramatic increase in the average distance to remaining
     nearest neighbors.
@@ -269,17 +349,27 @@ def find_threshold_distance(
         n_neighbors: Will first compute the number of nearest neighbors as a comparison for querying additional
             distance values.
         chunk_size: Number of cells to compute pairwise distance for at once
+        normalize_distances: Whether to normalize the distances by the number of nonzero columns (should be used only
+            if the entry in .obs[coords_key] contains something other than x-, y-, z-coordinates).
 
     Returns:
         bandwidth: Bandwidth in distance units
     """
     coords = adata.obsm[coords_key]
 
-    # Compute distances in chunks
-    chunks = [coords[i : i + chunk_size] for i in range(0, coords.shape[0], chunk_size)]
+    # If normalize_distances is True, get the indices of nonzero columns for each row in the distance matrix:
+    if normalize_distances:
+        n_nonzeros = {}
+        for i in range(coords.shape[0]):
+            n_nonzeros[i] = set(np.nonzero(coords[i, :])[0])
+    else:
+        n_nonzeros = None
+
+    # Compute distances in chunks, include start and end indices:
+    chunks_with_indices = [(coords[i : i + chunk_size], i) for i in range(0, coords.shape[0], chunk_size)]
     # Calculate pairwise distances for each chunk in parallel
-    partial_func = partial(calculate_distances_chunk, coords=coords)
-    distances = Parallel(n_jobs=-1)(delayed(partial_func)(chunk) for chunk in chunks)
+    partial_func = partial(calculate_distances_chunk, coords=coords, n_nonzeros=n_nonzeros)
+    distances = Parallel(n_jobs=-1)(delayed(partial_func)(chunk, start_idx) for chunk, start_idx in chunks_with_indices)
     # Concatenate the results to get the full pairwise distance matrix
     distances = np.concatenate(distances, axis=0)
 
@@ -372,7 +462,6 @@ class Kernel(object):
         normalize_weights: bool = False,
         use_expression_neighbors: bool = False,
     ):
-
         if use_expression_neighbors:
             self.dist_vector = local_dist(expr_mat[i], expr_mat).reshape(-1)
             self.function = "uniform"
@@ -393,7 +482,7 @@ class Kernel(object):
             # If condition is met, compare to samples of the same cell type:
             if cov[i] == 1:
                 self.dist_vector[ct != ct[i]] = max_dist
-        elif cov is not None and ct is not None:
+        elif cov is not None and ct is None:
             # Ignore samples that do not meet the condition:
             self.dist_vector[cov == 0] = max_dist
         elif ct is not None:
@@ -407,20 +496,10 @@ class Kernel(object):
         self.kernel = self._kernel_functions(bw_dist)
 
         # Bisquare and uniform need to be truncated if the sample is outside of the provided bandwidth:
-        if self.function in ["bisquare", "uniform"]:
-            self.kernel[bw_dist > 1] = 0
+        self.kernel[bw_dist > 1] = 0
 
         # Set density to zero if below threshold:
         self.kernel[self.kernel < threshold] = 0
-        n_neighbors = np.count_nonzero(self.kernel)
-
-        if cov is not None:
-            # If there are outlier samples that do not match condition of this sample within the neighborhood,
-            # set their weights to zero- set this threshold number to 1/10 of the number of neighbors:
-            thresh = int(0.1 * n_neighbors) if exclude_self else int(0.1 * n_neighbors + 1)
-            if np.sum(cov[self.kernel > 0] == 0) < thresh:
-                self.kernel[(cov == 0) & (self.kernel > 0)] = 0
-
         n_neighbors = np.count_nonzero(self.kernel)
 
         # Normalize the kernel by the number of non-zero neighbors, if applicable:

@@ -5,8 +5,7 @@ from .architype import (
     find_spatially_related_genes,
     get_genes_from_spatial_archetype,
 )
-
-# from .CCI_effects_modeling import *
+from .CCI_effects_modeling import *
 from .cci_two_cluster import (
     find_cci_two_group,
     prepare_cci_cellpair_adata,
@@ -29,4 +28,3 @@ from .labels import Label, create_label_class
 from .lisa import GM_lag_model, lisa_geo_df, local_moran_i
 from .live_wire import LiveWireSegmentation, compute_shortest_path, live_wire
 from .spatial_degs import cellbin_morani, moran_i
-from .spatially_variable_gene_ot import cal_wass_dis_bs

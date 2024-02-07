@@ -208,8 +208,8 @@ def find_cluster_degs(
 
     de = []
     for i_gene, gene in tqdm(enumerate(genes), desc="identifying top markers for each group"):
-        # distance.correlation requires 1d arrays as input
-        all_vals = X_data[:, i_gene].A.flatten() if sparse else X_data[:, i_gene].flatten()
+        all_vals = X_data[:, i_gene].A if sparse else X_data[:, i_gene]
+        all_vals = all_vals.reshape(-1)
         test_vals = all_vals[test_cells]
         control_vals = all_vals[control_cells]
         test_mean = test_vals.mean() + 1e-9
@@ -545,7 +545,6 @@ def top_n_degs(
         )
 
     for i in range(len(adata.obs[group].unique())):
-        # cur_table = adata.uns["cluster_markers"]["deg_tables"][i][i]
         cur_table = adata.uns["cluster_markers"]["deg_tables"][i]
 
         if custom_score_func is not None:

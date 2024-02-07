@@ -62,7 +62,7 @@ class AlignmentRefiner(nn.Module):
 
     @staticmethod
     def transform(x, params, train=False):
-        raise NotImplementederror()
+        raise NotImplementedError()
 
 
 class NonRigidAlignmentRefiner(AlignmentRefiner):

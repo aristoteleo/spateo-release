@@ -280,3 +280,46 @@ godsnot_102 = [
     "#A4E804",
     "#324E72",
 ]
+
+# D. Zhu's color scheme for categorical data- used in plotting interaction-related things:
+interaction_colors = [
+    "#FF0000",  # Red
+    "#FF69B4",  # Hot Pink
+    "#FFF68F",  # Khaki
+    "#FF8C00",  # Dark Orange
+    "#C71585",  # Medium Violet Red
+    "#00CED1",  # Dark Turquoise
+    "#1874CD",  # Dodger Blue
+    "#8B4726",  # Saddle Brown
+    "#9400D3",  # Dark Violet
+    "#00C957",  # Medium Spring Green
+    "#8EE5EE",  # Sky Blue
+    "#CDC673",  # Dark Khaki
+    "#7CFC00",  # Lawn Green
+    "#8A2BE2",  # Blue Violet
+    "#FFD700",  # Gold
+    "#FF1493",  # Deep Pink
+    "#008000",  # Green
+    "#4682B4",  # Steel Blue
+    "#B22222",  # Fire Brick
+    "#FF00FF",  # Magenta
+    "#32CD32",  # Lime Green
+    "#1E90FF",  # Dodger Blue
+    "#FFD700",  # Gold
+    "#9AFF9A",  # Pale Green
+    "#EE0000",  # Crimson
+    "#808080",  # Gray
+    "#C1FFC1",  # Light Green
+    "#B22222",  # Fire Brick
+    "#FFFF00",  # Yellow
+    "#FFFFFF",  # White
+    "#FA8072",  # Salmon
+    "#FFC1C1",  # Light Pink
+    "#836FFF",  # Medium Slate Blue
+    "#FF4500",  # Orange Red
+    "#698B22",  # Olive Drab
+    "#7CCD7C",  # Pale Green
+    "#C6E2FF",  # Powder Blue
+    "#FFA500",  # Orange
+    "#00FFFF",  # Cyan
+]

@@ -16,7 +16,6 @@ from spateo.tdr.interpolations import get_X_Y_grid
 def _con_K(
     x: np.ndarray, y: np.ndarray, beta: float = 0.1, method: str = "cdist", return_d: bool = False
 ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
-
     if len(x.shape) == 1:
         x = x[None, :]
     if method == "cdist" and not return_d:
@@ -43,7 +42,6 @@ def _con_K_geodist(
     beta: float = 0.1,
     return_d: bool = False,
 ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
-
     # find the nearest neighbor
     if len(x.shape) == 1:
         x = x[None, :]

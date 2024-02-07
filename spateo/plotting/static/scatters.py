@@ -1,6 +1,6 @@
 # code adapted from https://github.com/aristoteleo/dynamo-release/blob/master/dynamo/plot/scatters.py
 # and https://github.com/lmcinnes/umap/blob/7e051d8f3c4adca90ca81eb45f6a9d1372c076cf/umap/plot.py
-
+import re
 import warnings
 from numbers import Number
 from typing import Dict, List, Optional, Union
@@ -26,7 +26,6 @@ from ...tools.utils import (
     update_dict,
 )
 from .utils import (
-    _datashade_points,
     _get_adata_color_vec,
     _matplotlib_points,
     _select_font_color,
@@ -52,6 +51,9 @@ from .utils import (
 def scatters(
     adata: AnnData,
     basis: Union[str, list] = "umap",
+    vf_key: Optional[str] = None,
+    X_grid: Optional[np.ndarray] = None,
+    V: Optional[np.ndarray] = None,
     x: int = 0,
     y: int = 1,
     z: int = 2,
@@ -108,6 +110,8 @@ def scatters(
     aspect: str = "auto",
     slices: Optional[int] = None,
     img_layers: Optional[int] = None,
+    vf_plot_method: Literal["cell", "grid", "stream"] = "cell",
+    vf_kwargs: Optional[Dict[str, Union[str, int, float]]] = None,
     **kwargs,
 ) -> Union[None, Axes]:
     """Plot an embedding as points. Currently, this only works
@@ -125,6 +129,9 @@ def scatters(
             an Anndata object
         basis: `str`
             The reduced dimension.
+        vf_key: Optional, key in .obsm containing vector field information
+        X_grid: Optional, array containing grid points for vector field plots
+        V: Optional, array containing vector fields
         x: `int` (default: `0`)
             The column index of the low dimensional embedding for the x-axis.
         y: `int` (default: `1`)
@@ -324,8 +331,13 @@ def scatters(
         slices: The index to the tissue slice, will used in adata.uns["spatial"][slices].
         img_layers: The index to the (staining) image of a tissue slice, will be used in
             adata.uns["spatial"][slices]["images"].
+        vf_plot_method: The method used to plot the vector field. Can be one of the following:
+            'cell': Plot the vector field at the center of each cell.
+            'grid': Plot the vector field on a grid.
+            'stream': Plot the vector field as stream lines.
+        vf_kwargs: Optional dictionary containing parameters for vector field plotting
         kwargs:
-            Additional arguments passed to plt.scatters.
+            Additional arguments passed to plt functions (plt.scatters, plt.quiver, plt.streamplot).
 
     Returns:
         result:
@@ -544,27 +556,24 @@ def scatters(
                 if cur_l.startswith("velocity"):
                     cmap, sym_c = "bwr", True
 
-        if cur_b == "spatial":  # space plot don't need "X_spatial"
+        if cur_b == "spatial":
             prefix = ""
         elif any([key == cur_l + "_" + cur_b for key in adata.obsm.keys()]):
             prefix = cur_l + "_"
         else:
             prefix = "X_"
 
-        # if prefix + cur_b in adata.obsm.keys():
-        #     if type(x) != str and type(y) != str:
-        #         x_, y_ = (
-        #             adata.obsm[prefix + cur_b][:, int(x)],
-        #             adata.obsm[prefix + cur_b][:, int(y)],
-        #         )
-        # else:
-        #     continue
         if stack_colors:
             _stack_background_adata_indices = np.ones(len(adata), dtype=bool)
 
         for cur_c in color:
             # main_debug("coloring scatter of cur_c: %s" % str(cur_c))
-            if not stack_colors:
+            if vf_key is not None:
+                # Look after the 4th underscore (spatial_effect_sender/receiver_vf_ ...)
+                effector = re.search(r"(?:[^_]*_){4}([A-Za-z0-9/]+)_", vf_key).group(1)
+                target = re.search(r"_([A-Z0-9]+)$", vf_key).group(1)
+                cur_title = f"Effect {effector}-{target}, overlaid on {cur_c}"
+            elif not stack_colors:
                 cur_title = cur_c
             else:
                 cur_title = stack_colors_title
@@ -835,6 +844,10 @@ def scatters(
                         sym_c=sym_c,
                         inset_dict=inset_dict,
                         geo=True,
+                        X_grid=X_grid,
+                        V=V,
+                        vf_plot_method=vf_plot_method,
+                        vf_kwargs=vf_kwargs,
                         **geo_kwargs,
                     )
                     if labels is not None:
@@ -844,7 +857,7 @@ def scatters(
                             color_dict[i] = j
 
                         adata.uns[cur_title + "_colors"] = color_dict
-                elif points.shape[0] <= figsize[0] * figsize[1] * 100000:
+                else:
                     # scatter plot using matplotlib
                     # main_debug("drawing with _matplotlib_points function")
                     ax, color_out = _matplotlib_points(
@@ -869,6 +882,10 @@ def scatters(
                         sym_c=sym_c,
                         inset_dict=inset_dict,
                         projection=projection,
+                        X_grid=X_grid,
+                        V=V,
+                        vf_plot_method=vf_plot_method,
+                        vf_kwargs=vf_kwargs,
                         **scatter_kwargs,
                     )
                     if labels is not None:
@@ -878,31 +895,6 @@ def scatters(
                             color_dict[i] = j
 
                         adata.uns[cur_title + "_colors"] = color_dict
-                else:
-                    # scatter plot using datashader
-                    # main_debug("drawing with _datashade_points function")
-                    ax = _datashade_points(
-                        # points.values,
-                        point_coords,
-                        ax,
-                        labels,
-                        values,
-                        highlights,
-                        _cmap,
-                        color_key,
-                        _color_key_cmap,
-                        _background,
-                        figsize[0],
-                        figsize[1],
-                        show_legend,
-                        sort=sort,
-                        frontier=frontier,
-                        contour=contour,
-                        ccmap=ccmap,
-                        calpha=calpha,
-                        sym_c=sym_c,
-                        **scatter_kwargs,
-                    )
 
                 if ax_index == 1 and show_arrowed_spines:
                     arrowed_spines(ax, points.columns[:2], _background)
@@ -912,7 +904,10 @@ def scatters(
                     if deaxis:
                         deaxis_all(ax)
 
-                ax.set_title(cur_title)
+                if vf_key is not None:
+                    ax.set_title(cur_title, fontsize=8)
+                else:
+                    ax.set_title(cur_title)
                 ax.set_aspect(aspect)
 
                 axes_list.append(ax)
