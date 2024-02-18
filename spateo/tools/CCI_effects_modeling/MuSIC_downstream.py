@@ -95,7 +95,7 @@ class MuSIC_Interpreter(MuSIC):
                 "Running :func `SWR._set_up_model()` to organize predictors and targets for downstream "
                 "analysis now..."
             )
-            self._set_up_model()
+            self._set_up_model(verbose=False)
             # self.logger.info("Finished preprocessing, getting fitted coefficients and standard errors.")
 
         # Dictionary containing coefficients:
@@ -764,7 +764,12 @@ class MuSIC_Interpreter(MuSIC):
             plt.show()
 
     def plot_interaction_effect_3D(
-        self, target: str, interaction: str, save_path: str, pcutoff: Optional[float] = 99.7
+        self,
+        target: str,
+        interaction: str,
+        save_path: str,
+        pcutoff: Optional[float] = 99.7,
+        min_value: Optional[float] = 0,
     ):
         """Quick-visualize the magnitude of the predicted effect on target for a given interaction.
 
@@ -773,6 +778,8 @@ class MuSIC_Interpreter(MuSIC):
             interaction: Interaction to visualize (e.g. "Igf1:Igf1r" for L:R model, "Igf1" for ligand model)
             save_path: Path to save the figure to (will save as HTML file)
             pcutoff: Percentile cutoff for the colorbar. Will set all values above this percentile to this value.
+            min_value: Minimum value to set the colorbar to. Will set all values below this value to this value.
+                Defaults to 0.
         """
         targets = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
@@ -797,6 +804,7 @@ class MuSIC_Interpreter(MuSIC):
         if pcutoff == 0:
             cutoff = np.percentile(target_interaction_coef.values, 99.9)
         target_interaction_coef[target_interaction_coef > cutoff] = cutoff
+        target_interaction_coef[target_interaction_coef < min_value] = min_value
         plot_vals = target_interaction_coef.values
         scatter_effect = go.Scatter3d(
             x=x,
@@ -6787,7 +6795,7 @@ class MuSIC_Interpreter(MuSIC):
     def deg_effect_barplot(
         self,
         target: str,
-        interaction_subset: Optional[str] = None,
+        interaction_subset: Optional[List[str]] = None,
         top_n_interactions: Optional[int] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
@@ -6858,6 +6866,11 @@ class MuSIC_Interpreter(MuSIC):
             "afmhot",
             "gist_heat",
             "copper",
+            "viridis",
+            "plasma",
+            "inferno",
+            "magma",
+            "cividis",
         ]
         sequential_cmaps_r = [f"{c}_r" for c in sequential_cmaps]
         if cmap not in sequential_cmaps and cmap not in sequential_cmaps_r:
@@ -6941,6 +6954,238 @@ class MuSIC_Interpreter(MuSIC):
             return_all_list=None,
         )
 
+    def deg_effect_heatmap(
+        self,
+        target_subset: Optional[List[str]] = None,
+        target_type: Literal["ligand", "receptor", "target_gene", "tf_target"] = "target_gene",
+        interaction_subset: Optional[List[str]] = None,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = "magma",
+        lower_proportion_threshold: float = 0.1,
+        order_interactions: bool = False,
+        order_targets: bool = False,
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+        save_df: bool = False,
+    ):
+        """
+        Visualize the proportion of cells expressing any target (ligand, receptor, or target gene
+        involved in an upstream CCI model) that are predicted to be affected by each transcription factor,
+        or that are predicted to be affected by each L:R pair/ligand, using a heatmap for visualization.
+
+        Args:
+            target_subset: Optional, can be used to specify subset of targets (ligands, receptors, target genes,
+                or "TF_target" for target genes where the interaction to plot is TF effect) to
+                visualize, e.g. ["Tubb1a", "Tubb1b"]. If not given, will default to all targets.
+            target_type: Type of target gene to visualize. Must be one of "ligand", "receptor", or "target_gene".
+                Defaults to "target_gene". Used to specify where to search for the target genes to process.
+            interaction_subset: Optional, can be used to specify subset of interactions (transcription factors,
+                L:R pairs, etc.) to visualize, e.g. ["Sox2", "Irx3"]. If not given, will default to all TFs,
+                L:R pairs, etc.
+            fontsize: Font size to determine size of the axis labels, ticks, title, etc.
+            figsize: Width and height of plotting window
+            cmap: Name of matplotlib colormap specifying colormap to use. Must be a sequential colormap.
+            lower_proportion_threshold: Proportion threshold below which to set the proportion to 0 in the display.
+                Defaults to 0.1.
+            order_interactions: Whether to hierarchically sort the y-axis/interactions (transcription factors,
+                L:R pairs, etc.).
+            order_targets: Whether to hierarchically sort the x-axis/targets (ligands, receptors, target genes)
+            save_show_or_return: Whether to save, show or return the figure.
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function.
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+            save_df: Set True to save the metric dataframe in the end
+        """
+        if order_interactions or order_targets:
+            from scipy.cluster.hierarchy import dendrogram, leaves_list, linkage
+            from scipy.spatial.distance import pdist, squareform
+
+        if fontsize is None:
+            fontsize = rcParams.get("font.size")
+        if figsize is None:
+            figsize = rcParams.get("figure.figsize")
+
+        sequential_cmaps = [
+            "Greys",
+            "Purples",
+            "Blues",
+            "Greens",
+            "Oranges",
+            "Reds",
+            "YlOrBr",
+            "YlOrRd",
+            "OrRd",
+            "PuRd",
+            "RdPu",
+            "BuPu",
+            "GnBu",
+            "PuBu",
+            "YlGnBu",
+            "PuBuGn",
+            "BuGn",
+            "YlGn",
+            "binary",
+            "gist_yarg",
+            "gist_gray",
+            "gray",
+            "bone",
+            "pink",
+            "spring",
+            "summer",
+            "autumn",
+            "winter",
+            "cool",
+            "Wistia",
+            "hot",
+            "afmhot",
+            "gist_heat",
+            "copper",
+            "viridis",
+            "plasma",
+            "inferno",
+            "magma",
+            "cividis",
+        ]
+        sequential_cmaps_r = [f"{c}_r" for c in sequential_cmaps]
+        if cmap not in sequential_cmaps and cmap not in sequential_cmaps_r:
+            raise ValueError(f"Colormap {cmap} is not a sequential colormap.")
+
+        # Check whether targets are specified to be ligands, receptors, or target genes:
+        if target_type == "ligand":
+            all_coeffs = self.downstream_model_ligand_coeffs
+            all_feature_names = [
+                f.replace("regulator_", "") for f in self.downstream_model_ligand_design_matrix.columns
+            ]
+        elif target_type == "receptor":
+            all_coeffs = self.downstream_model_receptor_coeffs
+            all_feature_names = [
+                f.replace("regulator_", "") for f in self.downstream_model_receptor_design_matrix.columns
+            ]
+        elif target_type == "tf_target":
+            all_coeffs = self.downstream_model_target_coeffs
+            all_feature_names = [f for f in self.downstream_model_target_design_matrix.columns]
+        elif target_type == "target_gene":
+            all_coeffs = self.coeffs
+            all_feature_names = [f for f in self.design_matrix.columns]
+        else:
+            raise ValueError(
+                f"Target type {target_type} not recognized. Must be one of 'ligand', 'receptor', or 'target'."
+            )
+
+        output_dir = os.path.dirname(self.output_path)
+        file_name = os.path.basename(self.adata_path).split(".")[0]
+        if save_show_or_return in ["save", "both", "all"]:
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
+
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+        all_proportions = pd.DataFrame()
+
+        for target in all_coeffs.keys():
+            all_coeffs_target = all_coeffs[target]
+            all_coeffs_target.columns = [f.replace("b_", "") for f in all_coeffs_target.columns]
+            # Fill in missing columns with 0s:
+            all_coeffs_target = all_coeffs_target.reindex(all_feature_names, axis=1).fillna(0)
+
+            if interaction_subset is not None:
+                all_feature_names = [f for f in all_feature_names if f in interaction_subset]
+            all_feature_names = [f for f in all_feature_names if f in all_coeffs_target.columns]
+            all_coeffs_target = all_coeffs_target[all_feature_names]
+
+            nz_cells = np.where(self.adata[:, target].X.toarray() > 0)[0]
+            if len(nz_cells) > 0:
+                proportions = (all_coeffs_target.iloc[nz_cells] != 0).mean()
+                all_proportions[target] = proportions
+
+        if order_interactions:
+            interaction_dist_mat = pdist(all_proportions.values, metric="euclidean")
+            interaction_linkage = linkage(interaction_dist_mat, method="ward")
+            interaction_order = leaves_list(interaction_linkage)
+            all_proportions = all_proportions.iloc[interaction_order]
+
+        if order_targets:
+            target_dist_mat = pdist(all_proportions.T.values, metric="euclidean")
+            target_linkage = linkage(target_dist_mat, method="ward")
+            target_order = leaves_list(target_linkage)
+            all_proportions = all_proportions.T.iloc[target_order].T
+
+        thickness = 0.3 * figsize[0] / 10
+        mask = np.abs(all_proportions) < lower_proportion_threshold
+        m = sns.heatmap(
+            all_proportions,
+            square=True,
+            linecolor="grey",
+            linewidths=thickness,
+            cbar_kws={"label": "Proportion", "location": "top", "pad": 0.05},
+            cmap=cmap,
+            vmin=0,
+            vmax=all_proportions.max().max(),
+            mask=mask,
+            ax=ax,
+        )
+
+        # Outer frame:
+        for _, spine in m.spines.items():
+            spine.set_visible(True)
+            spine.set_linewidth(thickness * 2.5)
+
+        # Adjust colorbar label font size
+        cbar = m.collections[0].colorbar
+        cbar.set_label("Proportion", fontsize=fontsize * 2, labelpad=10)
+        # Adjust colorbar tick font size
+        cbar.ax.tick_params(labelsize=fontsize * 2.0)
+        cbar.ax.set_aspect(0.02)
+
+        if target_type == "ligand":
+            x_label = "Ligand"
+        elif target_type == "receptor":
+            x_label = "Receptor"
+        elif target_type == "target_gene" or target_type == "tf_target":
+            x_label = "Target Gene"
+        y_label = "L:R interaction" if target_type == "target_gene" else "Transcription factor"
+        id = "L:R interaction" if target_type == "target_gene" else "TF"
+        ax.set_xlabel(x_label, fontsize=fontsize * 2)
+        ax.set_ylabel(y_label, fontsize=fontsize * 2)
+        ax.tick_params(axis="x", labelsize=fontsize, rotation=90)
+        ax.tick_params(axis="y", labelsize=fontsize)
+        ax.set_title(f"Proportion of target-expressing cells affected by each {id}", fontsize=fontsize * 2.25, pad=20)
+        prefix = "heatmap"
+
+        if save_df:
+            all_proportions.to_csv(
+                os.path.join(
+                    output_folder,
+                    f"{prefix}_{adata_id}_proportion_affected_by_interaction.csv",
+                )
+            )
+
+        if save_show_or_return in ["save", "both", "all"]:
+            save_kwargs["ext"] = "png"
+            save_kwargs["dpi"] = 300
+            if "figure_folder" in locals():
+                save_kwargs["path"] = figure_folder
+            # Save figure:
+            save_return_show_fig_utils(
+                save_show_or_return=save_show_or_return,
+                show_legend=False,
+                background="white",
+                prefix=prefix,
+                save_kwargs=save_kwargs,
+                total_panels=1,
+                fig=fig,
+                axes=ax,
+                return_all=False,
+                return_all_list=None,
+            )
+
     def top_target_barplot(
         self,
         interaction: str,
@@ -7023,6 +7268,11 @@ class MuSIC_Interpreter(MuSIC):
             "afmhot",
             "gist_heat",
             "copper",
+            "viridis",
+            "plasma",
+            "inferno",
+            "magma",
+            "cividis",
         ]
         sequential_cmaps_r = [f"{c}_r" for c in sequential_cmaps]
         if cmap not in sequential_cmaps and cmap not in sequential_cmaps_r:

@@ -222,7 +222,7 @@ class MuSIC:
         self.tf_tf_db = None
         self.x_chunk = None
 
-    def _set_up_model(self, downstream: bool = False):
+    def _set_up_model(self, verbose: bool = True, downstream: bool = False):
         if self.mod_type is None and self.adata_path is not None:
             raise ValueError(
                 "No model type provided; need to provide a model type to fit. Options: 'niche', 'lr', "
@@ -308,7 +308,7 @@ class MuSIC:
             self.subset = False
 
         if self.spatial_subsample or self.total_counts_threshold != 0.0 or self.group_subset is not None:
-            self.run_subsample()
+            self.run_subsample(verbose=verbose)
             # Indicate model has been subsampled:
             self.subsampled = True
         elif self.group_subset:
@@ -929,6 +929,8 @@ class MuSIC:
                     targets = self.custom_targets
                 targets = [t for t in targets if t in adata.var_names]
             all_targets = list(set(self.targets_expr.columns.tolist() + targets))
+            set_difference = set(all_targets) - set(self.targets_expr.columns.tolist())
+            print(set_difference)
 
             if len(all_targets) > len(self.targets_expr.columns.tolist()):
                 # Filter targets to those that can be found in our prior GRN:
@@ -938,7 +940,7 @@ class MuSIC:
                 self.targets_expr = pd.DataFrame(
                     adata[:, all_targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, all_targets].X,
                     index=adata.obs_names,
-                    columns=targets,
+                    columns=all_targets,
                 )
 
                 # Cap extreme numerical outliers:
@@ -2034,7 +2036,7 @@ class MuSIC:
         else:
             self.feature_distance = None
 
-    def run_subsample(self, y: Optional[pd.DataFrame] = None):
+    def run_subsample(self, verbose: bool = True, y: Optional[pd.DataFrame] = None):
         """To combat computational intensiveness of this regressive protocol, subsampling will be performed in cases
         where there are >= 5000 cells or in cases where specific cell types are manually selected for fitting- local
         fit will be performed only on this subset under the assumption that discovered signals will not be
@@ -2074,7 +2076,8 @@ class MuSIC:
         if os.path.exists(neighboring_unsampled_path) and os.path.exists(subsampled_sample_names_path):
             self.subsampled_indices = {}
             self.n_samples_subsampled = {}
-            self.logger.info("Loading existing subsampling results from previous run and resuming...")
+            if verbose:
+                self.logger.info("Loading existing subsampling results from previous run and resuming...")
             with open(neighboring_unsampled_path, "r") as f:
                 self.neighboring_unsampled = json.load(f)
             with open(subsampled_sample_names_path, "r") as f:
@@ -2089,8 +2092,9 @@ class MuSIC:
 
             # New targets to process
             new_targets = set(y_arr.columns) - existing_targets
-            self.logger.info(f"Already processed targets: {', '.join(existing_targets)}")
-            self.logger.info(f"New targets that need to be processed: {', '.join(new_targets)}")
+            if verbose:
+                self.logger.info(f"Already processed targets: {', '.join(existing_targets)}")
+                self.logger.info(f"New targets that need to be processed: {', '.join(new_targets)}")
         else:
             self.neighboring_unsampled = {}
             self.subsampled_sample_names = {}
@@ -2120,7 +2124,8 @@ class MuSIC:
             coords = self.coords
 
         if self.total_counts_threshold != 0.0:
-            self.logger.info(f"Subsetting to cells with greater than {self.total_counts_threshold} total counts...")
+            if verbose:
+                self.logger.info(f"Subsetting to cells with greater than {self.total_counts_threshold} total counts...")
             if self.total_counts_key not in self.adata.obs_keys():
                 raise KeyError(f"{self.total_counts_key} not found in .obs of AnnData.")
             adata_high_qual = adata[adata.obs[self.total_counts_key] >= self.total_counts_threshold]
@@ -2129,7 +2134,8 @@ class MuSIC:
             y_arr_high_qual = y_arr.loc[sample_names]
             threshold_sampled_names = sample_names.intersection(sample_names_high_qual)
             if self.spatial_subsample is False:
-                self.logger.info(f"For all targets subsampled from {n_samples} to {adata_high_qual.n_obs} cells.")
+                if verbose:
+                    self.logger.info(f"For all targets subsampled from {n_samples} to {adata_high_qual.n_obs} cells.")
 
             for target in y_arr_high_qual.columns:
                 # Skip targets that have already been processed:
@@ -2174,7 +2180,8 @@ class MuSIC:
                                 closest_dict[key] = []
                             if sample_names[i] not in sampled_df.index:
                                 closest_dict[key].append(sample_names[i])
-                        self.logger.info("Finished compiling mapping from unsampled to sampled points...")
+                        if verbose:
+                            self.logger.info("Finished compiling mapping from unsampled to sampled points...")
 
                     # If subsampling by total counts, the arrays of subsampled indices, number subsampled and
                     # subsampled sample names (but notably not the unsampled-to-sampled mapping) are the same,
@@ -2189,11 +2196,13 @@ class MuSIC:
 
         # Subsampling by region:
         if self.spatial_subsample:
-            self.logger.info("Performing stratified subsampling from different regions of the data...")
+            if verbose:
+                self.logger.info("Performing stratified subsampling from different regions of the data...")
             for target in y_arr.columns:
                 # Skip targets that have already been processed:
                 if target in existing_targets:
-                    self.logger.info(f"Skipping already processed target: {target}")
+                    if verbose:
+                        self.logger.info(f"Skipping already processed target: {target}")
                     continue
 
                 # Check if target-specific files exist:
@@ -2211,7 +2220,8 @@ class MuSIC:
                             self.sample_names.get_loc(name) for name in self.subsampled_sample_names[target]
                         ]
                         self.n_samples_subsampled[target] = len(self.subsampled_indices[target])
-                    self.logger.info(f"Loaded existing subsampling results for target {target}...")
+                    if verbose:
+                        self.logger.info(f"Loaded existing subsampling results for target {target}...")
 
                 else:
                     if self.group_subset is None:
@@ -2304,7 +2314,8 @@ class MuSIC:
                         updated_sampled_names = set(threshold_sampled_names).intersection(sampled_df.index)
                         sampled_df = sampled_df.loc[updated_sampled_names]
 
-                    self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
+                    if verbose:
+                        self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
 
                     # Map each non-sampled point to its closest sampled point that matches the expression pattern
                     # (zero/nonzero):
@@ -3167,6 +3178,8 @@ class MuSIC:
             found = False
             if self.mod_type == "downstream" and "downstream" not in self.output_path:
                 parent_dir = os.path.join(os.path.dirname(self.output_path), "downstream")
+                if not os.path.exists(parent_dir):
+                    os.makedirs(parent_dir)
             else:
                 parent_dir = os.path.dirname(self.output_path)
             file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
@@ -3297,10 +3310,7 @@ class MuSIC:
                     target_file = pd.read_csv(path, index_col=0)
                     regulators = [c for c in target_file.columns if c.startswith("b_")]
                     regulators = [c.replace("b_", "") for c in regulators]
-                    if self.mod_type == "lr":
-                        ligands = [r.split(":")[0] for r in regulators]
-                    else:
-                        ligands = regulators
+                    ligands = regulators
 
                     # All of the possible receptors that are partners to these ligands:
                     receptors_for_ligands = self.lr_db[self.lr_db["from"].isin(ligands)]["to"].unique().tolist()
@@ -3549,6 +3559,8 @@ class MuSIC:
             + n_samples * np.log(2 * np.pi)
             + n_samples * (n_samples + trace_hat) / (n_samples - trace_hat - 2.0)
         )
+        if isinstance(aicc, np.ndarray):
+            aicc = aicc.item()
 
         return aicc
 
@@ -3706,7 +3718,8 @@ class MuSIC:
             if not os.path.exists(os.path.dirname(parent_dir)):
                 self.logger.info(
                     f"Could not find downstream directory {parent_dir}, this type of downstream model "
-                    f"may not have been fit. Returning empty dictionaries."
+                    f"may not have been fit yet. Returning empty dictionaries for now. :func `CCI_deg_detection()` "
+                    f"can be used for downstream modeling."
                 )
                 return {}, {}
 
@@ -3721,10 +3734,10 @@ class MuSIC:
                 betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
                 feat_sub = [col.replace("b_", "") for col in betas.columns]
                 if isinstance(betas.index[0], int) or isinstance(betas.index[0], float):
-                    betas.index = [self.X_df.index[idx] for idx in betas.index]
+                    betas.index = [self.X_df.index[int(idx)] for idx in betas.index]
                 standard_errors = all_outputs[[col for col in all_outputs.columns if col.startswith("se_")]]
                 if isinstance(standard_errors.index[0], int) or isinstance(standard_errors.index[0], float):
-                    standard_errors.index = [self.X_df.index[idx] for idx in standard_errors.index]
+                    standard_errors.index = [self.X_df.index[int(idx)] for idx in standard_errors.index]
 
                 if adjust_for_subsampling:
                     # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
