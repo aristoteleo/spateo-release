@@ -770,6 +770,7 @@ class MuSIC_Interpreter(MuSIC):
         save_path: str,
         pcutoff: Optional[float] = 99.7,
         min_value: Optional[float] = 0,
+        zero_opacity: float = 1.0,
     ):
         """Quick-visualize the magnitude of the predicted effect on target for a given interaction.
 
@@ -780,6 +781,7 @@ class MuSIC_Interpreter(MuSIC):
             pcutoff: Percentile cutoff for the colorbar. Will set all values above this percentile to this value.
             min_value: Minimum value to set the colorbar to. Will set all values below this value to this value.
                 Defaults to 0.
+            zero_opacity: Opacity of points with zero expression. Between 0.0 and 1.0. Default is 1.0.
         """
         targets = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
@@ -806,13 +808,29 @@ class MuSIC_Interpreter(MuSIC):
         target_interaction_coef[target_interaction_coef > cutoff] = cutoff
         target_interaction_coef[target_interaction_coef < min_value] = min_value
         plot_vals = target_interaction_coef.values
+
+        # Separate data into zero and non-zero (keeping one zero with non-zeros)
+        is_zero = plot_vals == 0
+        if np.any(is_zero):
+            non_zeros = np.where(is_zero, 0, plot_vals)
+            # Select the first zero to keep
+            first_zero_idx = np.where(is_zero)[0][0]
+            # Temp- to get the correct indices of nonzeros
+            non_zeros[first_zero_idx] = 1
+            is_nonzero = non_zeros != 0
+            non_zeros[first_zero_idx] = 0
+        else:
+            non_zeros = plot_vals
+            is_nonzero = np.ones(len(plot_vals), dtype=bool)
+
+        # Two plots, one for the zeros and one for the nonzeros
         scatter_effect = go.Scatter3d(
-            x=x,
-            y=y,
-            z=z,
+            x=x[is_nonzero],
+            y=y[is_nonzero],
+            z=z[is_nonzero],
             mode="markers",
             marker=dict(
-                color=plot_vals,
+                color=non_zeros,
                 colorscale="Hot",
                 size=2,
                 colorbar=dict(
@@ -825,7 +843,26 @@ class MuSIC_Interpreter(MuSIC):
             showlegend=False,
         )
 
+        # Plot zeros separately (if there are any):
+        scatter_zeros = None
+        if np.any(is_zero):
+            scatter_zeros = go.Scatter3d(
+                x=x[is_zero],
+                y=y[is_zero],
+                z=z[is_zero],
+                mode="markers",
+                marker=dict(
+                    color="#000000",  # Use zero values for color to match the scale
+                    size=2,
+                    opacity=zero_opacity,
+                ),
+                showlegend=False,
+            )
+
         fig = go.Figure(data=[scatter_effect])
+        if scatter_zeros is not None:
+            fig.add_trace(scatter_zeros)
+
         title_dict = dict(
             text=f"{interaction.title()} Effect on {target.title()}",
             y=0.9,
@@ -1031,6 +1068,8 @@ class MuSIC_Interpreter(MuSIC):
         receptor_targets: bool = False,
         target_gene_targets: bool = False,
         pcutoff: float = 99.7,
+        min_value: float = 0,
+        zero_opacity: float = 1.0,
     ):
         """Quick-visualize the magnitude of the predicted effect on target for a given TF. Can only find the files
         necessary for this if :func `CCI_deg_detection()` has been run.
@@ -1046,6 +1085,8 @@ class MuSIC_Interpreter(MuSIC):
             target_gene_targets: Set True if target genes were used as the target genes for the :func
                 `CCI_deg_detection()` model.
             pcutoff: Percentile cutoff for the colorbar. Will set all values above this percentile to this value.
+            min_value: Minimum value to set the colorbar to. Will set all values below this value to this value.
+            zero_opacity: Opacity of points with zero expression. Between 0.0 and 1.0. Default is 1.0.
         """
         downstream_parent_dir = os.path.dirname(os.path.splitext(self.output_path)[0])
         id = os.path.splitext(os.path.basename(self.output_path))[0]
@@ -1105,17 +1146,34 @@ class MuSIC_Interpreter(MuSIC):
         )
 
         target_tf_coef = downstream_coeffs[target].loc[adata.obs_names, f"b_{tf}"]
+
         # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
         cutoff = np.percentile(target_tf_coef.values, pcutoff)
         target_tf_coef[target_tf_coef > cutoff] = cutoff
+        target_tf_coef[target_tf_coef < min_value] = min_value
         plot_vals = target_tf_coef.values
+        # Separate data into zero and non-zero (keeping one zero with non-zeros)
+        is_zero = plot_vals == 0
+        if np.any(is_zero):
+            non_zeros = np.where(is_zero, 0, plot_vals)
+            # Select the first zero to keep
+            first_zero_idx = np.where(is_zero)[0][0]
+            # Temp- to get the correct indices of nonzeros
+            non_zeros[first_zero_idx] = 1
+            is_nonzero = non_zeros != 0
+            non_zeros[first_zero_idx] = 0
+        else:
+            non_zeros = plot_vals
+            is_nonzero = np.ones(len(plot_vals), dtype=bool)
+
+        # Two plots, one for the zeros and one for the nonzeros
         scatter_effect = go.Scatter3d(
-            x=x,
-            y=y,
-            z=z,
+            x=x[is_nonzero],
+            y=y[is_nonzero],
+            z=z[is_nonzero],
             mode="markers",
             marker=dict(
-                color=plot_vals,
+                color=non_zeros,
                 colorscale="Hot",
                 size=2,
                 colorbar=dict(
@@ -1128,7 +1186,26 @@ class MuSIC_Interpreter(MuSIC):
             showlegend=False,
         )
 
+        # Plot zeros separately (if there are any):
+        scatter_zeros = None
+        if np.any(is_zero):
+            scatter_zeros = go.Scatter3d(
+                x=x[is_zero],
+                y=y[is_zero],
+                z=z[is_zero],
+                mode="markers",
+                marker=dict(
+                    color="#000000",  # Use zero values for color to match the scale
+                    size=2,
+                    opacity=zero_opacity,
+                ),
+                showlegend=False,
+            )
+
         fig = go.Figure(data=[scatter_effect])
+        if scatter_zeros is not None:
+            fig.add_trace(scatter_zeros)
+
         title_dict = dict(
             text=f"{tf.title()} Effect on {target.title()}",
             y=0.9,

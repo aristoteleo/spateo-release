@@ -941,18 +941,20 @@ def plot_expression_3D(
     group_key: Optional[str] = None,
     ct_subset: Optional[list] = None,
     pcutoff: Optional[float] = 99.7,
+    zero_opacity: float = 1.0,
 ):
     """Visualize gene expression in a 3D space.
 
     Args:
-        target: Target gene to visualize
-        interaction: Interaction to visualize (e.g. "Igf1:Igf1r" for L:R model, "Igf1" for ligand model)
-        save_path: Path to save the figure to (will save as HTML file)
-        coords_key: Key for spatial coordinates in adata.obsm
+        adata: AnnData object containing spatial coordinates and cell type labels
+        save_path: Path to save the plot
+        gene: Will plot expression pattern of this gene
+        coords_key: Key in adata.obsm where spatial coordinates are stored
         group_key: Optional key for grouping in adata.obs, but needed if "ct_subset" is provided
         ct_subset: Optional list of cell types to include in the plot. If None, all cell types will be included.
         pcutoff: Percentile cutoff for gene expression. Default is 99.7, which will set the max value plotted to the
             99.7th percentile of gene expression values.
+        zero_opacity: Opacity of points with zero expression. Between 0.0 and 1.0. Default is 1.0.
     """
     if group_key is not None:
         if group_key not in adata.obs.keys():
@@ -963,17 +965,31 @@ def plot_expression_3D(
     x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
 
     gene_expr = adata[:, gene].X.toarray().flatten()
-
     # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
     cutoff = np.percentile(gene_expr, pcutoff)
     gene_expr[gene_expr > cutoff] = cutoff
-    scatter_expr = go.Scatter3d(
-        x=x,
-        y=y,
-        z=z,
+
+    # Separately plot zeros and nonzeros:
+    zero_indices = gene_expr == 0
+    non_zero_indices = gene_expr > 0
+
+    x_zeros, y_zeros, z_zeros = x[zero_indices], y[zero_indices], z[zero_indices]
+    x_non_zeros, y_non_zeros, z_non_zeros = x[non_zero_indices], y[non_zero_indices], z[non_zero_indices]
+    gene_expr_non_zeros = gene_expr[non_zero_indices]
+
+    # Plot non-zero expression values including one zero for color consistency
+    gene_expr_nz = np.append(gene_expr_non_zeros, 0)  # Include one zero value
+    x_nz = np.append(x_non_zeros, x[zero_indices][0]) if len(x_zeros) > 0 else x_non_zeros
+    y_nz = np.append(y_non_zeros, y[zero_indices][0]) if len(y_zeros) > 0 else y_non_zeros
+    z_nz = np.append(z_non_zeros, z[zero_indices][0]) if len(z_zeros) > 0 else z_non_zeros
+
+    scatter_expr_nz = go.Scatter3d(
+        x=x_nz,
+        y=y_nz,
+        z=z_nz,
         mode="markers",
         marker=dict(
-            color=gene_expr,
+            color=gene_expr_nz,
             colorscale="Hot",
             size=2,
             colorbar=dict(title=f"{gene}", x=0.75, titlefont=dict(size=24), tickfont=dict(size=24)),
@@ -981,7 +997,27 @@ def plot_expression_3D(
         showlegend=False,
     )
 
-    fig = go.Figure(data=[scatter_expr])
+    # Add separate trace for zero expression values, if any, with specified opacity
+    if len(x_zeros) > 0:
+        scatter_expr_zeros = go.Scatter3d(
+            x=x_zeros,
+            y=y_zeros,
+            z=z_zeros,
+            mode="markers",
+            marker=dict(
+                color="#000000",  # Use zero for color to match color scale
+                size=2,
+                opacity=zero_opacity,  # Apply custom opacity for zeros
+            ),
+            showlegend=False,
+        )
+    else:
+        scatter_expr_zeros = None
+
+    fig = go.Figure(data=[scatter_expr_nz])
+    if scatter_expr_zeros is not None:
+        fig.add_trace(scatter_expr_zeros)
+
     title_dict = dict(
         text=f"{gene}",
         y=0.9,
