@@ -3797,6 +3797,11 @@ class MuSIC:
                     betas *= mask_matrix
                     standard_errors *= mask_matrix
 
+                    # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
+                    # object, save back to file path:
+                    all_outputs = pd.concat([betas, standard_errors], axis=1)
+                    all_outputs.to_csv(os.path.join(parent_dir, file))
+
                 # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas
                 all_se[target] = standard_errors

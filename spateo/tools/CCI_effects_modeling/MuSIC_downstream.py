@@ -5839,6 +5839,7 @@ class MuSIC_Interpreter(MuSIC):
         interaction: str,
         target: str,
         vector_magnitude_lower_bound: float = 0.0,
+        manual_vector_scale_factor: Optional[float] = None,
         only_view_effect_region: bool = False,
         save_path: Optional[str] = None,
     ):
@@ -5852,6 +5853,9 @@ class MuSIC_Interpreter(MuSIC):
                 target}" to create vector field plot.
             vector_magnitude_lower_bound: Lower bound for the magnitude of the vector field vectors to be plotted,
                 as a fraction of the maximum vector magnitude. Defaults to 0.0.
+            manual_vector_scale_factor: If not None, will manually scale the vector field by this factor (
+                multiplicatively). Used for visualization purposes, not recommended to set above 2.0 (otherwise
+                likely to get misleading results with vectors that are too long).
             only_view_effect_region: If True, will only plot the region where the effect is predicted to be found,
                 rather than the entire 3D object
             save_path: Path to save the figure to (will save as HTML file)
@@ -5954,6 +5958,8 @@ class MuSIC_Interpreter(MuSIC):
         for i in tqdm(range(conn.shape[0]), desc="Scaling vectors..."):
             if vector_lengths[i] > 0:
                 scale_factor = average_mean_distance / vector_lengths[i]
+                if manual_vector_scale_factor is not None:
+                    scale_factor *= manual_vector_scale_factor
                 u[i] *= scale_factor
                 v[i] *= scale_factor
                 w[i] *= scale_factor
@@ -7197,12 +7203,8 @@ class MuSIC_Interpreter(MuSIC):
 
             if to_plot == "proportion":
                 nz_cells = np.where(self.adata[:, target].X.toarray() > 0)[0]
-                print(len(nz_cells))
                 for interaction in all_feature_names:
-                    print(target)
-                    print(interaction)
                     proportions = (all_coeffs_target.iloc[nz_cells][interaction] != 0).mean()
-                    print((all_coeffs_target.iloc[nz_cells][interaction] != 0).sum())
                     all_plot_values.loc[interaction, target] = proportions
             elif to_plot == "specificity":
                 for interaction in all_feature_names:
@@ -7233,6 +7235,8 @@ class MuSIC_Interpreter(MuSIC):
                 (all_plot_values > lower_proportion_threshold).any(axis=1),
                 (all_plot_values > lower_proportion_threshold).any(axis=0),
             ]
+            self.logger.info(f"Number of remaining rows: {len(all_plot_values.index)}")
+            self.logger.info(f"Number of remaining columns: {len(all_plot_values.columns)}")
 
         thickness = 0.5 * figsize[0] / 10
         mask = np.abs(all_plot_values) < lower_proportion_threshold
