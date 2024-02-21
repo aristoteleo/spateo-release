@@ -3519,13 +3519,7 @@ class MuSIC:
 
                     # Subtract 1 from predictions for predictions to account for the pseudocount from model setup:
                     y_pred -= 1
-                    # if self.mod_type != "downstream":
-                    #     y_pred[y_pred < 1] = 0.0
-                    # else:
                     y_pred[y_pred < 0] = 0.0
-
-                    # thresh = 1.01 if self.normalize else 0
-                    # y_pred[y_pred <= thresh] = 0.0
 
                 y_pred = pd.DataFrame(y_pred, index=self.sample_names, columns=[target])
                 all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
@@ -3785,6 +3779,23 @@ class MuSIC:
                     # object, save back to file path:
                     all_outputs = pd.concat([betas, standard_errors], axis=1)
                     all_outputs.to_csv(os.path.join(parent_dir, file))
+                else:
+                    # Same processing as for subsampling, but without the subsampling:
+                    if self.mod_type in ["receptor", "ligand", "downstream"]:
+                        mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
+                        betas *= mask_matrix
+                        standard_errors *= mask_matrix
+                    mask_df = (self.X_df != 0).astype(int)
+                    mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
+                    for col in betas.columns:
+                        if col.replace("b_", "") not in mask_df.columns:
+                            mask_df[col] = 0
+                    # Make sure the columns are in the same order:
+                    betas_columns = [col.replace("b_", "") for col in betas.columns]
+                    mask_df = mask_df.reindex(columns=betas_columns)
+                    mask_matrix = mask_df.values
+                    betas *= mask_matrix
+                    standard_errors *= mask_matrix
 
                 # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas
