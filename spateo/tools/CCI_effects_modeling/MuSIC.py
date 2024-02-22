@@ -3677,6 +3677,7 @@ class MuSIC:
     def return_outputs(
         self,
         adjust_for_subsampling: bool = True,
+        load_downstream: bool = False,
         load_from_downstream: Optional[Literal["ligand", "receptor", "target_gene"]] = None,
     ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
         """Return final coefficients for all fitted models.
@@ -3684,9 +3685,9 @@ class MuSIC:
         Args:
             adjust_for_subsampling: Set True if subsampling was performed; this indicates that the coefficients for
                 the subsampled points need to be extended to the neighboring non-sampled points.
+            load_downstream: Set True if this is being called from within instance of :class `MuSIC_Interpreter`.
             load_from_downstream: Set to "ligand", "receptor", or "target_gene" to load coefficients from downstream
-                models where targets are ligands, receptors or target genes. Can be used to load downstream model
-                coefficients from CCI models.
+                models where targets are ligands, receptors or target genes. Must be given if "load_downstream" is True.
 
         Outputs:
             all_coeffs: Dictionary containing dataframe consisting of coefficients for each target gene
@@ -3780,27 +3781,28 @@ class MuSIC:
                     all_outputs = pd.concat([betas, standard_errors], axis=1)
                     all_outputs.to_csv(os.path.join(parent_dir, file))
                 else:
-                    # Same processing as for subsampling, but without the subsampling:
-                    if self.mod_type in ["receptor", "ligand", "downstream"]:
-                        mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
+                    if not load_downstream:
+                        # Same processing as for subsampling, but without the subsampling:
+                        if self.mod_type in ["receptor", "ligand", "downstream"]:
+                            mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
+                            betas *= mask_matrix
+                            standard_errors *= mask_matrix
+                        mask_df = (self.X_df != 0).astype(int)
+                        mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
+                        for col in betas.columns:
+                            if col.replace("b_", "") not in mask_df.columns:
+                                mask_df[col] = 0
+                        # Make sure the columns are in the same order:
+                        betas_columns = [col.replace("b_", "") for col in betas.columns]
+                        mask_df = mask_df.reindex(columns=betas_columns)
+                        mask_matrix = mask_df.values
                         betas *= mask_matrix
                         standard_errors *= mask_matrix
-                    mask_df = (self.X_df != 0).astype(int)
-                    mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
-                    for col in betas.columns:
-                        if col.replace("b_", "") not in mask_df.columns:
-                            mask_df[col] = 0
-                    # Make sure the columns are in the same order:
-                    betas_columns = [col.replace("b_", "") for col in betas.columns]
-                    mask_df = mask_df.reindex(columns=betas_columns)
-                    mask_matrix = mask_df.values
-                    betas *= mask_matrix
-                    standard_errors *= mask_matrix
 
-                    # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
-                    # object, save back to file path:
-                    all_outputs = pd.concat([betas, standard_errors], axis=1)
-                    all_outputs.to_csv(os.path.join(parent_dir, file))
+                        # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
+                        # object, save back to file path:
+                        all_outputs = pd.concat([betas, standard_errors], axis=1)
+                        all_outputs.to_csv(os.path.join(parent_dir, file))
 
                 # Save coefficients and standard errors to dictionary:
                 all_coeffs[target] = betas

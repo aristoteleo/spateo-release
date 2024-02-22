@@ -99,7 +99,7 @@ class MuSIC_Interpreter(MuSIC):
             # self.logger.info("Finished preprocessing, getting fitted coefficients and standard errors.")
 
         # Dictionary containing coefficients:
-        self.coeffs, self.standard_errors = self.return_outputs(adjust_for_subsampling=False)
+        self.coeffs, self.standard_errors = self.return_outputs(adjust_for_subsampling=False, load_downstream=True)
         n_cells_expressing_targets = self.targets_expr.apply(lambda x: sum(x > 0), axis=0)
         if keep_column_threshold_proportion_cells is not None:
             keep_column_threshold_proportion_cells = 0.01
@@ -119,7 +119,7 @@ class MuSIC_Interpreter(MuSIC):
         id = os.path.basename(os.path.splitext(self.output_path)[0])
 
         self.downstream_model_ligand_coeffs, self.downstream_model_ligand_standard_errors = self.return_outputs(
-            adjust_for_subsampling=False, load_from_downstream="ligand"
+            adjust_for_subsampling=False, load_downstream=True, load_from_downstream="ligand"
         )
         dm_dir = os.path.join(
             downstream_parent_dir,
@@ -134,7 +134,7 @@ class MuSIC_Interpreter(MuSIC):
         )
 
         self.downstream_model_receptor_coeffs, self.downstream_model_receptor_standard_errors = self.return_outputs(
-            adjust_for_subsampling=False, load_from_downstream="receptor"
+            adjust_for_subsampling=False, load_downstream=True, load_from_downstream="receptor"
         )
         dm_dir = os.path.join(
             downstream_parent_dir,
@@ -149,7 +149,7 @@ class MuSIC_Interpreter(MuSIC):
         )
 
         self.downstream_model_target_coeffs, self.downstream_model_target_standard_errors = self.return_outputs(
-            adjust_for_subsampling=False, load_from_downstream="target_gene"
+            adjust_for_subsampling=False, load_downstream=True, load_from_downstream="target_gene"
         )
         dm_dir = os.path.join(
             downstream_parent_dir,
@@ -3119,12 +3119,18 @@ class MuSIC_Interpreter(MuSIC):
                 spine.set_visible(True)
                 spine.set_linewidth(thickness * 2.5)
 
-            # Adjust colorbar label font size
-            cbar = m.collections[0].colorbar
-            cbar.set_label(cbar_label, fontsize=fontsize * 1.5, labelpad=10)
-            # Adjust colorbar tick font size
-            cbar.ax.tick_params(labelsize=fontsize * 1.25)
-            cbar.ax.set_aspect(0.033)
+            # Adjust colorbar settings:
+            divider = make_axes_locatable(ax)
+            # Append axes to the top of the plot, where the colorbar will be placed
+            cax = divider.append_axes("top", size="30%", pad="30%")
+
+            # Create the colorbar manually in the appended axes
+            cbar = plt.colorbar(m.collections[0], cax=cax, orientation="horizontal")
+            cbar.set_label(cbar_label.title(), fontsize=fontsize * 1.5, labelpad=10)
+            cbar.ax.xaxis.set_ticks_position("top")  # Move ticks to the top
+            cbar.ax.xaxis.set_label_position("top")  # Move the label (title) to the top
+            cbar.ax.tick_params(labelsize=fontsize * 1.5)
+            cbar.ax.set_aspect(0.02)
 
             ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
             ax.set_ylabel("Cell Type-Specific Target", fontsize=fontsize * 1.25)
@@ -4162,12 +4168,18 @@ class MuSIC_Interpreter(MuSIC):
                 spine.set_visible(True)
                 spine.set_linewidth(thickness * 2.5)
 
-            # Adjust colorbar label font size
-            cbar = m.collections[0].colorbar
-            cbar.set_label(label, fontsize=fontsize * 1.5, labelpad=10)
-            # Adjust colorbar tick font size
-            cbar.ax.tick_params(labelsize=fontsize * 1.25)
-            cbar.ax.set_aspect(0.033)
+            # Adjust colorbar settings:
+            divider = make_axes_locatable(ax)
+            # Append axes to the top of the plot, where the colorbar will be placed
+            cax = divider.append_axes("top", size="30%", pad="30%")
+
+            # Create the colorbar manually in the appended axes
+            cbar = plt.colorbar(m.collections[0], cax=cax, orientation="horizontal")
+            cbar.set_label(to_plot.title(), fontsize=fontsize * 1.5, labelpad=10)
+            cbar.ax.xaxis.set_ticks_position("top")  # Move ticks to the top
+            cbar.ax.xaxis.set_label_position("top")  # Move the label (title) to the top
+            cbar.ax.tick_params(labelsize=fontsize * 1.5)
+            cbar.ax.set_aspect(0.02)
 
             ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
             ax.set_ylabel("Cell Type-Specific Target", fontsize=fontsize * 1.25)
@@ -5120,12 +5132,18 @@ class MuSIC_Interpreter(MuSIC):
             spine.set_visible(True)
             spine.set_linewidth(0.75)
 
-        # Adjust colorbar label font size
-        cbar = m.collections[0].colorbar
-        cbar.set_label("Partial correlation", fontsize=fontsize * 1.1)
-        # Adjust colorbar tick font size
-        cbar.ax.tick_params(labelsize=fontsize)
-        cbar.ax.set_aspect(0.05)
+        # Adjust colorbar settings:
+        divider = make_axes_locatable(ax)
+        # Append axes to the top of the plot, where the colorbar will be placed
+        cax = divider.append_axes("top", size="30%", pad="30%")
+
+        # Create the colorbar manually in the appended axes
+        cbar = plt.colorbar(m.collections[0], cax=cax, orientation="horizontal")
+        cbar.set_label(label, fontsize=fontsize * 1.5, labelpad=10)
+        cbar.ax.xaxis.set_ticks_position("top")  # Move ticks to the top
+        cbar.ax.xaxis.set_label_position("top")  # Move the label (title) to the top
+        cbar.ax.tick_params(labelsize=fontsize * 1.5)
+        cbar.ax.set_aspect(0.02)
 
         plt.xlabel("Target gene", fontsize=fontsize * 1.1)
         plt.ylabel("Interaction", fontsize=fontsize * 1.1)
@@ -5840,7 +5858,12 @@ class MuSIC_Interpreter(MuSIC):
         target: str,
         vector_magnitude_lower_bound: float = 0.0,
         manual_vector_scale_factor: Optional[float] = None,
+        cell_size: float = 1.0,
+        no_color_coding: bool = False,
         only_view_effect_region: bool = False,
+        add_group_label: Optional[str] = None,
+        group_label_obs_key: Optional[str] = None,
+        title_position: Tuple[float, float] = (0.5, 0.9),
         save_path: Optional[str] = None,
     ):
         """Visualize the directionality of the effect on target for a given interaction, overlaid onto the 3D spatial
@@ -5856,8 +5879,17 @@ class MuSIC_Interpreter(MuSIC):
             manual_vector_scale_factor: If not None, will manually scale the vector field by this factor (
                 multiplicatively). Used for visualization purposes, not recommended to set above 2.0 (otherwise
                 likely to get misleading results with vectors that are too long).
+            cell_size: Size of the cells in the 3D plot. Defaults to 1.0.
+            no_color_coding: If True, will color all cells the same color (except cells of given category, if given).
             only_view_effect_region: If True, will only plot the region where the effect is predicted to be found,
                 rather than the entire 3D object
+            add_group_label: This optional argument represents a cell type category. Will color the cells belonging
+                to this particular category orange. If given, it is recommended to also provide
+                `group_label_obs_key` (which will be :attr `group_key` if not given).
+            group_label_obs_key: If `add_group_label` is given, this argument represents the observation key in the
+                AnnData object that contains the group label. If not given, will default to :attr `group_key`.
+            title_position: Position of the title in the plot, given as a tuple of floats (i.e. (x, y)). Defaults to
+                (0.5, 0.9).
             save_path: Path to save the figure to (will save as HTML file)
         """
         targets = pd.read_csv(
@@ -5885,6 +5917,10 @@ class MuSIC_Interpreter(MuSIC):
 
         coords = adata.obsm[self.coords_key]
         x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+        # If a group label is provided, mask out only the cells of that group:
+        if add_group_label is not None:
+            if group_label_obs_key is None:
+                group_label_obs_key = self.group_key
 
         # Get the vector field for the given interaction:
         sending_vf = adata.obsm[f"spatial_effect_sender_vf_{interaction}_{target}"]
@@ -5943,6 +5979,9 @@ class MuSIC_Interpreter(MuSIC):
             if ligand_col[i] > 0 and target_col[i] > 0:
                 overlap_col[i] = 1
                 ligand_col[i] = 0
+        # If particular group label is provided, mask out only the cells of that group:
+        if add_group_label is not None:
+            group_col = (adata.obs[group_label_obs_key] == add_group_label).astype(int).values
 
         # Define vectors:
         u, v, w = sending_vf[:, 0], sending_vf[:, 1], sending_vf[:, 2]
@@ -5965,11 +6004,15 @@ class MuSIC_Interpreter(MuSIC):
                 w[i] *= scale_factor
 
         # If only viewing effect region, find the region where the effect is predicted to be found and mask out only
-        # the sending cells and neighbors:
+        # the sending cells and neighbors, along with cells of the chosen cell type, if applicable:
         if only_view_effect_region:
             magnitudes = np.linalg.norm(sending_vf, axis=1)
             threshold = np.quantile(magnitudes[magnitudes > 0], vector_magnitude_lower_bound)
             sending_cell_indices = np.where(magnitudes > threshold)[0]
+
+            # If a group label is provided, mask out only the cells of that group:
+            if add_group_label is not None:
+                group_indices = np.where(adata.obs[group_label_obs_key] == add_group_label)[0]
 
             # For the visualization, use the 10 nearest neighbors:
             _, adata = neighbors(
@@ -5990,6 +6033,8 @@ class MuSIC_Interpreter(MuSIC):
             neighbor_mask = np.zeros(len(x), dtype=bool)
             neighbor_mask[list(neighbor_indices)] = True
             neighbor_mask[list(sending_cell_indices)] = True
+            if add_group_label is not None:
+                neighbor_mask[group_indices] = True
             in_effect_region = neighbor_mask
 
         # Separate visualization for zeros and nonzeros:
@@ -6004,6 +6049,9 @@ class MuSIC_Interpreter(MuSIC):
             neighboring_ligand_nonzeros = (target_col == 0) & (ligand_col > 0) & in_effect_region
             overlap = overlap_col > 0 & in_effect_region
 
+        if add_group_label is not None:
+            group = group_col > 0
+
         scatters_zeros = go.Scatter3d(
             x=x[zeros],
             y=y[zeros],
@@ -6011,8 +6059,8 @@ class MuSIC_Interpreter(MuSIC):
             mode="markers",
             marker=dict(
                 color="#4B2991",
-                size=2.5,
-                opacity=0.5,
+                size=cell_size,
+                opacity=0.3,
             ),
             showlegend=False,
         )
@@ -6023,9 +6071,9 @@ class MuSIC_Interpreter(MuSIC):
             z=z[nonzeros],
             mode="markers",
             marker=dict(
-                color="#FFDF00",
-                size=3,
-                opacity=0.9,
+                color="#FFDF00" if not no_color_coding else "#4B2991",
+                size=cell_size,
+                opacity=0.9 if not no_color_coding else 0.3,
             ),
             showlegend=False,
         )
@@ -6036,9 +6084,9 @@ class MuSIC_Interpreter(MuSIC):
             z=z[neighboring_ligand_nonzeros],
             mode="markers",
             marker=dict(
-                color="#0BDA51",
-                size=3,
-                opacity=0.9,
+                color="#0BDA51" if not no_color_coding else "#4B2991",
+                size=cell_size,
+                opacity=0.9 if not no_color_coding else 0.3,
             ),
             showlegend=False,
         )
@@ -6049,53 +6097,79 @@ class MuSIC_Interpreter(MuSIC):
             z=z[overlap],
             mode="markers",
             marker=dict(
-                color="#0096FF",
-                size=3,
-                opacity=0.9,
+                color="#0096FF" if not no_color_coding else "#4B2991",
+                size=cell_size,
+                opacity=0.9 if not no_color_coding else 0.3,
             ),
             showlegend=False,
         )
 
-        # Invisible trace for the legend (so the colored point is larger than the plot points):
-        legend_scatters_zeros = go.Scatter3d(
-            x=[None],
-            y=[None],
-            z=[None],
-            mode="markers",
-            marker=dict(size=30, color="#4B2991", opacity=0.5),
-            name=f"Cells not expressing {target} or {ligand}",
-            showlegend=True,
-        )
+        if add_group_label is not None:
+            scatters_group = go.Scatter3d(
+                x=x[group],
+                y=y[group],
+                z=z[group],
+                mode="markers",
+                marker=dict(
+                    color="#FFA500",
+                    size=2.5,
+                    opacity=0.9,
+                ),
+                showlegend=False,
+            )
 
-        legend_scatters_nonzeros = go.Scatter3d(
-            x=[None],
-            y=[None],
-            z=[None],
-            mode="markers",
-            marker=dict(size=30, color="#FFDF00"),
-            name=f"Cells expressing {target}",
-            showlegend=True,
-        )
+        if not no_color_coding:
+            # Invisible trace for the legend (so the colored point is larger than the plot points):
+            legend_scatters_zeros = go.Scatter3d(
+                x=[None],
+                y=[None],
+                z=[None],
+                mode="markers",
+                marker=dict(size=30, color="#4B2991", opacity=0.5),
+                name=f"Cells not expressing {target} or {ligand}",
+                showlegend=True,
+            )
 
-        legend_scatters_ligand_nonzeros = go.Scatter3d(
-            x=[None],
-            y=[None],
-            z=[None],
-            mode="markers",
-            marker=dict(size=30, color="#0BDA51"),
-            name=f"Cells expressing {ligand}",
-            showlegend=True,
-        )
+            legend_scatters_nonzeros = go.Scatter3d(
+                x=[None],
+                y=[None],
+                z=[None],
+                mode="markers",
+                marker=dict(size=30, color="#FFDF00"),
+                name=f"Cells expressing {target}",
+                showlegend=True,
+            )
 
-        legend_scatters_overlap_nonzeros = go.Scatter3d(
-            x=[None],
-            y=[None],
-            z=[None],
-            mode="markers",
-            marker=dict(size=30, color="#0096FF"),
-            name=f"Cells expressing both {target} and {ligand}",
-            showlegend=True,
-        )
+            legend_scatters_ligand_nonzeros = go.Scatter3d(
+                x=[None],
+                y=[None],
+                z=[None],
+                mode="markers",
+                marker=dict(size=30, color="#0BDA51"),
+                name=f"Cells expressing {ligand}",
+                showlegend=True,
+            )
+
+            legend_scatters_overlap_nonzeros = go.Scatter3d(
+                x=[None],
+                y=[None],
+                z=[None],
+                mode="markers",
+                marker=dict(size=30, color="#0096FF"),
+                name=f"Cells expressing both {target} and {ligand}",
+                showlegend=True,
+            )
+
+        if add_group_label is not None:
+            legend_scatters_group = go.Scatter3d(
+                x=[None],
+                y=[None],
+                z=[None],
+                mode="markers",
+                marker=dict(size=30, color="#FFA500"),
+                name=f"Cells of type {add_group_label}",
+                showlegend=True,
+            )
 
         # Offset cones slightly so they don't overlap with and obscure the sending cells:
         if only_view_effect_region:
@@ -6137,26 +6211,68 @@ class MuSIC_Interpreter(MuSIC):
             x=line_x, y=line_y, z=line_z, mode="lines", line=dict(color="black", dash="dot", width=4), showlegend=False
         )
 
-        fig = go.Figure(
-            data=[
-                scatters_zeros,
-                legend_scatters_zeros,
-                scatters_nonzeros,
-                legend_scatters_nonzeros,
-                scatters_ligand_nonzeros,
-                legend_scatters_ligand_nonzeros,
-                scatters_overlap_nonzeros,
-                legend_scatters_overlap_nonzeros,
-                quiver,
-                dotted_lines,
-            ]
-        )
+        if not no_color_coding and add_group_label is None:
+            fig = go.Figure(
+                data=[
+                    scatters_zeros,
+                    scatters_nonzeros,
+                    scatters_ligand_nonzeros,
+                    scatters_overlap_nonzeros,
+                    quiver,
+                    dotted_lines,
+                ]
+            )
+        elif no_color_coding and add_group_label is not None:
+            fig = go.Figure(
+                data=[
+                    scatters_zeros,
+                    scatters_nonzeros,
+                    scatters_ligand_nonzeros,
+                    scatters_overlap_nonzeros,
+                    scatters_group,
+                    quiver,
+                    dotted_lines,
+                    legend_scatters_group,
+                ]
+            )
+        elif add_group_label is not None:
+            fig = go.Figure(
+                data=[
+                    scatters_zeros,
+                    legend_scatters_zeros,
+                    scatters_nonzeros,
+                    legend_scatters_nonzeros,
+                    scatters_ligand_nonzeros,
+                    legend_scatters_ligand_nonzeros,
+                    scatters_overlap_nonzeros,
+                    legend_scatters_overlap_nonzeros,
+                    scatters_group,
+                    legend_scatters_group,
+                    quiver,
+                    dotted_lines,
+                ]
+            )
+        else:
+            fig = go.Figure(
+                data=[
+                    scatters_zeros,
+                    legend_scatters_zeros,
+                    scatters_nonzeros,
+                    legend_scatters_nonzeros,
+                    scatters_ligand_nonzeros,
+                    legend_scatters_ligand_nonzeros,
+                    scatters_overlap_nonzeros,
+                    legend_scatters_overlap_nonzeros,
+                    quiver,
+                    dotted_lines,
+                ]
+            )
 
         title_dict = dict(
             text=f"{interaction.title()} Effect on {target.title()}",
-            y=0.9,
+            y=title_position[1],
             yanchor="top",
-            x=0.5,
+            x=title_position[0],
             xanchor="center",
             font=dict(size=36),
         )
@@ -7049,7 +7165,7 @@ class MuSIC_Interpreter(MuSIC):
         lower_proportion_threshold: float = 0.1,
         order_interactions: bool = False,
         order_targets: bool = False,
-        remove_all_zero_rows_and_cols: bool = False,
+        remove_rows_and_cols_threshold: Optional[int] = None,
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
         save_df: bool = False,
@@ -7079,7 +7195,9 @@ class MuSIC_Interpreter(MuSIC):
             order_interactions: Whether to hierarchically sort the y-axis/interactions (transcription factors,
                 L:R pairs, etc.).
             order_targets: Whether to hierarchically sort the x-axis/targets (ligands, receptors, target genes)
-            remove_all_zero_rows_and_cols: Whether to remove all-zero rows and columns from the heatmap.
+            remove_rows_and_cols_threshold: Optional, can be used to specify the threshold for the number of
+                nonzero interactions/TFs a row/column needs to be displayed. If not given, all rows and columns will
+                be displayed.
             save_show_or_return: Whether to save, show or return the figure.
                 If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
                 displayed and the associated axis and other object will be return.
@@ -7229,28 +7347,33 @@ class MuSIC_Interpreter(MuSIC):
             target_order = leaves_list(target_linkage)
             all_plot_values = all_plot_values.T.iloc[target_order].T
 
-        if remove_all_zero_rows_and_cols:
+        if remove_rows_and_cols_threshold is not None:
             # Keep rows/columns with any values above the threshold
-            all_plot_values = all_plot_values.loc[
-                (all_plot_values > lower_proportion_threshold).any(axis=1),
-                (all_plot_values > lower_proportion_threshold).any(axis=0),
-            ]
+            rows_above_threshold = (all_plot_values > lower_proportion_threshold).sum(
+                axis=1
+            ) >= remove_rows_and_cols_threshold
+            cols_above_threshold = (all_plot_values > lower_proportion_threshold).sum(
+                axis=0
+            ) >= remove_rows_and_cols_threshold
+
+            all_plot_values = all_plot_values.loc[rows_above_threshold, cols_above_threshold]
             self.logger.info(f"Number of remaining rows: {len(all_plot_values.index)}")
             self.logger.info(f"Number of remaining columns: {len(all_plot_values.columns)}")
 
         thickness = 0.5 * figsize[0] / 10
         mask = np.abs(all_plot_values) < lower_proportion_threshold
+        ax.set_facecolor("white")
         m = sns.heatmap(
             all_plot_values,
             square=True,
             linecolor="grey",
             linewidths=thickness,
-            cbar_kws={"label": to_plot.title(), "location": "top", "pad": 0.05},
             cmap=cmap,
             vmin=0,
             vmax=all_plot_values.max().max(),
             mask=mask,
             ax=ax,
+            cbar=False,
         )
 
         # Outer frame:
@@ -7258,10 +7381,16 @@ class MuSIC_Interpreter(MuSIC):
             spine.set_visible(True)
             spine.set_linewidth(thickness * 2.5)
 
-        # Adjust colorbar label font size
-        cbar = m.collections[0].colorbar
+        # Adjust colorbar settings:
+        divider = make_axes_locatable(ax)
+        # Append axes to the top of the plot, where the colorbar will be placed
+        cax = divider.append_axes("top", size="30%", pad="30%")
+
+        # Create the colorbar manually in the appended axes
+        cbar = plt.colorbar(m.collections[0], cax=cax, orientation="horizontal")
         cbar.set_label(to_plot.title(), fontsize=fontsize * 1.5, labelpad=10)
-        # Adjust colorbar tick font size
+        cbar.ax.xaxis.set_ticks_position("top")  # Move ticks to the top
+        cbar.ax.xaxis.set_label_position("top")  # Move the label (title) to the top
         cbar.ax.tick_params(labelsize=fontsize * 1.5)
         cbar.ax.set_aspect(0.02)
 
@@ -7284,8 +7413,8 @@ class MuSIC_Interpreter(MuSIC):
             else f"Specificity of each {id}"
         )
         ax.set_title(title, fontsize=title_fontsize, pad=20)
-        prefix = "heatmap"
 
+        prefix = "heatmap"
         if save_df:
             all_plot_values.to_csv(
                 os.path.join(
