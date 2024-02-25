@@ -99,7 +99,7 @@ class MuSIC_Interpreter(MuSIC):
             # self.logger.info("Finished preprocessing, getting fitted coefficients and standard errors.")
 
         # Dictionary containing coefficients:
-        self.coeffs, self.standard_errors = self.return_outputs(adjust_for_subsampling=False, load_downstream=True)
+        self.coeffs, self.standard_errors = self.return_outputs(adjust_for_subsampling=False, load_for_interpreter=True)
         n_cells_expressing_targets = self.targets_expr.apply(lambda x: sum(x > 0), axis=0)
         if keep_column_threshold_proportion_cells is not None:
             keep_column_threshold_proportion_cells = 0.01
@@ -119,7 +119,7 @@ class MuSIC_Interpreter(MuSIC):
         id = os.path.basename(os.path.splitext(self.output_path)[0])
 
         self.downstream_model_ligand_coeffs, self.downstream_model_ligand_standard_errors = self.return_outputs(
-            adjust_for_subsampling=False, load_downstream=True, load_from_downstream="ligand"
+            adjust_for_subsampling=False, load_for_interpreter=True, load_from_downstream="ligand"
         )
         dm_dir = os.path.join(
             downstream_parent_dir,
@@ -134,7 +134,7 @@ class MuSIC_Interpreter(MuSIC):
         )
 
         self.downstream_model_receptor_coeffs, self.downstream_model_receptor_standard_errors = self.return_outputs(
-            adjust_for_subsampling=False, load_downstream=True, load_from_downstream="receptor"
+            adjust_for_subsampling=False, load_for_interpreter=True, load_from_downstream="receptor"
         )
         dm_dir = os.path.join(
             downstream_parent_dir,
@@ -149,7 +149,7 @@ class MuSIC_Interpreter(MuSIC):
         )
 
         self.downstream_model_target_coeffs, self.downstream_model_target_standard_errors = self.return_outputs(
-            adjust_for_subsampling=False, load_downstream=True, load_from_downstream="target_gene"
+            adjust_for_subsampling=False, load_for_interpreter=True, load_from_downstream="target_gene"
         )
         dm_dir = os.path.join(
             downstream_parent_dir,
@@ -771,6 +771,7 @@ class MuSIC_Interpreter(MuSIC):
         pcutoff: Optional[float] = 99.7,
         min_value: Optional[float] = 0,
         zero_opacity: float = 1.0,
+        size: float = 2.0,
     ):
         """Quick-visualize the magnitude of the predicted effect on target for a given interaction.
 
@@ -782,6 +783,7 @@ class MuSIC_Interpreter(MuSIC):
             min_value: Minimum value to set the colorbar to. Will set all values below this value to this value.
                 Defaults to 0.
             zero_opacity: Opacity of points with zero expression. Between 0.0 and 1.0. Default is 1.0.
+            size: Size of the points in the scatter plot. Default is 2.
         """
         targets = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
@@ -800,6 +802,7 @@ class MuSIC_Interpreter(MuSIC):
         x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
 
         target_interaction_coef = self.coeffs[target].loc[adata.obs_names, f"b_{interaction}"]
+        self.logger.info(f"{(target_interaction_coef > 0).sum()} {target}-expressing cells affected by {interaction}.")
 
         # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
         cutoff = np.percentile(target_interaction_coef.values, pcutoff)
@@ -810,7 +813,7 @@ class MuSIC_Interpreter(MuSIC):
         plot_vals = target_interaction_coef.values
 
         # Separate data into zero and non-zero (keeping one zero with non-zeros)
-        is_zero = plot_vals == 0
+        is_zero = plot_vals == 0.0
         if np.any(is_zero):
             non_zeros = np.where(is_zero, 0, plot_vals)
             # Select the first zero to keep
@@ -820,7 +823,6 @@ class MuSIC_Interpreter(MuSIC):
             is_nonzero = non_zeros != 0
             non_zeros[first_zero_idx] = 0
         else:
-            non_zeros = plot_vals
             is_nonzero = np.ones(len(plot_vals), dtype=bool)
 
         # Two plots, one for the zeros and one for the nonzeros
@@ -830,9 +832,9 @@ class MuSIC_Interpreter(MuSIC):
             z=z[is_nonzero],
             mode="markers",
             marker=dict(
-                color=non_zeros,
+                color=plot_vals[is_nonzero],
                 colorscale="Hot",
-                size=2,
+                size=size,
                 colorbar=dict(
                     title=f"{interaction.title()} Effect on {target.title()}",
                     x=0.75,
@@ -853,7 +855,7 @@ class MuSIC_Interpreter(MuSIC):
                 mode="markers",
                 marker=dict(
                     color="#000000",  # Use zero values for color to match the scale
-                    size=2,
+                    size=size,
                     opacity=zero_opacity,
                 ),
                 showlegend=False,
@@ -1070,6 +1072,7 @@ class MuSIC_Interpreter(MuSIC):
         pcutoff: float = 99.7,
         min_value: float = 0,
         zero_opacity: float = 1.0,
+        size: float = 2.0,
     ):
         """Quick-visualize the magnitude of the predicted effect on target for a given TF. Can only find the files
         necessary for this if :func `CCI_deg_detection()` has been run.
@@ -1087,6 +1090,7 @@ class MuSIC_Interpreter(MuSIC):
             pcutoff: Percentile cutoff for the colorbar. Will set all values above this percentile to this value.
             min_value: Minimum value to set the colorbar to. Will set all values below this value to this value.
             zero_opacity: Opacity of points with zero expression. Between 0.0 and 1.0. Default is 1.0.
+            size: Size of the points in the scatter plot. Default is 2.
         """
         downstream_parent_dir = os.path.dirname(os.path.splitext(self.output_path)[0])
         id = os.path.splitext(os.path.basename(self.output_path))[0]
@@ -1142,7 +1146,7 @@ class MuSIC_Interpreter(MuSIC):
         x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
 
         downstream_coeffs, downstream_standard_errors = self.return_outputs(
-            adjust_for_subsampling=False, load_from_downstream=target_type
+            adjust_for_subsampling=False, load_from_downstream=target_type, load_for_interpreter=True
         )
 
         target_tf_coef = downstream_coeffs[target].loc[adata.obs_names, f"b_{tf}"]
@@ -1163,7 +1167,6 @@ class MuSIC_Interpreter(MuSIC):
             is_nonzero = non_zeros != 0
             non_zeros[first_zero_idx] = 0
         else:
-            non_zeros = plot_vals
             is_nonzero = np.ones(len(plot_vals), dtype=bool)
 
         # Two plots, one for the zeros and one for the nonzeros
@@ -1173,9 +1176,9 @@ class MuSIC_Interpreter(MuSIC):
             z=z[is_nonzero],
             mode="markers",
             marker=dict(
-                color=non_zeros,
+                color=plot_vals[is_nonzero],
                 colorscale="Hot",
-                size=2,
+                size=size,
                 colorbar=dict(
                     title=f"{tf.title()} Effect on {target.title()}",
                     x=0.75,
@@ -1196,7 +1199,7 @@ class MuSIC_Interpreter(MuSIC):
                 mode="markers",
                 marker=dict(
                     color="#000000",  # Use zero values for color to match the scale
-                    size=2,
+                    size=size,
                     opacity=zero_opacity,
                 ),
                 showlegend=False,
@@ -1253,7 +1256,9 @@ class MuSIC_Interpreter(MuSIC):
         )
         fig.write_html(save_path)
 
-    def visualize_overlap_between_interacting_components_3D(self, target: str, interaction: str, save_path: str):
+    def visualize_overlap_between_interacting_components_3D(
+        self, target: str, interaction: str, save_path: str, size: float = 2.0
+    ):
         """Visualize the spatial distribution of signaling features (ligand, receptor, or L:R field) and target gene,
         as well as the overlapping region. Intended for use with 3D spatial coordinates.
 
@@ -1261,6 +1266,7 @@ class MuSIC_Interpreter(MuSIC):
             target: Target gene to visualize
             interaction: Interaction to visualize (e.g. "Igf1:Igf1r" for L:R model, "Igf1" for ligand model)
             save_path: Path to save the figure to (will save as HTML file)
+            size: Size of the points in the plot. Defaults to 2.
         """
         from ...plotting.static.colorlabel import godsnot_102
 
@@ -1321,14 +1327,15 @@ class MuSIC_Interpreter(MuSIC):
 
         traces = []
         for group, color in color_mapping.items():
-            marker_size = 1.25 if group == "Other" else 2
+            marker_size = size * 0.75 if group == "Other" else size
+            opacity = 0.5 if group == "Other" else 1.0
             mask = adata.obs[f"{interaction}_{target}"] == group
             scatter = go.Scatter3d(
                 x=x[mask],
                 y=y[mask],
                 z=z[mask],
                 mode="markers",
-                marker=dict(size=marker_size, color=color),
+                marker=dict(size=marker_size, color=color, opacity=opacity),
                 showlegend=False,
             )
             traces.append(scatter)
@@ -3122,7 +3129,10 @@ class MuSIC_Interpreter(MuSIC):
             # Adjust colorbar settings:
             divider = make_axes_locatable(ax)
             # Append axes to the top of the plot, where the colorbar will be placed
-            cax = divider.append_axes("top", size="30%", pad="30%")
+            if df.shape[0] > df.shape[1]:
+                cax = divider.append_axes("top", size="30%", pad=0)
+            else:
+                cax = divider.append_axes("top", size="30%", pad="30%")
 
             # Create the colorbar manually in the appended axes
             cbar = plt.colorbar(m.collections[0], cax=cax, orientation="horizontal")
@@ -4171,7 +4181,10 @@ class MuSIC_Interpreter(MuSIC):
             # Adjust colorbar settings:
             divider = make_axes_locatable(ax)
             # Append axes to the top of the plot, where the colorbar will be placed
-            cax = divider.append_axes("top", size="30%", pad="30%")
+            if df.shape[0] > df.shape[1]:
+                cax = divider.append_axes("top", size="30%", pad=0)
+            else:
+                cax = divider.append_axes("top", size="30%", pad="30%")
 
             # Create the colorbar manually in the appended axes
             cbar = plt.colorbar(m.collections[0], cax=cax, orientation="horizontal")
@@ -5135,11 +5148,14 @@ class MuSIC_Interpreter(MuSIC):
         # Adjust colorbar settings:
         divider = make_axes_locatable(ax)
         # Append axes to the top of the plot, where the colorbar will be placed
-        cax = divider.append_axes("top", size="30%", pad="30%")
+        if all_stats_to_plot.shape[0] > all_stats_to_plot.shape[1]:
+            cax = divider.append_axes("top", size="30%", pad=0)
+        else:
+            cax = divider.append_axes("top", size="30%", pad="30%")
 
         # Create the colorbar manually in the appended axes
         cbar = plt.colorbar(m.collections[0], cax=cax, orientation="horizontal")
-        cbar.set_label(label, fontsize=fontsize * 1.5, labelpad=10)
+        cbar.set_label("Correlation", fontsize=fontsize * 1.5, labelpad=10)
         cbar.ax.xaxis.set_ticks_position("top")  # Move ticks to the top
         cbar.ax.xaxis.set_label_position("top")  # Move the label (title) to the top
         cbar.ax.tick_params(labelsize=fontsize * 1.5)
@@ -7384,7 +7400,10 @@ class MuSIC_Interpreter(MuSIC):
         # Adjust colorbar settings:
         divider = make_axes_locatable(ax)
         # Append axes to the top of the plot, where the colorbar will be placed
-        cax = divider.append_axes("top", size="30%", pad="30%")
+        if all_plot_values.shape[0] > all_plot_values.shape[1]:
+            cax = divider.append_axes("top", size="30%", pad=0)
+        else:
+            cax = divider.append_axes("top", size="30%", pad="30%")
 
         # Create the colorbar manually in the appended axes
         cbar = plt.colorbar(m.collections[0], cax=cax, orientation="horizontal")

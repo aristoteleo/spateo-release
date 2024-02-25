@@ -942,6 +942,7 @@ def plot_expression_3D(
     ct_subset: Optional[list] = None,
     pcutoff: Optional[float] = 99.7,
     zero_opacity: float = 1.0,
+    size: int = 2,
 ):
     """Visualize gene expression in a 3D space.
 
@@ -955,6 +956,7 @@ def plot_expression_3D(
         pcutoff: Percentile cutoff for gene expression. Default is 99.7, which will set the max value plotted to the
             99.7th percentile of gene expression values.
         zero_opacity: Opacity of points with zero expression. Between 0.0 and 1.0. Default is 1.0.
+        size: Size of the points in the plot. Defaults to 2.
     """
     if group_key is not None:
         if group_key not in adata.obs.keys():
@@ -991,7 +993,7 @@ def plot_expression_3D(
         marker=dict(
             color=gene_expr_nz,
             colorscale="Hot",
-            size=2,
+            size=size,
             colorbar=dict(title=f"{gene}", x=0.75, titlefont=dict(size=24), tickfont=dict(size=24)),
         ),
         showlegend=False,
@@ -1006,7 +1008,7 @@ def plot_expression_3D(
             mode="markers",
             marker=dict(
                 color="#000000",  # Use zero for color to match color scale
-                size=2,
+                size=size,
                 opacity=zero_opacity,  # Apply custom opacity for zeros
             ),
             showlegend=False,
@@ -1074,6 +1076,7 @@ def plot_multiple_genes_3D(
     coords_key: str = "spatial",
     group_key: Optional[str] = None,
     ct_subset: Optional[list] = None,
+    size: int = 2,
 ):
     """Visualize the exclusivity or overlap of multiple gene expression patterns in 3D space.
 
@@ -1086,6 +1089,7 @@ def plot_multiple_genes_3D(
         coords_key: Key for spatial coordinates in adata.obsm.
         group_key: Optional key for grouping in adata.obs, but needed if "ct_subset" is provided.
         ct_subset: Optional list of cell types to include in the plot. If None, all cell types will be included.
+        size: Size of the points in the plot. Defaults to 2.
     """
     if colors is None:
         colors = vega_10
@@ -1122,7 +1126,7 @@ def plot_multiple_genes_3D(
             y=y[mask],
             z=z[mask],
             mode="markers",
-            marker=dict(color=color, size=2),
+            marker=dict(color=color, size=size),
             name=gene,
             showlegend=False,
         )

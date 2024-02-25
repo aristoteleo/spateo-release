@@ -1829,7 +1829,7 @@ class MuSIC:
                 X_df = X_df.apply(lambda column: (column - column.min()) / (column.max() - column.min()))
                 # The above operation will tend to exaggerate the presence of ligand in sparser neighborhoods- set
                 # threshold to ignore these cells/avoid potential false positives:
-                X_df[X_df < 0.3] = 0
+                X_df[X_df < 0.2] = 0
 
             elif self.mod_type == "ligand" or self.mod_type == "receptor":
                 if self.mod_type == "ligand":
@@ -3277,6 +3277,7 @@ class MuSIC:
                     target_TFs = target_rows.columns[(target_rows == 1).any()].tolist()
                 else:
                     target_TFs = target_rows[target_rows == 1].index.tolist()
+                all_target_TFs = target_TFs
 
                 # For the given target, subset to the TFs that directly interact with receptors that can regulate the
                 # target:
@@ -3340,7 +3341,15 @@ class MuSIC:
                 target_TF_sub = np.array(target_TF_sub)[mask].tolist()
                 primary_tf_rows = self.grn.loc[target_TF_sub]
                 secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
-                target_TFs = list(set(target_TFs + secondary_TFs))
+
+                # Or which are target-binding TFs not associated directly with the receptor, but which can be
+                # upregulated by the receptor-associated TFs:
+                indirect_TFs = list(set(all_target_TFs) - set(target_TFs))
+                indirect_TFs = [tf for tf in indirect_TFs if tf in self.grn.index]
+                mask = self.grn.loc[indirect_TFs, target_TFs].any(axis=1)
+                indirect_TFs_to_keep = list(mask.index)
+
+                target_TFs = list(set(target_TFs + secondary_TFs + indirect_TFs_to_keep))
                 if len(target_TFs) == 0:
                     self.logger.info(
                         f"None of the provided regulators could be found to have an association with target gene "
@@ -3677,7 +3686,7 @@ class MuSIC:
     def return_outputs(
         self,
         adjust_for_subsampling: bool = True,
-        load_downstream: bool = False,
+        load_for_interpreter: bool = False,
         load_from_downstream: Optional[Literal["ligand", "receptor", "target_gene"]] = None,
     ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
         """Return final coefficients for all fitted models.
@@ -3685,7 +3694,7 @@ class MuSIC:
         Args:
             adjust_for_subsampling: Set True if subsampling was performed; this indicates that the coefficients for
                 the subsampled points need to be extended to the neighboring non-sampled points.
-            load_downstream: Set True if this is being called from within instance of :class `MuSIC_Interpreter`.
+            load_for_interpreter: Set True if this is being called from within instance of :class `MuSIC_Interpreter`.
             load_from_downstream: Set to "ligand", "receptor", or "target_gene" to load coefficients from downstream
                 models where targets are ligands, receptors or target genes. Must be given if "load_downstream" is True.
 
@@ -3781,7 +3790,7 @@ class MuSIC:
                     all_outputs = pd.concat([betas, standard_errors], axis=1)
                     all_outputs.to_csv(os.path.join(parent_dir, file))
                 else:
-                    if not load_downstream:
+                    if not load_for_interpreter:
                         # Same processing as for subsampling, but without the subsampling:
                         if self.mod_type in ["receptor", "ligand", "downstream"]:
                             mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
