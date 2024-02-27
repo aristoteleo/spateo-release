@@ -5872,15 +5872,20 @@ class MuSIC_Interpreter(MuSIC):
         self,
         interaction: str,
         target: str,
+        vf_key: Optional[str] = None,
         vector_magnitude_lower_bound: float = 0.0,
         manual_vector_scale_factor: Optional[float] = None,
+        bin_size: Optional[Union[float, Tuple[float]]] = None,
+        plot_cells: bool = True,
         cell_size: float = 1.0,
+        alpha: float = 0.3,
         no_color_coding: bool = False,
         only_view_effect_region: bool = False,
         add_group_label: Optional[str] = None,
         group_label_obs_key: Optional[str] = None,
         title_position: Tuple[float, float] = (0.5, 0.9),
         save_path: Optional[str] = None,
+        **kwargs,
     ):
         """Visualize the directionality of the effect on target for a given interaction, overlaid onto the 3D spatial
         plot. Can only be used for models that use ligand expression (:attr `mod_type` is 'ligand' or 'lr').
@@ -5890,12 +5895,22 @@ class MuSIC_Interpreter(MuSIC):
                 ligand model)
             target: Name of the target gene of interest. Will search key "spatial_effect_sender_vf_{interaction}_{
                 target}" to create vector field plot.
+            vf_key: Optional key in .obsm to specify which vector field to use. If not given, will use the provided
+                "interaction" and "target" to find the key specifying the vector field.
             vector_magnitude_lower_bound: Lower bound for the magnitude of the vector field vectors to be plotted,
                 as a fraction of the maximum vector magnitude. Defaults to 0.0.
             manual_vector_scale_factor: If not None, will manually scale the vector field by this factor (
                 multiplicatively). Used for visualization purposes, not recommended to set above 2.0 (otherwise
                 likely to get misleading results with vectors that are too long).
+            bin_size: Optional, can be used to de-clutter plotting space by splitting the space into 3D bins and
+                displaying one vector per bin. Can be given as a floating point number to create cubic bins,
+                or as a tuple of floats to specify different bin sizes for each dimension. If not given,
+                will plot one vector per cell. Defaults to None.
+            plot_cells: If False, will not plot any of the cells (unless a group label is given), so will only
+                visualize vector field. Defaults to True.
             cell_size: Size of the cells in the 3D plot. Defaults to 1.0.
+            alpha: If visualizing cells not affected by the interaction, this argument specifies the transparency of
+                those cells.
             no_color_coding: If True, will color all cells the same color (except cells of given category, if given).
             only_view_effect_region: If True, will only plot the region where the effect is predicted to be found,
                 rather than the entire 3D object
@@ -5907,7 +5922,25 @@ class MuSIC_Interpreter(MuSIC):
             title_position: Position of the title in the plot, given as a tuple of floats (i.e. (x, y)). Defaults to
                 (0.5, 0.9).
             save_path: Path to save the figure to (will save as HTML file)
+            kwargs: Additional arguments that can be passed to :func `plotly.graph_objects.Cone`. Common arguments:
+                - "colorscale": Sets the colorscale. The colorscale must be an array containing arrays mapping a
+                    normalized value to an rgb, rgba, hex, hsl, hsv, or named color string.
+                - "sizemode": Determines whether sizeref is set as a “scaled” (i.e unitless) scalar (normalized by the
+                    max u/v/w norm in the vector field) or as “absolute” value (in the same units as the vector
+                    field). Defaults to "scaled".
+                - "sizeref": The scalar reference for the cone size. The cone size is determined by its u/v/w norm
+                    multiplied by sizeref. Defaults to 2.0.
+                - "showscale": Determines whether or not a colorbar is displayed for this trace.
         """
+        if "showscale" not in kwargs.keys():
+            kwargs["showscale"] = False
+        if "sizemode" not in kwargs.keys():
+            kwargs["sizemode"] = "scaled"
+        if "sizeref" not in kwargs.keys():
+            kwargs["sizeref"] = 2.0
+        if "colorscale" not in kwargs.keys():
+            kwargs["colorscale"] = "Reds"
+
         targets = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
         )
@@ -5939,7 +5972,9 @@ class MuSIC_Interpreter(MuSIC):
                 group_label_obs_key = self.group_key
 
         # Get the vector field for the given interaction:
-        sending_vf = adata.obsm[f"spatial_effect_sender_vf_{interaction}_{target}"]
+        if vf_key is None:
+            vf_key = f"spatial_effect_sender_vf_{interaction}_{target}"
+        sending_vf = adata.obsm[vf_key]
 
         # Use the connectivity graph and the length scale of the coordinate system to determine the scaling of the
         # vectors:
@@ -6001,10 +6036,11 @@ class MuSIC_Interpreter(MuSIC):
 
         # Define vectors:
         u, v, w = sending_vf[:, 0], sending_vf[:, 1], sending_vf[:, 2]
+
         vector_lengths = np.sqrt(u**2 + v**2 + w**2)
-        # Scale vectors based on the length scale of the coordinate system:
+        # Scale vectors based on the length scale of the coordinate system- only available for non-bin plots:
         avg_distances = np.zeros(conn.shape[0])
-        for i in tqdm(range(conn.shape[0]), desc="Scaling vectors..."):
+        for i in range(conn.shape[0]):
             connected_samples = conn[i, :].nonzero()[1]
             if len(connected_samples) > 0:
                 avg_distances[i] = np.mean(pairwise_distances[i, connected_samples])
@@ -6018,6 +6054,65 @@ class MuSIC_Interpreter(MuSIC):
                 u[i] *= scale_factor
                 v[i] *= scale_factor
                 w[i] *= scale_factor
+
+        # If bin_size is given, use it to bin the vectors:
+        if bin_size is not None:
+            if isinstance(bin_size, (float, int)):
+                bin_size = (bin_size, bin_size, bin_size)
+            x_edges = np.arange(min(x), max(x) + bin_size[0], bin_size[0])
+            y_edges = np.arange(min(y), max(y) + bin_size[1], bin_size[1])
+            z_edges = np.arange(min(z), max(z) + bin_size[2], bin_size[2])
+            self.logger.info(f"Created {len(x_edges) - 1} x {len(y_edges) - 1} x {len(z_edges) - 1} bins.")
+
+            # Initialize dictionaries to accumulate vectors and their counts per bin
+            vector_sums = {}
+            vector_counts = {}
+            row_to_bin = {}  # Mapping from row index (cells) to bin index
+            bin_to_index = {}  # Mapping from bin_idx to an enumerated index (to keep track of which bin is at which
+            # position along the x_avg, y_avg, etc. vectors)
+
+            # Assign vectors to bins and accumulate sums and counts
+            for i in tqdm(range(len(x)), desc="Assigning vectors to bins..."):
+                bin_idx = (
+                    np.digitize(x[i], x_edges) - 1,
+                    np.digitize(y[i], y_edges) - 1,
+                    np.digitize(z[i], z_edges) - 1,
+                )
+                # Bin mapping for each cell:
+                row_to_bin[i] = bin_idx
+
+                if bin_idx not in vector_sums:
+                    vector_sums[bin_idx] = np.array([u[i], v[i], w[i]])
+                    vector_counts[bin_idx] = 1
+                else:
+                    vector_sums[bin_idx] += np.array([u[i], v[i], w[i]])
+                    vector_counts[bin_idx] += 1
+
+            # Calculate average vectors per bin
+            u_avg, v_avg, w_avg = [], [], []
+            x_avg, y_avg, z_avg = [], [], []
+
+            enumerated_index = 0
+            for bin_idx, sum_vec in vector_sums.items():
+                bin_to_index[bin_idx] = enumerated_index
+
+                count = vector_counts[bin_idx]
+                avg_vec = sum_vec / count
+                u_avg.append(avg_vec[0])
+                v_avg.append(avg_vec[1])
+                w_avg.append(avg_vec[2])
+
+                # Calculate bin center for plotting
+                x_bin_center = (x_edges[bin_idx[0]] + x_edges[bin_idx[0] + 1]) / 2
+                y_bin_center = (y_edges[bin_idx[1]] + y_edges[bin_idx[1] + 1]) / 2
+                z_bin_center = (z_edges[bin_idx[2]] + z_edges[bin_idx[2] + 1]) / 2
+                x_avg.append(x_bin_center)
+                y_avg.append(y_bin_center)
+                z_avg.append(z_bin_center)
+                enumerated_index += 1
+
+            u_avg, v_avg, w_avg = np.array(u_avg), np.array(v_avg), np.array(w_avg)
+            x_avg, y_avg, z_avg = np.array(x_avg), np.array(y_avg), np.array(z_avg)
 
         # If only viewing effect region, find the region where the effect is predicted to be found and mask out only
         # the sending cells and neighbors, along with cells of the chosen cell type, if applicable:
@@ -6052,6 +6147,17 @@ class MuSIC_Interpreter(MuSIC):
             if add_group_label is not None:
                 neighbor_mask[group_indices] = True
             in_effect_region = neighbor_mask
+
+            if bin_size is not None:
+                # Remaining bins post-filtering:
+                filtered_bins = set()
+                filtered_bin_indices = set()
+                for i, in_effect in enumerate(in_effect_region):
+                    if in_effect:
+                        filtered_bins.add(row_to_bin[i])
+
+                for bin_idx in filtered_bins:
+                    filtered_bin_indices.add(bin_to_index[bin_idx])
 
         # Separate visualization for zeros and nonzeros:
         if not only_view_effect_region:
@@ -6188,44 +6294,57 @@ class MuSIC_Interpreter(MuSIC):
             )
 
         # Offset cones slightly so they don't overlap with and obscure the sending cells:
-        if only_view_effect_region:
-            x = x[in_effect_region]
-            y = y[in_effect_region]
-            z = z[in_effect_region]
-            u = u[in_effect_region]
-            v = v[in_effect_region]
-            w = w[in_effect_region]
-        x_offset = x + 0.1 * u
-        y_offset = y + 0.1 * v
-        z_offset = z + 0.1 * w
+        if bin_size is None:
+            if only_view_effect_region:
+                x = x[in_effect_region]
+                y = y[in_effect_region]
+                z = z[in_effect_region]
+                u = u[in_effect_region]
+                v = v[in_effect_region]
+                w = w[in_effect_region]
+            x_offset = x + 0.1 * u
+            y_offset = y + 0.1 * v
+            z_offset = z + 0.1 * w
 
-        quiver = go.Cone(
-            x=x_offset,
-            y=y_offset,
-            z=z_offset,
-            u=u,
-            v=v,
-            w=w,
-            colorscale="Reds",
-            sizemode="scaled",
-            sizeref=2.0,
-            showscale=False,
-        )
+            quiver = go.Cone(x=x_offset, y=y_offset, z=z_offset, u=u, v=v, w=w, **kwargs)
 
-        # Add dotted lines connecting vectors to sending cells:
-        line_x = []
-        line_y = []
-        line_z = []
+            # Add dotted lines connecting vectors to sending cells:
+            line_x = []
+            line_y = []
+            line_z = []
 
-        for i in range(len(x)):
-            line_x.extend([x[i], x_offset[i], None])
-            line_y.extend([y[i], y_offset[i], None])
-            line_z.extend([z[i], z_offset[i], None])
+            for i in range(len(x)):
+                line_x.extend([x[i], x_offset[i], None])
+                line_y.extend([y[i], y_offset[i], None])
+                line_z.extend([z[i], z_offset[i], None])
 
-        # Create a single trace for all dotted lines
-        dotted_lines = go.Scatter3d(
-            x=line_x, y=line_y, z=line_z, mode="lines", line=dict(color="black", dash="dot", width=4), showlegend=False
-        )
+            # Create a single trace for all dotted lines
+            dotted_lines = go.Scatter3d(
+                x=line_x,
+                y=line_y,
+                z=line_z,
+                mode="lines",
+                line=dict(color="black", dash="dot", width=4),
+                showlegend=False,
+            )
+        else:
+            if only_view_effect_region:
+                x_avg = x_avg[filtered_bin_indices]
+                y_avg = y_avg[filtered_bin_indices]
+                z_avg = z_avg[filtered_bin_indices]
+                u_avg = u_avg[filtered_bin_indices]
+                v_avg = v_avg[filtered_bin_indices]
+                w_avg = w_avg[filtered_bin_indices]
+
+            quiver = go.Cone(
+                x=x_avg,
+                y=y_avg,
+                z=z_avg,
+                u=u_avg,
+                v=v_avg,
+                w=w_avg,
+                **kwargs,
+            )
 
         if not no_color_coding and add_group_label is None:
             fig = go.Figure(
@@ -6235,7 +6354,6 @@ class MuSIC_Interpreter(MuSIC):
                     scatters_ligand_nonzeros,
                     scatters_overlap_nonzeros,
                     quiver,
-                    dotted_lines,
                 ]
             )
         elif no_color_coding and add_group_label is not None:
@@ -6247,7 +6365,6 @@ class MuSIC_Interpreter(MuSIC):
                     scatters_overlap_nonzeros,
                     scatters_group,
                     quiver,
-                    dotted_lines,
                     legend_scatters_group,
                 ]
             )
@@ -6265,7 +6382,6 @@ class MuSIC_Interpreter(MuSIC):
                     scatters_group,
                     legend_scatters_group,
                     quiver,
-                    dotted_lines,
                 ]
             )
         else:
@@ -6280,9 +6396,11 @@ class MuSIC_Interpreter(MuSIC):
                     scatters_overlap_nonzeros,
                     legend_scatters_overlap_nonzeros,
                     quiver,
-                    dotted_lines,
                 ]
             )
+
+        if bin_size is None:
+            fig.add_trace(dotted_lines)
 
         title_dict = dict(
             text=f"{interaction.title()} Effect on {target.title()}",
