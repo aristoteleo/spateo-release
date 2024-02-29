@@ -4784,10 +4784,12 @@ class MuSIC_Interpreter(MuSIC):
         self,
         interactions: Optional[Union[str, List[str]]] = None,
         targets: Optional[Union[str, List[str]]] = None,
+        plot_type: Literal["average", "proportion"] = "average",
         effect_size_threshold: float = 0.0,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
         cmap: str = "Reds",
+        top_n: Optional[int] = None,
         save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
         save_kwargs: Optional[dict] = {},
     ):
@@ -4801,14 +4803,16 @@ class MuSIC_Interpreter(MuSIC):
                 targets that were specified in model fitting. If multiple targets are given, "save_show_or_return"
                 should be "save" (and provide appropriate keyword arguments for saving using "save_kwargs"), otherwise
                 only the last target will be shown.
+            plot_type: Options: "average" or "proportion". Whether to plot the average effect size or the proportion of
+                cells expressing the target predicted to be affected by the interaction.
             effect_size_threshold: Lower bound for average effect size to include a particular interaction in the
                 barplot
             fontsize: Size of font for x and y labels
             figsize: Size of figure
-            cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
-                the range is 0. It is recommended to use a sequential colormap (e.g. "Reds", "Blues", "Viridis",
-                etc.). For metric = "fc", if a divergent colormap is not provided, "seismic" will automatically be
-                used.
+            cmap: Colormap to use for barplot. It is recommended to use a sequential colormap (e.g. "Reds", "Blues",
+                "Viridis", etc.).
+            top_n: If given, will only include the top n features in the visualization. If not given, will include all
+                features that pass the "effect_size_threshold".
             save_show_or_return: Whether to save, show or return the figure
                 If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
                 displayed and the associated axis and other object will be return.
@@ -4860,51 +4864,258 @@ class MuSIC_Interpreter(MuSIC):
             interactions = [interaction for interaction in interactions if interaction in effects.columns]
             effects = effects[interactions]
 
-            # Subset to cells expressing the target that are predicted to be expressing the target:
             target_expr = self.adata[:, target].X.toarray().squeeze() > 0
-            target_pred = predictions[target].values.astype(bool)
-            target_true_pos_indices = np.where(target_expr & target_pred)[0]
-            target_expr_sub = self.adata[target_true_pos_indices, :].copy()
+            target_pred = predictions[target]
+            target_pred_np = target_pred.values.astype(bool)
 
-            # Subset effects dataframe to same subset:
-            effects_sub = effects.loc[target_expr_sub.obs_names, :]
-            # Compute average for each column:
-            average_effects = effects_sub.mean(axis=0)
+            if plot_type == "average":
+                # Subset to cells expressing the target that are predicted to be expressing the target:
+                target_true_pos_indices = np.where(target_expr & target_pred_np)[0]
+                target_expr_sub = self.adata[target_true_pos_indices, :].copy()
+                # Subset effects dataframe to same subset:
+                effects_sub = effects.loc[target_expr_sub.obs_names, :]
+                # Compute average for each column:
+                to_plot = effects_sub.mean(axis=0)
+            elif plot_type == "proportion":
+                # Get proportion of cells expressing the target that are predicted to be affected by particular
+                # molecule:
+                effects_sub = effects.loc[target_expr == 1, :]
+                to_plot = (effects_sub > 0).mean(axis=0)
+            else:
+                raise ValueError(f"Unrecognized input for to_plot: {plot_type}. Options are 'average' or 'proportion'.")
 
             # Filter based on the threshold
-            average_effects = average_effects[average_effects > effect_size_threshold]
+            to_plot = to_plot[to_plot > effect_size_threshold]
             # Sort the average_expression in descending order
-            average_effects = average_effects.sort_values(ascending=False)
-            if self.mod_type != "ligand":
-                average_effects.index = [replace_col_with_collagens(idx) for idx in average_effects.index]
-                average_effects.index = [replace_hla_with_hlas(idx) for idx in average_effects.index]
+            to_plot = to_plot.sort_values(ascending=False)
+            if self.mod_type == "ligand":
+                to_plot.index = [replace_col_with_collagens(idx) for idx in to_plot.index]
+                to_plot.index = [replace_hla_with_hlas(idx) for idx in to_plot.index]
+            if top_n is not None:
+                to_plot = to_plot.iloc[:top_n]
 
             # Plot:
             if figsize is None:
                 # Set figure size based on the number of interaction features and targets:
-                m = len(average_effects) / 2
+                m = len(to_plot) / 2
                 figsize = (m, 5)
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
 
-            palette = sns.color_palette(cmap, n_colors=len(average_effects))
+            palette = sns.color_palette(cmap, n_colors=len(to_plot))
             sns.barplot(
-                x=average_effects.index,
-                y=average_effects.values,
+                x=to_plot.index,
+                y=to_plot.values,
                 edgecolor="black",
                 linewidth=1,
                 palette=palette,
                 ax=ax,
             )
-            ax.set_xticklabels(average_effects.index, rotation=90, fontsize=fontsize)
+            ax.set_xticklabels(to_plot.index, rotation=90, fontsize=fontsize)
             ax.set_yticklabels(["{:.2f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
             ax.set_xlabel("Interaction (ligand(s):receptor(s))", fontsize=fontsize)
+            if plot_type == "average":
+                title = f"Average Predicted Interaction Effects on {target}"
+                ylabel = "Mean Coefficient \nMagnitude"
+            elif plot_type == "proportion":
+                if top_n is not None and top_n < 20:
+                    title = f"Proportion of {target}-Expressing Cells \nPredicted to be Affected by Interaction"
+                else:
+                    title = f"Proportion of {target}-Expressing Cells Predicted to be Affected by Interaction"
+                ylabel = "Proportion of Cells"
             ax.set_ylabel("Mean Coefficient \nMagnitude", fontsize=fontsize)
-            ax.set_title(f"Average Predicted Interaction Effects on {target}", fontsize=fontsize)
+            ax.set_title(title, fontsize=fontsize)
 
             # Use the saved name for the AnnData object to define part of the name of the saved file:
             base_name = os.path.basename(self.adata_path)
             adata_id = os.path.splitext(base_name)[0]
             prefix = f"{adata_id}_interaction_barplot_{target}"
+            save_kwargs["ext"] = "png"
+            save_kwargs["dpi"] = 300
+            if "figure_folder" in locals():
+                save_kwargs["path"] = figure_folder
+            # Save figure:
+            save_return_show_fig_utils(
+                save_show_or_return=save_show_or_return,
+                show_legend=False,
+                background="white",
+                prefix=prefix,
+                save_kwargs=save_kwargs,
+                total_panels=1,
+                fig=fig,
+                axes=ax,
+                return_all=False,
+                return_all_list=None,
+            )
+
+    def enriched_tfs_barplot(
+        self,
+        tfs: Optional[Union[str, List[str]]] = None,
+        targets: Optional[Union[str, List[str]]] = None,
+        target_type: Literal["ligand", "receptor", "target_gene"] = "target_gene",
+        plot_type: Literal["average", "proportion"] = "average",
+        effect_size_threshold: float = 0.0,
+        fontsize: Union[None, int] = None,
+        figsize: Union[None, Tuple[float, float]] = None,
+        cmap: str = "Reds",
+        top_n: Optional[int] = None,
+        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+        save_kwargs: Optional[dict] = {},
+    ):
+        """Visualize the top predicted effect sizes for each transcription factor on particular target gene(s).
+
+        Args:
+            tfs: Optional subset of transcription factors to focus on. If not given, will consider all transcription
+                factors that were specified in model fitting.
+            targets: Can optionally specify a subset of the targets to compute this on. If not given, will use all
+                targets that were specified in model fitting. If multiple targets are given, "save_show_or_return"
+                should be "save" (and provide appropriate keyword arguments for saving using "save_kwargs"), otherwise
+                only the last target will be shown.
+            target_type: Set whether the given targets are ligands, receptors or target genes. Used to determine
+                which folder to check for outputs.
+            plot_type: Options: "average" or "proportion". Whether to plot the average effect size or the proportion of
+                cells expressing the target predicted to be affected by the interaction.
+            effect_size_threshold: Lower bound for average effect size to include a particular interaction in the
+                barplot
+            fontsize: Size of font for x and y labels
+            figsize: Size of figure
+            cmap: Colormap to use for barplot. It is recommended to use a sequential colormap (e.g. "Reds", "Blues",
+                "Viridis", etc.).
+            top_n: If given, will only include the top n features in the visualization. If not given, will include
+                all features that pass the "effect_size_threshold".
+            save_show_or_return: Whether to save, show or return the figure
+                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
+                displayed and the associated axis and other object will be return.
+            save_kwargs: A dictionary that will passed to the save_fig function
+                By default it is an empty dictionary and the save_fig function will use the
+                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
+                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
+                keys according to your needs.
+        """
+        config_spateo_rcParams()
+        # But set display DPI to 300:
+        plt.rcParams["figure.dpi"] = 300
+
+        if fontsize is None:
+            fontsize = rcParams.get("font.size")
+
+        if tfs is None:
+            if target_type == "ligand":
+                coeffs = self.downstream_model_ligand_coeffs
+                tfs = self.downstream_model_ligand_design_matrix.columns.tolist()
+            elif target_type == "receptor":
+                coeffs = self.downstream_model_receptor_coeffs
+                tfs = self.downstream_model_receptor_design_matrix.columns.tolist()
+            elif target_type == "target_gene":
+                coeffs = self.downstream_model_target_coeffs
+                tfs = self.downstream_model_target_design_matrix.columns.tolist()
+            tfs = [tf.replace("regulator_", "") for tf in tfs]
+        elif isinstance(tfs, str):
+            interactions = [tfs]
+        elif not isinstance(tfs, list):
+            raise TypeError(f"TFs must be a list or string, not {type(tfs)}.")
+
+        # Predictions:
+        downstream_parent_dir = os.path.dirname(os.path.splitext(self.output_path)[0])
+        id = os.path.splitext(os.path.basename(self.output_path))[0]
+        if target_type == "ligand":
+            folder = "ligand_analysis"
+        elif target_type == "receptor":
+            folder = "receptor_analysis"
+        elif target_type == "target_gene":
+            folder = "target_gene_analysis"
+        pred_path = os.path.join(downstream_parent_dir, "cci_deg_detection", folder, "downstream/predictions.csv")
+        predictions = pd.read_csv(pred_path, index_col=0)
+
+        if save_show_or_return in ["save", "both", "all"]:
+            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
+                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
+            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
+            if not os.path.exists(figure_folder):
+                os.makedirs(figure_folder)
+
+        if targets is None:
+            if target_type == "ligand":
+                targets = self.ligand_for_downstream
+            elif target_type == "receptor":
+                targets = self.receptor_for_downstream
+            elif target_type == "target_gene":
+                targets = self.custom_targets
+        elif isinstance(targets, str):
+            targets = [targets]
+        elif not isinstance(targets, list):
+            raise TypeError(f"targets must be a list or string, not {type(targets)}.")
+
+        for target in targets:
+            # Get coefficients for this key
+            coef = coeffs[target]
+            effects = coef[[col for col in coef.columns if col.startswith("b_") and "intercept" not in col]]
+            effects.columns = [col.split("_")[1] for col in effects.columns]
+            # Subset to only the TFs of interest:
+            tfs = [tf for tf in tfs if tf in effects.columns]
+            effects = effects[tfs]
+
+            target_expr = self.adata[:, target].X.toarray().squeeze() > 0
+            target_pred = predictions[target]
+            target_pred_np = target_pred.values.astype(bool)
+
+            if plot_type == "average":
+                # Subset to cells expressing the target that are predicted to be expressing the target:
+                target_true_pos_indices = np.where(target_expr & target_pred_np)[0]
+                target_expr_sub = self.adata[target_true_pos_indices, :].copy()
+                # Subset effects dataframe to same subset:
+                effects_sub = effects.loc[target_expr_sub.obs_names, :]
+                # Compute average for each column:
+                to_plot = effects_sub.mean(axis=0)
+            elif plot_type == "proportion":
+                # Get proportion of cells expressing the target that are predicted to be affected by particular
+                # molecule:
+                effects_sub = effects.loc[target_expr == 1, :]
+                to_plot = (effects_sub > 0).mean(axis=0)
+            else:
+                raise ValueError(f"Unrecognized input for to_plot: {plot_type}. Options are 'average' or 'proportion'.")
+
+            # Filter based on the threshold
+            to_plot = to_plot[to_plot > effect_size_threshold]
+            # Sort the average_expression in descending order
+            to_plot = to_plot.sort_values(ascending=False)
+            if top_n is not None:
+                to_plot = to_plot.iloc[:top_n]
+
+            # Plot:
+            if figsize is None:
+                # Set figure size based on the number of interaction features and targets:
+                m = len(to_plot) / 2
+                figsize = (m, 5)
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+
+            palette = sns.color_palette(cmap, n_colors=len(to_plot))
+            sns.barplot(
+                x=to_plot.index,
+                y=to_plot.values,
+                edgecolor="black",
+                linewidth=1,
+                palette=palette,
+                ax=ax,
+            )
+            ax.set_xticklabels(to_plot.index, rotation=90, fontsize=fontsize)
+            ax.set_yticklabels(["{:.2f}".format(y) for y in ax.get_yticks()], fontsize=fontsize)
+            ax.set_xlabel("Transcription Factor", fontsize=fontsize)
+            if plot_type == "average":
+                title = f"Average Predicted TF Effects on {target}"
+                ylabel = "Mean Coefficient \nMagnitude"
+            elif plot_type == "proportion":
+                if top_n is not None and top_n < 20:
+                    title = f"Proportion of {target}-Expressing Cells \nPredicted to be Affected by TF"
+                else:
+                    title = f"Proportion of {target}-Expressing Cells Predicted to be Affected by TF"
+                ylabel = "Proportion of Cells"
+            ax.set_ylabel(ylabel, fontsize=fontsize)
+            ax.set_title(title, fontsize=fontsize)
+
+            # Use the saved name for the AnnData object to define part of the name of the saved file:
+            base_name = os.path.basename(self.adata_path)
+            adata_id = os.path.splitext(base_name)[0]
+            prefix = f"{adata_id}_tf_barplot_{target}"
             save_kwargs["ext"] = "png"
             save_kwargs["dpi"] = 300
             if "figure_folder" in locals():

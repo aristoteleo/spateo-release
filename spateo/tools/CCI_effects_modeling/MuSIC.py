@@ -3329,19 +3329,6 @@ class MuSIC:
                     target_row = self.grn.loc[gene_query]
                     target_TFs = target_row[target_row == 1].index.tolist()
 
-                # TFs that can regulate expression of the target-binding TFs:
-                # In finding secondary TFs, search for only those that regulate present target-binding TFs (i.e. the
-                # primary TFs must be expressed above a certain threshold):
-                subset_indices = np.nonzero(y_arr[target].values)[0]
-                subset_adata = self.adata[subset_indices].copy()
-                target_TF_sub = [tf for tf in target_TFs if tf in self.grn.index and tf in self.adata.var_names]
-                expression_data = subset_adata[:, target_TF_sub].X.toarray()
-                proportions = np.mean(expression_data > 0, axis=0)
-                mask = proportions > self.target_expr_threshold
-                target_TF_sub = np.array(target_TF_sub)[mask].tolist()
-                primary_tf_rows = self.grn.loc[target_TF_sub]
-                secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
-
                 # Or which are target-binding TFs not associated directly with the receptor, but which can be
                 # upregulated by the receptor-associated TFs:
                 indirect_TFs = list(set(all_target_TFs) - set(target_TFs))
@@ -3349,7 +3336,7 @@ class MuSIC:
                 mask = self.grn.loc[indirect_TFs, target_TFs].any(axis=1)
                 indirect_TFs_to_keep = list(mask.index)
 
-                target_TFs = list(set(target_TFs + secondary_TFs + indirect_TFs_to_keep))
+                target_TFs = list(set(target_TFs + indirect_TFs_to_keep))
                 if len(target_TFs) == 0:
                     self.logger.info(
                         f"None of the provided regulators could be found to have an association with target gene "
@@ -3357,14 +3344,7 @@ class MuSIC:
                     )
                     continue
 
-                # Cofactors for these transcription factors:
-                target_TFs_cof_int = [tf for tf in target_TFs if tf in self.cof_db.columns]
-                cof_subset = list(self.cof_db[(self.cof_db[target_TFs_cof_int] == 1).any(axis=1)].index)
-                # Other TFs that interact with these transcription factors:
-                target_TFs_i_int = [tf for tf in target_TFs if tf in self.tf_tf_db.columns]
-                intersecting_tf_subset = list(self.tf_tf_db[(self.tf_tf_db[target_TFs_i_int] == 1).any(axis=1)].index)
-
-                target_regulators = target_TFs + cof_subset + intersecting_tf_subset
+                target_regulators = target_TFs
                 # If there are no features, skip fitting for this gene and move on:
                 if len(target_regulators) == 0:
                     self.logger.info(
