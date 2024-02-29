@@ -7183,7 +7183,14 @@ class MuSIC_Interpreter(MuSIC):
         if use_pathways and self.species != "human":
             raise ValueError("Pathway analysis is only available for human samples.")
 
-        kwargs["mod_type"] = "downstream"
+        if use_ligands:
+            kwargs["mod_type"] = "downstream_ligand"
+        elif use_receptors:
+            kwargs["mod_type"] = "downstream_receptor"
+        elif use_pathways:
+            kwargs["mod_type"] = "downstream_pathway"
+        elif use_targets:
+            kwargs["mod_type"] = "downstream_target"
         kwargs["cci_dir"] = cci_dir_path
         kwargs["species"] = self.species
         kwargs["group_key"] = group_key

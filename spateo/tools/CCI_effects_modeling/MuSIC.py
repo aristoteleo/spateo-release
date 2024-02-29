@@ -3176,7 +3176,7 @@ class MuSIC:
             # Check if model has already been fit for this target:
             # Flag to indicate if a matching file name is found
             found = False
-            if self.mod_type == "downstream" and "downstream" not in self.output_path:
+            if "downstream" in self.mod_type and "downstream" not in self.output_path:
                 parent_dir = os.path.join(os.path.dirname(self.output_path), "downstream")
                 if not os.path.exists(parent_dir):
                     os.makedirs(parent_dir)
@@ -3261,7 +3261,7 @@ class MuSIC:
 
                 X = X_orig[:, keep_indices]
             # If downstream analysis model, filter X based on known protein-protein interactions:
-            elif self.mod_type == "downstream":
+            elif "downstream" in self.mod_type:
                 # If target is a complex, or a pathway, look at all rows corresponding to components of the
                 # multi-component target:
                 if self.adata.uns["target_type"] == "pathway" or "_" in target:
@@ -3329,6 +3329,17 @@ class MuSIC:
                     target_row = self.grn.loc[gene_query]
                     target_TFs = target_row[target_row == 1].index.tolist()
 
+                if self.mod_type == "downstream_ligand":
+                    subset_indices = np.nonzero(y_arr[target].values)[0]
+                    subset_adata = self.adata[subset_indices].copy()
+                    target_TF_sub = [tf for tf in target_TFs if tf in self.grn.index and tf in self.adata.var_names]
+                    expression_data = subset_adata[:, target_TF_sub].X.toarray()
+                    proportions = np.mean(expression_data > 0, axis=0)
+                    mask = proportions > self.target_expr_threshold
+                    target_TF_sub = np.array(target_TF_sub)[mask].tolist()
+                    primary_tf_rows = self.grn.loc[target_TF_sub]
+                    secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
+
                 # Or which are target-binding TFs not associated directly with the receptor, but which can be
                 # upregulated by the receptor-associated TFs:
                 indirect_TFs = list(set(all_target_TFs) - set(target_TFs))
@@ -3336,7 +3347,10 @@ class MuSIC:
                 mask = self.grn.loc[indirect_TFs, target_TFs].any(axis=1)
                 indirect_TFs_to_keep = list(mask.index)
 
-                target_TFs = list(set(target_TFs + indirect_TFs_to_keep))
+                if self.mod_type == "downstream_ligand":
+                    target_TFs = list(set(target_TFs + secondary_TFs + indirect_TFs_to_keep))
+                else:
+                    target_TFs = list(set(target_TFs + indirect_TFs_to_keep))
                 if len(target_TFs) == 0:
                     self.logger.info(
                         f"None of the provided regulators could be found to have an association with target gene "
@@ -3396,7 +3410,7 @@ class MuSIC:
             else:
                 self.clip = np.percentile(y, 99.7)
 
-            if self.mod_type == "downstream" and self.bw_fixed:
+            if "downstream" in self.mod_type and self.bw_fixed:
                 if "X_pca" not in self.adata.obsm_keys():
                     self.bw = 0.3
             elif self.mod_type == "downstream" and not self.bw_fixed:
@@ -3615,7 +3629,7 @@ class MuSIC:
 
         directory_path, filename = os.path.split(self.output_path)
 
-        if self.mod_type == "downstream" and "downstream" not in directory_path:
+        if "downstream" in self.mod_type and "downstream" not in directory_path:
             new_containing_dir = "downstream"
             new_directory_path = os.path.join(directory_path, new_containing_dir)
             # Set new output path:
