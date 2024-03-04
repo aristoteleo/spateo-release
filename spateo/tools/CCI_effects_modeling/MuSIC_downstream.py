@@ -808,6 +808,7 @@ class MuSIC_Interpreter(MuSIC):
         self.logger.info(f"{(target_interaction_coef > 0).sum()} {target}-expressing cells affected by {interaction}.")
         if n_neighbors_smooth > 0:
             from scipy.spatial import cKDTree
+
             tree = cKDTree(coords)
             distances, indices = tree.query(coords, k=n_neighbors_smooth + 1)
             smoothed_values = np.zeros(len(target_interaction_coef))
