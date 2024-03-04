@@ -495,7 +495,7 @@ class MuSIC:
         # If not performing upstream tasks, only load the AnnData object:
         if not upstream:
             # For downstream, modify some of the parameters:
-            if self.mod_type == "downstream":
+            if "downstream" in self.mod_type:
                 # Use neighbors in expression space:
                 self.logger.info("Because `mod_type` is `downstream`, using expression neighbors.")
                 self.use_expression_neighbors = True
@@ -631,7 +631,7 @@ class MuSIC:
                 else:
                     self.adata.X += 1
 
-            if self.mod_type == "downstream":
+            if "downstream" in self.mod_type:
                 # For finding upstream associations with ligand
                 self.setup_downstream()
 
@@ -2051,7 +2051,7 @@ class MuSIC:
             neighboring_unsampled: Dictionary containing a mapping between each unsampled point and the closest
                 sampled point
         """
-        if self.mod_type == "downstream":
+        if "downstream" in self.mod_type:
             parent_dir = os.path.join(os.path.dirname(self.output_path), "downstream")
         else:
             parent_dir = os.path.dirname(self.output_path)
@@ -2375,7 +2375,7 @@ class MuSIC:
         """
         sample_names = self.sample_names
 
-        if self.mod_type == "downstream":
+        if "downstream" in self.mod_type:
             parent_dir = os.path.join(os.path.dirname(self.output_path), "downstream")
         else:
             parent_dir = os.path.dirname(self.output_path)
@@ -2485,7 +2485,7 @@ class MuSIC:
 
         if self.minbw is None:
             if self.bw_fixed:
-                if self.mod_type == "downstream":
+                if "downstream" in self.mod_type:
                     # Check for dimensionality reduction:
                     if "X_pca" in self.adata.obsm_keys():
                         coords_key = "X_pca"
@@ -3413,7 +3413,7 @@ class MuSIC:
             if "downstream" in self.mod_type and self.bw_fixed:
                 if "X_pca" not in self.adata.obsm_keys():
                     self.bw = 0.3
-            elif self.mod_type == "downstream" and not self.bw_fixed:
+            elif "downstream" in self.mod_type and not self.bw_fixed:
                 self.bw = int(0.005 * self.n_samples)
 
             if self.bw is not None:
@@ -3721,7 +3721,7 @@ class MuSIC:
                 )
                 return {}, {}
 
-        elif self.mod_type == "downstream" and not hasattr(self, "saved"):
+        elif "downstream" in self.mod_type and not hasattr(self, "saved"):
             parent_dir = os.path.join(parent_dir, "downstream")
         file_list = [f for f in os.listdir(parent_dir) if os.path.isfile(os.path.join(parent_dir, f))]
 

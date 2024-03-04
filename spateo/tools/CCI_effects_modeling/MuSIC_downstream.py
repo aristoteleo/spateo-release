@@ -772,6 +772,7 @@ class MuSIC_Interpreter(MuSIC):
         min_value: Optional[float] = 0,
         zero_opacity: float = 1.0,
         size: float = 2.0,
+        n_neighbors_smooth: Optional[int] = 0,
     ):
         """Quick-visualize the magnitude of the predicted effect on target for a given interaction.
 
@@ -784,6 +785,8 @@ class MuSIC_Interpreter(MuSIC):
                 Defaults to 0.
             zero_opacity: Opacity of points with zero expression. Between 0.0 and 1.0. Default is 1.0.
             size: Size of the points in the scatter plot. Default is 2.
+            n_neighbors_smooth: Number of neighbors to use for smoothing (to make effect patterns more apparent). If 0,
+                no smoothing is applied. Default is 0.
         """
         targets = pd.read_csv(
             os.path.join(os.path.splitext(self.output_path)[0], "design_matrix", "targets.csv"), index_col=0
@@ -803,6 +806,23 @@ class MuSIC_Interpreter(MuSIC):
 
         target_interaction_coef = self.coeffs[target].loc[adata.obs_names, f"b_{interaction}"]
         self.logger.info(f"{(target_interaction_coef > 0).sum()} {target}-expressing cells affected by {interaction}.")
+        if n_neighbors_smooth > 0:
+            from scipy.spatial import cKDTree
+            tree = cKDTree(coords)
+            distances, indices = tree.query(coords, k=n_neighbors_smooth + 1)
+            smoothed_values = np.zeros(len(target_interaction_coef))
+            for i in range(len(smoothed_values)):
+                neighbor_indices = indices[i, 1:]
+                neighbor_coeffs = target_interaction_coef.iloc[neighbor_indices]
+                # Filter to keep only nonzero values
+                nonzero_neighbor_coeffs = neighbor_coeffs[neighbor_coeffs != 0]
+
+                # Proceed only if there are at least 5 nonzero neighbors
+                if len(nonzero_neighbor_coeffs) >= 5:
+                    # Calculate the mean of the nonzero target interaction coefficients
+                    smoothed_values[i] = np.mean(nonzero_neighbor_coeffs)
+            target_interaction_coef = pd.Series(smoothed_values, index=target_interaction_coef.index)
+            self.logger.info(f"{(target_interaction_coef > 0).sum()} {target} affected cells post-smoothing.")
 
         # Lenient w/ the max value cutoff so that the colored dots are more distinct from black background
         cutoff = np.percentile(target_interaction_coef.values, pcutoff)
@@ -4849,7 +4869,7 @@ class MuSIC_Interpreter(MuSIC):
                 os.makedirs(figure_folder)
 
         if targets is None:
-            targets = self.custom_targets
+            targets = self.targets_expr.columns
         elif isinstance(targets, str):
             targets = [targets]
         elif not isinstance(targets, list):
@@ -4998,18 +5018,20 @@ class MuSIC_Interpreter(MuSIC):
         if fontsize is None:
             fontsize = rcParams.get("font.size")
 
-        if tfs is None:
-            if target_type == "ligand":
-                coeffs = self.downstream_model_ligand_coeffs
+        if target_type == "ligand":
+            coeffs = self.downstream_model_ligand_coeffs
+            if tfs is None:
                 tfs = self.downstream_model_ligand_design_matrix.columns.tolist()
-            elif target_type == "receptor":
-                coeffs = self.downstream_model_receptor_coeffs
+        elif target_type == "receptor":
+            coeffs = self.downstream_model_receptor_coeffs
+            if tfs is None:
                 tfs = self.downstream_model_receptor_design_matrix.columns.tolist()
-            elif target_type == "target_gene":
-                coeffs = self.downstream_model_target_coeffs
+        elif target_type == "target_gene":
+            coeffs = self.downstream_model_target_coeffs
+            if tfs is None:
                 tfs = self.downstream_model_target_design_matrix.columns.tolist()
-            tfs = [tf.replace("regulator_", "") for tf in tfs]
-        elif isinstance(tfs, str):
+        tfs = [tf.replace("regulator_", "") for tf in tfs]
+        if isinstance(tfs, str):
             interactions = [tfs]
         elif not isinstance(tfs, list):
             raise TypeError(f"TFs must be a list or string, not {type(tfs)}.")
