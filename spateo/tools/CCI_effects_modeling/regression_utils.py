@@ -383,7 +383,10 @@ def iwls(
         if mask is not None:
             mask = mask.reshape(-1, 1)
             neg_mask = (new_betas < 0) & (mask == -1.0) | (new_betas > 0)
-            new_betas[~neg_mask] = 1e-6
+            coeffs = new_betas[(new_betas > 0)]
+            coeffs = np.append(coeffs, 1e-6)
+            coeff = np.min(coeffs)
+            new_betas[~neg_mask] = coeff
 
         linear_predictor = sparse_dot(x, new_betas)
         y_hat = distr.predict(linear_predictor)

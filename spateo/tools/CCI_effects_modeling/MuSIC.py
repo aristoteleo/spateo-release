@@ -3401,7 +3401,36 @@ class MuSIC:
                 indices = self.subsampled_indices[target]
                 self.x_chunk = np.array(indices)
 
-            feature_mask = None
+            if self.mod_type != "niche":
+                # To avoid false negative coefficients due to collinearity, feature mask based on the global correlation
+                correlations = []
+                for idx in range(X.shape[1]):
+                    # Create a boolean mask where both the current X column and y are nonzero
+                    mask = (X[:, idx].ravel() != 0) & (y.ravel() != 0)
+
+                    # Create a subset of the data using the mask
+                    X_subset = np.squeeze(X[mask, idx])
+                    y_subset = np.squeeze(y[mask])
+
+                    if X_subset.size <= 1:
+                        # X and y are not both nonzero anywhere
+                        correlation = 0.0
+                    else:
+                        # Compute the Pearson correlation coefficient for the subset
+                        if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
+                            correlation = scipy.stats.pearsonr(X_subset, y_subset)[0]
+                        else:
+                            correlation = np.nan  # Not enough data points to compute correlation
+
+                        # Append the correlation to the correlations list
+                    correlations.append(correlation)
+                correlations = np.array(correlations)
+                threshold = np.abs(correlations) < 0.1
+                feature_mask = np.where(threshold, np.abs(correlations), 1.0)
+                global_negative_relationship = correlations < -0.1
+                feature_mask = np.where(global_negative_relationship, feature_mask, 1.0)
+            else:
+                feature_mask = None
 
             # Use y to find the initial appropriate upper and lower bounds for coefficients:
             if self.distr != "gaussian":
@@ -3782,12 +3811,20 @@ class MuSIC:
                     # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
                     # object, save back to file path:
                     all_outputs = pd.concat([betas, standard_errors], axis=1)
-                    # Adjust betas such that entries where the target gene is not expressed are zero:
+                    # Adjust betas such that entries where the target gene is not expressed are zero, and which do
+                    # not have receptor expression/ligand expression in neighborhood to zero:
                     target_expressed = self.adata[:, target].X.toarray()
                     mask = target_expressed == 0
                     indices = np.where(mask)
                     index_cell_names = self.adata.obs_names[indices[0]]
                     all_outputs.loc[index_cell_names] = 0
+
+                    for col in betas.columns:
+                        if "intercept" not in col:
+                            interaction_coeff = col.replace("b_", "")
+                            interaction_coeff = interaction_coeff.replace("se_", "")
+                            mask = self.X_df[interaction_coeff] == 0
+                            all_outputs.loc[all_outputs.index, col] *= mask
 
                     all_outputs.to_csv(os.path.join(parent_dir, file))
                 else:
@@ -3812,12 +3849,20 @@ class MuSIC:
                         # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
                         # object, save back to file path:
                         all_outputs = pd.concat([betas, standard_errors], axis=1)
-                        # Adjust betas such that entries where the target gene is not expressed are zero:
+                        # Adjust betas such that entries where the target gene is not expressed are zero, and which do
+                        # not have receptor expression/ligand expression in neighborhood to zero:
                         target_expressed = self.adata[:, target].X.toarray()
                         mask = target_expressed == 0
                         indices = np.where(mask)
                         index_cell_names = self.adata.obs_names[indices[0]]
                         all_outputs.loc[index_cell_names] = 0
+
+                        for col in betas.columns:
+                            if "intercept" not in col:
+                                interaction_coeff = col.replace("b_", "")
+                                interaction_coeff = interaction_coeff.replace("se_", "")
+                                mask = self.X_df[interaction_coeff] == 0
+                                all_outputs.loc[all_outputs.index, col] *= mask
 
                         all_outputs.to_csv(os.path.join(parent_dir, file))
 

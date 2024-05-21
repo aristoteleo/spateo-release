@@ -371,7 +371,7 @@ def define_spateo_argparse(**kwargs):
         "-tolerance": {"default": 1e-3, "type": float},
         "-max_iter": {"default": 500, "type": int},
         "-patience": {"default": 5, "type": int},
-        "-ridge_lambda": {"default": 0.3, "type": float},
+        "-ridge_lambda": {"default": 0.5, "type": float},
         # Downstream arguments:
         "-search_bw": {
             "type": float,
