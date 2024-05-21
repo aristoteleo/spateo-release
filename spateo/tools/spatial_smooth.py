@@ -22,7 +22,7 @@ def smooth(
     manual_mask: Optional[np.ndarray] = None,
     normalize_W: bool = True,
     return_discrete: bool = False,
-    smoothing_threshold: Optional[int] = None,
+    smoothing_threshold: Optional[float] = None,
     n_subsample: Optional[int] = None,
     return_W: bool = False,
 ) -> Tuple[scipy.sparse.csr_matrix, Optional[Union[np.ndarray, scipy.sparse.csr_matrix]], Optional[np.ndarray]]:
@@ -48,7 +48,8 @@ def smooth(
         return_discrete: Set True to return
         smoothing_threshold: Optional, sets the threshold for smoothing in terms of the number of neighboring cells
             that must express each gene for a cell to be smoothed for that gene. The more gene-expressing neighbors,
-            the more confidence in the biological signal.
+            the more confidence in the biological signal. Can be given as a float between 0 and 1, in which case it
+            will be interpreted as a proportion of the total number of neighbors.
         n_subsample: Optional, sets the number of random neighbor samples to use in the smoothing. If not given,
             will use all neighbors (nonzero weights) for each cell.
         return_W: Set True to return the weights matrix post-processing
@@ -83,7 +84,6 @@ def smooth(
     else:
         # Threshold of zero means all neighboring cells get incorporated into the smoothing operation
         threshold = 0
-    logger.info(f"Threshold for smoothing: {threshold} neighbors")
 
     # If mask is manually given, no need to use cell type & expression information:
     if manual_mask is not None:
@@ -123,7 +123,7 @@ def smooth(
             if scipy.sparse.isspmatrix_csr(jaccard_mat):
                 jaccard_threshold = sparse_matrix_median(jaccard_mat, nonzero_only=True)
             else:
-                jaccard_threshold = np.median(jaccard_mat[jaccard_mat != 0])
+                jaccard_threshold = np.percentile(jaccard_mat[jaccard_mat != 0], 50)
             logger.info(f"Threshold Jaccard score: {jaccard_threshold}")
             # Generate a mask where Jaccard similarities are greater than the threshold, and apply to the weights
             # matrix:
@@ -139,6 +139,10 @@ def smooth(
         row_nonzeros = (W != 0).sum(axis=1)  # Boolean matrix where True=1 for non-zeros, then sum per row
         average_nonzeros = row_nonzeros.mean()  # Average over all rows
     logger.info(f"Average number of non-zero weights per cell: {average_nonzeros}")
+    # If threshold is given as a float, interpret as a proportion of the average number of non-zero weights
+    if 0 < threshold < 1:
+        threshold = int(average_nonzeros * threshold)
+        logger.info(f"Threshold set to {threshold} based on the average number of non-zero weights.")
 
     # Original nonzero entries and values (keep these around):
     initial_nz_rows, initial_nz_cols = X.nonzero()

@@ -811,6 +811,7 @@ def quick_plot_3D_celltypes(
     opacity: float = 1.0,
     title: Optional[str] = None,
     ct_subset: Optional[list] = None,
+    size: float = 2.0,
 ):
     """Using plotly, save a 3D plot where cells are drawn as points and colored by their cell type.
 
@@ -826,6 +827,7 @@ def quick_plot_3D_celltypes(
         title: Optional, can be used to provide a title for the plot
         ct_subset: Optional, used to specify cell types of interest. If given, only cells with these types will be
             plotted, and other cells will be labeled "Other". If None, all cell types will be plotted.
+        size: Size of the points in the plot. Defaults to 2.
     """
     from ..colorlabel import godsnot_102
 
@@ -864,7 +866,7 @@ def quick_plot_3D_celltypes(
             y=y[ct_mask],
             z=z[ct_mask],
             mode="markers",
-            marker=dict(size=2, color=color, opacity=opacity),
+            marker=dict(size=size, color=color, opacity=opacity),
             showlegend=False,
         )
         traces.append(scatter)

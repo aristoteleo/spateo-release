@@ -1727,6 +1727,7 @@ class MuSIC_Interpreter(MuSIC):
                 for g in genes:
                     if g not in top_genes[pos]:
                         consecutive_counts[g] = 0
+            genes_of_interest = list(genes_of_interest)
 
             to_plot = all_fc_coord_sorted[genes_of_interest]
             if to_plot.index.is_numeric():
@@ -4968,6 +4969,72 @@ class MuSIC_Interpreter(MuSIC):
                 return_all_list=None,
             )
 
+    def summarize_interaction_effects(
+        self,
+        interactions: Optional[Union[str, List[str]]] = None,
+        targets: Optional[Union[str, List[str]]] = None,
+        effect_size_threshold: float = 0.0,
+    ):
+        """Summarize the interaction effects for each target gene in dataframe format. Each element will be the
+        average effect size for a particular interaction on a particular target gene.
+
+        Args:
+            interactions: Optional subset of interactions to focus on. If not given, will consider all interactions.
+            targets: Can optionally specify a subset of the targets. If not given, will use all targets.
+            effect_size_threshold: Lower bound for average effect size to include a particular interaction.
+
+        Returns:
+            effects_df: Dataframe with the average effect size for each interaction (rows) on each target gene (
+                columns).
+        """
+        if interactions is None:
+            interactions = self.X_df.columns.tolist()
+        elif isinstance(interactions, str):
+            interactions = [interactions]
+        elif not isinstance(interactions, list):
+            raise TypeError(f"Interactions must be a list or string, not {type(interactions)}.")
+
+        if targets is None:
+            targets = self.targets_expr.columns
+        elif isinstance(targets, str):
+            targets = [targets]
+        elif not isinstance(targets, list):
+            raise TypeError(f"Targets must be a list or string, not {type(targets)}.")
+
+        # Predictions:
+        parent_dir = os.path.dirname(self.output_path)
+        pred_path = os.path.join(parent_dir, "predictions.csv")
+        predictions = pd.read_csv(pred_path, index_col=0)
+
+        # Initialize the DataFrame to store the results
+        effects_df = pd.DataFrame(0.0, index=interactions, columns=targets)
+
+        for target in targets:
+            coef = self.coeffs[target]
+            effects = coef[[col for col in coef.columns if col.startswith("b_") and "intercept" not in col]]
+            effects.columns = [col.split("_")[1] for col in effects.columns]
+            # Subset to only the interactions of interest:
+            interactions = [interaction for interaction in interactions if interaction in effects.columns]
+            effects = effects[interactions]
+
+            target_expr = self.adata[:, target].X.toarray().squeeze() > 0
+            target_pred = predictions[target]
+            target_pred_np = target_pred.values.astype(bool)
+
+            # Subset to cells expressing the target that are predicted to be expressing the target:
+            target_true_pos_indices = np.where(target_expr & target_pred_np)[0]
+            target_expr_sub = self.adata[target_true_pos_indices, :].copy()
+            # Subset effects dataframe to same subset:
+            effects_sub = effects.loc[target_expr_sub.obs_names, :]
+
+            average_effect_size = effects_sub.mean(axis=0)
+            # Filter interactions based on threshold and add to results DataFrame
+            filtered_effect_sizes = average_effect_size[average_effect_size > effect_size_threshold]
+            effects_df[target] = filtered_effect_sizes
+        effects_df = effects_df.replace(np.nan, 0.0)
+
+        return effects_df
+
     def enriched_tfs_barplot(
         self,
         tfs: Optional[Union[str, List[str]]] = None,
@@ -5031,6 +5098,11 @@ class MuSIC_Interpreter(MuSIC):
             coeffs = self.downstream_model_target_coeffs
             if tfs is None:
                 tfs = self.downstream_model_target_design_matrix.columns.tolist()
+        else:
+            raise ValueError(
+                f"Unrecognized input for target_type: {target_type}. Options are 'ligand', 'receptor', "
+                f"or 'target_gene'."
+            )
         tfs = [tf.replace("regulator_", "") for tf in tfs]
         if isinstance(tfs, str):
             interactions = [tfs]
@@ -5057,12 +5129,7 @@ class MuSIC_Interpreter(MuSIC):
                 os.makedirs(figure_folder)
 
         if targets is None:
-            if target_type == "ligand":
-                targets = self.ligand_for_downstream
-            elif target_type == "receptor":
-                targets = self.receptor_for_downstream
-            elif target_type == "target_gene":
-                targets = self.custom_targets
+            targets = coeffs.keys()
         elif isinstance(targets, str):
             targets = [targets]
         elif not isinstance(targets, list):
@@ -5157,266 +5224,93 @@ class MuSIC_Interpreter(MuSIC):
                 return_all_list=None,
             )
 
-    def partial_correlation_interactions(
+    def summarize_tf_effects(
         self,
-        interactions: Optional[Union[str, List[str]]] = None,
+        tfs: Optional[Union[str, List[str]]] = None,
         targets: Optional[Union[str, List[str]]] = None,
-        method: Literal["pearson", "spearman"] = "pearson",
-        filter_interactions_proportion_threshold: Optional[float] = None,
-        plot_zero_threshold: Optional[float] = None,
-        ignore_outliers: bool = True,
-        alternative: Literal["two-sided", "less", "greater"] = "two-sided",
-        fontsize: Union[None, int] = None,
-        figsize: Union[None, Tuple[float, float]] = None,
-        center: Optional[float] = None,
-        cmap: str = "Reds",
-        save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
-        save_kwargs: Optional[dict] = {},
-        save_df: bool = False,
+        target_type: Literal["ligand", "receptor", "target_gene"] = "target_gene",
+        effect_size_threshold: float = 0.0,
     ):
-        """Repression is more difficult to infer from single-cell data- this function computes semi-partial correlations
-        to shed light on interactions that may be overall repressive. In this case, for a given interaction-target pair,
-        all other interactions are used as covariates in a semi-partial correlation (to account for their effects on
-        the target, but not the other interactions which should be more independent of each other compared to the
-        target).
+        """Return a DataFrame with effect sizes for each transcription factor (TF) against given targets.
 
         Args:
-            interactions: Optional, given in the form ligand(s):receptor(s), following the formatting in the design
-                matrix. If not given, will use all interactions that were specified in model fitting.
-            targets: Can optionally specify a subset of the targets to compute this on. If not given, will use all
-                targets that were specified in model fitting.
-            method: Correlation type, options:
-                - Pearson :math:`r` product-moment correlation
-                - Spearman :math:`\\rho` rank-order correlation
-            filter_interactions_proportion_threshold: Optional, if given, will filter out interactions that are
-                predicted to occur in below this proportion of cells beforehand (to reduce the number of computations)
-            plot_zero_threshold: Optional, if given, will mask out values below this threshold in the heatmap (will
-                keep the interactions in the dataframe, just will not color the elements in the plot). Can also be
-                used together with filter_interactions_proportion_threshold.
-            ignore_outliers: Whether to ignore extremely high values for target gene expression when computing partial
-                correlations
-            alternative: Defines the alternative hypothesis, or tail of the partial correlation. Must be one of
-                "two-sided" (default), "greater" or "less". Both "greater" and "less" return a one-sided
-                p-value. "greater" tests against the alternative hypothesis that the partial correlation is
-                positive (greater than zero), "less" tests against the hypothesis that the partial
-                correlation is negative.
-            fontsize: Size of font for x and y labels
-            figsize: Size of figure
-            center: Optional, determines position of the colormap center. Between 0 and 1.
-            cmap: Colormap to use for heatmap. If metric is "number", "proportion", "specificity", the bottom end of
-                the range is 0. It is recommended to use a sequential colormap (e.g. "Reds", "Blues", "Viridis",
-                etc.). For metric = "fc", if a divergent colormap is not provided, "seismic" will automatically be
-                used.
-            save_show_or_return: Whether to save, show or return the figure
-                If "both", it will save and plot the figure at the same time. If "all", the figure will be saved,
-                displayed and the associated axis and other object will be return.
-            save_kwargs: A dictionary that will passed to the save_fig function
-                By default it is an empty dictionary and the save_fig function will use the
-                {"path": None, "prefix": 'scatter', "dpi": None, "ext": 'pdf', "transparent": True, "close": True,
-                "verbose": True} as its parameters. Otherwise you can provide a dictionary that properly modifies those
-                keys according to your needs.
-            save_df: Set True to save the metric dataframe in the end
+            tfs: Optional subset of TFs to focus on. If not given, considers all TFs.
+            targets: Subset of targets. If not given, uses all targets.
+            target_type: Whether the targets are ligands, receptors, or target genes.
+            effect_size_threshold: Lower bound for including an effect size.
+
+        Returns:
+            effects_df: DataFrame with the average effect size for each TF (rows) on each target gene (columns).
         """
-        logger = lm.get_main_logger()
-        config_spateo_rcParams()
-        # But set display DPI to 300:
-        plt.rcParams["figure.dpi"] = 300
-
-        assert method in [
-            "pearson",
-            "spearman",
-        ], 'only "pearson" and "spearman" are supported for partial correlation.'
-
-        if save_show_or_return in ["save", "both", "all"]:
-            if not os.path.exists(os.path.join(os.path.dirname(self.output_path), "figures")):
-                os.makedirs(os.path.join(os.path.dirname(self.output_path), "figures"))
-            figure_folder = os.path.join(os.path.dirname(self.output_path), "figures", "temp")
-            if not os.path.exists(figure_folder):
-                os.makedirs(figure_folder)
-
-        if save_df:
-            output_folder = os.path.join(os.path.dirname(self.output_path), "analyses")
-            if not os.path.exists(output_folder):
-                os.makedirs(output_folder)
-
-        # Filter interactions based on prevalence, if specified:
-        if filter_interactions_proportion_threshold is not None:
-            interaction_proportions = (self.X_df != 0).sum() / self.X_df.shape[0]
-            X_df = self.X_df.loc[:, interaction_proportions >= filter_interactions_proportion_threshold]
+        if target_type == "ligand":
+            coeffs = self.downstream_model_ligand_coeffs
+            if tfs is None:
+                tfs = self.downstream_model_ligand_design_matrix.columns.tolist()
+        elif target_type == "receptor":
+            coeffs = self.downstream_model_receptor_coeffs
+            if tfs is None:
+                tfs = self.downstream_model_receptor_design_matrix.columns.tolist()
+        elif target_type == "target_gene":
+            coeffs = self.downstream_model_target_coeffs
+            if tfs is None:
+                tfs = self.downstream_model_target_design_matrix.columns.tolist()
         else:
-            X_df = self.X_df
-
-        if interactions is None:
-            interactions = X_df.columns.tolist()
-        elif isinstance(interactions, str):
-            interactions = [interactions]
-        elif not isinstance(interactions, list):
-            raise TypeError(f"Interactions must be a list or string, not {type(interactions)}.")
-
-        if not all([c in X_df.columns for c in interactions]):
-            logger.warning(
-                "Some columns given in 'interactions' are not in dataframe. If "
-                "'filter_interactions_proportion_threshold' is given, these may have gotten filtered out. Filtering to "
-                "provided interactions that can be found in the dataframe."
+            raise ValueError(
+                f"Unrecognized input for target_type: {target_type}. Options are 'ligand', 'receptor', "
+                f"or 'target_gene'."
             )
-            interactions = [c for c in interactions if c in X_df.columns]
+        tfs = [tf.replace("regulator_", "") for tf in tfs]
+        if isinstance(tfs, str):
+            tfs = [tfs]
+        elif not isinstance(tfs, list):
+            raise TypeError(f"TFs must be a list or string, not {type(tfs)}.")
+
+        # Predictions:
+        downstream_parent_dir = os.path.dirname(os.path.splitext(self.output_path)[0])
+        if target_type == "ligand":
+            folder = "ligand_analysis"
+        elif target_type == "receptor":
+            folder = "receptor_analysis"
+        elif target_type == "target_gene":
+            folder = "target_gene_analysis"
+        pred_path = os.path.join(downstream_parent_dir, "cci_deg_detection", folder, "downstream/predictions.csv")
+        predictions = pd.read_csv(pred_path, index_col=0)
 
         if targets is None:
-            targets = self.custom_targets
+            targets = coeffs.keys()
         elif isinstance(targets, str):
             targets = [targets]
         elif not isinstance(targets, list):
-            raise TypeError(f"targets must be a list or string, not {type(interactions)}.")
+            raise TypeError(f"targets must be a list or string, not {type(targets)}.")
 
-        # Predictions:
-        parent_dir = os.path.dirname(self.output_path)
-        pred_path = os.path.join(parent_dir, "predictions.csv")
-        predictions = pd.read_csv(pred_path, index_col=0)
+        effects_df = pd.DataFrame(0.0, index=tfs, columns=targets)
 
-        interactions_df = X_df.loc[:, interactions]
-        targets_df = pd.DataFrame(self.adata[:, targets].X.toarray(), columns=targets, index=self.adata.obs_names)
+        for target in targets:
+            # Get coefficients for this key
+            coef = coeffs[target]
+            effects = coef[[col for col in coef.columns if col.startswith("b_") and "intercept" not in col]]
+            effects.columns = [col.split("_")[1] for col in effects.columns]
+            # Subset to only the TFs of interest:
+            tfs = [tf for tf in tfs if tf in effects.columns]
+            effects = effects[tfs]
 
-        # Check that columns are numeric
-        assert all([interactions_df[c].dtype.kind in "bfiu" for c in interactions])
-        assert all([targets_df[c].dtype.kind in "bfiu" for c in targets])
+            target_expr = self.adata[:, target].X.toarray().squeeze() > 0
+            target_pred = predictions[target]
+            target_pred_np = target_pred.values.astype(bool)
 
-        df = pd.concat([interactions_df, targets_df], axis=1)
-        n = df.shape[0]  # Number of samples
+            # Subset to cells expressing the target that are predicted to be expressing the target:
+            target_true_pos_indices = np.where(target_expr & target_pred_np)[0]
+            target_expr_sub = self.adata[target_true_pos_indices, :].copy()
+            # Subset effects dataframe to same subset:
+            effects_sub = effects.loc[target_expr_sub.obs_names, :]
+            # Compute average for each column:
+            average_effect_size = effects_sub.mean(axis=0)
+            # Filter interactions based on threshold and add to results DataFrame
+            filtered_effect_sizes = average_effect_size[average_effect_size > effect_size_threshold]
+            effects_df[target] = filtered_effect_sizes
+        effects_df = effects_df.replace(np.nan, 0.0)
 
-        # Optionally log-transform to remove the effect of outliers:
-        if ignore_outliers:
-            df = df.apply(np.log1p)
-
-        # Get all unique combinations of interactions and targets:
-        combinations = [f"{i}-{j}" for i in interactions for j in targets]
-        all_stats = pd.DataFrame(0, index=combinations, columns=["n_samples", "r", "CI95%"])
-        all_stats["n_samples"] = n
-
-        # Compute partial correlations for each interaction-target pair:
-        for interaction in interactions:
-            other_interactions = [c for c in interactions if c != interaction]
-            for target in targets:
-                # Subset to cells expressing the target that are predicted to be expressing the target:
-                target_expr = self.adata[:, target].X.toarray().squeeze() > 0
-                target_pred = predictions[target].values.astype(bool)
-                target_true_pos_indices = np.where(target_expr & target_pred)[0]
-                target_true_pos_labels = df.index[target_true_pos_indices]
-
-                # The dataframe to compute correlations from will consist of the interaction, the target and all other
-                # interactions as covariates:
-                data = df.loc[target_true_pos_labels, [interaction, target] + other_interactions]
-                k = data.shape[1] - 2  # Number of covariates
-
-                # Compute partial correlation:
-                if method == "spearman":
-                    # Convert the data to rank, similar to R cov()
-                    V = data.rank(na_option="keep").cov()
-                else:
-                    V = data.cov()
-
-                # Inverse covariance matrix:
-                Vi = np.linalg.pinv(V, hermitian=True)
-                Vi_diag = Vi.diagonal()
-                D = np.diag(np.sqrt(1 / Vi_diag))
-                pcor = -1 * (D @ Vi @ D)
-
-                # Semi-partial correlation:
-                with np.errstate(divide="ignore"):
-                    spcor = (
-                        pcor
-                        / np.sqrt(np.diag(V))[..., None]
-                        / np.sqrt(np.abs(Vi_diag - Vi**2 / Vi_diag[..., None])).T
-                    )
-
-                # Remove x covariates
-                r = spcor[1, 0]
-
-                # Two-sided confidence interval:
-                ci = compute_corr_ci(r, (n - k), confidence=95, decimals=6, alternative=alternative)
-                all_stats.loc[f"{interaction}-{target}", "r"] = r
-                all_stats.loc[f"{interaction}-{target}", "CI95%"] = ci
-        all_stats["Interaction"] = [i.split("-")[0] for i in all_stats.index]
-        all_stats["Target"] = [i.split("-")[1] for i in all_stats.index]
-
-        base_name = os.path.basename(self.adata_path)
-        adata_id = os.path.splitext(base_name)[0]
-        prefix = f"{adata_id}_semipartial_correlations"
-
-        if save_df:
-            all_stats.to_csv(os.path.join(output_folder, f"{prefix}_stats.csv"))
-
-        all_stats_to_plot = all_stats.pivot(index="Interaction", columns="Target", values="r")
-        if figsize is None:
-            # Set figure size based on the number of interaction features and targets:
-            m = len(all_stats_to_plot.index) * 40 / 300
-            n = len(all_stats_to_plot.columns) * 40 / 300
-            figsize = (n, m)
-
-        # Plot heatmap:
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-        if plot_zero_threshold is not None:
-            mask = all_stats_to_plot.abs() < plot_zero_threshold
-        else:
-            mask = all_stats_to_plot == 0
-
-        vmax = np.max(np.abs(all_stats_to_plot.values))
-        m = sns.heatmap(
-            all_stats_to_plot,
-            square=True,
-            linecolor="grey",
-            linewidths=0.3,
-            cbar_kws={"label": "Partial correlation", "location": "top"},
-            cmap=cmap,
-            center=center,
-            vmin=-vmax,
-            vmax=vmax,
-            mask=mask,
-            ax=ax,
-        )
-
-        # Outer frame:
-        for _, spine in m.spines.items():
-            spine.set_visible(True)
-            spine.set_linewidth(0.75)
-
-        # Adjust colorbar settings:
-        divider = make_axes_locatable(ax)
-        # Append axes to the top of the plot, where the colorbar will be placed
-        if all_stats_to_plot.shape[0] > all_stats_to_plot.shape[1]:
-            cax = divider.append_axes("top", size="30%", pad=0)
-        else:
-            cax = divider.append_axes("top", size="30%", pad="30%")
-
-        # Create the colorbar manually in the appended axes
-        cbar = plt.colorbar(m.collections[0], cax=cax, orientation="horizontal")
-        cbar.set_label("Correlation", fontsize=fontsize * 1.5, labelpad=10)
-        cbar.ax.xaxis.set_ticks_position("top")  # Move ticks to the top
-        cbar.ax.xaxis.set_label_position("top")  # Move the label (title) to the top
-        cbar.ax.tick_params(labelsize=fontsize * 1.5)
-        cbar.ax.set_aspect(0.02)
-
-        plt.xlabel("Target gene", fontsize=fontsize * 1.1)
-        plt.ylabel("Interaction", fontsize=fontsize * 1.1)
-        plt.title("Partial correlation", fontsize=fontsize * 1.25)
-        plt.tight_layout()
-
-        # Save figure:
-        save_kwargs["ext"] = "png"
-        save_kwargs["dpi"] = 300
-        if "figure_folder" in locals():
-            save_kwargs["path"] = figure_folder
-        save_return_show_fig_utils(
-            save_show_or_return=save_show_or_return,
-            show_legend=False,
-            background="white",
-            prefix=prefix,
-            save_kwargs=save_kwargs,
-            total_panels=1,
-            fig=fig,
-            axes=ax,
-            return_all=False,
-            return_all_list=None,
-        )
+        return effects_df
 
     def get_effect_potential(
         self,
@@ -7831,6 +7725,7 @@ class MuSIC_Interpreter(MuSIC):
         use_ligand_targets: bool = False,
         use_receptor_targets: bool = False,
         use_target_gene_targets: bool = True,
+        use_target_gene_tf_targets: bool = False,
         top_n_targets: Optional[int] = None,
         fontsize: Union[None, int] = None,
         figsize: Union[None, Tuple[float, float]] = None,
@@ -7851,8 +7746,10 @@ class MuSIC_Interpreter(MuSIC):
                 "use_target_gene_targets".
             use_receptor_targets: Whether receptors should be used as targets, i.e. if "interaction" is a TF and the
                 target genes being influenced by the TF are receptors. If True, will ignore "use_target_gene_targets".
-            use_target_gene_targets: Whether target genes should be used as targets, i.e. if "interaction" is a TF and
-                the target genes being influenced by the TF are target genes (that are not ligands or receptors).
+            use_target_gene_targets: Whether target genes should be used as targets, i.e. if "interaction" is an L:R
+                interaction
+            use_target_gene_tf_targets: Whether target genes should be used as targets, i.e. if "interaction" is a TF
+                and the target genes being influenced by the TF are target genes (that are not ligands or receptors).
             top_n_targets: Number of top targets to visualize. Defaults to 10.
             fontsize: Font size to determine size of the axis labels, ticks, title, etc.
             figsize: Width and height of plotting window
@@ -7928,6 +7825,9 @@ class MuSIC_Interpreter(MuSIC):
         # For target genes, the regulating features can be ligand/L:R, or TFs:
         elif use_target_gene_targets and interaction in self.design_matrix.columns:
             all_coeffs = self.coeffs
+        elif use_target_gene_tf_targets:
+            if f"regulator_{interaction}" not in self.downstream_model_target_design_matrix.columns:
+                raise ValueError(f"Feature {interaction} not found in design matrix.")
         elif (
             use_target_gene_targets and f"regulator_{interaction}" in self.downstream_model_target_design_matrix.columns
         ):
@@ -7986,596 +7886,6 @@ class MuSIC_Interpreter(MuSIC):
             return_all=False,
             return_all_list=None,
         )
-
-    def visualize_intercellular_network(
-        self,
-        lr_model_output_dir: str,
-        target_subset: Optional[Union[List[str], str]] = None,
-        top_n_targets: Optional[int] = 3,
-        ligand_subset: Optional[Union[List[str], str]] = None,
-        receptor_subset: Optional[Union[List[str], str]] = None,
-        regulator_subset: Optional[Union[List[str], str]] = None,
-        include_tf_ligand: bool = False,
-        include_tf_target: bool = True,
-        cell_subset: Optional[Union[List[str], str]] = None,
-        select_n_lr: int = 5,
-        select_n_tf: int = 3,
-        effect_size_threshold: float = 0.2,
-        coexpression_threshold: float = 0.2,
-        aggregate_method: Literal["mean", "median", "sum"] = "mean",
-        cmap_neighbors: str = "autumn",
-        cmap_default: str = "winter",
-        scale_factor: float = 3,
-        layout: Literal["random", "circular", "kamada", "planar", "spring", "spectral", "spiral"] = "planar",
-        node_fontsize: int = 8,
-        edge_fontsize: int = 8,
-        arrow_size: int = 1,
-        node_label_position: str = "middle center",
-        edge_label_position: str = "middle center",
-        upper_margin: float = 40,
-        lower_margin: float = 20,
-        left_margin: float = 50,
-        right_margin: float = 50,
-        title: Optional[str] = None,
-        save_path: Optional[str] = None,
-        save_id: Optional[str] = None,
-        save_ext: str = "png",
-        dpi: int = 300,
-    ):
-        """After fitting model, construct and visualize the inferred intercellular regulatory network. Effect sizes (
-        edge values) will be averaged over cells specified by "cell_subset", otherwise all cells will be used.
-
-        Args:
-            lr_model_output_dir: Path to directory containing the outputs of the L:R model. This function will assume
-                :attr `output_path` is the output path for the downstream model, i.e. connecting regulatory
-                factors/TFs to ligands/receptors/targets.
-            target_subset: Optional, can be used to specify target genes downstream of signaling interactions of
-                interest. If not given, will use all targets used for the model.
-            top_n_targets: Optional, can be used to specify the number of top targets to include in the network
-                instead of providing full list of custom targets ("top" judged by fraction of the chosen subset of
-                cells each target is expressed in).
-            ligand_subset: Optional, can be used to specify subset of ligands. If not given, will use all ligands
-                present in any of the interactions for the model.
-            receptor_subset: Optional, can be used to specify subset of receptors. If not given, will use all receptors
-                present in any of the interactions for the model.
-            regulator_subset: Optional, can be used to specify subset of regulators (transcription factors,
-                etc.). If not given, will use all regulatory molecules used in fitting the downstream model(s).
-            include_tf_ligand: Whether to include TF-ligand interactions in the network. While providing more
-                information, this can make it more difficult to interpret the plot. Defaults to False.
-            include_tf_target: Whether to include TF-target interactions in the network. While providing more
-                information, this can make it more difficult to interpret the plot. Defaults to True.
-            cell_subset: Optional, can be used to specify subset of cells to use for averaging effect sizes. If not
-                given, will use all cells. Can be either:
-                    - A list of cell IDs (must be in the same format as the cell IDs in the adata object)
-                    - Cell type label(s)
-            select_n_lr: Threshold for filtering out edges with low effect sizes, by selecting up to the top n L:R
-                interactions per target (fewer can be selected if the top n are all zero). Default is 5.
-            select_n_tf: Threshold for filtering out edges with low effect sizes, by selecting up to the top n
-                TFs. For TF-ligand edges, will select the top n for each receptor (with a theoretical maximum of n *
-                number of receptors in the graph).
-            coexpression_threshold: For receptor-target, TF-ligand, TF-receptor links, only draw edges if the
-                molecule pairs in question are coexpressed in > threshold number of cells.
-            aggregate_method: Only used when "include_tf_ligand" is True. For the TF-ligand array, each row will
-                be replaced by the mean, median or sum of the neighboring rows. Defaults to "mean".
-            cmap_neighbors: Colormap to use for nodes belonging to "source"/receiver cells. Defaults to
-                yellow-orange-red.
-            cmap_default: Colormap to use for nodes belonging to "neighbor"/sender cells. Defaults to
-                purple-blue-green.
-            scale_factor: Adjust to modify the size of the nodes
-            layout: Used for positioning nodes on the plot. Options:
-                - "random": Randomly positions nodes ini the unit square.
-                - "circular": Positions nodes on a circle.
-                - "kamada": Positions nodes using Kamada-Kawai path-length cost-function.
-                - "planar": Positions nodes without edge intersections, if possible.
-                - "spring": Positions nodes using Fruchterman-Reingold force-directed algorithm.
-                - "spectral": Positions nodes using eigenvectors of the graph Laplacian.
-                - "spiral": Positions nodes in a spiral layout.
-            node_fontsize: Font size for node labels
-            edge_fontsize: Font size for edge labels
-            arrow_size: Size of the arrow for directed graphs, by default 1
-            node_label_position: Position of node labels. Options: 'top left', 'top center', 'top right', 'middle left',
-                'middle center', 'middle right', 'bottom left', 'bottom center', 'bottom right'
-            edge_label_position: Position of edge labels. Options: 'top left', 'top center', 'top right', 'middle left',
-                'middle center', 'middle right', 'bottom left', 'bottom center', 'bottom right'
-            title: Optional, title for the plot. If not given, will use the AnnData object path to derive this.
-            upper_margin: Margin between top of the plot and top of the figure
-            lower_margin: Margin between bottom of the plot and bottom of the figure
-            left_margin: Margin between left of the plot and left of the figure
-            right_margin: Margin between right of the plot and right of the figure
-            save_path: Optional, directory to save figure to. If not given, will save to the parent folder of the
-                path provided for :attr `output_path` in the argument specification.
-            save_id: Optional unique identifier that can be used in saving. If not given, will use the AnnData
-                object path to derive this.
-            save_ext: File extension to save figure as. Default is "png".
-            dpi: Resolution to save figure at. Default is 300.
-
-
-        Returns:
-            G: Graph object, such that it can be separately plotted in interactive window.
-            sizing_list: List of node sizes, for use in interactive window.
-            color_list: List of node colors, for use in interactive window.
-        """
-
-        logger = lm.get_main_logger()
-        config_spateo_rcParams()
-        # Set display DPI:
-        plt.rcParams["figure.dpi"] = dpi
-
-        # Check that self.output_path corresponds to the downstream model if "regulator_subset" is given:
-        downstream_model_output_dir = os.path.dirname(self.output_path)
-        if (
-            not os.path.exists(os.path.join(downstream_model_output_dir, "cci_deg_detection"))
-            and regulator_subset is not None
-        ):
-            raise FileNotFoundError(
-                "No downstream model was ever constructed, however this is necessary to include "
-                "regulatory factors in the network."
-            )
-
-        # Check that lr_model_output_dir points to the correct folder for the L:R model- to do this check for
-        # predictions file directly in the folder (for downstream models, predictions are further nested in the
-        # "cci_deg_detection" derived subdirectories):
-        if not os.path.exists(os.path.join(lr_model_output_dir, "predictions.csv")):
-            raise FileNotFoundError(
-                "Check that provided `lr_model_output_dir` points to the correct folder for the "
-                "L:R model. For example, if the specified model output path is "
-                "outer/folder/results.csv, this should be outer/folder."
-            )
-        lr_model_output_files = os.listdir(lr_model_output_dir)
-        # Get L:R names from the design matrix:
-        for file in lr_model_output_files:
-            path = os.path.join(lr_model_output_dir, file)
-            if os.path.isdir(path):
-                if file not in ["analyses", "significance", "networks", ".ipynb_checkpoints"]:
-                    design_mat = pd.read_csv(os.path.join(path, "design_matrix", "design_matrix.csv"), index_col=0)
-        lr_to_target_feature_names = design_mat.columns.tolist()
-
-        # Get spatial weights- only needed if "include_tf_ligand" is True:
-        if include_tf_ligand:
-            for file in lr_model_output_files:
-                path = os.path.join(lr_model_output_dir, file)
-                if os.path.isdir(path):
-                    if file not in ["analyses", "significance", "networks", ".ipynb_checkpoints"]:
-                        spatial_weights_membrane_bound_obj = np.load(
-                            os.path.join(path, "spatial_weights", "spatial_weights_membrane_bound.npz")
-                        )
-                        membrane_bound_data = spatial_weights_membrane_bound_obj["data"]
-                        membrane_bound_indices = spatial_weights_membrane_bound_obj["indices"]
-                        membrane_bound_indptr = spatial_weights_membrane_bound_obj["indptr"]
-                        membrane_bound_shape = spatial_weights_membrane_bound_obj["shape"]
-
-                        spatial_weights_membrane_bound = scipy.sparse.csr_matrix(
-                            (membrane_bound_data, membrane_bound_indices, membrane_bound_indptr),
-                            shape=membrane_bound_shape,
-                        )
-                        # Row and column indices of nonzero elements:
-                        rows, cols = spatial_weights_membrane_bound.nonzero()
-                        all_pairs_membrane_bound = collections.defaultdict(list)
-                        for i, j in zip(rows, cols):
-                            all_pairs_membrane_bound[i].append(j)
-
-                        spatial_weights_secreted = np.load(
-                            os.path.join(path, "spatial_weights", "spatial_weights_secreted.npz")
-                        )
-                        secreted_data = spatial_weights_secreted["data"]
-                        secreted_indices = spatial_weights_secreted["indices"]
-                        secreted_indptr = spatial_weights_secreted["indptr"]
-                        secreted_shape = spatial_weights_secreted["shape"]
-
-                        spatial_weights_secreted = scipy.sparse.csr_matrix(
-                            (secreted_data, secreted_indices, secreted_indptr), shape=secreted_shape
-                        )
-                        # Row and column indices of nonzero elements:
-                        rows, cols = spatial_weights_secreted.nonzero()
-                        all_pairs_secreted = collections.defaultdict(list)
-                        for i, j in zip(rows, cols):
-                            all_pairs_secreted[i].append(j)
-
-        # If subset for ligands and/or receptors is not specified, use all that were included in the model:
-        if ligand_subset is None:
-            ligand_subset = []
-        if receptor_subset is None:
-            receptor_subset = []
-
-        for lig_rec in lr_to_target_feature_names:
-            lig, rec = lig_rec.split(":")
-            lig_split = lig.split("/")
-            for l in lig_split:
-                if l not in ligand_subset:
-                    ligand_subset.append(l)
-
-            if rec not in receptor_subset:
-                receptor_subset.append(rec)
-
-        downstream_model_dir = os.path.dirname(self.output_path)
-
-        # Get the names of target genes from the L:R-to-target model from input to lr_model_output_dir:
-        all_targets = []
-        target_to_file = {}
-        for file in lr_model_output_files:
-            if file.endswith(".csv") and "predictions" not in file:
-                parts = file.split("_")
-                target_str = parts[-1].replace(".csv", "")
-                # And map the target to the file name:
-                target_to_file[target_str] = os.path.join(lr_model_output_dir, file)
-                all_targets.append(target_str)
-
-        # Check if any downstream models exist (TF-ligand, TF-receptor, or TF-target):
-        if os.path.exists(os.path.join(downstream_model_dir, "cci_deg_detection")):
-            if os.path.exists(os.path.join(downstream_model_dir, "cci_deg_detection", "ligand_analysis")):
-                # Get the names of target genes from the TF-to-ligand model by looking within the output directory
-                # containing :attr `output_path`:
-                all_modeled_ligands = []
-                ligand_to_file = {}
-                ligand_folder = os.path.join(downstream_model_dir, "cci_deg_detection", "ligand_analysis")
-                ligand_files = os.listdir(ligand_folder)
-                for file in ligand_files:
-                    if file.endswith(".csv"):
-                        parts = file.split("_")
-                        ligand_str = parts[-1].replace(".csv", "")
-                        # And map the ligand to the file name:
-                        ligand_to_file[ligand_str] = os.path.join(ligand_folder, file)
-                        all_modeled_ligands.append(ligand_str)
-
-                # Get TF names from the design matrix:
-                for file in ligand_files:
-                    path = os.path.join(ligand_folder, file)
-                    if file != ".ipynb_checkpoints":
-                        if os.path.isdir(path):
-                            design_mat = pd.read_csv(
-                                os.path.join(path, "downstream_design_matrix", "design_matrix.csv"), index_col=0
-                            )
-                tf_to_ligand_feature_names = [col.replace("regulator_", "") for col in design_mat.columns]
-
-            if os.path.exists(os.path.join(downstream_model_dir, "cci_deg_detection", "target_gene_analysis")):
-                # Get the names of target genes from the TF-to-target model by looking within the output directory
-                # containing :attr `output_path`:
-                all_modeled_targets = []
-                modeled_target_to_file = {}
-                target_folder = os.path.join(downstream_model_dir, "cci_deg_detection", "target_gene_analysis")
-                target_files = os.listdir(target_folder)
-                for file in target_files:
-                    if file.endswith(".csv"):
-                        parts = file.split("_")
-                        target_str = parts[-1].replace(".csv", "")
-                        # And map the target to the file name:
-                        modeled_target_to_file[target_str] = os.path.join(target_folder, file)
-                        all_modeled_targets.append(target_str)
-
-                # Get TF names from the design matrix:
-                for file in target_files:
-                    path = os.path.join(target_folder, file)
-                    if file != ".ipynb_checkpoints":
-                        if os.path.isdir(path):
-                            design_mat = pd.read_csv(
-                                os.path.join(path, "downstream_design_matrix", "design_matrix.csv"), index_col=0
-                            )
-                tf_to_target_feature_names = [col.replace("regulator_", "") for col in design_mat.columns]
-
-        if save_path is not None:
-            save_folder = os.path.join(os.path.dirname(save_path), "networks")
-        else:
-            save_folder = os.path.join(os.path.dirname(self.output_path), "networks")
-
-        if not os.path.exists(save_folder):
-            os.makedirs(save_folder)
-
-        if cell_subset is not None:
-            if not isinstance(cell_subset, list):
-                cell_subset = [cell_subset]
-
-            if all(label in set(self.adata.obs[self.group_key]) for label in cell_subset):
-                adata = self.adata[self.adata.obs[self.group_key].isin(cell_subset)].copy()
-                # Get numerical indices corresponding to cells in the subset:
-                cell_ids = [i for i, name in enumerate(self.adata.obs_names) if name in adata.obs_names]
-            else:
-                adata = self.adata[cell_subset, :].copy()
-                cell_ids = [i for i, name in enumerate(self.adata.obs_names) if name in adata.obs_names]
-        else:
-            adata = self.adata.copy()
-            cell_ids = [i for i, name in enumerate(self.adata.obs_names)]
-
-        targets = all_targets if target_subset is None else target_subset
-
-        # Check for existing dataframes that will be used to construct the network:
-        if os.path.exists(os.path.join(save_folder, "lr_to_target.csv")):
-            lr_to_target_df = pd.read_csv(os.path.join(save_folder, "lr_to_target.csv"), index_col=0)
-        else:
-            # Construct L:R-to-target dataframe:
-            lr_to_target_df = pd.DataFrame(0, index=lr_to_target_feature_names, columns=targets)
-
-            for target in targets:
-                # Load file corresponding to this target:
-                file_name = target_to_file[target]
-                file_path = os.path.join(lr_model_output_dir, file_name)
-                target_df = pd.read_csv(file_path, index_col=0)
-                target_df = target_df.loc[:, [col for col in target_df.columns if col.startswith("b_")]]
-                # Compute average predicted absolute value effect size over the chosen cell subset to populate
-                # L:R-to-target dataframe:
-                target_df.columns = [col.replace("b_", "") for col in target_df.columns if col.startswith("b_")]
-                lr_to_target_df.loc[:, target] = target_df.iloc[cell_ids, :].abs().mean(axis=0)
-
-            # Save L:R-to-target dataframe:
-            lr_to_target_df.to_csv(os.path.join(save_folder, "lr_to_target.csv"))
-
-        # Graph construction:
-        G = nx.DiGraph()
-
-        # Identify nodes and edges from L:R-to-target dataframe:
-        for target in targets:
-            top_n_lr = lr_to_target_df.nlargest(n=select_n_lr, columns=target).index.tolist()
-            # Or check if any of the top n should reasonably not be included- compare to :attr target_expr_threshold
-            # of the maximum in the array (because these values can be variable):
-            reference_value = lr_to_target_df.max().max()
-            top_n_lr = [
-                lr
-                for lr in top_n_lr
-                if lr_to_target_df.loc[lr, target] >= (self.target_expr_threshold * reference_value)
-            ]
-
-            target_label = f"Target: {target}"
-            if not G.has_node(target_label):
-                G.add_node(target_label, ID=target_label)
-
-            for lr in top_n_lr:
-                ligand_receptor_pair = lr
-                ligands, receptor = ligand_receptor_pair.split(":")
-
-                # Check if ligands and receptors are in their respective subsets
-                if receptor in receptor_subset and any(lig in ligand_subset for lig in ligands.split("/")):
-                    # For ligands separated by "/", check expression of each individual ligand in the AnnData object,
-                    # keep ligands that are sufficiently expressed in the specified cell subset:
-                    for lig in ligands.split("/"):
-                        num_expr = (adata[:, lig].X > 0).sum()
-                        expr_percent = num_expr / adata.shape[0]
-                        pass_threshold = expr_percent >= self.target_expr_threshold
-
-                        if lig in ligand_subset and pass_threshold:
-                            # For the intents of this network, the ligand refers to ligand expressed in neighboring
-                            # cells:
-                            lig = f"Neighbor {lig}"
-                            if not G.has_node(lig):
-                                G.add_node(lig, ID=lig)
-                            if not G.has_node(receptor):
-                                G.add_node(receptor, ID=receptor)
-                            G.add_edge(lig, receptor, Type="L:R", Coexpression=None)
-
-                    # Check if receptor and target are coexpressed enough to draw connection:
-                    receptor_expression = (adata[:, receptor].X > 0).toarray().flatten()
-                    target_expression = (adata[:, target].X > 0).toarray().flatten()
-                    coexpression = np.sum(receptor_expression * target_expression)
-                    # Threshold based on proportion of cells expressing receptor:
-                    num_coexpressed_threshold = coexpression_threshold * np.sum(receptor_expression)
-                    if coexpression >= num_coexpressed_threshold:
-                        G.add_edge(
-                            receptor,
-                            target_label,
-                            Type="L:R effect",
-                            Coexpression=coexpression / np.sum(receptor_expression),
-                        )
-
-        # Incorporate TF-to-ligand connections based on existing L:R-target links:
-        if "tf_to_ligand_feature_names" in locals() and include_tf_ligand:
-            # Intersection between graph ligands and modeled ligands:
-            graph_ligands = [node.replace("Neighbor ", "") for node in G.nodes if node.startswith("Neighbor")]
-            valid_ligands = [lig for lig in graph_ligands if lig in all_modeled_ligands]
-            if len(valid_ligands) == 0:
-                raise ValueError(
-                    "No modeled ligands are included among the graph ligands. We recommend "
-                    "re-running the downstream model with a new set of ligands, taken from the "
-                    "L:R interactions used for the L:R-to-target model."
-                )
-
-            for ligand in valid_ligands:
-                ligand_expression_mask = (adata[:, ligand].X > 0).toarray().flatten()
-                file_name = ligand_to_file[ligand]
-                file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "ligand_analysis", file_name)
-                ligand_df = pd.read_csv(file_path, index_col=0)
-                ligand_df = ligand_df.loc[:, [col for col in ligand_df.columns if col.startswith("b_")]]
-                ligand_df.columns = [col.replace("b_", "") for col in ligand_df.columns if col.startswith("b_")]
-                if regulator_subset is not None:
-                    ligand_df = ligand_df.loc[:, [col for col in ligand_df.columns if col in regulator_subset]]
-
-                # For each ligand in the L:R-to-target DF, consider the subset of cells expressing the receptor
-                # the ligand is associated with-
-                # Construct the TF-to-ligand DF based only on the subset of cells that are neighbors for cells
-                # expressing the receptor and that also express the ligand.
-                # First determine whether the ligand is secreted or membrane-bound:
-                matching_rows = self.lr_db[self.lr_db["from"] == ligand]
-                is_secreted = (
-                    matching_rows["type"].str.contains("Secreted Signaling").any()
-                    or matching_rows["type"].str.contains("ECM-Receptor").any()
-                )
-                # Select the appropriate dictionary of neighboring cells
-                neighbors_dict = all_pairs_secreted if is_secreted else all_pairs_membrane_bound
-
-                # Get receptors on the other end of edges corresponding to this ligand:
-                receptors = set([edge[1] for edge in G.edges if edge[0] == f"Neighbor {ligand}"])
-                # Find the top n TFs for each receptor (connections will be made from TF to ligand to receptor,
-                # so the primary node might be slightly different for each receptor):
-                for receptor in receptors:
-                    # Indices of cells expressing the receptor:
-                    receptor_expression_mask = (adata[:, receptor].X > 0).toarray().flatten()
-                    receptor_expressing_cells_indices = np.where(receptor_expression_mask)[0]
-                    mean_values_temp = pd.DataFrame(
-                        index=range(len(receptor_expressing_cells_indices)), columns=ligand_df.columns
-                    )
-
-                    # Processing of ligand_df - rather than measuring TF-ligand connection for each cell,
-                    # mean_values_temp will instead reflect the average TF-ligand connection over all neighbors of that
-                    # cell.
-                    # This is necessary because the network is an intercellular network, so the receptor-target edge
-                    # and TF-ligand edge coming from the same cell would be misleading:
-                    ligand_df_mod = ligand_df.iloc[receptor_expressing_cells_indices, :]
-                    # Get the neighboring cells for each receptor-expressing cell:
-                    for i, idx in enumerate(receptor_expressing_cells_indices):
-                        # Get neighboring indices for each index from neighbors_dict
-                        neighboring_indices = neighbors_dict.get(idx, [])
-                        if neighboring_indices:
-                            mean_vals_over_neighbors = ligand_df.loc[neighboring_indices, :].mean(axis=0)
-                            mean_values_temp.iloc[i, :] = mean_vals_over_neighbors
-                    # Get top TFs for this receptor:
-                    # First, take mean effect size for each column:
-                    mean_tf_ligand_effect_size = mean_values_temp.mean(axis=0)
-                    top_n_tf = mean_tf_ligand_effect_size.sort_values(ascending=False).index[:select_n_tf]
-                    # For each TF in top_n, if TF and ligand pass coexpression threshold (optional), check if node
-                    # exists for TF (if not create it) and add edge from TF to ligand:
-                    for tf in top_n_tf:
-                        if coexpression_threshold is not None:
-                            tf_expression = (adata[:, tf].X > 0).toarray().flatten()
-                            coexpression = np.sum(tf_expression * ligand_expression_mask)
-                            # Threshold based on proportion of cells expressing ligand:
-                            num_coexpressed_threshold = coexpression_threshold * np.sum(ligand_expression_mask)
-                            if coexpression < coexpression_threshold:
-                                continue
-                        tf = f"Neighbor TF: {tf}"
-                        if not G.has_node(tf):
-                            G.add_node(tf, ID=tf)
-                        G.add_edge(
-                            tf,
-                            f"Neighbor {ligand}",
-                            Type="TF:L",
-                            Coexpression=coexpression / np.sum(ligand_expression_mask),
-                        )
-
-        # Add TF-to-target connections:
-        if "tf_to_target_feature_names" in locals() and include_tf_target:
-            graph_targets = [node.replace("Target: ", "") for node in G.nodes if node.startswith("Target")]
-            valid_targets = [target for target in graph_targets if target in all_modeled_targets]
-            if len(valid_targets) == 0:
-                raise ValueError(
-                    "No modeled targets are included among the graph targets. We recommend "
-                    "re-running the downstream model with a new set of targets, taken from the "
-                    "targets used for the L:R-to-target model."
-                )
-
-            # Construct TF to target dataframe:
-            tf_to_target_df = pd.DataFrame(0, index=tf_to_target_feature_names, columns=valid_targets)
-
-            for target in valid_targets:
-                target_expression_mask = (adata[:, target].X > 0).toarray().flatten()
-                file_name = modeled_target_to_file[target]
-                file_path = os.path.join(downstream_model_dir, "cci_deg_detection", "target_gene_analysis", file_name)
-                target_df = pd.read_csv(file_path, index_col=0)
-                target_df = target_df.loc[:, [col for col in target_df.columns if col.startswith("b_")]]
-                target_df.columns = [col.replace("b_", "") for col in target_df.columns if col.startswith("b_")]
-                if regulator_subset is not None:
-                    target_df = target_df.loc[:, [col for col in target_df.columns if col in regulator_subset]]
-
-                # Compute average predicted effect size over the chosen cell subset to populate the TF-to-target
-                # dataframe:
-                tf_to_target_df.loc[:, target] = target_df.iloc[cell_ids, :].mean(axis=0)
-
-                # Add edges from TFs to targets:
-                top_n_tf = tf_to_target_df.nlargest(n=select_n_tf, columns=target).index.tolist()
-                for tf in top_n_tf:
-                    if coexpression_threshold is not None:
-                        tf_expression = (adata[:, tf].X > 0).toarray().flatten()
-                        coexpression = np.sum(tf_expression * target_expression_mask)
-                        # Threshold based on proportion of cells expressing target:
-                        num_coexpressed_threshold = coexpression_threshold * np.sum(target_expression_mask)
-                        if coexpression < coexpression_threshold:
-                            continue
-                    if not G.has_node(f"TF: {tf}"):
-                        G.add_node(f"TF: {tf}", ID=f"TF: {tf}")
-                    G.add_edge(
-                        f"TF: {tf}",
-                        f"Target: {target}",
-                        Type="TF:T",
-                        Coexpression=coexpression / np.sum(target_expression_mask),
-                    )
-
-        # Set colors for nodes- for neighboring cell ligands + TFs, use a distinct colormap (and same w/ receptors,
-        # targets and TFs for source cells)- color both on gradient based on number of connections:
-        color_list = []
-        sizing_list = []
-        sizing_neighbor = {}
-        sizing_nonneighbor = {}
-
-        cmap_neighbor = plt.cm.get_cmap(cmap_neighbors)
-        cmap_non_neighbor = plt.cm.get_cmap(cmap_default)
-
-        # Calculate node degrees and set color and size based on the degree and label
-        n_nodes = len(G.nodes())
-
-        for node in G.nodes():
-            degree = G.degree(node)
-            # Add degree as property:
-            G.nodes[node]["Connections"] = degree
-
-            if degree < 3:
-                base = 2
-            else:
-                base = degree
-
-            if n_nodes < 20:
-                size_and_color = base * scale_factor
-            else:
-                size_and_color = np.sqrt(degree) * scale_factor
-
-            # Add size to sizing_list
-            if "Neighbor" in node:
-                sizing_neighbor[node] = size_and_color
-            else:
-                sizing_nonneighbor[node] = size_and_color
-
-        for node in G.nodes():
-            if "Neighbor" in node:
-                color = matplotlib.colors.to_hex(cmap_neighbor(sizing_neighbor[node] / max(sizing_neighbor.values())))
-                sizing_list.append(sizing_neighbor[node])
-            else:
-                color = matplotlib.colors.to_hex(
-                    cmap_non_neighbor(sizing_nonneighbor[node] / max(sizing_nonneighbor.values()))
-                )
-                sizing_list.append(sizing_nonneighbor[node])
-            color_list.append(color)
-
-        if layout == "planar":
-            is_planar, _ = nx.check_planarity(G)
-            if not is_planar:
-                logger.info("Graph is not planar, using spring layout instead.")
-                layout = "spring"
-
-        # Draw graph:
-        if title is None:
-            title = f"{os.path.basename(self.adata_path).split('.')[0]} Regulatory Correlation Network"
-
-        f = plot_network(
-            G,
-            title=title,
-            size_method=sizing_list,
-            color_method=color_list,
-            node_text=["Connections"],
-            node_label="ID",
-            nodefont_size=node_fontsize,
-            node_label_position=node_label_position,
-            edge_text=["Type", "Coexpression"],
-            edge_label="Type",
-            edge_label_position=node_label_position,
-            edgefont_size=edge_fontsize,
-            edge_thickness_attr="Coexpression",
-            layout=layout,
-            arrow_size=arrow_size,
-            upper_margin=upper_margin,
-            lower_margin=lower_margin,
-            left_margin=left_margin,
-            right_margin=right_margin,
-            show_colorbar=False,
-        )
-
-        # Save graph:
-        if save_id is None:
-            save_id = os.path.basename(self.adata_path).split(".")[0]
-        if save_path is None:
-            save_path = save_folder
-        full_save_path = os.path.join(save_path, f"{save_id}_network.{save_ext}")
-        logger.info(f"Writing network to {full_save_path}...")
-
-        fig = plotly.graph_objects.Figure(f)
-        # The default is 100 DPI
-        fig.write_image(full_save_path, scale=dpi / 100)
-
-        return G, sizing_list, color_list
 
     # ---------------------------------------------------------------------------------------------------
     # Permutation testing

@@ -237,7 +237,7 @@ class MuSIC:
                     "No CCI directory provided; need to provide a CCI directory to fit a model with "
                     "ligand/receptor expression."
                 )
-            self.load_and_process(downstream=downstream)
+            self.load_and_process()
         else:
             if self.csv_path is None:
                 raise ValueError(
@@ -464,7 +464,7 @@ class MuSIC:
                 self.logger.info(f"Using provided list of target genes: {self.custom_targets}.")
             self.logger.info(f"Saving all outputs to this directory: {os.path.dirname(self.output_path)}.")
 
-    def load_and_process(self, upstream: bool = False, downstream: bool = False):
+    def load_and_process(self, upstream: bool = False):
         """
         Load AnnData object and process it for modeling.
 
@@ -930,7 +930,6 @@ class MuSIC:
                 targets = [t for t in targets if t in adata.var_names]
             all_targets = list(set(self.targets_expr.columns.tolist() + targets))
             set_difference = set(all_targets) - set(self.targets_expr.columns.tolist())
-            print(set_difference)
 
             if len(all_targets) > len(self.targets_expr.columns.tolist()):
                 # Filter targets to those that can be found in our prior GRN:
@@ -1029,7 +1028,7 @@ class MuSIC:
                     ligands = [
                         l
                         for l in ligands
-                        if l
+                        if l.title()
                         not in [
                             "Lta4h",
                             "Fdx1",
@@ -1054,6 +1053,7 @@ class MuSIC:
                             "Daglb",
                             "Ubash3d",
                             "Psap",
+                            "Lck",
                         ]
                     ]
                     l_complexes = [elem for elem in ligands if "_" in elem]
@@ -3782,6 +3782,13 @@ class MuSIC:
                     # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
                     # object, save back to file path:
                     all_outputs = pd.concat([betas, standard_errors], axis=1)
+                    # Adjust betas such that entries where the target gene is not expressed are zero:
+                    target_expressed = self.adata[:, target].X.toarray()
+                    mask = target_expressed == 0
+                    indices = np.where(mask)
+                    index_cell_names = self.adata.obs_names[indices[0]]
+                    all_outputs.loc[index_cell_names] = 0
+
                     all_outputs.to_csv(os.path.join(parent_dir, file))
                 else:
                     if not load_for_interpreter:
@@ -3805,6 +3812,13 @@ class MuSIC:
                         # Concatenate coefficients and standard errors to re-associate each row with its name in the AnnData
                         # object, save back to file path:
                         all_outputs = pd.concat([betas, standard_errors], axis=1)
+                        # Adjust betas such that entries where the target gene is not expressed are zero:
+                        target_expressed = self.adata[:, target].X.toarray()
+                        mask = target_expressed == 0
+                        indices = np.where(mask)
+                        index_cell_names = self.adata.obs_names[indices[0]]
+                        all_outputs.loc[index_cell_names] = 0
+
                         all_outputs.to_csv(os.path.join(parent_dir, file))
 
                 # Save coefficients and standard errors to dictionary:

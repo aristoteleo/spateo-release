@@ -9,6 +9,7 @@ from pyvista import PolyData
 from scipy.sparse import csr_matrix, diags, issparse, lil_matrix, spmatrix
 from scipy.spatial import ConvexHull, Delaunay, cKDTree
 from scipy.stats import norm
+from tqdm import tqdm
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
@@ -340,45 +341,51 @@ def create_new_coordinate(
             min_point = pos_df[cols].min()
             max_point = pos_df[cols].max()
         else:  # Negative planes
-            min_point = pos_df[cols].copy()
-            max_point = pos_df[cols].copy()
+            min_point = pos_df[cols].min()
+            max_point = pos_df[cols].max()
             min_point[cols[1]] = pos_df[cols[1]].max()
             max_point[cols[1]] = pos_df[cols[1]].min()
-        reverse = "-" in plane
-        adata.obs[f"{plane} Coordinate"] = pos_df.apply(
-            lambda row: project_and_calculate_distance(row, cols, min_point, max_point, reverse), axis=1
-        )
+
+        if "-" in plane:
+            reference_point = max_point
+        else:
+            reference_point = min_point
+
+        c0, d0 = min_point
+        c1, d1 = max_point
+
+        dc = c1 - c0
+        dd = d1 - d0
+        if dc != 0:
+            m = dd / dc
+            b = d0 - m * c0
+        else:
+            # Vertical line:
+            m = np.inf
+            b = c0
+
+        projected_points = []
+        distances = []
+        for _, row in tqdm(pos_df.iterrows(), desc="Creating new coordinate..."):
+            p0, p1 = row[cols]
+            if m != np.inf:
+                # Calculate the projected point onto the line
+                proj_p0 = (m * p1 + p0 - m * b) / (m**2 + 1)
+                proj_p1 = (m**2 * p1 + m * p0 + b) / (m**2 + 1)
+            else:
+                # Projection onto a vertical line
+                proj_p0 = b
+                proj_p1 = p1
+
+            projected_points.append((proj_p0, proj_p1))
+            # Calculate the distance along the line from the reference point
+            distances.append(np.sqrt((proj_p0 - reference_point[0]) ** 2 + (proj_p1 - reference_point[1]) ** 2))
+
+        # Return dataframe
+        new_coord = pd.DataFrame(projected_points, index=pos_df.index, columns=["proj_x", "proj_y"])
+        new_coord["distance"] = distances
+        adata.obs[f"{plane} Coordinate"] = new_coord["distance"]
+        # Also store information to draw the line:
+        adata.uns[f"{plane} Line"] = {"start": min_point, "end": max_point, "m": m, "b": b}
 
         return adata
-
-
-def project_and_calculate_distance(
-    row: pd.Series, cols: list, min_point: pd.Series, max_point: pd.Series, reverse: bool = False
-):
-    """Project a point onto a line with a slope of either 1 or -1, and calculate the distance along the new line for
-    the projected point to establish its coordinate.
-
-    Args:
-        row: A row from the dataframe that contains the spatial coordinates
-        cols: The list of two columns that define the plane, e.g. ["X", "Y"]
-        min_point: The minimum point that defines the "start" of the new coordinate axis
-        max_point: The maximum point that defines the "end" of the new coordinate axis
-        reverse: Flag that indicates whether the projection starts from the minimum along the x-axis or the maximum
-            along the x-axis (or y-axis or z-axis, depending on which axis is used as the reference).
-
-    Returns:
-        distance: The distance along the new coordinate axis for the projected point
-    """
-    if reverse:
-        # For -xy, -yz, -xz (slope -1)
-        x_proj = (row[cols[0]] - row[cols[1]]) / 2
-        y_proj = -x_proj
-        reference_point = max_point
-    else:
-        # For xy, yz, xz (slope 1)
-        x_proj = (row[cols[0]] + row[cols[1]]) / 2
-        y_proj = x_proj
-        reference_point = min_point
-
-    distance = np.sqrt((x_proj - reference_point[cols[0]]) ** 2 + (y_proj - reference_point[cols[1]]) ** 2)
-    return distance
