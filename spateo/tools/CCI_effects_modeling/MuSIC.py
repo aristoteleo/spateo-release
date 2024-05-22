@@ -3100,7 +3100,7 @@ class MuSIC:
             all_trace_hat = np.array(trace_hats).reshape(-1, 1)
             all_nans = np.array(nans).reshape(-1, 1)
 
-            # Diagnostics: mean nonzero value
+            # Diagnostics: mean value
             pred_test_val = np.mean(all_y_pred[true != 0])
             obs_test_val = np.mean(true[true != 0])
 
@@ -3108,7 +3108,6 @@ class MuSIC:
             # such elements were ignored:
             mask = ~all_nans
             num_valid = len(mask)
-            number_of_nans = np.sum(~mask)
             ll = self.distr_obj.log_likelihood(true[mask], all_y_pred[mask])
             norm_ll = ll / num_valid
 
@@ -3117,8 +3116,8 @@ class MuSIC:
             self.logger.info(f"Bandwidth: {bw:.3f}, hat matrix trace: {trace_hat}")
             aicc = self.compute_aicc_glm(norm_ll, norm_trace_hat, n_samples=n_samples)
             self.logger.info(
-                f"Bandwidth: {bw:.3f}, LL: {norm_ll:.3f}, GLM AICc: {aicc:.3f}, predicted average nonzero "
-                f"value: {pred_test_val:.3f}, observed average nonzero value: {obs_test_val:.3f}"
+                f"Bandwidth: {bw:.3f}, LL: {norm_ll:.3f}, GLM AICc: {aicc:.3f}, predicted average nonzero value: "
+                f"{pred_test_val:.3f}, observed average nonzero value: {obs_test_val:.3f}"
             )
 
             return aicc
@@ -3372,6 +3371,10 @@ class MuSIC:
                     f"For target {target}, from {len(self.feature_names)} features, kept {len(keep_indices)} to fit "
                     f"model."
                 )
+                if len(keep_indices) <= 3:
+                    self.logger.info("Less than 3 features found for this target. Skipping.")
+                    continue
+
                 X_labels = [self.feature_names[idx] for idx in keep_indices]
                 X = X_orig[:, keep_indices]
             else:
@@ -3759,6 +3762,14 @@ class MuSIC:
                 target = file.split("_")[-1][:-4]
                 all_outputs = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
                 betas = all_outputs[[col for col in all_outputs.columns if col.startswith("b_")]]
+                if all_outputs.shape[1] <= 3:
+                    os.remove(os.path.join(parent_dir, file))
+                    continue
+                # Check if all coefficients are zero
+                if (betas == 0).all().all():
+                    os.remove(os.path.join(parent_dir, file))
+                    continue
+
                 feat_sub = [col.replace("b_", "") for col in betas.columns]
                 if isinstance(betas.index[0], int) or isinstance(betas.index[0], float):
                     betas.index = [self.X_df.index[int(idx)] for idx in betas.index]
@@ -3817,14 +3828,15 @@ class MuSIC:
                     mask = target_expressed == 0
                     indices = np.where(mask)
                     index_cell_names = self.adata.obs_names[indices[0]]
+
                     all_outputs.loc[index_cell_names] = 0
 
                     for col in betas.columns:
                         if "intercept" not in col:
                             interaction_coeff = col.replace("b_", "")
                             interaction_coeff = interaction_coeff.replace("se_", "")
-                            mask = self.X_df[interaction_coeff] == 0
-                            all_outputs.loc[all_outputs.index, col] *= mask
+                            mask = self.X_df[interaction_coeff] != 0
+                            all_outputs[col] *= mask
 
                     all_outputs.to_csv(os.path.join(parent_dir, file))
                 else:
@@ -3861,8 +3873,8 @@ class MuSIC:
                             if "intercept" not in col:
                                 interaction_coeff = col.replace("b_", "")
                                 interaction_coeff = interaction_coeff.replace("se_", "")
-                                mask = self.X_df[interaction_coeff] == 0
-                                all_outputs.loc[all_outputs.index, col] *= mask
+                                mask = self.X_df[interaction_coeff] != 0
+                                all_outputs[col] *= mask
 
                         all_outputs.to_csv(os.path.join(parent_dir, file))
 
