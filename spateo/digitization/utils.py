@@ -522,3 +522,56 @@ def domain_heat_eqn_solver(
     grid_field = grid_field * field_mask
 
     return grid_field
+
+
+def digitize_general(  
+    pc: np.ndarray,
+    adj_mtx: np.ndarray,
+    boundary_lower: np.ndarray,
+    boundary_upper: np.ndarray,
+    max_itr: int = 1e5,
+    lh: float = 1,
+    hh: float = 100,
+) -> np.ndarray:
+    """Calculate the "heat" for a general point cloud of interests by solving a PDE, partial differential equation, 
+    the heat equation. The two polar boundaries are given by their indices within the point cloud. The neighbor network
+    of the point cloud is given as an adjacency matrix.
+
+    Args:
+        pc: An array of 3-D coordinates, representing the point cloud.
+        adj: A 2-D adjacency matrix of the neighbor network.
+        boundary_low: The indices of points selected as lower boundary in the point cloud.
+        boundary_low: The indices of points selected as upper boundary in the point cloud.
+        max_itr: Maximum number of iterations dedicated to solving the heat equation.
+        lh: lowest digital-heat (temperature). Defaults to 1.
+        hh: highest digital-heat (temperature). Defaults to 100.
+
+    Returns:
+        An array of "heat" values of each point in the point cloud.
+    """
+    
+    mask_field = np.zeros(len(pc))
+    mask_field[boundary_lower] = lh
+    mask_field[boundary_upper] = hh
+
+    max_err = 1e-5
+    err = 1
+    itr = 0
+    grid_field = mask_field.copy()
+
+    while (err > max_err) and (itr <= max_itr):
+        grid_field_pre = grid_field.copy()
+    
+        grid_field = np.matmul(grid_field, adj_mtx)
+
+        grid_field = np.where(mask_field != 0, mask_field, grid_field)
+        err = np.sqrt(
+            np.sum((grid_field - grid_field_pre) ** 2) / np.sum(grid_field**2)
+        )
+        if itr >= max_itr:
+            lm.main_info("Max iteration reached, with L2 error at: " + str(err))
+        itr = itr + 1
+
+    print("Total iteration: " + str(itr))
+    
+    return grid_field
