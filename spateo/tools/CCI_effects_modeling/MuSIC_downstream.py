@@ -6824,6 +6824,7 @@ class MuSIC_Interpreter(MuSIC):
                     targets = self.custom_targets
                 # Check that all targets can be found in the source AnnData object:
                 targets = [t for t in targets if t in self.adata.var_names]
+                targets = list(set(targets))
                 targets_expr = pd.DataFrame(
                     self.adata[:, targets].X.A if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
                     index=self.adata.obs_names,

@@ -524,7 +524,7 @@ def domain_heat_eqn_solver(
     return grid_field
 
 
-def digitize_general(  
+def digitize_general(
     pc: np.ndarray,
     adj_mtx: np.ndarray,
     boundary_lower: np.ndarray,
@@ -533,7 +533,7 @@ def digitize_general(
     lh: float = 1,
     hh: float = 100,
 ) -> np.ndarray:
-    """Calculate the "heat" for a general point cloud of interests by solving a PDE, partial differential equation, 
+    """Calculate the "heat" for a general point cloud of interests by solving a PDE, partial differential equation,
     the heat equation. The two polar boundaries are given by their indices within the point cloud. The neighbor network
     of the point cloud is given as an adjacency matrix.
 
@@ -549,7 +549,7 @@ def digitize_general(
     Returns:
         An array of "heat" values of each point in the point cloud.
     """
-    
+
     mask_field = np.zeros(len(pc))
     mask_field[boundary_lower] = lh
     mask_field[boundary_upper] = hh
@@ -561,17 +561,15 @@ def digitize_general(
 
     while (err > max_err) and (itr <= max_itr):
         grid_field_pre = grid_field.copy()
-    
+
         grid_field = np.matmul(grid_field, adj_mtx)
 
         grid_field = np.where(mask_field != 0, mask_field, grid_field)
-        err = np.sqrt(
-            np.sum((grid_field - grid_field_pre) ** 2) / np.sum(grid_field**2)
-        )
+        err = np.sqrt(np.sum((grid_field - grid_field_pre) ** 2) / np.sum(grid_field**2))
         if itr >= max_itr:
             lm.main_info("Max iteration reached, with L2 error at: " + str(err))
         itr = itr + 1
 
     print("Total iteration: " + str(itr))
-    
+
     return grid_field

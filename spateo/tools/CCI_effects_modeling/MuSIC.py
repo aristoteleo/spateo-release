@@ -2489,28 +2489,30 @@ class MuSIC:
                     # Check for dimensionality reduction:
                     if "X_pca" in self.adata.obsm_keys():
                         coords_key = "X_pca"
-                        initial_bw = 8
+                        initial_bw = 0.5
                         alpha = 0.05
 
-                        # Use 0.2% of the total number of cells as the target number of neighbors for the lower
+                        # Use 2% of the total number of cells as the target number of neighbors for the lower
                         # bandwidth:
                         n_anchors = np.min((self.n_samples, 5000))
                         self.minbw = find_bw_for_n_neighbors(
                             self.adata,
                             coords_key=coords_key,
                             n_anchors=n_anchors,
-                            target_n_neighbors=int(0.002 * self.n_samples),
+                            target_n_neighbors=int(0.02 * self.n_samples),
                             verbose=False,
                             initial_bw=initial_bw,
                             alpha=alpha,
                             normalize_distances=True,
                         )
 
+                        # Use 5% of the total number of cells as the target number of neighbors for the upper
+                        # bandwidth
                         self.maxbw = find_bw_for_n_neighbors(
                             self.adata,
                             coords_key=coords_key,
                             n_anchors=n_anchors,
-                            target_n_neighbors=int(0.005 * self.n_samples),
+                            target_n_neighbors=int(0.05 * self.n_samples),
                             verbose=False,
                             initial_bw=initial_bw,
                             alpha=alpha,
@@ -3307,7 +3309,10 @@ class MuSIC:
                 path = os.path.join(parent_dir, id_tag + f"_{target}.csv")
                 targets_df = pd.read_csv(os.path.join(parent_dir, id_tag, "design_matrix", "targets.csv"), index_col=0)
                 if target in targets_df.columns:  # i.e. if this gene is among the target genes of the upstream model
-                    target_file = pd.read_csv(path, index_col=0)
+                    try:
+                        target_file = pd.read_csv(path, index_col=0)
+                    except FileNotFoundError:
+                        continue
                     regulators = [c for c in target_file.columns if c.startswith("b_")]
                     regulators = [c.replace("b_", "") for c in regulators]
                     ligands = regulators
