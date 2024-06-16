@@ -139,15 +139,16 @@ def normalize_coords(
         coords = [coords]
 
     # normalize_scale now becomes to a list
-    normalize_scale_list = []
+    normalize_scale_list = nx.zeros((len(coords, )), type_as=coords[0])
     normalize_mean_list = []
     for i in range(len(coords)):
         normalize_mean = nx.einsum("ij->j", coords[i]) / coords[i].shape[0]
         normalize_mean_list.append(normalize_mean)
         coords[i] -= normalize_mean
         normalize_scale = nx.sqrt(nx.einsum("ij->", nx.einsum("ij,ij->ij", coords[i], coords[i])) / coords[i].shape[0])
-        normalize_scale_list.append(normalize_scale)
+        normalize_scale_list[i] = normalize_scale
 
+    # if the dim is 2D, then we do the scaling together to keep the relative scale same
     if coords[0].shape[1] == 2:
         normalize_scale = nx.mean(normalize_scale_list)
         normalize_scale_list = [normalize_scale] * len(coords)
@@ -156,7 +157,6 @@ def normalize_coords(
     if verbose:
         lm.main_info(message=f"Coordinates normalization params:", indent_level=1)
         lm.main_info(message=f"Scale: {normalize_scale}.", indent_level=2)
-        # lm.main_info(message=f"Mean:  {normalize_mean_list}", indent_level=2)
     return coords, normalize_scale_list, normalize_mean_list
 
 
@@ -200,9 +200,9 @@ def align_preprocess(
     genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     layer: str = "X",
+    use_rep: Optional[str] = None,
     normalize_c: bool = False,
     normalize_g: bool = False,
-    select_high_exp_genes: Union[bool, float, int] = False,
     dtype: str = "float64",
     device: str = "cpu",
     verbose: bool = True,
@@ -242,17 +242,11 @@ def align_preprocess(
     new_samples = [s[:, common_genes] for s in new_samples]
 
     # Gene expression matrix of all samples
-    exp_matrices = [nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples]
-    if not (select_high_exp_genes is False):
-        # Select significance genes if select_high_exp_genes is True
-        ExpressionData = _cat(nx=nx, x=exp_matrices, dim=0)
-
-        ExpressionVar = _var(nx, ExpressionData, 0)
-        exp_threshold = 10 if isinstance(select_high_exp_genes, bool) else select_high_exp_genes
-        EvidenceExpression = nx.where(ExpressionVar > exp_threshold)[0]
-        exp_matrices = [exp_matrix[:, EvidenceExpression] for exp_matrix in exp_matrices]
-        if verbose:
-            lm.main_info(message=f"Evidence expression number: {len(EvidenceExpression)}.")
+    if (use_rep is None) or (not isinstance(use_rep, str)) or (use_rep not in samples[0].obsm.keys()) or (use_rep not in samples[1].obsm.keys()):
+        exp_matrices = [nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples]
+        exp_matrices
+    else:
+        exp_matrices = [nx.from_numpy(s.obsm[use_rep], type_as=type_as) for s in new_samples]
 
     # Spatial coordinates of all samples
     spatial_coords = [
@@ -492,7 +486,7 @@ def calc_exp_dissimilarity(
     Args:
         X_A: Gene expression matrix of sample A.
         X_B: Gene expression matrix of sample B.
-        dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
+        dissimilarity: Expression dissimilarity measure: ``'kl'``, ``'euclidean'``, ``'euc'``, ``'cos'``, or ``'cosine'``.
 
     Returns:
         Union[np.ndarray, torch.Tensor]: The dissimilarity matrix of two feature samples.
@@ -503,7 +497,9 @@ def calc_exp_dissimilarity(
         "kl",
         "euclidean",
         "euc",
-    ], "``dissimilarity`` value is wrong. Available ``dissimilarity`` are: ``'kl'``, ``'euclidean'`` and ``'euc'``."
+        "cos",
+        "cosine"
+    ], "``dissimilarity`` value is wrong. Available ``dissimilarity`` are: ``'kl'``, ``'euclidean'``, ``'euc'``, ``'cos'``, and ``'cosine'``."
     if dissimilarity.lower() == "kl":
         X_A = X_A + 0.01
         X_B = X_B + 0.01
@@ -684,7 +680,28 @@ def get_optimal_R(
 ###############################
 # Distance Matrix Calculation #
 ###############################
+def _cal_cosine_similarity(tensor1, tensor2, dim=1, eps=1e-8):
+    tensor1_norm = torch.sqrt(torch.sum(tensor1**2, dim=dim, keepdim=True))
+    tensor2_norm = torch.sqrt(torch.sum(tensor2**2, dim=dim, keepdim=True))
+    tensor1_norm = torch.clamp(tensor1_norm, min=eps)
+    tensor2_norm = torch.clamp(tensor2_norm, min=eps)
+    dot_product = torch.sum(tensor1 * tensor2, dim=dim, keepdim=True)
+    cosine_similarity = dot_product / (tensor1_norm * tensor2_norm)
+    cosine_similarity = cosine_similarity.squeeze(dim)
+    return cosine_similarity
 
+def _cos_similarity(
+    mat1: Union[np.ndarray, torch.Tensor],
+    mat2: Union[np.ndarray, torch.Tensor],
+):
+    nx = ot.backend.get_backend(mat1, mat2)
+    if nx_torch(nx):
+        mat1_unsqueeze = mat1.unsqueeze(-1)
+        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0,2)
+        distMat = _cal_cosine_similarity(mat1_unsqueeze, mat2_unsqueeze) * 0.5 + 0.5
+    else:
+        distMat = (-ot.dist(mat1, mat2, metric='cosine')+1)*0.5 + 0.5
+    return distMat
 
 def _dist(
     mat1: Union[np.ndarray, torch.Tensor],
@@ -695,17 +712,21 @@ def _dist(
         "euc",
         "euclidean",
         "kl",
+        "cos",
+        "cosine"
     ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'`` and ``'kl'``."
     nx = ot.backend.get_backend(mat1, mat2)
     if metric.lower() == "euc" or metric.lower() == "euclidean":
         distMat = nx.sum(mat1**2, 1)[:, None] + nx.sum(mat2**2, 1)[None, :] - 2 * _dot(nx)(mat1, mat2.T)
-    else:
+    elif metric.lower() == "kl":
         distMat = (
             nx.sum(mat1 * nx.log(mat1), 1)[:, None]
             + nx.sum(mat2 * nx.log(mat2), 1)[None, :]
             - _dot(nx)(mat1, nx.log(mat2).T)
             - _dot(nx)(mat2, nx.log(mat1).T).T
         ) / 2
+    elif (metric.lower() == "cosine") or (metric.lower() == "cos"):
+        distMat = _cos_similarity(mat1, mat2)
     return distMat
 
 
@@ -767,6 +788,7 @@ def coarse_rigid_alignment(
     transformed_points: Optional[Union[np.ndarray, torch.Tensor]] = None,
     dissimilarity: str = "kl",
     top_K: int = 10,
+    allow_flip: bool = False,
     verbose: bool = True,
 ) -> Tuple[Any, Any, Any, Any, Union[ndarray, Any], Union[ndarray, Any]]:
     if verbose:
@@ -808,18 +830,17 @@ def coarse_rigid_alignment(
 
     train_x, train_y = sub_coordsA[NN[:, 1], :], coordsB[NN[:, 0], :]
 
-    R_flip = np.eye(D)
-    R_flip[-1, -1] = -1
-
     P, R, t, init_weight, sigma2, gamma = inlier_from_NN(train_x, train_y, distance[:, None])
-    # P2, R2, t2, init_weight, sigma2_2, gamma_2 = inlier_from_NN(train_x, np.dot(train_y, R_flip), distance[:, None])
-    P2, R2, t2, init_weight, sigma2_2, gamma_2 = inlier_from_NN(np.dot(train_x, R_flip), train_y, distance[:, None])
-    if gamma_2 > gamma:
-        P = P2
-        R = R2
-        t = t2
-        sigma2 = sigma2_2
-        R = np.dot(R, R_flip)
+    if allow_flip:
+        R_flip = np.eye(D)
+        R_flip[-1, -1] = -1
+        P2, R2, t2, init_weight, sigma2_2, gamma_2 = inlier_from_NN(np.dot(train_x, R_flip), train_y, distance[:, None])
+        if gamma_2 > gamma:
+            P = P2
+            R = R2
+            t = t2
+            sigma2 = sigma2_2
+            R = np.dot(R, R_flip)
     inlier_threshold = min(P[np.argsort(-P[:, 0])[20], 0], 0.5)
     inlier_set = np.where(P[:, 0] > inlier_threshold)[0]
     inlier_x, inlier_y = train_x[inlier_set, :], train_y[inlier_set, :]
@@ -1102,6 +1123,57 @@ def voxel_data(
     voxel_coords = voxel_coords[is_voxels == 1, :]
     voxel_gene_exps = voxel_gene_exps[is_voxels == 1, :]
     return voxel_coords, voxel_gene_exps
+
+def _init_guess_sigma2(
+    XA,
+    XB,
+    subsample=2000,
+):
+    NA, NB, D = XA.shape[0], XB.shape[0], XA.shape[1]
+    sub_sample_A = np.random.choice(NA, subsample, replace=False) if NA > subsample else np.arange(NA)
+    sub_sample_B = np.random.choice(NB, subsample, replace=False) if NB > subsample else np.arange(NB)
+    SpatialDistMat = calc_exp_dissimilarity(
+        X_A=XA[sub_sample_A, :],
+        X_B=XB[sub_sample_B, :],
+        dissimilarity="euc",
+    )
+    SpatialDistMat = SpatialDistMat ** 2
+    sigma2 = 0.1 * SpatialDistMat.sum() / (D * sub_sample_A.shape[0] * sub_sample_A.shape[0])  # 2 for 3D
+    return sigma2
+
+def _init_guess_beta2(
+    nx,
+    XA,
+    XB,
+    dissimilarity="kl",
+    partial_robust_level=1,
+    beta2=None,
+    beta2_end=None,
+    subsample=5000,
+    verbose=False,
+):
+    NA, NB, D = XA.shape[0], XB.shape[0], XA.shape[1]
+    sub_sample_A = np.random.choice(NA, subsample, replace=False) if NA > subsample else np.arange(NA)
+    sub_sample_B = np.random.choice(NB, subsample, replace=False) if NB > subsample else np.arange(NB)
+    GeneDistMat = calc_exp_dissimilarity(
+        X_A=XA[sub_sample_A, :],
+        X_B=XB[sub_sample_B, :],
+        dissimilarity=dissimilarity,
+    )
+    minGeneDistMat = nx.min(GeneDistMat, 1)
+    if beta2 is None:
+        beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(sub_sample_A.shape[0] * 0.05)]] / 5
+    else:
+        beta2 = _data(nx, beta2, XA)
+
+    if beta2_end is None:
+        beta2_end = nx.max(minGeneDistMat) / (nx.sqrt(_data(nx, partial_robust_level, XA)))
+    else:
+        beta2_end = _data(nx, beta2_end, XA)
+    beta2 = nx.maximum(beta2, _data(nx, 1e-2, XA))
+    if verbose:
+        lm.main_info(message=f"beta2: {beta2} --> {beta2_end}.", indent_level=2)
+    return beta2, beta2_end
 
 
 #################################

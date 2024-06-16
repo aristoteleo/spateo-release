@@ -30,6 +30,8 @@ from .utils import (
     _roll,
     _unique,
     _unsqueeze,
+    _init_guess_beta2,
+    _init_guess_sigma2,
     align_preprocess,
     cal_dist,
     calc_exp_dissimilarity,
@@ -219,28 +221,32 @@ def BA_align(
     genes: Optional[Union[List, torch.Tensor]] = None,
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
-    iter_key_added: Optional[str] = "iter_spatial",
+    iter_key_added: Optional[str] = None,
     vecfld_key_added: Optional[str] = "VecFld_morpho",
     layer: str = "X",
     dissimilarity: str = "kl",
+    use_rep: Optional[str] = None,
     keep_size: bool = False,
     max_iter: int = 200,
     lambdaVF: Union[int, float] = 1e2,
     beta: Union[int, float] = 0.01,
     K: Union[int, float] = 15,
+    beta2: Optional[Union[int, float]] = None,
+    beta2_end: Optional[Union[int, float]] = None,
     normalize_c: bool = True,
     normalize_g: bool = True,
-    select_high_exp_genes: Union[bool, float, int] = False,
     dtype: str = "float32",
     device: str = "cpu",
     inplace: bool = True,
     verbose: bool = True,
     nn_init: bool = True,
+    allow_flip: bool = False,
     SVI_mode: bool = True,
     batch_size: int = 1000,
     partial_robust_level: float = 25,
+    pre_compute_dist: bool = True,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
-    """_summary_
+    """The core function of Spateo alignment
 
     Args:
         sampleA: Sample A that acts as reference.
@@ -251,15 +257,16 @@ def BA_align(
         iter_key_added: ``.uns`` key under which to add the result of each iteration of the iterative process. If ``iter_key_added`` is None, the results are not saved.
         vecfld_key_added: The key that will be used for the vector field key in ``.uns``. If ``vecfld_key_added`` is None, the results are not saved.
         layer: If ``'X'``, uses ``.X`` to calculate dissimilarity between spots, otherwise uses the representation given by ``.layers[layer]``.
-        dissimilarity: Expression dissimilarity measure: ``'kl'`` or ``'euclidean'``.
-        small_variance: When approximating the assignment matrix, if True, we use small sigma2 (0.001) rather than the infered sigma2
-        max_iter: Max number of iterations for morpho alignment.
+        dissimilarity: Expression dissimilarity measure: ``'kl'``, ``'euclidean'``, or ``'cos'``.
+        use_rep: Use the indicated representation. If use_rep is None, then use the given "layer", else use the key stored in .obsm. E.g., "X_pca".
+        max_iter: Max number of iterations for morpho alignment. 
         lambdaVF : Hyperparameter that controls the non-rigid distortion degree. Smaller means more flexibility.
         beta: The length-scale of the SE kernel. Higher means more flexibility.
         K: The number of sparse inducing points used for Nystr ̈om approximation. Smaller means faster but less accurate.
+        beta2: Manually assigned significance gene expression similarity. Smaller indicating greater significance.
+        beta2_end: Manually assigned significance gene expression similarity. Smaller indicating greater significance.
         normalize_c: Whether to normalize spatial coordinates.
         normalize_g: Whether to normalize gene expression. If ``dissimilarity`` == ``'kl'``, ``normalize_g`` must be False.
-        select_high_exp_genes: Whether to select genes with high differences in gene expression.
         samples_s: The space size of each sample. Area size for 2D samples and volume size for 3D samples.
         dtype: The floating-point number type. Only ``float32`` and ``float64``.
         device: Equipment used to run the program. You can also set the specified GPU for running. ``E.g.: '0'``.
@@ -269,6 +276,7 @@ def BA_align(
         SVI_mode: Whether to use stochastic variational inferential (SVI) optimization strategy.
         batch_size: The size of the mini-batch of SVI. If set smaller, the calculation will be faster, but it will affect the accuracy, and vice versa. If not set, it is automatically set to one-tenth of the data size.
         partial_robust_level: The robust level of partial alignment. The larger the value, the more robust the alignment to partial cases is. Recommended setting from 1 to 50.
+        pre_compute_dist: If ``True``, the gene similarity matrix is computed before the mini batch is performed. Otherwise, it is computed during the mini batch. This can be significantly faster, but can also require more GPU memory if using GPU.
     """
     empty_cache(device=device)
     # Preprocessing
@@ -289,20 +297,19 @@ def BA_align(
         spatial_key=spatial_key,
         normalize_c=normalize_c,
         normalize_g=normalize_g,
-        select_high_exp_genes=select_high_exp_genes,
         dtype=dtype,
         device=device,
         verbose=verbose,
+        use_rep=use_rep,
     )
-
+    
     coordsA, coordsB = spatial_coords[1], spatial_coords[0]
     X_A, X_B = exp_matrices[1], exp_matrices[0]
     del spatial_coords, exp_matrices
-
     NA, NB, D, G = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1], X_A.shape[1]
     sub_sample = False
-    sub_sample_num = 15000
-    if SVI_mode and (NA > sub_sample_num or NB > sub_sample_num):
+    sub_sample_num = 20000
+    if SVI_mode and (NA > sub_sample_num or NB > sub_sample_num) and (pre_compute_dist is False):
         if NA > sub_sample_num:
             sub_idx_A = np.random.choice(NA, sub_sample_num, replace=False)
             sub_coordsA = coordsA[sub_idx_A, :]
@@ -333,6 +340,7 @@ def BA_align(
                 X_A=sub_X_A,
                 X_B=sub_X_B,
                 transformed_points=coordsA,
+                allow_flip=allow_flip,
             )
         else:
             _cra_kwargs = dict(
@@ -341,6 +349,7 @@ def BA_align(
                 X_A=X_A,
                 X_B=X_B,
                 transformed_points=None,
+                allow_flip=allow_flip,
             )
         coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(
             dissimilarity=dissimilarity, top_K=10, verbose=verbose, **_cra_kwargs
@@ -350,6 +359,23 @@ def BA_align(
         inlier_A = _data(nx, inlier_A, type_as)
         inlier_B = _data(nx, inlier_B, type_as)
         inlier_P = _data(nx, inlier_P, type_as)
+    else:
+        # init_R = np.eye(D)
+        # init_t = np.zeros((D,))
+        # inlier_A = np.zeros((4,D))
+        # inlier_B = np.zeros((4,D))
+        # inlier_P = np.ones((4,1))
+        # init_R = _data(nx, init_R, type_as)
+        # init_t = _data(nx, init_t, type_as)
+        # inlier_A = _data(nx, inlier_A, type_as)
+        # inlier_B = _data(nx, inlier_B, type_as)
+        # inlier_P = _data(nx, inlier_P, type_as)
+
+        init_R = nx.eye(D, type_as=type_as)
+        init_t = nx.zeros((D,), type_as=type_as)
+        inlier_A = nx.zeros((4,D), type_as=type_as)
+        inlier_B = nx.zeros((4,D), type_as=type_as)
+        inlier_P = nx.ones((4,1), type_as=type_as)
     coarse_alignment = coordsA
 
     # Random select control points
@@ -384,23 +410,17 @@ def BA_align(
     else:
         SpatialDistMat = cal_dist(XAHat, coordsB)
 
-    sigma2 = 0.1 * nx.sum(SpatialDistMat) / (D * NA * NB)  # 2 for 3D
-    s = _data(nx, 1, type_as)
-    R = _identity(nx, D, type_as)
-    minGeneDistMat = nx.min(GeneDistMat, 1)
-    # Automatically determine the value of beta2
-    beta2 = minGeneDistMat[nx.argsort(minGeneDistMat)[int(GeneDistMat.shape[0] * 0.05)]] / 5
-    beta2_end = nx.max(minGeneDistMat) / 5
-    del minGeneDistMat
-    if sub_sample:
-        del sub_X_A, sub_X_B, GeneDistMat
-    # The value of beta2 becomes progressively larger
-    beta2 = nx.maximum(beta2, _data(nx, 1e-2, type_as))
+    # initial guess for sigma2 and beta2
+    sigma2 = _init_guess_sigma2(XAHat, coordsB)
+    beta2, beta2_end = _init_guess_beta2(nx, X_A, X_B, dissimilarity, partial_robust_level, beta2, beta2_end, verbose=verbose)
     beta2_decrease = _power(nx)(beta2_end / beta2, 1 / (50))
+
+    R = _identity(nx, D, type_as)
+    
 
     # Use smaller spatial variance to reduce tails
     outlier_variance = 1
-    max_outlier_variance = partial_robust_level  # 20
+    max_outlier_variance = partial_robust_level
     outlier_variance_decrease = _power(nx)(_data(nx, max_outlier_variance, type_as), 1 / (max_iter / 2))
 
     if SVI_mode:
@@ -429,7 +449,6 @@ def BA_align(
         sampleB.uns[iter_key_added][key_added] = {}
         sampleB.uns[iter_key_added]["sigma2"] = {}
         sampleB.uns[iter_key_added]["beta2"] = {}
-        sampleB.uns[iter_key_added]["scale"] = {}
 
     for iter in iteration:
         if iter_key_added is not None:
@@ -437,7 +456,6 @@ def BA_align(
             sampleB.uns[iter_key_added][key_added][iter] = nx.to_numpy(iter_XAHat)
             sampleB.uns[iter_key_added]["sigma2"][iter] = nx.to_numpy(sigma2)
             sampleB.uns[iter_key_added]["beta2"][iter] = nx.to_numpy(beta2)
-            sampleB.uns[iter_key_added]["scale"][iter] = nx.to_numpy(s)
         if SVI_mode:
             step_size = nx.minimum(_data(nx, 1.0, type_as), SVI_deacy / (iter + 1.0))
             P, spatial_P, sigma2_P = get_P(
@@ -496,10 +514,10 @@ def BA_align(
         gamma = _data(nx, 0.01, type_as) if gamma < 0.01 else gamma
 
         # Update alpha
-        alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
+        alpha = step_size * nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial)) + (1 - step_size) * alpha
 
         # Update VnA
-        if (sigma2 < 0.015 and s > 0.95) or (iter > 80):
+        if (sigma2 < 0.015) or (iter > 80):
             if SVI_mode:
                 SigmaInv = (
                     step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
@@ -529,7 +547,10 @@ def BA_align(
                 )
 
         # Update R()
-        lambdaReg = 1e0 * Sp / nx.sum(inlier_P)
+        if nn_init:
+            lambdaReg = partial_robust_level * 1e0 * Sp / nx.sum(inlier_P)
+        else:
+            lambdaReg = 0
         if SVI_mode:
             PXA, PVA, PXB = (
                 _dot(nx)(K_NA, coordsA)[None, :],
@@ -582,7 +603,7 @@ def BA_align(
             R = step_size * (_dot(nx)(_dot(nx)(svdU, C), svdV)) + (1 - step_size) * R
         else:
             R = _dot(nx)(_dot(nx)(svdU, C), svdV)
-        RnA = s * _dot(nx)(coordsA, R.T) + t
+        RnA = _dot(nx)(coordsA, R.T) + t
         XAHat = RnA + VnA
 
         # Update sigma2 and beta2
@@ -654,7 +675,6 @@ def BA_align(
     # save vector field and other parameters
     if not (vecfld_key_added is None):
         sampleB.uns[vecfld_key_added] = {
-            "s": nx.to_numpy(s),
             "R": nx.to_numpy(R),
             "t": nx.to_numpy(t),
             "optimal_R": nx.to_numpy(optimal_R),
