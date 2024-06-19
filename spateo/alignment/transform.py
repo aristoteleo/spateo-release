@@ -83,7 +83,6 @@ def BA_transform(
         XA = (XA - normalize_mean_quary) / normalize_scale
     ctrl_pts = _data(nx, vecfld["ctrl_pts"], type_as)
     Coff = _data(nx, vecfld["Coff"], type_as)
-    s = _data(nx, vecfld["s"], type_as)
     R = _data(nx, vecfld["R"], type_as)
     t = _data(nx, vecfld["t"], type_as)
     optimal_R = _data(nx, vecfld["optimal_R"], type_as)
@@ -95,7 +94,7 @@ def BA_transform(
     beta = vecfld["beta"]
     quary_kernel = con_K(XA, ctrl_pts, beta)
     quary_velocities = _dot(nx)(quary_kernel, Coff) * deformation_scale
-    quary_similarity = s * _dot(nx)(XA, R.T) + t
+    quary_similarity = _dot(nx)(XA, R.T) + t
     quary_optimal_similarity = _dot(nx)(XA, optimal_R.T) + optimal_t
     XAHat = quary_velocities + quary_similarity
 
@@ -140,7 +139,6 @@ def BA_transform_and_assignment(
         XB = (XB - normalize_mean_ref) / normalize_scale
     ctrl_pts = vecfld["ctrl_pts"]
     Coff = vecfld["Coff"]
-    s = vecfld["s"]
     R = vecfld["R"]
     t = vecfld["t"]
     optimal_R = vecfld["optimal_R"]
@@ -152,7 +150,7 @@ def BA_transform_and_assignment(
     beta = vecfld["beta"]
     quary_kernel = con_K(XA, ctrl_pts, beta, True)
     quary_velocities = cal_dot(quary_kernel, Coff, use_chunk=True)
-    quary_similarity = s * cal_dot(XA, R.T, use_chunk=True) + t
+    quary_similarity = cal_dot(XA, R.T, use_chunk=True) + t
     quary_optimal_similarity = cal_dot(XA, optimal_R.T, use_chunk=True) + optimal_t
     XAHat = quary_velocities + quary_similarity
     XAHat = nx.from_numpy(XAHat)
