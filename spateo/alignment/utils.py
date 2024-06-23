@@ -41,6 +41,42 @@ def downsampling(
         sampling_models.append(sampling_model)
     return sampling_models
 
+## generate label transfer prior
+def generate_label_transfer_prior(cat1, cat2, positive_pairs=None, negative_pairs=None):
+    label_transfer_prior = dict()
+    if positive_pairs is None:
+        positive_pairs = []
+    if negative_pairs is None:
+        negative_pairs = []
+    # let same annotation to have a high value
+    if (len(positive_pairs) == 0) and (len(negative_pairs) == 0):
+        for c in cat1:
+            if c in cat2:
+                positive_pairs.append({'left': [c], 'right': [c], 'value': 10})
+    for c2 in cat2:
+        cur_transfer_prior = dict()
+        for c1 in cat1:
+            cur_transfer_prior[c1] = 1
+        label_transfer_prior[c2] = cur_transfer_prior
+    for p in positive_pairs:
+        for l in p['left']:
+            for r in p['right']:
+                label_transfer_prior[r][l] = p['value']
+        # label_transfer_prior[p[1]][p[0]] = p[2]
+    for p in negative_pairs:
+        for l in p['left']:
+            for r in p['right']:
+                label_transfer_prior[r][l] = p['value']
+        # label_transfer_prior[p[1]][p[0]] = p[2]
+    norm_label_transfer_prior = dict()
+    for c2 in cat2:
+        norm_c = np.array([label_transfer_prior[c2][c1] for c1 in cat1]).sum()
+        cur_transfer_prior = dict()
+        for c1 in cat1:
+            cur_transfer_prior[c1] = label_transfer_prior[c2][c1] / norm_c
+        norm_label_transfer_prior[c2] = cur_transfer_prior
+    return norm_label_transfer_prior
+
 
 ###################
 # After Alignment #

@@ -11,6 +11,7 @@ from .alignment import (
     paste_align,
     paste_align_ref,
     paste_transform,
+    generate_label_transfer_prior,
 )
 
 # morpho_align_sparse

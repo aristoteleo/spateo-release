@@ -9,4 +9,5 @@ from .utils import (
     get_optimal_mapping_relationship,
     mapping_aligned_coords,
     mapping_center_coords,
+    generate_label_transfer_prior,
 )
