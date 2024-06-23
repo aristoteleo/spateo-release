@@ -148,7 +148,7 @@ def BA_align_sparse(
     genes: Optional[Union[List, torch.Tensor]] = None,
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
-    iter_key_added: Optional[str] = "iter_spatial",
+    iter_key_added: Optional[str] = None,
     vecfld_key_added: Optional[str] = "VecFld_morpho",
     layer: str = "X",
     dissimilarity: str = "kl",
@@ -158,6 +158,7 @@ def BA_align_sparse(
     K: Union[int, float] = 15,
     beta2: Optional[Union[int, float]] = None,
     beta2_end: Optional[Union[int, float]] = None,
+    sigma2_init: float = 0.1,
     normalize_c: bool = True,
     normalize_g: bool = True,
     dtype: str = "float32",
@@ -173,6 +174,7 @@ def BA_align_sparse(
     batch_size: int = 1024,
     use_sparse: bool = True,
     pre_compute_dist: bool = False,
+    batch_capacity: int = 1,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
     empty_cache(device=device)
     # Preprocessing and extract the spatial and expression information
@@ -280,7 +282,7 @@ def BA_align_sparse(
     s = _data(nx, 1, type_as)
     R = _identity(nx, D, type_as)
     # calculate the initial values of sigma2 and beta2
-    sigma2 = _init_guess_sigma2(XAHat, coordsB)
+    sigma2 = sigma2_init * _init_guess_sigma2(XAHat, coordsB)
     beta2, beta2_end = _init_guess_beta2(nx, X_A, X_B, dissimilarity, partial_robust_level, beta2, beta2_end)
     empty_cache(device=device)
     # initial the sigma2 and beta2 temperature for better performance
@@ -351,6 +353,7 @@ def BA_align_sparse(
                 Sigma=SigmaDiag,
                 outlier_variance=outlier_variance,
                 label_transfer_prior=label_transfer_prior,
+                batch_capacity=batch_capacity,
             )
         else:
             P, assignment_results = get_P_sparse(
@@ -367,6 +370,7 @@ def BA_align_sparse(
                 Sigma=SigmaDiag,
                 outlier_variance=outlier_variance,
                 label_transfer_prior=label_transfer_prior,
+                batch_capacity=batch_capacity,
             )
 
         # update temperature
@@ -605,6 +609,6 @@ def BA_align_sparse(
     empty_cache(device=device)
     return (
         None if inplace else (sampleA, sampleB),
-        nx.to_numpy(P.to_dense()),
+        P.to('cpu').to_dense().numpy(),
         nx.to_numpy(sigma2),
     )

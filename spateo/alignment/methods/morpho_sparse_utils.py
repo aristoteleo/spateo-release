@@ -14,7 +14,6 @@ def calc_distance(
     X_A: Union[np.ndarray, torch.Tensor],
     X_B: Union[np.ndarray, torch.Tensor],
     metric: str = "euc",
-    # chunk_num: int = 1,
     batch_capacity: int = 1,
     use_sparse: bool = False,
     sparse_method: str = "topk",
@@ -107,11 +106,13 @@ def calc_P_related(
     label_transfer_prior: Optional[dict] = None,
     top_k: int = 1024,
 ):
+    labelA = None if labelA is None else labelA.values
+    labelB = None if labelA is None else labelB.values
     # metric = 'square_euc'
     NA, NB = XnAHat.shape[0], XnB.shape[0]
-    D = XnAHat.shape[1]
-    batch_base = 1e7
-    split_size = min(int(batch_capacity * batch_base / (NA * D)), NB)
+    D, G = XnAHat.shape[1], X_A.shape[1]
+    batch_base = 1e10 # 1e7
+    split_size = min(int(batch_capacity * batch_base/ (NA * G)), NB)
     split_size = 1 if split_size == 0 else split_size
 
     nx = ot.backend.get_backend(XnAHat, XnB)
@@ -119,21 +120,20 @@ def calc_P_related(
     # only chunk XnB and X_B (data points)
     XnB_chunks = _split(nx, XnB, split_size, dim=0)
     X_B_chunks = _split(nx, X_B, split_size, dim=0)
+    labelB_chunks = [None] * len(XnB_chunks) if labelB is None else torch_like_split(labelB, split_size, dim=0)
+    # label_mask = _construct_label_mask(labelA, labelB, label_transfer_prior).T
 
-    label_mask = _construct_label_mask(labelA, labelB, label_transfer_prior).T
-
-    mask_chunks_arr = _split(nx, nx.arange(NB), split_size, dim=0)
+    # mask_chunks_arr = _split(nx, nx.arange(NB), split_size, dim=0)
 
     K_NA_spatial = nx.zeros((NA,), type_as=XnAHat)
     K_NA_sigma2 = nx.zeros((NA,), type_as=XnAHat)
     Ps = []
     sigma2_temp = 0
     cur_row = 0
-    for XnB_chunk, X_B_chunk, mask_chunk_arr in zip(XnB_chunks, X_B_chunks, mask_chunks_arr):
+    for XnB_chunk, X_B_chunk, labelB_chunk in zip(XnB_chunks, X_B_chunks, labelB_chunks):
         label_mask_chunk = (
-            None if labelA is None else _data(nx, label_mask[:, np.array(mask_chunk_arr)], type_as=XnB_chunk)
+            None if labelA is None else _construct_label_mask(nx, labelA, labelB_chunk, label_transfer_prior, XnB_chunk).T
         )
-
         # calculate distance matrix (common step)
         SpatialMat = _dist(XnAHat, XnB_chunk, "square_euc")
         # calculate spatial_P and keep K_NA_spatials
@@ -272,14 +272,22 @@ def _init_guess_beta2(
     return beta2, beta2_end
 
 
-def _construct_label_mask(labelA, labelB, label_transfer_prior):
-    label_mask = np.zeros((labelB.shape[0], labelA.shape[0]))
-    for k in label_transfer_prior.keys():
-        idx = np.where((labelB == k))[0]
-        cur_P = labelA.map(label_transfer_prior[k]).values
-        label_mask[idx, :] = cur_P
-    return label_mask
+# def _construct_label_mask(labelA, labelB, label_transfer_prior):
+#     label_mask = np.zeros((labelB.shape[0], labelA.shape[0]))
+#     for k in label_transfer_prior.keys():
+#         idx = np.where((labelB == k))[0]
+#         cur_P = labelA.map(label_transfer_prior[k]).values
+#         label_mask[idx, :] = cur_P
+#     return label_mask
 
+def _construct_label_mask(nx, labelA, labelB, label_transfer_prior, type_as):
+    label_mask = nx.zeros((labelB.shape[0], labelA.shape[0]), type_as=type_as)
+    for k in label_transfer_prior.keys():
+        idxB = np.where((labelB == k))[0]
+        for j in label_transfer_prior[k].keys():
+            idxA = np.where((labelA == j))[0]
+            label_mask[idxB[:, None],idxA] = label_transfer_prior[k][j]
+    return label_mask
 
 ## Sparse operation
 def _dense_to_sparse(
@@ -370,6 +378,21 @@ _split = (
     if nx_torch(nx)
     else np.array_split(x, chunk_size, axis=dim)
 )
+def torch_like_split(arr, size, dim=0):
+    if dim < 0:
+        dim += arr.ndim
+    shape = arr.shape
+    arr = np.swapaxes(arr, dim, -1)
+    flat_arr = arr.reshape(-1, shape[dim])
+    num_splits = flat_arr.shape[-1] // size
+    remainder = flat_arr.shape[-1] % size
+    splits = np.array_split(flat_arr[:, :num_splits * size], num_splits, axis=-1)
+    if remainder:
+        splits.append(flat_arr[:, num_splits * size:])
+    splits = [np.swapaxes(split.reshape(*shape[:dim], -1, *shape[dim+1:]), dim, -1) for split in splits]
+    
+    return splits
+
 _where = lambda nx, condition: torch.where(condition) if nx_torch(nx) else np.where(condition)
 _repeat_interleave = (
     lambda nx, x, repeats, axis: torch.repeat_interleave(x, repeats, dim=axis)
