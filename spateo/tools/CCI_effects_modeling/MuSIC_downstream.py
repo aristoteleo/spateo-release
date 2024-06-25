@@ -6921,7 +6921,7 @@ class MuSIC_Interpreter(MuSIC):
                         return 0
                     return len(intersection) / len(regulator_nonzero)
 
-                # Calculating the intersection ratios and finding top 10 regulators for each signal
+                # Calculating the intersection ratios and finding top 20 regulators for each signal
                 top_regulators = {}
 
                 for signal_column in ds_targets_df.columns:
@@ -6931,7 +6931,7 @@ class MuSIC_Interpreter(MuSIC):
                         )
                         for regulator_column in regulator_expr.columns
                     }
-                    sorted_regulators = sorted(ratios, key=ratios.get, reverse=True)[:10]
+                    sorted_regulators = sorted(ratios, key=ratios.get, reverse=True)[:20]
                     top_regulators[signal_column] = sorted_regulators
 
                 # Final set of top regulators:
