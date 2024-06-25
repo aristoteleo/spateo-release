@@ -380,8 +380,8 @@ _repeat_interleave = (
 
 def _sort(nx, arr, axis=-1, descending=False):
     if not descending:
-        sorted_arr, sorted_idx = nx.sort2(arr, axis=axis)
+        sorted_arr, sorted_idx = torch.sort(arr, dim=axis, descending=True)
     else:
-        sorted_arr, sorted_idx = nx.sort2(-arr, axis=axis)
+        sorted_arr, sorted_idx = torch.sort(arr, dim=axis, descending=False)
         sorted_arr = -sorted_arr
     return sorted_arr, sorted_idx
