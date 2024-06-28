@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 from anndata import AnnData
 from skimage import morphology
-
+import matplotlib as mpl
 from ..configuration import SKM
 from ..logging import logger_manager as lm
 
@@ -49,7 +49,7 @@ def gen_cluster_image(
     lm.main_info(f"Set up the color for the clusters with the {cmap} colormap.")
 
     # TODO: what if cluster number is larger than cmap.N?
-    cmap = plt.cm.get_cmap(cmap)
+    cmap = mpl.colormaps[cmap]
     colors = cmap(np.arange(cmap.N))
     color_ls = []
     for i in range(cmap.N):

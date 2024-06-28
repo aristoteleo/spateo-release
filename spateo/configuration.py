@@ -279,7 +279,7 @@ def shiftedColorMap(
         newcmap: a new colormap that has the middle point of the colormap shifted.
     """
     # Check for existing shifted colormap:
-    matplotlib.cm.ColormapRegistry.unregister(plt.colormaps, name="shiftedcmap")
+    cm.ColormapRegistry.unregister(plt.colormaps, name="shiftedcmap")
 
     cdict = {"red": [], "green": [], "blue": [], "alpha": []}
 
@@ -300,7 +300,7 @@ def shiftedColorMap(
         cdict["alpha"].append((si, a, a))
 
     newcmap = matplotlib.colors.LinearSegmentedColormap(name, cdict)
-    plt.register_cmap(cmap=newcmap)
+    matplotlib.colormaps.register(cmap=newcmap)
 
     return newcmap
 
@@ -330,23 +330,23 @@ glasbey_dark_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     if "fire" not in matplotlib.colormaps():
-        plt.register_cmap("fire", fire_cmap)
+        matplotlib.colormaps.register(name="fire", cmap=fire_cmap)
     if "darkblue" not in matplotlib.colormaps():
-        plt.register_cmap("darkblue", darkblue_cmap)
+        matplotlib.colormaps.register(name="darkblue", cmap=darkblue_cmap)
     if "darkgreen" not in matplotlib.colormaps():
-        plt.register_cmap("darkgreen", darkgreen_cmap)
+        matplotlib.colormaps.register(name="darkgreen", cmap=darkgreen_cmap)
     if "darkred" not in matplotlib.colormaps():
-        plt.register_cmap("darkred", darkred_cmap)
+        matplotlib.colormaps.register(name="darkred", cmap=darkred_cmap)
     if "darkpurple" not in matplotlib.colormaps():
-        plt.register_cmap("darkpurple", darkpurple_cmap)
+        matplotlib.colormaps.register(name="darkpurple", cmap=darkpurple_cmap)
     if "div_blue_black_red" not in matplotlib.colormaps():
-        plt.register_cmap("div_blue_black_red", div_blue_black_red_cmap)
+        matplotlib.colormaps.register(name="div_blue_black_red", cmap=div_blue_black_red_cmap)
     if "div_blue_red" not in matplotlib.colormaps():
-        plt.register_cmap("div_blue_red", div_blue_red_cmap)
+        matplotlib.colormaps.register(name="div_blue_red", cmap=div_blue_red_cmap)
     if "glasbey_white" not in matplotlib.colormaps():
-        plt.register_cmap("glasbey_white", glasbey_white_cmap)
+        matplotlib.colormaps.register(name="glasbey_white", cmap=glasbey_white_cmap)
     if "glasbey_dark" not in matplotlib.colormaps():
-        plt.register_cmap("glasbey_dark", glasbey_dark_cmap)
+        matplotlib.colormaps.register(name="glasbey_dark", cmap=glasbey_dark_cmap)
 
 _themes = {
     "fire": {

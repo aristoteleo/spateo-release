@@ -398,8 +398,8 @@ def _matplotlib_points(
                 "each sample (size mismatch: {} {})".format(labels.shape[0], points.shape[0])
             )
         if color_key is None:
-            # main_debug("color_key is None")
-            cmap = copy.copy(matplotlib.cm.get_cmap(color_key_cmap))
+            # main_debug("color_key is None")  
+            cmap = copy.copy(matplotlib.colormaps[color_key_cmap])
             cmap.set_bad("lightgray")
             colors = None
 
