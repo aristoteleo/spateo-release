@@ -1992,6 +1992,18 @@ class MuSIC_Interpreter(MuSIC):
             if title is None:
                 title = f"Signaling effect distribution along axis given by {position_key} key"
             save_id = position_key
+        # To ensure each coordinate has enough samples, round to the nearest 10 if the max value is on the order of
+        # magnitude of 1000, and the nearest 1 if the max value is on the order of magnitude of 100.
+        max_value = pos.max()
+        if max_value < 1000:
+            rounding_base = 10
+        elif max_value >= 1000:
+            rounding_base = 100
+        else:
+            rounding_base = 1000
+
+        pos = pos.round(-int(pd.np.log10(rounding_base)))
+
         # If position array is numerical, there may not be an exact match- convert the data type to integer:
         if pos.dtype == float:
             pos = pos.astype(int)
@@ -2154,24 +2166,25 @@ class MuSIC_Interpreter(MuSIC):
             ]
             # Remove combinations where the effect is hardly present (arbitrarily defined at 0.5% of cells):
             combinations = [
-                f"{target}:{feature}"
+                f"{target};{feature}"
                 for target, feature in combinations
                 if (all_coeffs[target][f"b_{feature}"] != 0).mean() >= 0.005
             ]
             mean_effect = pd.Series(index=combinations)
             for combo in combinations:
-                target, feature = combo.split(":")
+                target, feature = combo.split(";")
                 target_coefs = all_coeffs[target][f"b_{feature}"]
                 mean_effect[combo] = target_coefs.mean()
 
             # For each cell, compute the fold change over the average for each combination:
             all_fc = pd.DataFrame(index=self.adata.obs_names, columns=combinations)
             for combo in tqdm(combinations, desc="Computing fold changes for interaction-target combinations..."):
-                target, feature = combo.split(":")
+                target, feature = combo.split(";")
                 target_coefs = all_coeffs[target][f"b_{feature}"]
                 all_fc[combo] = target_coefs / mean_effect[combo]
             # Log fold change:
             all_fc = np.log1p(all_fc)
+            all_fc[np.isnan(all_fc)] = 0
 
             # z-score the fold change values:
             all_fc = all_fc.apply(scipy.stats.zscore, axis=0)
@@ -6921,7 +6934,7 @@ class MuSIC_Interpreter(MuSIC):
                         return 0
                     return len(intersection) / len(regulator_nonzero)
 
-                # Calculating the intersection ratios and finding top 10 regulators for each signal
+                # Calculating the intersection ratios and finding top 20 regulators for each signal
                 top_regulators = {}
 
                 for signal_column in ds_targets_df.columns:
@@ -6931,7 +6944,7 @@ class MuSIC_Interpreter(MuSIC):
                         )
                         for regulator_column in regulator_expr.columns
                     }
-                    sorted_regulators = sorted(ratios, key=ratios.get, reverse=True)[:10]
+                    sorted_regulators = sorted(ratios, key=ratios.get, reverse=True)[:20]
                     top_regulators[signal_column] = sorted_regulators
 
                 # Final set of top regulators:
