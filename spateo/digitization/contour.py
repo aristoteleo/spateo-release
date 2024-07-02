@@ -5,10 +5,11 @@ import random
 from typing import Any, List, Optional, Tuple, Union
 
 import cv2
+import matplotlib as mpl
 import numpy as np
 from anndata import AnnData
 from skimage import morphology
-import matplotlib as mpl
+
 from ..configuration import SKM
 from ..logging import logger_manager as lm
 
