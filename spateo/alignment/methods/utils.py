@@ -140,13 +140,14 @@ def normalize_coords(
 
     # normalize_scale now becomes to a list
     normalize_scale_list = []
+    normalize_scale_list = nx.zeros((len(coords, )), type_as=coords[0])
     normalize_mean_list = []
     for i in range(len(coords)):
         normalize_mean = nx.einsum("ij->j", coords[i]) / coords[i].shape[0]
         normalize_mean_list.append(normalize_mean)
         coords[i] -= normalize_mean
         normalize_scale = nx.sqrt(nx.einsum("ij->", nx.einsum("ij,ij->ij", coords[i], coords[i])) / coords[i].shape[0])
-        normalize_scale_list.append(normalize_scale)
+        normalize_scale_list[i] = normalize_scale
 
     if coords[0].shape[1] == 2:
         normalize_scale = nx.mean(normalize_scale_list)
