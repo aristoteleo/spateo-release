@@ -1,6 +1,7 @@
 from unittest import TestCase, mock
 
 import numpy as np
+
 import spateo.segmentation.label as label
 
 from ..mixins import TestMixin, create_random_adata

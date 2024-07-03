@@ -17,7 +17,14 @@ from pandas.api.types import is_categorical_dtype
 from typing_extensions import Literal
 
 from ...configuration import SKM, _themes, reset_rcParams
-from ...tools.utils import affine_transform, calc_1nd_moment, flatten, gen_rotation_2d, get_mapper, update_dict
+from ...tools.utils import (
+    affine_transform,
+    calc_1nd_moment,
+    flatten,
+    gen_rotation_2d,
+    get_mapper,
+    update_dict,
+)
 from .utils import (
     _get_adata_color_vec,
     _matplotlib_points,

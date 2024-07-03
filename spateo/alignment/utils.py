@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.spatial import cKDTree
+
 from spateo.logging import logger_manager as lm
 
 ####################

@@ -8,4 +8,9 @@ from .line_model import (
     generate_edges,
 )
 from .morphofield_model import construct_field, construct_field_streams
-from .morphopath_model import construct_genesis, construct_genesis_X, construct_trajectory, construct_trajectory_X
+from .morphopath_model import (
+    construct_genesis,
+    construct_genesis_X,
+    construct_trajectory,
+    construct_trajectory_X,
+)

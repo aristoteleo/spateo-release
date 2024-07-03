@@ -6,7 +6,15 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 from scipy.spatial import Delaunay
-from shapely.geometry import LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, multipolygon
+from shapely.geometry import (
+    LineString,
+    MultiLineString,
+    MultiPoint,
+    MultiPolygon,
+    Point,
+    Polygon,
+    multipolygon,
+)
 from shapely.ops import polygonize, unary_union
 
 from ..configuration import SKM

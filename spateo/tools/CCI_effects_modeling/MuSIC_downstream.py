@@ -38,7 +38,12 @@ from matplotlib import rcParams
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.stats import mannwhitneyu, pearsonr, spearmanr, ttest_1samp, ttest_ind
 from sklearn.decomposition import TruncatedSVD
-from sklearn.metrics import confusion_matrix, f1_score, mean_squared_error, roc_auc_score
+from sklearn.metrics import (
+    confusion_matrix,
+    f1_score,
+    mean_squared_error,
+    roc_auc_score,
+)
 from sklearn.preprocessing import normalize
 from tqdm.auto import tqdm
 

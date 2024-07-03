@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
+
 from spateo.logging import logger_manager as lm
 
 from .methods import BA_align, empty_cache

@@ -2,6 +2,7 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
+
 from spateo.configuration import SKM
 
 from .methods import generalized_procrustes_analysis, paste_pairwise_align

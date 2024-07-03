@@ -33,7 +33,13 @@ from pandas.api.types import is_numeric_dtype
 
 from ...configuration import SKM, config_spateo_rcParams, set_pub_style
 from ...logging import logger_manager as lm
-from .utils import _get_array_values, check_colornorm, deduplicate_kwargs, plot_dendrogram, save_return_show_fig_utils
+from .utils import (
+    _get_array_values,
+    check_colornorm,
+    deduplicate_kwargs,
+    plot_dendrogram,
+    save_return_show_fig_utils,
+)
 
 
 # --------------------------------------- Data conversion for plotting --------------------------------------- #

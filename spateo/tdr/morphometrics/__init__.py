@@ -1,4 +1,9 @@
-from .morphofield import cell_directions, morphofield_gp, morphofield_sparsevfc, morphopath
+from .morphofield import (
+    cell_directions,
+    morphofield_gp,
+    morphofield_sparsevfc,
+    morphopath,
+)
 from .morphofield_dg import (
     morphofield_acceleration,
     morphofield_curl,

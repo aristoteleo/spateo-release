@@ -8,7 +8,13 @@ from .models_backbone import (
     map_points_to_backbone,
     update_backbone,
 )
-from .models_individual import construct_cells, construct_pc, construct_surface, voxelize_mesh, voxelize_pc
+from .models_individual import (
+    construct_cells,
+    construct_pc,
+    construct_surface,
+    voxelize_mesh,
+    voxelize_pc,
+)
 from .models_migration import (
     construct_align_lines,
     construct_arrow,

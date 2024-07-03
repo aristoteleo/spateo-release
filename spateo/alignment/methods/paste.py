@@ -5,6 +5,7 @@ import ot
 import torch
 from anndata import AnnData
 from sklearn.decomposition import NMF
+
 from spateo.logging import logger_manager as lm
 
 from .utils import (

@@ -13,6 +13,7 @@ except ImportError:
 from typing import List, Optional, Tuple, Union
 
 import pandas as pd
+
 from spateo.logging import logger_manager as lm
 
 from .morpho_sparse_utils import (
