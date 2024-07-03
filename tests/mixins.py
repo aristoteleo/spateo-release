@@ -5,7 +5,6 @@ from unittest import TestCase
 
 import numpy as np
 from anndata import AnnData
-
 from spateo.configuration import SKM
 
 

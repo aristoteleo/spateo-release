@@ -1,9 +1,8 @@
 from unittest import TestCase, mock
 
 import numpy as np
-from scipy import sparse
-
 import spateo.io.utils as utils
+from scipy import sparse
 
 from ..mixins import TestMixin
 

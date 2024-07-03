@@ -2,9 +2,8 @@ from unittest import TestCase, mock
 
 import networkx as nx
 import numpy as np
-from scipy import sparse
-
 import spateo.segmentation.density as density
+from scipy import sparse
 
 from ..mixins import TestMixin, create_random_adata
 

@@ -14,29 +14,10 @@ from typing import List, Optional, Tuple, Union
 
 from spateo.logging import logger_manager as lm
 
-from .utils import (
-    _chunk,
-    _data,
-    _dot,
-    _identity,
-    _linalg,
-    _mul,
-    _pi,
-    _pinv,
-    _power,
-    _prod,
-    _psi,
-    _randperm,
-    _roll,
-    _unique,
-    _unsqueeze,
-    align_preprocess,
-    cal_dist,
-    calc_exp_dissimilarity,
-    coarse_rigid_alignment,
-    empty_cache,
-    get_optimal_R,
-)
+from .utils import (_chunk, _data, _dot, _identity, _linalg, _mul, _pi, _pinv,
+                    _power, _prod, _psi, _randperm, _roll, _unique, _unsqueeze,
+                    align_preprocess, cal_dist, calc_exp_dissimilarity,
+                    coarse_rigid_alignment, empty_cache, get_optimal_R)
 
 
 def con_K(

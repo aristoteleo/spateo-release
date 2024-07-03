@@ -35,14 +35,11 @@ from adjustText import adjust_text
 from joblib import Parallel, delayed
 from matplotlib import rcParams
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from scipy.stats import mannwhitneyu, pearsonr, spearmanr, ttest_1samp, ttest_ind
+from scipy.stats import (mannwhitneyu, pearsonr, spearmanr, ttest_1samp,
+                         ttest_ind)
 from sklearn.decomposition import TruncatedSVD
-from sklearn.metrics import (
-    confusion_matrix,
-    f1_score,
-    mean_squared_error,
-    roc_auc_score,
-)
+from sklearn.metrics import (confusion_matrix, f1_score, mean_squared_error,
+                             roc_auc_score)
 from sklearn.preprocessing import normalize
 from tqdm.auto import tqdm
 
@@ -56,7 +53,8 @@ from ...tools.utils import filter_adata_spatial
 from ..dimensionality_reduction import find_optimal_pca_components, pca_fit
 from ..utils import compute_corr_ci, create_new_coordinate
 from .MuSIC import MuSIC
-from .regression_utils import assign_significance, multitesting_correction, wald_test
+from .regression_utils import (assign_significance, multitesting_correction,
+                               wald_test)
 from .SWR import define_spateo_argparse
 
 

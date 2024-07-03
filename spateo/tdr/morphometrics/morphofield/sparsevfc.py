@@ -8,7 +8,6 @@ except ImportError:
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-
 from spateo.alignment import get_optimal_mapping_relationship
 from spateo.alignment.methods import paste_pairwise_align
 from spateo.logging import logger_manager as lm

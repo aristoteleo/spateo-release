@@ -10,7 +10,6 @@ from numpy import ndarray
 from scipy.linalg import pinv
 from scipy.sparse import issparse
 from scipy.special import psi
-
 from spateo.logging import logger_manager as lm
 
 # Get the intersection of lists

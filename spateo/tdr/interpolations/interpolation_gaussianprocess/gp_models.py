@@ -1,6 +1,7 @@
 import gpytorch
 from gpytorch.models import ApproximateGP, ExactGP
-from gpytorch.variational import CholeskyVariationalDistribution, VariationalStrategy
+from gpytorch.variational import (CholeskyVariationalDistribution,
+                                  VariationalStrategy)
 
 
 class Approx_GPModel(ApproximateGP):

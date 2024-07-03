@@ -19,15 +19,8 @@ from typing_extensions import Literal
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm
-from .utils import (
-    bin_indices,
-    centroids,
-    get_bin_props,
-    get_coords_labels,
-    get_label_props,
-    get_points_props,
-    in_concave_hull,
-)
+from .utils import (bin_indices, centroids, get_bin_props, get_coords_labels,
+                    get_label_props, get_points_props, in_concave_hull)
 
 try:
     import ngs_tools as ngs

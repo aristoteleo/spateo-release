@@ -1,7 +1,6 @@
 from unittest import TestCase, mock
 
 import numpy as np
-
 import spateo.segmentation.icell as icell
 
 from ..mixins import TestMixin, create_random_adata

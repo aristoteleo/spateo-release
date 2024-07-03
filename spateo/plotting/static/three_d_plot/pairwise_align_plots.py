@@ -14,13 +14,8 @@ from pyvista import PolyData
 from scipy.sparse import issparse
 
 from ....alignment import get_optimal_mapping_relationship
-from ....tdr import (
-    add_model_labels,
-    collect_models,
-    construct_align_lines,
-    construct_pc,
-    merge_models,
-)
+from ....tdr import (add_model_labels, collect_models, construct_align_lines,
+                     construct_pc, merge_models)
 from .three_dims_plots import three_d_animate, three_d_plot
 
 

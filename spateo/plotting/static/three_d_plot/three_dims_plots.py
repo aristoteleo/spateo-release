@@ -18,16 +18,9 @@ except ImportError:
 from spateo.tdr import collect_models
 
 from ..colorlabel import vega_10
-from .three_dims_plotter import (
-    _set_jupyter,
-    add_legend,
-    add_model,
-    add_outline,
-    add_text,
-    create_plotter,
-    output_plotter,
-    save_plotter,
-)
+from .three_dims_plotter import (_set_jupyter, add_legend, add_model,
+                                 add_outline, add_text, create_plotter,
+                                 output_plotter, save_plotter)
 
 
 def wrap_to_plotter(

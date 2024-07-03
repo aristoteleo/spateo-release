@@ -5,18 +5,11 @@ import ot
 import torch
 from anndata import AnnData
 from sklearn.decomposition import NMF
-
 from spateo.logging import logger_manager as lm
 
-from .utils import (
-    align_preprocess,
-    calc_exp_dissimilarity,
-    check_exp,
-    check_spatial_coords,
-    filter_common_genes,
-    intersect_lsts,
-    to_dense_matrix,
-)
+from .utils import (align_preprocess, calc_exp_dissimilarity, check_exp,
+                    check_spatial_coords, filter_common_genes, intersect_lsts,
+                    to_dense_matrix)
 
 ######################################
 # Align spots across pairwise slices #

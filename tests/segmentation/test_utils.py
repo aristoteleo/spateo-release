@@ -1,7 +1,6 @@
 from unittest import TestCase, mock
 
 import numpy as np
-
 import spateo.segmentation.utils as utils
 
 from ..mixins import TestMixin
