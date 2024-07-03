@@ -242,10 +242,17 @@ def align_preprocess(
     new_samples = [s[:, common_genes] for s in new_samples]
 
     # Gene expression matrix of all samples
-    if (use_rep is None) or (not isinstance(use_rep, str)) or (use_rep not in samples[0].obsm.keys()) or (use_rep not in samples[1].obsm.keys()):
+    if (
+        (use_rep is None)
+        or (not isinstance(use_rep, str))
+        or (use_rep not in samples[0].obsm.keys())
+        or (use_rep not in samples[1].obsm.keys())
+    ):
         exp_matrices = [nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples]
     else:
-        exp_matrices = [nx.from_numpy(s.obsm[use_rep], type_as=type_as) for s in new_samples] + [nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples]
+        exp_matrices = [nx.from_numpy(s.obsm[use_rep], type_as=type_as) for s in new_samples] + [
+            nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples
+        ]
     if not (select_high_exp_genes is False):
         # Select significance genes if select_high_exp_genes is True
         ExpressionData = _cat(nx=nx, x=exp_matrices, dim=0)
@@ -270,7 +277,12 @@ def align_preprocess(
         spatial_coords, normalize_scale_list, normalize_mean_list = normalize_coords(
             coords=spatial_coords, nx=nx, verbose=verbose
         )
-    if normalize_g and ((use_rep is None) or (not isinstance(use_rep, str)) or (use_rep not in samples[0].obsm.keys()) or (use_rep not in samples[1].obsm.keys())):
+    if normalize_g and (
+        (use_rep is None)
+        or (not isinstance(use_rep, str))
+        or (use_rep not in samples[0].obsm.keys())
+        or (use_rep not in samples[1].obsm.keys())
+    ):
         exp_matrices = normalize_exps(matrices=exp_matrices, nx=nx, verbose=verbose)
 
     return (
@@ -507,7 +519,7 @@ def calc_exp_dissimilarity(
         "euclidean",
         "euc",
         "cos",
-        "cosine"
+        "cosine",
     ], "``dissimilarity`` value is wrong. Available ``dissimilarity`` are: ``'kl'``, ``'euclidean'`` and ``'euc'``."
     if dissimilarity.lower() == "kl":
         X_A = X_A + 0.01
@@ -699,11 +711,12 @@ def _cos_similarity(
     if nx_torch(nx):
         torch_cos = torch.nn.CosineSimilarity(dim=1)
         mat1_unsqueeze = mat1.unsqueeze(-1)
-        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0,2)
+        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0, 2)
         distMat = torch_cos(mat1_unsqueeze, mat2_unsqueeze) * 0.5 + 0.5
     else:
-        distMat = (-ot.dist(mat1, mat2, metric='cosine')+1)*0.5 + 0.5
+        distMat = (-ot.dist(mat1, mat2, metric="cosine") + 1) * 0.5 + 0.5
     return distMat
+
 
 def _dist(
     mat1: Union[np.ndarray, torch.Tensor],
@@ -715,7 +728,7 @@ def _dist(
         "euclidean",
         "kl",
         "cos",
-        "cosine"
+        "cosine",
     ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'`` and ``'kl'``."
     nx = ot.backend.get_backend(mat1, mat2)
     if metric.lower() == "euc" or metric.lower() == "euclidean":
@@ -736,7 +749,11 @@ def PCA_reduction(
     data_mat: Union[np.ndarray, torch.Tensor],
     reduced_dim: int = 64,
     center: bool = True,
-) -> Tuple[Union[np.ndarray, torch.Tensor], Union[np.ndarray, torch.Tensor], Union[np.ndarray, torch.Tensor],]:
+) -> Tuple[
+    Union[np.ndarray, torch.Tensor],
+    Union[np.ndarray, torch.Tensor],
+    Union[np.ndarray, torch.Tensor],
+]:
     """PCA dimensionality reduction using SVD decomposition
 
     Args:
@@ -1146,8 +1163,8 @@ _cat = lambda nx, x, dim: torch.cat(x, dim=dim) if nx_torch(nx) else np.concaten
 _unique = lambda nx, x, dim: torch.unique(x, dim=dim) if nx_torch(nx) else np.unique(x, axis=dim)
 _var = lambda nx, x, dim: torch.var(x, dim=dim) if nx_torch(nx) else np.var(x, axis=dim)
 
-_data = (
-    lambda nx, data, type_as: torch.tensor(data, device=type_as.device, dtype=type_as.dtype)
+_data = lambda nx, data, type_as: (
+    torch.tensor(data, device=type_as.device, dtype=type_as.dtype)
     if nx_torch(nx)
     else np.asarray(data, dtype=type_as.dtype)
 )
@@ -1157,28 +1174,22 @@ _power = lambda nx: torch.pow if nx_torch(nx) else np.power
 _psi = lambda nx: torch.special.psi if nx_torch(nx) else psi
 _pinv = lambda nx: torch.linalg.pinv if nx_torch(nx) else pinv
 _dot = lambda nx: torch.matmul if nx_torch(nx) else np.dot
-_identity = (
-    lambda nx, N, type_as: torch.eye(N, dtype=type_as.dtype, device=type_as.device)
-    if nx_torch(nx)
-    else np.identity(N, dtype=type_as.dtype)
+_identity = lambda nx, N, type_as: (
+    torch.eye(N, dtype=type_as.dtype, device=type_as.device) if nx_torch(nx) else np.identity(N, dtype=type_as.dtype)
 )
 _linalg = lambda nx: torch.linalg if nx_torch(nx) else np.linalg
 _prod = lambda nx: torch.prod if nx_torch(nx) else np.prod
 _pi = lambda nx: torch.pi if nx_torch(nx) else np.pi
-_chunk = (
-    lambda nx, x, chunk_num, dim: torch.chunk(x, chunk_num, dim=dim)
-    if nx_torch(nx)
-    else np.array_split(x, chunk_num, axis=dim)
+_chunk = lambda nx, x, chunk_num, dim: (
+    torch.chunk(x, chunk_num, dim=dim) if nx_torch(nx) else np.array_split(x, chunk_num, axis=dim)
 )
 _randperm = lambda nx: torch.randperm if nx_torch(nx) else np.random.permutation
 _roll = lambda nx: torch.roll if nx_torch(nx) else np.roll
-_choice = (
-    lambda nx, length, size: torch.randperm(length)[:size]
-    if nx_torch(nx)
-    else np.random.choice(length, size, replace=False)
+_choice = lambda nx, length, size: (
+    torch.randperm(length)[:size] if nx_torch(nx) else np.random.choice(length, size, replace=False)
 )
-_topk = (
-    lambda nx, x, topk, axis: torch.topk(x, topk, dim=axis)[1] if nx_torch(nx) else np.argpartition(x, topk, axis=axis)
+_topk = lambda nx, x, topk, axis: (
+    torch.topk(x, topk, dim=axis)[1] if nx_torch(nx) else np.argpartition(x, topk, axis=axis)
 )
 _dstack = lambda nx: torch.dstack if nx_torch(nx) else np.dstack
 _vstack = lambda nx: torch.vstack if nx_torch(nx) else np.vstack

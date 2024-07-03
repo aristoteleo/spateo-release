@@ -398,7 +398,7 @@ def _matplotlib_points(
                 "each sample (size mismatch: {} {})".format(labels.shape[0], points.shape[0])
             )
         if color_key is None:
-            # main_debug("color_key is None")  
+            # main_debug("color_key is None")
             cmap = copy.copy(matplotlib.colormaps[color_key_cmap])
             cmap.set_bad("lightgray")
             colors = None
@@ -632,20 +632,20 @@ def _matplotlib_points(
         _vmin = (
             np.nanmin(values)
             if vmin is None
-            else np.nanpercentile(values, vmin * 100)
-            if (vmin + vmax == 1 and 0 <= vmin < vmax)
-            else np.nanpercentile(values, vmin)
-            if (vmin + vmax == 100 and 0 <= vmin < vmax)
-            else vmin
+            else (
+                np.nanpercentile(values, vmin * 100)
+                if (vmin + vmax == 1 and 0 <= vmin < vmax)
+                else np.nanpercentile(values, vmin) if (vmin + vmax == 100 and 0 <= vmin < vmax) else vmin
+            )
         )
         _vmax = (
             np.nanmax(values)
             if vmax is None
-            else np.nanpercentile(values, vmax * 100)
-            if (vmin + vmax == 1 and 0 <= vmin < vmax)
-            else np.nanpercentile(values, vmax)
-            if (vmin + vmax == 100 and 0 <= vmin < vmax)
-            else vmax
+            else (
+                np.nanpercentile(values, vmax * 100)
+                if (vmin + vmax == 1 and 0 <= vmin < vmax)
+                else np.nanpercentile(values, vmax) if (vmin + vmax == 100 and 0 <= vmin < vmax) else vmax
+            )
         )
 
         if sym_c and _vmin < 0 and _vmax > 0:

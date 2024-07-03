@@ -1,6 +1,7 @@
 """
 Defining the types of distributions that the dependent variable can be assumed to take.
 """
+
 from typing import Optional
 
 import numpy as np

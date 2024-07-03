@@ -1,5 +1,6 @@
 """Helper functions about image layer processing.
 """
+
 from typing import Optional
 
 import numpy as np

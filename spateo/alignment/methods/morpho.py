@@ -14,10 +14,29 @@ from typing import List, Optional, Tuple, Union
 
 from spateo.logging import logger_manager as lm
 
-from .utils import (_chunk, _data, _dot, _identity, _linalg, _mul, _pi, _pinv,
-                    _power, _prod, _psi, _randperm, _roll, _unique, _unsqueeze,
-                    align_preprocess, cal_dist, calc_exp_dissimilarity,
-                    coarse_rigid_alignment, empty_cache, get_optimal_R)
+from .utils import (
+    _chunk,
+    _data,
+    _dot,
+    _identity,
+    _linalg,
+    _mul,
+    _pi,
+    _pinv,
+    _power,
+    _prod,
+    _psi,
+    _randperm,
+    _roll,
+    _unique,
+    _unsqueeze,
+    align_preprocess,
+    cal_dist,
+    calc_exp_dissimilarity,
+    coarse_rigid_alignment,
+    empty_cache,
+    get_optimal_R,
+)
 
 
 def con_K(
@@ -334,9 +353,9 @@ def BA_align(
     else:
         init_R = np.eye(D)
         init_t = np.zeros((D,))
-        inlier_A = np.zeros((4,D))
-        inlier_B = np.zeros((4,D))
-        inlier_P = np.ones((4,1))
+        inlier_A = np.zeros((4, D))
+        inlier_B = np.zeros((4, D))
+        inlier_P = np.ones((4, 1))
         init_R = _data(nx, init_R, type_as)
         init_t = _data(nx, init_t, type_as)
         inlier_A = _data(nx, inlier_A, type_as)
@@ -660,9 +679,9 @@ def BA_align(
             "Coff": nx.to_numpy(Coff),
             "ctrl_pts": nx.to_numpy(ctrl_pts),
             "normalize_scale": nx.to_numpy(normalize_scale_list[0]) if normalize_c else None,
-            "normalize_mean_list": [nx.to_numpy(normalize_mean) for normalize_mean in normalize_mean_list]
-            if normalize_c
-            else None,
+            "normalize_mean_list": (
+                [nx.to_numpy(normalize_mean) for normalize_mean in normalize_mean_list] if normalize_c else None
+            ),
             "normalize_c": normalize_c,
             "dissimilarity": dissimilarity,
             "beta2": nx.to_numpy(sigma2),

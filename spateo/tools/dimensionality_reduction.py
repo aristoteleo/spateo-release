@@ -1,5 +1,6 @@
 """Tools for dimensionality reduction, adapted from Dynamo: https://github.com/aristoteleo/dynamo-release/
 dynamo/tools/dimension_reduction.py"""
+
 import warnings
 from copy import deepcopy
 from typing import Callable, List, Literal, Optional, Tuple, Union
@@ -16,8 +17,7 @@ from sklearn.utils import check_random_state
 from sklearn.utils.extmath import svd_flip
 from sklearn.utils.sparsefuncs import mean_variance_axis
 from umap import UMAP
-from umap.umap_ import (find_ab_params, fuzzy_simplicial_set,
-                        nearest_neighbors, simplicial_set_embedding)
+from umap.umap_ import find_ab_params, fuzzy_simplicial_set, nearest_neighbors, simplicial_set_embedding
 
 from ..configuration import SKM
 from ..logging import logger_manager as lm

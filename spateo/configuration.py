@@ -185,9 +185,7 @@ class SpateoAdataKeyManager:
                 passing = (
                     all(SpateoAdataKeyManager.adata_is_type(_adata, t) for _adata in adata)
                     if isinstance(adata, (list, tuple))
-                    else SpateoAdataKeyManager.adata_is_type(adata, t)
-                    if type(adata) == AnnData
-                    else False
+                    else SpateoAdataKeyManager.adata_is_type(adata, t) if type(adata) == AnnData else False
                 )
                 if (not optional or adata is not None) and not passing:
                     if isinstance(adata, (list, tuple)):

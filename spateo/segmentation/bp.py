@@ -1,6 +1,7 @@
 """Belief propagation to compute the marginal probabilities of a spot being
 occupied by a cell.
 """
+
 from typing import Optional
 
 import cv2

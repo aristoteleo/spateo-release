@@ -1,5 +1,6 @@
 """Functions to refine staining and RNA alignments.
 """
+
 import math
 from typing import List, Optional, Union
 

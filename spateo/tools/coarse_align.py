@@ -2,6 +2,7 @@
 Todo:
     * @Xiaojieqiu: update with Google style documentation, function typings, tests
 """
+
 import math
 from typing import List, Optional, Tuple, Union
 

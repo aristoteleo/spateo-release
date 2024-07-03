@@ -1,6 +1,7 @@
 """Variational inference implementation of a negative binomial mixture model
 using Pyro.
 """
+
 from typing import Dict, Optional, Tuple, Union
 
 import numpy as np

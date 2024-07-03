@@ -1,5 +1,6 @@
 """Interactive plotting functions for aggregated UMI counts.
 """
+
 from typing import List, Optional, Tuple, Union
 
 import anndata

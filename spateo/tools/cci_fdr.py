@@ -1,6 +1,7 @@
 """
 Companion functions for cell-cell communication inference analyses
 """
+
 try:
     from typing import Literal
 except ImportError:

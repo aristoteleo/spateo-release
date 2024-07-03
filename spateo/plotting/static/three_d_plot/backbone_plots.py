@@ -10,8 +10,7 @@ import numpy as np
 from pyvista import MultiBlock, PolyData, UnstructuredGrid
 
 from .three_dims_plots import wrap_to_plotter
-from .three_dims_plotter import (_set_jupyter, add_model, create_plotter,
-                                 output_plotter)
+from .three_dims_plotter import _set_jupyter, add_model, create_plotter, output_plotter
 
 
 def backbone(

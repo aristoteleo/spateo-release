@@ -1,5 +1,6 @@
 """Spatial markers.
 """
+
 import warnings
 from random import sample
 from typing import Tuple

@@ -3,6 +3,7 @@ https://github.com/stardist/stardist
 
 [Schmidt18]_ and [Weigert20]_
 """
+
 import math
 from typing import Optional, Union
 

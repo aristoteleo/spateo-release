@@ -1,6 +1,7 @@
 """
 Aggregate buckets of AnnData object by binning.
 """
+
 import numpy as np
 import pandas as pd
 import scipy

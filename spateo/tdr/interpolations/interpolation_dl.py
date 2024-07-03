@@ -7,8 +7,7 @@ from numpy import ndarray
 from scipy.sparse import issparse
 
 from ...logging import logger_manager as lm
-from .interpolation_deeplearn import (DataSampler, DeepInterpolation,
-                                      interpolation_nn)
+from .interpolation_deeplearn import DataSampler, DeepInterpolation, interpolation_nn
 
 
 def deep_intepretation(

@@ -5,6 +5,7 @@ POT Python Optimal Transport library,
 Journal of Machine Learning Research, 22(78):1−8, 2021.
 Website: https://pythonot.github.io/
 """
+
 import multiprocessing
 import sys
 from functools import partial

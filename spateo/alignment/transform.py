@@ -7,9 +7,21 @@ from anndata import AnnData
 
 from .methods import cal_dist, cal_dot
 from .methods.morpho import con_K
-from .methods.utils import (_chunk, _data, _dot, _mul, _pi, _power, _prod,
-                            _unsqueeze, calc_exp_dissimilarity, check_backend,
-                            check_exp, filter_common_genes, intersect_lsts)
+from .methods.utils import (
+    _chunk,
+    _data,
+    _dot,
+    _mul,
+    _pi,
+    _power,
+    _prod,
+    _unsqueeze,
+    calc_exp_dissimilarity,
+    check_backend,
+    check_exp,
+    filter_common_genes,
+    intersect_lsts,
+)
 
 
 def paste_transform(

@@ -18,9 +18,16 @@ except ImportError:
 from spateo.tdr import collect_models
 
 from ..colorlabel import vega_10
-from .three_dims_plotter import (_set_jupyter, add_legend, add_model,
-                                 add_outline, add_text, create_plotter,
-                                 output_plotter, save_plotter)
+from .three_dims_plotter import (
+    _set_jupyter,
+    add_legend,
+    add_model,
+    add_outline,
+    add_text,
+    create_plotter,
+    output_plotter,
+    save_plotter,
+)
 
 
 def wrap_to_plotter(
@@ -1107,9 +1114,9 @@ def plot_multiple_genes_3D(
 
     # Assign individual gene labels where only one gene is expressed:
     for gene in genes:
-        adata.obs.loc[
-            (adata.obs[gene] == True) & (adata.obs["gene_expr_category"] == "None"), "gene_expr_category"
-        ] = gene
+        adata.obs.loc[(adata.obs[gene] == True) & (adata.obs["gene_expr_category"] == "None"), "gene_expr_category"] = (
+            gene
+        )
 
     traces = []
     for gene, color in zip(genes + ["Multiple genes"], colors):

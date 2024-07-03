@@ -1,5 +1,6 @@
 """IO functions for 10x Visium technology.
 """
+
 import os
 from typing import List, NamedTuple, Optional, Union
 

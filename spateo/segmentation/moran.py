@@ -2,6 +2,7 @@
 
 Adapted from code written by @HailinPan.
 """
+
 from typing import Optional, Tuple
 
 import cv2

@@ -2,6 +2,7 @@
 Plots to visualize results from cell-cell colocalization based analyses, as well as cell-cell communication
 inference-based analyses. Makes use of dotplot-generating functions
 """
+
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from matplotlib.collections import PolyCollection

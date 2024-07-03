@@ -1,6 +1,7 @@
 """
 Functions to either scale single-cell data or normalize such that the row-wise sums are identical.
 """
+
 import inspect
 import math
 import warnings

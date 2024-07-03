@@ -3,6 +3,7 @@ https://github.com/MouseLand/cellpose
 
 [Stringer20]_
 """
+
 from typing import Optional, Union
 
 import numpy as np

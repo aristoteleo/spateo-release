@@ -7,9 +7,15 @@ from anndata import AnnData
 from sklearn.decomposition import NMF
 from spateo.logging import logger_manager as lm
 
-from .utils import (align_preprocess, calc_exp_dissimilarity, check_exp,
-                    check_spatial_coords, filter_common_genes, intersect_lsts,
-                    to_dense_matrix)
+from .utils import (
+    align_preprocess,
+    calc_exp_dissimilarity,
+    check_exp,
+    check_spatial_coords,
+    filter_common_genes,
+    intersect_lsts,
+    to_dense_matrix,
+)
 
 ######################################
 # Align spots across pairwise slices #
@@ -63,7 +69,15 @@ def paste_pairwise_align(
     """
 
     # Preprocessing
-    (nx, type_as, new_samples, exp_matrices, spatial_coords, normalize_scale, normalize_mean_list,) = align_preprocess(
+    (
+        nx,
+        type_as,
+        new_samples,
+        exp_matrices,
+        spatial_coords,
+        normalize_scale,
+        normalize_mean_list,
+    ) = align_preprocess(
         samples=[sampleA, sampleB],
         genes=genes,
         spatial_key=spatial_key,

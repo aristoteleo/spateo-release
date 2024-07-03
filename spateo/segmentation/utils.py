@@ -1,5 +1,6 @@
 """Utility functions for cell segmentation.
 """
+
 from typing import Optional, Tuple, Union
 
 import cv2

@@ -1,5 +1,6 @@
 """Plotting functions for aggregated UMI counts.
 """
+
 import math
 import warnings
 from typing import Dict, Optional, Tuple, Union

@@ -17,8 +17,7 @@ from scipy.sparse import issparse
 
 from ...alignment.methods import _chunk, _unsqueeze
 from ...logging import logger_manager as lm
-from .interpolation_gaussianprocess import (Approx_GPModel, Exact_GPModel,
-                                            gp_train)
+from .interpolation_gaussianprocess import Approx_GPModel, Exact_GPModel, gp_train
 
 
 class Imputation_GPR:

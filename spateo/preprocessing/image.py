@@ -1,5 +1,6 @@
 """Image preprocessing.
 """
+
 from typing import Optional, Union
 
 import cv2

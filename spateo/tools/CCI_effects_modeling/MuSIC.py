@@ -2,6 +2,7 @@
 Modeling cell-cell communication using a regression model that is considerate of the spatial heterogeneity of (and thus
 the context-dependency of the relationships of) the response variable.
 """
+
 import argparse
 import itertools
 import json
@@ -29,8 +30,7 @@ from ...tools.spatial_smooth import smooth
 from ..find_neighbors import find_bw_for_n_neighbors, get_wi, neighbors
 from ..spatial_degs import moran_i
 from .distributions import Gaussian, NegativeBinomial, Poisson
-from .regression_utils import (compute_betas_local, iwls,
-                               multicollinearity_check)
+from .regression_utils import compute_betas_local, iwls, multicollinearity_check
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -1680,13 +1680,11 @@ class MuSIC:
                     threshold = (
                         0.67
                         if len(receptor_cols) == 2
-                        else 0.5
-                        if len(receptor_cols) == 3
-                        else 0.4
-                        if len(receptor_cols) == 4
-                        else 0.33
-                        if len(receptor_cols) >= 5
-                        else 1
+                        else (
+                            0.5
+                            if len(receptor_cols) == 3
+                            else 0.4 if len(receptor_cols) == 4 else 0.33 if len(receptor_cols) >= 5 else 1
+                        )
                     )
                     # If overlap is greater than threshold, combine columns
                     if len(receptor_cols) > 1 and overlap > threshold:
@@ -1727,13 +1725,11 @@ class MuSIC:
                                 threshold = (
                                     0.67
                                     if len(combined_cols) == 2
-                                    else 0.5
-                                    if len(combined_cols) == 3
-                                    else 0.4
-                                    if len(combined_cols) == 4
-                                    else 0.33
-                                    if len(combined_cols) >= 5
-                                    else 1
+                                    else (
+                                        0.5
+                                        if len(combined_cols) == 3
+                                        else 0.4 if len(combined_cols) == 4 else 0.33 if len(combined_cols) >= 5 else 1
+                                    )
                                 )
                                 combined_receptor_df = receptor_df[(receptor_df[combined_cols] != 0).any(axis=1)]
                                 # Calculate overlap for combined ligands

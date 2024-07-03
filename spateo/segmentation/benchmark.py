@@ -1,6 +1,7 @@
 """Functions to help segmentation benchmarking, specifically to compare
 two sets of segmentation labels.
 """
+
 from typing import Optional, Tuple
 
 import numpy as np

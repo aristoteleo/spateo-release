@@ -1,6 +1,7 @@
 """
 Miscellaneous non-normalizing data transformations on AnnData objects
 """
+
 from functools import singledispatch
 from typing import Optional, Union
 

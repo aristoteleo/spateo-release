@@ -1,6 +1,7 @@
 """
 Auxiliary functions to aid in the interpretation functions for the spatial and spatially-lagged regression models.
 """
+
 from typing import Callable, List, Optional, Union
 
 from joblib import Parallel, delayed

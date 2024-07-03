@@ -8,8 +8,7 @@ from typing import List, Optional, Union
 import numpy as np
 from anndata import AnnData
 from pyvista import PolyData
-from spateo.tdr import (add_model_labels, center_to_zero, collect_models,
-                        construct_pc, merge_models, translate_model)
+from spateo.tdr import add_model_labels, center_to_zero, collect_models, construct_pc, merge_models, translate_model
 
 from .three_dims_plots import three_d_multi_plot
 

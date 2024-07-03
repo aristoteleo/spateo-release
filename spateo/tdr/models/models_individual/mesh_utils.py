@@ -3,6 +3,7 @@ This code contains methods to optimize the final reconstructed mesh model.
     1. uniform mesh
     2. fix mesh
 """
+
 from typing import Optional, Union
 
 import numpy as np

@@ -1,5 +1,6 @@
 """IO functions for STARmap technology.
 """
+
 import os
 
 import numpy as np

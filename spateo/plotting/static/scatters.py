@@ -17,13 +17,21 @@ from pandas.api.types import is_categorical_dtype
 from typing_extensions import Literal
 
 from ...configuration import SKM, _themes, reset_rcParams
-from ...tools.utils import (affine_transform, calc_1nd_moment, flatten,
-                            gen_rotation_2d, get_mapper, update_dict)
-from .utils import (_get_adata_color_vec, _matplotlib_points,
-                    _select_font_color, arrowed_spines, deaxis_all,
-                    despline_all, is_cell_anno_column, is_gene_name,
-                    is_layer_keys, is_list_of_lists, save_fig,
-                    save_return_show_fig_utils)
+from ...tools.utils import affine_transform, calc_1nd_moment, flatten, gen_rotation_2d, get_mapper, update_dict
+from .utils import (
+    _get_adata_color_vec,
+    _matplotlib_points,
+    _select_font_color,
+    arrowed_spines,
+    deaxis_all,
+    despline_all,
+    is_cell_anno_column,
+    is_gene_name,
+    is_layer_keys,
+    is_list_of_lists,
+    save_fig,
+    save_return_show_fig_utils,
+)
 
 # from ..tools.moments import calc_1nd_moment
 # from ..docrep import DocstringProcessor
@@ -627,12 +635,16 @@ def scatters(
                 elif is_gene_name(_adata, cur_x) and is_gene_name(_adata, cur_y):
                     points = pd.DataFrame(
                         {
-                            cur_x: _adata.obs_vector(k=cur_x, layer=None)
-                            if cur_l_smoothed == "X"
-                            else _adata.obs_vector(k=cur_x, layer=cur_l_smoothed),
-                            cur_y: _adata.obs_vector(k=cur_y, layer=None)
-                            if cur_l_smoothed == "X"
-                            else _adata.obs_vector(k=cur_y, layer=cur_l_smoothed),
+                            cur_x: (
+                                _adata.obs_vector(k=cur_x, layer=None)
+                                if cur_l_smoothed == "X"
+                                else _adata.obs_vector(k=cur_x, layer=cur_l_smoothed)
+                            ),
+                            cur_y: (
+                                _adata.obs_vector(k=cur_y, layer=None)
+                                if cur_l_smoothed == "X"
+                                else _adata.obs_vector(k=cur_y, layer=cur_l_smoothed)
+                            ),
                         }
                     )
                     # points = points.loc[(points > 0).sum(1) > 1, :]
@@ -654,9 +666,11 @@ def scatters(
                     points = pd.DataFrame(
                         {
                             cur_x: _adata.obs_vector(cur_x),
-                            cur_y: _adata.obs_vector(k=cur_y, layer=None)
-                            if cur_l_smoothed == "X"
-                            else _adata.obs_vector(k=cur_y, layer=cur_l_smoothed),
+                            cur_y: (
+                                _adata.obs_vector(k=cur_y, layer=None)
+                                if cur_l_smoothed == "X"
+                                else _adata.obs_vector(k=cur_y, layer=cur_l_smoothed)
+                            ),
                         }
                     )
                     # points = points.loc[points.iloc[:, 1] > 0, :]
@@ -668,9 +682,11 @@ def scatters(
                 elif is_gene_name(_adata, cur_x) and is_cell_anno_column(_adata, cur_y):
                     points = pd.DataFrame(
                         {
-                            cur_x: _adata.obs_vector(k=cur_x, layer=None)
-                            if cur_l_smoothed == "X"
-                            else _adata.obs_vector(k=cur_x, layer=cur_l_smoothed),
+                            cur_x: (
+                                _adata.obs_vector(k=cur_x, layer=None)
+                                if cur_l_smoothed == "X"
+                                else _adata.obs_vector(k=cur_x, layer=cur_l_smoothed)
+                            ),
                             cur_y: _adata.obs_vector(cur_y),
                         }
                     )
@@ -705,9 +721,11 @@ def scatters(
                         list(_adata.obs[aggregate].unique()),
                     )
                     group_color, group_median = (
-                        np.zeros((1, len(uniq_grp))).flatten()
-                        if isinstance(_color[0], Number)
-                        else np.zeros((1, len(uniq_grp))).astype("str").flatten(),
+                        (
+                            np.zeros((1, len(uniq_grp))).flatten()
+                            if isinstance(_color[0], Number)
+                            else np.zeros((1, len(uniq_grp))).astype("str").flatten()
+                        ),
                         np.zeros((len(uniq_grp), 2)),
                     )
 
@@ -759,7 +777,7 @@ def scatters(
 
                 _cmap = _themes[_theme_]["cmap"] if cmap is None else cmap
                 if stack_colors:
-                    # main_debug("stack colors: changing cmap") 
+                    # main_debug("stack colors: changing cmap")
                     _cmap = stack_colors_cmaps[ax_index % len(stack_colors_cmaps)]
                     max_color = matplotlib.colormaps[_cmap](float("inf"))
                     legend_circle = Line2D(

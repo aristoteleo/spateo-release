@@ -3,6 +3,7 @@ generate a cell mask, NOT to identify individual cells.
 
 Original author @HailinPan, refactored by @Lioscro.
 """
+
 from functools import partial
 from typing import Dict, Optional, Tuple, Union
 

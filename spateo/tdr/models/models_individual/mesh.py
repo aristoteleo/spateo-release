@@ -10,8 +10,7 @@ except ImportError:
     from typing_extensions import Literal
 
 from ..utilities import add_model_labels, merge_models, scale_model
-from .mesh_utils import (clean_mesh, fix_mesh, smooth_mesh, uniform_larger_pc,
-                         uniform_mesh)
+from .mesh_utils import clean_mesh, fix_mesh, smooth_mesh, uniform_larger_pc, uniform_mesh
 
 ###################################
 # Construct cell-level mesh model #

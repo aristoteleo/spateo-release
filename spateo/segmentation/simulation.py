@@ -2,6 +2,7 @@
 
 Adapted from code written by @HailinPan.
 """
+
 from collections import deque
 from typing import Optional, Tuple
 

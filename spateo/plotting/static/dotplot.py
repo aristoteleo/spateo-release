@@ -6,6 +6,7 @@ Development notes: some of the methods mention dendrograms/other extra plots and
 generate those- coming in future update...additions that will have to be made: functions for plot_dendrogram,
 plot_totals, additional if condition in make_figure()...
 """
+
 import collections.abc as cabc
 from collections import namedtuple
 from itertools import product
@@ -32,8 +33,7 @@ from pandas.api.types import is_numeric_dtype
 
 from ...configuration import SKM, config_spateo_rcParams, set_pub_style
 from ...logging import logger_manager as lm
-from .utils import (_get_array_values, check_colornorm, deduplicate_kwargs,
-                    plot_dendrogram, save_return_show_fig_utils)
+from .utils import _get_array_values, check_colornorm, deduplicate_kwargs, plot_dendrogram, save_return_show_fig_utils
 
 
 # --------------------------------------- Data conversion for plotting --------------------------------------- #
