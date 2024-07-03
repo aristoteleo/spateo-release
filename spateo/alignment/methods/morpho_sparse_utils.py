@@ -4,7 +4,7 @@ import numpy as np
 import ot
 import pandas as pd
 import torch
-from scipy.sparse import coo_array
+# from scipy.sparse import coo_array
 from torch import sparse_coo_tensor as SparseTensor
 
 from .utils import _data, _identity, _linalg, _unsqueeze
@@ -14,6 +14,7 @@ def calc_distance(
     X_A: Union[np.ndarray, torch.Tensor],
     X_B: Union[np.ndarray, torch.Tensor],
     metric: str = "euc",
+    # chunk_num: int = 1,
     batch_capacity: int = 1,
     use_sparse: bool = False,
     sparse_method: str = "topk",
@@ -28,7 +29,9 @@ def calc_distance(
         "square_euc",
         "square_euclidean",
         "kl",
-    ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'``, ``'square_euc'``, ``'square_euclidean'``, and ``'kl'``."
+        "cos",
+        "cosine",
+    ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'``, ``'square_euc'``, ``'square_euclidean'``, ``'kl'``, ``'cos'``, and ``'cosine'``."
 
     if use_sparse:
         assert sparse_method in [
@@ -111,7 +114,7 @@ def calc_P_related(
     # metric = 'square_euc'
     NA, NB = XnAHat.shape[0], XnB.shape[0]
     D, G = XnAHat.shape[1], X_A.shape[1]
-    batch_base = 1e10 # 1e7
+    batch_base = 1e8 # 1e7
     split_size = min(int(batch_capacity * batch_base/ (NA * G)), NB)
     split_size = 1 if split_size == 0 else split_size
 
@@ -324,12 +327,28 @@ def _dense_to_sparse(
     return results
 
 
+# def _SparseTensor(nx, row, col, value, sparse_sizes):
+#     if nx_torch(nx):
+#         return SparseTensor(indices=torch.vstack((row, col)), values=value, size=sparse_sizes)
+#     else:
+#         return coo_array((value, (row, col)), shape=sparse_sizes)
 def _SparseTensor(nx, row, col, value, sparse_sizes):
-    if nx_torch(nx):
-        return SparseTensor(indices=torch.vstack((row, col)), values=value, size=sparse_sizes)
-    else:
-        return coo_array((value, (row, col)), shape=sparse_sizes)
+    return SparseTensor(indices=torch.vstack((row, col)), values=value, size=sparse_sizes)
 
+
+def _cos_similarity(
+    mat1: Union[np.ndarray, torch.Tensor],
+    mat2: Union[np.ndarray, torch.Tensor],
+):
+    nx = ot.backend.get_backend(mat1, mat2)
+    if nx_torch(nx):
+        torch_cos = torch.nn.CosineSimilarity(dim=1)
+        mat1_unsqueeze = mat1.unsqueeze(-1)
+        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0,2)
+        distMat = -torch_cos(mat1_unsqueeze, mat2_unsqueeze) * 0.5 + 0.5
+    else:
+        distMat = (ot.dist(mat1, mat2, metric='cosine'))*0.5
+    return distMat
 
 def _dist(
     mat1: Union[np.ndarray, torch.Tensor],
@@ -342,6 +361,8 @@ def _dist(
         "square_euc",
         "square_euclidean",
         "kl",
+        "cos",
+        "cosine",
     ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'``, ``'square_euc'``, ``'square_euclidean'``, and ``'kl'``."
     nx = ot.backend.get_backend(mat1, mat2)
     if (
@@ -365,6 +386,8 @@ def _dist(
             - _dot(nx)(mat1, nx.log(mat2).T)
             - _dot(nx)(mat2, nx.log(mat1).T).T
         ) / 2
+    elif (metric.lower() == "cos" or metric.lower() == "cosine"):
+        distMat = _cos_similarity(mat1, mat2)
     return distMat
 
 

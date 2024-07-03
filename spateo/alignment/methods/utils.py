@@ -274,6 +274,23 @@ def align_preprocess(
         normalize_mean_list,
     )
 
+def guidance_pair_preprocess(
+    guidance_pair,
+    normalize_scale_list,
+    normalize_mean_list,
+    nx,
+    type_as,
+):
+    X_BI = nx.from_numpy(guidance_pair[0], type_as=type_as)
+    X_AI = nx.from_numpy(guidance_pair[1], type_as=type_as)
+    normalize_scale = normalize_scale_list[0]
+    normalize_mean_ref = normalize_mean_list[0]
+    normalize_mean_quary = normalize_mean_list[1]
+    X_AI = (X_AI - normalize_mean_quary) / normalize_scale
+    X_BI = (X_BI - normalize_mean_ref) / normalize_scale
+    return [X_AI, X_BI]
+
+
 
 def shape_align_preprocess(
     coordsA,

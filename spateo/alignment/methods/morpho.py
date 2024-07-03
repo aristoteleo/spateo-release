@@ -38,6 +38,7 @@ from .utils import (
     coarse_rigid_alignment,
     empty_cache,
     get_optimal_R,
+    guidance_pair_preprocess,
 )
 
 
@@ -214,6 +215,278 @@ def get_P_chunk(
     P = nx.concatenate(Ps, axis=1)
     return P
 
+# TO-DO: keep size
+# TO-DO: genes can incorporate SVG in .var
+def BA_align(
+    sampleA: AnnData,
+    sampleB: AnnData,
+    layer: str = "X",
+    genes: Optional[Union[List[str], torch.Tensor]] = None,
+    spatial_key: str = "spatial",
+    key_added: str = "align_spatial",
+    iter_key_added: Optional[str] = None,
+    vecfld_key_added: Optional[str] = None,
+    dissimilarity: str = "kl",
+    use_rep: Optional[str] = None,
+    max_iter: int = 200,
+    SVI_mode: bool = True,
+    sparse_calculation_mode: bool = False,
+    batch_size: int = 1000,
+    pre_compute_dist: bool = True,
+    lambdaVF: Union[int, float] = 1e2,
+    beta: Union[int, float] = 0.01,
+    K: Union[int, float] = 15,
+    sigma2_init_scale: Optional[Union[int, float]] = 0.1,
+    beta2_init: Optional[Union[int, float]] = None,
+    beta2_end: Optional[Union[int, float]] = None,
+    partial_robust_level: float = 25,
+    normalize_c: bool = True,
+    normalize_g: bool = True,
+    dtype: str = "float32",
+    device: str = "cpu",
+    inplace: bool = True,
+    verbose: bool = True,
+    nn_init: bool = True,
+    allow_flip: bool = False,
+    label_key: Optional[str] = None,
+    label_transfer_prior: Optional[dict] = None,
+    guidance_pair: Optional[Union[List[np.ndarray], np.ndarray]] = None,
+    guidance_effect: Optional[Union[bool, str]] = False,
+    guidance_epsilon: float = 1,
+) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
+    """
+    The core function of Spateo alignment to align two spatial transcriptomics AnnData objects 
+
+    Parameters
+    ----------
+    sampleA : AnnData
+        The first AnnData object that acts as reference.
+    sampleB : AnnData
+        The second AnnData object that performs alignment.
+    genes : Optional[Union[List[str], torch.Tensor]]
+        List of genes or tensor specifying the genes to be used for alignment. If None, use all common genes for calculation.
+    spatial_key : str, optional
+        Key in ``.obsm`` of AnnData objects that corresponds to the raw spatial coordinate, by default "spatial".
+    key_added : str, optional
+        ``.obsm`` key under which the aligned spatial coordinates are added, by default "align_spatial".
+    iter_key_added : Optional[str], optional
+        ``.uns`` key under which to add the intermediate results of each iteration of the iterative process. If ``iter_key_added`` is None, the results are not saved. By default None.
+    vecfld_key_added : Optional[str], optional
+        ``.uns`` key under which vector field results are added. If ``vecfld_key_added`` is None, the results are not saved. By default None.
+    layer : str, optional
+        If ``X``, uses ``.X`` layer in AnnData objects to calculate dissimilarity between spots/cells, otherwise uses the representation given by ``.layers[layer]``., by default "X".
+    dissimilarity : str, optional
+        Dissimilarity measure to be used. Avaiable option: ``'kl'``, ``'euc'``, or ``'cos'``. By default "kl".
+    use_rep : Optional[str], optional
+        Use the indicated representation. If use_rep is None, then use the given "layer", else use the key stored in .obsm. E.g., "X_pca". By default None.
+    max_iter : int, optional
+        Maximum number of iterations, by default 200.
+    SVI_mode : bool, optional
+        Whether to use Stochastic Variational Inference mode, by default True.
+    sparse_calculation_mode: bool, optional
+        Whether to use sparse matrix calculation during the optimization. Sparse matrix can reduce the memory usage significantly, but will increase the calculation time if the sample size is samll. Recommend  setting to ``True`` if the number of samples is greater than 30,000. By default False.
+    lambdaVF : Union[int, float], optional
+        Regularization parameter for vector field of the non-rigid transformation. Smaller means more flexibility. By default 1e2.
+    beta : Union[int, float], optional
+        The length-scale of the SE kernel. Higher means more flexibility. By default 0.01.
+    K : Union[int, float], optional
+        The number of sparse inducing points used for Nystr ̈om approximation. Smaller should be faster but slightly less accurate. By default 15.
+    sigma2_init_scale : Optional[Union[int, float]], optional
+        Initial value for the manually assigned spatial dispersion level. Smaller indicating that the spatial is less flexible in the optimization. By default 0.1.
+    beta2_init : Optional[Union[int, float]], optional
+        Initial value for the manually assigned significance gene expression similarity. Smaller indicating greater significance. If not assigned, then Spateo will determine it automatically. By default None.
+    beta2_end : Optional[Union[int, float]], optional
+        End value for the manually assigned significance gene expression similarity. Smaller indicating greater significance. If not assigned, then Spateo will determine it automatically. By default None.
+    normalize_c : bool, optional
+        Whether to normalize the spatial coordinates, by default True.
+    normalize_g : bool, optional
+        Whether to normalize the gene expression. If ``dissimilarity`` == ``'kl'``, ``normalize_g`` must be False. By default True.
+    dtype : str, optional
+        The floating-point number data type for computations. Only ``float32`` and ``float64`` are accepted. By default "float32".
+    device : str, optional
+        Equipment used to run the program. You can also set the specified GPU for running. E.g.: ``'0'``. By default "cpu".
+    inplace : bool, optional
+        Whether to copy adata or modify it inplace. By default True.
+    verbose : bool, optional
+        Whether to print verbose messages, by default True.
+    nn_init : bool, optional
+        Whether to use nearest neighbor matching to initialize the alignment. By default True.
+    allow_flip : bool, optional
+        Whether to allow flipping of coordinates, by default False.
+    label_key : Optional[str], optional
+        Category annotation stored in ``.obs`` of AnnData objects used to incorporate label consistency information, by default None.
+    label_transfer_prior : Optional[dict], optional
+        Manually assigned label transfer prior for the label consistency calculation. You can define some positive pairs and negative pairs based on expert knowledge and generate the label transfer prior by calling ``spateo.align.construct_label_transfer_prior``. If not assigned (None), Spateo will automatically set based on the label consistency.
+    batch_size : int, optional
+        The size of the mini-batch of SVI. If set smaller, the calculation will be faster, but it will affect the accuracy, and vice versa. If not set, it is automatically set to one-tenth of the data size. By default 1000.
+    partial_robust_level : float, optional
+        The robust level of partial alignment. The larger the value, the more robust the alignment to partial cases is. Recommended setting from 1 to 50. By default 25.
+    pre_compute_dist : bool, optional
+        If ``True``, the gene similarity matrix is computed before the mini batch is performed. Otherwise, it is computed during the mini batch. This can be significantly faster, but can also require more GPU memory if using GPU. By default True.
+    guidance_pair : Optional[list], optional
+        List of guidance pairs for alignment. You can add manually assigned pair to guide the alignment. By default None.
+    guidance_effect : Optional[Union[bool, str]], optional
+        Effect of guidance for the transformation. Can be either ``'nonrigid'``, ``'rigid'``, ``'both'``, and False, by default False.
+    guidance_epsilon : float, optional
+        Epsilon value for guidance. Smaller means stronger guidance. By default 1.
+    """
+
+    assert dissimilarity in [
+        "kl",
+        "euclidean",
+        "euc",
+        "cos",
+        "cosine"
+    ], "``dissimilarity`` value is not valid. Available ``dissimilarity`` are: ``'kl'``, ``'euclidean'``, ``'euc'``, ``'cos'``, and ``'cosine'``."
+    normalize_g = False if dissimilarity == "kl" else normalize_g
+
+    # if using GPU, empty the GPU memory
+    empty_cache(device=device)
+
+    # prerocessing
+    sampleA, sampleB = (sampleA, sampleB) if inplace else (sampleA.copy(), sampleB.copy())
+    (
+        nx,
+        type_as,
+        new_samples,
+        exp_matrices,
+        spatial_coords,
+        normalize_scale_list,
+        normalize_mean_list,
+    ) = align_preprocess(
+        samples=[sampleA, sampleB],
+        layer=layer,
+        genes=genes,
+        spatial_key=spatial_key,
+        normalize_c=normalize_c,
+        normalize_g=normalize_g,
+        dtype=dtype,
+        device=device,
+        verbose=verbose,
+        use_rep=use_rep,
+    )
+    coordsA, coordsB = spatial_coords[1], spatial_coords[0]
+    X_A, X_B = exp_matrices[1], exp_matrices[0]
+    raw_X_A, raw_X_B = (exp_matrices[1], exp_matrices[0]) if use_rep is None else (exp_matrices[3], exp_matrices[2])
+
+    # normalize guidance pair and convert to correct data types
+    if isinstance(guidance_pair, list) and (guidance_effect is not False):
+        guidance_pair = guidance_pair_preprocess(guidance_pair, normalize_scale_list, normalize_mean_list, nx, type_as)
+        X_AI, X_BI = guidance_pair[0], guidance_pair[1]
+        V_AI = nx.zeros(X_AI.shape, type_as=type_as)
+    else:
+        X_AI, X_BI = None, None
+
+    # perform coarse rigid alignment
+    # TODO: add downsampling in the coarse_rigid_alignment
+    if nn_init:
+        coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(
+            dissimilarity=dissimilarity, 
+            top_K=10, 
+            verbose=verbose, 
+            coordsA=coordsA,
+            coordsB=coordsB,
+            X_A=X_A,
+            X_B=X_B,
+            allow_flip=allow_flip,
+        )
+    else:
+        init_R = nx.eye(D, type_as=type_as)
+        init_t = nx.zeros((D,), type_as=type_as)
+    init_coords = coordsA.copy()
+    
+    if X_AI is not None:
+        X_AI = X_AI @ init_R.T + init_t
+
+    # construct the kernel for Gaussian processes
+    # random select the inducing variables
+    Unique_coordsA = _unique(nx, coordsA, 0)
+    idx = random.sample(range(Unique_coordsA.shape[0]), min(K, Unique_coordsA.shape[0]))
+    ctrl_pts = Unique_coordsA[idx, :]
+    K = ctrl_pts.shape[0]
+
+    GammaSparse = con_K(ctrl_pts, ctrl_pts, beta)  # K x K
+    U = con_K(coordsA, ctrl_pts, beta)  # NA x K
+    if (guidance_effect == 'nonrigid'):
+        U_I = con_K(X_AI, ctrl_pts, beta)  # NI x K
+
+    # initial guess for sigma2, beta2, anneling factor for sigma2 and beta2
+    sigma2 = sigma2_init_scale * _init_guess_sigma2(coordsA, coordsB)
+    beta2, beta2_end = _init_guess_beta2(nx, X_A, X_B, dissimilarity, partial_robust_level, beta2_init, beta2_end, verbose=verbose)
+    beta2_decrease = _get_anneling_factor(beta2, beta2_end, 50, nx)
+    sigma2_variance = 1
+    sigma2_variance_end = partial_robust_level
+    sigma2_variance_decress = _get_anneling_factor(sigma2_variance, sigma2_variance_end, (max_iter / 2), nx)
+
+    # initialize the variational variables
+    kappa = nx.ones((NA), type_as=type_as)
+    alpha = nx.ones((NA), type_as=type_as)
+    gamma, gamma_a, gamma_b = (
+        _data(nx, 0.5, type_as),
+        _data(nx, 1.0, type_as),
+        _data(nx, 1.0, type_as),
+    )
+    VnA = nx.zeros(coordsA.shape, type_as=type_as)  # nonrigid vector velocity
+    XAHat, RnA = coordsA, coordsA  # initial transformed / rigid position
+    Coff = nx.zeros(ctrl_pts.shape, type_as=type_as)  # inducing variables coefficient
+    SigmaDiag = nx.zeros((NA), type_as=type_as)  # Gaussian processes variance
+    R = _identity(nx, D, type_as)  # rotation in rigid transformation
+    nonrigid_flag = False  # indicate if to start nonrigid
+
+    # initialize the SVI
+    if SVI_mode:
+        SVI_deacy = _data(nx, 10.0, type_as)
+        # Select a random subset of data
+        batch_size = min(max(int(NB / 10), batch_size), NB)
+        randomidx = _randperm(nx)(NB)
+        randIdx = randomidx[:batch_size]
+        randomIdx = _roll(nx)(randomidx, batch_size)
+        randcoordsB = coordsB[randIdx, :]  # batch_size x D
+        Sp, Sp_spatial, Sp_sigma2 = 0, 0, 0
+        SigmaInv = nx.zeros((K, K), type_as=type_as)  # K x K
+        PXB_term = nx.zeros((NA, D), type_as=type_as)  # NA x D
+
+    # calculate the gene expression similarity matrix
+    if (not SVI_mode) or (pre_compute_dist):
+        GeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B, dissimilarity=dissimilarity)
+    
+    # get the batch gene expression similarity matrix 
+    if SVI_mode and (sparse_calculation_mode is False):
+        if pre_compute_dist:
+            randGeneDistMat = GeneDistMat[:, randIdx]  # NA x batch_size
+        else:
+            randGeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B[randIdx, :], dissimilarity=dissimilarity)  # NA x batch_size
+    
+    # get the batch spatial similarity matrix 
+    if sparse_calculation_mode is False:
+        if SVI_mode:
+            SpatialDistMat = cal_dist(XAHat, randcoordsB)  # NA x batch_size
+        else:
+            SpatialDistMat = cal_dist(XAHat, coordsB)  # NA x NB
+
+    # initialize the intermediate results
+    if iter_key_added is not None:
+        sampleB.uns[iter_key_added] = dict()
+        sampleB.uns[iter_key_added][key_added] = {}
+        sampleB.uns[iter_key_added]["sigma2"] = {}
+        sampleB.uns[iter_key_added]["beta2"] = {}
+        if save_concrete_iter:
+            sampleB.uns[iter_key_added]["matches"] = {}
+            sampleB.uns[iter_key_added]["alpha"] = {}
+
+    # start iteration
+    iteration = (
+        lm.progress_logger(range(max_iter), progress_name="Start Spateo alignment") if verbose else range(max_iter)
+    )
+    for iter in iteration:
+        # update the step size for SVI
+        step_size = nx.minimum(_data(nx, 1.0, type_as), SVI_deacy / (iter + 1.0))
+        # calculate the assignment matrix
+        if 
+    
+    
+
+
 
 def BA_align(
     sampleA: AnnData,
@@ -245,6 +518,9 @@ def BA_align(
     batch_size: int = 1000,
     partial_robust_level: float = 25,
     pre_compute_dist: bool = True,
+    guidance_pair: Optional[list] = None,
+    guidance_effect: Optional[Union[bool, str]] = False,
+    guidance_epsilon: float = 1,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
     """The core function of Spateo alignment
 
@@ -302,7 +578,11 @@ def BA_align(
         verbose=verbose,
         use_rep=use_rep,
     )
-    
+    # normalize guidance pair and convert to correct data types
+    if isinstance(guidance_pair, list) and (guidance_effect is not False):
+        guidance_pair = guidance_pair_preprocess(guidance_pair, normalize_scale_list, normalize_mean_list, nx, type_as)
+        X_AI = guidance_pair[0]
+        X_BI = guidance_pair[1]
     coordsA, coordsB = spatial_coords[1], spatial_coords[0]
     X_A, X_B = exp_matrices[1], exp_matrices[0]
     del spatial_coords, exp_matrices
@@ -359,23 +639,29 @@ def BA_align(
         inlier_A = _data(nx, inlier_A, type_as)
         inlier_B = _data(nx, inlier_B, type_as)
         inlier_P = _data(nx, inlier_P, type_as)
+        # inlier_P = inlier_P * M / nx.sum(inlier_P)
+        inlier_R = inlier_A
+        inlier_V = nx.zeros(inlier_A.shape, type_as=type_as)
     else:
-        # init_R = np.eye(D)
-        # init_t = np.zeros((D,))
-        # inlier_A = np.zeros((4,D))
-        # inlier_B = np.zeros((4,D))
-        # inlier_P = np.ones((4,1))
-        # init_R = _data(nx, init_R, type_as)
-        # init_t = _data(nx, init_t, type_as)
-        # inlier_A = _data(nx, inlier_A, type_as)
-        # inlier_B = _data(nx, inlier_B, type_as)
-        # inlier_P = _data(nx, inlier_P, type_as)
-
         init_R = nx.eye(D, type_as=type_as)
         init_t = nx.zeros((D,), type_as=type_as)
-        inlier_A = nx.zeros((4,D), type_as=type_as)
-        inlier_B = nx.zeros((4,D), type_as=type_as)
-        inlier_P = nx.ones((4,1), type_as=type_as)
+        inlier_A = []
+        inlier_B = []
+        inlier_P = []
+    if (guidance_effect is not False) and (guidance_pair is not None):
+        X_AI = X_AI @ init_R.T + init_t
+        if len(inlier_A) == 0:
+            inlier_A = X_AI
+            inlier_B = X_BI
+            inlier_P = nx.ones((X_AI.shape[0],1), type_as=type_as)
+        else:
+            inlier_A = nx.concatenate([inlier_A, X_AI], axis=0)
+            inlier_B = nx.concatenate([inlier_B, X_BI], axis=0)
+            inlier_P = nx.concatenate([inlier_P, nx.ones((X_AI.shape[0],1), type_as=type_as)], axis=0)
+        inlier_R = inlier_A
+        inlier_V = nx.zeros(inlier_A.shape, type_as=type_as)
+        inlier_AHat = inlier_A
+
     coarse_alignment = coordsA
 
     # Random select control points
@@ -387,6 +673,8 @@ def BA_align(
     # construct the kernel
     GammaSparse = con_K(ctrl_pts, ctrl_pts, beta)
     U = con_K(coordsA, ctrl_pts, beta)
+    if (guidance_effect == 'nonrigid'):
+        inlier_U = con_K(inlier_A, ctrl_pts, beta)
     kappa = nx.ones((NA), type_as=type_as)
     alpha = nx.ones((NA), type_as=type_as)
     VnA = nx.zeros(coordsA.shape, type_as=type_as)
@@ -416,7 +704,7 @@ def BA_align(
     beta2_decrease = _power(nx)(beta2_end / beta2, 1 / (50))
 
     R = _identity(nx, D, type_as)
-    
+    nonrigid_flag = False
 
     # Use smaller spatial variance to reduce tails
     outlier_variance = 1
@@ -449,13 +737,17 @@ def BA_align(
         sampleB.uns[iter_key_added][key_added] = {}
         sampleB.uns[iter_key_added]["sigma2"] = {}
         sampleB.uns[iter_key_added]["beta2"] = {}
+        # sampleB.uns[iter_key_added]["inlier_AHat"] = {}
+        # sampleB.uns[iter_key_added]["inlier_B"] = nx.to_numpy(X_BI * normalize_scale_list[0] + normalize_mean_list[0] if normalize_c else X_BI)
 
     for iter in iteration:
         if iter_key_added is not None:
             iter_XAHat = XAHat * normalize_scale_list[0] + normalize_mean_list[0] if normalize_c else XAHat
+            # iter_inlier_AHat = inlier_AHat * normalize_scale_list[0] + normalize_mean_list[0] if normalize_c else inlier_AHat
             sampleB.uns[iter_key_added][key_added][iter] = nx.to_numpy(iter_XAHat)
             sampleB.uns[iter_key_added]["sigma2"][iter] = nx.to_numpy(sigma2)
             sampleB.uns[iter_key_added]["beta2"][iter] = nx.to_numpy(beta2)
+            # sampleB.uns[iter_key_added]["inlier_AHat"][iter] = nx.to_numpy(iter_inlier_AHat)
         if SVI_mode:
             step_size = nx.minimum(_data(nx, 1.0, type_as), SVI_deacy / (iter + 1.0))
             P, spatial_P, sigma2_P = get_P(
@@ -514,43 +806,67 @@ def BA_align(
         gamma = _data(nx, 0.01, type_as) if gamma < 0.01 else gamma
 
         # Update alpha
-        alpha = step_size * nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial)) + (1 - step_size) * alpha
+        if SVI_mode:
+            alpha = step_size * nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial)) + (1 - step_size) * alpha
+        else:
+            alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
 
         # Update VnA
-        if (sigma2 < 0.015) or (iter > 80):
+        if (sigma2 < 0.015) or (iter > 80) or nonrigid_flag:
+            nonrigid_flag=True
             if SVI_mode:
-                SigmaInv = (
-                    step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
-                    + (1 - step_size) * SigmaInv
-                )
-                term1 = _dot(nx)(_pinv(nx)(SigmaInv), U.T)
+                if (guidance_effect == 'nonrigid') or (guidance_effect == 'both'):
+                    SigmaInv = (
+                        step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)) + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_U.T, inlier_U * inlier_P))
+                        + (1 - step_size) * SigmaInv
+                    )
+                else:
+                    SigmaInv = (
+                        step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
+                        + (1 - step_size) * SigmaInv
+                    )
+                
+                Sigma = _pinv(nx)(SigmaInv)
+                term1 = _dot(nx)(Sigma, U.T)
                 PXB_term = (
                     step_size * (_dot(nx)(P, randcoordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
                     + (1 - step_size) * PXB_term
                 )
-                Coff = _dot(nx)(term1, PXB_term)
-                VnA = _dot(nx)(
-                    U,
-                    Coff,
-                )
+                if (guidance_effect == 'nonrigid') or (guidance_effect == 'both'):
+                    term1_guide = _dot(nx)(Sigma, inlier_U.T)
+                    XBRA_guide_term = (inlier_B - inlier_R) * inlier_P
+                    Coff = _dot(nx)(term1, PXB_term) + (sigma2 / guidance_epsilon) * _dot(nx)(term1_guide, XBRA_guide_term)
+                    inlier_V = _dot(nx)(inlier_U, Coff)
+                else:
+                    Coff = _dot(nx)(term1, PXB_term)
+                VnA = _dot(nx)(U, Coff, )
                 SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
             else:
-                term1 = _dot(nx)(
-                    _pinv(nx)(sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))),
-                    U.T,
+                if (guidance_effect == 'nonrigid') or (guidance_effect == 'both'):
+                    SigmaInv = (
+                        (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)) + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_U.T, inlier_U * inlier_P))
+                    )
+                else:
+                    SigmaInv = (
+                        (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
+                    )
+                
+                Sigma = _pinv(nx)(SigmaInv)
+                term1 = _dot(nx)(Sigma, U.T)
+                PXB_term = (
+                    (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
                 )
+                if (guidance_effect == 'nonrigid') or (guidance_effect == 'both'):
+                    term1_guide = _dot(nx)(Sigma, inlier_U.T)
+                    XBRA_guide_term = (inlier_B - inlier_R) * inlier_P
+                    Coff = _dot(nx)(term1, PXB_term) + (sigma2 / guidance_epsilon) * _dot(nx)(term1_guide, XBRA_guide_term)
+                    inlier_V = _dot(nx)(inlier_U, Coff)
+                else:
+                    Coff = _dot(nx)(term1, PXB_term)
+                VnA = _dot(nx)(U, Coff)
                 SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
-                Coff = _dot(nx)(term1, (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)))
-                VnA = _dot(nx)(
-                    U,
-                    Coff,
-                )
 
-        # Update R()
-        if nn_init:
-            lambdaReg = partial_robust_level * 1e0 * Sp / nx.sum(inlier_P)
-        else:
-            lambdaReg = 0
+        # Update rigid transformation R()
         if SVI_mode:
             PXA, PVA, PXB = (
                 _dot(nx)(K_NA, coordsA)[None, :],
@@ -563,38 +879,59 @@ def BA_align(
                 _dot(nx)(K_NA, VnA)[None, :],
                 _dot(nx)(K_NB, coordsB)[None, :],
             )
-        PCYC, PCXC = _dot(nx)(inlier_P.T, inlier_B), _dot(nx)(inlier_P.T, inlier_A)
         if SVI_mode and iter > 1:
-            t = (
-                step_size
-                * (
-                    ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T)))
-                    / (Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P))
+            if ((guidance_effect == 'rigid') or (guidance_effect == 'both') or (nn_init == True)):
+                t = (
+                    step_size
+                    * (
+                        ((PXB - PVA - _dot(nx)(PXA, R.T)) + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_B - inlier_V - _dot(nx)(inlier_A, R.T)))
+                        / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
+                    )
+                    + (1 - step_size) * t
                 )
-                + (1 - step_size) * t
-            )
+            else:
+                t = (
+                    step_size
+                    * (
+                        (PXB - PVA - _dot(nx)(PXA, R.T))
+                        / Sp
+                    )
+                    + (1 - step_size) * t
+                )
         else:
-            t = ((PXB - PVA - _dot(nx)(PXA, R.T)) + 2 * lambdaReg * sigma2 * (PCYC - _dot(nx)(PCXC, R.T))) / (
-                Sp + 2 * lambdaReg * sigma2 * nx.sum(inlier_P)
-            )
+            if ((guidance_effect == 'rigid') or (guidance_effect == 'both') or (nn_init == True)):
+                t = (
+                        (PXB - PVA - _dot(nx)(PXA, R.T)) + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_B - inlier_V - _dot(nx)(inlier_A, R.T))
+                    ) / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
+                    
+            else:
+                t = (PXB - PVA - _dot(nx)(PXA, R.T))/ Sp
+        # Solve for the rotation
+        if ((guidance_effect == 'rigid') or (guidance_effect == 'both') or (nn_init == True)):
+            mu_XB = (PXB + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_B)) / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
+            mu_XA = (PXA + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_A)) / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
+            mu_Vn = (PVA + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_V)) / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
+            
+            XAI_hat = inlier_A - mu_XA
+            XBI_hat = inlier_B - mu_XB
+            fI_hat = inlier_V - mu_Vn
+        else:
+            mu_XB = PXB / Sp
+            mu_XA = PXA / Sp
+            mu_Vn = PVA / Sp
+        XA_hat = coordsA - mu_XA
+        f_hat = VnA - mu_Vn
         if SVI_mode:
-            A = -(
-                _dot(nx)(PXA.T, t)
-                + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, randcoordsB))
-                + 2
-                * lambdaReg
-                * sigma2
-                * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
-            ).T
+            XB_hat = randcoordsB - mu_XB
         else:
-            A = -(
-                _dot(nx)(PXA.T, t)
-                + _dot(nx)(coordsA.T, nx.einsum("ij,i->ij", VnA, K_NA) - _dot(nx)(P, coordsB))
-                + 2
-                * lambdaReg
-                * sigma2
-                * (_dot(nx)(PCXC.T, t) - _dot(nx)(nx.einsum("ij,i->ij", inlier_A, inlier_P[:, 0]).T, inlier_B))
-            ).T
+            XB_hat = coordsB - mu_XB
+
+        if ((guidance_effect == 'rigid') or (guidance_effect == 'both') or (nn_init == True)):
+            A_guide = _dot(nx)((XAI_hat * inlier_P).T, (fI_hat - XBI_hat))
+            A = -(_dot(nx)(XA_hat.T, nx.einsum("ij,i->ij", f_hat, K_NA)) - _dot(nx)(_dot(nx)(XA_hat.T, P), XB_hat) + (sigma2 / guidance_epsilon) * A_guide).T
+            
+        else:
+            A = -(_dot(nx)(XA_hat.T, nx.einsum("ij,i->ij", f_hat, K_NA)) - _dot(nx)(_dot(nx)(XA_hat.T, P), XB_hat)).T
 
         svdU, svdS, svdV = _linalg(nx).svd(A)
         C = _identity(nx, D, type_as)
@@ -604,8 +941,10 @@ def BA_align(
         else:
             R = _dot(nx)(_dot(nx)(svdU, C), svdV)
         RnA = _dot(nx)(coordsA, R.T) + t
+        inlier_R = _dot(nx)(inlier_A, R.T) + t
         XAHat = RnA + VnA
-
+        
+        inlier_AHat = inlier_R + inlier_V
         # Update sigma2 and beta2
         if SVI_mode:
             SpatialDistMat = cal_dist(XAHat, randcoordsB)
