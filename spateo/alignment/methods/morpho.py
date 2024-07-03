@@ -350,6 +350,17 @@ def BA_align(
         inlier_A = _data(nx, inlier_A, type_as)
         inlier_B = _data(nx, inlier_B, type_as)
         inlier_P = _data(nx, inlier_P, type_as)
+    else:
+        init_R = np.eye(D)
+        init_t = np.zeros((D,))
+        inlier_A = np.zeros((4,D))
+        inlier_B = np.zeros((4,D))
+        inlier_P = np.ones((4,1))
+        init_R = _data(nx, init_R, type_as)
+        init_t = _data(nx, init_t, type_as)
+        inlier_A = _data(nx, inlier_A, type_as)
+        inlier_B = _data(nx, inlier_B, type_as)
+        inlier_P = _data(nx, inlier_P, type_as)
     coarse_alignment = coordsA
 
     # Random select control points
@@ -529,7 +540,10 @@ def BA_align(
                 )
 
         # Update R()
-        lambdaReg = 1e0 * Sp / nx.sum(inlier_P)
+        if nn_init:
+            lambdaReg = partial_robust_level * 1e0 * Sp / nx.sum(inlier_P)
+        else:
+            lambdaReg = 0
         if SVI_mode:
             PXA, PVA, PXB = (
                 _dot(nx)(K_NA, coordsA)[None, :],
