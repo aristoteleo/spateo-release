@@ -200,6 +200,7 @@ def align_preprocess(
     genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     layer: str = "X",
+    use_rep: Optional[str] = None,
     normalize_c: bool = False,
     normalize_g: bool = False,
     select_high_exp_genes: Union[bool, float, int] = False,
@@ -242,7 +243,10 @@ def align_preprocess(
     new_samples = [s[:, common_genes] for s in new_samples]
 
     # Gene expression matrix of all samples
-    exp_matrices = [nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples]
+    if (use_rep is None) or (not isinstance(use_rep, str)) or (use_rep not in samples[0].obsm.keys()) or (use_rep not in samples[1].obsm.keys()):
+        exp_matrices = [nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples]
+    else:
+        exp_matrices = [nx.from_numpy(s.obsm[use_rep], type_as=type_as) for s in new_samples] + [nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples]
     if not (select_high_exp_genes is False):
         # Select significance genes if select_high_exp_genes is True
         ExpressionData = _cat(nx=nx, x=exp_matrices, dim=0)
@@ -267,7 +271,7 @@ def align_preprocess(
         spatial_coords, normalize_scale_list, normalize_mean_list = normalize_coords(
             coords=spatial_coords, nx=nx, verbose=verbose
         )
-    if normalize_g:
+    if normalize_g and ((use_rep is None) or (not isinstance(use_rep, str)) or (use_rep not in samples[0].obsm.keys()) or (use_rep not in samples[1].obsm.keys())):
         exp_matrices = normalize_exps(matrices=exp_matrices, nx=nx, verbose=verbose)
 
     return (
@@ -503,6 +507,8 @@ def calc_exp_dissimilarity(
         "kl",
         "euclidean",
         "euc",
+        "cos",
+        "cosine"
     ], "``dissimilarity`` value is wrong. Available ``dissimilarity`` are: ``'kl'``, ``'euclidean'`` and ``'euc'``."
     if dissimilarity.lower() == "kl":
         X_A = X_A + 0.01
@@ -686,6 +692,20 @@ def get_optimal_R(
 ###############################
 
 
+def _cos_similarity(
+    mat1: Union[np.ndarray, torch.Tensor],
+    mat2: Union[np.ndarray, torch.Tensor],
+):
+    nx = ot.backend.get_backend(mat1, mat2)
+    if nx_torch(nx):
+        torch_cos = torch.nn.CosineSimilarity(dim=1)
+        mat1_unsqueeze = mat1.unsqueeze(-1)
+        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0,2)
+        distMat = torch_cos(mat1_unsqueeze, mat2_unsqueeze) * 0.5 + 0.5
+    else:
+        distMat = (-ot.dist(mat1, mat2, metric='cosine')+1)*0.5 + 0.5
+    return distMat
+
 def _dist(
     mat1: Union[np.ndarray, torch.Tensor],
     mat2: Union[np.ndarray, torch.Tensor],
@@ -695,17 +715,21 @@ def _dist(
         "euc",
         "euclidean",
         "kl",
+        "cos",
+        "cosine"
     ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'`` and ``'kl'``."
     nx = ot.backend.get_backend(mat1, mat2)
     if metric.lower() == "euc" or metric.lower() == "euclidean":
         distMat = nx.sum(mat1**2, 1)[:, None] + nx.sum(mat2**2, 1)[None, :] - 2 * _dot(nx)(mat1, mat2.T)
-    else:
+    elif metric.lower() == "kl":
         distMat = (
             nx.sum(mat1 * nx.log(mat1), 1)[:, None]
             + nx.sum(mat2 * nx.log(mat2), 1)[None, :]
             - _dot(nx)(mat1, nx.log(mat2).T)
             - _dot(nx)(mat2, nx.log(mat1).T).T
         ) / 2
+    elif (metric.lower() == "cosine") or (metric.lower() == "cos"):
+        distMat = _cos_similarity(mat1, mat2)
     return distMat
 
 
