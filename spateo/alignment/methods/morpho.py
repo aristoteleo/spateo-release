@@ -369,6 +369,9 @@ def BA_align(
     X_A, X_B = exp_matrices[1], exp_matrices[0]
     raw_X_A, raw_X_B = (exp_matrices[1], exp_matrices[0]) if use_rep is None else (exp_matrices[3], exp_matrices[2])
 
+    # process the label information
+    # TODO: convert label information and label transfer prior dict into better data type
+
     # normalize guidance pair and convert to correct data types
     if isinstance(guidance_pair, list) and (guidance_effect is not False):
         guidance_pair = guidance_pair_preprocess(guidance_pair, normalize_scale_list, normalize_mean_list, nx, type_as)
