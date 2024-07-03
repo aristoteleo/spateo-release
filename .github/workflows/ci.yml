@@ -9,25 +9,25 @@ on:
 jobs:
   check-code:
     name: Check code quality
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout branch
         uses: actions/checkout@master
       - name: Setup python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
       - name: Install dependencies
         run: make install-dev
       - name: Check code quality
         run: make check
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
-        python: [3.8, 3.9]
-        os: [ubuntu-20.04]
+        python: [3.9]
+        os: [ubuntu-22.04]
     name: Test on Python ${{ matrix.python }}
     steps:
       - name: Checkout branch
