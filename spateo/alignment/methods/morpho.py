@@ -485,9 +485,162 @@ def BA_align(
         # update the step size for SVI
         step_size = nx.minimum(_data(nx, 1.0, type_as), SVI_deacy / (iter + 1.0))
         # calculate the assignment matrix
-        if 
+        _common_kwargs = dict(
+            sigma2=sigma2,
+            beta2=beta2,
+            alpha=alpha,
+            gamma=gamma,
+            Sigma=SigmaDiag,
+            outlier_variance=outlier_variance,
+        )
+        # TODO: label dist mat
+        if sparse_calculation_mode:
+            _unique_kwargs = dict(
+                XnAHat=XAHat,
+                XnB=randcoordsB if SVI_mode else coordsB,
+                X_A=X_A,
+                X_B=randX_B if SVI_mode else X_B,
+                batch_capacity=batch_capacity,
+                labelA=labelA,
+                labelB=randlabelB if SVI_mode else labelB,
+            )
+            P, assignment_results = get_P_sparse(_common_kwargs,_unique_kwargs)
+        else:
+            _unique_kwargs = dict(
+                GeneDistMat=randGeneDistMat if SVI_mode else GeneDistMat,
+                SpatialDistMat=SpatialDistMat,
+                LabelDistMat=randLabelDistMat if SVI_mode else LabelDistMat,
+            )
+            P, assignment_results = get_P(_common_kwargs,_unique_kwargs)
+
+        # update anneling parameters
+        if iter > 5:
+            beta2 = (
+                nx.maximum(beta2 * beta2_decrease, beta2_end)
+                if beta2_decrease < 1
+                else nx.minimum(beta2 * beta2_decrease, beta2_end)
+            )
+            sigma2_variance = nx.minimum(sigma2_variance * sigma2_variance_decress, sigma2_variance_end)
+
+        # update variational variables gamma and alpha
+        K_NA, K_NB = assignment_results["K_NA"], assignment_results["K_NB"]
+        K_NA_spatial = assignment_results["K_NA_spatial"]
+        K_NA_sigma2 = assignment_results["K_NA_sigma2"]
+        # update gamma
+        gamma = update_gamma(
+            gamma, step_size, batch_size, gamma_a, gamma_b, assignment_results, SVI_mode
+        )
+
+        # update alpha
+        alpha = update_alpha(
+            alpha, step_size, kappa, assignment_results, SVI_mode
+        )
+
+        # update nonrigid vector field
+        if (sigma2 < 0.015) or (iter > 80) or nonrigid_flag:
+            nonrigid_flag=True
+            nonrigid_variable_field = update_nonrigid(nonrigid_variable_field)
+
+        # update rigid transformation
+        rigid_variable_field = update_rigid(rigid_variable_field)
+
+        # update sigma2 and beta2
+        SpatialDistMat = cal_dist(XAHat, randcoordsB) if SVI_mode else cal_dist(XAHat, coordsB)
+        sigma2, sigma2_variance = update_sigma2(SpatialDistMat, assignment_results)
+        beta2 = update_beta()
+
+        # iterate to next batch
+        if SVI_mode and iter < max_iter - 1:
+            randIdx = randomidx[:batch_size]
+            randomidx = _roll(nx)(randomidx, batch_size)
+            randcoordsB = coordsB[randIdx, :]
+            if sub_sample:
+                randGeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B[randIdx, :], dissimilarity=dissimilarity)
+            else:
+                randGeneDistMat = GeneDistMat[:, randIdx]  # NA x batch_size
+            SpatialDistMat = cal_dist(XAHat, randcoordsB)
+
+    # get the full cell mapping
+    if SVI_mode:
+        _common_kwargs = dict(
+            sigma2=sigma2,
+            beta2=beta2,
+            alpha=alpha,
+            gamma=gamma,
+            Sigma=SigmaDiag,
+            outlier_variance=outlier_variance,
+        )
+        if sparse_calculation_mode:
+            _unique_kwargs = dict(
+                XnAHat=XAHat,
+                XnB=coordsB,
+                X_A=X_A,
+                X_B=X_B,
+                batch_capacity=batch_capacity,
+                labelA=labelA,
+                labelB=labelB,
+            )
+            P, assignment_results = get_P_sparse(_common_kwargs,_unique_kwargs)
+        else:
+            _unique_kwargs = dict(
+                GeneDistMat=randGeneDistMat if SVI_mode else GeneDistMat,
+                SpatialDistMat=SpatialDistMat,
+                LabelDistMat=randLabelDistMat if SVI_mode else LabelDistMat,
+            )
+            P, assignment_results = get_P(_common_kwargs,_unique_kwargs)
+
+    # Get optimal rigid transformation based on final mapping
+    # TODO: make sure the R_init means
+    optimal_RnA, optimal_R, optimal_t = get_optimal_R(
+        coordsA=coordsA,
+        coordsB=coordsB,
+        P=P,
+        R_init=R,
+    )
+
+    if verbose:
+        lm.main_info(f"Key Parameters: gamma: {gamma}; beta2: {beta2}; sigma2: {sigma2}")
+
+    # denormalize
+    if normalize_c:
+        XAHat = XAHat * normalize_scale_list[0] + normalize_mean_list[0]
+        RnA = RnA * normalize_scale_list[0] + normalize_mean_list[0]
+        optimal_RnA = optimal_RnA * normalize_scale_list[0] + normalize_mean_list[0]
+        coarse_alignment = coarse_alignment * normalize_scale_list[0] + normalize_mean_list[0]
     
-    
+    # Save aligned coordinates
+    sampleB.obsm["Nonrigid_align_spatial"] = nx.to_numpy(XAHat).copy()
+    sampleB.obsm["Rigid_align_spatial"] = nx.to_numpy(optimal_RnA).copy()
+
+    # save vector field and other parameters
+    if not (vecfld_key_added is None):
+        sampleB.uns[vecfld_key_added] = {
+            "R": nx.to_numpy(R),
+            "t": nx.to_numpy(t),
+            "optimal_R": nx.to_numpy(optimal_R),
+            "optimal_t": nx.to_numpy(optimal_t),
+            "init_R": init_R,
+            "init_t": init_t,
+            "beta": beta,
+            "Coff": nx.to_numpy(Coff),
+            "ctrl_pts": nx.to_numpy(ctrl_pts),
+            "normalize_scale": nx.to_numpy(normalize_scale_list[0]) if normalize_c else None,
+            "normalize_mean_list": [nx.to_numpy(normalize_mean) for normalize_mean in normalize_mean_list]
+            if normalize_c
+            else None,
+            "normalize_c": normalize_c,
+            "dissimilarity": dissimilarity,
+            "beta2": nx.to_numpy(sigma2),
+            "sigma2": nx.to_numpy(sigma2),
+            "gamma": nx.to_numpy(gamma),
+            "NA": NA,
+            "outlier_variance": nx.to_numpy(outlier_variance),
+        }
+    empty_cache(device=device)
+    return (
+        None if inplace else (sampleA, sampleB),
+        nx.to_numpy(P.T),
+    )
 
 
 
