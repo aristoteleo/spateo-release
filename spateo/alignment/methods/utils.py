@@ -178,6 +178,7 @@ def check_use_rep(samples: List[AnnData], use_rep: Union[str, list], rep_type: O
                 raise ValueError("rep_type must be either 'obsm' or 'obs'")
     return True
 
+# TODO: check the label in samples is consistency to the label_transfer_dict
 def check_label_transfer(
     nx,
     type_as,
@@ -479,7 +480,7 @@ def normalize_exps(
 
     normalize_scale = 0
     for i in range(len(exp_matrices)):
-        normalize_mean = nx.einsum("ij->j", exp_matrices[i][0]) / exp_matrices[i][0].shape[0]
+        # normalize_mean = nx.einsum("ij->j", exp_matrices[i][0]) / exp_matrices[i][0].shape[0]
         normalize_scale += nx.sqrt(
             nx.einsum("ij->", nx.einsum("ij,ij->ij", exp_matrices[i][0], exp_matrices[i][0])) / exp_matrices[i][0].shape[0]
         )
@@ -489,7 +490,7 @@ def normalize_exps(
         exp_matrices[i][0] /= normalize_scale
     if verbose:
         lm.main_info(message=f"Gene expression normalization params:", indent_level=1)
-        lm.main_info(message=f"Mean: {normalize_mean}.", indent_level=2)
+        # lm.main_info(message=f"Mean: {normalize_mean}.", indent_level=2)
         lm.main_info(message=f"Scale: {normalize_scale}.", indent_level=2)
 
     return exp_matrices
@@ -653,37 +654,37 @@ def guidance_pair_preprocess(
 
 
 # TODO: what does this function do?
-def _mask_from_label_prior(
-    adataA: AnnData,
-    adataB: AnnData,
-    label_key: Optional[str] = "cluster",
-):
-    # check the label key
-    if label_key not in adataA.obs.keys():
-        raise ValueError(f"adataA does not have label key {label_key}.")
-    if label_key not in adataB.obs.keys():
-        raise ValueError(f"adataB does not have label key {label_key}.")
-    # get the label from anndata
-    labelA = pd.DataFrame(adataA.obs[label_key].values, columns=[label_key])
-    labelB = pd.DataFrame(adataB.obs[label_key].values, columns=[label_key])
+# def _mask_from_label_prior(
+#     adataA: AnnData,
+#     adataB: AnnData,
+#     label_key: Optional[str] = "cluster",
+# ):
+#     # check the label key
+#     if label_key not in adataA.obs.keys():
+#         raise ValueError(f"adataA does not have label key {label_key}.")
+#     if label_key not in adataB.obs.keys():
+#         raise ValueError(f"adataB does not have label key {label_key}.")
+#     # get the label from anndata
+#     labelA = pd.DataFrame(adataA.obs[label_key].values, columns=[label_key])
+#     labelB = pd.DataFrame(adataB.obs[label_key].values, columns=[label_key])
 
-    # get the intersect and different label
-    cateA = labelA[label_key].astype("category").cat.categories
-    cateB = labelB[label_key].astype("category").cat.categories
-    intersect_cate = cateA.intersection(cateB)
-    cateA_unique = cateA.difference(cateB)
-    cateB_unique = cateB.difference(cateA)
+#     # get the intersect and different label
+#     cateA = labelA[label_key].astype("category").cat.categories
+#     cateB = labelB[label_key].astype("category").cat.categories
+#     intersect_cate = cateA.intersection(cateB)
+#     cateA_unique = cateA.difference(cateB)
+#     cateB_unique = cateB.difference(cateA)
 
-    # calculate the label mask
-    label_mask = np.zeros((len(labelA), len(labelB)), dtype="float32")
-    for cate in intersect_cate:
-        label_mask += (labelA[label_key] == cate).values[:, None] * (labelB[label_key] == cate).values[None, :]
-    for cate in cateA_unique:
-        label_mask += (labelA[label_key] == cate).values[:, None] * np.ones((1, len(labelB)))
-    for cate in cateB_unique:
-        label_mask += np.ones((len(labelA), 1)) * (labelB[label_key] == cate).values[None, :]
-    label_mask[label_mask > 0] = 1
-    return label_mask
+#     # calculate the label mask
+#     label_mask = np.zeros((len(labelA), len(labelB)), dtype="float32")
+#     for cate in intersect_cate:
+#         label_mask += (labelA[label_key] == cate).values[:, None] * (labelB[label_key] == cate).values[None, :]
+#     for cate in cateA_unique:
+#         label_mask += (labelA[label_key] == cate).values[:, None] * np.ones((1, len(labelB)))
+#     for cate in cateB_unique:
+#         label_mask += np.ones((len(labelA), 1)) * (labelB[label_key] == cate).values[None, :]
+#     label_mask[label_mask > 0] = 1
+#     return label_mask
 
 
 ##############################################
@@ -895,6 +896,68 @@ def _minkowski_distance_backend(X, Y):
     pass
 
 
+
+def calc_distance(
+    X: Union[np.ndarray, torch.Tensor],
+    Y: Union[np.ndarray, torch.Tensor],
+    metric: str = "euc",
+    label_transfer: Optional[Union[np.ndarray, torch.Tensor]] = None, 
+) -> Union[np.ndarray, torch.Tensor]:
+    """
+    Calculate the distance between all pairs of samples in matrices X and Y using the specified metric.
+
+    Parameters
+    ----------
+    X : np.ndarray or torch.Tensor
+        Matrix with shape (N, D), where each row represents a sample.
+    Y : np.ndarray or torch.Tensor
+        Matrix with shape (M, D), where each row represents a sample.
+    metric : str, optional
+        The metric to use for calculating distances. Options are 'euc', 'euclidean', 'square_euc', 'square_euclidean',
+        'kl', 'sym_kl', 'cos', 'cosine', 'label'. Default is 'euc'.
+    label_transfer : Optional[np.ndarray or torch.Tensor], optional
+        Matrix with shape (K, L) containing the label transfer cost. Required if metric is 'label'. Default is None.
+
+    Returns
+    -------
+    np.ndarray or torch.Tensor
+        Pairwise distance matrix with shape (N, M).
+
+    Raises
+    ------
+    AssertionError
+        If the number of features in X and Y do not match.
+        If `metric` is not one of the supported metrics.
+        If `label_transfer` is required but not provided.
+    """
+
+
+    assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
+    assert metric in [  
+        "euc",
+        "euclidean",
+        "square_euc",
+        "square_euclidean",
+        "kl",
+        "sym_kl",
+        "cos",
+        "cosine",
+        "label"
+    ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'``, ``'square_euc'``, ``'square_euclidean'``, ``'kl'``, ``'sym_kl'``, ``'cos'``, ``'cosine'``, and ``'label'``."
+
+    if metric == "label":
+        assert label_transfer is not None, "label_transfer must be provided for metric 'label'."
+        return _label_distance_backend(X, Y, label_transfer)
+    elif metric in ["euc", "euclidean"]:
+        return _euc_distance_backend(X, Y, squared=False)
+    elif metric in ["square_euc", "square_euclidean"]:
+        return _euc_distance_backend(X, Y, squared=True)
+    elif metric == "kl":
+        return _kl_distance_backend(X, Y)
+    elif metric == "sym_kl":
+        return (_kl_distance_backend(X, Y) + _kl_distance_backend(Y, X).T) / 2
+    elif metric in ["cos", "cosine"]:
+        return _cosine_distance_backend(X, Y)
 
 
 
