@@ -626,11 +626,13 @@ def align_preprocess(
     if normalize_g:
         exp_layers = normalize_exps(matrices=exp_layers, nx=nx, verbose=verbose)
 
+    # TODO: add docstring for return label_transfer
     return (
         nx,
         type_as,
         exp_layers,
         spatial_coords,
+        label_transfer,
         normalize_scales,
         normalize_means,
     )
@@ -959,9 +961,365 @@ def calc_distance(
     elif metric in ["cos", "cosine"]:
         return _cosine_distance_backend(X, Y)
 
+def calc_probability(
+    distance_matrix: Union[np.ndarray, torch.Tensor],
+    probability_type: str = 'Gauss',
+    probability_parameter: Optional[float] = None
+) -> Union[np.ndarray, torch.Tensor]:
+    """
+    Calculate probability based on the distance matrix and specified probability type.
+
+    Parameters
+    ----------
+    distance_matrix : np.ndarray or torch.Tensor
+        The distance matrix.
+    probability_type : str, optional
+        The type of probability to calculate. Options are 'Gauss', 'cos_prob', and 'prob'. Default is 'Gauss'.
+    probability_parameter : Optional[float], optional
+        The parameter for the probability calculation. Required for certain probability types. Default is None.
+
+    Returns
+    -------
+    np.ndarray or torch.Tensor
+        The calculated probability matrix.
+
+    Raises
+    ------
+    ValueError
+        If `probability_type` is not one of the supported types or if required parameters are missing.
+    """
+
+    # Get the appropriate backend (either NumPy or PyTorch)
+    nx = ot.backend.get_backend(distance_matrix)
+    
+    if probability_type == 'Gauss':
+        if probability_parameter is None:
+            raise ValueError("probability_parameter must be provided for 'Gauss' probability type.") 
+        probability = nx.exp(-distance_matrix / (2 * probability_parameter))
+    elif probability_type == 'cos_prob':
+        probability = distance_matrix * 0.5 + 0.5
+    elif probability_type == 'prob':
+        probability = distance_matrix
+    else:
+        raise ValueError(f"Unsupported probability type: {probability_type}")
+
+    return probability
 
 
+###############################
+# Calculate assignment matrix #
+###############################
 
+def get_P_core(
+    nx,
+    type_as,
+    Dim,
+    spatial_dist: Union[np.ndarray, torch.Tensor],
+    exp_dist: List[Union[np.ndarray, torch.Tensor]],
+    sigma2: Union[int, float, np.ndarray, torch.Tensor],
+    model_mul: Union[np.ndarray, torch.Tensor],
+    # alpha: Union[np.ndarray, torch.Tensor],
+    gamma: Union[float, np.ndarray, torch.Tensor],
+    # Sigma: Union[np.ndarray, torch.Tensor],
+    samples_s: Optional[List[float]] = None,
+    sigma2_variance: float = 1,
+    probability_type: Union[str, List[str]] = 'Gauss',
+    probability_parameters: Optional[List] = None,
+    eps: float = 1e-8,
+):
+    """
+    Compute assignment matrix P and additional results based on given distances and parameters.
+
+    Parameters
+    ----------
+    nx : module
+        Backend module (e.g., numpy or torch).
+    type_as : type
+        Type to which the output should be cast.
+    spatial_dist : np.ndarray or torch.Tensor
+        Spatial distance matrix.
+    exp_dist : List[np.ndarray or torch.Tensor]
+        List of expression distance matrices.
+    sigma2 : int, float, np.ndarray or torch.Tensor
+        Sigma squared value.
+    alpha : np.ndarray or torch.Tensor
+        Alpha values.
+    gamma : float, np.ndarray or torch.Tensor
+        Gamma value.
+    Sigma : np.ndarray or torch.Tensor
+        Sigma values.
+    samples_s : Optional[List[float]], optional
+        Samples. Default is None.
+    sigma2_variance : float, optional
+        Sigma squared variance. Default is 1.
+    probability_type : Union[str, List[str]], optional
+        Probability type. Default is 'Gauss'.
+    probability_parameters : Optional[List[float]], optional
+        Probability parameters. Default is None.
+
+    Returns
+    -------
+    np.ndarray or torch.Tensor
+        Assignment matrix P.
+    dict
+        Additional results.
+    """
+
+    # Calculate spatial probability with sigma2_variance
+    spatial_prob = calc_probability(
+        spatial_dist, 
+        'Gauss', 
+        probability_parameter = sigma2 / sigma2_variance
+    )  # N x M
+
+    # TODO: everytime this will generate D/2 on GPU, may influence the runtime
+    spatial_outlier = _power(nx)((2 * _pi(nx) * sigma2), _data(nx, Dim / 2, type_as)) * (1 - gamma) / (gamma * outlier_s)  # scalar
+
+    # TODO: the position of the following is unclear
+    spatial_inlier = 1 - spatial_outlier / (spatial_outlier + nx.sum(spatial_prob, axis=0, keep_dims=True) + eps)  # 1 x M 
+
+    spatial_prob = spatial_prob * model_mul
+
+    # spatial P
+    P = spatial_prob / (spatial_outlier + nx.sum(spatial_prob, axis=0, keep_dims=True) + eps)  # N x M
+    K_NA_spatial = P.sum(1)
+
+    # Calculate spatial probability without sigma2_variance
+    spatial_prob = calc_probability(
+        spatial_dist, 
+        'Gauss', 
+        probability_parameter = sigma2,
+    )  # N x M
+    spatial_prob = spatial_prob * model_mul
+
+    # sigma2 P
+    P = spatial_inlier * spatial_prob / (nx.sum(spatial_prob, axis=0, keep_dims=True) + eps)
+    K_NA_sigma2 = P.sum(1)
+    sigma2_related = (P * spatial_dist).sum()
+
+    # Calculate probabilities for expression distances
+    if probability_parameters is None:
+        probability_parameters = [None] * len(exp_dist)
+
+    for e_d, p_t, p_p in zip(exp_dist, probability_type, probability_parameters):
+        spatial_prob *= calc_probability(e_d, p_t, p_p)
+
+    P = spatial_inlier * spatial_prob / (nx.sum(spatial_prob, axis=0, keep_dims=True) + eps)
+
+    return P, K_NA_spatial, K_NA_sigma2, sigma2_related
+
+
+def get_P(
+    nx,
+    type_as,
+    Dim,
+    spatial_dist: Union[np.ndarray, torch.Tensor],
+    exp_dist: List[Union[np.ndarray, torch.Tensor]],
+    sigma2: Union[int, float, np.ndarray, torch.Tensor],
+    alpha: Union[np.ndarray, torch.Tensor],
+    gamma: Union[float, np.ndarray, torch.Tensor],
+    Sigma: Union[np.ndarray, torch.Tensor],
+    samples_s: Optional[List[float]] = None,
+    sigma2_variance: float = 1,
+    probability_type: Union[str, List[str]] = 'Gauss',
+    probability_parameters: Optional[List[float]] = None,
+    # use_chunk: bool = False,
+    # chunk_capacity_scale: int = 1,
+):
+    N, M = spatial_dist.shape
+    # calculate vectors for model points
+    model_mul = _unsqueeze(nx)(alpha * nx.exp(-Sigma / sigma2), -1)  # N x 1
+    P, K_NA_spatial, K_NA_sigma2, sigma2_related = get_P_core(
+        nx,
+        type_as,
+        Dim=Dim,
+        spatial_dist=spatial_dist,
+        exp_dist=exp_dist,
+        sigma2=sigma2,
+        model_mul=model_mul,
+        gamma=gamma,
+        samples_s=samples_s,
+        sigma2_variance=sigma2_variance,
+        probability_type=probability_type,
+        probability_parameters=probability_parameters,
+    )
+
+    assignment_results = {
+        "K_NA_spatial": K_NA_spatial,
+        "K_NA_sigma2": K_NA_sigma2,
+        "sigma2_related": sigma2_related,
+    }
+
+    return P, assignment_results
+
+
+    
+    # if use_chunk:
+    #     # get the chunk size
+    #     chunk_capacity_base = 1e8
+    #     split_size = min(int(chunk_capacity_scale * chunk_capacity_base/ (N)), M)
+    #     split_size = 1 if split_size == 0 else split_size
+
+    #     spatial_dist_chunks = _split(nx, spatial_dist, split_size, dim=0)
+    #     exp_dist_chunks = _split(nx, exp_dist, split_size, dim=0)
+
+    # else:
+    #     pass
+
+
+def get_P_sparse(
+    nx,
+    type_as,
+    Dim,
+    spatial_XA: Union[np.ndarray, torch.Tensor],
+    spatial_XB: Union[np.ndarray, torch.Tensor],
+    exp_layer_A: List[Union[np.ndarray, torch.Tensor]],
+    exp_layer_B: List[Union[np.ndarray, torch.Tensor]],
+    label_transfer: Union[np.ndarray, torch.Tensor],
+    sigma2: Union[int, float, np.ndarray, torch.Tensor],
+    alpha: Union[np.ndarray, torch.Tensor],
+    gamma: Union[float, np.ndarray, torch.Tensor],
+    Sigma: Union[np.ndarray, torch.Tensor],
+    samples_s: Optional[List[float]] = None,  # TODO: now can't be None
+    sigma2_variance: float = 1,  # TODO: check if float or tensor type
+    probability_type: Union[str, List[str]] = 'Gauss',
+    probability_parameters: Optional[List[float]] = None,
+    use_chunk: bool = False,
+    chunk_capacity_scale: int = 1,
+    top_k: int = 1024,
+    metrics: Union[str, List[str]] = 'kl',
+):
+    """
+    Calculate sparse assignment matrix P using spatial and expression / representation distances.
+
+    Parameters
+    ----------
+    nx : module
+        Backend module (e.g., numpy or torch).
+    type_as : type
+        Type to which the output should be cast.
+    Dim : int
+        Dimensionality of the spatial data.
+    spatial_XA : np.ndarray or torch.Tensor
+        Spatial coordinates of sample A.
+    spatial_XB : np.ndarray or torch.Tensor
+        Spatial coordinates of sample B.
+    exp_layer_A : np.ndarray or torch.Tensor
+        Expression / representation data of sample A.
+    exp_layer_B : np.ndarray or torch.Tensor
+        Expression / representation data of sample B.
+    label_transfer : np.ndarray or torch.Tensor
+        Label transfer cost matrix.
+    sigma2 : int, float, np.ndarray or torch.Tensor
+        Sigma squared value.
+    alpha : np.ndarray or torch.Tensor
+        Alpha values.
+    gamma : float, np.ndarray or torch.Tensor
+        Gamma value.
+    Sigma : np.ndarray or torch.Tensor
+        Sigma values.
+    samples_s : Optional[List[float]], optional
+        Samples. Default is None.
+    sigma2_variance : float, optional
+        Sigma squared variance. Default is 1.
+    probability_type : Union[str, List[str]], optional
+        Probability type. Default is 'Gauss'.
+    probability_parameters : Optional[List[float]], optional
+        Probability parameters. Default is None.
+    use_chunk : bool, optional
+        Whether to use chunking for large datasets. Default is False.
+    chunk_capacity_scale : int, optional
+        Scale factor for chunk capacity. Default is 1.
+    top_k : int, optional
+        Number of top elements to keep in the sparse matrix. Default is 1024.
+    metrics : Union[str, List[str]], optional
+        Distance metrics to use. Default is 'kl'.
+
+    Returns
+    -------
+    Union[np.ndarray, torch.Tensor]
+        Sparse assignment matrix P.
+    dict
+        Additional results.
+    """
+
+    N, M = spatial_XA.shape[0], spatial_XB.shape[1]
+
+    # calculate vectors for model points
+    model_mul = _unsqueeze(nx)(alpha * nx.exp(-Sigma / sigma2), -1)  # N x 1
+
+    if use_chunk:
+        # get the chunk size
+        chunk_capacity_base = 1e8
+        split_size = min(int(chunk_capacity_scale * chunk_capacity_base/ (N)), M)
+        split_size = 1 if split_size == 0 else split_size
+
+        # chunk the data along the B (data points)
+        spatial_XB_chunks = _split(nx, spatial_XB, split_size, dim=0)
+        exp_layer_B_chunks = _split(nx, exp_layer_B, split_size, dim=0)
+
+        # initial results for chunk
+        K_NA_spatial = nx.zeros((NA,), type_as=type_as)
+        K_NA_sigma2 = nx.zeros((NA,), type_as=type_as)
+        Ps = []
+        sigma2_related = 0
+
+        for spatial_XB_chunk, exp_layer_B_chunk in zip(spatial_XB_chunks, exp_layer_B_chunks):
+            # calculate the spatial distance
+            spatial_dist = calc_distance(spatial_XA, spatial_XB_chunk, metric="euc")
+
+            # calculate the expression / representation distances
+            # TODO: calc_distance should calculate the list
+            exp_dist = calc_distance(exp_layer_A, exp_layer_B_chunk, metrics, label_transfer)
+
+            # calculate the assignment matrix within the chunk
+            P, K_NA_spatial_chunk, K_NA_sigma2_chunk, sigma2_related_chunk = get_P_core(
+                nx,
+                type_as,
+                Dim=Dim,
+                spatial_dist=spatial_dist,
+                exp_dist=exp_dist,
+                sigma2=sigma2,
+                model_mul=model_mul,
+                gamma=gamma,
+                samples_s=samples_s,
+                sigma2_variance=sigma2_variance,
+                probability_type=probability_type,
+                probability_parameters=probability_parameters,
+            )
+
+            # convert to sparse matrix
+            P = _dense_to_sparse(
+                mat=P,
+                sparse_method="topk",
+                threshold=top_k,
+                axis=0,
+                descending=True,
+            )
+
+            # add / update chunk results
+            Ps.append(P)
+            K_NA_spatial += K_NA_spatial_chunk
+            K_NA_sigma2 += K_NA_sigma2_chunk
+            sigma2_related += sigma2_related_chunk
+
+        # concatenate / process chunk results
+        P = _sparse_concat(nx, Ps, axis=1)
+        Sp_sigma2 = K_NA_sigma2.sum()
+        sigma2_related = sigma2_related / (Dim * Sp_sigma2)
+
+        assignment_results = {
+            "K_NA_spatial": K_NA_spatial,
+            "K_NA_sigma2": K_NA_sigma2,
+            "sigma2_related": sigma2_related,
+        }
+
+        return P, assignment_results
+        
+
+
+    else:
+        raise NotImplementedError("Non-chunking mode is not implemented yet.")
 
 
 

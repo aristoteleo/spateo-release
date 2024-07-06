@@ -220,117 +220,93 @@ def get_P_chunk(
 def BA_align(
     sampleA: AnnData,
     sampleB: AnnData,
-    layer: str = "X",
+    rep_layer: Union[str, List[str]] = "X",
+    rep_field: Union[str, List[str]] = "layer",
     genes: Optional[Union[List[str], torch.Tensor]] = None,
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
     iter_key_added: Optional[str] = None,
     vecfld_key_added: Optional[str] = None,
-    dissimilarity: str = "kl",
-    use_rep: Optional[str] = None,
+
+    dissimilarity: Union[str, List[str]] = "kl",
+    probability_type: Union[str, List[str]] = "gauss",
+    probability_parameter: Optional[Union[float, List[float]]] = None,
+    label_transfer_dict: Optional[Union[dict, List[dict]]] = None,
+
+    nn_init: bool = True,
+    allow_flip: bool = False,
+    init_layer: str = "X",
+    init_field: str = 'layer',
+
     max_iter: int = 200,
     SVI_mode: bool = True,
-    sparse_calculation_mode: bool = False,
     batch_size: int = 1000,
     pre_compute_dist: bool = True,
+    sparse_calculation_mode: bool = False,
+    
     lambdaVF: Union[int, float] = 1e2,
     beta: Union[int, float] = 0.01,
     K: Union[int, float] = 15,
     sigma2_init_scale: Optional[Union[int, float]] = 0.1,
-    beta2_init: Optional[Union[int, float]] = None,
-    beta2_end: Optional[Union[int, float]] = None,
     partial_robust_level: float = 25,
     normalize_c: bool = True,
     normalize_g: bool = True,
+
     dtype: str = "float32",
     device: str = "cpu",
-    inplace: bool = True,
+    # inplace: bool = True,
     verbose: bool = True,
-    nn_init: bool = True,
-    allow_flip: bool = False,
-    label_key: Optional[str] = None,
-    label_transfer_prior: Optional[dict] = None,
+    
     guidance_pair: Optional[Union[List[np.ndarray], np.ndarray]] = None,
     guidance_effect: Optional[Union[bool, str]] = False,
     guidance_epsilon: float = 1,
-) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
+) -> Tuple[Tuple[AnnData, AnnData], np.ndarray]:
     """
-    The core function of Spateo alignment to align two spatial transcriptomics AnnData objects 
+    Align two spatial transcriptomics AnnData objects using the Spateo alignment algorithm.
 
-    Parameters
-    ----------
-    sampleA : AnnData
-        The first AnnData object that acts as reference.
-    sampleB : AnnData
-        The second AnnData object that performs alignment.
-    genes : Optional[Union[List[str], torch.Tensor]]
-        List of genes or tensor specifying the genes to be used for alignment. If None, use all common genes for calculation.
-    spatial_key : str, optional
-        Key in ``.obsm`` of AnnData objects that corresponds to the raw spatial coordinate, by default "spatial".
-    key_added : str, optional
-        ``.obsm`` key under which the aligned spatial coordinates are added, by default "align_spatial".
-    iter_key_added : Optional[str], optional
-        ``.uns`` key under which to add the intermediate results of each iteration of the iterative process. If ``iter_key_added`` is None, the results are not saved. By default None.
-    vecfld_key_added : Optional[str], optional
-        ``.uns`` key under which vector field results are added. If ``vecfld_key_added`` is None, the results are not saved. By default None.
-    layer : str, optional
-        If ``X``, uses ``.X`` layer in AnnData objects to calculate dissimilarity between spots/cells, otherwise uses the representation given by ``.layers[layer]``., by default "X".
-    dissimilarity : str, optional
-        Dissimilarity measure to be used. Avaiable option: ``'kl'``, ``'euc'``, or ``'cos'``. By default "kl".
-    use_rep : Optional[str], optional
-        Use the indicated representation. If use_rep is None, then use the given "layer", else use the key stored in .obsm. E.g., "X_pca". By default None.
-    max_iter : int, optional
-        Maximum number of iterations, by default 200.
-    SVI_mode : bool, optional
-        Whether to use Stochastic Variational Inference mode, by default True.
-    sparse_calculation_mode: bool, optional
-        Whether to use sparse matrix calculation during the optimization. Sparse matrix can reduce the memory usage significantly, but will increase the calculation time if the sample size is samll. Recommend  setting to ``True`` if the number of samples is greater than 30,000. By default False.
-    lambdaVF : Union[int, float], optional
-        Regularization parameter for vector field of the non-rigid transformation. Smaller means more flexibility. By default 1e2.
-    beta : Union[int, float], optional
-        The length-scale of the SE kernel. Higher means more flexibility. By default 0.01.
-    K : Union[int, float], optional
-        The number of sparse inducing points used for Nystr ̈om approximation. Smaller should be faster but slightly less accurate. By default 15.
-    sigma2_init_scale : Optional[Union[int, float]], optional
-        Initial value for the manually assigned spatial dispersion level. Smaller indicating that the spatial is less flexible in the optimization. By default 0.1.
-    beta2_init : Optional[Union[int, float]], optional
-        Initial value for the manually assigned significance gene expression similarity. Smaller indicating greater significance. If not assigned, then Spateo will determine it automatically. By default None.
-    beta2_end : Optional[Union[int, float]], optional
-        End value for the manually assigned significance gene expression similarity. Smaller indicating greater significance. If not assigned, then Spateo will determine it automatically. By default None.
-    normalize_c : bool, optional
-        Whether to normalize the spatial coordinates, by default True.
-    normalize_g : bool, optional
-        Whether to normalize the gene expression. If ``dissimilarity`` == ``'kl'``, ``normalize_g`` must be False. By default True.
-    dtype : str, optional
-        The floating-point number data type for computations. Only ``float32`` and ``float64`` are accepted. By default "float32".
-    device : str, optional
-        Equipment used to run the program. You can also set the specified GPU for running. E.g.: ``'0'``. By default "cpu".
-    inplace : bool, optional
-        Whether to copy adata or modify it inplace. By default True.
-    verbose : bool, optional
-        Whether to print verbose messages, by default True.
-    nn_init : bool, optional
-        Whether to use nearest neighbor matching to initialize the alignment. By default True.
-    allow_flip : bool, optional
-        Whether to allow flipping of coordinates, by default False.
-    label_key : Optional[str], optional
-        Category annotation stored in ``.obs`` of AnnData objects used to incorporate label consistency information, by default None.
-    label_transfer_prior : Optional[dict], optional
-        Manually assigned label transfer prior for the label consistency calculation. You can define some positive pairs and negative pairs based on expert knowledge and generate the label transfer prior by calling ``spateo.align.construct_label_transfer_prior``. If not assigned (None), Spateo will automatically set based on the label consistency.
-    batch_size : int, optional
-        The size of the mini-batch of SVI. If set smaller, the calculation will be faster, but it will affect the accuracy, and vice versa. If not set, it is automatically set to one-tenth of the data size. By default 1000.
-    partial_robust_level : float, optional
-        The robust level of partial alignment. The larger the value, the more robust the alignment to partial cases is. Recommended setting from 1 to 50. By default 25.
-    pre_compute_dist : bool, optional
-        If ``True``, the gene similarity matrix is computed before the mini batch is performed. Otherwise, it is computed during the mini batch. This can be significantly faster, but can also require more GPU memory if using GPU. By default True.
-    guidance_pair : Optional[list], optional
-        List of guidance pairs for alignment. You can add manually assigned pair to guide the alignment. By default None.
-    guidance_effect : Optional[Union[bool, str]], optional
-        Effect of guidance for the transformation. Can be either ``'nonrigid'``, ``'rigid'``, ``'both'``, and False, by default False.
-    guidance_epsilon : float, optional
-        Epsilon value for guidance. Smaller means stronger guidance. By default 1.
+    Args:
+        sampleA (AnnData): The first AnnData object that acts as the reference.
+        sampleB (AnnData): The second AnnData object to be aligned.
+        rep_layer (Union[str, List[str]], optional): Representation layer(s) in AnnData to be used for alignment. Defaults to "X".
+        rep_field (Union[str, List[str]], optional): Representation layer field(s) in AnnData to be used for alignment. "layer" means gene expression, "obsm" means embdedding like pca or VAE, "obs" means discrete label annotation. Note that Spateo only accept one label annotation. Defaults to "layer".
+        genes (Optional[Union[List[str], torch.Tensor]], optional): List or tensor of genes to be used for alignment. For example, you can input the genes you are interested or spatially variabe genes here. Defaults to None.
+        spatial_key (str, optional): Key in `.obsm` of AnnData corresponding to the spatial coordinates. Defaults to "spatial".
+        key_added (str, optional): Key under which the aligned spatial coordinates are added in `.obsm`. Defaults to "align_spatial".
+        iter_key_added (Optional[str], optional): Key under which to store intermediate iteration results in `.uns`. Defaults to None.
+        vecfld_key_added (Optional[str], optional): Key under which to store vector field results in `.uns`. Defaults to None.
+        dissimilarity (Union[str, List[str]], optional): Measure(s) of pairwise dissimilarity of each observation to be used. Defaults to "kl".
+        probability_type (Union[str, List[str]], optional): Type(s) of probability distribution used. Defaults to "gauss".
+        probability_parameter (Optional[Union[float, List[float]]], optional): Parameters for the probability distribution. Defaults to None.
+        label_transfer_dict (Optional[Union[dict, List[dict]]], optional): Dictionary that stores the label transfer probability. Defaults to None.
+        nn_init (bool, optional): Whether to use nearest neighbor initialization. Defaults to True.
+        allow_flip (bool, optional): Whether to allow flipping of coordinates. Defaults to False.
+        init_layer (str, optional): Layer for init alignment. Defaults to "X".
+        init_field (str, optional): Layer field for init alignment. Defaults to 'layer'.
+        max_iter (int, optional): Maximum number of iterations. Defaults to 200.
+        SVI_mode (bool, optional): Whether to use Stochastic Variational Inference mode. Defaults to True.
+        batch_size (int, optional): Size of the mini-batch for SVI. Defaults to 1000.
+        pre_compute_dist (bool, optional): Whether to pre-compute the gene similarity matrix. Defaults to True.
+        sparse_calculation_mode (bool, optional): Whether to use sparse matrix calculations. Defaults to False.
+        lambdaVF (Union[int, float], optional): Regularization parameter for vector field. Defaults to 1e2.
+        beta (Union[int, float], optional): Length-scale of the SE kernel. Defaults to 0.01.
+        K (Union[int, float], optional): Number of sparse inducing points for Nyström approximation. Defaults to 15.
+        sigma2_init_scale (Optional[Union[int, float]], optional): Initial spatial dispersion scale. Defaults to 0.1.
+        partial_robust_level (float, optional): Robust level for partial alignment. Defaults to 25.
+        normalize_c (bool, optional): Whether to normalize spatial coordinates. Defaults to True.
+        normalize_g (bool, optional): Whether to normalize gene expression. Defaults to True.
+        dtype (str, optional): Data type for computations. Defaults to "float32".
+        device (str, optional): Device for computation, e.g., "cpu" or "0" for GPU. Defaults to "cpu".
+        # inplace (bool, optional): Whether to modify `adata` inplace. Defaults to True.
+        verbose (bool, optional): Whether to print verbose messages. Defaults to True.
+        guidance_pair (Optional[Union[List[np.ndarray], np.ndarray]], optional): Guidance pairs for alignment. Defaults to None.
+        guidance_effect (Optional[Union[bool, str]], optional): Effect of guidance. Defaults to False.
+        guidance_epsilon (float, optional): Epsilon value for guidance. Defaults to 1.
+
+    Returns:
+        Tuple[Tuple[AnnData, AnnData], np.ndarray]: A tuple containing the aligned AnnData objects and assignment matrix.
     """
 
+    # TODO: remove the type checking out
     assert dissimilarity in [
         "kl",
         "euclidean",
@@ -344,18 +320,18 @@ def BA_align(
     empty_cache(device=device)
 
     # prerocessing
-    sampleA, sampleB = (sampleA, sampleB) if inplace else (sampleA.copy(), sampleB.copy())
+    # sampleA, sampleB = (sampleA, sampleB) if inplace else (sampleA.copy(), sampleB.copy())
     (
         nx,
         type_as,
-        new_samples,
-        exp_matrices,
+        exp_layers,
         spatial_coords,
-        normalize_scale_list,
-        normalize_mean_list,
+        normalize_scales,
+        normalize_means,
     ) = align_preprocess(
         samples=[sampleA, sampleB],
-        layer=layer,
+        rep_layer=rep_layer,
+        rep_field=rep_field,
         genes=genes,
         spatial_key=spatial_key,
         normalize_c=normalize_c,
@@ -363,11 +339,10 @@ def BA_align(
         dtype=dtype,
         device=device,
         verbose=verbose,
-        use_rep=use_rep,
     )
+
     coordsA, coordsB = spatial_coords[1], spatial_coords[0]
-    X_A, X_B = exp_matrices[1], exp_matrices[0]
-    raw_X_A, raw_X_B = (exp_matrices[1], exp_matrices[0]) if use_rep is None else (exp_matrices[3], exp_matrices[2])
+    exp_layer_A, exp_layer_B = exp_layers[1], exp_layers[0]
 
     # process the label information
     # TODO: convert label information and label transfer prior dict into better data type
@@ -382,26 +357,34 @@ def BA_align(
 
     # perform coarse rigid alignment
     # TODO: add downsampling in the coarse_rigid_alignment
+    # TODO: coordsA should not be transformed here, because the inducing variable is in the same space
     if nn_init:
         coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(
-            dissimilarity=dissimilarity, 
-            top_K=10, 
-            verbose=verbose, 
             coordsA=coordsA,
             coordsB=coordsB,
-            X_A=X_A,
-            X_B=X_B,
+            init_layer=init_layer,
+            init_field=init_field,
+            samples=[sampleA, sampleB],
+            top_K=10, 
             allow_flip=allow_flip,
+            verbose=verbose,
         )
     else:
         init_R = nx.eye(D, type_as=type_as)
         init_t = nx.zeros((D,), type_as=type_as)
     init_coords = coordsA.copy()
     
+    # apply coarse alignment to guidance pair
     if X_AI is not None:
         X_AI = X_AI @ init_R.T + init_t
 
     # construct the kernel for Gaussian processes
+    construct_kernel(
+        spatial_coords=coordsA,
+        inducing_variables="random",
+        
+
+    )
     # random select the inducing variables
     Unique_coordsA = _unique(nx, coordsA, 0)
     idx = random.sample(range(Unique_coordsA.shape[0]), min(K, Unique_coordsA.shape[0]))
