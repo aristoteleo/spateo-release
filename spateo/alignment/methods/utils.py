@@ -1,5 +1,5 @@
 import os
-from typing import Any, List, Optional, Tuple, Union, Dict
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import ot
@@ -27,7 +27,7 @@ extract_data_matrix = lambda adata, rep: adata.X if rep is None else adata.layer
 # Check data and device #
 #########################
 
-
+# Finished
 def check_backend(device: str = "cpu", dtype: str = "float32", verbose: bool = True):
     """
     Check the proper backend for the device.
@@ -62,17 +62,25 @@ def check_backend(device: str = "cpu", dtype: str = "float32", verbose: bool = T
     return backend, type_as
 
 
+# Finished
 def check_spatial_coords(sample: AnnData, spatial_key: str = "spatial") -> np.ndarray:
     """
-    Check spatial coordinate information.
+    Check and return the spatial coordinate information from an AnnData object.
 
     Args:
-        sample: An anndata object.
-        spatial_key: The key in `.obsm` that corresponds to the raw spatial coordinates.
+        sample (AnnData): An AnnData object containing the sample data.
+        spatial_key (str, optional): The key in `.obsm` that corresponds to the raw spatial coordinates. Defaults to "spatial".
 
     Returns:
-        The spatial coordinates.
+        np.ndarray: The spatial coordinates.
+
+    Raises:
+        KeyError: If the specified spatial_key is not found in `sample.obsm`.
     """
+
+    if spatial_key not in sample.obsm:
+        raise KeyError(f"Spatial key '{spatial_key}' not found in AnnData object.")
+
     coordinates = sample.obsm[spatial_key].copy()
     if isinstance(coordinates, pd.DataFrame):
         coordinates = coordinates.values
@@ -80,137 +88,192 @@ def check_spatial_coords(sample: AnnData, spatial_key: str = "spatial") -> np.nd
     return np.asarray(coordinates)
 
 
+# Finished
 def check_exp(sample: AnnData, layer: str = "X") -> np.ndarray:
     """
     Check expression matrix.
 
     Args:
-        sample: An anndata object.
-        layer: The key in `.layers` that corresponds to the expression matrix.
+        sample (AnnData): An AnnData object containing the sample data.
+        layer (str, optional): The key in `.layers` that corresponds to the expression matrix. Defaults to "X".
 
     Returns:
         The expression matrix.
+
+    Raises:
+        KeyError: If the specified layer is not found in `sample.layers`.
     """
 
-    exp_martix = sample.X.copy() if layer == "X" else sample.layers[layer].copy()
+    if layer == "X":
+        exp_matrix = sample.X.copy()
+    else:
+        if layer not in sample.layers:
+            raise KeyError(f"Layer '{layer}' not found in AnnData object.")
+        exp_matrix = sample.layers[layer].copy()
+
     exp_martix = to_dense_matrix(exp_martix)
     return exp_martix
 
-def check_obs(use_rep: List[str], rep_type: List[str]) -> Optional[str]:
+
+# Finished
+def check_obs(rep_layer: List[str], rep_field: List[str]) -> Optional[str]:
     """
-    Check that the number of occurrences of 'obs' in the list of strings is no more than one.
+    Check that the number of occurrences of 'obs' in the list of representation fields is no more than one.
 
-    Parameters
-    ----------
-    use_rep : List[str]
-        A list of representations to check.
-    rep_type : List[str]
-        A list of representation types corresponding to the representations in `use_rep`.
+    Args:
+        rep_layer (List[str]): A list of representations to check.
+        rep_field (List[str]): A list of representation types corresponding to the representations in `rep_layer`.
 
-    Returns
-    -------
-    Optional[str]
-        The representation key if 'obs' occurs once, otherwise None.
+    Returns:
+        Optional[str]: The representation key if 'obs' occurs exactly once, otherwise None.
 
-    Raises
-    ------
-    ValueError
-        If 'obs' occurs more than once in the list.
+    Raises:
+        ValueError: If 'obs' occurs more than once in the list.
     """
-    for i, s in enumerate(rep_type):
-        if s == 'obs':
+
+    count = 0
+    position = -1
+
+    for i, s in enumerate(rep_field):
+        if s == "obs":
             count += 1
             position = i
             if count > 1:
-                raise ValueError(f"'obs' occurs more than once in the list. Currently Spateo only support one label consistency.")
-            
-    # return the obs key
+                raise ValueError(
+                    f"'obs' occurs more than once in the list. Currently Spateo only support one label consistency."
+                )
+
+    # Return the 'obs' key if found exactly once
     if count == 1:
-        return use_rep[position]
+        return rep_layer[position]
     else:
         return None
 
 
-def check_use_rep(samples: List[AnnData], use_rep: Union[str, list], rep_type: Optional[Union[str, list]] = None,) -> bool:
+# Finished
+def check_rep_layer(
+    samples: List[AnnData],
+    rep_layer: Union[str, List[str]] = "X",
+    rep_field: Union[str, List[str]] = "layer",
+) -> bool:
     """
-    Check if `use_rep` exists in the `.obsm` or `.obs` attributes of AnnData objects based on `rep_type`.
+    Check if specified representations exist in the `.layers`, `.obsm`, or `.obs` attributes of AnnData objects.
 
-    Parameters
-    ----------
-    samples : List[AnnData]
-        A list of AnnData objects containing the data samples.
-    use_rep : Union[str, list]
-        The representation to check.
-    rep_type : str
-        The type of representation. Accept types: "obsm" and "obs".
+    Args:
+        samples (List[AnnData]):
+            A list of AnnData objects containing the data samples.
+        rep_layer (Union[str, List[str]], optional):
+            The representation layer(s) to check. Defaults to "X".
+        rep_field (Union[str, List[str]], optional):
+            The field(s) indicating the type of representation. Acceptable values are "layer", "obsm", and "obs". Defaults to "layer".
 
-    Returns
-    -------
-    bool
-        True if `use_rep` exists in the specified attribute of all AnnData objects, False otherwise.
+    Returns:
+        bool:
+            True if all specified representations exist in the corresponding attributes of all AnnData objects, False otherwise.
+
+    Raises:
+        ValueError:
+            If the specified representation is not found in the specified attribute or if the attribute type is invalid.
     """
-
-    if rep_type is None:
-        rep_type = "obsm"
-
-    if isinstance(use_rep, str):
-        use_rep = [use_rep]
-
-    if isinstance(rep_type, str):
-        rep_type = [rep_type] * len(use_rep)
 
     for sample in samples:
-        for rep, rep_t in zip(use_rep, rep_type):
-            if rep_t == "obsm":
+        for rep, rep_f in zip(rep_layer, rep_field):
+            if rep_f == "layer":
+                if rep not in sample.layers:
+                    raise ValueError(
+                        f"The specified representation '{rep}' not found in the '{rep_f}' attribute of some of the AnnData objects."
+                    )
+                    return False
+            if rep_f == "obsm":
                 if rep not in sample.obsm:
-                    raise ValueError(f"The specified representation '{rep}' not found in the '{rep_t}' attribute of some of the AnnData objects.")
+                    raise ValueError(
+                        f"The specified representation '{rep}' not found in the '{rep_f}' attribute of some of the AnnData objects."
+                    )
                     return False
-            elif rep_t == "obs":
+            elif rep_f == "obs":
                 if rep not in sample.obs:
-                    raise ValueError(f"The specified representation '{rep}' not found in the '{rep_t}' attribute of some of the AnnData objects.")
+                    raise ValueError(
+                        f"The specified representation '{rep}' not found in the '{rep_f}' attribute of some of the AnnData objects."
+                    )
                     return False
-                
+
                 # judge if the sample.obs[rep] is categorical
                 if not isinstance(sample.obs[rep].dtype, pd.CategoricalDtype):
-                    raise ValueError(f"The specified representation '{rep}' found in the '{rep_t}' attribute should be categorical.")
+                    raise ValueError(
+                        f"The specified representation '{rep}' found in the '{rep_f}' attribute should be categorical."
+                    )
                     return False
             else:
-                raise ValueError("rep_type must be either 'obsm' or 'obs'")
+                raise ValueError("rep_type must be either 'layer', 'obsm' or 'obs'")
     return True
 
-# TODO: check the label in samples is consistency to the label_transfer_dict
+
+# Finished
+def check_label_transfer_dict(
+    catA: List[str],
+    catB: List[str],
+    label_transfer_dict: Dict[str, Dict[str, float]],
+):
+    """
+    Check the label transfer dictionary for consistency with given categories.
+
+    Args:
+        catA (List[str]):
+            List of category labels from the first dataset.
+        catB (List[str]):
+            List of category labels from the second dataset.
+        label_transfer_dict (Dict[str, Dict[str, float]]):
+            Dictionary defining the transfer probabilities between categories.
+
+    Raises:
+        KeyError:
+            If a category from `catA` is not found in `label_transfer_dict`.
+        KeyError:
+            If a category from `catB` is not found in the nested dictionary of `label_transfer_dict`.
+    """
+
+    for ca in catA:
+        if ca in label_transfer_dict.keys():
+            for cb in catB:
+                if cb not in label_transfer_dict[ca].keys():
+                    raise KeyError(
+                        f"Category '{cb}' from catB not found in label_transfer_dict for category '{ca}' from catA."
+                    )
+
+        else:
+            raise KeyError(f"Category '{ca}' from catA not found in label_transfer_dict.")
+
+
+# Finished
 def check_label_transfer(
-    nx,
-    type_as,
-    samples: List[AnnData], 
-    obs_key: str, 
-    label_transfer_dict: Optional[List[Dict[str, Dict[str, float]]]] = None
+    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    type_as: Union[torch.Tensor, np.ndarray],
+    samples: List[AnnData],
+    obs_key: str,
+    label_transfer_dict: Optional[List[Dict[str, Dict[str, float]]]] = None,
 ) -> List[Union[np.ndarray, torch.Tensor]]:
     """
     Check and generate label transfer matrices for the given samples.
 
-    Parameters
-    ----------
-    nx : module
-        Backend module (e.g., numpy or torch).
-    type_as : type
-        Type to which the output should be cast.
-    samples : List[AnnData]
-        List of AnnData objects containing the samples.
-    obs_key : str
-        The key in `.obs` that corresponds to the labels.
-    label_transfer_dict : Optional[List[Dict[str, Dict[str, float]]]], optional
-        List of dictionaries defining the label transfer cost between categories of each pair of samples.
+    Args:
+        nx (module):
+            Backend module (e.g., numpy or torch).
+        type_as (type):
+            Type to which the output should be cast.
+        samples (List[AnnData]):
+            List of AnnData objects containing the samples.
+        obs_key (str):
+            The key in `.obs` that corresponds to the labels.
+        label_transfer_dict (Optional[List[Dict[str, Dict[str, float]]]], optional):
+            List of dictionaries defining the label transfer cost between categories of each pair of samples. Defaults to None.
 
-    Returns
-    -------
-    List[Union[np.ndarray, torch.Tensor]]
-        List of label transfer matrices, each as either a NumPy array or torch Tensor.
-    
-    Raises
-    ------
-    ValueError
-        If the length of `label_transfer_dict` does not match `len(samples) - 1`.
+    Returns:
+        List[Union[np.ndarray, torch.Tensor]]:
+            List of label transfer matrices, each as either a NumPy array or torch Tensor.
+
+    Raises:
+        ValueError:
+            If the length of `label_transfer_dict` does not match `len(samples) - 1`.
     """
 
     if label_transfer_dict is not None:
@@ -223,51 +286,51 @@ def check_label_transfer(
             raise ValueError("label_transfer_dict should be a list or a dictionary.")
 
     label_transfer = []
-    for i in range(len(samples)-1):
-        cat1 = samples[i].obs[obs_key].cat.categories.tolist()
-        cat2 = samples[i+1].obs[obs_key].cat.categories.tolist()
-        cur_label_transfer = np.zeros(len(cat1), len(cat2), dtype=np.float32)
+    for i in range(len(samples) - 1):
+        catB = samples[i].obs[obs_key].cat.categories.tolist()
+        catA = samples[i + 1].obs[obs_key].cat.categories.tolist()
+        cur_label_transfer = np.zeros(len(catA), len(catB), dtype=np.float32)
 
         if label_transfer_dict is not None:
             cur_label_transfer_dict = label_transfer_dict[i]
+            check_label_transfer_dict(catA=catA, catB=catB, label_transfer_dict=cur_label_transfer_dict)
         else:
-            cur_label_transfer_dict = generate_label_transfer_dict(cat1, cat2)
+            cur_label_transfer_dict = generate_label_transfer_dict(catA, catB)
 
-        for j, c2 in enumerate(cat2):
-            for k, c1 in enumerate(cat1):
-                cur_label_transfer[j, k] = cur_label_transfer_dict[c2][c1]
+        for j, ca in enumerate(catA):
+            for k, cb in enumerate(catB):
+                cur_label_transfer[j, k] = cur_label_transfer_dict[ca][cb]
         label_transfer.append(nx.from_numpy(cur_label_transfer, type_as=type_as))
 
     return label_transfer
 
 
+# Finished
 def generate_label_transfer_dict(
-    cat1: List[str], 
-    cat2: List[str], 
-    positive_pairs: Optional[List[Dict[str, Union[List[str], float]]]] = None, 
+    cat1: List[str],
+    cat2: List[str],
+    positive_pairs: Optional[List[Dict[str, Union[List[str], float]]]] = None,
     negative_pairs: Optional[List[Dict[str, Union[List[str], float]]]] = None,
     default_positve_value: float = 10.0,
 ) -> Dict[str, Dict[str, float]]:
     """
     Generate a label transfer dictionary with normalized values.
 
-    Parameters
-    ----------
-    cat1 : List[str]
-        List of categories from the first dataset.
-    cat2 : List[str]
-        List of categories from the second dataset.
-    positive_pairs : Optional[List[Dict[str, Union[List[str], float]]]], optional
-        List of positive pairs with transfer values. Each dictionary should have 'left', 'right', and 'value' keys. Default is None.
-    negative_pairs : Optional[List[Dict[str, Union[List[str], float]]]], optional
-        List of negative pairs with transfer values. Each dictionary should have 'left', 'right', and 'value' keys. Default is None.
-    default_positive_value : float, optional
-        Default value for positive pairs if positive pairs are "None". Default is 10.0.
+    Args:
+        cat1 (List[str]):
+            List of categories from the first dataset.
+        cat2 (List[str]):
+            List of categories from the second dataset.
+        positive_pairs (Optional[List[Dict[str, Union[List[str], float]]]], optional):
+            List of positive pairs with transfer values. Each dictionary should have 'left', 'right', and 'value' keys. Defaults to None.
+        negative_pairs (Optional[List[Dict[str, Union[List[str], float]]]], optional):
+            List of negative pairs with transfer values. Each dictionary should have 'left', 'right', and 'value' keys. Defaults to None.
+        default_positive_value (float, optional):
+            Default value for positive pairs if none are provided. Defaults to 10.0.
 
-    Returns
-    -------
-    Dict[str, Dict[str, float]]
-        A normalized label transfer dictionary.
+    Returns:
+        Dict[str, Dict[str, float]]:
+            A normalized label transfer dictionary.
     """
 
     # Initialize label transfer dictionary with default values
@@ -276,23 +339,23 @@ def generate_label_transfer_dict(
     # Generate default positive pairs if none provided
     if (positive_pairs is None) and (negative_pairs is None):
         common_cat = np.union1d(cat1, cat2)
-        positive_pairs = [{'left': [c], 'right': [c], 'value': default_positve_value} for c in common_cat]
+        positive_pairs = [{"left": [c], "right": [c], "value": default_positve_value} for c in common_cat]
 
     # Apply positive pairs to the dictionary
     if positive_pairs is not None:
         for p in positive_pairs:
-            for l in p['left']:
-                for r in p['right']:
+            for l in p["left"]:
+                for r in p["right"]:
                     if r in label_transfer_dict and l in label_transfer_dict[r]:
-                        label_transfer_dict[r][l] = p['value']
+                        label_transfer_dict[r][l] = p["value"]
 
-    # Apply negative pairs to the dictionary   
-    if negative_pairs is not None:  
+    # Apply negative pairs to the dictionary
+    if negative_pairs is not None:
         for p in negative_pairs:
-            for l in p['left']:
-                for r in p['right']:
+            for l in p["left"]:
+                for r in p["right"]:
                     if r in label_transfer_dict and l in label_transfer_dict[r]:
-                        label_transfer_dict[r][l] = p['value']
+                        label_transfer_dict[r][l] = p["value"]
 
     # Normalize the label transfer dictionary
     norm_label_transfer_dict = dict()
@@ -303,47 +366,40 @@ def generate_label_transfer_dict(
     return norm_label_transfer_dict
 
 
-
+# Finished
 def get_rep(
-    nx,
-    type_as,
-    sample: AnnData, 
-    rep: str = "label",
-    rep_type: str = "obsm",
-    
+    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    type_as: Union[torch.Tensor, np.ndarray],
+    sample: AnnData,
+    rep: str = "X",
+    rep_field: str = "layer",
+    genes: Optional[Union[list, np.ndarray]] = None,
 ) -> np.ndarray:
     """
     Get the specified representation from the AnnData object.
 
-    Parameters
-    ----------
-    nx : module
-        Backend module (e.g., numpy or torch).
-    type_as : type
-        Type to which the output should be cast.
-    sample : AnnData
-        The AnnData object containing the sample data.
-    rep : str, optional
-        The name of the representation to retrieve. Default is "label".
-    rep_type : str, optional
-        The type of representation. Accept types: "obs" and "obsm". Default is "obsm".
+    Args:
+        nx (module): Backend module (e.g., numpy or torch).
+        type_as (type): Type to which the output should be cast.
+        sample (AnnData): The AnnData object containing the sample data.
+        rep (str, optional): The name of the representation to retrieve. Defaults to "X".
+        rep_field (str, optional): The type of representation. Acceptable values are "layer", "obs" and "obsm". Defaults to "layer".
+        genes (Optional[Union[list, np.ndarray]], optional): List of genes to filter if `rep_field` is "layer". Defaults to None.
 
-    Returns
-    -------
-    np.ndarray or torch.Tensor
-        The requested representation from the AnnData object, cast to the specified type.
+    Returns:
+        Union[np.ndarray, torch.Tensor]: The requested representation from the AnnData object, cast to the specified type.
 
-    Raises
-    ------
-    ValueError
-        If `rep_type` is not one of the expected values.
-    KeyError
-        If the specified representation is not found in the AnnData object.
+    Raises:
+        ValueError: If `rep_field` is not one of the expected values.
+        KeyError: If the specified representation is not found in the AnnData object.
     """
 
+    # gene expression stored in ".layer" field
+    if rep_field == "layer":
+        representation = nx.from_numpy(check_exp(sample=sample[:, genes], layer=rep), type_as=type_as)
+
     # label information stored in ".obs" field
-    # TODO: currently we suppose the label corresponds to the label transfer. We can extent in the future
-    if rep_type == "obs":
+    elif rep_type == "obs":
         # Sort categories and convert to integer codes
         representation = sample.obs[rep].cat.codes.values
         representation = nx.from_numpy(representation)
@@ -363,7 +419,7 @@ def get_rep(
 # Data preprocessing #
 ######################
 
-
+# Finished
 def filter_common_genes(*genes, verbose: bool = True) -> list:
     """
     Filters for the intersection of genes between all samples.
@@ -385,9 +441,10 @@ def filter_common_genes(*genes, verbose: bool = True) -> list:
         return common_genes
 
 
+# Finished
 def normalize_coords(
+    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
     coords: List[Union[np.ndarray, torch.Tensor]],
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend] = ot.backend.NumpyBackend,
     verbose: bool = True,
     separate_scale: bool = True,
     separate_mean: bool = True,
@@ -417,7 +474,6 @@ def normalize_coords(
         - normalize_means: List of mean values used for normalization of each coordinate axis.
     """
 
-    
     D = coords[0].shape[1]
     normalize_scales = nx.zeros((len(coords),), type_as=coords[0])
     normalize_means = nx.zeros((len(coords), D), type_as=coords[0])
@@ -455,54 +511,68 @@ def normalize_coords(
     return coords, normalize_scales, normalize_means
 
 
+# Finished
 def normalize_exps(
-    exp_matrices: List[List[Union[np.ndarray, torch.Tensor]]],
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend] = ot.backend.NumpyBackend,
+    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    exp_layers: List[List[Union[np.ndarray, torch.Tensor]]],
+    rep_field: Union[str, List[str]] = "layer",
     verbose: bool = True,
-) -> List[Union[np.ndarray, torch.Tensor]]:
+) -> List[List[Union[np.ndarray, torch.Tensor]]]:
     """
     Normalize the gene expression matrices.
 
-    Parameters
-    ----------
-    exp_matrices : List[List[Union[np.ndarray, torch.Tensor]]]
-        Gene expression and optionally the representation matrices of the samples. Each element in the list can be a numpy array or a torch tensor.
-    nx : Union[ot.backend.TorchBackend, ot.backend.NumpyBackend], optional
-        The backend to use for computations. Default is `ot.backend.NumpyBackend`.
-    verbose : bool, optional
-        If `True`, print progress updates. Default is `True`.
+    Args:
+        nx (Union[ot.backend.TorchBackend, ot.backend.NumpyBackend], optional):
+            The backend to use for computations. Defaults to `ot.backend.NumpyBackend`.
+        exp_layers (List[List[Union[np.ndarray, torch.Tensor]]]):
+            Gene expression and optionally the representation matrices of the samples.
+            Each element in the list can be a numpy array or a torch tensor.
+        rep_field (Union[str, List[str]], optional):
+            Field(s) indicating the type of representation. If 'layer', normalization can be applied.
+            Defaults to "layer".
+        verbose (bool, optional):
+            If `True`, print progress updates. Default is `True`.
 
-    Returns
-    -------
-    List[Union[np.ndarray, torch.Tensor]]
-        A list of normalized gene expression matrices. Each matrix in the list is a numpy array or a torch tensor.
+    Returns:
+        List[List[Union[np.ndarray, torch.Tensor]]]:
+            A list of lists containing normalized gene expression matrices.
+            Each matrix in the list is a numpy array or a torch tensor.
     """
 
-    normalize_scale = 0
-    for i in range(len(exp_matrices)):
-        # normalize_mean = nx.einsum("ij->j", exp_matrices[i][0]) / exp_matrices[i][0].shape[0]
-        normalize_scale += nx.sqrt(
-            nx.einsum("ij->", nx.einsum("ij,ij->ij", exp_matrices[i][0], exp_matrices[i][0])) / exp_matrices[i][0].shape[0]
-        )
+    if isinstance(rep_field, str):
+        rep_field = [rep_field] * len(exp_layers[0])
 
-    normalize_scale /= len(exp_matrices)
-    for i in range(len(exp_matrices)):
-        exp_matrices[i][0] /= normalize_scale
-    if verbose:
-        lm.main_info(message=f"Gene expression normalization params:", indent_level=1)
-        # lm.main_info(message=f"Mean: {normalize_mean}.", indent_level=2)
-        lm.main_info(message=f"Scale: {normalize_scale}.", indent_level=2)
+    for i, rep_f in enumerate(rep_field):
+        if rep_f == "layer":
+            normalize_scale = 0
 
-    return exp_matrices
+            # Calculate the normalization scale
+            for l in range(len(exp_layers)):
+                normalize_scale += nx.sqrt(
+                    nx.einsum("ij->", nx.einsum("ij,ij->ij", exp_layers[i][l], exp_layers[i][l]))
+                    / exp_layers[i][l].shape[0]
+                )
+
+            normalize_scale /= len(exp_layers)
+
+            # Apply the normalization scale
+            for i in range(len(exp_layers)):
+                exp_layers[i][l] /= normalize_scale
+
+            if verbose:
+                lm.main_info(message=f"Gene expression normalization params:", indent_level=1)
+                lm.main_info(message=f"Scale: {normalize_scale}.", indent_level=2)
+
+    return exp_layers
 
 
+# Finished
 def align_preprocess(
     samples: List[AnnData],
+    rep_layer: Union[str, List[str]] = "X",
+    rep_field: Union[str, List[str]] = "layer",
     genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
-    layer: str = "X",
-    use_rep: Optional[Union[str, List[str]]] = None,
-    rep_type: Optional[Union[str, List[str]]] = None,
     label_transfer_dict: Optional[Union[dict, List[dict]]] = None,
     normalize_c: bool = False,
     normalize_g: bool = False,
@@ -514,6 +584,7 @@ def align_preprocess(
     Union[torch.Tensor, np.ndarray],
     List[List[torch.Tensor, np.ndarray]],
     List[torch.Tensor, np.ndarray],
+    Union[torch.Tensor, np.ndarray],
     Union[torch.Tensor, np.ndarray],
     Union[torch.Tensor, np.ndarray],
 ]:
@@ -568,65 +639,69 @@ def align_preprocess(
     nx, type_as = check_backend(device=device, dtype=dtype)
 
     # Check if the representation is in the AnnData objects
-    if use_rep is not None:
-        if rep_type is None:
-            rep_type = "obsm"
+    if rep_layer is not None:
+        if rep_field is None:
+            rep_field = "layer"
 
-        if isinstance(use_rep, str):
-            use_rep = [use_rep]
+        if isinstance(rep_layer, str):
+            rep_layer = [rep_layer]
 
-        if isinstance(rep_type, str):
-            rep_type = [rep_type] * len(use_rep)
+        if isinstance(rep_field, str):
+            rep_field = [rep_field] * len(rep_layer)
 
-        if not check_use_rep(samples, use_rep, rep_type):
+        # if not check_use_rep(samples, use_rep, rep_type):
+        if not check_rep_layer(samples=samples, rep_layer=rep_layer, rep_field=rep_field):
             raise ValueError(f"The specified representation is not found in the attribute of the AnnData objects.")
 
-        obs_key = check_obs(use_rep, rep_type)
-    
+        obs_key = check_obs(rep_layer, rep_field)
+    else:
+        raise ValueError(
+            "No representation input is detected, which may not produce meaningful result. Please check the rep_layer and rep_field."
+        )
 
     # Get the common genes
     all_samples_genes = [s[0].var.index for s in samples]
     common_genes = filter_common_genes(*all_samples_genes, verbose=verbose)
     common_genes = common_genes if genes is None else intersect_lsts(common_genes, genes)
 
-    # Extract the gene expression and optionaly representations of all samples
-    # Each representation has a layer
+    # Extract the gene expression / representations of all samples, where each representation has a layer
     exp_layers = []
     for s in samples:
         cur_layer = []
-        cur_layer.append(nx.from_numpy(check_exp(sample=s[:,common_genes], layer=layer), type_as=type_as))
-        if use_rep is not None:
-            for rep, rep_t in zip(use_rep, rep_type):
-                cur_layer.append(get_rep(sample=s, rep=rep, rep_type=rep_t, nx=nx, type_as=type_as))
+        if rep_layer is not None:
+            for rep, rep_f in zip(rep_layer, rep_field):
+                cur_layer.append(
+                    get_rep(nx=nx, type_as=type_as, sample=s, rep=rep, rep_field=rep_f, genes=common_genes)
+                )
         exp_layers.append(cur_layer)
 
-    # check the label tranfer dict and generate a matrix that contains the label transfer cost and cast to the specified type
+    # check the label tranfer dictionary and generate a matrix that contains the label transfer cost and cast to the specified type
     if obs_key is not None:
         label_transfer = check_label_transfer(nx, type_as, samples, obs_key, label_transfer_dict)
     else:
         label_transfer = None
-            
 
     # Spatial coordinates of all samples
     spatial_coords = [
         nx.from_numpy(check_spatial_coords(sample=s, spatial_key=spatial_key), type_as=type_as) for s in samples
     ]
 
-    # check the spatial coordinates dimensionality  
+    # check the spatial coordinates dimensionality
     coords_dims = nx.unique(_data(nx, [c.shape[1] for c in spatial_coords], type_as))
     assert len(coords_dims) == 1, "Spatial coordinate dimensions are different, please check again."
 
-    
+    # Normalize spatial coordinates if required
     if normalize_c:
         spatial_coords, normalize_scales, normalize_means = normalize_coords(
             coords=spatial_coords, nx=nx, verbose=verbose
         )
     else:
         normalize_scales, normalize_means = None, None
-    if normalize_g:
-        exp_layers = normalize_exps(matrices=exp_layers, nx=nx, verbose=verbose)
 
-    # TODO: add docstring for return label_transfer
+    # Normalize gene expression if required
+    if normalize_g:
+        exp_layers = normalize_exps(nx=nx, matrices=exp_layers, rep_field=rep_field, verbose=verbose)
+
     return (
         nx,
         type_as,
@@ -637,20 +712,47 @@ def align_preprocess(
         normalize_means,
     )
 
-# TODO: update the function
+
+# Finished
 def guidance_pair_preprocess(
-    guidance_pair,
-    normalize_scale_list,
-    normalize_mean_list,
-    nx,
-    type_as,
-):
+    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    type_as: Union[torch.Tensor, np.ndarray],
+    guidance_pair: List[np.ndarray],
+    normalize_scales: Union[torch.Tensor, np.ndarray],
+    normalize_means: Union[torch.Tensor, np.ndarray],
+) -> List[Union[torch.Tensor, np.ndarray]]:
+    """
+    Preprocess guidance pairs by normalizing them.
+
+    Args:
+        nx (Union[ot.backend.TorchBackend, ot.backend.NumpyBackend], optional):
+            Backend module for computations (e.g., numpy or torch). Defaults to `ot.backend.NumpyBackend`.
+        type_as (Union[torch.Tensor, np.ndarray]):
+            Type to which the output should be cast.
+        guidance_pair (List[np.ndarray]):
+            List containing the guidance pairs as numpy arrays.
+        normalize_scales (Union[torch.Tensor, np.ndarray]):
+            Tensor or array of normalization scales.
+        normalize_means (Union[torch.Tensor, np.ndarray]):
+            Tensor or array of normalization means.
+
+    Returns:
+        List[Union[torch.Tensor, np.ndarray]]:
+            List containing the normalized guidance pairs.
+
+    """
+
+    # Convert guidance pairs to the backend type
     X_BI = nx.from_numpy(guidance_pair[0], type_as=type_as)
     X_AI = nx.from_numpy(guidance_pair[1], type_as=type_as)
-    normalize_scale = normalize_scale_list[0]
-    normalize_mean_ref = normalize_mean_list[0]
-    normalize_mean_quary = normalize_mean_list[1]
-    X_AI = (X_AI - normalize_mean_quary) / normalize_scale
+
+    # Extract normalization parameters
+    normalize_scale = normalize_scales[0]
+    normalize_mean_ref = normalize_means[0]
+    normalize_mean_query = normalize_means[1]
+
+    # Normalize the guidance pairs
+    X_AI = (X_AI - normalize_mean_query) / normalize_scale
     X_BI = (X_BI - normalize_mean_ref) / normalize_scale
     return [X_AI, X_BI]
 
@@ -693,9 +795,10 @@ def guidance_pair_preprocess(
 # Calculate  dissimilarity / distance matrix #
 ##############################################
 
+
 def _kl_distance_backend(
-    X: Union[np.ndarray, torch.Tensor], 
-    Y: Union[np.ndarray, torch.Tensor], 
+    X: Union[np.ndarray, torch.Tensor],
+    Y: Union[np.ndarray, torch.Tensor],
     probabilistic: bool = True,
     eps: float = 1e-8,
 ) -> Union[np.ndarray, torch.Tensor]:
@@ -735,7 +838,6 @@ def _kl_distance_backend(
         X = X / nx.sum(X, axis=1, keepdims=True)
         Y = Y / nx.sum(Y, axis=1, keepdims=True)
 
-    
     # Compute log of X and Y
     log_X = nx.log(X + 1e-8)  # Adding epsilon to avoid log(0)
     log_Y = nx.log(Y + 1e-8)  # Adding epsilon to avoid log(0)
@@ -743,12 +845,13 @@ def _kl_distance_backend(
     # Compute X log X and the pairwise KL divergence
     X_log_X = nx.sum(X * log_X, axis=1, keepdims=True)
     D = X_log_X - nx.dot(X, log_Y.T)
-    
+
     return D
 
+
 def _cosine_distance_backend(
-    X: Union[np.ndarray, torch.Tensor], 
-    Y: Union[np.ndarray, torch.Tensor], 
+    X: Union[np.ndarray, torch.Tensor],
+    Y: Union[np.ndarray, torch.Tensor],
     eps: float = 1e-8,
 ) -> Union[np.ndarray, torch.Tensor]:
     """
@@ -767,32 +870,33 @@ def _cosine_distance_backend(
     -------
     np.ndarray or torch.Tensor
         Pairwise cosine similarity matrix with shape (N, M).
-    
+
     Raises
     ------
     AssertionError
         If the number of features in X and Y do not match.
     """
-    
+
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
 
     # Get the appropriate backend (either NumPy or PyTorch)
     nx = ot.backend.get_backend(X, Y)
-    
+
     # Normalize rows to unit vectors
     X_norm = nx.sqrt(nx.sum(X**2, axis=1, keepdims=True))
     Y_norm = nx.sqrt(nx.sum(Y**2, axis=1, keepdims=True))
     X = X / nx.maximum(X_norm, eps)
     Y = Y / nx.maximum(Y_norm, eps)
-    
+
     # Compute cosine similarity
     D = nx.dot(X, Y.T)
-    
+
     return D
 
+
 def _euc_distance_backend(
-    X: Union[np.ndarray, torch.Tensor], 
-    Y: Union[np.ndarray, torch.Tensor], 
+    X: Union[np.ndarray, torch.Tensor],
+    Y: Union[np.ndarray, torch.Tensor],
     squared: bool = True,
 ) -> Union[np.ndarray, torch.Tensor]:
     """
@@ -811,13 +915,13 @@ def _euc_distance_backend(
     -------
     np.ndarray or torch.Tensor
         Pairwise Euclidean distance matrix with shape (N, M).
-    
+
     Raises
     ------
     AssertionError
         If the number of features in X and Y do not match.
     """
-    
+
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
 
     # Get the appropriate backend (either NumPy or PyTorch)
@@ -833,10 +937,11 @@ def _euc_distance_backend(
 
     return D
 
+
 def _label_distance_backend(
-    X: Union[np.ndarray, torch.Tensor], 
-    Y: Union[np.ndarray, torch.Tensor],  
-    label_transfer: Union[np.ndarray, torch.Tensor], 
+    X: Union[np.ndarray, torch.Tensor],
+    Y: Union[np.ndarray, torch.Tensor],
+    label_transfer: Union[np.ndarray, torch.Tensor],
 ) -> Union[np.ndarray, torch.Tensor]:
     """
     Generate a matrix of size (N, M) by indexing into the label_transfer matrix using the values in X and Y.
@@ -854,7 +959,7 @@ def _label_distance_backend(
     -------
     np.ndarray or torch.Tensor
         Matrix with shape (N, M) where each element is the value from label_transfer indexed by the corresponding values in X and Y.
-    
+
     Raises
     ------
     AssertionError
@@ -868,42 +973,51 @@ def _label_distance_backend(
     if nx_torch(nx):
         assert not (torch.is_floating_point(X) or torch.is_floating_point(Y)), "X and Y should contain integer values."
     else:
-        assert np.issubdtype(X.dtype, np.integer) and np.issubdtype(X.dtype, np.integer), "X should contain integer values."
+        assert np.issubdtype(X.dtype, np.integer) and np.issubdtype(
+            X.dtype, np.integer
+        ), "X should contain integer values."
 
     D = label_transfer[X, :][:, Y]
 
     return D
 
+
 # TODO: finish these
+
 
 def _correlation_distance_backend(X, Y):
     pass
 
+
 def _jaccard_distance_backend(X, Y):
     pass
+
 
 def _chebyshev_distance_backend(X, Y):
     pass
 
+
 def _canberra_distance_backend(X, Y):
     pass
+
 
 def _braycurtis_distance_backend(X, Y):
     pass
 
+
 def _hamming_distance_backend(X, Y):
     pass
 
+
 def _minkowski_distance_backend(X, Y):
     pass
-
 
 
 def calc_distance(
     X: Union[np.ndarray, torch.Tensor],
     Y: Union[np.ndarray, torch.Tensor],
     metric: str = "euc",
-    label_transfer: Optional[Union[np.ndarray, torch.Tensor]] = None, 
+    label_transfer: Optional[Union[np.ndarray, torch.Tensor]] = None,
 ) -> Union[np.ndarray, torch.Tensor]:
     """
     Calculate the distance between all pairs of samples in matrices X and Y using the specified metric.
@@ -933,9 +1047,8 @@ def calc_distance(
         If `label_transfer` is required but not provided.
     """
 
-
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
-    assert metric in [  
+    assert metric in [
         "euc",
         "euclidean",
         "square_euc",
@@ -944,7 +1057,7 @@ def calc_distance(
         "sym_kl",
         "cos",
         "cosine",
-        "label"
+        "label",
     ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'``, ``'square_euc'``, ``'square_euclidean'``, ``'kl'``, ``'sym_kl'``, ``'cos'``, ``'cosine'``, and ``'label'``."
 
     if metric == "label":
@@ -961,10 +1074,11 @@ def calc_distance(
     elif metric in ["cos", "cosine"]:
         return _cosine_distance_backend(X, Y)
 
+
 def calc_probability(
     distance_matrix: Union[np.ndarray, torch.Tensor],
-    probability_type: str = 'Gauss',
-    probability_parameter: Optional[float] = None
+    probability_type: str = "Gauss",
+    probability_parameter: Optional[float] = None,
 ) -> Union[np.ndarray, torch.Tensor]:
     """
     Calculate probability based on the distance matrix and specified probability type.
@@ -991,14 +1105,14 @@ def calc_probability(
 
     # Get the appropriate backend (either NumPy or PyTorch)
     nx = ot.backend.get_backend(distance_matrix)
-    
-    if probability_type == 'Gauss':
+
+    if probability_type == "Gauss":
         if probability_parameter is None:
-            raise ValueError("probability_parameter must be provided for 'Gauss' probability type.") 
+            raise ValueError("probability_parameter must be provided for 'Gauss' probability type.")
         probability = nx.exp(-distance_matrix / (2 * probability_parameter))
-    elif probability_type == 'cos_prob':
+    elif probability_type == "cos_prob":
         probability = distance_matrix * 0.5 + 0.5
-    elif probability_type == 'prob':
+    elif probability_type == "prob":
         probability = distance_matrix
     else:
         raise ValueError(f"Unsupported probability type: {probability_type}")
@@ -1010,10 +1124,11 @@ def calc_probability(
 # Calculate assignment matrix #
 ###############################
 
+
 def get_P_core(
-    nx,
-    type_as,
-    Dim,
+    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    type_as: Union[torch.Tensor, np.ndarray],
+    Dim: Union[torch.Tensor, np.ndarray],
     spatial_dist: Union[np.ndarray, torch.Tensor],
     exp_dist: List[Union[np.ndarray, torch.Tensor]],
     sigma2: Union[int, float, np.ndarray, torch.Tensor],
@@ -1023,7 +1138,7 @@ def get_P_core(
     # Sigma: Union[np.ndarray, torch.Tensor],
     samples_s: Optional[List[float]] = None,
     sigma2_variance: float = 1,
-    probability_type: Union[str, List[str]] = 'Gauss',
+    probability_type: Union[str, List[str]] = "Gauss",
     probability_parameters: Optional[List] = None,
     eps: float = 1e-8,
 ):
@@ -1066,17 +1181,17 @@ def get_P_core(
     """
 
     # Calculate spatial probability with sigma2_variance
-    spatial_prob = calc_probability(
-        spatial_dist, 
-        'Gauss', 
-        probability_parameter = sigma2 / sigma2_variance
-    )  # N x M
+    spatial_prob = calc_probability(spatial_dist, "Gauss", probability_parameter=sigma2 / sigma2_variance)  # N x M
 
     # TODO: everytime this will generate D/2 on GPU, may influence the runtime
-    spatial_outlier = _power(nx)((2 * _pi(nx) * sigma2), _data(nx, Dim / 2, type_as)) * (1 - gamma) / (gamma * outlier_s)  # scalar
+    spatial_outlier = (
+        _power(nx)((2 * _pi(nx) * sigma2), _data(nx, Dim / 2, type_as)) * (1 - gamma) / (gamma * outlier_s)
+    )  # scalar
 
     # TODO: the position of the following is unclear
-    spatial_inlier = 1 - spatial_outlier / (spatial_outlier + nx.sum(spatial_prob, axis=0, keep_dims=True) + eps)  # 1 x M 
+    spatial_inlier = 1 - spatial_outlier / (
+        spatial_outlier + nx.sum(spatial_prob, axis=0, keep_dims=True) + eps
+    )  # 1 x M
 
     spatial_prob = spatial_prob * model_mul
 
@@ -1086,9 +1201,9 @@ def get_P_core(
 
     # Calculate spatial probability without sigma2_variance
     spatial_prob = calc_probability(
-        spatial_dist, 
-        'Gauss', 
-        probability_parameter = sigma2,
+        spatial_dist,
+        "Gauss",
+        probability_parameter=sigma2,
     )  # N x M
     spatial_prob = spatial_prob * model_mul
 
@@ -1110,9 +1225,9 @@ def get_P_core(
 
 
 def get_P(
-    nx,
-    type_as,
-    Dim,
+    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    type_as: Union[torch.Tensor, np.ndarray],
+    Dim: Union[torch.Tensor, np.ndarray],
     spatial_dist: Union[np.ndarray, torch.Tensor],
     exp_dist: List[Union[np.ndarray, torch.Tensor]],
     sigma2: Union[int, float, np.ndarray, torch.Tensor],
@@ -1121,7 +1236,7 @@ def get_P(
     Sigma: Union[np.ndarray, torch.Tensor],
     samples_s: Optional[List[float]] = None,
     sigma2_variance: float = 1,
-    probability_type: Union[str, List[str]] = 'Gauss',
+    probability_type: Union[str, List[str]] = "Gauss",
     probability_parameters: Optional[List[float]] = None,
     # use_chunk: bool = False,
     # chunk_capacity_scale: int = 1,
@@ -1130,8 +1245,8 @@ def get_P(
     # calculate vectors for model points
     model_mul = _unsqueeze(nx)(alpha * nx.exp(-Sigma / sigma2), -1)  # N x 1
     P, K_NA_spatial, K_NA_sigma2, sigma2_related = get_P_core(
-        nx,
-        type_as,
+        nx=nx,
+        type_as=type_as,
         Dim=Dim,
         spatial_dist=spatial_dist,
         exp_dist=exp_dist,
@@ -1152,8 +1267,6 @@ def get_P(
 
     return P, assignment_results
 
-
-    
     # if use_chunk:
     #     # get the chunk size
     #     chunk_capacity_base = 1e8
@@ -1168,9 +1281,9 @@ def get_P(
 
 
 def get_P_sparse(
-    nx,
-    type_as,
-    Dim,
+    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    type_as: Union[torch.Tensor, np.ndarray],
+    Dim: Union[torch.Tensor, np.ndarray],
     spatial_XA: Union[np.ndarray, torch.Tensor],
     spatial_XB: Union[np.ndarray, torch.Tensor],
     exp_layer_A: List[Union[np.ndarray, torch.Tensor]],
@@ -1182,12 +1295,12 @@ def get_P_sparse(
     Sigma: Union[np.ndarray, torch.Tensor],
     samples_s: Optional[List[float]] = None,  # TODO: now can't be None
     sigma2_variance: float = 1,  # TODO: check if float or tensor type
-    probability_type: Union[str, List[str]] = 'Gauss',
+    probability_type: Union[str, List[str]] = "Gauss",
     probability_parameters: Optional[List[float]] = None,
     use_chunk: bool = False,
     chunk_capacity_scale: int = 1,
     top_k: int = 1024,
-    metrics: Union[str, List[str]] = 'kl',
+    metrics: Union[str, List[str]] = "kl",
 ):
     """
     Calculate sparse assignment matrix P using spatial and expression / representation distances.
@@ -1251,7 +1364,7 @@ def get_P_sparse(
     if use_chunk:
         # get the chunk size
         chunk_capacity_base = 1e8
-        split_size = min(int(chunk_capacity_scale * chunk_capacity_base/ (N)), M)
+        split_size = min(int(chunk_capacity_scale * chunk_capacity_base / (N)), M)
         split_size = 1 if split_size == 0 else split_size
 
         # chunk the data along the B (data points)
@@ -1315,13 +1428,9 @@ def get_P_sparse(
         }
 
         return P, assignment_results
-        
-
 
     else:
         raise NotImplementedError("Non-chunking mode is not implemented yet.")
-
-
 
 
 def kl_divergence_backend(X, Y, probabilistic=True):
@@ -1483,7 +1592,7 @@ def calc_exp_dissimilarity(
         "euclidean",
         "euc",
         "cos",
-        "cosine"
+        "cosine",
     ], "``dissimilarity`` value is wrong. Available ``dissimilarity`` are: ``'kl'``, ``'euclidean'``, ``'euc'``, ``'cos'``, and ``'cosine'``."
     if dissimilarity.lower() == "kl":
         X_A = X_A + 0.01
@@ -1675,6 +1784,7 @@ def _cal_cosine_similarity(tensor1, tensor2, dim=1, eps=1e-8):
     cosine_similarity = cosine_similarity.squeeze(dim)
     return cosine_similarity
 
+
 def _cos_similarity(
     mat1: Union[np.ndarray, torch.Tensor],
     mat2: Union[np.ndarray, torch.Tensor],
@@ -1682,11 +1792,12 @@ def _cos_similarity(
     nx = ot.backend.get_backend(mat1, mat2)
     if nx_torch(nx):
         mat1_unsqueeze = mat1.unsqueeze(-1)
-        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0,2)
+        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0, 2)
         distMat = _cal_cosine_similarity(mat1_unsqueeze, mat2_unsqueeze) * 0.5 + 0.5
     else:
-        distMat = (-ot.dist(mat1, mat2, metric='cosine')+1)*0.5 + 0.5
+        distMat = (-ot.dist(mat1, mat2, metric="cosine") + 1) * 0.5 + 0.5
     return distMat
+
 
 def _dist(
     mat1: Union[np.ndarray, torch.Tensor],
@@ -1698,7 +1809,7 @@ def _dist(
         "euclidean",
         "kl",
         "cos",
-        "cosine"
+        "cosine",
     ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'`` and ``'kl'``."
     nx = ot.backend.get_backend(mat1, mat2)
     if metric.lower() == "euc" or metric.lower() == "euclidean":
@@ -2109,6 +2220,7 @@ def voxel_data(
     voxel_gene_exps = voxel_gene_exps[is_voxels == 1, :]
     return voxel_coords, voxel_gene_exps
 
+
 def _init_guess_sigma2(
     XA,
     XB,
@@ -2122,9 +2234,10 @@ def _init_guess_sigma2(
         X_B=XB[sub_sample_B, :],
         dissimilarity="euc",
     )
-    SpatialDistMat = SpatialDistMat ** 2
+    SpatialDistMat = SpatialDistMat**2
     sigma2 = 0.1 * SpatialDistMat.sum() / (D * sub_sample_A.shape[0] * sub_sample_A.shape[0])  # 2 for 3D
     return sigma2
+
 
 def _init_guess_beta2(
     nx,
