@@ -710,6 +710,7 @@ def align_preprocess(
         label_transfer,
         normalize_scales,
         normalize_means,
+        common_genes,
     )
 
 
@@ -1433,6 +1434,34 @@ def get_P_sparse(
         raise NotImplementedError("Non-chunking mode is not implemented yet.")
 
 
+##########################################
+# Variational variables update functions #
+##########################################
+
+
+#################################
+# Kernel construction functions #
+#################################
+
+
+def construct_kernel(
+    spatial_coords,
+    inducing_variables_num,
+    sampling_method,
+    kernel_bandwidth,
+    kernel_type,
+    add_evaluation_points,
+):
+
+    # generate inducing variables from spatial_coords
+    unique_spatial_coords = _unique(nx, spatial_coords, 0)
+
+    # TODO: finish the downsampling function
+    inducing_variables, inducing_variables_idx = downsampling(
+        X=spatial_coords, n_sampling=inducing_variables_num, sampling_method=sampling_method
+    )
+
+
 def kl_divergence_backend(X, Y, probabilistic=True):
     """
     Returns pairwise KL divergence (over all pairs of samples) of two matrices X and Y.
@@ -1826,54 +1855,154 @@ def _dist(
     return distMat
 
 
-def PCA_reduction(
-    data_mat: Union[np.ndarray, torch.Tensor],
-    reduced_dim: int = 64,
-    center: bool = True,
-) -> Tuple[Union[np.ndarray, torch.Tensor], Union[np.ndarray, torch.Tensor], Union[np.ndarray, torch.Tensor],]:
-    """PCA dimensionality reduction using SVD decomposition
+# def PCA_reduction(
+#     data_mat: Union[np.ndarray, torch.Tensor],
+#     reduced_dim: int = 64,
+#     center: bool = True,
+# ) -> Tuple[Union[np.ndarray, torch.Tensor], Union[np.ndarray, torch.Tensor], Union[np.ndarray, torch.Tensor],]:
+#     """PCA dimensionality reduction using SVD decomposition
 
-    Args:
-        data_mat (Union[np.ndarray, torch.Tensor]): Input data matrix with shape n x k, where n is the data point number and k is the feature dimension.
-        reduced_dim (int, optional): Size of dimension after dimensionality reduction. Defaults to 64.
-        center (bool, optional): if True, center the input data, otherwise, assume that the input is centered. Defaults to True.
+#     Args:
+#         data_mat (Union[np.ndarray, torch.Tensor]): Input data matrix with shape n x k, where n is the data point number and k is the feature dimension.
+#         reduced_dim (int, optional): Size of dimension after dimensionality reduction. Defaults to 64.
+#         center (bool, optional): if True, center the input data, otherwise, assume that the input is centered. Defaults to True.
 
-    Returns:
-        projected_data (Union[np.ndarray, torch.Tensor]): Data matrix after dimensionality reduction with shape n x r.
-        V_new_basis (Union[np.ndarray, torch.Tensor]): New basis with shape k x r.
-        mean_data_mat (Union[np.ndarray, torch.Tensor]): The mean of the input data matrix.
-    """
+#     Returns:
+#         projected_data (Union[np.ndarray, torch.Tensor]): Data matrix after dimensionality reduction with shape n x r.
+#         V_new_basis (Union[np.ndarray, torch.Tensor]): New basis with shape k x r.
+#         mean_data_mat (Union[np.ndarray, torch.Tensor]): The mean of the input data matrix.
+#     """
 
-    nx = ot.backend.get_backend(data_mat)
-    mean_data_mat = _unsqueeze(nx)(nx.mean(data_mat, axis=0), 0)
-    if center:
-        mean_re_data_mat = data_mat - mean_data_mat
-    else:
-        mean_re_data_mat = data_mat
-    # SVD to perform PCA
-    _, S, VH = _linalg(nx).svd(mean_re_data_mat)
-    S_index = nx.argsort(-S)
-    V_new_basis = VH.t()[:, S_index[:reduced_dim]]
-    projected_data = nx.einsum("ij,jk->ik", mean_re_data_mat, V_new_basis)
-    return projected_data, V_new_basis, mean_data_mat
+#     nx = ot.backend.get_backend(data_mat)
+#     mean_data_mat = _unsqueeze(nx)(nx.mean(data_mat, axis=0), 0)
+#     if center:
+#         mean_re_data_mat = data_mat - mean_data_mat
+#     else:
+#         mean_re_data_mat = data_mat
+#     # SVD to perform PCA
+#     _, S, VH = _linalg(nx).svd(mean_re_data_mat)
+#     S_index = nx.argsort(-S)
+#     V_new_basis = VH.t()[:, S_index[:reduced_dim]]
+#     projected_data = nx.einsum("ij,jk->ik", mean_re_data_mat, V_new_basis)
+#     return projected_data, V_new_basis, mean_data_mat
 
 
-def PCA_project(
-    data_mat: Union[np.ndarray, torch.Tensor],
-    V_new_basis: Union[np.ndarray, torch.Tensor],
-    center: bool = True,
+# def PCA_project(
+#     data_mat: Union[np.ndarray, torch.Tensor],
+#     V_new_basis: Union[np.ndarray, torch.Tensor],
+#     center: bool = True,
+# ):
+#     nx = ot.backend.get_backend(data_mat)
+#     return nx.einsum("ij,jk->ik", data_mat, V_new_basis)
+
+
+# def PCA_recover(
+#     projected_data: Union[np.ndarray, torch.Tensor],
+#     V_new_basis: Union[np.ndarray, torch.Tensor],
+#     mean_data_mat: Union[np.ndarray, torch.Tensor],
+# ) -> Union[np.ndarray, torch.Tensor]:
+#     nx = ot.backend.get_backend(projected_data)
+#     return nx.einsum("ij,jk->ik", projected_data, V_new_basis.t()) + mean_data_mat
+
+# Finished
+def coarse_rigid_alignment(
+    nx,
+    type_as,
+    samples: List[AnnData],
+    coordsA: Union[np.ndarray, torch.Tensor],
+    coordsB: Union[np.ndarray, torch.Tensor],
+    init_layer: str = "X",
+    init_field: str = "layer",
+    genes: Optional[Union[list, np.ndarray]] = None,
+    top_K: int = 10,
+    allow_flip: bool = False,
+    verbose: bool = True,
+    n_sampling: Optional[int] = 20000,
 ):
-    nx = ot.backend.get_backend(data_mat)
-    return nx.einsum("ij,jk->ik", data_mat, V_new_basis)
+    if verbose:
+        lm.main_info(message="Performing coarse rigid alignment...", indent_level=1)
+    N, M, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
 
+    # TODO: downsampling here
+    sampling_idxA = np.random.choice(N, n_sampling, replace=False) if N > n_sampling else np.arange(N)
+    sampling_idxB = np.random.choice(M, n_sampling, replace=False) if M > n_sampling else np.arange(M)
+    sampleA = samples[1][sampling_idxA]
+    sampleB = samples[0][sampling_idxB]
+    coordsA = coordsA[sampling_idxA, :]
+    coordsB = coordsB[sampling_idxB, :]
 
-def PCA_recover(
-    projected_data: Union[np.ndarray, torch.Tensor],
-    V_new_basis: Union[np.ndarray, torch.Tensor],
-    mean_data_mat: Union[np.ndarray, torch.Tensor],
-) -> Union[np.ndarray, torch.Tensor]:
-    nx = ot.backend.get_backend(projected_data)
-    return nx.einsum("ij,jk->ik", projected_data, V_new_basis.t()) + mean_data_mat
+    X_A = get_rep(nx=nx, type_as=type_as, sample=sampleA, rep=init_layer, rep_field=init_field, genes=genes)
+    X_B = get_rep(nx=nx, type_as=type_as, sample=sampleB, rep=init_layer, rep_field=init_field, genes=genes)
+
+    # voxeling the data
+    coordsA, X_A = voxel_data(
+        nx=nx,
+        coords=coordsA,
+        gene_exp=X_A,
+        voxel_num=max(min(int(N / 20), 1000), 100),
+    )
+    coordsB, X_B = voxel_data(
+        nx=nx,
+        coords=coordsB,
+        gene_exp=X_B,
+        voxel_num=max(min(int(M / 20), 1000), 100),
+    )
+
+    # calculate the similarity distance purely based on expression
+    exp_dist = calc_distance(
+        X=X_A,
+        Y=X_B,
+        metric="kl" if init_field == "layer" else "euc",
+    )
+
+    # construct matching pairs based on brute force mutual K-NN. Here we use numpy backend
+    # TODO: we can use GPU to search KNN and then convert to CPU
+    item2 = np.argpartition(exp_dist, top_K, axis=0)[:top_K, :].T
+    item1 = np.repeat(np.arange(DistMat.shape[1])[:, None], top_K, axis=1)
+    NN1 = np.dstack((item1, item2)).reshape((-1, 2))
+    distance1 = exp_dist.T[NN1[:, 0], NN1[:, 1]]
+
+    item1 = np.argpartition(exp_dist, top_K, axis=1)[:, :top_K]
+    item2 = np.repeat(np.arange(exp_dist.shape[0])[:, None], top_K, axis=1)
+    NN2 = np.dstack((item1, item2)).reshape((-1, 2))
+    distance2 = exp_dist.T[NN2[:, 0], NN2[:, 1]]
+
+    NN = np.vstack((NN1, NN2))
+    distance = np.r_[distance1, distance2]
+
+    # input pairs
+    train_x, train_y = coordsA[NN[:, 1], :], coordsB[NN[:, 0], :]
+
+    # coarse alignment core function
+    P, R, t, init_weight, sigma2, gamma = inlier_from_NN(train_x, train_y, distance[:, None])
+
+    # if allow_filp, then try to flip the data
+    if allow_flip:
+        R_flip = np.eye(D)
+        R_flip[-1, -1] = -1
+        P2, R2, t2, init_weight, sigma2_2, gamma_2 = inlier_from_NN(np.dot(train_x, R_flip), train_y, distance[:, None])
+        if gamma_2 > gamma:
+            P = P2
+            R = R2
+            t = t2
+            sigma2 = sigma2_2
+            R = np.dot(R, R_flip)
+            lm.main_info(message="Flipping detected in coarse rigid alignment.", indent_level=2)
+    inlier_threshold = min(P[np.argsort(-P[:, 0])[20], 0], 0.5)
+    inlier_set = np.where(P[:, 0] > inlier_threshold)[0]
+    inlier_x, inlier_y = train_x[inlier_set, :], train_y[inlier_set, :]
+    inlier_P = P[inlier_set, :]
+
+    # convert to correct data type
+    inlier_x = nx.from_numpy(inlier_x, type_as=type_as)
+    inlier_y = nx.from_numpy(inlier_y, type_as=type_as)
+    inlier_P = nx.from_numpy(inlier_P, type_as=type_as)
+    R = nx.from_numpy(R, type_as=type_as)
+    t = nx.from_numpy(t, type_as=type_as)
+
+    if verbose:
+        lm.main_info(message="Coarse rigid alignment done.", indent_level=1)
+    return inlier_x, inlier_y, inlier_P, R, t
 
 
 def coarse_rigid_alignment(

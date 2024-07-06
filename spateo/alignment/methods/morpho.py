@@ -316,7 +316,16 @@ def BA_align(
     empty_cache(device=device)
 
     # prerocessing
-    (nx, type_as, exp_layers, spatial_coords, label_transfer, normalize_scales, normalize_means,) = align_preprocess(
+    (
+        nx,
+        type_as,
+        exp_layers,
+        spatial_coords,
+        label_transfer,
+        normalize_scales,
+        normalize_means,
+        genes,
+    ) = align_preprocess(
         samples=[sampleA, sampleB],
         rep_layer=rep_layer,
         rep_field=rep_field,
@@ -336,11 +345,11 @@ def BA_align(
     # normalize guidance pair and convert to correct data types
     if isinstance(guidance_pair, list) and (guidance_effect is not False):
         guidance_pair = guidance_pair_preprocess(
-            nx,
-            type_as,
-            guidance_pair,
-            normalize_scales,
-            normalize_means,
+            nx=nx,
+            type_as=type_as,
+            guidance_pair=guidance_pair,
+            normalize_scales=normalize_scales,
+            normalize_means=normalize_means,
         )
         X_AI, X_BI = guidance_pair[1], guidance_pair[0]
         V_AI = nx.zeros(X_AI.shape, type_as=type_as)
@@ -351,11 +360,14 @@ def BA_align(
     # TODO: add downsampling in the coarse_rigid_alignment
     # TODO: coordsA should not be transformed here, because the inducing variable is in the same space
     if nn_init:
-        coordsA, inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(
+        inlier_A, inlier_B, inlier_P, init_R, init_t = coarse_rigid_alignment(
+            nx=nx,
+            type_as=type_as,
             coordsA=coordsA,
             coordsB=coordsB,
             init_layer=init_layer,
             init_field=init_field,
+            genes=genes,
             samples=[sampleA, sampleB],
             top_K=10,
             allow_flip=allow_flip,
@@ -364,11 +376,10 @@ def BA_align(
     else:
         init_R = nx.eye(D, type_as=type_as)
         init_t = nx.zeros((D,), type_as=type_as)
-    init_coords = coordsA.copy()
 
-    # apply coarse alignment to guidance pair
-    if X_AI is not None:
-        X_AI = X_AI @ init_R.T + init_t
+    # # apply coarse alignment to guidance pair
+    # if X_AI is not None:
+    #     X_AI = X_AI @ init_R.T + init_t
 
     # construct the kernel for Gaussian processes
     inducing_variables, inducing_variables_index, GammaSparse, U, U_I = construct_kernel(
