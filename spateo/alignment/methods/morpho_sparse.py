@@ -176,6 +176,7 @@ def BA_align_sparse(
     batch_size: int = 1024,
     use_sparse: bool = True,
     pre_compute_dist: bool = False,
+    batch_capacity: int = 1,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
     empty_cache(device=device)
     # Preprocessing and extract the spatial and expression information
