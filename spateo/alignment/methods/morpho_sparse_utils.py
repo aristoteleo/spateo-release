@@ -112,6 +112,7 @@ def calc_P_related(
     # metric = 'square_euc'
     NA, NB = XnAHat.shape[0], XnB.shape[0]
     D = XnAHat.shape[1]
+    G = X_A.shape[1]
     batch_base = 1e9
     split_size = min(int(batch_capacity * batch_base / (NA * G)), NB)
     split_size = 1 if split_size == 0 else split_size
