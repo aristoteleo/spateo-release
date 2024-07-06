@@ -140,7 +140,14 @@ def normalize_coords(
 
     # normalize_scale now becomes to a list
     normalize_scale_list = []
-    normalize_scale_list = nx.zeros((len(coords, )), type_as=coords[0])
+    normalize_scale_list = nx.zeros(
+        (
+            len(
+                coords,
+            )
+        ),
+        type_as=coords[0],
+    )
     normalize_mean_list = []
     for i in range(len(coords)):
         normalize_mean = nx.einsum("ij->j", coords[i]) / coords[i].shape[0]
@@ -244,10 +251,17 @@ def align_preprocess(
     new_samples = [s[:, common_genes] for s in new_samples]
 
     # Gene expression matrix of all samples
-    if (use_rep is None) or (not isinstance(use_rep, str)) or (use_rep not in samples[0].obsm.keys()) or (use_rep not in samples[1].obsm.keys()):
+    if (
+        (use_rep is None)
+        or (not isinstance(use_rep, str))
+        or (use_rep not in samples[0].obsm.keys())
+        or (use_rep not in samples[1].obsm.keys())
+    ):
         exp_matrices = [nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples]
     else:
-        exp_matrices = [nx.from_numpy(s.obsm[use_rep], type_as=type_as) for s in new_samples] + [nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples]
+        exp_matrices = [nx.from_numpy(s.obsm[use_rep], type_as=type_as) for s in new_samples] + [
+            nx.from_numpy(check_exp(sample=s, layer=layer), type_as=type_as) for s in new_samples
+        ]
     if not (select_high_exp_genes is False):
         # Select significance genes if select_high_exp_genes is True
         ExpressionData = _cat(nx=nx, x=exp_matrices, dim=0)
@@ -272,7 +286,12 @@ def align_preprocess(
         spatial_coords, normalize_scale_list, normalize_mean_list = normalize_coords(
             coords=spatial_coords, nx=nx, verbose=verbose
         )
-    if normalize_g and ((use_rep is None) or (not isinstance(use_rep, str)) or (use_rep not in samples[0].obsm.keys()) or (use_rep not in samples[1].obsm.keys())):
+    if normalize_g and (
+        (use_rep is None)
+        or (not isinstance(use_rep, str))
+        or (use_rep not in samples[0].obsm.keys())
+        or (use_rep not in samples[1].obsm.keys())
+    ):
         exp_matrices = normalize_exps(matrices=exp_matrices, nx=nx, verbose=verbose)
 
     return (
@@ -509,7 +528,7 @@ def calc_exp_dissimilarity(
         "euclidean",
         "euc",
         "cos",
-        "cosine"
+        "cosine",
     ], "``dissimilarity`` value is wrong. Available ``dissimilarity`` are: ``'kl'``, ``'euclidean'`` and ``'euc'``."
     if dissimilarity.lower() == "kl":
         X_A = X_A + 0.01
@@ -701,11 +720,12 @@ def _cos_similarity(
     if nx_torch(nx):
         torch_cos = torch.nn.CosineSimilarity(dim=1)
         mat1_unsqueeze = mat1.unsqueeze(-1)
-        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0,2)
+        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0, 2)
         distMat = torch_cos(mat1_unsqueeze, mat2_unsqueeze) * 0.5 + 0.5
     else:
-        distMat = (-ot.dist(mat1, mat2, metric='cosine')+1)*0.5 + 0.5
+        distMat = (-ot.dist(mat1, mat2, metric="cosine") + 1) * 0.5 + 0.5
     return distMat
+
 
 def _dist(
     mat1: Union[np.ndarray, torch.Tensor],
@@ -717,7 +737,7 @@ def _dist(
         "euclidean",
         "kl",
         "cos",
-        "cosine"
+        "cosine",
     ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'`` and ``'kl'``."
     nx = ot.backend.get_backend(mat1, mat2)
     if metric.lower() == "euc" or metric.lower() == "euclidean":
