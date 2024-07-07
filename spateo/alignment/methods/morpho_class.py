@@ -14,6 +14,36 @@ from typing import List, Optional, Tuple, Union
 
 from spateo.logging import logger_manager as lm
 
+from .utils import (
+    _data,
+    _dot,
+    _get_anneling_factor,
+    _identity,
+    _init_guess_sigma2,
+    _linalg,
+    _pinv,
+    _psi,
+    _randperm,
+    _roll,
+    _unique,
+    _unsqueeze,
+    calc_distance,
+    check_backend,
+    check_label_transfer,
+    check_label_transfer_dict,
+    check_obs,
+    check_rep_layer,
+    check_spatial_coords,
+    con_K,
+    filter_common_genes,
+    get_P_core,
+    get_rep,
+    inlier_from_NN,
+    intersect_lsts,
+    sample,
+    voxel_data,
+)
+
 
 class Morpho_pairwise:
     def __init__(
@@ -115,7 +145,7 @@ class Morpho_pairwise:
 
         # calculate the representation(s) pairwise distance matrix if pre_compute_dist is True or not in SVI mode
         # this will reduce the runtime but consume more GPU memory
-        if (not self.SVI_mode) or (pre_compute_dist):
+        if (not self.SVI_mode) or (self.pre_compute_dist):
             self.exp_layer_dist = calc_distance(
                 X=self.exp_layer_A, Y=self.exp_layer_B, metric=self.dissimilarity, label_transfer=self.label_transfer
             )
@@ -141,7 +171,7 @@ class Morpho_pairwise:
 
         self._get_optimal_R()
 
-        if verbose:
+        if self.verbose:
             lm.main_info(
                 f"Key Parameters: gamma: {self.gamma}; sigma2: {self.sigma2}; probability_parameters: {self.probability_parameters}"
             )
@@ -163,7 +193,9 @@ class Morpho_pairwise:
             if isinstance(self.rep_field, str):
                 self.rep_field = [self.rep_field] * len(self.rep_layer)
 
-            if not check_rep_layer(samples=[self.sampleA, self.sampleB], rep_layer=rep_layer, rep_field=rep_field):
+            if not check_rep_layer(
+                samples=[self.sampleA, self.sampleB], rep_layer=self.rep_layer, rep_field=self.rep_field
+            ):
                 raise ValueError(f"The specified representation is not found in the attribute of the AnnData objects.")
 
             self.obs_key = check_obs(self.rep_layer, self.rep_field)
@@ -174,9 +206,9 @@ class Morpho_pairwise:
 
         # Check spatial key
         if self.spatial_key not in self.sampleA.obsm:
-            raise KeyError(f"Spatial key '{spatial_key}' not found in sampleA AnnData object.")
+            raise KeyError(f"Spatial key '{self.spatial_key}' not found in sampleA AnnData object.")
         if self.spatial_key not in self.sampleB.obsm:
-            raise KeyError(f"Spatial key '{spatial_key}' not found in sampleB AnnData object.")
+            raise KeyError(f"Spatial key '{self.spatial_key}' not found in sampleB AnnData object.")
 
         # Check transfer proir
         if self.obs_key is not None:
@@ -234,17 +266,17 @@ class Morpho_pairwise:
         if self.nn_init:
             if not check_rep_layer(
                 samples=[self.sampleA, self.sampleB],
-                rep_layer=init_layer,
-                rep_field=init_field,
+                rep_layer=self.init_layer,
+                rep_field=self.init_field,
             ):
                 raise ValueError(f"The specified representation is not found in the attribute of the AnnData objects.")
 
         # Check guidance_effect
-        if guidance_effect:
+        if self.guidance_effect:
             valid_guidance_effects = ["nonrigid", "rigid", "both"]
-            if guidance_effect not in valid_guidance_effects:
+            if self.guidance_effect not in valid_guidance_effects:
                 raise ValueError(
-                    f"Invalid `guidance_effect` value: {guidance_effect}. Available `guidance_effect` values are: "
+                    f"Invalid `guidance_effect` value: {self.guidance_effect}. Available `guidance_effect` values are: "
                     f"{', '.join(valid_guidance_effects)}."
                 )
 
@@ -259,7 +291,7 @@ class Morpho_pairwise:
 
         # Get the common genes
         all_samples_genes = [self.sampleA[0].var.index, self.sampleB[0].var.index]
-        common_genes = filter_common_genes(*all_samples_genes, verbose=verbose)
+        common_genes = filter_common_genes(*all_samples_genes, verbose=self.verbose)
         self.genes = common_genes if self.genes is None else intersect_lsts(common_genes, self.genes)
 
         # Extract the gene expression / representations of all samples, where each representation has a layer
@@ -300,11 +332,11 @@ class Morpho_pairwise:
             self.label_transfer = None
 
         # Extract the spatial coordinates of samples
-        self.coordsA = nx.from_numpy(
-            check_spatial_coords(sample=self.sampleA, spatial_key=spatial_key), type_as=type_as
+        self.coordsA = self.nx.from_numpy(
+            check_spatial_coords(sample=self.sampleA, spatial_key=self.spatial_key), type_as=self.type_as
         )
-        self.coordsB = nx.from_numpy(
-            check_spatial_coords(sample=self.sampleB, spatial_key=spatial_key), type_as=type_as
+        self.coordsB = self.nx.from_numpy(
+            check_spatial_coords(sample=self.sampleB, spatial_key=self.spatial_key), type_as=self.type_as
         )
 
         # check the spatial coordinates dimensionality
@@ -314,12 +346,12 @@ class Morpho_pairwise:
         self.NA, self.NB, self.D = self.coordsA.shape[0], self.coordsB.shape[0], self.coordsA.shape[1]
 
         # Normalize spatial coordinates if required
-        if normalize_c:
-            _normalize_coords()
+        if self.normalize_c:
+            self._normalize_coords()
 
         # Normalize gene expression if required
-        if normalize_g:
-            _normalize_exps()
+        if self.normalize_g:
+            self._normalize_exps()
 
         if self.verbose:
             lm.main_info(message=f"Preprocess finished.", indent_level=1)
@@ -330,7 +362,7 @@ class Morpho_pairwise:
         separate_scale: bool = False,
     ):
         normalize_scales = self.nx.zeros((2,), type_as=self.type_as)
-        normalize_means = self.nx.zeros((2, D), type_as=self.type_as)
+        normalize_means = self.nx.zeros((2, self.D), type_as=self.type_as)
 
         coords = [self.coordsA, self.coordsB]
         # get the means for each coords
@@ -341,7 +373,7 @@ class Morpho_pairwise:
         # get the global means for whole coords if "separate_mean" is True
         if not separate_mean:
             global_mean = self.nx.mean(normalize_means, axis=0)
-            normalize_means = self.nx.full((len(coords), D), global_mean)
+            normalize_means = self.nx.full((len(coords), self.D), global_mean)
 
         # move each coords to zero center and calculate the normalization scale
         for i in range(len(coords)):
@@ -364,7 +396,7 @@ class Morpho_pairwise:
         self.normalize_means = normalize_means
 
         # show the normalization results if "verbose" is True
-        if verbose:
+        if self.verbose:
             lm.main_info(message=f"Spatial coordinates normalization params:", indent_level=1)
             lm.main_info(message=f"Scale: {normalize_scales[:2]}...", indent_level=2)
             lm.main_info(message=f"Scale: {normalize_means[:2]}...", indent_level=2)
@@ -392,7 +424,7 @@ class Morpho_pairwise:
                 for i in range(len(exp_layers)):
                     exp_layers[i][l] /= normalize_scale
 
-                if verbose:
+                if self.verbose:
                     lm.main_info(message=f"Gene expression normalization params:", indent_level=1)
                     lm.main_info(message=f"Scale: {normalize_scale}.", indent_level=2)
 
@@ -406,7 +438,7 @@ class Morpho_pairwise:
         self._init_probability_parameters()
 
         self.sigma2_variance = 1
-        self.sigma2_variance_end = partial_robust_level
+        self.sigma2_variance_end = self.partial_robust_level
         self.sigma2_variance_decress = _get_anneling_factor(
             start=self.sigma2_variance, end=self.sigma2_variance_end, iter=(self.max_iter / 2), nx=self.nx
         )
@@ -456,10 +488,10 @@ class Morpho_pairwise:
 
             if p_t == "guass":
                 sub_sample_A = (
-                    np.random.choice(self.NA, subsample, replace=False) if NA > subsample else np.arange(self.NA)
+                    np.random.choice(self.NA, subsample, replace=False) if self.NA > subsample else np.arange(self.NA)
                 )
                 sub_sample_B = (
-                    np.random.choice(self.NB, subsample, replace=False) if NB > subsample else np.arange(self.NB)
+                    np.random.choice(self.NB, subsample, replace=False) if self.NB > subsample else np.arange(self.NB)
                 )
                 exp_dist = calc_distance(
                     X=exp_A[sub_sample_A, :],
@@ -499,7 +531,7 @@ class Morpho_pairwise:
         self,
         iter,
     ):
-        self.step_size = self.nx.minimum(_data(self.nx, 1.0, type_as), self.SVI_deacy / (iter + 1.0))
+        self.step_size = self.nx.minimum(_data(self.nx, 1.0, self.type_as), self.SVI_deacy / (iter + 1.0))
         self.batch_idx = self.batch_perm[: self.batch_size]
         self.batch_perm = _roll(self.nx)(self.batch_perm, self.batch_size)  # move the batch_perm
 
@@ -549,7 +581,7 @@ class Morpho_pairwise:
             voxel_num=max(min(int(N / 20), 1000), 100),
         )
         coordsB, X_B = voxel_data(
-            nx=nx,
+            nx=self.nx,
             coords=coordsB,
             gene_exp=X_B,
             voxel_num=max(min(int(M / 20), 1000), 100),
@@ -565,7 +597,7 @@ class Morpho_pairwise:
         # construct matching pairs based on brute force mutual K-NN. Here we use numpy backend
         # TODO: we can use GPU to search KNN and then convert to CPU
         item2 = np.argpartition(exp_dist, top_K, axis=0)[:top_K, :].T
-        item1 = np.repeat(np.arange(DistMat.shape[1])[:, None], top_K, axis=1)
+        item1 = np.repeat(np.arange(exp_dist.shape[1])[:, None], top_K, axis=1)
         NN1 = np.dstack((item1, item2)).reshape((-1, 2))
         distance1 = exp_dist.T[NN1[:, 0], NN1[:, 1]]
 
@@ -615,26 +647,27 @@ class Morpho_pairwise:
     def _update_assignment_P(
         self,
     ):
-        model_mul = _unsqueeze(nx)(alpha * nx.exp(-Sigma / sigma2), -1)  # N x 1
+        model_mul = _unsqueeze(self.nx)(self.alpha * self.nx.exp(-self.Sigma / self.sigma2), -1)  # N x 1
 
         if self.SVI_mode:
             pass
 
         else:
-            P, K_NA_spatial, K_NA_sigma2, sigma2_related = get_P_core(
-                nx=nx,
-                type_as=type_as,
-                Dim=Dim,
-                spatial_dist=spatial_dist,
-                exp_dist=exp_dist,
-                sigma2=sigma2,
-                model_mul=model_mul,
-                gamma=gamma,
-                samples_s=samples_s,
-                sigma2_variance=sigma2_variance,
-                probability_type=probability_type,
-                probability_parameters=probability_parameters,
-            )
+            pass
+            # P, K_NA_spatial, K_NA_sigma2, sigma2_related = get_P_core(
+            #     nx=nx,
+            #     type_as=type_as,
+            #     Dim=Dim,
+            #     spatial_dist=spatial_dist,
+            #     exp_dist=exp_dist,
+            #     sigma2=sigma2,
+            #     model_mul=model_mul,
+            #     gamma=gamma,
+            #     samples_s=samples_s,
+            #     sigma2_variance=sigma2_variance,
+            #     probability_type=probability_type,
+            #     probability_parameters=probability_parameters,
+            # )
 
     def _update_gamma(
         self,
@@ -674,7 +707,7 @@ class Morpho_pairwise:
         self,
     ):
         SigmaInv = self.sigma2 * self.lambdaVF * self.GammaSparse + _dot(self.nx)(
-            U.T, nx.einsum("ij,i->ij", self.U, self.K_NA)
+            self.U.T, self.nx.einsum("ij,i->ij", self.U, self.K_NA)
         )
         PXB_term = _dot(self.nx)(self.P, self.coordsB) - self.nx.einsum("ij,i->ij", self.RnA, self.K_NA)
         if self.SVI_mode:
@@ -691,12 +724,12 @@ class Morpho_pairwise:
             self.UPXB_term += (self.sigma2 / self.guidance_epsilon) * _dot(self.nx)(self.U_I.T, self.X_BI - self.R_AI)
 
         Sigma = _pinv(self.nx)(self.SigmaInv)
-        self.Coff = _dot(nx)(Sigma, UPXB_term)
+        self.Coff = _dot(self.nx)(Sigma, UPXB_term)
 
         self.VnA = _dot(self.nx)(self.U, self.Coff)
         self.V_AI = _dot(self.nx)(self.U_I, self.Coff)
         self.SigmaDiag = self.sigma2 * self.nx.einsum(
-            "ij->i", self.nx.einsum("ij,ji->ij", self.U, _dot(nx)(Sigma, self.U.T))
+            "ij->i", self.nx.einsum("ij,ji->ij", self.U, _dot(self.nx)(Sigma, self.U.T))
         )
 
     def _update_rigid(
@@ -719,7 +752,7 @@ class Morpho_pairwise:
             mu_Vn_deno += (self.sigma2 / self.guidance_epsilon) * self.X_BI.shape[0]
         if self.nn_init:
             mu_XB += (self.sigma2 / self.lambdaReg) * _dot(self.nx)(self.inlier_P.T, self.inlier_B)
-            mu_XA += (self.sigma2 / self.lambdaReg) * _dot(nself.x)(self.inlier_P.T, self.inlier_A)
+            mu_XA += (self.sigma2 / self.lambdaReg) * _dot(self.nx)(self.inlier_P.T, self.inlier_A)
             mu_X_deno += (self.sigma2 / self.lambdaReg) * self.nx.sum(self.inlier_P)
 
         mu_XB = mu_XB / mu_X_deno
@@ -751,10 +784,10 @@ class Morpho_pairwise:
             A -= (self.sigma2 / self.lambdaReg) * _dot(self.nx)((inlier_A_hat * self.inlier_P).T, -inlier_B_hat).T
 
         svdU, svdS, svdV = _linalg(self.nx).svd(A)
-        C = _identity(self.nx, D, self.type_as)
+        C = _identity(self.nx, self.D, self.type_as)
         C[-1, -1] = _linalg(self.nx).det(_dot(self.nx)(svdU, svdV))
 
-        R = _dot(nx)(_dot(nx)(svdU, C), svdV)
+        R = _dot(self.nx)(_dot(self.nx)(svdU, C), svdV)
         if self.SVI_mode and self.step_size < 1:
             self.R = self.step_size * R + (1 - self.step_size) * self.R
         else:
@@ -771,14 +804,14 @@ class Morpho_pairwise:
             t_deno += (self.sigma2 / self.guidance_epsilon) * self.X_BI.shape[0]
 
         if self.nn_init:
-            t_numerator += (self.sigma2 / self.lambdaReg) * _dot(nx)(
+            t_numerator += (self.sigma2 / self.lambdaReg) * _dot(self.nx)(
                 self.inlier_P.T, self.inlier_B - _dot(self.nx)(self.inlier_A, self.R.T)
             )
             t_deno += (self.sigma2 / self.lambdaReg) * self.nx.sum(self.inlier_P)
 
         t = t_numerator / t_deno
         if self.SVI_mode and self.step_size < 1:
-            self.t = step_size * t + (1 - self.step_size) * self.t
+            self.t = self.step_size * t + (1 - self.step_size) * self.t
         else:
             self.t = t
 
