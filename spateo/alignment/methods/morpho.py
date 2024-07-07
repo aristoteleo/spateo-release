@@ -341,6 +341,7 @@ def BA_align(
 
     coordsA, coordsB = spatial_coords[1], spatial_coords[0]
     exp_layer_A, exp_layer_B = exp_layers[1], exp_layers[0]
+    NA, NB, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
 
     # normalize guidance pair and convert to correct data types
     if isinstance(guidance_pair, list) and (guidance_effect is not False):
@@ -382,27 +383,23 @@ def BA_align(
     #     X_AI = X_AI @ init_R.T + init_t
 
     # construct the kernel for Gaussian processes
-    inducing_variables, inducing_variables_index, GammaSparse, U, U_I = construct_kernel(
+    (
+        inducing_variables,  # K x D
+        inducing_variables_index,  # K
+        GammaSparse,  # K x K
+        U,  # NA x K
+        U_I,  # NI x K / None
+    ) = get_kernel(
         spatial_coords=coordsA,
         inducing_variables="random",
         kernel_bandwidth=beta,
         kernel_type="euc",
         add_evaluation_points=X_AI if (guidance_effect == "nonrigid") else None,
     )
-    # # random select the inducing variables
-    # Unique_coordsA = _unique(nx, coordsA, 0)
-    # idx = random.sample(range(Unique_coordsA.shape[0]), min(K, Unique_coordsA.shape[0]))
-    # ctrl_pts = Unique_coordsA[idx, :]
-    # K = ctrl_pts.shape[0]
-
-    # GammaSparse = con_K(ctrl_pts, ctrl_pts, beta)  # K x K
-    # U = con_K(coordsA, ctrl_pts, beta)  # NA x K
-    # if (guidance_effect == 'nonrigid'):
-    #     U_I = con_K(X_AI, ctrl_pts, beta)  # NI x K
+    K = inducing_variables.shape[0]
 
     # initial guess for sigma2, beta2, anneling factor for sigma2 and beta2
     sigma2 = sigma2_init_scale * _init_guess_sigma2(coordsA, coordsB)
-    # TODO: finish this function
     probability_parameters = _init_probability_parameters(
         exp_layer_A=exp_layer_A,
         exp_layer_B=exp_layer_B,
@@ -410,9 +407,6 @@ def BA_align(
         probability_type=probability_type,
         probability_parameters=probability_parameters,
     )
-
-    # beta2, beta2_end = _init_guess_beta2(nx, X_A, X_B, dissimilarity, partial_robust_level, beta2_init, beta2_end, verbose=verbose)
-    # beta2_decrease = _get_anneling_factor(beta2, beta2_end, 50, nx)
 
     sigma2_variance = 1
     sigma2_variance_end = partial_robust_level
@@ -430,7 +424,7 @@ def BA_align(
     )
     VnA = nx.zeros(coordsA.shape, type_as=type_as)  # nonrigid vector velocity
     XAHat, RnA = coordsA, coordsA  # initial transformed / rigid position
-    Coff = nx.zeros(ctrl_pts.shape, type_as=type_as)  # inducing variables coefficient
+    Coff = nx.zeros(K, type_as=type_as)  # inducing variables coefficient
     SigmaDiag = nx.zeros((NA), type_as=type_as)  # Gaussian processes variance
     R = _identity(nx, D, type_as)  # rotation in rigid transformation
     nonrigid_flag = False  # indicate if to start nonrigid
@@ -453,26 +447,17 @@ def BA_align(
         exp_layer_dist = calc_distance(
             X=exp_layer_A, Y=exp_layer_B, metric=dissimilarity, label_transfer=label_transfer
         )
-        # GeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B, dissimilarity=dissimilarity)
 
     # get the current batch representation(s) pairwise distance matrix
-    # TODO: we can insert this into get_P
-
-    # if SVI_mode and (sparse_calculation_mode is False):
-    #     if pre_compute_dist:
-    #         randGeneDistMat = GeneDistMat[:, randIdx]  # NA x batch_size
-    #     else:
-    #         randGeneDistMat = calc_exp_dissimilarity(
-    #             X_A=X_A, X_B=X_B[randIdx, :], dissimilarity=dissimilarity
-    #         )  # NA x batch_size
+    # TODO: we can insert spatial_dist calculation this into get_P
 
     # get the current batch spatial proximity matrix
-    if sparse_calculation_mode is False:
-        spatial_dist = calc_distance(
-            X=XAHat,
-            Y=randcoordsB if SVI_mode else coordsB,
-            metric="euc",
-        )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
+    # if sparse_calculation_mode is False:
+    #     spatial_dist = calc_distance(
+    #         X=XAHat,
+    #         Y=randcoordsB if SVI_mode else coordsB,
+    #         metric="euc",
+    #     )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
 
     # initialize the intermediate results
     if iter_key_added is not None:
@@ -495,7 +480,7 @@ def BA_align(
         step_size = nx.minimum(_data(nx, 1.0, type_as), SVI_deacy / (iter + 1.0))
 
         # calculate the assignment matrix
-        P, assignment_results = calculate_assignment_P(
+        P, assignment_results = update_assignment_P(
             nx=nx,
             type_as=type_as,
             spatial_A=XAHat,
@@ -513,51 +498,33 @@ def BA_align(
             probability_parameters=probability_parameters,
             sparse_calculation_mode=sparse_calculation_mode,
         )
-        # # calculate the assignment matrix
-        # _common_kwargs = dict(
-        #     sigma2=sigma2,
-        #     beta2=beta2,
-        #     alpha=alpha,
-        #     gamma=gamma,
-        #     Sigma=SigmaDiag,
-        #     outlier_variance=outlier_variance,
-        # )
-        # # TODO: label dist mat
-        # if sparse_calculation_mode:
-        #     _unique_kwargs = dict(
-        #         XnAHat=XAHat,
-        #         XnB=randcoordsB if SVI_mode else coordsB,
-        #         X_A=X_A,
-        #         X_B=randX_B if SVI_mode else X_B,
-        #         batch_capacity=batch_capacity,
-        #         labelA=labelA,
-        #         labelB=randlabelB if SVI_mode else labelB,
-        #     )
-        #     P, assignment_results = get_P_sparse(_common_kwargs, _unique_kwargs)
-        # else:
-        #     _unique_kwargs = dict(
-        #         GeneDistMat=randGeneDistMat if SVI_mode else GeneDistMat,
-        #         SpatialDistMat=SpatialDistMat,
-        #         LabelDistMat=randLabelDistMat if SVI_mode else LabelDistMat,
-        #     )
-        #     P, assignment_results = get_P(_common_kwargs, _unique_kwargs)
-
-        # update anneling parameters
-        # if iter > 5:
-        # beta2 = (
-        #     nx.maximum(beta2 * beta2_decrease, beta2_end)
-        #     if beta2_decrease < 1
-        #     else nx.minimum(beta2 * beta2_decrease, beta2_end)
-        # )
-        # sigma2_variance = nx.minimum(sigma2_variance * sigma2_variance_decress, sigma2_variance_end)
 
         # update variational variables gamma and alpha
         K_NA, K_NB = assignment_results["K_NA"], assignment_results["K_NB"]
         K_NA_spatial = assignment_results["K_NA_spatial"]
         K_NA_sigma2 = assignment_results["K_NA_sigma2"]
 
+        (Sp, Sp_spatial, Sp_sigma2) = update_Sp(
+            step_size=step_size,
+            SVI_mode=SVI_mode,
+            Sp=Sp,
+            Sp_spatial=Sp_spatial,
+            Sp_sigma2=Sp_sigma2,
+            assignment_results=assignment_results,
+        )
+
         # update gamma
-        gamma = update_gamma(gamma, step_size, batch_size, gamma_a, gamma_b, assignment_results, SVI_mode)
+        gamma = update_gamma(
+            nx=nx,
+            type_as=type_as,
+            gamma=gamma,
+            step_size=step_size,
+            batch_size=batch_size,
+            gamma_a=gamma_a,
+            gamma_b=gamma_b,
+            Sp_spatial=Sp_spatial,
+            SVI_mode=SVI_mode,
+        )
 
         # update alpha
         alpha = update_alpha(alpha, step_size, kappa, assignment_results, SVI_mode)
@@ -565,7 +532,27 @@ def BA_align(
         # update nonrigid vector field
         if (sigma2 < 0.015) or (iter > 80) or nonrigid_flag:
             nonrigid_flag = True
-            nonrigid_variable_field = update_nonrigid(nonrigid_variable_field)
+            (VnA, V_AI, SigmaDiag, SigmaInv, PXB_term, Coff) = update_nonrigid(
+                nx=nx,
+                type_as=type_as,
+                SVI_mode=SVI_mode,
+                guidance_effect=guidance_effect,
+                SigmaInv=SigmaInv,
+                step_size=step_size,
+                sigma2=sigma2,
+                lambdaVF=lambdaVF,
+                GammaSparse=GammaSparse,
+                U=U,
+                K_NA=K_NA,
+                PXB_term=PXB_term,
+                P=P,
+                coordsB=randcoordsB if SVI_mode else coordsB,
+                RnA=RnA,
+                guidance_epsilon=guidance_epsilon,
+                U_I=U_I,
+                R_AI=R_AI,
+                X_BI=X_BI,
+            )
 
         # update rigid transformation
         rigid_variable_field = update_rigid(rigid_variable_field)
@@ -580,15 +567,10 @@ def BA_align(
             batch_idx = batch_perm[:batch_size]
             batch_perm = _roll(nx)(batch_perm, batch_size)
             randcoordsB = coordsB[randIdx, :]
-            # if sub_sample:
-            #     randGeneDistMat = calc_exp_dissimilarity(X_A=X_A, X_B=X_B[randIdx, :], dissimilarity=dissimilarity)
-            # else:
-            #     randGeneDistMat = GeneDistMat[:, randIdx]  # NA x batch_size
-            # SpatialDistMat = cal_dist(XAHat, randcoordsB)
 
     # get the full cell-cell assignment
     if SVI_mode:
-        P, assignment_results = calculate_assignment_P(
+        P, assignment_results = update_assignment_P(
             nx=nx,
             type_as=type_as,
             spatial_A=XAHat,
@@ -605,34 +587,6 @@ def BA_align(
             probability_parameters=probability_parameters,
             sparse_calculation_mode=sparse_calculation_mode,
         )
-
-    # if SVI_mode:
-    #     _common_kwargs = dict(
-    #         sigma2=sigma2,
-    #         beta2=beta2,
-    #         alpha=alpha,
-    #         gamma=gamma,
-    #         Sigma=SigmaDiag,
-    #         outlier_variance=outlier_variance,
-    #     )
-    #     if sparse_calculation_mode:
-    #         _unique_kwargs = dict(
-    #             XnAHat=XAHat,
-    #             XnB=coordsB,
-    #             X_A=X_A,
-    #             X_B=X_B,
-    #             batch_capacity=batch_capacity,
-    #             labelA=labelA,
-    #             labelB=labelB,
-    #         )
-    #         P, assignment_results = get_P_sparse(_common_kwargs, _unique_kwargs)
-    #     else:
-    #         _unique_kwargs = dict(
-    #             GeneDistMat=randGeneDistMat if SVI_mode else GeneDistMat,
-    #             SpatialDistMat=SpatialDistMat,
-    #             LabelDistMat=randLabelDistMat if SVI_mode else LabelDistMat,
-    #         )
-    #         P, assignment_results = get_P(_common_kwargs, _unique_kwargs)
 
     # Get optimal rigid transformation based on final mapping
     # TODO: make sure the R_init means

@@ -1439,27 +1439,304 @@ def get_P_sparse(
 ##########################################
 
 
+def update_Sp(
+    nx,
+    type_as,
+    step_size,
+    batch_size,
+    SVI_mode,
+    assignment_results,
+    Sp,
+    Sp_spatial,
+    Sp_sigma2,
+):
+    if SVI_mode:
+        Sp = step_size * assignment_results["Sp"] + (1 - step_size) * Sp
+        Sp_spatial = step_size * assignment_results["Sp_spatial"] + (1 - step_size) * Sp_spatial
+        Sp_sigma2 = step_size * assignment_results["Sp_sigma2"] + (1 - step_size) * Sp_sigma2
+
+        assignment_results["Sp"] = Sp
+        assignment_results["Sp_spatial"] = Sp_spatial
+        assignment_results["Sp_sigma2"] = Sp_sigma2
+    else:
+        Sp = assignment_results["Sp"]
+        Sp_spatial = assignment_results["Sp_spatial"]
+        Sp_sigma2 = assignment_results["Sp_sigma2"]
+
+    return Sp, Sp_spatial, Sp_sigma2
+
+
+def update_gamma(
+    nx,
+    type_as,
+    gamma,
+    batch_size,
+    gamma_a,
+    gamma_b,
+    Sp_spatial,
+    SVI_mode,
+):
+    if SVI_mode:
+        gamma = nx.exp(_psi(nx)(gamma_a + Sp_spatial) - _psi(nx)(gamma_a + gamma_b + batch_size))
+    else:
+        gamma = nx.exp(_psi(nx)(gamma_a + Sp_spatial) - _psi(nx)(gamma_a + gamma_b + NB))
+    gamma = _data(nx, 0.99, type_as) if gamma > 0.99 else gamma
+    gamma = _data(nx, 0.01, type_as) if gamma < 0.01 else gamma
+    return gamma
+
+
+def update_alpha(nx, type_as, step_size, alpha, kappa, NA, assignment_results):
+
+    if SVI_mode:
+        alpha = (
+            step_size
+            * nx.exp(
+                _psi(nx)(kappa + assignment_results["K_NA_spatial"])
+                - _psi(nx)(kappa * NA + assignment_results["Sp_spatial"])
+            )
+            + (1 - step_size) * alpha
+        )
+    else:
+        alpha = nx.exp(
+            _psi(nx)(kappa + assignment_results["K_NA_spatial"])
+            - _psi(nx)(kappa * NA + assignment_results["Sp_spatial"])
+        )
+
+    return alpha
+
+
+def update_nonrigid(
+    nx,
+    type_as,
+    SVI_mode,
+    guidance_effect,
+    SigmaInv,
+    step_size,
+    sigma2,
+    lambdaVF,
+    GammaSparse,
+    U,
+    K_NA,
+    PXB_term,
+    P,
+    coordsB,
+    RnA,
+    guidance_epsilon,
+    U_I,
+    R_AI,
+    X_BI,
+):
+    if SVI_mode:
+        SigmaInv = (
+            step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
+            + (1 - step_size) * SigmaInv
+        )
+        PXB_term = step_size * (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)) + (1 - step_size) * PXB_term
+    else:
+        SigmaInv = sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))
+        PXB_term = _dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)
+
+    UPXB_term = _dot(nx)(U.T, PXB_term)
+
+    if (guidance_effect == "nonrigid") or (guidance_effect == "both"):
+        SigmaInv += (sigma2 / guidance_epsilon) * _dot(nx)(U_I.T, U_I)
+        UPXB_term += (sigma2 / guidance_epsilon) * _dot(nx)(U_I.T, X_BI - R_AI)
+
+    Sigma = _pinv(nx)(SigmaInv)
+    Coff = _dot(nx)(Sigma, UPXB_term)
+
+    VnA = _dot(nx)(U, Coff)
+    V_AI = _dot(nx)(U_I, Coff)
+    SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, _dot(nx)(Sigma, U.T)))
+
+    return VnA, V_AI, SigmaDiag, SigmaInv, PXB_term, Coff
+
+
+def update_rigid(
+    nx,
+    type_as,
+):
+
+    PXA, PVA, PXB = (
+        _dot(nx)(K_NA, coordsA)[None, :],
+        _dot(nx)(K_NA, VnA)[None, :],
+        _dot(nx)(K_NB, coordsB)[None, :],
+    )
+
+    # solve rotation using SVD formula
+    mu_XB, mu_XA, mu_Vn = PXB, PXA, PVA
+    mu_X_deno, mu_Vn_deno = Sp, Sp
+    if guidance_effect in ("rigid", "both"):
+        mu_XB += (sigma2 / guidance_epsilon) * X_BI
+        mu_XA += (sigma2 / guidance_epsilon) * X_AI
+        mu_Vn += (sigma2 / guidance_epsilon) * V_AI
+        mu_X_deno += (sigma2 / guidance_epsilon) * X_BI.shape[0]
+        mu_Vn_deno += (sigma2 / guidance_epsilon) * X_BI.shape[0]
+    if nn_init:
+        mu_XB += (sigma2 / lambdaReg) * _dot(nx)(inlier_P.T, inlier_B)
+        mu_XA += (sigma2 / lambdaReg) * _dot(nx)(inlier_P.T, inlier_A)
+        mu_X_deno += (sigma2 / guidance_epsilon) * nx.sum(inlier_P)
+
+    mu_XB = mu_XB / mu_X_deno
+    mu_XA = mu_XA / mu_X_deno
+    mu_Vn = mu_Vn / mu_Vn_deno
+
+    XA_hat = coordsA - mu_XA
+    VnA_hat = VnA - mu_Vn
+    XB_hat = coordsB - mu_XB
+
+    if guidance_effect in ("rigid", "both"):
+        X_AI_hat = X_AI - mu_XA
+        X_BI_hat = X_BI - mu_XB
+        V_AI_hat = V_AI - mu_Vn
+
+    if nn_init:
+        inlier_A_hat = inlier_A - mu_XA
+        inlier_B_hat = inlier_B - mu_XB
+
+    A = -(_dot(nx)(XA_hat.T, nx.einsum("ij,i->ij", VnA_hat, K_NA)) - _dot(nx)(_dot(nx)(XA_hat.T, P), XB_hat)).T
+
+    if guidance_effect in ("rigid", "both"):
+        A -= (sigma2 / guidance_epsilon) * _dot(nx)(X_AI_hat.T, V_AI_hat - X_BI_hat).T
+
+    if nn_init:
+        A -= (sigma2 / lambdaReg) * _dot(nx)((inlier_A_hat * inlier_P).T, -inlier_B_hat).T
+
+    svdU, svdS, svdV = _linalg(nx).svd(A)
+    C = _identity(nx, D, type_as)
+    C[-1, -1] = _linalg(nx).det(_dot(nx)(svdU, svdV))
+
+    if SVI_mode and step_size < 1:
+        R = step_size * (_dot(nx)(_dot(nx)(svdU, C), svdV)) + (1 - step_size) * R
+    else:
+        R = _dot(nx)(_dot(nx)(svdU, C), svdV)
+
+    # solve translation using SVD formula
+    t_numerator = PXB - PVA - _dot(nx)(PXA, R.T)
+    t_deno = Sp
+
+    if guidance_effect in ("rigid", "both"):
+        t_numerator += (sigma2 / guidance_epsilon) * nx.sum(X_BI - V_AI - _dot(nx)(X_AI, R.T), axis=0)
+        t_deno += (sigma2 / guidance_epsilon) * X_BI.shape[0]
+
+    if nn_init:
+        t_numerator += (sigma2 / lambdaReg) * _dot(nx)(inlier_P.T, inlier_B - _dot(nx)(inlier_A, R.T))
+        t_deno += (sigma2 / lambdaReg) * nx.sum(inlier_P)
+
+    if SVI_mode and step_size < 1:
+        t = step_size * (t_numerator / t_deno) + (1 - step_size) * t
+    else:
+        t = t_numerator / t_deno
+
+    return R, t
+
+
+def update_sigma2():
+    pass
+
+
+def update_assignment_P():
+    pass
+
+
 #################################
 # Kernel construction functions #
 #################################
 
 
-def construct_kernel(
-    spatial_coords,
-    inducing_variables_num,
-    sampling_method,
-    kernel_bandwidth,
-    kernel_type,
-    add_evaluation_points,
-):
+def con_K(
+    X: Union[np.ndarray, torch.Tensor],
+    Y: Union[np.ndarray, torch.Tensor],
+    beta: Union[int, float] = 0.01,
+) -> Union[np.ndarray, torch.Tensor]:
+    """con_K constructs the Squared Exponential (SE) kernel, where K(i,j)=k(X_i,Y_j)=exp(-beta*||X_i-Y_j||^2).
+
+    Args:
+        X: The first vector X\in\mathbb{R}^{N\times d}
+        Y: The second vector X\in\mathbb{R}^{M\times d}
+        beta: The length-scale of the SE kernel.
+        use_chunk (bool, optional): Whether to use chunk to reduce the GPU memory usage. Note that if set to ``True'' it will slow down the calculation. Defaults to False.
+
+    Returns:
+        K: The kernel K\in\mathbb{R}^{N\times M}
+    """
+
+    assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
+    nx = ot.backend.get_backend(X, Y)
+
+    K = calc_distance(
+        X=X,
+        Y=Y,
+        metric="euc",
+    )
+    K = nx.exp(-beta * K)
+    return K
+
+
+def con_K_geodist():
+    pass
+
+
+def get_kernel(
+    spatial_coords: Union[np.ndarray, torch.Tensor],
+    inducing_variables_num: int,
+    kernel_bandwidth: float,
+    sampling_method: str,
+    kernel_type: str = "euc",
+    add_evaluation_points: Optional[Union[np.ndarray, torch.Tensor]] = None,
+) -> Tuple[
+    Union[np.ndarray, torch.Tensor],
+    Union[np.ndarray, torch.Tensor],
+    Union[np.ndarray, torch.Tensor],
+    Union[np.ndarray, torch.Tensor],
+    Optional[Union[np.ndarray, torch.Tensor]],
+]:
+    """
+    Construct a kernel matrix for spatial data.
+
+    Args:
+        spatial_coords (Union[np.ndarray, torch.Tensor]):
+            The spatial coordinates of the data points.
+        inducing_variables_num (int):
+            The number of inducing variables to sample.
+        sampling_method (str):
+            The method to use for sampling inducing variables.
+        kernel_bandwidth (float):
+            The bandwidth parameter for the kernel.
+        kernel_type (str):
+            The type of kernel to construct. Currently supports "euc".
+        add_evaluation_points (Optional[Union[np.ndarray, torch.Tensor]], optional):
+            Additional points to evaluate the kernel at. Defaults to None.
+
+    Returns:
+        Tuple[Union[np.ndarray, torch.Tensor], Union[np.ndarray, torch.Tensor], Union[np.ndarray, torch.Tensor], Union[np.ndarray, torch.Tensor], Optional[Union[np.ndarray, torch.Tensor]]]:
+            A tuple containing the inducing variables, their indices, the sparse kernel matrix, the kernel matrix for spatial coordinates, and the evaluation kernel matrix (if provided).
+
+    Raises:
+        NotImplementedError:
+            If the specified kernel type is not implemented.
+    """
 
     # generate inducing variables from spatial_coords
     unique_spatial_coords = _unique(nx, spatial_coords, 0)
 
     # TODO: finish the downsampling function
-    inducing_variables, inducing_variables_idx = downsampling(
+    inducing_variables, inducing_variables_index = sample(
         X=spatial_coords, n_sampling=inducing_variables_num, sampling_method=sampling_method
     )
+
+    if kernel_type == "euc":
+        GammaSparse = con_K(X=inducing_variables, Y=inducing_variables, beta=kernel_bandwidth)
+        U = con_K(X=spatial_coords, Y=inducing_variables, beta=kernel_bandwidth)
+        U_star = (
+            con_K(X=add_evaluation_points, Y=inducing_variables, beta=kernel_bandwidth)
+            if add_evaluation_points is not None
+            else None
+        )
+    else:
+        raise NotImplementedError(f"Kernel type '{kernel_type}' is not implemented.")
+
+    return inducing_variables, inducing_variables_index, GammaSparse, U, U_star
 
 
 def kl_divergence_backend(X, Y, probabilistic=True):
@@ -2353,7 +2630,7 @@ def voxel_data(
 def _init_guess_sigma2(
     XA,
     XB,
-    subsample=2000,
+    subsample=20000,
 ):
     NA, NB, D = XA.shape[0], XB.shape[0], XA.shape[1]
     sub_sample_A = np.random.choice(NA, subsample, replace=False) if NA > subsample else np.arange(NA)
@@ -2366,6 +2643,70 @@ def _init_guess_sigma2(
     SpatialDistMat = SpatialDistMat**2
     sigma2 = 0.1 * SpatialDistMat.sum() / (D * sub_sample_A.shape[0] * sub_sample_A.shape[0])  # 2 for 3D
     return sigma2
+
+
+# TODO: type check for dissimilarity probability_type probability_parameters
+def _init_probability_parameters(
+    exp_layer_A: List[Union[np.ndarray, torch.Tensor]],
+    exp_layer_B: List[Union[np.ndarray, torch.Tensor]],
+    dissimilarity: Union[str, List[str]] = "kl",
+    probability_type: Union[str, List[str]] = "gauss",
+    probability_parameters: Optional[Union[float, List[float]]] = None,
+    subsample=20000,
+):
+    """
+    Initialize probability parameters for the given expression layers.
+
+    Args:
+        exp_layer_A (List[np.ndarray]):
+            List of expression layers for dataset A.
+        exp_layer_B (List[np.ndarray]):
+            List of expression layers for dataset B.
+        dissimilarity (List[str]):
+            List of dissimilarity metrics.
+        probability_type (List[str]):
+            List of probability types.
+        probability_parameters (List[Optional[float]]):
+            List of probability parameters to be initialized.
+        subsample (int, optional):
+            Number of subsamples to use. Defaults to 20000.
+
+    Returns:
+        List[Optional[float]]:
+            List of initialized probability parameters.
+    """
+
+    for i, (exp_A, exp_B, d_s, p_t, p_p) in enumerate(
+        zip(exp_layer_A, exp_layer_B, dissimilarity, probability_type, probability_parameters)
+    ):
+        if p_p is not None:
+            continue
+
+        if p_t == "guass":
+            NA, NB = exp_A.shape[0], exp_B.shape[0]
+            sub_sample_A = np.random.choice(NA, subsample, replace=False) if NA > subsample else np.arange(NA)
+            sub_sample_B = np.random.choice(NB, subsample, replace=False) if NB > subsample else np.arange(NB)
+            exp_dist = calc_distance(
+                X=exp_A[sub_sample_A, :],
+                Y=exp_B[sub_sample_B, :],
+                metric=d_s,
+            )
+            min_exp_dist = nx.min(exp_dist, 1)
+            probability_parameters[i] = min_exp_dist[nx.argsort(min_exp_dist)[int(sub_sample_A.shape[0] * 0.05)]] / 5
+        else:
+            pass
+
+    return probability_parameters
+
+
+def _get_anneling_factor(
+    nx,
+    start,
+    end,
+    iter,
+):
+    anneling_factor = _power(nx)(end / start, 1 / (iter))
+    return anneling_factor
 
 
 def _init_guess_beta2(
