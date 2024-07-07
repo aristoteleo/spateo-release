@@ -712,16 +712,61 @@ def get_optimal_R(
 ###############################
 
 
+def _cosine_distance_backend(
+    X: Union[np.ndarray, torch.Tensor],
+    Y: Union[np.ndarray, torch.Tensor],
+    eps: float = 1e-8,
+) -> Union[np.ndarray, torch.Tensor]:
+    """
+    Compute the pairwise cosine similarity between all pairs of samples in matrices X and Y.
+
+    Parameters
+    ----------
+    X : np.ndarray or torch.Tensor
+        Matrix with shape (N, D), where each row represents a sample.
+    Y : np.ndarray or torch.Tensor
+        Matrix with shape (M, D), where each row represents a sample.
+    eps : float, optional
+        A small value to avoid division by zero. Default is 1e-8.
+
+    Returns
+    -------
+    np.ndarray or torch.Tensor
+        Pairwise cosine similarity matrix with shape (N, M).
+
+    Raises
+    ------
+    AssertionError
+        If the number of features in X and Y do not match.
+    """
+
+    assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
+
+    # Get the appropriate backend (either NumPy or PyTorch)
+    nx = ot.backend.get_backend(X, Y)
+
+    # Normalize rows to unit vectors
+    X_norm = nx.sqrt(nx.sum(X**2, axis=1, keepdims=True))
+    Y_norm = nx.sqrt(nx.sum(Y**2, axis=1, keepdims=True))
+    X = X / nx.maximum(X_norm, eps)
+    Y = Y / nx.maximum(Y_norm, eps)
+
+    # Compute cosine similarity
+    D = nx.dot(X, Y.T)
+
+    return D
+
+
 def _cos_similarity(
     mat1: Union[np.ndarray, torch.Tensor],
     mat2: Union[np.ndarray, torch.Tensor],
 ):
     nx = ot.backend.get_backend(mat1, mat2)
     if nx_torch(nx):
-        torch_cos = torch.nn.CosineSimilarity(dim=1)
-        mat1_unsqueeze = mat1.unsqueeze(-1)
-        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0, 2)
-        distMat = torch_cos(mat1_unsqueeze, mat2_unsqueeze) * 0.5 + 0.5
+        # torch_cos = torch.nn.CosineSimilarity(dim=1)
+        # mat1_unsqueeze = mat1.unsqueeze(-1)
+        # mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0, 2)
+        distMat = -_cosine_distance_backend(mat1, mat2) * 0.5 + 0.5
     else:
         distMat = (-ot.dist(mat1, mat2, metric="cosine") + 1) * 0.5 + 0.5
     return distMat

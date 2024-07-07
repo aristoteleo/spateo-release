@@ -547,7 +547,7 @@ def BA_align_sparse(
                 Sigma=SigmaDiag,
                 outlier_variance=outlier_variance,
                 label_transfer_prior=label_transfer_prior,
-                top_k=32,
+                top_k=512,
                 dissimilarity=dissimilarity,
                 batch_capacity=batch_capacity,
             )
