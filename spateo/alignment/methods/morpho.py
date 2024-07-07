@@ -252,6 +252,7 @@ def BA_align(
     label_transfer_prior: Optional[dict] = None,
     beta2: Optional[float] = None,
     beta2_end: Optional[float] = None,
+    sigma2_end: Optional[float] = None,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
     """core function for spateo pairwise alignment
 
@@ -677,7 +678,7 @@ def BA_align(
             XnB=coordsB,
             X_A=X_A,
             X_B=X_B,
-            sigma2=sigma2,
+            sigma2=sigma2 if sigma2_end is None else _data(nx, sigma2_end, type_as),
             beta2=beta2,
             alpha=alpha,
             gamma=gamma,
