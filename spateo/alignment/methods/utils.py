@@ -85,6 +85,22 @@ def check_spatial_coords(sample: AnnData, spatial_key: str = "spatial") -> np.nd
     if isinstance(coordinates, pd.DataFrame):
         coordinates = coordinates.values
 
+    mask = []
+    for i in range(coordinates.shape[1]):
+        if len(np.unique(coordinates[:, i])) == 1:
+            lm.main_info(
+                message=f"The {i}-th dimension of the spatial coordinate has single value, which will be ignored.",
+                indent_level=2,
+            )
+        else:
+            mask.append(i)
+
+    # Select only dimensions with more than one unique value
+    coordinates = coordinates[:, mask]
+
+    if coordinates.shape[1] > 3 or coordinates.shape[1] < 2:
+        raise ValueError(f"The spatial coordinate '{spatial_key}' should only has 2 / 3 dimension")
+
     return np.asarray(coordinates)
 
 
@@ -111,8 +127,8 @@ def check_exp(sample: AnnData, layer: str = "X") -> np.ndarray:
             raise KeyError(f"Layer '{layer}' not found in AnnData object.")
         exp_matrix = sample.layers[layer].copy()
 
-    exp_martix = to_dense_matrix(exp_martix)
-    return exp_martix
+    exp_matrix = to_dense_matrix(exp_matrix)
+    return exp_matrix
 
 
 # Finished
@@ -179,32 +195,28 @@ def check_rep_layer(
     for sample in samples:
         for rep, rep_f in zip(rep_layer, rep_field):
             if rep_f == "layer":
-                if rep not in sample.layers:
+                if (rep != "X") and (rep not in sample.layers):
                     raise ValueError(
                         f"The specified representation '{rep}' not found in the '{rep_f}' attribute of some of the AnnData objects."
                     )
-                    return False
-            if rep_f == "obsm":
+            elif rep_f == "obsm":
                 if rep not in sample.obsm:
                     raise ValueError(
                         f"The specified representation '{rep}' not found in the '{rep_f}' attribute of some of the AnnData objects."
                     )
-                    return False
             elif rep_f == "obs":
                 if rep not in sample.obs:
                     raise ValueError(
                         f"The specified representation '{rep}' not found in the '{rep_f}' attribute of some of the AnnData objects."
                     )
-                    return False
 
                 # judge if the sample.obs[rep] is categorical
                 if not isinstance(sample.obs[rep].dtype, pd.CategoricalDtype):
                     raise ValueError(
                         f"The specified representation '{rep}' found in the '{rep_f}' attribute should be categorical."
                     )
-                    return False
             else:
-                raise ValueError("rep_type must be either 'layer', 'obsm' or 'obs'")
+                raise ValueError("rep_field must be either 'layer', 'obsm' or 'obs'")
     return True
 
 
@@ -399,7 +411,7 @@ def get_rep(
         representation = nx.from_numpy(check_exp(sample=sample[:, genes], layer=rep), type_as=type_as)
 
     # label information stored in ".obs" field
-    elif rep_type == "obs":
+    elif rep_field == "obs":
         # Sort categories and convert to integer codes
         representation = sample.obs[rep].cat.codes.values
         representation = nx.from_numpy(representation)
@@ -407,10 +419,10 @@ def get_rep(
             representation = representation.to(type_as.device)
 
     # scalar values stored in ".obsm" field
-    elif rep_type == "obsm":
+    elif rep_field == "obsm":
         representation = nx.from_numpy(sample.obsm[rep], type_as=type_as)
     else:
-        raise ValueError("rep_type must be either 'obsm' or 'obs'")
+        raise ValueError("rep_field must be either 'layer', 'obsm' or 'obs'")
 
     return representation
 
@@ -448,7 +460,9 @@ def normalize_coords(
     verbose: bool = True,
     separate_scale: bool = True,
     separate_mean: bool = True,
-) -> Tuple[List[np.ndarray, torch.Tensor], List[np.ndarray, torch.Tensor], List[np.ndarray, torch.Tensor]]:
+) -> Tuple[
+    List[Union[np.ndarray, torch.Tensor]], List[Union[np.ndarray, torch.Tensor]], List[Union[np.ndarray, torch.Tensor]]
+]:
     """
     Normalize the spatial coordinate.
 
@@ -467,7 +481,7 @@ def normalize_coords(
 
     Returns
     -------
-    Tuple[List[np.ndarray, torch.Tensor], List[np.ndarray, torch.Tensor], List[np.ndarray, torch.Tensor]]
+    Tuple[List[Union[np.ndarray, torch.Tensor]], List[Union[np.ndarray, torch.Tensor]], List[Union[np.ndarray, torch.Tensor]]]
         A tuple containing:
         - coords: List of normalized spatial coordinates.
         - normalize_scales: List of normalization scale factors applied to each coordinate axis.
@@ -582,8 +596,8 @@ def align_preprocess(
 ) -> Tuple[
     Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
     Union[torch.Tensor, np.ndarray],
-    List[List[torch.Tensor, np.ndarray]],
-    List[torch.Tensor, np.ndarray],
+    List[List[Union[np.ndarray, torch.Tensor]]],
+    List[Union[np.ndarray, torch.Tensor]],
     Union[torch.Tensor, np.ndarray],
     Union[torch.Tensor, np.ndarray],
     Union[torch.Tensor, np.ndarray],
@@ -1015,9 +1029,9 @@ def _minkowski_distance_backend(X, Y):
 
 
 def calc_distance(
-    X: Union[np.ndarray, torch.Tensor],
-    Y: Union[np.ndarray, torch.Tensor],
-    metric: str = "euc",
+    X: Union[List[Union[np.ndarray, torch.Tensor]], Union[np.ndarray, torch.Tensor]],
+    Y: Union[List[Union[np.ndarray, torch.Tensor]], Union[np.ndarray, torch.Tensor]],
+    metric: Union[List[str], str] = "euc",
     label_transfer: Optional[Union[np.ndarray, torch.Tensor]] = None,
 ) -> Union[np.ndarray, torch.Tensor]:
     """
@@ -1048,37 +1062,53 @@ def calc_distance(
         If `label_transfer` is required but not provided.
     """
 
-    assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
-    assert metric in [
-        "euc",
-        "euclidean",
-        "square_euc",
-        "square_euclidean",
-        "kl",
-        "sym_kl",
-        "cos",
-        "cosine",
-        "label",
-    ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'``, ``'square_euc'``, ``'square_euclidean'``, ``'kl'``, ``'sym_kl'``, ``'cos'``, ``'cosine'``, and ``'label'``."
+    if not isinstance(X, list):
+        X = [X]
+    if not isinstance(Y, list):
+        Y = [Y]
+    if not isinstance(metric, list):
+        metric = [metric]
+    dist_mats = []
+    for (x, y, m) in zip(X, Y, metric):
+        if m == "label":
+            assert label_transfer is not None, "label_transfer must be provided for metric 'label'."
+            dist_mats.append(_label_distance_backend(x, y, label_transfer))
+        elif m in ["euc", "euclidean"]:
+            dist_mats.append(_euc_distance_backend(x, y, squared=False))
+        elif m in ["square_euc", "square_euclidean"]:
+            dist_mats.append(_euc_distance_backend(x, y, squared=True))
+        elif m == "kl":
+            dist_mats.append(
+                _kl_distance_backend(
+                    x,
+                    y,
+                )
+            )
+        elif m == "sym_kl":
+            dist_mats.append(
+                (
+                    _kl_distance_backend(
+                        x,
+                        y,
+                    )
+                    + _kl_distance_backend(y, x).T
+                )
+                / 2
+            )
+        elif m in ["cos", "cosine"]:
+            dist_mats.append(
+                _cosine_distance_backend(
+                    x,
+                    y,
+                )
+            )
 
-    if metric == "label":
-        assert label_transfer is not None, "label_transfer must be provided for metric 'label'."
-        return _label_distance_backend(X, Y, label_transfer)
-    elif metric in ["euc", "euclidean"]:
-        return _euc_distance_backend(X, Y, squared=False)
-    elif metric in ["square_euc", "square_euclidean"]:
-        return _euc_distance_backend(X, Y, squared=True)
-    elif metric == "kl":
-        return _kl_distance_backend(X, Y)
-    elif metric == "sym_kl":
-        return (_kl_distance_backend(X, Y) + _kl_distance_backend(Y, X).T) / 2
-    elif metric in ["cos", "cosine"]:
-        return _cosine_distance_backend(X, Y)
+    return dist_mats
 
 
 def calc_probability(
     distance_matrix: Union[np.ndarray, torch.Tensor],
-    probability_type: str = "Gauss",
+    probability_type: str = "gauss",
     probability_parameter: Optional[float] = None,
 ) -> Union[np.ndarray, torch.Tensor]:
     """
@@ -1107,13 +1137,13 @@ def calc_probability(
     # Get the appropriate backend (either NumPy or PyTorch)
     nx = ot.backend.get_backend(distance_matrix)
 
-    if probability_type == "Gauss":
+    if probability_type.lower() == "gauss":
         if probability_parameter is None:
             raise ValueError("probability_parameter must be provided for 'Gauss' probability type.")
         probability = nx.exp(-distance_matrix / (2 * probability_parameter))
-    elif probability_type == "cos_prob":
+    elif probability_type.lower() == "cos_prob":
         probability = distance_matrix * 0.5 + 0.5
-    elif probability_type == "prob":
+    elif probability_type.lower() == "prob":
         probability = distance_matrix
     else:
         raise ValueError(f"Unsupported probability type: {probability_type}")
@@ -1142,6 +1172,8 @@ def get_P_core(
     probability_type: Union[str, List[str]] = "Gauss",
     probability_parameters: Optional[List] = None,
     eps: float = 1e-8,
+    sparse_calculation_mode: bool = False,
+    top_k: int = -1,
 ):
     """
     Compute assignment matrix P and additional results based on given distances and parameters.
@@ -1182,34 +1214,35 @@ def get_P_core(
     """
 
     # Calculate spatial probability with sigma2_variance
-    spatial_prob = calc_probability(spatial_dist, "Gauss", probability_parameter=sigma2 / sigma2_variance)  # N x M
+    spatial_prob = calc_probability(spatial_dist, "gauss", probability_parameter=sigma2 / sigma2_variance)  # N x M
 
     # TODO: everytime this will generate D/2 on GPU, may influence the runtime
+    outlier_s = samples_s * spatial_dist.shape[0]
     spatial_outlier = (
         _power(nx)((2 * _pi(nx) * sigma2), _data(nx, Dim / 2, type_as)) * (1 - gamma) / (gamma * outlier_s)
     )  # scalar
 
     # TODO: the position of the following is unclear
     spatial_inlier = 1 - spatial_outlier / (
-        spatial_outlier + nx.sum(spatial_prob, axis=0, keep_dims=True) + eps
+        spatial_outlier + nx.sum(spatial_prob, axis=0, keepdims=True) + eps
     )  # 1 x M
 
     spatial_prob = spatial_prob * model_mul
 
     # spatial P
-    P = spatial_prob / (spatial_outlier + nx.sum(spatial_prob, axis=0, keep_dims=True) + eps)  # N x M
+    P = spatial_prob / (spatial_outlier + nx.sum(spatial_prob, axis=0, keepdims=True) + eps)  # N x M
     K_NA_spatial = P.sum(1)
 
     # Calculate spatial probability without sigma2_variance
     spatial_prob = calc_probability(
         spatial_dist,
-        "Gauss",
+        "gauss",
         probability_parameter=sigma2,
     )  # N x M
     spatial_prob = spatial_prob * model_mul
 
     # sigma2 P
-    P = spatial_inlier * spatial_prob / (nx.sum(spatial_prob, axis=0, keep_dims=True) + eps)
+    P = spatial_inlier * spatial_prob / (nx.sum(spatial_prob, axis=0, keepdims=True) + eps)
     K_NA_sigma2 = P.sum(1)
     sigma2_related = (P * spatial_dist).sum()
 
@@ -1220,7 +1253,16 @@ def get_P_core(
     for e_d, p_t, p_p in zip(exp_dist, probability_type, probability_parameters):
         spatial_prob *= calc_probability(e_d, p_t, p_p)
 
-    P = spatial_inlier * spatial_prob / (nx.sum(spatial_prob, axis=0, keep_dims=True) + eps)
+    P = spatial_inlier * spatial_prob / (nx.sum(spatial_prob, axis=0, keepdims=True) + eps)
+
+    if sparse_calculation_mode:
+        P = _dense_to_sparse(
+            mat=P,
+            sparse_method="topk",
+            threshold=top_k,
+            axis=0,
+            descending=True,
+        )
 
     return P, K_NA_spatial, K_NA_sigma2, sigma2_related
 
@@ -1664,7 +1706,7 @@ def con_K(
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
     nx = ot.backend.get_backend(X, Y)
 
-    K = calc_distance(
+    [K] = calc_distance(
         X=X,
         Y=Y,
         metric="euc",
@@ -2572,6 +2614,7 @@ def inlier_from_NN_debug(
 
 
 def voxel_data(
+    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
     coords: Union[np.ndarray, torch.Tensor],
     gene_exp: Union[np.ndarray, torch.Tensor],
     voxel_size: Optional[float] = None,
@@ -2596,7 +2639,7 @@ def voxel_data(
     voxel_gene_exp: np.ndarray or torch.Tensor
         The gene expression of the voxels.
     """
-    nx = ot.backend.get_backend(coords, gene_exp)
+    # nx = ot.backend.get_backend(coords, gene_exp)
     N, D = coords.shape[0], coords.shape[1]
     coords = nx.to_numpy(coords)
     gene_exp = nx.to_numpy(gene_exp)
@@ -2744,6 +2787,41 @@ def _init_guess_beta2(
     return beta2, beta2_end
 
 
+## Sparse operation
+def _dense_to_sparse(
+    mat: Union[np.ndarray, torch.Tensor],
+    sparse_method: str = "topk",
+    threshold: Union[int, float] = 100,
+    axis: int = 0,
+    descending=False,
+):
+    assert sparse_method in [
+        "topk",
+        "threshold",
+    ], "``sparse_method`` value is wrong. Available ``sparse_method`` are: ``'topk'`` and ``'threshold'``."
+    threshold = int(threshold) if sparse_method == "topk" else threshold
+    nx = ot.backend.get_backend(mat)
+
+    NA, NB = mat.shape[0], mat.shape[1]
+
+    if sparse_method == "topk":
+        sorted_mat, sorted_idx = _sort(nx, mat, axis=axis, descending=descending)
+        if axis == 0:
+            col = _repeat_interleave(nx, nx.arange(NB, type_as=mat), threshold, axis=0)
+            row = sorted_idx[:threshold, :].T.reshape(-1)
+            val = sorted_mat[:threshold, :].T.reshape(-1)
+        elif axis == 1:
+            col = sorted_idx[:, :threshold].reshape(-1)
+            row = _repeat_interleave(nx, nx.arange(NA, type_as=mat), threshold, axis=0)
+            val = sorted_mat[:, :threshold].reshape(-1)
+    elif sparse_method == "threshold":
+        row, col = _where(nx, DistMat < threshold)
+        val = DistMat[row, col]
+
+    results = _SparseTensor(nx=nx, row=row, col=col, value=val, sparse_sizes=(NA, NB))
+    return results
+
+
 #################################
 # Funcs between Numpy and Torch #
 #################################
@@ -2800,3 +2878,25 @@ _topk = (
 _dstack = lambda nx: torch.dstack if nx_torch(nx) else np.dstack
 _vstack = lambda nx: torch.vstack if nx_torch(nx) else np.vstack
 _hstack = lambda nx: torch.hstack if nx_torch(nx) else np.hstack
+
+_split = (
+    lambda nx, x, chunk_size, dim: torch.split(x, chunk_size, dim)
+    if nx_torch(nx)
+    else np.array_split(x, chunk_size, axis=dim)
+)
+
+
+def torch_like_split(arr, size, dim=0):
+    if dim < 0:
+        dim += arr.ndim
+    shape = arr.shape
+    arr = np.swapaxes(arr, dim, -1)
+    flat_arr = arr.reshape(-1, shape[dim])
+    num_splits = flat_arr.shape[-1] // size
+    remainder = flat_arr.shape[-1] % size
+    splits = np.array_split(flat_arr[:, : num_splits * size], num_splits, axis=-1)
+    if remainder:
+        splits.append(flat_arr[:, num_splits * size :])
+    splits = [np.swapaxes(split.reshape(*shape[:dim], -1, *shape[dim + 1 :]), dim, -1) for split in splits]
+
+    return splits

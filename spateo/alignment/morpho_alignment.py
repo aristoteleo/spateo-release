@@ -14,8 +14,6 @@ from .methods import BA_align, empty_cache
 from .transform import BA_transform, BA_transform_and_assignment
 from .utils import _iteration, downsampling
 
-
-
 # def morpho_align(
 #     models: List[AnnData],
 #     layer: str = "X",
@@ -162,7 +160,25 @@ def morpho_align(
     for i in _iteration(n=len(align_models) - 1, progress_name=progress_name, verbose=True):
         modelA = align_models[i]
         modelB = align_models[i + 1]
-        _, P, sigma2 = BA_align(
+        # _, P, sigma2 = BA_align(
+        #     sampleA=modelA,
+        #     sampleB=modelB,
+        #     genes=genes,
+        #     spatial_key=key_added,
+        #     key_added=key_added,
+        #     iter_key_added=iter_key_added,
+        #     vecfld_key_added=vecfld_key_added,
+        #     layer=layer,
+        #     dissimilarity=dissimilarity,
+        #     max_iter=max_iter,
+        #     dtype=dtype,
+        #     device=device,
+        #     inplace=True,
+        #     verbose=verbose,
+        #     SVI_mode=SVI_mode,
+        #     **kwargs,
+        # )
+        morpho_model = Morpho_pairwise(
             sampleA=modelA,
             sampleB=modelB,
             genes=genes,
@@ -180,15 +196,15 @@ def morpho_align(
             SVI_mode=SVI_mode,
             **kwargs,
         )
+        P = morpho_model.run()
         if mode == "SN-S":
             modelB.obsm[key_added] = modelB.obsm["Rigid_align_spatial"]
         elif mode == "SN-N":
             modelB.obsm[key_added] = modelB.obsm["Nonrigid_align_spatial"]
         pis.append(P)
-        sigma2s.append(sigma2)
         empty_cache(device=device)
 
-    return align_models, pis, sigma2s
+    return align_models, pis
 
 
 def morpho_align_sparse(

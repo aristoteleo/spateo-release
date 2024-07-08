@@ -12,9 +12,7 @@ except ImportError:
 
 from typing import List, Optional, Tuple, Union
 
-from spateo.logging import logger_manager as lm
-
-from .utils import (
+from utils import (  # sample,; _sparse_concat,
     _data,
     _dot,
     _get_anneling_factor,
@@ -22,9 +20,11 @@ from .utils import (
     _init_guess_sigma2,
     _linalg,
     _pinv,
+    _prod,
     _psi,
     _randperm,
     _roll,
+    _split,
     _unique,
     _unsqueeze,
     calc_distance,
@@ -40,9 +40,10 @@ from .utils import (
     get_rep,
     inlier_from_NN,
     intersect_lsts,
-    sample,
     voxel_data,
 )
+
+from spateo.logging import logger_manager as lm
 
 
 class Morpho_pairwise:
@@ -66,14 +67,16 @@ class Morpho_pairwise:
         allow_flip: bool = False,
         init_layer: str = "X",
         init_field: str = "layer",
-        # max_iter: int = 200, # put to run
+        max_iter: int = 200,  # put to run
         SVI_mode: bool = True,
         batch_size: int = 1000,
         pre_compute_dist: bool = True,
         sparse_calculation_mode: bool = False,
+        sparse_top_k: int = 1024,
         lambdaVF: Union[int, float] = 1e2,
         beta: Union[int, float] = 0.01,
         K: Union[int, float] = 15,
+        kernel_type: str = "euc",
         sigma2_init_scale: Optional[Union[int, float]] = 0.1,
         partial_robust_level: float = 25,
         normalize_c: bool = True,
@@ -84,6 +87,9 @@ class Morpho_pairwise:
         guidance_pair: Optional[Union[List[np.ndarray], np.ndarray]] = None,
         guidance_effect: Optional[Union[bool, str]] = False,
         guidance_epsilon: float = 1,
+        use_chunk: bool = False,
+        chunk_capacity: float = 1.0,
+        lambdaReg: float = 1.0,
     ) -> None:
 
         # initialization
@@ -105,6 +111,7 @@ class Morpho_pairwise:
         self.probability_parameters = probability_parameters
         self.label_transfer_dict = label_transfer_dict
         self.nn_init = nn_init
+        self.max_iter = max_iter
         self.allow_flip = allow_flip
         self.init_layer = init_layer
         self.init_field = init_field
@@ -112,8 +119,12 @@ class Morpho_pairwise:
         self.batch_size = batch_size
         self.pre_compute_dist = pre_compute_dist
         self.sparse_calculation_mode = sparse_calculation_mode
+        self.sparse_top_k = sparse_top_k
         self.beta = beta
+        self.lambdaVF = lambdaVF
         self.K = K
+        self.kernel_type = kernel_type
+        self.kernel_bandwidth = beta
         self.sigma2_init_scale = sigma2_init_scale
         self.partial_robust_level = partial_robust_level
         self.normalize_c = normalize_c
@@ -123,6 +134,9 @@ class Morpho_pairwise:
         self.guidance_pair = guidance_pair
         self.guidance_effect = guidance_effect
         self.guidance_epsilon = guidance_epsilon
+        self.use_chunk = use_chunk
+        self.chunk_capacity = chunk_capacity
+        self.lambdaReg = lambdaReg
 
         # checking keys
         self._check()
@@ -133,9 +147,9 @@ class Morpho_pairwise:
             device=device,
         )
 
-        self._construct_kernel()
+        self._construct_kernel(inducing_variables_num=K, sampling_method="random")
 
-        self._initialize_variational_variables()
+        self._initialize_variational_variables(sigma2_init_scale=sigma2_init_scale)
 
     def run(
         self,
@@ -147,7 +161,7 @@ class Morpho_pairwise:
         # this will reduce the runtime but consume more GPU memory
         if (not self.SVI_mode) or (self.pre_compute_dist):
             self.exp_layer_dist = calc_distance(
-                X=self.exp_layer_A, Y=self.exp_layer_B, metric=self.dissimilarity, label_transfer=self.label_transfer
+                X=self.exp_layers_A, Y=self.exp_layers_B, metric=self.dissimilarity, label_transfer=self.label_transfer
             )
 
         # start iteration
@@ -157,7 +171,7 @@ class Morpho_pairwise:
             else range(self.max_iter)
         )
         for iter in iteration:
-            self._update_batch()
+            self._update_batch(iter=iter)
             self._update_assignment_P()
             self._update_gamma()
             self._update_alpha()
@@ -167,6 +181,7 @@ class Morpho_pairwise:
 
         # get the full cell-cell assignment
         if self.SVI_mode:
+            self.SVI_mode = False
             self._update_assignment_P()
 
         self._get_optimal_R()
@@ -177,6 +192,8 @@ class Morpho_pairwise:
             )
 
         self._wrap_output()
+
+        return self.P
 
     def _check(
         self,
@@ -259,15 +276,20 @@ class Morpho_pairwise:
                 )
 
         # Check probability_parameters
-        if self.probability_type is None:
-            self.probability_type = [None] * len(self.rep_layer)
+        if self.probability_parameters is None:
+            self.probability_parameters = [None] * len(self.rep_layer)
 
         # Check init_layer and init_field
         if self.nn_init:
+            # if isinstance(self.init_layer, str):
+            #     self.init_layer = [self.init_layer]
+            # if isinstance(self.init_field, str):
+            #     self.init_field = [self.init_field]
+
             if not check_rep_layer(
                 samples=[self.sampleA, self.sampleB],
-                rep_layer=self.init_layer,
-                rep_field=self.init_field,
+                rep_layer=[self.init_layer],
+                rep_field=[self.init_field],
             ):
                 raise ValueError(f"The specified representation is not found in the attribute of the AnnData objects.")
 
@@ -353,8 +375,26 @@ class Morpho_pairwise:
         if self.normalize_g:
             self._normalize_exps()
 
+        # preprocess guidance pair if provided
+        if (self.guidance_pair is not None) and (self.guidance_effect != False) and (self.guidance_epsilon > 0):
+            self._guidance_pair_preprocess()
+        else:
+            self.guidance = False
+
         if self.verbose:
             lm.main_info(message=f"Preprocess finished.", indent_level=1)
+
+    def _guidance_pair_preprocess(
+        self,
+    ):
+        # Convert guidance pairs to the backend type
+        self.X_BI = self.nx.from_numpy(self.guidance_pair[0], type_as=self.type_as)
+        self.X_AI = self.nx.from_numpy(self.guidance_pair[1], type_as=self.type_as)
+
+        if self.normalize_c:
+            # Normalize the guidance pairs
+            self.X_AI = (self.X_AI - self.normalize_means[0]) / self.normalize_scales[0]
+            self.X_BI = (self.X_BI - self.normalize_means[1]) / self.normalize_scales[1]
 
     def _normalize_coords(
         self,
@@ -406,8 +446,9 @@ class Morpho_pairwise:
     ):
         exp_layers = [self.exp_layers_A, self.exp_layers_B]
 
-        for i, rep_f in enumerate(self.rep_field):
-            if rep_f == "layer":
+        for i, (rep_f, d_s) in enumerate(zip(self.rep_field, self.dissimilarity)):
+            # only normalize the matrix if representation is layer and dissimilarity metric is not kl
+            if (rep_f == "layer") and (d_s != "kl"):
                 normalize_scale = 0
 
                 # Calculate the normalization scale
@@ -421,7 +462,7 @@ class Morpho_pairwise:
                 normalize_scale /= len(exp_layers)
 
                 # Apply the normalization scale
-                for i in range(len(exp_layers)):
+                for l in range(len(exp_layers)):
                     exp_layers[i][l] /= normalize_scale
 
                 if self.verbose:
@@ -451,11 +492,17 @@ class Morpho_pairwise:
             _data(self.nx, 1.0, self.type_as),
         )
         self.VnA = self.nx.zeros(self.coordsA.shape, type_as=self.type_as)  # nonrigid vector velocity
-        self.XAHat, RnA = self.coordsA, self.coordsA  # initial transformed / rigid position
+        self.XAHat, self.RnA = self.coordsA, self.coordsA  # initial transformed / rigid position
         self.Coff = self.nx.zeros(self.K, type_as=self.type_as)  # inducing variables coefficient
         self.SigmaDiag = self.nx.zeros((self.NA), type_as=self.type_as)  # Gaussian processes variance
         self.R = _identity(self.nx, self.D, self.type_as)  # rotation in rigid transformation
         self.nonrigid_flag = False  # indicate if to start nonrigid
+        self.Dim = _data(self.nx, self.D, self.type_as)
+        self.samples_s = self.nx.maximum(
+            _prod(self.nx)(self.nx.max(self.coordsA, axis=0) - self.nx.min(self.coordsA, axis=0)),
+            _prod(self.nx)(self.nx.max(self.coordsB, axis=0) - self.nx.min(self.coordsB, axis=0)),
+        )
+        self.outlier_s = self.samples_s * self.NA
 
         # initialize the SVI
         if self.SVI_mode:
@@ -470,30 +517,36 @@ class Morpho_pairwise:
             self.SigmaInv = self.nx.zeros((self.K, self.K), type_as=self.type_as)  # K x K
             self.PXB_term = self.nx.zeros((self.NA, self.D), type_as=self.type_as)  # NA x D
 
+        if self.use_chunk:
+            chunk_base = 1e8  # 1e7
+            self.split_size = min(int(self.chunk_capacity * chunk_base / (self.NA)), self.NB)
+            self.split_size = 1 if self.split_size == 0 else self.split_size
+
     def _init_probability_parameters(
         self,
         subsample: int = 20000,
     ):
+        # print(self.probability_parameters)
         for i, (exp_A, exp_B, d_s, p_t, p_p) in enumerate(
             zip(
-                self.exp_layer_A,
-                self.exp_layer_B,
+                self.exp_layers_A,
+                self.exp_layers_B,
                 self.dissimilarity,
                 self.probability_type,
                 self.probability_parameters,
             )
         ):
+
             if p_p is not None:
                 continue
-
-            if p_t == "guass":
+            if p_t.lower() == "gauss":
                 sub_sample_A = (
                     np.random.choice(self.NA, subsample, replace=False) if self.NA > subsample else np.arange(self.NA)
                 )
                 sub_sample_B = (
                     np.random.choice(self.NB, subsample, replace=False) if self.NB > subsample else np.arange(self.NB)
                 )
-                exp_dist = calc_distance(
+                [exp_dist] = calc_distance(
                     X=exp_A[sub_sample_A, :],
                     Y=exp_B[sub_sample_B, :],
                     metric=d_s,
@@ -511,16 +564,16 @@ class Morpho_pairwise:
         sampling_method,
     ):
         unique_spatial_coords = _unique(self.nx, self.coordsA, 0)
-        (self.inducing_variables, _) = sample(
-            X=unique_spatial_coords, n_sampling=inducing_variables_num, sampling_method=sampling_method
-        )
+        inducing_variables_idx = np.random.choice(unique_spatial_coords.shape[0], inducing_variables_num, replace=False)
+        self.inducing_variables = unique_spatial_coords[inducing_variables_idx, :]
+        # (self.inducing_variables, _) = sample(
+        #     X=unique_spatial_coords, n_sampling=inducing_variables_num, sampling_method=sampling_method
+        # )
         if self.kernel_type == "euc":
             self.GammaSparse = con_K(X=self.inducing_variables, Y=self.inducing_variables, beta=self.kernel_bandwidth)
             self.U = con_K(X=self.coordsA, Y=self.inducing_variables, beta=self.kernel_bandwidth)
-            self.U_star = (
-                con_K(X=self.X_AI, Y=self.inducing_variables, beta=self.kernel_bandwidth)
-                if self.X_AI is not None
-                else None
+            self.U_I = (
+                con_K(X=self.X_AI, Y=self.inducing_variables, beta=self.kernel_bandwidth) if self.guidance else None
             )
         else:
             raise NotImplementedError(f"Kernel type '{self.kernel_type}' is not implemented.")
@@ -588,7 +641,7 @@ class Morpho_pairwise:
         )
 
         # calculate the similarity distance purely based on expression
-        exp_dist = calc_distance(
+        [exp_dist] = calc_distance(
             X=X_A,
             Y=X_B,
             metric="kl" if self.init_field == "layer" else "euc",
@@ -647,27 +700,92 @@ class Morpho_pairwise:
     def _update_assignment_P(
         self,
     ):
-        model_mul = _unsqueeze(self.nx)(self.alpha * self.nx.exp(-self.Sigma / self.sigma2), -1)  # N x 1
+        model_mul = _unsqueeze(self.nx)(self.alpha * self.nx.exp(-self.SigmaDiag / self.sigma2), -1)  # N x 1
+        common_kwargs = dict(
+            nx=self.nx,
+            type_as=self.type_as,
+            Dim=self.Dim,
+            sigma2=self.sigma2,
+            model_mul=model_mul,
+            gamma=self.gamma,
+            samples_s=self.samples_s,
+            sigma2_variance=self.sigma2_variance,
+            probability_type=self.probability_type,
+            probability_parameters=self.probability_parameters,
+            sparse_calculation_mode=self.sparse_calculation_mode,
+            top_k=self.sparse_top_k,
+        )
 
         if self.SVI_mode:
-            pass
+            if self.use_chunk:
+                spatial_XB_chunks = _split(self.nx, self.coordsB, self.split_size, dim=0)
+                exp_layer_B_chunks = _split(self.nx, self.exp_layers_B, self.split_size, dim=0)
+                # initial results for chunk
+                K_NA_spatial = self.nx.zeros((self.NA,), type_as=self.type_as)
+                K_NA_sigma2 = self.nx.zeros((self.NA,), type_as=self.type_as)
 
+                Ps = []
+                sigma2_related = 0
+
+                for spatial_XB_chunk, exp_layer_B_chunk in zip(spatial_XB_chunks, exp_layer_B_chunks):
+                    # calculate the spatial distance
+                    [spatial_dist] = calc_distance(self.XAHat, spatial_XB_chunk, metric="euc")
+
+                    # calculate the expression / representation distances
+                    exp_layer_dist = calc_distance(
+                        self.exp_layers_A, exp_layer_B_chunk, self.metrics, self.label_transfer
+                    )
+
+                    P, K_NA_spatial_chunk, K_NA_sigma2_chunk, sigma2_related_chunk = get_P_core(
+                        spatial_dist=spatial_dist, exp_dist=exp_layer_dist, **common_kwargs
+                    )
+
+                    # add / update chunk results
+                    Ps.append(P)
+                    K_NA_spatial += K_NA_spatial_chunk
+                    K_NA_sigma2 += K_NA_sigma2_chunk
+                    sigma2_related += sigma2_related_chunk
+
+                # concatenate / process chunk results
+                # P = _concat(self.nx, Ps, axis=1, sparse=self.sparse_calculation_mode)
+                self.P = self.nx.concatenate(Ps, axis=1)
+                self.K_NA_sigma2 = K_NA_sigma2
+                self.Sp_sigma2 = K_NA_sigma2.sum()
+                self.K_NA_spatial = K_NA_spatial
+
+            else:
+                [spatial_dist] = calc_distance(
+                    X=self.XAHat,
+                    Y=self.coordsB[self.batch_idx, :],
+                    metric="euc",
+                )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
+                if self.pre_compute_dist:
+                    exp_layer_dist = [exp_layer_d[:, self.batch_idx] for exp_layer_d in self.exp_layer_dist]
+                else:
+                    exp_layer_dist = calc_distance(
+                        X=self.exp_layer_A,
+                        Y=[e_l[self.batch_idx] for e_l in self.exp_layer_B],
+                        metric=self.dissimilarity,
+                        label_transfer=self.label_transfer,
+                    )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
+
+                self.P, self.K_NA_spatial, self.K_NA_sigma2, self.sigma2_related = get_P_core(
+                    spatial_dist=spatial_dist, exp_dist=exp_layer_dist, **common_kwargs
+                )
         else:
-            pass
-            # P, K_NA_spatial, K_NA_sigma2, sigma2_related = get_P_core(
-            #     nx=nx,
-            #     type_as=type_as,
-            #     Dim=Dim,
-            #     spatial_dist=spatial_dist,
-            #     exp_dist=exp_dist,
-            #     sigma2=sigma2,
-            #     model_mul=model_mul,
-            #     gamma=gamma,
-            #     samples_s=samples_s,
-            #     sigma2_variance=sigma2_variance,
-            #     probability_type=probability_type,
-            #     probability_parameters=probability_parameters,
-            # )
+            [spatial_dist] = calc_distance(
+                X=self.XAHat,
+                Y=self.coordsB,
+                metric="euc",
+            )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
+            self.P, self.K_NA_spatial, self.K_NA_sigma2, self.sigma2_related = get_P_core(
+                spatial_dist=spatial_dist, exp_dist=self.exp_layer_dist, **common_kwargs
+            )
+        self.Sp = self.P.sum()
+        self.Sp_sigma2 = self.K_NA_sigma2.sum()
+        self.sigma2_related = self.sigma2_related / (self.Dim * self.Sp_sigma2)
+        self.K_NA = self.nx.sum(self.P, axis=1)
+        self.K_NB = self.nx.sum(self.P, axis=0)
 
     def _update_gamma(
         self,
@@ -709,17 +827,21 @@ class Morpho_pairwise:
         SigmaInv = self.sigma2 * self.lambdaVF * self.GammaSparse + _dot(self.nx)(
             self.U.T, self.nx.einsum("ij,i->ij", self.U, self.K_NA)
         )
-        PXB_term = _dot(self.nx)(self.P, self.coordsB) - self.nx.einsum("ij,i->ij", self.RnA, self.K_NA)
+
         if self.SVI_mode:
+            PXB_term = _dot(self.nx)(self.P, self.coordsB[self.batch_idx, :]) - self.nx.einsum(
+                "ij,i->ij", self.RnA, self.K_NA
+            )
             self.SigmaInv = self.step_size * SigmaInv + (1 - self.step_size) * self.SigmaInv
             self.PXB_term = self.step_size * PXB_term + (1 - self.step_size) * self.PXB_term
         else:
+            self.PXB_term = _dot(self.nx)(self.P, self.coordsB) - self.nx.einsum("ij,i->ij", self.RnA, self.K_NA)
             self.SigmaInv, self.PXB_term = SigmaInv, PXB_term
 
         UPXB_term = _dot(self.nx)(self.U.T, self.PXB_term)
 
         # TODO: can we store these kernel multiple results? They are fixed
-        if (self.guidance_effect == "nonrigid") or (self.guidance_effect == "both"):
+        if self.guidance and ((self.guidance_effect == "nonrigid") or (self.guidance_effect == "both")):
             self.SigmaInv += (self.sigma2 / self.guidance_epsilon) * _dot(self.nx)(self.U_I.T, self.U_I)
             self.UPXB_term += (self.sigma2 / self.guidance_epsilon) * _dot(self.nx)(self.U_I.T, self.X_BI - self.R_AI)
 
@@ -727,7 +849,8 @@ class Morpho_pairwise:
         self.Coff = _dot(self.nx)(Sigma, UPXB_term)
 
         self.VnA = _dot(self.nx)(self.U, self.Coff)
-        self.V_AI = _dot(self.nx)(self.U_I, self.Coff)
+        if self.guidance and ((self.guidance_effect == "nonrigid") or (self.guidance_effect == "both")):
+            self.V_AI = _dot(self.nx)(self.U_I, self.Coff)
         self.SigmaDiag = self.sigma2 * self.nx.einsum(
             "ij->i", self.nx.einsum("ij,ji->ij", self.U, _dot(self.nx)(Sigma, self.U.T))
         )
@@ -735,16 +858,19 @@ class Morpho_pairwise:
     def _update_rigid(
         self,
     ):
+
         PXA, PVA, PXB = (
             _dot(self.nx)(self.K_NA, self.coordsA)[None, :],
             _dot(self.nx)(self.K_NA, self.VnA)[None, :],
-            _dot(self.nx)(self.K_NB, self.coordsB)[None, :],
+            _dot(self.nx)(self.K_NB, self.coordsB[self.batch_idx, :])[None, :]
+            if self.SVI_mode
+            else _dot(self.nx)(self.K_NB, self.coordsB)[None, :],
         )
 
         # solve rotation using SVD formula
         mu_XB, mu_XA, mu_Vn = PXB, PXA, PVA
         mu_X_deno, mu_Vn_deno = self.Sp, self.Sp
-        if self.guidance_effect in ("rigid", "both"):
+        if self.guidance and (self.guidance_effect in ("rigid", "both")):
             mu_XB += (self.sigma2 / self.guidance_epsilon) * self.X_BI
             mu_XA += (self.sigma2 / self.guidance_epsilon) * self.X_AI
             mu_Vn += (self.sigma2 / self.guidance_epsilon) * self.V_AI
@@ -755,15 +881,16 @@ class Morpho_pairwise:
             mu_XA += (self.sigma2 / self.lambdaReg) * _dot(self.nx)(self.inlier_P.T, self.inlier_A)
             mu_X_deno += (self.sigma2 / self.lambdaReg) * self.nx.sum(self.inlier_P)
 
+        print(mu_Vn, mu_Vn_deno)
         mu_XB = mu_XB / mu_X_deno
         mu_XA = mu_XA / mu_X_deno
         mu_Vn = mu_Vn / mu_Vn_deno
 
         XA_hat = self.coordsA - mu_XA
         VnA_hat = self.VnA - mu_Vn
-        XB_hat = self.coordsB - mu_XB
+        XB_hat = (self.coordsB[self.batch_idx, :] - mu_XB) if self.SVI_mode else (self.coordsB - mu_XB)
 
-        if self.guidance_effect in ("rigid", "both"):
+        if self.guidance and (self.guidance_effect in ("rigid", "both")):
             X_AI_hat = self.X_AI - mu_XA
             X_BI_hat = self.X_BI - mu_XB
             V_AI_hat = self.V_AI - mu_Vn
@@ -797,7 +924,7 @@ class Morpho_pairwise:
         t_numerator = PXB - PVA - _dot(self.nx)(PXA, self.R.T)
         t_deno = self.Sp
 
-        if self.guidance_effect in ("rigid", "both"):
+        if self.guidance and (self.guidance_effect in ("rigid", "both")):
             t_numerator += (self.sigma2 / self.guidance_epsilon) * self.nx.sum(
                 self.X_BI - self.V_AI - _dot(self.nx)(self.X_AI, self.R.T), axis=0
             )
@@ -815,12 +942,67 @@ class Morpho_pairwise:
         else:
             self.t = t
 
-    def _update_sigma2(
+    def _update_sigma2(self, iter):
+        self.sigma2 = self.nx.maximum(
+            (self.sigma2_related + self.nx.einsum("i,i", self.K_NA_sigma2, self.SigmaDiag) / self.Sp_sigma2),
+            _data(self.nx, 1e-3, self.type_as),
+        )
+        if iter < 100:
+            self.sigma2 = self.nx.maximum(self.sigma2, _data(self.nx, 1e-2, self.type_as))
+
+    def _get_optimal_R(
         self,
     ):
-        pass
+        mu_XnA, mu_XnB = (
+            _dot(self.nx)(self.K_NA, self.coordsA) / self.Sp,
+            _dot(self.nx)(self.K_NB, self.coordsB) / self.Sp,
+        )
+        XnABar, XnBBar = self.coordsA - mu_XnA, self.coordsB - mu_XnB
+        A = _dot(self.nx)(_dot(self.nx)(self.P, XnBBar).T, XnABar)
+
+        # get the optimal rotation matrix R
+        svdU, svdS, svdV = _linalg(self.nx).svd(A)
+        # TODO: C can be initial once and only (-1,-1) value will be changed
+        C = _identity(self.nx, self.D, type_as=self.type_as)
+        C[-1, -1] = _linalg(self.nx).det(_dot(self.nx)(svdU, svdV))
+        self.R = _dot(self.nx)(_dot(self.nx)(svdU, C), svdV)
+        self.t = mu_XnB - _dot(self.nx)(mu_XnA, self.R.T)
+        self.optimal_RnA = _dot(self.nx)(self.coordsA, self.R.T) + self.t
 
     def _wrap_output(
         self,
     ):
-        pass
+        # denormalize
+        if self.normalize_c:
+            self.XAHat = self.XAHat * self.normalize_scales[1] + self.normalize_means[1]
+            self.RnA = self.RnA * self.normalize_scales[1] + self.normalize_means[1]
+            self.optimal_RnA = self.optimal_RnA * self.normalize_scales[1] + self.normalize_means[1]
+
+        # Save aligned coordinates
+        self.XAHat = self.nx.to_numpy(self.XAHat).copy()
+        self.optimal_RnA = self.nx.to_numpy(self.optimal_RnA).copy()
+        self.RnA = self.nx.to_numpy(self.RnA).copy()
+
+        if not (self.vecfld_key_added is None):
+
+            self.vecfld = {
+                "R": self.nx.to_numpy(self.R),
+                "t": self.nx.to_numpy(self.t),
+                "optimal_R": self.nx.to_numpy(self.optimal_R),
+                "optimal_t": self.nx.to_numpy(self.optimal_t),
+                "init_R": self.init_R,
+                "init_t": self.init_t,
+                "beta": self.beta,
+                "Coff": self.nx.to_numpy(self.Coff),
+                "inducing_variables": self.nx.to_numpy(self.inducing_variables),
+                "normalize_scales": self.nx.to_numpy(self.normalize_scales) if self.normalize_c else None,
+                "normalize_means": self.nx.to_numpy(self.normalize_means) if self.normalize_c else None,
+                "normalize_c": self.normalize_c,
+                "dissimilarity": self.dissimilarity,
+                # "beta2": self.nx.to_numpy(self.beta2),
+                "sigma2": self.nx.to_numpy(self.sigma2),
+                "gamma": self.nx.to_numpy(self.gamma),
+                "NA": self.NA,
+                "sigma2_variance": self.nx.to_numpy(self.sigma2_variance),
+                "method": "Spateo",
+            }

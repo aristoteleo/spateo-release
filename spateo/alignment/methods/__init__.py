@@ -5,10 +5,7 @@ from .paste import (
     paste_center_align,
     paste_pairwise_align,
 )
-from .utils import (
-    PCA_project,
-    PCA_recover,
-    PCA_reduction,
+from .utils import (  # PCA_project,; PCA_recover,; PCA_reduction,
     _chunk,
     _unsqueeze,
     align_preprocess,
