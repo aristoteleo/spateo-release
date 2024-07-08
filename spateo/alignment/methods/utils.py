@@ -1074,9 +1074,9 @@ def calc_distance(
             assert label_transfer is not None, "label_transfer must be provided for metric 'label'."
             dist_mats.append(_label_distance_backend(x, y, label_transfer))
         elif m in ["euc", "euclidean"]:
-            dist_mats.append(_euc_distance_backend(x, y, squared=False))
-        elif m in ["square_euc", "square_euclidean"]:
             dist_mats.append(_euc_distance_backend(x, y, squared=True))
+        elif m in ["square_euc", "square_euclidean"]:
+            dist_mats.append(_euc_distance_backend(x, y, squared=False))
         elif m == "kl":
             dist_mats.append(
                 _kl_distance_backend(
@@ -2744,11 +2744,12 @@ def _init_probability_parameters(
 
 def _get_anneling_factor(
     nx,
+    type_as,
     start,
     end,
     iter,
 ):
-    anneling_factor = _power(nx)(end / start, 1 / (iter))
+    anneling_factor = _power(nx)(_data(nx, end / start, type_as=type_as), 1 / (iter))
     return anneling_factor
 
 

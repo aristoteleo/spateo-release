@@ -12,7 +12,7 @@ except ImportError:
 
 from typing import List, Optional, Tuple, Union
 
-from utils import (  # sample,; _sparse_concat,
+from spateo.alignment.methods.utils import (  # sample,; _sparse_concat,
     _data,
     _dot,
     _get_anneling_factor,
@@ -42,7 +42,6 @@ from utils import (  # sample,; _sparse_concat,
     intersect_lsts,
     voxel_data,
 )
-
 from spateo.logging import logger_manager as lm
 
 
@@ -164,6 +163,12 @@ class Morpho_pairwise:
                 X=self.exp_layers_A, Y=self.exp_layers_B, metric=self.dissimilarity, label_transfer=self.label_transfer
             )
 
+        if self.iter_key_added is not None:
+            self.iter_added = dict()
+            self.iter_added[self.key_added] = {}
+            self.iter_added["sigma2"] = {}
+            # sampleB.uns[iter_key_added]["beta2"] = {}
+
         # start iteration
         iteration = (
             lm.progress_logger(range(self.max_iter), progress_name="Start Spateo pairwise alignment")
@@ -171,13 +176,19 @@ class Morpho_pairwise:
             else range(self.max_iter)
         )
         for iter in iteration:
-            self._update_batch(iter=iter)
+            if self.iter_key_added is not None:
+                self._save_iter(iter=iter)
+            if self.SVI_mode:
+                self._update_batch(iter=iter)
             self._update_assignment_P()
             self._update_gamma()
             self._update_alpha()
-            self._update_nonrigid()
+            if (iter > 80) or (self.sigma2 < 0.015) or (self.nonrigid_flag):
+                self.nonrigid_flag = True
+                self._update_nonrigid()
             self._update_rigid()
-            self._update_sigma2()
+            self.XAHat = self.VnA + self.RnA
+            self._update_sigma2(iter=iter)
 
         # get the full cell-cell assignment
         if self.SVI_mode:
@@ -481,7 +492,11 @@ class Morpho_pairwise:
         self.sigma2_variance = 1
         self.sigma2_variance_end = self.partial_robust_level
         self.sigma2_variance_decress = _get_anneling_factor(
-            start=self.sigma2_variance, end=self.sigma2_variance_end, iter=(self.max_iter / 2), nx=self.nx
+            start=self.sigma2_variance,
+            end=self.sigma2_variance_end,
+            iter=(self.max_iter / 2),
+            nx=self.nx,
+            type_as=self.type_as,
         )
 
         self.kappa = self.nx.ones((self.NA), type_as=self.type_as)
@@ -510,9 +525,6 @@ class Morpho_pairwise:
             # Select a random subset of data
             self.batch_size = min(max(int(self.NB / 10), self.batch_size), self.NB)
             self.batch_perm = _randperm(self.nx)(self.NB)
-            # batch_idx = batch_perm[:batch_size]
-            # batch_perm = _roll(nx)(batch_perm, batch_size)
-            # batch_coordsB = coordsB[batch_idx, :]  # batch_size x D
             self.Sp, self.Sp_spatial, self.Sp_sigma2 = 0, 0, 0
             self.SigmaInv = self.nx.zeros((self.K, self.K), type_as=self.type_as)  # K x K
             self.PXB_term = self.nx.zeros((self.NA, self.D), type_as=self.type_as)  # NA x D
@@ -526,7 +538,6 @@ class Morpho_pairwise:
         self,
         subsample: int = 20000,
     ):
-        # print(self.probability_parameters)
         for i, (exp_A, exp_B, d_s, p_t, p_p) in enumerate(
             zip(
                 self.exp_layers_A,
@@ -697,6 +708,15 @@ class Morpho_pairwise:
         if self.verbose:
             lm.main_info(message="Coarse rigid alignment done.", indent_level=1)
 
+    def _save_iter(self, iter):
+        self.iter_added[self.key_added][iter] = (
+            self.nx.to_numpy(self.XAHat * self.normalize_scales[1] + self.normalize_means[1])
+            if self.normalize_c
+            else self.nx.to_numpy(self.XAHat)
+        )
+        self.iter_added["sigma2"][iter] = self.nx.to_numpy(self.sigma2)
+        # self.iter_added["beta2"][iter] = nx.to_numpy(beta2)
+
     def _update_assignment_P(
         self,
     ):
@@ -733,7 +753,7 @@ class Morpho_pairwise:
 
                     # calculate the expression / representation distances
                     exp_layer_dist = calc_distance(
-                        self.exp_layers_A, exp_layer_B_chunk, self.metrics, self.label_transfer
+                        self.exp_layers_A, exp_layer_B_chunk, self.dissimilarity, self.label_transfer
                     )
 
                     P, K_NA_spatial_chunk, K_NA_sigma2_chunk, sigma2_related_chunk = get_P_core(
@@ -783,6 +803,7 @@ class Morpho_pairwise:
             )
         self.Sp = self.P.sum()
         self.Sp_sigma2 = self.K_NA_sigma2.sum()
+        self.Sp_spatial = self.K_NA_spatial.sum()
         self.sigma2_related = self.sigma2_related / (self.Dim * self.Sp_sigma2)
         self.K_NA = self.nx.sum(self.P, axis=1)
         self.K_NB = self.nx.sum(self.P, axis=0)
@@ -881,7 +902,6 @@ class Morpho_pairwise:
             mu_XA += (self.sigma2 / self.lambdaReg) * _dot(self.nx)(self.inlier_P.T, self.inlier_A)
             mu_X_deno += (self.sigma2 / self.lambdaReg) * self.nx.sum(self.inlier_P)
 
-        print(mu_Vn, mu_Vn_deno)
         mu_XB = mu_XB / mu_X_deno
         mu_XA = mu_XA / mu_X_deno
         mu_Vn = mu_Vn / mu_Vn_deno
@@ -941,6 +961,12 @@ class Morpho_pairwise:
             self.t = self.step_size * t + (1 - self.step_size) * self.t
         else:
             self.t = t
+
+        self.RnA = _dot(self.nx)(self.coordsA, self.R.T) + self.t
+        if self.nn_init:
+            self.inlier_R = _dot(self.nx)(self.inlier_A, self.R.T) + self.t
+        if self.guidance:
+            self.R_AI = _dot(self.nx)(self.R_AI, self.R.T) + self.t
 
     def _update_sigma2(self, iter):
         self.sigma2 = self.nx.maximum(
