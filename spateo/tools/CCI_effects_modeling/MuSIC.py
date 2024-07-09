@@ -2739,6 +2739,8 @@ class MuSIC:
 
             residual = y[i] - pred_y
             diagnostic = residual
+            if isinstance(diagnostic, np.ndarray):
+                diagnostic = residual[0]
             # Reshape coefficients if necessary:
             betas = betas.flatten()
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
