@@ -4,6 +4,7 @@ import numpy as np
 import ot
 import pandas as pd
 import torch
+
 # from scipy.sparse import coo_array
 from torch import sparse_coo_tensor as SparseTensor
 
@@ -114,8 +115,8 @@ def calc_P_related(
     # metric = 'square_euc'
     NA, NB = XnAHat.shape[0], XnB.shape[0]
     D, G = XnAHat.shape[1], X_A.shape[1]
-    batch_base = 1e8 # 1e7
-    split_size = min(int(batch_capacity * batch_base/ (NA * G)), NB)
+    batch_base = 1e8  # 1e7
+    split_size = min(int(batch_capacity * batch_base / (NA * G)), NB)
     split_size = 1 if split_size == 0 else split_size
 
     nx = ot.backend.get_backend(XnAHat, XnB)
@@ -135,7 +136,9 @@ def calc_P_related(
     cur_row = 0
     for XnB_chunk, X_B_chunk, labelB_chunk in zip(XnB_chunks, X_B_chunks, labelB_chunks):
         label_mask_chunk = (
-            None if labelA is None else _construct_label_mask(nx, labelA, labelB_chunk, label_transfer_prior, XnB_chunk).T
+            None
+            if labelA is None
+            else _construct_label_mask(nx, labelA, labelB_chunk, label_transfer_prior, XnB_chunk).T
         )
         # calculate distance matrix (common step)
         SpatialMat = _dist(XnAHat, XnB_chunk, "square_euc")
@@ -283,14 +286,16 @@ def _init_guess_beta2(
 #         label_mask[idx, :] = cur_P
 #     return label_mask
 
+
 def _construct_label_mask(nx, labelA, labelB, label_transfer_prior, type_as):
     label_mask = nx.zeros((labelB.shape[0], labelA.shape[0]), type_as=type_as)
     for k in label_transfer_prior.keys():
         idxB = np.where((labelB == k))[0]
         for j in label_transfer_prior[k].keys():
             idxA = np.where((labelA == j))[0]
-            label_mask[idxB[:, None],idxA] = label_transfer_prior[k][j]
+            label_mask[idxB[:, None], idxA] = label_transfer_prior[k][j]
     return label_mask
+
 
 ## Sparse operation
 def _dense_to_sparse(
@@ -344,11 +349,12 @@ def _cos_similarity(
     if nx_torch(nx):
         torch_cos = torch.nn.CosineSimilarity(dim=1)
         mat1_unsqueeze = mat1.unsqueeze(-1)
-        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0,2)
+        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0, 2)
         distMat = -torch_cos(mat1_unsqueeze, mat2_unsqueeze) * 0.5 + 0.5
     else:
-        distMat = (ot.dist(mat1, mat2, metric='cosine'))*0.5
+        distMat = (ot.dist(mat1, mat2, metric="cosine")) * 0.5
     return distMat
+
 
 def _dist(
     mat1: Union[np.ndarray, torch.Tensor],
@@ -386,7 +392,7 @@ def _dist(
             - _dot(nx)(mat1, nx.log(mat2).T)
             - _dot(nx)(mat2, nx.log(mat1).T).T
         ) / 2
-    elif (metric.lower() == "cos" or metric.lower() == "cosine"):
+    elif metric.lower() == "cos" or metric.lower() == "cosine":
         distMat = _cos_similarity(mat1, mat2)
     return distMat
 
@@ -401,6 +407,8 @@ _split = (
     if nx_torch(nx)
     else np.array_split(x, chunk_size, axis=dim)
 )
+
+
 def torch_like_split(arr, size, dim=0):
     if dim < 0:
         dim += arr.ndim
@@ -409,12 +417,13 @@ def torch_like_split(arr, size, dim=0):
     flat_arr = arr.reshape(-1, shape[dim])
     num_splits = flat_arr.shape[-1] // size
     remainder = flat_arr.shape[-1] % size
-    splits = np.array_split(flat_arr[:, :num_splits * size], num_splits, axis=-1)
+    splits = np.array_split(flat_arr[:, : num_splits * size], num_splits, axis=-1)
     if remainder:
-        splits.append(flat_arr[:, num_splits * size:])
-    splits = [np.swapaxes(split.reshape(*shape[:dim], -1, *shape[dim+1:]), dim, -1) for split in splits]
-    
+        splits.append(flat_arr[:, num_splits * size :])
+    splits = [np.swapaxes(split.reshape(*shape[:dim], -1, *shape[dim + 1 :]), dim, -1) for split in splits]
+
     return splits
+
 
 _where = lambda nx, condition: torch.where(condition) if nx_torch(nx) else np.where(condition)
 _repeat_interleave = (

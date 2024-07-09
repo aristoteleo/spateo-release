@@ -5,9 +5,8 @@ import ot
 import torch
 from anndata import AnnData
 
-from .methods import cal_dist, cal_dot
-from .methods.morpho import con_K
-from .methods.utils import (
+# from .methods.morpho import con_K
+from .methods import (
     _chunk,
     _data,
     _dot,
@@ -16,9 +15,12 @@ from .methods.utils import (
     _power,
     _prod,
     _unsqueeze,
+    cal_dist,
+    cal_dot,
     calc_exp_dissimilarity,
     check_backend,
     check_exp,
+    con_K,
     filter_common_genes,
     intersect_lsts,
 )

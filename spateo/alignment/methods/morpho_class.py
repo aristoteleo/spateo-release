@@ -12,7 +12,7 @@ except ImportError:
 
 from typing import List, Optional, Tuple, Union
 
-from spateo.alignment.methods.utils import (  # sample,; _sparse_concat,
+from spateo.alignment.methods.utils import (
     _data,
     _dot,
     _get_anneling_factor,
@@ -46,13 +46,68 @@ from spateo.logging import logger_manager as lm
 
 
 class Morpho_pairwise:
+    """
+    A class to align two spatial transcriptomics AnnData objects using the Spateo alignment algorithm.
+
+    Attributes:
+        sampleA (AnnData): The first AnnData object that acts as the reference.
+        sampleB (AnnData): The second AnnData object that acts as the reference.
+        rep_layer (Union[str, List[str]]): Representation layer(s) used for alignment. Default is "X".
+        rep_field (Union[str, List[str]]): Representation layer field(s) in AnnData to be used for alignment. "layer" means gene expression, "obsm" means embdedding like pca or VAE, "obs" means discrete label annotation. Note that Spateo only accept one label annotation. Defaults to "layer".
+        genes (Optional[Union[List[str], torch.Tensor]]): List or tensor of genes to be used for alignment. For example, you can input the genes you are interested or spatially variabe genes here. Defaults to None.
+        spatial_key (str): Key in `.obsm` of AnnData corresponding to the spatial coordinates. Defaults to "spatial".
+        key_added (str): Key under which the aligned spatial coordinates are added in `.obsm`. Defaults to "align_spatial".
+        iter_key_added (Optional[str]): Key under which to store intermediate iteration results in `.uns`. Defaults to None.
+        save_concrete_iter (bool): Whether to save more concrete intermediate iteration results. Default is False.
+        vecfld_key_added (Optional[str]): Key under which to store vector field results in `.uns`. Defaults to None.
+
+        dissimilarity (Union[str, List[str]]): Measure(s) of pairwise dissimilarity of each observation to be used. Defaults to "kl".
+        probability_type (Union[str, List[str]]): Type(s) of probability distribution used. Defaults to "gauss".
+        probability_parameters (Optional[Union[float, List[float]]]): Parameters for the probability distribution. Defaults to None.
+        label_transfer_dict (Optional[Union[dict, List[dict]]]): Dictionary that stores the label transfer probability. Defaults to None.
+
+        nn_init (bool): Whether to use nearest neighbor matching to initialize the alignment. Default is True.
+        allow_flip (bool): Whether to allow flipping of coordinates. Default is False.
+        init_layer (str): Layer for initialize alignment. Defaults to "X".
+        init_field (str): Layer field for initialize alignment. Defaults to 'layer'.
+        nn_init_weight (float): Weight for nn_init guidance. Larger means that the nn_init guidance has more impact on the alignment, vice versa. Default is 1.0.
+        nn_init_top_K (int, optional): The number of top K nearest neighbors to consider in the nn_init. Defaults to 10.
+
+        guidance_pair (Optional[Union[List[np.ndarray], np.ndarray]]): List of guidance pairs for alignment. Default is None.
+        guidance_effect (Optional[Union[bool, str]]): Effect of guidance for the transformation. Valid value: False, "rigid", "nonrigid", and "both". Default is False.
+        guidance_weight (float): Weight for guidance. Larger means that the guidance has more impact on the alignment, vice versa. Default is 1.
+
+        max_iter (int): Maximum number of iterations. Defaults to 200.
+        SVI_mode (bool): Whether to use Stochastic Variational Inference mode. Default is True.
+        batch_size (int): Size of the mini-batch of SVI. Default is 1000.
+        pre_compute_dist (bool): Whether to precompute the distance matrix when using SVI mode. This will significantly speed up the calculation process but will also take more (GPU) memory. Default is True.
+        sparse_calculation_mode (bool): Whether to use sparse matrix calculation. This will significantly reduce the (GPU) memory but will also slow down the speed. Default is False.
+        sparse_top_k (int): The top k elements to keep in sparse calculation mode. Default is 1024.
+        use_chunk (bool): Whether to use chunking in calculations. This will reduce the (GPU) memory but will also slow down the speed. Default is False.
+        chunk_capacity (float): Chunk size scale to the chunk_base.
+
+        lambdaVF (Union[int, float]): Regularization parameter for the vector field of the non-rigid transformation. Smaller means that non-rigid deformation gets fewer constraints, then deformation can be larger and more flexible, vice versa. Default is 1e2. Recommended setting range [1e-1, 1e4].
+        beta (Union[int, float]): Length-scale of the SE kernel. Larger means less correlation between points and more flexible non-rigid deformation, and vice versa. Default is 0.01. Recommended setting range [1e-4, 1e0].
+        K (Union[int, float]): Number of sparse inducing points used for Nyström approximation for the kernel. Default is 15.
+        kernel_type (str): Type of kernel used. Default is "euc".
+        sigma2_init_scale (Optional[Union[int, float]]): Initial value for the spatial dispersion level. Default is 0.1.
+        partial_robust_level (float): Robust level of partial alignment. Default is 25.
+
+        normalize_c (bool): Whether to normalize spatial coordinates. Default is True.
+        normalize_g (bool): Whether to normalize gene expression. Default is True.
+
+        dtype (str): Data type for computations. Default is "float32".
+        device (str): Device used to run the program. Default is "cpu".
+        verbose (bool): Whether to print verbose messages. Default is True.
+    """
+
     def __init__(
         self,
         sampleA: AnnData,
         sampleB: AnnData,
         rep_layer: Union[str, List[str]] = "X",
         rep_field: Union[str, List[str]] = "layer",
-        genes: Optional[Union[List[str], torch.Tensor]] = None,
+        genes: Optional[Union[List[str], np.ndarray, torch.Tensor]] = None,
         spatial_key: str = "spatial",
         key_added: str = "align_spatial",
         iter_key_added: Optional[str] = None,
@@ -66,7 +121,8 @@ class Morpho_pairwise:
         allow_flip: bool = False,
         init_layer: str = "X",
         init_field: str = "layer",
-        max_iter: int = 200,  # put to run
+        nn_init_top_K: int = 10,
+        max_iter: int = 200,
         SVI_mode: bool = True,
         batch_size: int = 1000,
         pre_compute_dist: bool = True,
@@ -80,23 +136,24 @@ class Morpho_pairwise:
         partial_robust_level: float = 25,
         normalize_c: bool = True,
         normalize_g: bool = True,
+        separate_mean: bool = True,
+        separate_scale: bool = False,
         dtype: str = "float32",
         device: str = "cpu",
         verbose: bool = True,
         guidance_pair: Optional[Union[List[np.ndarray], np.ndarray]] = None,
         guidance_effect: Optional[Union[bool, str]] = False,
-        guidance_epsilon: float = 1,
+        guidance_weight: float = 1.0,
         use_chunk: bool = False,
         chunk_capacity: float = 1.0,
-        lambdaReg: float = 1.0,
+        nn_init_weight: float = 1.0,
     ) -> None:
 
         # initialization
         self.verbose = verbose
-
         # the order is different
-        self.sampleB = sampleA  # sample A is data points (or self.sampleB)
-        self.sampleA = sampleB  # sample B is model points (or self.sampleA)
+        self.sampleA = sampleA  # sample A is model points
+        self.sampleB = sampleB  # sample B is data points
         self.rep_layer = rep_layer
         self.rep_field = rep_field
         self.genes = genes
@@ -110,6 +167,7 @@ class Morpho_pairwise:
         self.probability_parameters = probability_parameters
         self.label_transfer_dict = label_transfer_dict
         self.nn_init = nn_init
+        self.nn_init_top_K = nn_init_top_K
         self.max_iter = max_iter
         self.allow_flip = allow_flip
         self.init_layer = init_layer
@@ -128,14 +186,16 @@ class Morpho_pairwise:
         self.partial_robust_level = partial_robust_level
         self.normalize_c = normalize_c
         self.normalize_g = normalize_g
+        self.separate_mean = separate_mean
+        self.separate_scale = separate_scale
         self.dtype = dtype
         self.device = device
         self.guidance_pair = guidance_pair
         self.guidance_effect = guidance_effect
-        self.guidance_epsilon = guidance_epsilon
+        self.guidance_weight = guidance_weight
         self.use_chunk = use_chunk
         self.chunk_capacity = chunk_capacity
-        self.lambdaReg = lambdaReg
+        self.nn_init_weight = nn_init_weight
 
         # checking keys
         self._check()
@@ -153,6 +213,20 @@ class Morpho_pairwise:
     def run(
         self,
     ):
+        """
+        Run the pairwise alignment process for spatial transcriptomics data.
+
+        Steps involved:
+        1. Perform coarse rigid alignment if nearest neighbor (nn) initialization is enabled.
+        2. Calculate the pairwise distance matrix for representations if pre-computation is enabled or not in SVI mode.
+        3. Initialize iteration variables and structures.
+        4. Perform iterative variational updates for alignment, including assignment P, gamma, alpha, sigma2, rigid and non-rigid updates.
+        5. Retrieve the full cell-cell assignment after the iterative process and calculate the optimal rigid transformation
+
+        Returns:
+            np.ndarray: The final cell-cell assignment matrix.
+        """
+
         if self.nn_init:
             self._coarse_rigid_alignment()
 
@@ -167,7 +241,6 @@ class Morpho_pairwise:
             self.iter_added = dict()
             self.iter_added[self.key_added] = {}
             self.iter_added["sigma2"] = {}
-            # sampleB.uns[iter_key_added]["beta2"] = {}
 
         # start iteration
         iteration = (
@@ -190,7 +263,7 @@ class Morpho_pairwise:
             self.XAHat = self.VnA + self.RnA
             self._update_sigma2(iter=iter)
 
-        # get the full cell-cell assignment
+        # Retrieve the full cell-cell assignment
         if self.SVI_mode:
             self.SVI_mode = False
             self._update_assignment_P()
@@ -209,6 +282,22 @@ class Morpho_pairwise:
     def _check(
         self,
     ):
+        """
+        Validate and initialize various attributes for the Morpho_pairwise object.
+
+        This method performs several checks and initializations, including:
+        - Representation layers and fields in AnnData objects
+        - Spatial keys in AnnData objects
+        - Label transfer dictionaries
+        - Dissimilarity metrics
+        - Probability types and parameters
+        - Initialization layers and fields
+        - Guidance effects
+
+        Raises:
+            ValueError: If any of the validations fail or required attributes are missing.
+            KeyError: If the specified spatial key is not found in the AnnData objects.
+        """
 
         # Check if the representation is in the AnnData objects
         if self.rep_layer is not None:
@@ -239,7 +328,7 @@ class Morpho_pairwise:
             raise KeyError(f"Spatial key '{self.spatial_key}' not found in sampleB AnnData object.")
 
         # Check transfer proir
-        if self.obs_key is not None:
+        if self.obs_key is not None and self.label_transfer_dict is not None:
             self.catA = self.sampleA.obs[self.obs_key].cat.categories.tolist()
             self.catB = self.sampleB.obs[self.obs_key].cat.categories.tolist()
             check_label_transfer_dict(self.catA, self.catB, self.label_transfer_dict)
@@ -276,7 +365,7 @@ class Morpho_pairwise:
             "gaussian",
             "cos",
             "cosine",
-            "label",
+            "prob",
         ]
         self.probability_type = [d_s.lower() for d_s in self.probability_type]  # Convert all to lowercase
 
@@ -286,17 +375,17 @@ class Morpho_pairwise:
                     f"Invalid `metric` value: {p_t}. Available `metrics` are: " f"{', '.join(valid_metrics)}."
                 )
 
+        for i, r_f in enumerate(self.rep_field):
+            if r_f == "obs":
+                self.dissimilarity[i] = "label"
+                self.probability_type[i] = "prob"
+
         # Check probability_parameters
         if self.probability_parameters is None:
             self.probability_parameters = [None] * len(self.rep_layer)
 
         # Check init_layer and init_field
         if self.nn_init:
-            # if isinstance(self.init_layer, str):
-            #     self.init_layer = [self.init_layer]
-            # if isinstance(self.init_field, str):
-            #     self.init_field = [self.init_field]
-
             if not check_rep_layer(
                 samples=[self.sampleA, self.sampleB],
                 rep_layer=[self.init_layer],
@@ -313,11 +402,33 @@ class Morpho_pairwise:
                     f"{', '.join(valid_guidance_effects)}."
                 )
 
+        if self.sparse_calculation_mode:
+            self.pre_compute_dist = False
+
     def _align_preprocess(
         self,
         dtype: str = "float32",
         device: str = "cpu",
     ):
+        """
+        Preprocess the data for alignment.
+
+        This method performs several preprocessing steps, including:
+        - Determining the backend (CPU/GPU) for computation.
+        - Extracting common genes from the samples.
+        - Extracting gene expression or representations from the samples.
+        - Checking and generating the label transfer matrix from the dictionary.
+        - Extracting and normalizing spatial coordinates.
+        - Normalizing gene expression if required.
+        - Preprocessing guidance pairs if provided.
+
+        Args:
+            dtype (str, optional): The data type for computations. Defaults to "float32".
+            device (str, optional): The device used for computation (e.g., "cpu" or "cuda:0"). Defaults to "cpu".
+
+        Raises:
+            AssertionError: If the spatial coordinate dimensions of the samples are different.
+        """
 
         # Determine if gpu or cpu is being used
         (self.nx, self.type_as) = check_backend(device=device, dtype=dtype)
@@ -359,7 +470,12 @@ class Morpho_pairwise:
         # check the label tranfer dictionary and generate a matrix that contains the label transfer cost and cast to the specified type
         if self.obs_key is not None:
             self.label_transfer = check_label_transfer(
-                self.nx, self.type_as, [self.sampleA, self.sampleB], self.obs_key, self.label_transfer_dict
+                nx=self.nx,
+                type_as=self.type_as,
+                sampleA=self.sampleA,
+                sampleB=self.sampleB,
+                obs_key=self.obs_key,
+                label_transfer_dict=self.label_transfer_dict,
             )
         else:
             self.label_transfer = None
@@ -387,7 +503,7 @@ class Morpho_pairwise:
             self._normalize_exps()
 
         # preprocess guidance pair if provided
-        if (self.guidance_pair is not None) and (self.guidance_effect != False) and (self.guidance_epsilon > 0):
+        if (self.guidance_pair is not None) and (self.guidance_effect != False) and (self.guidance_weight > 0):
             self._guidance_pair_preprocess()
         else:
             self.guidance = False
@@ -398,6 +514,20 @@ class Morpho_pairwise:
     def _guidance_pair_preprocess(
         self,
     ):
+        """
+        Preprocess the guidance pairs for alignment.
+
+        This method converts the guidance pairs to the backend type (e.g., NumPy, Torch) and
+        normalizes them if required.
+
+        The normalization is based on the means and scales of the spatial coordinates.
+
+        Raises:
+            ValueError: If `self.guidance_pair` is not properly formatted.
+        """
+        if not isinstance(self.guidance_pair, list) or len(self.guidance_pair) != 2:
+            raise ValueError("guidance_pair must be a list with two elements: [X_BI, X_AI].")
+
         # Convert guidance pairs to the backend type
         self.X_BI = self.nx.from_numpy(self.guidance_pair[0], type_as=self.type_as)
         self.X_AI = self.nx.from_numpy(self.guidance_pair[1], type_as=self.type_as)
@@ -409,9 +539,18 @@ class Morpho_pairwise:
 
     def _normalize_coords(
         self,
-        separate_mean: bool = True,
-        separate_scale: bool = False,
     ):
+        """
+        Normalize the spatial coordinates of the samples.
+
+        This method normalizes the spatial coordinates of the samples to have zero mean and unit variance.
+        It can normalize the coordinates separately or globally based on the provided arguments.
+
+        Raises:
+            AssertionError: If the dimensionality of the coordinates does not match.
+
+        """
+
         normalize_scales = self.nx.zeros((2,), type_as=self.type_as)
         normalize_means = self.nx.zeros((2, self.D), type_as=self.type_as)
 
@@ -422,7 +561,7 @@ class Morpho_pairwise:
             normalize_means[i] = normalize_mean
 
         # get the global means for whole coords if "separate_mean" is True
-        if not separate_mean:
+        if not self.separate_mean:
             global_mean = self.nx.mean(normalize_means, axis=0)
             normalize_means = self.nx.full((len(coords), self.D), global_mean)
 
@@ -435,7 +574,7 @@ class Morpho_pairwise:
             normalize_scales[i] = normalize_scale
 
         # get the global scale for whole coords if "separate_scale" is True
-        if not separate_scale:
+        if not self.separate_scale:
             global_scale = self.nx.mean(normalize_scales)
             normalize_scales = self.nx.full((len(coords),), global_scale)
 
@@ -455,6 +594,17 @@ class Morpho_pairwise:
     def _normalize_exps(
         self,
     ):
+        """
+        Normalize the gene expression matrices.
+
+        This method normalizes the gene expression matrices for the samples if the representation field
+        is 'layer' and the dissimilarity metric is not 'kl'. The normalization ensures that the matrices
+        have a consistent scale across the samples.
+
+        Raises:
+            ValueError: If the normalization scale cannot be calculated.
+        """
+
         exp_layers = [self.exp_layers_A, self.exp_layers_B]
 
         for i, (rep_f, d_s) in enumerate(zip(self.rep_field, self.dissimilarity)):
@@ -482,8 +632,21 @@ class Morpho_pairwise:
 
     def _initialize_variational_variables(
         self,
-        sigma2_init_scale,
+        sigma2_init_scale: float = 1.0,
     ):
+        """
+        Initialize variational variables for the alignment process.
+
+        This method sets initial guesses for various parameters, initializes variational variables,
+        and configures the Stochastic Variational Inference (SVI) mode if enabled.
+
+        Args:
+            sigma2_init_scale (float, optional): Initial scaling factor for sigma2. Defaults to 1.0.
+
+        Raises:
+            ValueError: If any initialization fails.
+        """
+
         # initial guess for sigma2, beta2, anneling factor for sigma2 and beta2
         self.sigma2 = sigma2_init_scale * _init_guess_sigma2(self.coordsA, self.coordsB)
 
@@ -519,6 +682,11 @@ class Morpho_pairwise:
         )
         self.outlier_s = self.samples_s * self.NA
 
+        # initialize some constants
+        self._gamma_001 = _data(self.nx, 0.01, self.type_as)
+        self._gamma_099 = _data(self.nx, 0.99, self.type_as)
+        self.C = _identity(self.nx, self.D, self.type_as)
+
         # initialize the SVI
         if self.SVI_mode:
             self.SVI_deacy = _data(self.nx, 10.0, self.type_as)
@@ -529,6 +697,7 @@ class Morpho_pairwise:
             self.SigmaInv = self.nx.zeros((self.K, self.K), type_as=self.type_as)  # K x K
             self.PXB_term = self.nx.zeros((self.NA, self.D), type_as=self.type_as)  # NA x D
 
+        # Initialize chunking if use_chunk is enabled
         if self.use_chunk:
             chunk_base = 1e8  # 1e7
             self.split_size = min(int(self.chunk_capacity * chunk_base / (self.NA)), self.NB)
@@ -538,6 +707,19 @@ class Morpho_pairwise:
         self,
         subsample: int = 20000,
     ):
+        """
+        Initialize probability parameters for the alignment process.
+
+        This method calculates initial values for probability parameters based on the provided
+        subsampling size and the specified dissimilarity and probability types.
+
+        Args:
+            subsample (int, optional): The number of subsamples to use for initialization. Defaults to 20000.
+
+        Raises:
+            ValueError: If an unsupported probability type is encountered.
+        """
+
         for i, (exp_A, exp_B, d_s, p_t, p_p) in enumerate(
             zip(
                 self.exp_layers_A,
@@ -558,8 +740,8 @@ class Morpho_pairwise:
                     np.random.choice(self.NB, subsample, replace=False) if self.NB > subsample else np.arange(self.NB)
                 )
                 [exp_dist] = calc_distance(
-                    X=exp_A[sub_sample_A, :],
-                    Y=exp_B[sub_sample_B, :],
+                    X=exp_A[sub_sample_A],
+                    Y=exp_B[sub_sample_B],
                     metric=d_s,
                 )
                 min_exp_dist = self.nx.min(exp_dist, 1)
@@ -567,13 +749,29 @@ class Morpho_pairwise:
                     min_exp_dist[self.nx.argsort(min_exp_dist)[int(sub_sample_A.shape[0] * 0.05)]] / 5
                 )
             else:
-                pass
+                pass  # Handle other probability types if necessary
 
+    # TODO: add other sampling method like trn sampling
+    # TODO: add other kernel type like geodist
     def _construct_kernel(
         self,
         inducing_variables_num,
         sampling_method,
     ):
+        """
+        Construct the kernel matrix for the alignment process.
+
+        This method generates inducing variables from the spatial coordinates, constructs the sparse
+        kernel matrix, and handles different kernel types. It raises an error if the kernel type is not implemented.
+
+        Args:
+            inducing_variables_num (int): Number of inducing variables to sample.
+            sampling_method (str): Method used for sampling the inducing variables.
+
+        Raises:
+            NotImplementedError: If the specified kernel type is not implemented.
+        """
+
         unique_spatial_coords = _unique(self.nx, self.coordsA, 0)
         inducing_variables_idx = np.random.choice(unique_spatial_coords.shape[0], inducing_variables_num, replace=False)
         self.inducing_variables = unique_spatial_coords[inducing_variables_idx, :]
@@ -593,8 +791,21 @@ class Morpho_pairwise:
 
     def _update_batch(
         self,
-        iter,
+        iter: int,
     ):
+        """
+        Update the batch for Stochastic Variational Inference (SVI).
+
+        This method updates the batch indices and step size for each iteration during the SVI process.
+        It ensures that the batch permutation is rolled to provide a new batch for each iteration.
+
+        Args:
+            iter (int): The current iteration number.
+
+        Raises:
+            ValueError: If batch size exceeds the number of available data points.
+        """
+
         self.step_size = self.nx.minimum(_data(self.nx, 1.0, self.type_as), self.SVI_deacy / (iter + 1.0))
         self.batch_idx = self.batch_perm[: self.batch_size]
         self.batch_perm = _roll(self.nx)(self.batch_perm, self.batch_size)  # move the batch_perm
@@ -602,12 +813,27 @@ class Morpho_pairwise:
     def _coarse_rigid_alignment(
         self,
         n_sampling=20000,
-        top_K=10,
     ):
+        """
+        Perform coarse rigid alignment between two sets of spatial coordinates.
+
+        This method performs downsampling, voxelization, and matching pairs construction based on
+        brute force mutual K-nearest neighbors (K-NN). It calculates the similarity distance based
+        on gene expression and performs a coarse alignment using inlier estimation. Optionally,
+        it allows flipping the data for better alignment.
+
+        Args:
+            n_sampling (int, optional): The number of samples to use for downsampling. Defaults to 20000.
+
+        Raises:
+            ValueError: If any required representation is not found in the AnnData objects.
+            RuntimeError: If coarse rigid alignment fails after reducing top_K.
+        """
         if self.verbose:
             lm.main_info(message="Performing coarse rigid alignment...", indent_level=1)
 
-        # TODO: downsampling here
+        top_K = self.nn_init_top_K
+
         sampling_idxA = (
             np.random.choice(self.NA, n_sampling, replace=False) if self.NA > n_sampling else np.arange(self.NA)
         )
@@ -657,18 +883,31 @@ class Morpho_pairwise:
             Y=X_B,
             metric="kl" if self.init_field == "layer" else "euc",
         )
+        exp_dist = self.nx.to_numpy(exp_dist)
+        while True:
+            # construct matching pairs based on brute force mutual K-NN. Here we use numpy backend
+            # TODO: we can use GPU to search KNN and then convert to CPU
+            try:
+                item2 = np.argpartition(exp_dist, top_K, axis=0)[:top_K, :].T
+                item1 = np.repeat(np.arange(exp_dist.shape[1])[:, None], top_K, axis=1)
+                NN1 = np.dstack((item1, item2)).reshape((-1, 2))
+                distance1 = exp_dist.T[NN1[:, 0], NN1[:, 1]]
 
-        # construct matching pairs based on brute force mutual K-NN. Here we use numpy backend
-        # TODO: we can use GPU to search KNN and then convert to CPU
-        item2 = np.argpartition(exp_dist, top_K, axis=0)[:top_K, :].T
-        item1 = np.repeat(np.arange(exp_dist.shape[1])[:, None], top_K, axis=1)
-        NN1 = np.dstack((item1, item2)).reshape((-1, 2))
-        distance1 = exp_dist.T[NN1[:, 0], NN1[:, 1]]
+                item1 = np.argpartition(exp_dist, top_K, axis=1)[:, :top_K]
+                item2 = np.repeat(np.arange(exp_dist.shape[0])[:, None], top_K, axis=1)
+                NN2 = np.dstack((item1, item2)).reshape((-1, 2))
+                distance2 = exp_dist.T[NN2[:, 0], NN2[:, 1]]
 
-        item1 = np.argpartition(exp_dist, top_K, axis=1)[:, :top_K]
-        item2 = np.repeat(np.arange(exp_dist.shape[0])[:, None], top_K, axis=1)
-        NN2 = np.dstack((item1, item2)).reshape((-1, 2))
-        distance2 = exp_dist.T[NN2[:, 0], NN2[:, 1]]
+                break  # Break the loop if successful
+            except Exception as e:
+                top_K -= 1
+                if top_K == 0:
+                    raise RuntimeError("Failed to perform coarse rigid alignment after reducing top_K.") from e
+                if self.verbose:
+                    lm.main_info(
+                        message=f"Error in coarse rigid alignment: {e}. Reducing top_K to {top_K} and retrying.",
+                        indent_level=2,
+                    )
 
         NN = np.vstack((NN1, NN2))
         distance = np.r_[distance1, distance2]
@@ -708,18 +947,50 @@ class Morpho_pairwise:
         if self.verbose:
             lm.main_info(message="Coarse rigid alignment done.", indent_level=1)
 
-    def _save_iter(self, iter):
+    def _save_iter(
+        self,
+        iter: int,
+    ):
+        """
+        Save the current iteration's alignment results.
+
+        This method saves the current transformed coordinates and the sigma2 value for the specified
+        iteration. It normalizes the coordinates if normalization is enabled.
+
+        Args:
+            iter (int): The current iteration number.
+
+        Raises:
+            KeyError: If `key_added` or "sigma2" key is not found in `iter_added`.
+        """
+
         self.iter_added[self.key_added][iter] = (
             self.nx.to_numpy(self.XAHat * self.normalize_scales[1] + self.normalize_means[1])
             if self.normalize_c
             else self.nx.to_numpy(self.XAHat)
         )
         self.iter_added["sigma2"][iter] = self.nx.to_numpy(self.sigma2)
-        # self.iter_added["beta2"][iter] = nx.to_numpy(beta2)
+
+    ##########################################
+    # Variational variables update functions #
+    ##########################################
 
     def _update_assignment_P(
         self,
     ):
+        """
+        Update the assignment matrix P.
+
+        This method calculates the assignment matrix P, which represents the probability
+        of cells in the sampleB are generated by the cells in sampleA. It considers both
+        spatial and expression / representation distances and updates variational parameters accordingly.
+
+        Args:
+            None
+
+        Raises:
+            ValueError: If any required representation is not found in the AnnData objects.
+        """
         model_mul = _unsqueeze(self.nx)(self.alpha * self.nx.exp(-self.SigmaDiag / self.sigma2), -1)  # N x 1
         common_kwargs = dict(
             nx=self.nx,
@@ -736,81 +1007,108 @@ class Morpho_pairwise:
             top_k=self.sparse_top_k,
         )
 
-        if self.SVI_mode:
-            if self.use_chunk:
-                spatial_XB_chunks = _split(self.nx, self.coordsB, self.split_size, dim=0)
-                exp_layer_B_chunks = _split(self.nx, self.exp_layers_B, self.split_size, dim=0)
-                # initial results for chunk
-                K_NA_spatial = self.nx.zeros((self.NA,), type_as=self.type_as)
-                K_NA_sigma2 = self.nx.zeros((self.NA,), type_as=self.type_as)
-
-                Ps = []
-                sigma2_related = 0
-
-                for spatial_XB_chunk, exp_layer_B_chunk in zip(spatial_XB_chunks, exp_layer_B_chunks):
-                    # calculate the spatial distance
-                    [spatial_dist] = calc_distance(self.XAHat, spatial_XB_chunk, metric="euc")
-
-                    # calculate the expression / representation distances
-                    exp_layer_dist = calc_distance(
-                        self.exp_layers_A, exp_layer_B_chunk, self.dissimilarity, self.label_transfer
-                    )
-
-                    P, K_NA_spatial_chunk, K_NA_sigma2_chunk, sigma2_related_chunk = get_P_core(
-                        spatial_dist=spatial_dist, exp_dist=exp_layer_dist, **common_kwargs
-                    )
-
-                    # add / update chunk results
-                    Ps.append(P)
-                    K_NA_spatial += K_NA_spatial_chunk
-                    K_NA_sigma2 += K_NA_sigma2_chunk
-                    sigma2_related += sigma2_related_chunk
-
-                # concatenate / process chunk results
-                # P = _concat(self.nx, Ps, axis=1, sparse=self.sparse_calculation_mode)
-                self.P = self.nx.concatenate(Ps, axis=1)
-                self.K_NA_sigma2 = K_NA_sigma2
-                self.Sp_sigma2 = K_NA_sigma2.sum()
-                self.K_NA_spatial = K_NA_spatial
-
+        if self.use_chunk:
+            if self.SVI_mode:
+                spatial_XB_chunks = _split(self.nx, self.coordsB[self.batch_idx, :], self.split_size, dim=0)
+                exp_layer_B_chunks = [
+                    _split(self.nx, layer[self.batch_idx], self.split_size, dim=0) for layer in self.exp_layers_B
+                ]
             else:
-                [spatial_dist] = calc_distance(
-                    X=self.XAHat,
-                    Y=self.coordsB[self.batch_idx, :],
-                    metric="euc",
-                )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
-                if self.pre_compute_dist:
-                    exp_layer_dist = [exp_layer_d[:, self.batch_idx] for exp_layer_d in self.exp_layer_dist]
-                else:
-                    exp_layer_dist = calc_distance(
-                        X=self.exp_layer_A,
-                        Y=[e_l[self.batch_idx] for e_l in self.exp_layer_B],
-                        metric=self.dissimilarity,
-                        label_transfer=self.label_transfer,
-                    )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
+                spatial_XB_chunks = _split(self.nx, self.coordsB, self.split_size, dim=0)
+                exp_layer_B_chunks = [_split(self.nx, layer, self.split_size, dim=0) for layer in self.exp_layers_B]
+            exp_layer_B_chunks = [
+                [exp_layer_B_chunks[j][i] for j in range(len(self.exp_layers_B))] for i in range(len(spatial_XB_chunks))
+            ]
+            # initial results for chunk
+            K_NA_spatial = self.nx.zeros((self.NA,), type_as=self.type_as)
+            K_NA_sigma2 = self.nx.zeros((self.NA,), type_as=self.type_as)
 
-                self.P, self.K_NA_spatial, self.K_NA_sigma2, self.sigma2_related = get_P_core(
+            Ps = []
+            sigma2_related = 0
+
+            for spatial_XB_chunk, exp_layer_B_chunk in zip(spatial_XB_chunks, exp_layer_B_chunks):
+                # calculate the spatial distance
+                [spatial_dist] = calc_distance(self.XAHat, spatial_XB_chunk, metric="euc")
+
+                # calculate the expression / representation distances
+                exp_layer_dist = calc_distance(
+                    self.exp_layers_A, exp_layer_B_chunk, self.dissimilarity, self.label_transfer
+                )
+
+                P, K_NA_spatial_chunk, K_NA_sigma2_chunk, sigma2_related_chunk = get_P_core(
                     spatial_dist=spatial_dist, exp_dist=exp_layer_dist, **common_kwargs
                 )
+
+                # add / update chunk results
+                Ps.append(P)
+                K_NA_spatial += K_NA_spatial_chunk
+                K_NA_sigma2 += K_NA_sigma2_chunk
+                sigma2_related += sigma2_related_chunk
+
+            # concatenate / process chunk results
+            self.P = self.nx.concatenate(Ps, axis=1)
+            self.K_NA_sigma2 = K_NA_sigma2
+            Sp_sigma2 = K_NA_sigma2.sum()
+            self.K_NA_spatial = K_NA_spatial
+
         else:
             [spatial_dist] = calc_distance(
                 X=self.XAHat,
-                Y=self.coordsB,
+                Y=self.coordsB[self.batch_idx, :] if self.SVI_mode else self.coordsB,
                 metric="euc",
             )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
-            self.P, self.K_NA_spatial, self.K_NA_sigma2, self.sigma2_related = get_P_core(
-                spatial_dist=spatial_dist, exp_dist=self.exp_layer_dist, **common_kwargs
+            if self.pre_compute_dist:
+                exp_layer_dist = (
+                    [exp_layer_d[:, self.batch_idx] for exp_layer_d in self.exp_layer_dist]
+                    if self.SVI_mode
+                    else self.exp_layer_dist,
+                )
+            else:
+                exp_layer_dist = calc_distance(
+                    X=self.exp_layers_A,
+                    Y=[e_l[self.batch_idx] for e_l in self.exp_layers_B],
+                    metric=self.dissimilarity,
+                    label_transfer=self.label_transfer,
+                )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
+
+            self.P, self.K_NA_spatial, self.K_NA_sigma2, sigma2_related = get_P_core(
+                spatial_dist=spatial_dist, exp_dist=exp_layer_dist, **common_kwargs
             )
-        self.Sp = self.P.sum()
-        self.Sp_sigma2 = self.K_NA_sigma2.sum()
-        self.Sp_spatial = self.K_NA_spatial.sum()
-        self.sigma2_related = self.sigma2_related / (self.Dim * self.Sp_sigma2)
+
+        Sp = self.P.sum()
+        Sp_sigma2 = self.K_NA_sigma2.sum()
+        Sp_spatial = self.K_NA_spatial.sum()
+        self.sigma2_related = sigma2_related / (self.Dim * Sp_sigma2)
         self.K_NA = self.nx.sum(self.P, axis=1)
         self.K_NB = self.nx.sum(self.P, axis=0)
+
+        if self.SVI_mode:
+            self.Sp_spatial = self.step_size * Sp_spatial + (1 - self.step_size) * self.Sp_spatial
+            self.Sp = self.step_size * Sp + (1 - self.step_size) * self.Sp
+            self.Sp_sigma2 = self.step_size * Sp_sigma2 + (1 - self.step_size) * self.Sp_sigma2
+        else:
+            self.Sp_spatial = Sp_spatial
+            self.Sp = Sp
+            self.Sp_sigma2 = Sp_sigma2
+
+        if self.sparse_calculation_mode:
+            self.K_NA = self.K_NA.to_dense()
+            self.K_NB = self.K_NB.to_dense()
+            self.K_NA_spatial = self.K_NA_spatial.to_dense()
+            self.K_NA_sigma2 = self.K_NA_sigma2.to_dense()
 
     def _update_gamma(
         self,
     ):
+        """
+        Update the gamma parameter.
+
+        This method updates the gamma parameter based on the current state of the alignment process.
+        It adjusts gamma using the digamma function (_psi) and ensures that gamma remains within
+        the range [0.01, 0.99].
+
+        """
+
         if self.SVI_mode:
             self.gamma = self.nx.exp(
                 _psi(self.nx)(self.gamma_a + self.Sp_spatial)
@@ -820,12 +1118,21 @@ class Morpho_pairwise:
             self.gamma = self.nx.exp(
                 _psi(self.nx)(self.gamma_a + self.Sp_spatial) - _psi(self.nx)(self.gamma_a + self.gamma_b + self.NB)
             )
-        self.gamma = _data(self.nx, 0.99, self.type_as) if self.gamma > 0.99 else self.gamma
-        self.gamma = _data(self.nx, 0.01, self.type_as) if self.gamma < 0.01 else self.gamma
+
+        self.gamma = self.nx.maximum(self.nx.minimum(self.gamma, self._gamma_099), self._gamma_001)
 
     def _update_alpha(
         self,
     ):
+        """
+        Update the gamma parameter.
+
+        This method updates the gamma parameter based on the current state of the alignment process.
+        It adjusts gamma using the digamma function (_psi) and ensures that gamma remains within
+        the range [0.01, 0.99].
+
+        """
+
         if self.SVI_mode:
             # Using SVI mode for alpha update
             self.alpha = (
@@ -845,10 +1152,18 @@ class Morpho_pairwise:
     def _update_nonrigid(
         self,
     ):
+        """
+        Update the non-rigid transformation parameters.
+
+        This method updates the non-rigid transformation parameters using the current state
+        of the alignment process. It computes the Sigma inverse matrix, the PXB term, and
+        updates the variational parameters for the non-rigid alignment.
+
+        """
+
         SigmaInv = self.sigma2 * self.lambdaVF * self.GammaSparse + _dot(self.nx)(
             self.U.T, self.nx.einsum("ij,i->ij", self.U, self.K_NA)
         )
-
         if self.SVI_mode:
             PXB_term = _dot(self.nx)(self.P, self.coordsB[self.batch_idx, :]) - self.nx.einsum(
                 "ij,i->ij", self.RnA, self.K_NA
@@ -863,8 +1178,12 @@ class Morpho_pairwise:
 
         # TODO: can we store these kernel multiple results? They are fixed
         if self.guidance and ((self.guidance_effect == "nonrigid") or (self.guidance_effect == "both")):
-            self.SigmaInv += (self.sigma2 / self.guidance_epsilon) * _dot(self.nx)(self.U_I.T, self.U_I)
-            self.UPXB_term += (self.sigma2 / self.guidance_epsilon) * _dot(self.nx)(self.U_I.T, self.X_BI - self.R_AI)
+            self.SigmaInv += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * _dot(self.nx)(
+                self.U_I.T, self.U_I
+            )
+            UPXB_term += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * _dot(self.nx)(
+                self.U_I.T, self.X_BI - self.R_AI
+            )
 
         Sigma = _pinv(self.nx)(self.SigmaInv)
         self.Coff = _dot(self.nx)(Sigma, UPXB_term)
@@ -879,6 +1198,14 @@ class Morpho_pairwise:
     def _update_rigid(
         self,
     ):
+        """
+        Update the rigid transformation parameters.
+
+        This method updates the rigid transformation parameters using the current state
+        of the alignment process. It solves for rotation and translation using the SVD
+        formula and incorporates guidance and nearest neighbor initialization if applicable.
+
+        """
 
         PXA, PVA, PXB = (
             _dot(self.nx)(self.K_NA, self.coordsA)[None, :],
@@ -892,15 +1219,21 @@ class Morpho_pairwise:
         mu_XB, mu_XA, mu_Vn = PXB, PXA, PVA
         mu_X_deno, mu_Vn_deno = self.Sp, self.Sp
         if self.guidance and (self.guidance_effect in ("rigid", "both")):
-            mu_XB += (self.sigma2 / self.guidance_epsilon) * self.X_BI
-            mu_XA += (self.sigma2 / self.guidance_epsilon) * self.X_AI
-            mu_Vn += (self.sigma2 / self.guidance_epsilon) * self.V_AI
-            mu_X_deno += (self.sigma2 / self.guidance_epsilon) * self.X_BI.shape[0]
-            mu_Vn_deno += (self.sigma2 / self.guidance_epsilon) * self.X_BI.shape[0]
+            mu_XB += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_BI
+            mu_XA += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_AI
+            mu_Vn += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.V_AI
+            mu_X_deno += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_BI.shape[0]
+            mu_Vn_deno += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_BI.shape[0]
         if self.nn_init:
-            mu_XB += (self.sigma2 / self.lambdaReg) * _dot(self.nx)(self.inlier_P.T, self.inlier_B)
-            mu_XA += (self.sigma2 / self.lambdaReg) * _dot(self.nx)(self.inlier_P.T, self.inlier_A)
-            mu_X_deno += (self.sigma2 / self.lambdaReg) * self.nx.sum(self.inlier_P)
+            mu_XB += (self.sigma2 * self.nn_init_weight * self.Sp / self.nx.sum(self.inlier_P)) * _dot(self.nx)(
+                self.inlier_P.T, self.inlier_B
+            )
+            mu_XA += (self.sigma2 * self.nn_init_weight * self.Sp / self.nx.sum(self.inlier_P)) * _dot(self.nx)(
+                self.inlier_P.T, self.inlier_A
+            )
+            mu_X_deno += (self.sigma2 * self.nn_init_weight * self.Sp / self.nx.sum(self.inlier_P)) * self.nx.sum(
+                self.inlier_P
+            )
 
         mu_XB = mu_XB / mu_X_deno
         mu_XA = mu_XA / mu_X_deno
@@ -925,16 +1258,19 @@ class Morpho_pairwise:
         ).T
 
         if self.guidance_effect in ("rigid", "both"):
-            A -= (self.sigma2 / self.guidance_epsilon) * _dot(self.nx)(X_AI_hat.T, V_AI_hat - X_BI_hat).T
+            A -= (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * _dot(self.nx)(
+                X_AI_hat.T, V_AI_hat - X_BI_hat
+            ).T
 
         if self.nn_init:
-            A -= (self.sigma2 / self.lambdaReg) * _dot(self.nx)((inlier_A_hat * self.inlier_P).T, -inlier_B_hat).T
+            A -= (self.sigma2 * self.nn_init_weight * self.Sp / self.nx.sum(self.inlier_P)) * _dot(self.nx)(
+                (inlier_A_hat * self.inlier_P).T, -inlier_B_hat
+            ).T
 
         svdU, svdS, svdV = _linalg(self.nx).svd(A)
-        C = _identity(self.nx, self.D, self.type_as)
-        C[-1, -1] = _linalg(self.nx).det(_dot(self.nx)(svdU, svdV))
+        self.C[-1, -1] = _linalg(self.nx).det(_dot(self.nx)(svdU, svdV))
 
-        R = _dot(self.nx)(_dot(self.nx)(svdU, C), svdV)
+        R = _dot(self.nx)(_dot(self.nx)(svdU, self.C), svdV)
         if self.SVI_mode and self.step_size < 1:
             self.R = self.step_size * R + (1 - self.step_size) * self.R
         else:
@@ -945,16 +1281,18 @@ class Morpho_pairwise:
         t_deno = self.Sp
 
         if self.guidance and (self.guidance_effect in ("rigid", "both")):
-            t_numerator += (self.sigma2 / self.guidance_epsilon) * self.nx.sum(
+            t_numerator += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.nx.sum(
                 self.X_BI - self.V_AI - _dot(self.nx)(self.X_AI, self.R.T), axis=0
             )
-            t_deno += (self.sigma2 / self.guidance_epsilon) * self.X_BI.shape[0]
+            t_deno += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_BI.shape[0]
 
         if self.nn_init:
-            t_numerator += (self.sigma2 / self.lambdaReg) * _dot(self.nx)(
+            t_numerator += (self.sigma2 * self.nn_init_weight * self.Sp / self.nx.sum(self.inlier_P)) * _dot(self.nx)(
                 self.inlier_P.T, self.inlier_B - _dot(self.nx)(self.inlier_A, self.R.T)
             )
-            t_deno += (self.sigma2 / self.lambdaReg) * self.nx.sum(self.inlier_P)
+            t_deno += (self.sigma2 * self.nn_init_weight * self.Sp / self.nx.sum(self.inlier_P)) * self.nx.sum(
+                self.inlier_P
+            )
 
         t = t_numerator / t_deno
         if self.SVI_mode and self.step_size < 1:
@@ -968,7 +1306,22 @@ class Morpho_pairwise:
         if self.guidance:
             self.R_AI = _dot(self.nx)(self.R_AI, self.R.T) + self.t
 
-    def _update_sigma2(self, iter):
+    def _update_sigma2(
+        self,
+        iter: int,
+    ):
+        """
+        Update the sigma2 parameter.
+
+        This method updates the sigma2 parameter based on the current state of the alignment process.
+        It ensures that sigma2 remains above a certain threshold to prevent numerical instability.
+
+        Args:
+            iter (int): The current iteration number.
+
+        Raises:
+            ValueError: If sigma2 is not properly updated.
+        """
         self.sigma2 = self.nx.maximum(
             (self.sigma2_related + self.nx.einsum("i,i", self.K_NA_sigma2, self.SigmaDiag) / self.Sp_sigma2),
             _data(self.nx, 1e-3, self.type_as),
@@ -979,6 +1332,17 @@ class Morpho_pairwise:
     def _get_optimal_R(
         self,
     ):
+        """
+        Compute the optimal rotation matrix R and translation vector t.
+
+        This method computes the optimal rotation matrix and translation vector for aligning the coordinates
+        of sample A to sample B. It uses the SVD formula to determine the optimal rotation and ensures that
+        the transformation maintains the correct orientation.
+
+        Raises:
+            ValueError: If the SVD decomposition fails or if the determinant check fails.
+        """
+
         mu_XnA, mu_XnB = (
             _dot(self.nx)(self.K_NA, self.coordsA) / self.Sp,
             _dot(self.nx)(self.K_NB, self.coordsB) / self.Sp,
@@ -988,16 +1352,22 @@ class Morpho_pairwise:
 
         # get the optimal rotation matrix R
         svdU, svdS, svdV = _linalg(self.nx).svd(A)
-        # TODO: C can be initial once and only (-1,-1) value will be changed
-        C = _identity(self.nx, self.D, type_as=self.type_as)
-        C[-1, -1] = _linalg(self.nx).det(_dot(self.nx)(svdU, svdV))
-        self.R = _dot(self.nx)(_dot(self.nx)(svdU, C), svdV)
+        self.C[-1, -1] = _linalg(self.nx).det(_dot(self.nx)(svdU, svdV))
+        self.R = _dot(self.nx)(_dot(self.nx)(svdU, self.C), svdV)
         self.t = mu_XnB - _dot(self.nx)(mu_XnA, self.R.T)
         self.optimal_RnA = _dot(self.nx)(self.coordsA, self.R.T) + self.t
 
     def _wrap_output(
         self,
     ):
+        """
+        Wrap the output after the alignment process.
+
+        This method denormalizes the aligned coordinates, converts them to numpy arrays,
+        and saves them in the instance. It also prepares a dictionary containing the
+        transformation parameters and metadata if `vecfld_key_added` is not None.
+        """
+
         # denormalize
         if self.normalize_c:
             self.XAHat = self.XAHat * self.normalize_scales[1] + self.normalize_means[1]
@@ -1025,7 +1395,6 @@ class Morpho_pairwise:
                 "normalize_means": self.nx.to_numpy(self.normalize_means) if self.normalize_c else None,
                 "normalize_c": self.normalize_c,
                 "dissimilarity": self.dissimilarity,
-                # "beta2": self.nx.to_numpy(self.beta2),
                 "sigma2": self.nx.to_numpy(self.sigma2),
                 "gamma": self.nx.to_numpy(self.gamma),
                 "NA": self.NA,

@@ -122,7 +122,7 @@ def get_P_sparse(
         top_k=top_k,
         dissimilarity=dissimilarity,
     )
-    
+
     K_NA = P.sum(1).to_dense()
     K_NB = P.sum(0).to_dense()
     Sp = P.sum()
@@ -207,7 +207,7 @@ def BA_align_sparse(
         use_rep=use_rep,
     )
     # normalize guidance pair and convert to correct data types
-    if (guidance_effect is not False):
+    if guidance_effect is not False:
         guidance_pair = guidance_pair_preprocess(guidance_pair, normalize_scale_list, normalize_mean_list, nx, type_as)
         X_AI = guidance_pair[0]
         X_BI = guidance_pair[1]
@@ -226,8 +226,6 @@ def BA_align_sparse(
         labelB = pd.Series(sampleA.obs[label_key].values)
     else:
         labelA, labelB = None, None
-    
-    
 
     # perform coarse rigid alignment
     if nn_init:
@@ -263,11 +261,11 @@ def BA_align_sparse(
         if len(inlier_A) == 0:
             inlier_A = X_AI
             inlier_B = X_BI
-            inlier_P = nx.ones((X_AI.shape[0],1), type_as=type_as)
+            inlier_P = nx.ones((X_AI.shape[0], 1), type_as=type_as)
         else:
             inlier_A = nx.concatenate([inlier_A, X_AI], axis=0)
             inlier_B = nx.concatenate([inlier_B, X_BI], axis=0)
-            inlier_P = nx.concatenate([inlier_P, nx.ones((X_AI.shape[0],1), type_as=type_as)], axis=0)
+            inlier_P = nx.concatenate([inlier_P, nx.ones((X_AI.shape[0], 1), type_as=type_as)], axis=0)
         inlier_R = inlier_A
         inlier_V = nx.zeros(inlier_A.shape, type_as=type_as)
         inlier_AHat = inlier_A
@@ -280,7 +278,7 @@ def BA_align_sparse(
     K = ctrl_pts.shape[0]
     GammaSparse = con_K(ctrl_pts, ctrl_pts, beta)
     U = con_K(coordsA, ctrl_pts, beta)
-    if (guidance_effect == 'nonrigid'):
+    if guidance_effect == "nonrigid":
         inlier_U = con_K(inlier_A, ctrl_pts, beta)
     kernel_dict = {
         "dist": "cdist",
@@ -432,7 +430,10 @@ def BA_align_sparse(
 
         # Update alpha
         if SVI_mode:
-            alpha = step_size * nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial)) + (1 - step_size) * alpha
+            alpha = (
+                step_size * nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
+                + (1 - step_size) * alpha
+            )
         else:
             alpha = nx.exp(_psi(nx)(kappa + K_NA_spatial) - _psi(nx)(kappa * NA + Sp_spatial))
 
@@ -440,9 +441,14 @@ def BA_align_sparse(
         # if (sigma2 < 0.015) or (iter > 80):
         if True:
             if SVI_mode:
-                if (guidance_effect == 'nonrigid') or (guidance_effect == 'both'):
+                if (guidance_effect == "nonrigid") or (guidance_effect == "both"):
                     SigmaInv = (
-                        step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)) + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_U.T, inlier_U * inlier_P))
+                        step_size
+                        * (
+                            sigma2 * lambdaVF * GammaSparse
+                            + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))
+                            + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_U.T, inlier_U * inlier_P)
+                        )
                         + (1 - step_size) * SigmaInv
                     )
                 else:
@@ -450,41 +456,46 @@ def BA_align_sparse(
                         step_size * (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
                         + (1 - step_size) * SigmaInv
                     )
-                
+
                 Sigma = _pinv(nx)(SigmaInv)
                 term1 = _dot(nx)(Sigma, U.T)
                 PXB_term = (
                     step_size * (_dot(nx)(P, randcoordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
                     + (1 - step_size) * PXB_term
                 )
-                if (guidance_effect == 'nonrigid') or (guidance_effect == 'both'):
+                if (guidance_effect == "nonrigid") or (guidance_effect == "both"):
                     term1_guide = _dot(nx)(Sigma, inlier_U.T)
                     XBRA_guide_term = (inlier_B - inlier_R) * inlier_P
-                    Coff = _dot(nx)(term1, PXB_term) + (sigma2 / guidance_epsilon) * _dot(nx)(term1_guide, XBRA_guide_term)
+                    Coff = _dot(nx)(term1, PXB_term) + (sigma2 / guidance_epsilon) * _dot(nx)(
+                        term1_guide, XBRA_guide_term
+                    )
                     inlier_V = _dot(nx)(inlier_U, Coff)
                 else:
                     Coff = _dot(nx)(term1, PXB_term)
-                VnA = _dot(nx)(U, Coff, )
+                VnA = _dot(nx)(
+                    U,
+                    Coff,
+                )
                 SigmaDiag = sigma2 * nx.einsum("ij->i", nx.einsum("ij,ji->ij", U, term1))
             else:
-                if (guidance_effect == 'nonrigid') or (guidance_effect == 'both'):
+                if (guidance_effect == "nonrigid") or (guidance_effect == "both"):
                     SigmaInv = (
-                        (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)) + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_U.T, inlier_U * inlier_P))
+                        sigma2 * lambdaVF * GammaSparse
+                        + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))
+                        + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_U.T, inlier_U * inlier_P)
                     )
                 else:
-                    SigmaInv = (
-                        (sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA)))
-                    )
-                
+                    SigmaInv = sigma2 * lambdaVF * GammaSparse + _dot(nx)(U.T, nx.einsum("ij,i->ij", U, K_NA))
+
                 Sigma = _pinv(nx)(SigmaInv)
                 term1 = _dot(nx)(Sigma, U.T)
-                PXB_term = (
-                    (_dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA))
-                )
-                if (guidance_effect == 'nonrigid') or (guidance_effect == 'both'):
+                PXB_term = _dot(nx)(P, coordsB) - nx.einsum("ij,i->ij", RnA, K_NA)
+                if (guidance_effect == "nonrigid") or (guidance_effect == "both"):
                     term1_guide = _dot(nx)(Sigma, inlier_U.T)
                     XBRA_guide_term = (inlier_B - inlier_R) * inlier_P
-                    Coff = _dot(nx)(term1, PXB_term) + (sigma2 / guidance_epsilon) * _dot(nx)(term1_guide, XBRA_guide_term)
+                    Coff = _dot(nx)(term1, PXB_term) + (sigma2 / guidance_epsilon) * _dot(nx)(
+                        term1_guide, XBRA_guide_term
+                    )
                     inlier_V = _dot(nx)(inlier_U, Coff)
                 else:
                     Coff = _dot(nx)(term1, PXB_term)
@@ -507,38 +518,42 @@ def BA_align_sparse(
                 _dot(nx)(K_NB, coordsB)[None, :],
             )
         if SVI_mode and iter > 1:
-            if ((guidance_effect == 'rigid') or (guidance_effect == 'both') or (nn_init == True)):
+            if (guidance_effect == "rigid") or (guidance_effect == "both") or (nn_init == True):
                 t = (
                     step_size
                     * (
-                        ((PXB - PVA - _dot(nx)(PXA, R.T)) + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_B - inlier_V - _dot(nx)(inlier_A, R.T)))
+                        (
+                            (PXB - PVA - _dot(nx)(PXA, R.T))
+                            + (sigma2 / guidance_epsilon)
+                            * _dot(nx)(inlier_P.T, inlier_B - inlier_V - _dot(nx)(inlier_A, R.T))
+                        )
                         / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
                     )
                     + (1 - step_size) * t
                 )
             else:
-                t = (
-                    step_size
-                    * (
-                        (PXB - PVA - _dot(nx)(PXA, R.T))
-                        / Sp
-                    )
-                    + (1 - step_size) * t
-                )
+                t = step_size * ((PXB - PVA - _dot(nx)(PXA, R.T)) / Sp) + (1 - step_size) * t
         else:
-            if ((guidance_effect == 'rigid') or (guidance_effect == 'both') or (nn_init == True)):
+            if (guidance_effect == "rigid") or (guidance_effect == "both") or (nn_init == True):
                 t = (
-                        (PXB - PVA - _dot(nx)(PXA, R.T)) + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_B - inlier_V - _dot(nx)(inlier_A, R.T))
-                    ) / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
-                    
+                    (PXB - PVA - _dot(nx)(PXA, R.T))
+                    + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_B - inlier_V - _dot(nx)(inlier_A, R.T))
+                ) / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
+
             else:
-                t = (PXB - PVA - _dot(nx)(PXA, R.T))/ Sp
+                t = (PXB - PVA - _dot(nx)(PXA, R.T)) / Sp
         # Solve for the rotation
-        if ((guidance_effect == 'rigid') or (guidance_effect == 'both') or (nn_init == True)):
-            mu_XB = (PXB + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_B)) / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
-            mu_XA = (PXA + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_A)) / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
-            mu_Vn = (PVA + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_V)) / (Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P))
-            
+        if (guidance_effect == "rigid") or (guidance_effect == "both") or (nn_init == True):
+            mu_XB = (PXB + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_B)) / (
+                Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P)
+            )
+            mu_XA = (PXA + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_A)) / (
+                Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P)
+            )
+            mu_Vn = (PVA + (sigma2 / guidance_epsilon) * _dot(nx)(inlier_P.T, inlier_V)) / (
+                Sp + (sigma2 / guidance_epsilon) * nx.sum(inlier_P)
+            )
+
             XAI_hat = inlier_A - mu_XA
             XBI_hat = inlier_B - mu_XB
             fI_hat = inlier_V - mu_Vn
@@ -555,10 +570,14 @@ def BA_align_sparse(
             XB_hat = coordsB - mu_XB
         # print(inlier_P.shape)
         # if SVI_mode:
-        if ((guidance_effect == 'rigid') or (guidance_effect == 'both') or (nn_init == True)):
+        if (guidance_effect == "rigid") or (guidance_effect == "both") or (nn_init == True):
             A_guide = _dot(nx)((XAI_hat * inlier_P).T, (fI_hat - XBI_hat))
-            A = -(_dot(nx)(XA_hat.T, nx.einsum("ij,i->ij", f_hat, K_NA)) - _dot(nx)(_dot(nx)(XA_hat.T, P), XB_hat) + (sigma2 / guidance_epsilon) * A_guide).T
-            
+            A = -(
+                _dot(nx)(XA_hat.T, nx.einsum("ij,i->ij", f_hat, K_NA))
+                - _dot(nx)(_dot(nx)(XA_hat.T, P), XB_hat)
+                + (sigma2 / guidance_epsilon) * A_guide
+            ).T
+
         else:
             A = -(_dot(nx)(XA_hat.T, nx.einsum("ij,i->ij", f_hat, K_NA)) - _dot(nx)(_dot(nx)(XA_hat.T, P), XB_hat)).T
         # print(A)
@@ -571,7 +590,7 @@ def BA_align_sparse(
             R = _dot(nx)(_dot(nx)(svdU, C), svdV)
         RnA = _dot(nx)(coordsA, R.T) + t
         XAHat = RnA + VnA
-        if (guidance_effect != False):
+        if guidance_effect != False:
             inlier_R = _dot(nx)(inlier_A, R.T) + t
             inlier_AHat = inlier_R + inlier_V
         # print(R)
@@ -685,6 +704,6 @@ def BA_align_sparse(
     empty_cache(device=device)
     return (
         None if inplace else (sampleA, sampleB),
-        P.to('cpu').to_dense().numpy(),
+        P.to("cpu").to_dense().numpy(),
         nx.to_numpy(sigma2),
     )

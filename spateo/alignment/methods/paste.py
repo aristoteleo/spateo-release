@@ -8,7 +8,7 @@ from sklearn.decomposition import NMF
 
 from spateo.logging import logger_manager as lm
 
-from .utils import (
+from .deprecated_utils import (
     align_preprocess,
     calc_exp_dissimilarity,
     check_exp,
