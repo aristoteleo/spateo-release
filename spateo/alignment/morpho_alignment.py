@@ -8,12 +8,11 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 from anndata import AnnData
 
-from spateo.logging import logger_manager as lm
-
-from .methods import Morpho_pairwise, empty_cache
+from spateo.alignment.methods import Morpho_pairwise, empty_cache
 
 # from .transform import BA_transform, BA_transform_and_assignment
-from .utils import _iteration, downsampling
+from spateo.alignment.utils import _iteration, downsampling
+from spateo.logging import logger_manager as lm
 
 
 def morpho_align(
@@ -27,7 +26,7 @@ def morpho_align(
     vecfld_key_added: str = "VecFld_morpho",
     mode: Literal["SN-N", "SN-S"] = "SN-S",
     dissimilarity: Union[str, List[str]] = "kl",
-    max_iter: int = 100,
+    max_iter: int = 200,
     dtype: str = "float32",
     device: str = "cpu",
     verbose: bool = True,
@@ -65,9 +64,9 @@ def morpho_align(
     for m in align_models:
         m.obsm[key_added] = m.obsm[spatial_key]
     for m in align_models:
-        m.obsm["Rigid_align_spatial"] = m.obsm[spatial_key]
+        m.obsm[f"{key_added}_rigid"] = m.obsm[spatial_key]
     for m in align_models:
-        m.obsm["Nonrigid_align_spatial"] = m.obsm[spatial_key]
+        m.obsm[f"{key_added}_nonrigid"] = m.obsm[spatial_key]
 
     pis = []
     progress_name = f"Models alignment based on morpho, mode: {mode}."
@@ -88,7 +87,6 @@ def morpho_align(
             max_iter=max_iter,
             dtype=dtype,
             device=device,
-            inplace=True,
             verbose=verbose,
             **kwargs,
         )
@@ -99,7 +97,12 @@ def morpho_align(
             modelB.obsm[key_added] = modelB.obsm[f"{key_added}_rigid"]
         elif mode == "SN-N":
             modelB.obsm[key_added] = modelB.obsm[f"{key_added}_nonrigid"]
-        pis.append(P)
+
+        if iter_key_added is not None:
+            modelB.uns[iter_key_added] = morpho_model.iter_added
+        if vecfld_key_added is not None:
+            modelB.uns[vecfld_key_added] = morpho_model.vecfld
+        pis.append(P.T)
         empty_cache(device=device)
 
     return align_models, pis

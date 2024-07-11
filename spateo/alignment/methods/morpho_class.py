@@ -13,6 +13,7 @@ except ImportError:
 from typing import List, Optional, Tuple, Union
 
 from spateo.alignment.methods.utils import (
+    _copy,
     _data,
     _dot,
     _get_anneling_factor,
@@ -40,6 +41,8 @@ from spateo.alignment.methods.utils import (
     get_rep,
     inlier_from_NN,
     intersect_lsts,
+    nx_torch,
+    sparse_tensor_to_scipy,
     voxel_data,
 )
 from spateo.logging import logger_manager as lm
@@ -122,9 +125,10 @@ class Morpho_pairwise:
         init_layer: str = "X",
         init_field: str = "layer",
         nn_init_top_K: int = 10,
+        nn_init_weight: float = 1.0,
         max_iter: int = 200,
         SVI_mode: bool = True,
-        batch_size: int = 1000,
+        batch_size: Optional[int] = None,
         pre_compute_dist: bool = True,
         sparse_calculation_mode: bool = False,
         sparse_top_k: int = 1024,
@@ -133,6 +137,9 @@ class Morpho_pairwise:
         K: Union[int, float] = 15,
         kernel_type: str = "euc",
         sigma2_init_scale: Optional[Union[int, float]] = 0.1,
+        gamma_a: float = 1.0,
+        gamma_b: float = 1.0,
+        kappa: Union[float, np.ndarray] = 1.0,
         partial_robust_level: float = 25,
         normalize_c: bool = True,
         normalize_g: bool = True,
@@ -146,7 +153,6 @@ class Morpho_pairwise:
         guidance_weight: float = 1.0,
         use_chunk: bool = False,
         chunk_capacity: float = 1.0,
-        nn_init_weight: float = 1.0,
     ) -> None:
 
         # initialization
@@ -196,6 +202,9 @@ class Morpho_pairwise:
         self.use_chunk = use_chunk
         self.chunk_capacity = chunk_capacity
         self.nn_init_weight = nn_init_weight
+        self.gamma_a = gamma_a
+        self.gamma_b = gamma_b
+        self.kappa = kappa
 
         # checking keys
         self._check()
@@ -208,8 +217,9 @@ class Morpho_pairwise:
 
         self._construct_kernel(inducing_variables_num=K, sampling_method="random")
 
-        self._initialize_variational_variables(sigma2_init_scale=sigma2_init_scale)
+        # self._initialize_variational_variables(sigma2_init_scale=sigma2_init_scale)
 
+    @torch.no_grad()
     def run(
         self,
     ):
@@ -230,6 +240,8 @@ class Morpho_pairwise:
         if self.nn_init:
             self._coarse_rigid_alignment()
 
+        self._initialize_variational_variables()
+
         # calculate the representation(s) pairwise distance matrix if pre_compute_dist is True or not in SVI mode
         # this will reduce the runtime but consume more GPU memory
         if (not self.SVI_mode) or (self.pre_compute_dist):
@@ -249,6 +261,8 @@ class Morpho_pairwise:
             else range(self.max_iter)
         )
         for iter in iteration:
+            # if iter > 2:
+            #     break
             if self.iter_key_added is not None:
                 self._save_iter(iter=iter)
             if self.SVI_mode:
@@ -279,6 +293,7 @@ class Morpho_pairwise:
 
         return self.P
 
+    @torch.no_grad()
     def _check(
         self,
     ):
@@ -405,6 +420,7 @@ class Morpho_pairwise:
         if self.sparse_calculation_mode:
             self.pre_compute_dist = False
 
+    @torch.no_grad()
     def _align_preprocess(
         self,
         dtype: str = "float32",
@@ -511,6 +527,7 @@ class Morpho_pairwise:
         if self.verbose:
             lm.main_info(message=f"Preprocess finished.", indent_level=1)
 
+    @torch.no_grad()
     def _guidance_pair_preprocess(
         self,
     ):
@@ -630,9 +647,10 @@ class Morpho_pairwise:
                     lm.main_info(message=f"Gene expression normalization params:", indent_level=1)
                     lm.main_info(message=f"Scale: {normalize_scale}.", indent_level=2)
 
+    @torch.no_grad()
     def _initialize_variational_variables(
         self,
-        sigma2_init_scale: float = 1.0,
+        # sigma2_init_scale: float = 1.0,
     ):
         """
         Initialize variational variables for the alignment process.
@@ -648,7 +666,7 @@ class Morpho_pairwise:
         """
 
         # initial guess for sigma2, beta2, anneling factor for sigma2 and beta2
-        self.sigma2 = sigma2_init_scale * _init_guess_sigma2(self.coordsA, self.coordsB)
+        self.sigma2 = self.sigma2_init_scale * _init_guess_sigma2(self.coordsA, self.coordsB)
 
         self._init_probability_parameters()
 
@@ -657,20 +675,29 @@ class Morpho_pairwise:
         self.sigma2_variance_decress = _get_anneling_factor(
             start=self.sigma2_variance,
             end=self.sigma2_variance_end,
-            iter=(self.max_iter / 2),
+            # iter=(self.max_iter / 2),
+            iter=100,
             nx=self.nx,
             type_as=self.type_as,
         )
 
-        self.kappa = self.nx.ones((self.NA), type_as=self.type_as)
+        # self.kappa = self.nx.ones((self.NA), type_as=self.type_as)
+        if isinstance(self.kappa, float):
+            self.kappa = self.nx.ones((self.NA), type_as=self.type_as) * self.kappa
+        elif isinstance(self.kappa, np.ndarray):
+            self.kappa = self.nx.from_numpy(self.kappa, type_as=self.type_as)
+        else:
+            raise ValueError("kappa should be a float or a numpy array.")
         self.alpha = self.nx.ones((self.NA), type_as=self.type_as)
         self.gamma, self.gamma_a, self.gamma_b = (
             _data(self.nx, 0.5, self.type_as),
-            _data(self.nx, 1.0, self.type_as),
-            _data(self.nx, 1.0, self.type_as),
+            _data(self.nx, self.gamma_a, self.type_as),
+            _data(self.nx, self.gamma_b, self.type_as),
         )
         self.VnA = self.nx.zeros(self.coordsA.shape, type_as=self.type_as)  # nonrigid vector velocity
-        self.XAHat, self.RnA = self.coordsA, self.coordsA  # initial transformed / rigid position
+        self.XAHat, self.RnA = _copy(self.nx, self.coordsA), _copy(
+            self.nx, self.coordsA
+        )  # initial transformed / rigid position
         self.Coff = self.nx.zeros(self.K, type_as=self.type_as)  # inducing variables coefficient
         self.SigmaDiag = self.nx.zeros((self.NA), type_as=self.type_as)  # Gaussian processes variance
         self.R = _identity(self.nx, self.D, self.type_as)  # rotation in rigid transformation
@@ -691,7 +718,10 @@ class Morpho_pairwise:
         if self.SVI_mode:
             self.SVI_deacy = _data(self.nx, 10.0, self.type_as)
             # Select a random subset of data
-            self.batch_size = min(max(int(self.NB / 10), self.batch_size), self.NB)
+            if self.batch_size is None:
+                self.batch_size = min(max(int(self.NB / 10), 1000), self.NB)
+            else:
+                self.batch_size = min(self.batch_size, self.NB)
             self.batch_perm = _randperm(self.nx)(self.NB)
             self.Sp, self.Sp_spatial, self.Sp_sigma2 = 0, 0, 0
             self.SigmaInv = self.nx.zeros((self.K, self.K), type_as=self.type_as)  # K x K
@@ -753,6 +783,7 @@ class Morpho_pairwise:
 
     # TODO: add other sampling method like trn sampling
     # TODO: add other kernel type like geodist
+    @torch.no_grad()
     def _construct_kernel(
         self,
         inducing_variables_num,
@@ -944,6 +975,12 @@ class Morpho_pairwise:
         self.init_R = self.nx.from_numpy(R, type_as=self.type_as)
         self.init_t = self.nx.from_numpy(t, type_as=self.type_as)
 
+        self.inlier_A = self.inlier_A @ self.init_R.T + self.init_t
+        self.coordsA = self.coordsA @ self.init_R.T + self.init_t
+
+        # self.init_coordsA = self.nx.to_numpy(_copy(self.nx, self.coordsA))
+        # self.init_coordsB = self.nx.to_numpy(_copy(self.nx, self.coordsB))
+
         if self.verbose:
             lm.main_info(message="Coarse rigid alignment done.", indent_level=1)
 
@@ -1061,7 +1098,7 @@ class Morpho_pairwise:
                 exp_layer_dist = (
                     [exp_layer_d[:, self.batch_idx] for exp_layer_d in self.exp_layer_dist]
                     if self.SVI_mode
-                    else self.exp_layer_dist,
+                    else self.exp_layer_dist
                 )
             else:
                 exp_layer_dist = calc_distance(
@@ -1076,9 +1113,9 @@ class Morpho_pairwise:
             )
 
         Sp = self.P.sum()
+
         Sp_sigma2 = self.K_NA_sigma2.sum()
         Sp_spatial = self.K_NA_spatial.sum()
-        self.sigma2_related = sigma2_related / (self.Dim * Sp_sigma2)
         self.K_NA = self.nx.sum(self.P, axis=1)
         self.K_NB = self.nx.sum(self.P, axis=0)
 
@@ -1096,6 +1133,9 @@ class Morpho_pairwise:
             self.K_NB = self.K_NB.to_dense()
             self.K_NA_spatial = self.K_NA_spatial.to_dense()
             self.K_NA_sigma2 = self.K_NA_sigma2.to_dense()
+
+        self.sigma2_related = sigma2_related / (self.Dim * self.Sp_sigma2)
+        # print(self.sigma2_related)
 
     def _update_gamma(
         self,
@@ -1172,7 +1212,7 @@ class Morpho_pairwise:
             self.PXB_term = self.step_size * PXB_term + (1 - self.step_size) * self.PXB_term
         else:
             self.PXB_term = _dot(self.nx)(self.P, self.coordsB) - self.nx.einsum("ij,i->ij", self.RnA, self.K_NA)
-            self.SigmaInv, self.PXB_term = SigmaInv, PXB_term
+            self.SigmaInv = SigmaInv
 
         UPXB_term = _dot(self.nx)(self.U.T, self.PXB_term)
 
@@ -1214,10 +1254,10 @@ class Morpho_pairwise:
             if self.SVI_mode
             else _dot(self.nx)(self.K_NB, self.coordsB)[None, :],
         )
-
+        # print(self.Sp)
         # solve rotation using SVD formula
         mu_XB, mu_XA, mu_Vn = PXB, PXA, PVA
-        mu_X_deno, mu_Vn_deno = self.Sp, self.Sp
+        mu_X_deno, mu_Vn_deno = _copy(self.nx, self.Sp), _copy(self.nx, self.Sp)
         if self.guidance and (self.guidance_effect in ("rigid", "both")):
             mu_XB += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_BI
             mu_XA += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_AI
@@ -1278,7 +1318,7 @@ class Morpho_pairwise:
 
         # solve translation using SVD formula
         t_numerator = PXB - PVA - _dot(self.nx)(PXA, self.R.T)
-        t_deno = self.Sp
+        t_deno = _copy(self.nx, self.Sp)
 
         if self.guidance and (self.guidance_effect in ("rigid", "both")):
             t_numerator += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.nx.sum(
@@ -1326,6 +1366,10 @@ class Morpho_pairwise:
             (self.sigma2_related + self.nx.einsum("i,i", self.K_NA_sigma2, self.SigmaDiag) / self.Sp_sigma2),
             _data(self.nx, 1e-3, self.type_as),
         )
+        # if iter > 5:
+        self.sigma2_variance = self.nx.minimum(
+            self.sigma2_variance * self.sigma2_variance_decress, self.sigma2_variance_end
+        )
         if iter < 100:
             self.sigma2 = self.nx.maximum(self.sigma2, _data(self.nx, 1e-2, self.type_as))
 
@@ -1353,9 +1397,9 @@ class Morpho_pairwise:
         # get the optimal rotation matrix R
         svdU, svdS, svdV = _linalg(self.nx).svd(A)
         self.C[-1, -1] = _linalg(self.nx).det(_dot(self.nx)(svdU, svdV))
-        self.R = _dot(self.nx)(_dot(self.nx)(svdU, self.C), svdV)
-        self.t = mu_XnB - _dot(self.nx)(mu_XnA, self.R.T)
-        self.optimal_RnA = _dot(self.nx)(self.coordsA, self.R.T) + self.t
+        self.optimal_R = _dot(self.nx)(_dot(self.nx)(svdU, self.C), svdV)
+        self.optimal_t = mu_XnB - _dot(self.nx)(mu_XnA, self.optimal_R.T)
+        self.optimal_RnA = _dot(self.nx)(self.coordsA, self.optimal_R.T) + self.optimal_t
 
     def _wrap_output(
         self,
@@ -1378,6 +1422,10 @@ class Morpho_pairwise:
         self.XAHat = self.nx.to_numpy(self.XAHat).copy()
         self.optimal_RnA = self.nx.to_numpy(self.optimal_RnA).copy()
         self.RnA = self.nx.to_numpy(self.RnA).copy()
+        if self.sparse_calculation_mode and nx_torch(self.nx):
+            self.P = sparse_tensor_to_scipy(self.P)
+        else:
+            self.P = self.nx.to_numpy(self.P)
 
         if not (self.vecfld_key_added is None):
 
@@ -1386,8 +1434,8 @@ class Morpho_pairwise:
                 "t": self.nx.to_numpy(self.t),
                 "optimal_R": self.nx.to_numpy(self.optimal_R),
                 "optimal_t": self.nx.to_numpy(self.optimal_t),
-                "init_R": self.init_R,
-                "init_t": self.init_t,
+                "init_R": self.nx.to_numpy(self.init_R) if self.nn_init else None,
+                "init_t": self.nx.to_numpy(self.init_t) if self.nn_init else None,
                 "beta": self.beta,
                 "Coff": self.nx.to_numpy(self.Coff),
                 "inducing_variables": self.nx.to_numpy(self.inducing_variables),
