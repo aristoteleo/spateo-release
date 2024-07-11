@@ -933,6 +933,7 @@ def calc_distance(
 
 
 def calc_probability(
+    nx,
     distance_matrix: Union[np.ndarray, torch.Tensor],
     probability_type: str = "gauss",
     probability_parameter: Optional[float] = None,
@@ -961,8 +962,6 @@ def calc_probability(
     """
 
     # Get the appropriate backend (either NumPy or PyTorch)
-    nx = ot.backend.get_backend(distance_matrix)
-
     if probability_type.lower() == "gauss":
         if probability_parameter is None:
             raise ValueError("probability_parameter must be provided for 'Gauss' probability type.")
@@ -990,9 +989,7 @@ def get_P_core(
     exp_dist: List[Union[np.ndarray, torch.Tensor]],
     sigma2: Union[int, float, np.ndarray, torch.Tensor],
     model_mul: Union[np.ndarray, torch.Tensor],
-    # alpha: Union[np.ndarray, torch.Tensor],
     gamma: Union[float, np.ndarray, torch.Tensor],
-    # Sigma: Union[np.ndarray, torch.Tensor],
     samples_s: Optional[List[float]] = None,
     sigma2_variance: float = 1,
     probability_type: Union[str, List[str]] = "Gauss",
@@ -1040,31 +1037,31 @@ def get_P_core(
     """
 
     # Calculate spatial probability with sigma2_variance
-    spatial_prob = calc_probability(spatial_dist, "gauss", probability_parameter=sigma2 / sigma2_variance)  # N x M
-
+    spatial_prob = calc_probability(nx, spatial_dist, "gauss", probability_parameter=sigma2 / sigma2_variance)  # N x M
+    # print(spatial_prob.sum())
     # TODO: everytime this will generate D/2 on GPU, may influence the runtime
     outlier_s = samples_s * spatial_dist.shape[0]
-    spatial_outlier = (
-        _power(nx)((2 * _pi(nx) * sigma2), _data(nx, Dim / 2, type_as)) * (1 - gamma) / (gamma * outlier_s)
-    )  # scalar
-
+    # outlier_s = samples_s
+    # print(outlier_s)
+    spatial_outlier = _power(nx)((2 * _pi(nx) * sigma2), Dim / 2) * (1 - gamma) / (gamma * outlier_s)  # scalar
+    # print(spatial_outlier)
     # TODO: the position of the following is unclear
-    spatial_inlier = 1 - spatial_outlier / (
-        spatial_outlier + nx.sum(spatial_prob, axis=0, keepdims=True) + eps
-    )  # 1 x M
-
+    spatial_inlier = 1 - spatial_outlier / (spatial_outlier + nx.sum(spatial_prob, axis=0, keepdims=True))  # 1 x M
+    # print(spatial_inlier.mean())
     spatial_prob = spatial_prob * model_mul
 
     # spatial P
-    P = spatial_prob / (spatial_outlier + nx.sum(spatial_prob, axis=0, keepdims=True) + eps)  # N x M
+    P = spatial_prob / (spatial_outlier + nx.sum(spatial_prob, axis=0, keepdims=True))  # N x M
     K_NA_spatial = P.sum(1)
 
     # Calculate spatial probability without sigma2_variance
     spatial_prob = calc_probability(
+        nx,
         spatial_dist,
         "gauss",
         probability_parameter=sigma2,
     )  # N x M
+
     spatial_prob = spatial_prob * model_mul
 
     # sigma2 P
@@ -1075,9 +1072,8 @@ def get_P_core(
     # Calculate probabilities for expression distances
     if probability_parameters is None:
         probability_parameters = [None] * len(exp_dist)
-
     for e_d, p_t, p_p in zip(exp_dist, probability_type, probability_parameters):
-        spatial_prob *= calc_probability(e_d, p_t, p_p)
+        spatial_prob *= calc_probability(nx, e_d, p_t, p_p)
 
     P = spatial_inlier * spatial_prob / (nx.sum(spatial_prob, axis=0, keepdims=True) + eps)
 
@@ -1091,7 +1087,7 @@ def get_P_core(
             axis=0,
             descending=True,
         )
-
+    # print(P.sum())
     return P, K_NA_spatial, K_NA_sigma2, sigma2_related
 
 
@@ -1232,7 +1228,6 @@ def voxel_data(
     max_coords = np.max(coords, axis=0)
     if voxel_size is None:
         voxel_size = np.sqrt(np.prod(max_coords - min_coords)) / (np.sqrt(N) / 5)
-        # print(voxel_size)
     voxel_steps = (max_coords - min_coords) / int(np.sqrt(voxel_num))
     voxel_coords = [
         np.arange(min_coord, max_coord, voxel_step)
@@ -1406,6 +1401,8 @@ _repeat_interleave = (
     else np.repeat(x, repeats, axis)
 )
 
+_copy = lambda nx, data: data.clone() if nx_torch(nx) else data.copy()
+
 
 def _sort(nx, arr, axis=-1, descending=False):
     if not descending:
@@ -1419,3 +1416,28 @@ def _sort(nx, arr, axis=-1, descending=False):
 def _SparseTensor(nx, row, col, value, sparse_sizes):
 
     return SparseTensor(indices=torch.vstack((row, col)), values=value, size=sparse_sizes)
+
+
+def sparse_tensor_to_scipy(sparse_tensor):
+    from scipy.sparse import coo_matrix
+
+    """
+    Convert a PyTorch SparseTensor to a SciPy sparse matrix (COO format).
+
+    Args:
+        sparse_tensor (torch.sparse.Tensor): The input PyTorch sparse tensor.
+
+    Returns:
+        scipy.sparse.coo_matrix: The output SciPy sparse matrix.
+    """
+    if not sparse_tensor.is_sparse:
+        raise ValueError("Input tensor is not a sparse tensor")
+
+    sparse_tensor = sparse_tensor.coalesce()  # Ensure the sparse tensor is in coalesced format
+    values = sparse_tensor.values().cpu().numpy()
+    indices = sparse_tensor.indices().cpu().numpy()
+
+    shape = sparse_tensor.shape
+    coo = coo_matrix((values, (indices[0], indices[1])), shape=shape)
+
+    return coo
