@@ -6907,7 +6907,8 @@ class MuSIC_Interpreter(MuSIC):
                     all_TFs.extend(custom_tfs)
 
                 # Also add all TFs that can bind these TFs:
-                primary_tf_rows = grn.loc[all_TFs]
+                check_TFs = [tf for tf in all_TFs if tf in grn.index]
+                primary_tf_rows = grn.loc[check_TFs]
                 secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
                 if scipy.sparse.issparse(adata.X):
                     nnz_counts = np.array(adata[:, secondary_TFs].X.getnnz(axis=0)).flatten()
@@ -7009,6 +7010,10 @@ class MuSIC_Interpreter(MuSIC):
                 counts_targets.obs[group_key] = cell_types
 
                 if self.total_counts_key is not None:
+                    if self.total_counts_key not in self.adata.obs.columns:
+                        self.adata.obs[self.total_counts_key] = (
+                            self.adata.X.sum() if scipy.sparse.issparse(self.adata.X) else self.adata.X.sum(axis=1)
+                        )
                     counts_targets.obs[self.total_counts_key] = self.adata.obs.loc[
                         signal[subset_key].index, self.total_counts_key
                     ]

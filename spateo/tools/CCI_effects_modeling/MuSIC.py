@@ -1030,9 +1030,10 @@ class MuSIC:
                     ligands = [l for l in ligands if l in database_ligands]
                     # Some ligands in the mouse database are not ligands, but internal factors that interact w/ i.e.
                     # the hormone receptors:
+                    ligands_test = l_test = [l[0].upper() + l[1:].lower() for l in ligands]
                     ligands = [
                         l
-                        for l in ligands
+                        for l in ligands_test
                         if l.title()
                         not in [
                             "Lta4h",
@@ -1056,6 +1057,7 @@ class MuSIC:
                             "Enho",
                             "Ptgr1",
                             "Agrp",
+                            "Pnmt",
                             "Akr1b3",
                             "Daglb",
                             "Ubash3d",
@@ -1075,6 +1077,17 @@ class MuSIC:
                             "Mmp2",
                             "Ttr",
                             "Alb",
+                            "Sult2a1",
+                            "Hsd17b6",
+                            "Cyp11a1",
+                            "Cyp11b1",
+                            "Cyp11b2",
+                            "Cyp17a1",
+                            "Cyp19a1",
+                            "Cyp21a1",
+                            "Cyp27b1",
+                            "Sult1e1",
+                            "Dio3",
                         ]
                     ]
                     l_complexes = [elem for elem in ligands if "_" in elem]
@@ -1448,7 +1461,8 @@ class MuSIC:
                 targets = np.array(targets)[target_expr_percentage > self.target_expr_threshold]
 
             # Filter targets to those that can be found in our prior GRN:
-            targets = [t for t in targets if t in self.grn.index]
+            if self.mod_type != "niche":
+                targets = [t for t in targets if t in self.grn.index]
 
             self.targets_expr = pd.DataFrame(
                 adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
@@ -3430,7 +3444,6 @@ class MuSIC:
                 indices = self.subsampled_indices[target]
                 self.x_chunk = np.array(indices)
 
-            if self.mod_type != "niche":
                 # To avoid false negative coefficients due to collinearity, feature mask based on the global correlation
                 correlations = []
                 for idx in range(X.shape[1]):
@@ -3830,10 +3843,9 @@ class MuSIC:
                         # receptor models, do not infer expression in cells that do not express the target because it
                         # is unknown whether the ligand/receptor (the half of the interacting pair that is missing) is
                         # present in the neighborhood of these cells:
-                        if self.mod_type in ["receptor", "ligand", "downstream"]:
-                            mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
-                            betas *= mask_matrix
-                            standard_errors *= mask_matrix
+                        mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
+                        betas *= mask_matrix
+                        standard_errors *= mask_matrix
                         mask_df = (self.X_df.loc[betas.index] != 0).astype(int)
                         mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
                         for col in betas.columns:
@@ -3868,10 +3880,9 @@ class MuSIC:
                 else:
                     if not load_for_interpreter:
                         # Same processing as for subsampling, but without the subsampling:
-                        if self.mod_type in ["receptor", "ligand", "downstream"]:
-                            mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
-                            betas *= mask_matrix
-                            standard_errors *= mask_matrix
+                        mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
+                        betas *= mask_matrix
+                        standard_errors *= mask_matrix
                         mask_df = (self.X_df.loc[betas.index] != 0).astype(int)
                         mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
                         for col in betas.columns:
