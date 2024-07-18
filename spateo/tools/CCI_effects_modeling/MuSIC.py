@@ -293,6 +293,8 @@ class MuSIC:
             for file in file_list:
                 if not "predictions" in file:
                     check = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
+                    if isinstance(check.index[0], int):
+                        check.index = check.index.astype(str)
                     if any([name not in check.index for name in self.sample_names]):
                         self.map_new_cells()
                     break
@@ -635,6 +637,10 @@ class MuSIC:
                     self.adata.X.data += 1
                 else:
                     self.adata.X += 1
+            else:
+                self.adata.layers[
+                    "original_counts"
+                ] = self.adata.X.copy()  # add this since gaussian model may also need this in downstream model
 
             if "downstream" in self.mod_type:
                 # For finding upstream associations with ligand
@@ -2752,7 +2758,10 @@ class MuSIC:
                 pred_y = np.dot(X[i], betas)
 
             residual = y[i] - pred_y
-            diagnostic = residual
+            if isinstance(residual, np.ndarray) or isinstance(residual, list):
+                diagnostic = residual[0]
+            else:
+                diagnostic = residual
             # Reshape coefficients if necessary:
             betas = betas.flatten()
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
@@ -3460,7 +3469,11 @@ class MuSIC:
                     else:
                         # Compute the Pearson correlation coefficient for the subset
                         if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
-                            correlation = scipy.stats.pearsonr(X_subset, y_subset)[0]
+                            try:
+                                correlation = scipy.stats.pearsonr(X_subset, y_subset)[0]
+                            except ValueError:
+                                self.logger.info("Some values are missing in the data. Skipping.")
+                                correlation = np.nan
                         else:
                             correlation = np.nan  # Not enough data points to compute correlation
 
@@ -3843,9 +3856,14 @@ class MuSIC:
                         # receptor models, do not infer expression in cells that do not express the target because it
                         # is unknown whether the ligand/receptor (the half of the interacting pair that is missing) is
                         # present in the neighborhood of these cells:
-                        mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
-                        betas *= mask_matrix
-                        standard_errors *= mask_matrix
+                        if self.mod_type in ["receptor", "ligand", "downstream"]:
+                            if isinstance(self.adata[betas.index, target].X, np.ndarray):
+                                mask_matrix = (self.adata[betas.index, target].X != 0).astype(int)
+                            else:
+                                mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
+                            betas *= mask_matrix
+                            standard_errors *= mask_matrix
+
                         mask_df = (self.X_df.loc[betas.index] != 0).astype(int)
                         mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
                         for col in betas.columns:
