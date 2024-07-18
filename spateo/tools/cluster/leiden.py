@@ -5,6 +5,7 @@ import igraph
 import leidenalg
 import numpy as np
 import scipy
+import scipy.sparse
 from sklearn.neighbors import kneighbors_graph
 
 from ...configuration import SKM
@@ -87,6 +88,8 @@ def calculate_leiden_partition(
     if adj is not None:
         if isinstance(adj, np.ndarray):
             G = adj_to_igraph(adj.tolist())
+        elif scipy.sparse.issparse(adj):
+            G = adj_to_igraph(adj.A.tolist())
         else:
             G = igraph.Graph(n=adj.shape[0])
             for i, j in zip(*adj.nonzero()):
