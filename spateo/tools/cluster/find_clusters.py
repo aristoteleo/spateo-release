@@ -233,5 +233,6 @@ def scc(
     )
 
     adata.obs[key_added] = clusters
+    adata.obs[key_added] = adata.obs[key_added].astype(str)
 
     return adata
