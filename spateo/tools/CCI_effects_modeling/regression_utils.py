@@ -824,7 +824,7 @@ def permutation_testing(
         pval: The calculated p-value.
     """
     if scipy.sparse.isspmatrix_csr(data):
-        data = data.A
+        data = data.toarray()
 
     if subset_rows is not None:
         if subset_cols is not None:

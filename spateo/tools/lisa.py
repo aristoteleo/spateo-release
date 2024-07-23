@@ -54,9 +54,9 @@ def lisa_geo_df(
     df = pd.DataFrame(coords, columns=["x", "y"])
 
     if layer is None:
-        df["exp"] = adata[:, gene].X.A.flatten()
+        df["exp"] = adata[:, gene].X.toarray().flatten()
     else:
-        df["exp"] = np.log1p(adata[:, gene].layers[layer].A.flatten())
+        df["exp"] = np.log1p(adata[:, gene].layers[layer].toarray().flatten())
 
     df["w_exp"] = weights.spatial_lag.lag_spatial(w, df["exp"])
     df["exp_zscore"] = (df["exp"] - df["exp"].mean()) / df["exp"].std()
@@ -200,9 +200,9 @@ def local_moran_i(
         diamond_spec,
     ):
         if layer is None:
-            db["exp"] = adata[:, cur_g].X.A.flatten()
+            db["exp"] = adata[:, cur_g].X.toarray().flatten()
         else:
-            db["exp"] = np.log1p(adata[:, cur_g].layers[layer].A.flatten())
+            db["exp"] = np.log1p(adata[:, cur_g].layers[layer].toarray().flatten())
 
         db["w_exp"] = weights.spatial_lag.lag_spatial(w, db["exp"])
 
@@ -424,9 +424,9 @@ def GM_lag_model(
         knn,
     ):
         if layer is None:
-            X["log_exp"] = adata[:, cur_g].X.A
+            X["log_exp"] = adata[:, cur_g].X.toarray()
         else:
-            X["log_exp"] = np.log1p(adata[:, cur_g].layers[layer].A)
+            X["log_exp"] = np.log1p(adata[:, cur_g].layers[layer].toarray())
 
         try:
             model = spreg.GM_Lag(

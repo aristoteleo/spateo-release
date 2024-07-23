@@ -280,7 +280,7 @@ def find_cci_two_group(
         # real lr_cp_exp_score
         ligand_data = adata[cell_pair["cell_sender"], lr_network["from"]]
         receptor_data = adata[cell_pair["cell_receiver"], lr_network["to"]]
-        lr_data = ligand_data.X.A * receptor_data.X.A if x_sparse else ligand_data.X * receptor_data.X
+        lr_data = ligand_data.X.toarray() * receptor_data.X.toarray() if x_sparse else ligand_data.X * receptor_data.X
         lr_data = np.array(lr_data)
         if cell_pair.shape[0] == 0:
             lr_prod = np.zeros(lr_network.shape[0])
@@ -312,7 +312,7 @@ def find_cci_two_group(
             per_ligand_data = adata[per_sender_id, lr_network["from"]]
             per_receptor_data = adata[per_receiver_id, lr_network["to"]]
             per_lr_data = (
-                per_ligand_data.X.A * per_receptor_data.X.A if x_sparse else per_ligand_data.X * per_receptor_data.X
+                per_ligand_data.X.toarray() * per_receptor_data.X.toarray() if x_sparse else per_ligand_data.X * per_receptor_data.X
             )
             per_lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, per_lr_data)
             if np.isnan(per_lr_co_exp_ratio).all():
@@ -359,9 +359,9 @@ def calculate_group_pair_lr_pair(
 
     ## ligand-20 groups; receptor-20 groups
     for g in cols:
-        meanl = np.mean(adata_l[adata_l.obs[group] == g].X.A, axis=0)
+        meanl = np.mean(adata_l[adata_l.obs[group] == g].X.toarray(), axis=0)
         dfl[g] = meanl
-        meanr = np.mean(adata_r[adata_r.obs[group] == g].X.A, axis=0)
+        meanr = np.mean(adata_r[adata_r.obs[group] == g].X.toarray(), axis=0)
         dfr[g] = meanr
 
     ## group_pairs

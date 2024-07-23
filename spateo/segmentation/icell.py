@@ -264,7 +264,7 @@ def _score_pixels(
     # Convert X to dense array
     if issparse(X):
         lm.main_debug("Converting X to dense array.")
-        X = X.A
+        X = X.toarray()
 
     # All methods require some kind of 2D convolution to start off
     lm.main_debug(f"Computing 2D convolution with k={k}.")

@@ -106,7 +106,7 @@ def moran_i(
 
     # computing the moran_i for a single gene, and then used the joblib.Parallel to compute all genes in adata object.
     def _single(gene, X_data, W, adata, permutations):
-        cur_X = X_data[:, adata.var.index == gene].A if issparse(X_data) else X_data[:, adata.var.index == gene]
+        cur_X = X_data[:, adata.var.index == gene].toarray() if issparse(X_data) else X_data[:, adata.var.index == gene]
         mbi = explore.esda.moran.Moran(cur_X, W, permutations=permutations, two_tailed=False)
         Moran_I = mbi.I
         p_value = mbi.p_sim

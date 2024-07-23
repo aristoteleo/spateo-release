@@ -140,7 +140,7 @@ class SpateoAdataKeyManager:
         else:
             res_data = adata.layers[layer]
         if make_dense and sparse.issparse(res_data):
-            return res_data.A
+            return res_data.toarray()
         if copy:
             return res_data.copy()
         return res_data

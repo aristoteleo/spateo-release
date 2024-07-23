@@ -759,7 +759,7 @@ class MuSIC:
 
             # Define ligand/receptor/pathway expression array:
             self.targets_expr = pd.DataFrame(
-                adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
+                adata[:, targets].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
                 index=adata.obs_names,
                 columns=targets,
             )
@@ -767,7 +767,7 @@ class MuSIC:
             adata_orig = adata.copy()
             adata_orig.X = adata.layers["original_counts"]
             targets_expr_raw = pd.DataFrame(
-                adata_orig[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata_orig[:, targets].X,
+                adata_orig[:, targets].X.toarray() if scipy.sparse.issparse(adata.X) else adata_orig[:, targets].X,
                 index=adata.obs_names,
                 columns=targets,
             )
@@ -836,7 +836,7 @@ class MuSIC:
                         f"covariate to the X matrix."
                     )
             matched_obs_matrix = self.adata.obs[matched_obs].to_numpy()
-            matched_var_matrix = self.adata[:, matched_var_names].X.A
+            matched_var_matrix = self.adata[:, matched_var_names].X.toarray()
             cov_names = matched_obs + matched_var_names
             concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
             self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
@@ -942,7 +942,7 @@ class MuSIC:
                 all_targets = [t for t in all_targets if t in self.grn.index]
 
                 self.targets_expr = pd.DataFrame(
-                    adata[:, all_targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, all_targets].X,
+                    adata[:, all_targets].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, all_targets].X,
                     index=adata.obs_names,
                     columns=all_targets,
                 )
@@ -1157,7 +1157,7 @@ class MuSIC:
                 ligands = [l for l in ligands if l in adata.var_names]
 
                 self.ligands_expr = pd.DataFrame(
-                    adata[:, ligands].X.A if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
+                    adata[:, ligands].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
                     index=adata.obs_names,
                     columns=ligands,
                 )
@@ -1294,7 +1294,7 @@ class MuSIC:
                 receptors = [r for r in receptors if r in adata.var_names]
 
                 self.receptors_expr = pd.DataFrame(
-                    adata[:, receptors].X.A if scipy.sparse.issparse(adata.X) else adata[:, receptors].X,
+                    adata[:, receptors].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, receptors].X,
                     index=adata.obs_names,
                     columns=receptors,
                 )
@@ -1451,7 +1451,7 @@ class MuSIC:
             targets = [t for t in targets if t in self.grn.index]
 
             self.targets_expr = pd.DataFrame(
-                adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
+                adata[:, targets].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
                 index=adata.obs_names,
                 columns=targets,
             )
@@ -1540,9 +1540,9 @@ class MuSIC:
                         matching_rows["type"].str.contains("Secreted Signaling").any()
                         or matching_rows["type"].str.contains("ECM-Receptor").any()
                     ):
-                        lagged_expr = spatial_weights_secreted.dot(expr_sparse).A.flatten()
+                        lagged_expr = spatial_weights_secreted.dot(expr_sparse).toarray().flatten()
                     else:
-                        lagged_expr = spatial_weights_membrane_bound.dot(expr_sparse).A.flatten()
+                        lagged_expr = spatial_weights_membrane_bound.dot(expr_sparse).toarray().flatten()
                     lagged_expr_mat[:, i] = lagged_expr
                 self.ligands_expr = pd.DataFrame(
                     lagged_expr_mat, index=adata.obs_names, columns=self.ligands_expr.columns
@@ -2029,7 +2029,7 @@ class MuSIC:
                         f"covariate to the X matrix."
                     )
             matched_obs_matrix = self.adata.obs[matched_obs].to_numpy()
-            matched_var_matrix = self.adata[:, matched_var_names].X.A
+            matched_var_matrix = self.adata[:, matched_var_names].X.toarray()
             cov_names = matched_obs + matched_var_names
             concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
             self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
@@ -2453,7 +2453,7 @@ class MuSIC:
             if hasattr(self, "targets_expr"):
                 targets = self.targets_expr.columns
                 y_arr = pd.DataFrame(
-                    self.adata[:, targets].X.A if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
+                    self.adata[:, targets].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
                     index=self.sample_names,
                     columns=targets,
                 )
