@@ -2002,7 +2002,7 @@ class MuSIC_Interpreter(MuSIC):
         else:
             rounding_base = 1000
 
-        pos = pos.round(-int(pd.np.log10(rounding_base)))
+        pos = pos.round(-int(np.log10(rounding_base)))
 
         # If position array is numerical, there may not be an exact match- convert the data type to integer:
         if pos.dtype == float:
@@ -2206,10 +2206,14 @@ class MuSIC_Interpreter(MuSIC):
                     consecutive_counts[feature] += 1
                     if consecutive_counts[feature] >= int(window_size * 1.67):
                         feats_of_interest.add(feature)
-                for feature in combinations:
-                    if feature not in top_combinations[pos]:
-                        consecutive_counts[feature] = 0
+                # I am not sure what this is for. It will remove genes encountered before, and consecutive_counts is no longer used here after.
+                # for feature in combinations:
+                #     if feature not in top_combinations[pos]:
+                #         consecutive_counts[feature] = 0
 
+            feats_of_interest = list(
+                feats_of_interest
+            )  # fix for set subscription, set subscription is no longer allowed
             to_plot = all_fc_coord_sorted[feats_of_interest]
             if to_plot.index.is_numeric():
                 # Minmax scale to normalize positional context:
@@ -3944,7 +3948,10 @@ class MuSIC_Interpreter(MuSIC):
 
                 if to_plot == "mean":
                     mean_effects = []
-                    coef_target = self.coeffs[target].loc[adata.obs_names]
+                    # coef_target = self.coeffs[target].loc[adata.obs_names]
+                    coef_target = self.coeffs[target].loc[
+                        cell_in_ct.obs_names
+                    ]  # This should be cell_in_ct, since it's cell type specific effect, and not the entire adata object
                     coef_target = coef_target[[c for c in coef_target.columns if "intercept" not in c]]
 
                     if effect_threshold is None:
@@ -6901,18 +6908,22 @@ class MuSIC_Interpreter(MuSIC):
                 if scipy.sparse.issparse(adata.X):
                     nnz_counts = np.array(adata[:, all_TFs].X.getnnz(axis=0)).flatten()
                 else:
-                    nnz_counts = np.array(adata[:, all_TFs].X.getnnz(axis=0)).flatten()
+                    # nnz_counts = np.array(adata[:, all_TFs].X.getnnz(axis=0)).flatten()
+                    nnz_counts = np.count_nonzero(
+                        adata[:, all_TFs].X, axis=0
+                    ).flatten()  # np.ndarray have no getnnz attributes
                 all_TFs = [tf for tf, nnz in zip(all_TFs, nnz_counts) if nnz >= n_cells_threshold]
                 if custom_tfs is not None:
                     all_TFs.extend(custom_tfs)
 
                 # Also add all TFs that can bind these TFs:
-                primary_tf_rows = grn.loc[all_TFs]
+                check_TFs = [tf for tf in all_TFs if tf in grn.index]
+                primary_tf_rows = grn.loc[check_TFs]
                 secondary_TFs = primary_tf_rows.columns[(primary_tf_rows == 1).any()].tolist()
                 if scipy.sparse.issparse(adata.X):
                     nnz_counts = np.array(adata[:, secondary_TFs].X.getnnz(axis=0)).flatten()
                 else:
-                    nnz_counts = np.array(adata[:, secondary_TFs].X.getnnz(axis=0)).flatten()
+                    nnz_counts = np.count_nonzero(adata[:, secondary_TFs].X, axis=0).flatten()
                 secondary_TFs = [
                     tf for tf, nnz in zip(secondary_TFs, nnz_counts) if nnz >= int(0.5 * n_cells_threshold)
                 ]
@@ -6920,9 +6931,14 @@ class MuSIC_Interpreter(MuSIC):
 
                 regulator_features = all_TFs + secondary_TFs
                 # Prioritize those that are most coexpressed with at least one target:
-                regulator_expr = pd.DataFrame(
-                    adata[:, regulator_features].X.toarray(), index=signal[subset_key].index, columns=regulator_features
-                )
+                if scipy.sparse.issparse(adata.X):
+                    regulator_expr = pd.DataFrame(
+                        adata[:, regulator_features].X.toarray(), index=signal[subset_key].index, columns=regulator_features
+                    )
+                elif isinstance(adata.X, np.ndarray):  # adata.X might be np.ndarray
+                    regulator_expr = pd.DataFrame(
+                        adata[:, regulator_features].X, index=signal[subset_key].index, columns=regulator_features
+                    )
                 # Dataframe containing target expression:
                 ds_targets_df = signal[subset_key]
 
@@ -6963,7 +6979,10 @@ class MuSIC_Interpreter(MuSIC):
                 counts = adata[:, regulator_features].copy()
 
                 # Convert to dataframe:
-                counts_df = pd.DataFrame(counts.X.toarray(), index=counts.obs_names, columns=counts.var_names)
+                if scipy.sparse.issparse(adata.X):
+                    counts_df = pd.DataFrame(counts.X.toarray(), index=counts.obs_names, columns=counts.var_names)
+                elif isinstance(counts.X, np.ndarray):
+                    counts_df = pd.DataFrame(counts.X, index=counts.obs_names, columns=counts.var_names)
                 # combined_df = pd.concat([counts_df, signal[subset_key]], axis=1)
 
                 # Store the targets (ligands/receptors) to AnnData object, save to file path:
@@ -7009,6 +7028,10 @@ class MuSIC_Interpreter(MuSIC):
                 counts_targets.obs[group_key] = cell_types
 
                 if self.total_counts_key is not None:
+                    if self.total_counts_key not in self.adata.obs.columns:
+                        self.adata.obs[self.total_counts_key] = (
+                            self.adata.X.sum() if scipy.sparse.issparse(self.adata.X) else self.adata.X.sum(axis=1)
+                        )
                     counts_targets.obs[self.total_counts_key] = self.adata.obs.loc[
                         signal[subset_key].index, self.total_counts_key
                     ]
@@ -7129,6 +7152,7 @@ class MuSIC_Interpreter(MuSIC):
         kwargs["bw_fixed"] = True
         kwargs["total_counts_threshold"] = self.total_counts_threshold
         kwargs["total_counts_key"] = self.total_counts_key
+        kwargs["distr"] = self.distr
 
         # Use the same output directory as the main model, add folder demarcating results from downstream task:
         output_dir = os.path.dirname(self.output_path)
@@ -7613,6 +7637,7 @@ class MuSIC_Interpreter(MuSIC):
                         all_cells_affected = dm[dm[f"regulator_{interaction}"] > 0]
                     else:
                         all_cells_affected = dm[dm[interaction] > 0]
+
                     specificity = (all_coeffs_target.loc[all_cells_affected.index, interaction] != 0).mean()
                     all_plot_values.loc[interaction, target] = specificity
         all_plot_values.index = [replace_col_with_collagens(f) for f in all_plot_values.index]

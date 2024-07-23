@@ -90,6 +90,7 @@ def get_P_sparse(
     labelB: Optional[pd.Series] = None,
     label_transfer_prior: Optional[dict] = None,
     top_k: int = 1024,
+    dissimilarity: str = "kl",
 ):
     assert XnAHat.shape[1] == XnB.shape[1], "XnAHat and XnB do not have the same number of features."
     assert XnAHat.shape[0] == alpha.shape[0], "XnAHat and alpha do not have the same length."
@@ -118,6 +119,7 @@ def get_P_sparse(
         col_mul=(_mul(nx)(alpha, nx.exp(-Sigma / sigma2))),
         batch_capacity=batch_capacity,
         top_k=top_k,
+        dissimilarity=dissimilarity,
     )
 
     K_NA = P.sum(1).to_dense()
@@ -151,6 +153,7 @@ def BA_align_sparse(
     iter_key_added: Optional[str] = "iter_spatial",
     vecfld_key_added: Optional[str] = "VecFld_morpho",
     layer: str = "X",
+    use_rep: Optional[str] = None,
     dissimilarity: str = "kl",
     max_iter: int = 200,
     lambdaVF: Union[int, float] = 1e2,
@@ -173,6 +176,7 @@ def BA_align_sparse(
     batch_size: int = 1024,
     use_sparse: bool = True,
     pre_compute_dist: bool = False,
+    batch_capacity: int = 1,
 ) -> Tuple[Optional[Tuple[AnnData, AnnData]], np.ndarray, np.ndarray]:
     empty_cache(device=device)
     # Preprocessing and extract the spatial and expression information
@@ -196,6 +200,7 @@ def BA_align_sparse(
         dtype=dtype,
         device=device,
         verbose=verbose,
+        use_rep=use_rep,
     )
     coordsA, coordsB = spatial_coords[1], spatial_coords[0]
     X_A, X_B = exp_matrices[1], exp_matrices[0]
@@ -351,6 +356,8 @@ def BA_align_sparse(
                 Sigma=SigmaDiag,
                 outlier_variance=outlier_variance,
                 label_transfer_prior=label_transfer_prior,
+                dissimilarity=dissimilarity,
+                batch_capacity=batch_capacity,
             )
         else:
             P, assignment_results = get_P_sparse(
@@ -367,6 +374,8 @@ def BA_align_sparse(
                 Sigma=SigmaDiag,
                 outlier_variance=outlier_variance,
                 label_transfer_prior=label_transfer_prior,
+                dissimilarity=dissimilarity,
+                batch_capacity=batch_capacity,
             )
 
         # update temperature
@@ -538,7 +547,9 @@ def BA_align_sparse(
                 Sigma=SigmaDiag,
                 outlier_variance=outlier_variance,
                 label_transfer_prior=label_transfer_prior,
-                top_k=32,
+                top_k=512,
+                dissimilarity=dissimilarity,
+                batch_capacity=batch_capacity,
             )
     # Get optimal Rigid transformation
     optimal_RnA, optimal_R, optimal_t = get_optimal_R_sparse(

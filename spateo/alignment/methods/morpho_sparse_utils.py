@@ -29,7 +29,9 @@ def calc_distance(
         "square_euc",
         "square_euclidean",
         "kl",
-    ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'``, ``'square_euc'``, ``'square_euclidean'``, and ``'kl'``."
+        "cos",
+        "cosine",
+    ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'``, ``'square_euc'``, ``'square_euclidean'``, ``'kl'``, ``'cos'``, and ``'cosine'``."
 
     if use_sparse:
         assert sparse_method in [
@@ -107,11 +109,14 @@ def calc_P_related(
     label_transfer_prior: Optional[dict] = None,
     top_k: int = 1024,
 ):
+    labelA = None if labelA is None else labelA.values
+    labelB = None if labelA is None else labelB.values
     # metric = 'square_euc'
     NA, NB = XnAHat.shape[0], XnB.shape[0]
     D = XnAHat.shape[1]
-    batch_base = 1e7
-    split_size = min(int(batch_capacity * batch_base / (NA * D)), NB)
+    G = X_A.shape[1]
+    batch_base = 1e9
+    split_size = min(int(batch_capacity * batch_base / (NA * G)), NB)
     split_size = 1 if split_size == 0 else split_size
 
     nx = ot.backend.get_backend(XnAHat, XnB)
@@ -120,18 +125,18 @@ def calc_P_related(
     XnB_chunks = _split(nx, XnB, split_size, dim=0)
     X_B_chunks = _split(nx, X_B, split_size, dim=0)
 
-    label_mask = _construct_label_mask(labelA, labelB, label_transfer_prior).T
-
-    mask_chunks_arr = _split(nx, nx.arange(NB), split_size, dim=0)
+    labelB_chunks = [None] * len(XnB_chunks) if labelB is None else _torch_like_split(labelB, split_size, dim=0)
 
     K_NA_spatial = nx.zeros((NA,), type_as=XnAHat)
     K_NA_sigma2 = nx.zeros((NA,), type_as=XnAHat)
     Ps = []
     sigma2_temp = 0
     cur_row = 0
-    for XnB_chunk, X_B_chunk, mask_chunk_arr in zip(XnB_chunks, X_B_chunks, mask_chunks_arr):
+    for XnB_chunk, X_B_chunk, labelB_chunk in zip(XnB_chunks, X_B_chunks, labelB_chunks):
         label_mask_chunk = (
-            None if labelA is None else _data(nx, label_mask[:, np.array(mask_chunk_arr)], type_as=XnB_chunk)
+            None
+            if labelA is None
+            else _construct_label_mask(nx, labelA, labelB_chunk, label_transfer_prior, XnB_chunk).T
         )
 
         # calculate distance matrix (common step)
@@ -272,12 +277,13 @@ def _init_guess_beta2(
     return beta2, beta2_end
 
 
-def _construct_label_mask(labelA, labelB, label_transfer_prior):
-    label_mask = np.zeros((labelB.shape[0], labelA.shape[0]))
+def _construct_label_mask(nx, labelA, labelB, label_transfer_prior, type_as):
+    label_mask = nx.zeros((labelB.shape[0], labelA.shape[0]), type_as=type_as)
     for k in label_transfer_prior.keys():
-        idx = np.where((labelB == k))[0]
-        cur_P = labelA.map(label_transfer_prior[k]).values
-        label_mask[idx, :] = cur_P
+        idxB = np.where((labelB == k))[0]
+        for j in label_transfer_prior[k].keys():
+            idxA = np.where((labelA == j))[0]
+            label_mask[idxB[:, None], idxA] = label_transfer_prior[k][j]
     return label_mask
 
 
@@ -323,6 +329,66 @@ def _SparseTensor(nx, row, col, value, sparse_sizes):
         return coo_array((value, (row, col)), shape=sparse_sizes)
 
 
+def _cosine_distance_backend(
+    X: Union[np.ndarray, torch.Tensor],
+    Y: Union[np.ndarray, torch.Tensor],
+    eps: float = 1e-8,
+) -> Union[np.ndarray, torch.Tensor]:
+    """
+    Compute the pairwise cosine similarity between all pairs of samples in matrices X and Y.
+
+    Parameters
+    ----------
+    X : np.ndarray or torch.Tensor
+        Matrix with shape (N, D), where each row represents a sample.
+    Y : np.ndarray or torch.Tensor
+        Matrix with shape (M, D), where each row represents a sample.
+    eps : float, optional
+        A small value to avoid division by zero. Default is 1e-8.
+
+    Returns
+    -------
+    np.ndarray or torch.Tensor
+        Pairwise cosine similarity matrix with shape (N, M).
+
+    Raises
+    ------
+    AssertionError
+        If the number of features in X and Y do not match.
+    """
+
+    assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
+
+    # Get the appropriate backend (either NumPy or PyTorch)
+    nx = ot.backend.get_backend(X, Y)
+
+    # Normalize rows to unit vectors
+    X_norm = nx.sqrt(nx.sum(X**2, axis=1, keepdims=True))
+    Y_norm = nx.sqrt(nx.sum(Y**2, axis=1, keepdims=True))
+    X = X / nx.maximum(X_norm, eps)
+    Y = Y / nx.maximum(Y_norm, eps)
+
+    # Compute cosine similarity
+    D = nx.dot(X, Y.T)
+
+    return D
+
+
+def _cos_similarity(
+    mat1: Union[np.ndarray, torch.Tensor],
+    mat2: Union[np.ndarray, torch.Tensor],
+):
+    nx = ot.backend.get_backend(mat1, mat2)
+    if nx_torch(nx):
+        # torch_cos = torch.nn.CosineSimilarity(dim=1)
+        # mat1_unsqueeze = mat1.unsqueeze(-1)
+        # mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0, 2)
+        distMat = -_cosine_distance_backend(mat1, mat2) * 0.5 + 0.5
+    else:
+        distMat = (-ot.dist(mat1, mat2, metric="cosine") + 1) * 0.5 + 0.5
+    return distMat
+
+
 def _dist(
     mat1: Union[np.ndarray, torch.Tensor],
     mat2: Union[np.ndarray, torch.Tensor],
@@ -334,6 +400,8 @@ def _dist(
         "square_euc",
         "square_euclidean",
         "kl",
+        "cos",
+        "cosine",
     ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'``, ``'square_euc'``, ``'square_euclidean'``, and ``'kl'``."
     nx = ot.backend.get_backend(mat1, mat2)
     if (
@@ -357,6 +425,8 @@ def _dist(
             - _dot(nx)(mat1, nx.log(mat2).T)
             - _dot(nx)(mat2, nx.log(mat1).T).T
         ) / 2
+    elif metric.lower() == "cos" or metric.lower() == "cosine":
+        distMat = _cos_similarity(mat1, mat2)
     return distMat
 
 
@@ -370,6 +440,24 @@ _split = (
     if nx_torch(nx)
     else np.array_split(x, chunk_size, axis=dim)
 )
+
+
+def _torch_like_split(arr, size, dim=0):
+    if dim < 0:
+        dim += arr.ndim
+    shape = arr.shape
+    arr = np.swapaxes(arr, dim, -1)
+    flat_arr = arr.reshape(-1, shape[dim])
+    num_splits = flat_arr.shape[-1] // size
+    remainder = flat_arr.shape[-1] % size
+    splits = np.array_split(flat_arr[:, : num_splits * size], num_splits, axis=-1)
+    if remainder:
+        splits.append(flat_arr[:, num_splits * size :])
+    splits = [np.swapaxes(split.reshape(*shape[:dim], -1, *shape[dim + 1 :]), dim, -1) for split in splits]
+
+    return splits
+
+
 _where = lambda nx, condition: torch.where(condition) if nx_torch(nx) else np.where(condition)
 _repeat_interleave = (
     lambda nx, x, repeats, axis: torch.repeat_interleave(x, repeats, dim=axis)
