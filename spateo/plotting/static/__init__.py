@@ -1,7 +1,7 @@
 """Spatiotemporal modeling of spatial transcriptomics
 """
 from .agg import box_qc_regions, imshow, qc_regions
-from .align import multi_slices
+from .align import overlay_slices_2d, slices_2d
 from .bbs import delaunay, polygon
 from .colorlabel import color_label
 from .dotplot import dotplot
@@ -23,11 +23,11 @@ from .three_d_plot import (
     merge_animations,
     multi_models,
     pairwise_iteration,
+    pairwise_iteration_panel,
     pairwise_mapping,
     pi_heatmap,
     three_d_animate,
     three_d_multi_plot,
     three_d_plot,
     torsion,
-    pairwise_iteration_panel,
 )
