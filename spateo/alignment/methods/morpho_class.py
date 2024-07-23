@@ -521,6 +521,7 @@ class Morpho_pairwise:
         # preprocess guidance pair if provided
         if (self.guidance_pair is not None) and (self.guidance_effect != False) and (self.guidance_weight > 0):
             self._guidance_pair_preprocess()
+            self.guidance = True
         else:
             self.guidance = False
 
@@ -548,6 +549,8 @@ class Morpho_pairwise:
         # Convert guidance pairs to the backend type
         self.X_BI = self.nx.from_numpy(self.guidance_pair[0], type_as=self.type_as)
         self.X_AI = self.nx.from_numpy(self.guidance_pair[1], type_as=self.type_as)
+        self.V_AI = self.nx.zeros(self.X_AI.shape, type_as=self.type_as)
+        print(self.V_AI)
 
         if self.normalize_c:
             # Normalize the guidance pairs
@@ -813,7 +816,9 @@ class Morpho_pairwise:
             self.GammaSparse = con_K(X=self.inducing_variables, Y=self.inducing_variables, beta=self.kernel_bandwidth)
             self.U = con_K(X=self.coordsA, Y=self.inducing_variables, beta=self.kernel_bandwidth)
             self.U_I = (
-                con_K(X=self.X_AI, Y=self.inducing_variables, beta=self.kernel_bandwidth) if self.guidance else None
+                con_K(X=self.X_AI, Y=self.inducing_variables, beta=self.kernel_bandwidth)
+                if self.guidance_effect in ["nonrigid", "both"]
+                else None
             )
         else:
             raise NotImplementedError(f"Kernel type '{self.kernel_type}' is not implemented.")
@@ -1259,11 +1264,11 @@ class Morpho_pairwise:
         mu_XB, mu_XA, mu_Vn = PXB, PXA, PVA
         mu_X_deno, mu_Vn_deno = _copy(self.nx, self.Sp), _copy(self.nx, self.Sp)
         if self.guidance and (self.guidance_effect in ("rigid", "both")):
-            mu_XB += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_BI
-            mu_XA += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_AI
-            mu_Vn += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.V_AI
-            mu_X_deno += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_BI.shape[0]
-            mu_Vn_deno += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_BI.shape[0]
+            mu_XB += (self.sigma2 * self.guidance_weight * self.Sp / self.X_BI.shape[0]) * self.X_BI.mean()
+            mu_XA += (self.sigma2 * self.guidance_weight * self.Sp / self.X_BI.shape[0]) * self.X_AI.mean()
+            mu_Vn += (self.sigma2 * self.guidance_weight * self.Sp / self.X_BI.shape[0]) * self.V_AI.mean()
+            mu_X_deno += (self.sigma2 * self.guidance_weight * self.Sp / self.X_BI.shape[0]) * self.X_BI.shape[0]
+            mu_Vn_deno += (self.sigma2 * self.guidance_weight * self.Sp / self.X_BI.shape[0]) * self.X_BI.shape[0]
         if self.nn_init:
             mu_XB += (self.sigma2 * self.nn_init_weight * self.Sp / self.nx.sum(self.inlier_P)) * _dot(self.nx)(
                 self.inlier_P.T, self.inlier_B

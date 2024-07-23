@@ -1,5 +1,6 @@
 # from .morpho import BA_align
 # from .morpho_sparse import BA_align_sparse
+from .backend import NumpyBackend, TorchBackend
 from .deprecated_utils import (
     align_preprocess,
     cal_dist,
@@ -7,6 +8,7 @@ from .deprecated_utils import (
     calc_exp_dissimilarity,
 )
 from .morpho_class import Morpho_pairwise
+from .morpho_mesh_correction import Mesh_correction
 from .paste import (
     generalized_procrustes_analysis,
     paste_center_align,

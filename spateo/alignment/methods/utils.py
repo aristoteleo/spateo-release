@@ -2,7 +2,8 @@ import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-import ot
+
+# import ot
 import pandas as pd
 import torch
 from anndata import AnnData
@@ -12,6 +13,7 @@ from scipy.sparse import issparse
 from scipy.special import psi
 from torch import sparse_coo_tensor as SparseTensor
 
+from spateo.alignment.methods.backend import NumpyBackend, TorchBackend, get_backend
 from spateo.logging import logger_manager as lm
 
 # Get the intersection of lists
@@ -43,14 +45,14 @@ def check_backend(device: str = "cpu", dtype: str = "float32", verbose: bool = T
         type_as: The type_as.device is the device used to run the program and the type_as.dtype is the floating-point number type.
     """
     if device == "cpu":
-        backend = ot.backend.NumpyBackend()
+        backend = NumpyBackend()
     else:
         os.environ["CUDA_VISIBLE_DEVICES"] = device
         if torch.cuda.is_available():
             torch.cuda.init()
-            backend = ot.backend.TorchBackend()
+            backend = TorchBackend()
         else:
-            backend = ot.backend.NumpyBackend()
+            backend = NumpyBackend()
             if verbose:
                 lm.main_info(
                     message="GPU is not available, resorting to torch cpu.",
@@ -259,7 +261,7 @@ def check_label_transfer_dict(
 
 # Finished
 def check_label_transfer(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     type_as: Union[torch.Tensor, np.ndarray],
     sampleA: AnnData,
     sampleB: AnnData,
@@ -310,7 +312,7 @@ def check_label_transfer(
 
 
 # def check_label_transfer(
-#     nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+#     nx: Union[TorchBackend, NumpyBackend],
 #     type_as: Union[torch.Tensor, np.ndarray],
 #     samples: List[AnnData],
 #     obs_key: str,
@@ -398,7 +400,8 @@ def generate_label_transfer_dict(
     """
 
     # Initialize label transfer dictionary with default values
-    label_transfer_dict = {c2: {c1: 1.0 for c1 in cat1} for c2 in cat2}
+    # label_transfer_dict = {c2: {c1: 1.0 for c1 in cat1} for c2 in cat2}
+    label_transfer_dict = {c1: {c2: 1.0 for c2 in cat2} for c1 in cat1}
 
     # Generate default positive pairs if none provided
     if (positive_pairs is None) and (negative_pairs is None):
@@ -423,16 +426,21 @@ def generate_label_transfer_dict(
 
     # Normalize the label transfer dictionary
     norm_label_transfer_dict = dict()
-    for c2 in cat2:
-        norm_c = np.array([label_transfer_dict[c2][c1] for c1 in cat1]).sum()
-        norm_label_transfer_dict[c2] = {c1: label_transfer_dict[c2][c1] / norm_c for c1 in cat1}
+    for c1 in cat1:
+        norm_c = np.array([label_transfer_dict[c1][c2] for c2 in cat2]).sum()
+        norm_label_transfer_dict[c1] = {c2: label_transfer_dict[c1][c2] / norm_c for c2 in cat2}
+
+    # norm_label_transfer_dict = dict()
+    # for c2 in cat2:
+    #     norm_c = np.array([label_transfer_dict[c2][c1] for c1 in cat1]).sum()
+    #     norm_label_transfer_dict[c2] = {c1: label_transfer_dict[c2][c1] / norm_c for c1 in cat1}
 
     return norm_label_transfer_dict
 
 
 # Finished
 def get_rep(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     type_as: Union[torch.Tensor, np.ndarray],
     sample: AnnData,
     rep: str = "X",
@@ -507,7 +515,7 @@ def filter_common_genes(*genes, verbose: bool = True) -> list:
 
 # Finished
 def normalize_coords(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     coords: List[Union[np.ndarray, torch.Tensor]],
     verbose: bool = True,
     separate_scale: bool = True,
@@ -522,8 +530,8 @@ def normalize_coords(
     ----------
     coords : List[Union[np.ndarray, torch.Tensor]]
         Spatial coordinates of the samples. Each element in the list can be a numpy array or a torch tensor.
-    nx : Union[ot.backend.TorchBackend, ot.backend.NumpyBackend], optional
-        The backend to use for computations. Default is `ot.backend.NumpyBackend`.
+    nx : Union[TorchBackend, NumpyBackend], optional
+        The backend to use for computations. Default is `NumpyBackend`.
     verbose : bool, optional
         If `True`, print progress updates. Default is `True`.
     separate_scale : bool, optional
@@ -579,7 +587,7 @@ def normalize_coords(
 
 # Finished
 def normalize_exps(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     exp_layers: List[List[Union[np.ndarray, torch.Tensor]]],
     rep_field: Union[str, List[str]] = "layer",
     verbose: bool = True,
@@ -588,8 +596,8 @@ def normalize_exps(
     Normalize the gene expression matrices.
 
     Args:
-        nx (Union[ot.backend.TorchBackend, ot.backend.NumpyBackend], optional):
-            The backend to use for computations. Defaults to `ot.backend.NumpyBackend`.
+        nx (Union[TorchBackend, NumpyBackend], optional):
+            The backend to use for computations. Defaults to `NumpyBackend`.
         exp_layers (List[List[Union[np.ndarray, torch.Tensor]]]):
             Gene expression and optionally the representation matrices of the samples.
             Each element in the list can be a numpy array or a torch tensor.
@@ -672,7 +680,7 @@ def _kl_distance_backend(
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
 
     # Get the appropriate backend (either NumPy or PyTorch)
-    nx = ot.backend.get_backend(X, Y)
+    nx = get_backend(X, Y)
 
     # Normalize rows to sum to 1 if probabilistic is True
     if probabilistic:
@@ -721,7 +729,7 @@ def _cosine_distance_backend(
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
 
     # Get the appropriate backend (either NumPy or PyTorch)
-    nx = ot.backend.get_backend(X, Y)
+    nx = get_backend(X, Y)
 
     # Normalize rows to unit vectors
     X_norm = nx.sqrt(nx.sum(X**2, axis=1, keepdims=True))
@@ -766,7 +774,7 @@ def _euc_distance_backend(
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
 
     # Get the appropriate backend (either NumPy or PyTorch)
-    nx = ot.backend.get_backend(X, Y)
+    nx = get_backend(X, Y)
 
     D = nx.sum(X**2, 1)[:, None] + nx.sum(Y**2, 1)[None, :] - 2 * nx.dot(X, Y.T)
 
@@ -809,7 +817,7 @@ def _label_distance_backend(
     assert X.ndim == 1, "X should be a 1-dimensional array."
     assert Y.ndim == 1, "Y should be a 1-dimensional array."
 
-    nx = ot.backend.get_backend(X, Y, label_transfer)
+    nx = get_backend(X, Y, label_transfer)
 
     if nx_torch(nx):
         assert not (torch.is_floating_point(X) or torch.is_floating_point(Y)), "X and Y should contain integer values."
@@ -982,7 +990,7 @@ def calc_probability(
 
 
 def get_P_core(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     type_as: Union[torch.Tensor, np.ndarray],
     Dim: Union[torch.Tensor, np.ndarray],
     spatial_dist: Union[np.ndarray, torch.Tensor],
@@ -1114,7 +1122,7 @@ def con_K(
     """
 
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
-    nx = ot.backend.get_backend(X, Y)
+    nx = get_backend(X, Y)
 
     [K] = calc_distance(
         X=X,
@@ -1193,7 +1201,7 @@ def inlier_from_NN(
 
 
 def voxel_data(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     coords: Union[np.ndarray, torch.Tensor],
     gene_exp: Union[np.ndarray, torch.Tensor],
     voxel_size: Optional[float] = None,
@@ -1218,7 +1226,7 @@ def voxel_data(
     voxel_gene_exp: np.ndarray or torch.Tensor
         The gene expression of the voxels.
     """
-    # nx = ot.backend.get_backend(coords, gene_exp)
+    # nx = get_backend(coords, gene_exp)
     N, D = coords.shape[0], coords.shape[1]
     coords = nx.to_numpy(coords)
     gene_exp = nx.to_numpy(gene_exp)
@@ -1292,7 +1300,7 @@ def _dense_to_sparse(
         "threshold",
     ], "``sparse_method`` value is wrong. Available ``sparse_method`` are: ``'topk'`` and ``'threshold'``."
     threshold = int(threshold) if sparse_method == "topk" else threshold
-    nx = ot.backend.get_backend(mat)
+    nx = get_backend(mat)
 
     NA, NB = mat.shape[0], mat.shape[1]
 
@@ -1326,7 +1334,7 @@ def empty_cache(device: str = "cpu"):
 
 
 # Check if nx is a torch backend
-nx_torch = lambda nx: True if isinstance(nx, ot.backend.TorchBackend) else False
+nx_torch = lambda nx: True if isinstance(nx, TorchBackend) else False
 
 # Concatenate expression matrices
 _cat = lambda nx, x, dim: torch.cat(x, dim=dim) if nx_torch(nx) else np.concatenate(x, axis=dim)

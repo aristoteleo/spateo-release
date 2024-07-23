@@ -1,8 +1,10 @@
 from .alignment import (
     BA_transform,
     BA_transform_and_assignment,
+    Mesh_correction,
     align_preprocess,
     calc_exp_dissimilarity,
+    generate_label_transfer_prior,
     get_optimal_mapping_relationship,
     grid_deformation,
     morpho_align,
@@ -11,7 +13,5 @@ from .alignment import (
     paste_align,
     paste_align_ref,
     paste_transform,
-    generate_label_transfer_prior,
+    solve_RT_by_correspondence,
 )
-
-# morpho_align_sparse
