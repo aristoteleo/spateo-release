@@ -380,7 +380,9 @@ def predict_ligand_activities(
         response_expressed_genes = list(set(expressed_genes_receiver) & set(ligand_target_matrix.index))
         response_expressed_genes_df = pd.DataFrame(response_expressed_genes)
         response_expressed_genes_df = response_expressed_genes_df.rename(columns={0: "gene"})
-        response_expressed_genes_df["avg_expr"] = np.mean(adata[receiver_cells, response_expressed_genes].X.toarray(), axis=0)
+        response_expressed_genes_df["avg_expr"] = np.mean(
+            adata[receiver_cells, response_expressed_genes].X.toarray(), axis=0
+        )
         lt_matrix = ligand_target_matrix[potential_ligands.tolist()].loc[response_expressed_genes_df["gene"].tolist()]
         de = []
         for ligand in lt_matrix:

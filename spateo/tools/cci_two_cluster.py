@@ -374,7 +374,9 @@ def find_cci_two_group(
             per_ligand_data = adata[per_sender_id, lr_network["from"]]
             per_receptor_data = adata[per_receiver_id, lr_network["to"]]
             per_lr_data = (
-                per_ligand_data.X.toarray() * per_receptor_data.X.toarray() if x_sparse else per_ligand_data.X * per_receptor_data.X
+                per_ligand_data.X.toarray() * per_receptor_data.X.toarray()
+                if x_sparse
+                else per_ligand_data.X * per_receptor_data.X
             )
             per_lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, per_lr_data)
             if np.isnan(per_lr_co_exp_ratio).all():

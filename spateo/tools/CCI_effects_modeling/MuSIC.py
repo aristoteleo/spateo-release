@@ -2,6 +2,7 @@
 Modeling cell-cell communication using a regression model that is considerate of the spatial heterogeneity of (and thus
 the context-dependency of the relationships of) the response variable.
 """
+
 import argparse
 import itertools
 import json
@@ -1699,13 +1700,11 @@ class MuSIC:
                     threshold = (
                         0.67
                         if len(receptor_cols) == 2
-                        else 0.5
-                        if len(receptor_cols) == 3
-                        else 0.4
-                        if len(receptor_cols) == 4
-                        else 0.33
-                        if len(receptor_cols) >= 5
-                        else 1
+                        else (
+                            0.5
+                            if len(receptor_cols) == 3
+                            else 0.4 if len(receptor_cols) == 4 else 0.33 if len(receptor_cols) >= 5 else 1
+                        )
                     )
                     # If overlap is greater than threshold, combine columns
                     if len(receptor_cols) > 1 and overlap > threshold:
@@ -1746,13 +1745,11 @@ class MuSIC:
                                 threshold = (
                                     0.67
                                     if len(combined_cols) == 2
-                                    else 0.5
-                                    if len(combined_cols) == 3
-                                    else 0.4
-                                    if len(combined_cols) == 4
-                                    else 0.33
-                                    if len(combined_cols) >= 5
-                                    else 1
+                                    else (
+                                        0.5
+                                        if len(combined_cols) == 3
+                                        else 0.4 if len(combined_cols) == 4 else 0.33 if len(combined_cols) >= 5 else 1
+                                    )
                                 )
                                 combined_receptor_df = receptor_df[(receptor_df[combined_cols] != 0).any(axis=1)]
                                 # Calculate overlap for combined ligands
@@ -2473,7 +2470,11 @@ class MuSIC:
             if hasattr(self, "targets_expr"):
                 targets = self.targets_expr.columns
                 y_arr = pd.DataFrame(
-                    self.adata[:, targets].X.toarray() if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
+                    (
+                        self.adata[:, targets].X.toarray()
+                        if scipy.sparse.issparse(self.adata.X)
+                        else self.adata[:, targets].X
+                    ),
                     index=self.sample_names,
                     columns=targets,
                 )

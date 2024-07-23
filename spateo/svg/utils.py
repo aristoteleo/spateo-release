@@ -139,7 +139,9 @@ def add_pos_ratio_to_adata(adata: AnnData, layer: str = None, var_name: str = "r
             else np.sum(adata.layers[layer] > 0, axis=0)
         )
     else:
-        adata.var[var_name] = np.sum(adata.X.toarray() > 0, axis=0) if issparse(adata.X) else np.sum(adata.X > 0, axis=0)
+        adata.var[var_name] = (
+            np.sum(adata.X.toarray() > 0, axis=0) if issparse(adata.X) else np.sum(adata.X > 0, axis=0)
+        )
     adata.var[var_name] = adata.var[var_name] / adata.n_obs
 
 
