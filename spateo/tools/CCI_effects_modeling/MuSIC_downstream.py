@@ -982,9 +982,9 @@ class MuSIC_Interpreter(MuSIC):
                 if len(strong_active_effects) >= 3:
                     adata.obs.loc[idx, "interaction_categories"] = "Multiple interactions"
                 elif len(strong_active_effects) == 2:
-                    adata.obs.loc[idx, "interaction_categories"] = (
-                        f"{strong_active_effects[0]} and {strong_active_effects[1]}"
-                    )
+                    adata.obs.loc[
+                        idx, "interaction_categories"
+                    ] = f"{strong_active_effects[0]} and {strong_active_effects[1]}"
                 elif len(active_effects) == 1:
                     adata.obs.loc[idx, "interaction_categories"] = active_effects[0]
             else:
@@ -1325,24 +1325,24 @@ class MuSIC_Interpreter(MuSIC):
         overlap = target_expressing.intersection(interaction_expressing)
 
         adata.obs[f"{interaction}_{target}"] = "Other"
-        adata.obs.loc[target_expressing, f"{interaction}_{target}"] = (
-            f"{target} only (no {interaction} in neighborhood and/or receptor)"
-        )
+        adata.obs.loc[
+            target_expressing, f"{interaction}_{target}"
+        ] = f"{target} only (no {interaction} in neighborhood and/or receptor)"
         if self.mod_type == "lr":
             ligand, receptor = interaction.split(":")
-            adata.obs.loc[interaction_expressing, f"{interaction}_{target}"] = (
-                f"{ligand.title()} in Neighborhood and {receptor}, no {target}"
-            )
-            adata.obs.loc[overlap, f"{interaction}_{target}"] = (
-                f"{ligand.title()} in Neighborhood, {receptor} and {target}"
-            )
+            adata.obs.loc[
+                interaction_expressing, f"{interaction}_{target}"
+            ] = f"{ligand.title()} in Neighborhood and {receptor}, no {target}"
+            adata.obs.loc[
+                overlap, f"{interaction}_{target}"
+            ] = f"{ligand.title()} in Neighborhood, {receptor} and {target}"
         elif self.mod_type == "ligand":
-            adata.obs.loc[interaction_expressing, f"{interaction}_{target}"] = (
-                f"{interaction.title()} in Neighborhood and Receptor, no {target}"
-            )
-            adata.obs.loc[overlap, f"{interaction}_{target}"] = (
-                f"{interaction.title()} in Neighborhood, Receptor and {target}"
-            )
+            adata.obs.loc[
+                interaction_expressing, f"{interaction}_{target}"
+            ] = f"{interaction.title()} in Neighborhood and Receptor, no {target}"
+            adata.obs.loc[
+                overlap, f"{interaction}_{target}"
+            ] = f"{interaction.title()} in Neighborhood, Receptor and {target}"
 
         color_mapping = dict(zip(adata.obs[f"{interaction}_{target}"].value_counts().index, godsnot_102))
         color_mapping["Other"] = "#D3D3D3"
@@ -3537,9 +3537,9 @@ class MuSIC_Interpreter(MuSIC):
         adata.obs.loc[
             target_expressing_selected, f"{interaction}_{target}_{select_examples_criterion}_example_points"
         ] = target_expression
-        adata.obs.loc[neighbors_selected, f"{interaction}_{target}_{select_examples_criterion}_example_points"] = (
-            ligand_expression
-        )
+        adata.obs.loc[
+            neighbors_selected, f"{interaction}_{target}_{select_examples_criterion}_example_points"
+        ] = ligand_expression
 
         if display_plot:
             # plotly to create 3D scatter plot:
@@ -5569,13 +5569,13 @@ class MuSIC_Interpreter(MuSIC):
         if store_summed_potential:
             if self.mod_type == "niche":
                 if receiver_cell_type is None:
-                    self.adata.obs[f"norm_sum_sent_effect_potential_{sender_cell_type}_for_{target}"] = (
-                        normalized_effect_potential_sum_sender
-                    )
+                    self.adata.obs[
+                        f"norm_sum_sent_effect_potential_{sender_cell_type}_for_{target}"
+                    ] = normalized_effect_potential_sum_sender
 
-                    self.adata.obs[f"norm_sum_received_effect_potential_from_{sender_cell_type}_for_{target}"] = (
-                        normalized_effect_potential_sum_receiver
-                    )
+                    self.adata.obs[
+                        f"norm_sum_received_effect_potential_from_{sender_cell_type}_for_{target}"
+                    ] = normalized_effect_potential_sum_receiver
                 else:
                     self.adata.obs[
                         f"norm_sum_sent_{sender_cell_type}_effect_potential_to_{receiver_cell_type}_for_{target}"
@@ -5590,26 +5590,26 @@ class MuSIC_Interpreter(MuSIC):
                     ligand = replace_col_with_collagens(ligand)
                     ligand = replace_hla_with_hlas(ligand)
 
-                self.adata.obs[f"norm_sum_sent_effect_potential_{ligand}_for_{target}"] = (
-                    normalized_effect_potential_sum_sender
-                )
+                self.adata.obs[
+                    f"norm_sum_sent_effect_potential_{ligand}_for_{target}"
+                ] = normalized_effect_potential_sum_sender
 
-                self.adata.obs[f"norm_sum_received_effect_potential_from_{ligand}_for_{target}"] = (
-                    normalized_effect_potential_sum_receiver
-                )
+                self.adata.obs[
+                    f"norm_sum_received_effect_potential_from_{ligand}_for_{target}"
+                ] = normalized_effect_potential_sum_receiver
 
             elif self.mod_type == "lr":
                 if "/" in ligand:
                     ligand = replace_col_with_collagens(ligand)
                     ligand = replace_hla_with_hlas(ligand)
 
-                self.adata.obs[f"norm_sum_sent_effect_potential_{ligand}_for_{target}_via_{receptor}"] = (
-                    normalized_effect_potential_sum_sender
-                )
+                self.adata.obs[
+                    f"norm_sum_sent_effect_potential_{ligand}_for_{target}_via_{receptor}"
+                ] = normalized_effect_potential_sum_sender
 
-                self.adata.obs[f"norm_sum_received_effect_potential_from_{ligand}_for_{target}_via_{receptor}"] = (
-                    normalized_effect_potential_sum_receiver
-                )
+                self.adata.obs[
+                    f"norm_sum_received_effect_potential_from_{ligand}_for_{target}_via_{receptor}"
+                ] = normalized_effect_potential_sum_receiver
 
             self.adata.obs["effect_sign"] = effect_sign.reshape(-1, 1)
 
@@ -6940,7 +6940,9 @@ class MuSIC_Interpreter(MuSIC):
                 # Prioritize those that are most coexpressed with at least one target:
                 if scipy.sparse.issparse(adata.X):
                     regulator_expr = pd.DataFrame(
-                        adata[:, regulator_features].X.toarray(), index=signal[subset_key].index, columns=regulator_features
+                        adata[:, regulator_features].X.toarray(),
+                        index=signal[subset_key].index,
+                        columns=regulator_features,
                     )
                 elif isinstance(adata.X, np.ndarray):  # adata.X might be np.ndarray
                     regulator_expr = pd.DataFrame(
