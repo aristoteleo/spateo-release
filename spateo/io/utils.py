@@ -234,7 +234,7 @@ def bin_matrix(X: Union[np.ndarray, spmatrix], binsize: int) -> Union[np.ndarray
     def _bin_sparse(X):
         nz = X.nonzero()
         x, y = nz
-        data = X[nz].toarray().flatten()
+        data = X[nz].A.flatten()
         x_bin = bin_indices(x, 0, binsize)
         y_bin = bin_indices(y, 0, binsize)
         return csr_matrix((data, (x_bin, y_bin)), shape=shape, dtype=X.dtype)
