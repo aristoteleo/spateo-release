@@ -10,7 +10,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import geopandas as gpd
 
-import matplotlib
+import matplotlib as mpl
 import matplotlib.patheffects as PathEffects
 import matplotlib.pyplot as plt
 import mpl_toolkits
@@ -75,15 +75,13 @@ def _get_adata_color_vec(adata, layer, col):
 
 
 def map2color(val, min=None, max=None, cmap="viridis"):
-    import matplotlib
     import matplotlib.cm as cm
-    import matplotlib.pyplot as plt
 
     minima = np.min(val) if min is None else min
     maxima = np.max(val) if max is None else max
 
-    norm = matplotlib.colors.Normalize(vmin=minima, vmax=maxima, clip=True)
-    mapper = cm.ScalarMappable(norm=norm, cmap=plt.get_cmap(cmap))
+    norm = mpl.colors.Normalize(vmin=minima, vmax=maxima, clip=True)
+    mapper = cm.ScalarMappable(norm=norm, cmap=mpl.colormaps[cmap])
 
     cols = [mapper.to_rgba(v) for v in val]
 
@@ -91,7 +89,7 @@ def map2color(val, min=None, max=None, cmap="viridis"):
 
 
 def _to_hex(arr):
-    return [matplotlib.colors.to_hex(c) for c in arr]
+    return [mpl.colors.to_hex(c) for c in arr]
 
 
 # https://stackoverflow.com/questions/8468855/convert-a-rgb-colour-value-to-decimal
@@ -399,7 +397,7 @@ def _matplotlib_points(
             )
         if color_key is None:
             # main_debug("color_key is None")
-            cmap = copy.copy(matplotlib.cm.get_cmap(color_key_cmap))
+            cmap = copy.copy(mpl.colormaps[color_key_cmap])
             cmap.set_bad("lightgray")
             colors = None
 
@@ -594,12 +592,12 @@ def _matplotlib_points(
     # Color by values
     elif values is not None:
         # main_debug("drawing points by values")
-        cmap_ = copy.copy(matplotlib.cm.get_cmap(cmap))
+        cmap_ = copy.copy(mpl.colormaps[cmap])
         cmap_.set_bad("lightgray")
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            matplotlib.colormaps.register(name=cmap_.name, cmap=cmap_, force=True)
+            mpl.colormaps.register(name=cmap_.name, cmap=cmap_, force=True)
 
         if values.shape[0] != points.shape[0]:
             raise ValueError(
@@ -780,9 +778,9 @@ def _matplotlib_points(
         if "norm" in kwargs:
             norm = kwargs["norm"]
         else:
-            norm = matplotlib.colors.Normalize(vmin=_vmin, vmax=_vmax)
+            norm = mpl.colors.Normalize(vmin=_vmin, vmax=_vmax)
 
-        mappable = matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap)
+        mappable = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
         mappable.set_array(values)
         if show_colorbar:
             cb = plt.colorbar(mappable, cax=set_colorbar(ax, inset_dict), ax=ax)
@@ -791,12 +789,12 @@ def _matplotlib_points(
             cb.locator = MaxNLocator(nbins=3, integer=True)
             cb.update_ticks()
 
-        cmap = matplotlib.cm.get_cmap(cmap)
+        cmap = mpl.colormaps[cmap]
         colors = cmap(values)
     # No color (just pick the midpoint of the cmap)
     else:
         # main_debug("drawing points without color passed in args, using midpoint of the cmap")
-        colors = plt.get_cmap(cmap)(0.5)
+        colors = mpl.colormaps[cmap](0.5)
         if geo:
             _geo_projection(ax, points, color=colors, **kwargs)
 
@@ -823,7 +821,7 @@ def _matplotlib_points(
             ax.legend(
                 handles=legend_elements,
                 bbox_to_anchor=(1.04, 1),
-                loc=matplotlib.rcParams["legend.loc"],
+                loc=mpl.rcParams["legend.loc"],
                 ncol=len(unique_labels) // 20 + 1,
                 prop=dict(size=8),
             )
@@ -1486,8 +1484,8 @@ def save_return_show_fig_utils(
     prefix: str,
     save_kwargs: Dict,
     total_panels: int,
-    fig: matplotlib.figure.Figure,
-    axes: matplotlib.axes.Axes,
+    fig: mpl.figure.Figure,
+    axes: mpl.axes.Axes,
     return_all: bool,
     return_all_list: Union[List, Tuple, None],
 ) -> Optional[Tuple]:
@@ -1585,7 +1583,7 @@ def check_colornorm(
     vmin: Union[None, float] = None,
     vmax: Union[None, float] = None,
     vcenter: Union[None, float] = None,
-    norm: Union[None, matplotlib.colors.Normalize] = None,
+    norm: Union[None, mpl.colors.Normalize] = None,
 ):
     """
     When plotting continuous variables, configure a normalizer object for the purposes of mapping the data to varying
@@ -1824,7 +1822,7 @@ def dendrogram(
 
 
 def plot_dendrogram(
-    dendro_ax: matplotlib.axes.Axes,
+    dendro_ax: mpl.axes.Axes,
     adata: AnnData,
     cat_key: str,
     dendrogram_key: Union[None, str] = None,
