@@ -300,7 +300,7 @@ def shiftedColorMap(
         cdict["alpha"].append((si, a, a))
 
     newcmap = matplotlib.colors.LinearSegmentedColormap(name, cdict)
-    plt.register_cmap(cmap=newcmap)
+    matplotlib.colormaps.register(cmap=newcmap)
 
     return newcmap
 
@@ -330,31 +330,22 @@ glasbey_dark_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     if "fire" not in matplotlib.colormaps():
-        # plt.register_cmap("fire", fire_cmap)
         matplotlib.colormaps.register(cmap=fire_cmap, name="fire")
     if "darkblue" not in matplotlib.colormaps():
-        # plt.register_cmap("darkblue", darkblue_cmap)
         matplotlib.colormaps.register(cmap=darkblue_cmap, name="darkblue")
     if "darkgreen" not in matplotlib.colormaps():
-        # plt.register_cmap("darkgreen", darkgreen_cmap)
         matplotlib.colormaps.register(cmap=darkgreen_cmap, name="darkgreen")
     if "darkred" not in matplotlib.colormaps():
-        # plt.register_cmap("darkred", darkred_cmap)
         matplotlib.colormaps.register(cmap=darkred_cmap, name="darkred")
     if "darkpurple" not in matplotlib.colormaps():
-        # plt.register_cmap("darkpurple", darkpurple_cmap)
         matplotlib.colormaps.register(cmap=darkpurple_cmap, name="darkpurple")
     if "div_blue_black_red" not in matplotlib.colormaps():
-        # plt.register_cmap("div_blue_black_red", div_blue_black_red_cmap)
         matplotlib.colormaps.register(cmap=div_blue_black_red_cmap, name="div_blue_black_red")
     if "div_blue_red" not in matplotlib.colormaps():
-        # plt.register_cmap("div_blue_red", div_blue_red_cmap)
         matplotlib.colormaps.register(cmap=div_blue_red_cmap, name="div_blue_red")
     if "glasbey_white" not in matplotlib.colormaps():
-        # plt.register_cmap("glasbey_white", glasbey_white_cmap)
         matplotlib.colormaps.register(cmap=glasbey_white_cmap, name="glasbey_white")
     if "glasbey_dark" not in matplotlib.colormaps():
-        # plt.register_cmap("glasbey_dark", glasbey_dark_cmap)
         matplotlib.colormaps.register(cmap=glasbey_dark_cmap, name="glasbey_dark")
 
 _themes = {

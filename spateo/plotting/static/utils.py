@@ -599,7 +599,7 @@ def _matplotlib_points(
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            matplotlib.cm.register_cmap(name=cmap_.name, cmap=cmap_, override_builtin=True)
+            matplotlib.colormaps.register(name=cmap_.name, cmap=cmap_, force=True)
 
         if values.shape[0] != points.shape[0]:
             raise ValueError(
