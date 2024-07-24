@@ -7,7 +7,7 @@ from functools import wraps
 from typing import List, Optional, Tuple, Union
 
 import colorcet
-import matplotlib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -247,12 +247,12 @@ SKM = SpateoAdataKeyManager
 
 # Means to shift the scale of colormaps:
 def shiftedColorMap(
-    cmap: matplotlib.colors.ListedColormap,
+    cmap: mpl.colors.ListedColormap,
     start: float = 0,
     midpoint: float = 0.5,
     stop: float = 1.0,
     name: str = "shiftedcmap",
-) -> matplotlib.colors.ListedColormap:
+) -> mpl.colors.ListedColormap:
     """
     Function to offset the "center" of a colormap. Useful for
     data with a negative min and positive max, and you want the
@@ -279,7 +279,7 @@ def shiftedColorMap(
         newcmap: a new colormap that has the middle point of the colormap shifted.
     """
     # Check for existing shifted colormap:
-    matplotlib.cm.ColormapRegistry.unregister(plt.colormaps, name="shiftedcmap")
+    mpl.cm.ColormapRegistry.unregister(plt.colormaps, name="shiftedcmap")
 
     cdict = {"red": [], "green": [], "blue": [], "alpha": []}
 
@@ -299,54 +299,54 @@ def shiftedColorMap(
         cdict["blue"].append((si, b, b))
         cdict["alpha"].append((si, a, a))
 
-    newcmap = matplotlib.colors.LinearSegmentedColormap(name, cdict)
-    matplotlib.colormaps.register(cmap=newcmap)
+    newcmap = mpl.colors.LinearSegmentedColormap(name, cdict)
+    mpl.colormaps.register(cmap=newcmap)
 
     return newcmap
 
 
-fire_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("fire", colorcet.fire)
-darkblue_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("darkblue", colorcet.kbc)
-darkgreen_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("darkgreen", colorcet.kgy)
-darkred_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+fire_cmap = mpl.colors.LinearSegmentedColormap.from_list("fire", colorcet.fire)
+darkblue_cmap = mpl.colors.LinearSegmentedColormap.from_list("darkblue", colorcet.kbc)
+darkgreen_cmap = mpl.colors.LinearSegmentedColormap.from_list("darkgreen", colorcet.kgy)
+darkred_cmap = mpl.colors.LinearSegmentedColormap.from_list(
     "darkred", colors=colorcet.linear_kry_5_95_c72[:192], N=256
 )
-darkpurple_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("darkpurple", colorcet.linear_bmw_5_95_c89)
+darkpurple_cmap = mpl.colors.LinearSegmentedColormap.from_list("darkpurple", colorcet.linear_bmw_5_95_c89)
 # add gkr theme
-div_blue_black_red_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+div_blue_black_red_cmap = mpl.colors.LinearSegmentedColormap.from_list(
     "div_blue_black_red", colorcet.diverging_gkr_60_10_c40
 )
 # add RdBu_r theme
-div_blue_red_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+div_blue_red_cmap = mpl.colors.LinearSegmentedColormap.from_list(
     "div_blue_red", colorcet.diverging_bwr_55_98_c37
 )
 # add glasbey_bw for cell annotation in white background
-glasbey_white_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("glasbey_white", colorcet.glasbey_bw_minc_20)
+glasbey_white_cmap = mpl.colors.LinearSegmentedColormap.from_list("glasbey_white", colorcet.glasbey_bw_minc_20)
 # add glasbey_bw_minc_20_maxl_70 theme for cell annotation in dark background
-glasbey_dark_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+glasbey_dark_cmap = mpl.colors.LinearSegmentedColormap.from_list(
     "glasbey_dark", colorcet.glasbey_bw_minc_20_maxl_70
 )
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    if "fire" not in matplotlib.colormaps():
-        matplotlib.colormaps.register(cmap=fire_cmap, name="fire")
-    if "darkblue" not in matplotlib.colormaps():
-        matplotlib.colormaps.register(cmap=darkblue_cmap, name="darkblue")
-    if "darkgreen" not in matplotlib.colormaps():
-        matplotlib.colormaps.register(cmap=darkgreen_cmap, name="darkgreen")
-    if "darkred" not in matplotlib.colormaps():
-        matplotlib.colormaps.register(cmap=darkred_cmap, name="darkred")
-    if "darkpurple" not in matplotlib.colormaps():
-        matplotlib.colormaps.register(cmap=darkpurple_cmap, name="darkpurple")
-    if "div_blue_black_red" not in matplotlib.colormaps():
-        matplotlib.colormaps.register(cmap=div_blue_black_red_cmap, name="div_blue_black_red")
-    if "div_blue_red" not in matplotlib.colormaps():
-        matplotlib.colormaps.register(cmap=div_blue_red_cmap, name="div_blue_red")
-    if "glasbey_white" not in matplotlib.colormaps():
-        matplotlib.colormaps.register(cmap=glasbey_white_cmap, name="glasbey_white")
-    if "glasbey_dark" not in matplotlib.colormaps():
-        matplotlib.colormaps.register(cmap=glasbey_dark_cmap, name="glasbey_dark")
+    if "fire" not in mpl.colormaps():
+        mpl.colormaps.register(cmap=fire_cmap, name="fire")
+    if "darkblue" not in mpl.colormaps():
+        mpl.colormaps.register(cmap=darkblue_cmap, name="darkblue")
+    if "darkgreen" not in mpl.colormaps():
+        mpl.colormaps.register(cmap=darkgreen_cmap, name="darkgreen")
+    if "darkred" not in mpl.colormaps():
+        mpl.colormaps.register(cmap=darkred_cmap, name="darkred")
+    if "darkpurple" not in mpl.colormaps():
+        mpl.colormaps.register(cmap=darkpurple_cmap, name="darkpurple")
+    if "div_blue_black_red" not in mpl.colormaps():
+        mpl.colormaps.register(cmap=div_blue_black_red_cmap, name="div_blue_black_red")
+    if "div_blue_red" not in mpl.colormaps():
+        mpl.colormaps.register(cmap=div_blue_red_cmap, name="div_blue_red")
+    if "glasbey_white" not in mpl.colormaps():
+        mpl.colormaps.register(cmap=glasbey_white_cmap, name="glasbey_white")
+    if "glasbey_dark" not in mpl.colormaps():
+        mpl.colormaps.register(cmap=glasbey_dark_cmap, name="glasbey_dark")
 
 _themes = {
     "fire": {
@@ -512,7 +512,7 @@ def config_spateo_rcParams(
     background: str = "white",
     prop_cycle: List[str] = zebrafish_256,
     fontsize: int = 8,
-    color_map: matplotlib.colors.ListedColormap = None,
+    color_map: mpl.colors.ListedColormap = None,
     frameon: Optional[bool] = None,
 ) -> None:
     """Configure matplotlib.rcParams to spateo defaults (based on ggplot style and scanpy).
@@ -735,8 +735,8 @@ def set_pub_style(scaler: float = 1) -> None:
     """
 
     set_figure_params("spateo", background="white")
-    matplotlib.use("cairo")
-    matplotlib.rcParams.update({"font.size": 6 * scaler})
+    mpl.use("cairo")
+    mpl.rcParams.update({"font.size": 6 * scaler})
     params = {
         "font.size": 6 * scaler,
         "legend.fontsize": 6 * scaler,
@@ -748,13 +748,13 @@ def set_pub_style(scaler: float = 1) -> None:
         "axes.titlepad": 1 * scaler,
         "axes.labelpad": 1 * scaler,
     }
-    matplotlib.rcParams.update(params)
+    mpl.rcParams.update(params)
 
 
 def set_pub_style_mpltex():
     """formatting helper function based on mpltex package that can be used to save publishable figures"""
     set_figure_params("spateo", background="white")
-    matplotlib.use("cairo")
+    mpl.use("cairo")
     # the following code is adapted from https://github.com/liuyxpp/mpltex
     # latex_preamble = r"\usepackage{siunitx}\sisetup{detect-all}\usepackage{helvet}\usepackage[eulergreek,EULERGREEK]{sansmath}\sansmath"
     params = {
@@ -811,4 +811,4 @@ def set_pub_style_mpltex():
         "axes.titlepad": 1,
         "axes.labelpad": 1,
     }
-    matplotlib.rcParams.update(params)
+    mpl.rcParams.update(params)
