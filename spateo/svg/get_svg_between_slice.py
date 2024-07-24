@@ -137,12 +137,12 @@ def cal_gw_dis_on_genes(inp1, inp2):
     pos_r1s = []
     pos_r2s = []
     if issparse(adata1.X):
-        df1 = pd.DataFrame(adata1.X.A, columns=adata1.var_names)
+        df1 = pd.DataFrame(adata1.X.toarray(), columns=adata1.var_names)
     else:
         df1 = pd.DataFrame(adata1.X, columns=adata1.var_names)
 
     if issparse(adata2.X):
-        df2 = pd.DataFrame(adata2.X.A, columns=adata2.var_names)
+        df2 = pd.DataFrame(adata2.X.toarray(), columns=adata2.var_names)
     else:
         df2 = pd.DataFrame(adata2.X, columns=adata2.var_names)
 

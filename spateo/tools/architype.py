@@ -146,9 +146,9 @@ def archetypes(
     """
 
     if layer is None:
-        exp = adata[:, moran_i_genes].X.A
+        exp = adata[:, moran_i_genes].X.toarray()
     else:
-        exp = adata[:, moran_i_genes].layers[layer].A
+        exp = adata[:, moran_i_genes].layers[layer].toarray()
 
     archetypes, clusters, gene_corrs = find_spatial_archetypes(num_clusters, exp.T)
     arch_cols = ["archetype %d" % i for i in np.arange(num_clusters)]
@@ -195,9 +195,9 @@ def archetypes_genes(
     """
 
     if layer is None:
-        exp = adata[:, moran_i_genes].X.A
+        exp = adata[:, moran_i_genes].X.toarray()
     else:
-        exp = adata[:, moran_i_genes].layers[layer].A
+        exp = adata[:, moran_i_genes].layers[layer].toarray()
 
     archetypes_dict = {}
 

@@ -147,7 +147,7 @@ def smooth(
     # Original nonzero entries and values (keep these around):
     initial_nz_rows, initial_nz_cols = X.nonzero()
     if scipy.sparse.isspmatrix_csr(X):
-        initial_nz_vals = X[initial_nz_rows, initial_nz_cols].A1
+        initial_nz_vals = X[initial_nz_rows, initial_nz_cols].toarray().flatten()
     else:
         initial_nz_vals = X[initial_nz_rows, initial_nz_cols]
 

@@ -9,6 +9,7 @@ These include:
     - following spatially-aware regression (or a sequence of spatially-aware regressions), overlay the directionality
     of the predicted influence of the ligand on downstream expression.
 """
+
 import argparse
 import collections
 import gc
@@ -6744,7 +6745,7 @@ class MuSIC_Interpreter(MuSIC):
                         sig_df = sig_df.drop(col, axis=1)
                         for l in col.split("_"):
                             if scipy.sparse.issparse(self.adata.X):
-                                gene_expr = self.adata[:, l].X.A
+                                gene_expr = self.adata[:, l].X.toarray()
                             else:
                                 gene_expr = self.adata[:, l].X
                             sig_df[l] = gene_expr
@@ -6801,7 +6802,7 @@ class MuSIC_Interpreter(MuSIC):
                         sig_df = sig_df.drop(col, axis=1)
                         for r in col.split("_"):
                             if scipy.sparse.issparse(self.adata.X):
-                                gene_expr = self.adata[:, r].X.A
+                                gene_expr = self.adata[:, r].X.toarray()
                             else:
                                 gene_expr = self.adata[:, r].X
                             sig_df[r] = gene_expr
@@ -6846,7 +6847,11 @@ class MuSIC_Interpreter(MuSIC):
                 targets = [t for t in targets if t in self.adata.var_names]
                 targets = list(set(targets))
                 targets_expr = pd.DataFrame(
-                    self.adata[:, targets].X.A if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
+                    (
+                        self.adata[:, targets].X.toarray()
+                        if scipy.sparse.issparse(self.adata.X)
+                        else self.adata[:, targets].X
+                    ),
                     index=self.adata.obs_names,
                     columns=targets,
                 )
@@ -6879,9 +6884,11 @@ class MuSIC_Interpreter(MuSIC):
                     ct_signaling = ct_signaling.var.index[sig_expr_percentage > self.target_expr_threshold]
 
                     sig_expr = pd.DataFrame(
-                        self.adata[:, ct_signaling].X.A
-                        if scipy.sparse.issparse(self.adata.X)
-                        else self.adata[:, ct_signaling].X,
+                        (
+                            self.adata[:, ct_signaling].X.toarray()
+                            if scipy.sparse.issparse(self.adata.X)
+                            else self.adata[:, ct_signaling].X
+                        ),
                         index=self.sample_names,
                         columns=ct_signaling,
                     )
@@ -6933,7 +6940,9 @@ class MuSIC_Interpreter(MuSIC):
                 # Prioritize those that are most coexpressed with at least one target:
                 if scipy.sparse.issparse(adata.X):
                     regulator_expr = pd.DataFrame(
-                        adata[:, regulator_features].X.A, index=signal[subset_key].index, columns=regulator_features
+                        adata[:, regulator_features].X.toarray(),
+                        index=signal[subset_key].index,
+                        columns=regulator_features,
                     )
                 elif isinstance(adata.X, np.ndarray):  # adata.X might be np.ndarray
                     regulator_expr = pd.DataFrame(

@@ -197,7 +197,7 @@ def backbone_scc(
     if "pp" not in adata.uns.keys():
         adata.uns["pp"] = {}
     genes, X_data = fetch_X_data(adata, genes, layer)
-    X_data = X_data.A if issparse(X_data) else X_data
+    X_data = X_data.toarray() if issparse(X_data) else X_data
     X_data = pd.DataFrame(X_data, columns=genes)
     X_data[adata_nodes_key] = adata.obs[adata_nodes_key].values
     X_data = pd.DataFrame(X_data.groupby(by=adata_nodes_key).mean())

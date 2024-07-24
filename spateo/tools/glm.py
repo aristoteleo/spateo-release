@@ -93,7 +93,7 @@ def glm_degs(
         range(len(genes)), progress_name="Detecting genes via Generalized Additive Models (GAMs)"
     ):
         gene = genes[i]
-        expression = X_data[:, i].A if sparse else X_data[:, i]
+        expression = X_data[:, i].toarray() if sparse else X_data[:, i]
         df_factors["expression"] = expression
         try:
             nb2_full, nb2_null = glm_test(df_factors, fullModelFormulaStr, reducedModelFormulaStr)

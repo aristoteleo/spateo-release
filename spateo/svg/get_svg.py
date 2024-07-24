@@ -228,7 +228,7 @@ def cal_wass_dis_for_genes(
     ws = []
     pos_rs = []
     if issparse(adata.X):
-        df = pd.DataFrame(adata.X.A, columns=adata.var_names)
+        df = pd.DataFrame(adata.X.toarray(), columns=adata.var_names)
     else:
         df = pd.DataFrame(adata.X, columns=adata.var_names)
 
@@ -303,7 +303,7 @@ def cal_wass_dist_bs(
         b = target
     if isinstance(target, str):
         b = (
-            bin_scale_adata[:, target].X.A.flatten()
+            bin_scale_adata[:, target].X.toarray().flatten()
             if issparse(bin_scale_adata[:, target].X)
             else bin_scale_adata[:, target].X.flatten()
         )
@@ -411,7 +411,7 @@ def cal_wass_dis_nobs(
         b = target
     if isinstance(target, str):
         b = (
-            bin_scale_adata[:, target].X.A.flatten()
+            bin_scale_adata[:, target].X.toarray().flatten()
             if issparse(bin_scale_adata[:, target].X)
             else bin_scale_adata[:, target].X.flatten()
         )
@@ -527,7 +527,7 @@ def cal_wass_dis_target_on_genes(
         gene_set = bin_scale_adata.var_names
 
     if issparse(bin_scale_adata.X):
-        df = pd.DataFrame(bin_scale_adata.X.A, columns=bin_scale_adata.var_names)
+        df = pd.DataFrame(bin_scale_adata.X.toarray(), columns=bin_scale_adata.var_names)
     else:
         df = pd.DataFrame(bin_scale_adata.X, columns=bin_scale_adata.var_names)
 
