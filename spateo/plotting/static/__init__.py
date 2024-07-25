@@ -4,6 +4,7 @@ from .agg import box_qc_regions, imshow, qc_regions
 from .align import multi_slices
 from .bbs import delaunay, polygon
 from .colorlabel import color_label
+from .contour import spatial_domains
 from .dotplot import dotplot
 from .geo import geo
 from .glm import glm_fit, glm_heatmap
