@@ -7,7 +7,9 @@ except ImportError:
 
 import anndata
 import cv2
+import numpy as np
 from scipy.sparse import isspmatrix
+from scipy.spatial import distance
 
 from ...configuration import SKM
 from .leiden import calculate_leiden_partition
@@ -248,7 +250,6 @@ def optimize_cluster(adata: anndata.AnnData, radius: int = 50, key: str = "label
         radius: the radius of the neighborhood.
         key: the key in `.obs` that corresponds to the cluster labels.
     """
-    import ot
 
     n_neigh = radius
     new_type = []
@@ -256,12 +257,12 @@ def optimize_cluster(adata: anndata.AnnData, radius: int = 50, key: str = "label
 
     # calculate distance
     position = adata.obsm["spatial"]
-    distance = ot.dist(position, position, metric="euclidean")
+    dist_matrix = distance.cdist(position, position, metric="euclidean")
 
-    n_cell = distance.shape[0]
+    n_cell = dist_matrix.shape[0]
 
     for i in range(n_cell):
-        vec = distance[i, :]
+        vec = dist_matrix[i, :]
         index = vec.argsort()
         neigh_type = []
         for j in range(1, n_neigh + 1):
