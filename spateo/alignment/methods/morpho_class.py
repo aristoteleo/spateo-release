@@ -127,6 +127,7 @@ class Morpho_pairwise:
         nn_init_top_K: int = 10,
         nn_init_weight: float = 1.0,
         max_iter: int = 200,
+        nonrigid_start_iter: int = 80,
         SVI_mode: bool = True,
         batch_size: Optional[int] = None,
         pre_compute_dist: bool = True,
@@ -205,6 +206,7 @@ class Morpho_pairwise:
         self.gamma_a = gamma_a
         self.gamma_b = gamma_b
         self.kappa = kappa
+        self.nonrigid_start_iter = nonrigid_start_iter
 
         # checking keys
         self._check()
@@ -270,7 +272,8 @@ class Morpho_pairwise:
             self._update_assignment_P()
             self._update_gamma()
             self._update_alpha()
-            if (iter > 80) or (self.sigma2 < 0.015) or (self.nonrigid_flag):
+            # if (iter > self.nonrigid_start_iter) or (self.sigma2 < 0.015) or (self.nonrigid_flag):
+            if (iter > self.nonrigid_start_iter) or (self.nonrigid_flag):
                 self.nonrigid_flag = True
                 self._update_nonrigid()
             self._update_rigid()
@@ -778,8 +781,9 @@ class Morpho_pairwise:
                     metric=d_s,
                 )
                 min_exp_dist = self.nx.min(exp_dist, 1)
-                self.probability_parameters[i] = (
-                    min_exp_dist[self.nx.argsort(min_exp_dist)[int(sub_sample_A.shape[0] * 0.05)]] / 5
+                self.probability_parameters[i] = self.nx.maximum(
+                    min_exp_dist[self.nx.argsort(min_exp_dist)[int(sub_sample_A.shape[0] * 0.05)]] / 5,
+                    self.nx.data(0.01, self.type_as),
                 )
             else:
                 pass  # Handle other probability types if necessary

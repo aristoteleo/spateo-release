@@ -312,12 +312,12 @@ def solve_RT_by_correspondence(
     R = np.dot(Vt.T, U.T)
 
     # Ensure the rotation matrix is proper
-    if np.linalg.det(R) < 0:
-        Vt[-1, :] *= -1
-        R = np.dot(Vt.T, U.T)
+    # if np.linalg.det(R) < 0:
+    #     Vt[-1, :] *= -1
+    #     R = np.dot(Vt.T, U.T)
 
     # Compute the translation vector
-    t = tY - np.dot(tX, R.T)
+    t = tX - np.dot(tY, R.T)
 
     if return_scale:
         # Compute the scale factor

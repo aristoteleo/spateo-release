@@ -23,6 +23,7 @@ def slices_2d(
     slices: Union[AnnData, List[AnnData]],
     slices_key: Optional[Union[bool, str]] = None,
     label_key: Optional[str] = None,
+    label_type: Optional[str] = None,
     spatial_key: str = "spatial",
     point_size: Optional[float] = None,
     n_sampling: int = -1,
@@ -44,6 +45,9 @@ def slices_2d(
     cmap="tab20",
     center_coordinate: bool = False,
     gridspec_kws: Optional[dict] = None,
+    return_palette: bool = False,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[dict] = None,
     **kwargs,
 ):
     # Check slices object.
@@ -62,10 +66,10 @@ def slices_2d(
 
         if label_key in s.obs.keys():
             labels.append(s.obs[label_key].copy())
-            label_type = "cluster"
+            # label_type = "cluster"
         elif label_key in s.var_names:
             labels.append(s[:, label_key].X.A.copy().squeeze())
-            label_type = "scalar"
+            # label_type = "scalar"
         else:
             raise ValueError(f"adata.obs['{label_key}'] or adata.var['{label_key}'] does not exist.")
 
@@ -81,6 +85,13 @@ def slices_2d(
         assert (
             spatial_coords[-1].shape[0] == labels[-1].shape[0]
         ), "The number of spatial coordinates and labels must be the same. Please check the data."
+
+    # infer the label_type if not specified
+    if label_type is None:
+        if labels[0].values.dtype in ["float16", "float32", "float64", "int16", "int32", "int64"]:
+            label_type = "scalar"
+        else:
+            label_type = "cluster"
 
     # downsampling if n_sampling is set
     for i in range(len(slices)):
@@ -260,7 +271,36 @@ def slices_2d(
 
     # TODO: add save_return_show_fig_utils
     # plt.tight_layout()
-    return g, palette
+    if return_palette:
+        return (
+            save_return_show_fig_utils(
+                save_show_or_return=save_show_or_return,
+                show_legend=show_legend,
+                background="white",
+                prefix="multi_slices",
+                save_kwargs=save_kwargs,
+                total_panels=len(slice_ids),
+                fig=g,
+                axes=g,
+                return_all=False,
+                return_all_list=None,
+            ),
+            palette,
+        )
+    else:
+        return save_return_show_fig_utils(
+            save_show_or_return=save_show_or_return,
+            show_legend=show_legend,
+            background="white",
+            prefix="multi_slices",
+            save_kwargs=save_kwargs,
+            total_panels=len(slice_ids),
+            fig=g,
+            axes=g,
+            return_all=False,
+            return_all_list=None,
+        )
+    # return g, palette
 
 
 def overlay_slices_2d(
@@ -287,8 +327,10 @@ def overlay_slices_2d(
     height: float = 2,
     alpha: float = 1.0,  # TODO: alpha to be a key in adata
     cmap="tab20",
-    center_coordinate: bool = False,
+    center_coordinate: bool = True,  # different from slices_2d
     gridspec_kws: Optional[dict] = None,
+    save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
+    save_kwargs: Optional[dict] = None,
     **kwargs,
 ):
     # Check slices object.
@@ -315,6 +357,12 @@ def overlay_slices_2d(
             else:
                 raise ValueError(f"adata.obs['{label_key}'] or adata.var['{label_key}'] does not exist.")
 
+            assert (
+                spatial_coords[-1].shape[0] == labels[-1].shape[0]
+            ), "The number of spatial coordinates and labels must be the same. Please check the data."
+        else:
+            label_type = "cluster"
+
         if (slices_key is not None) and (slices_key in s.obs.keys()):
             unique_id = np.unique(s.obs[slices_key])
             if len(unique_id) == 1:
@@ -324,10 +372,6 @@ def overlay_slices_2d(
         else:
             slice_ids.append(str(i))
 
-        assert (
-            spatial_coords[-1].shape[0] == labels[-1].shape[0]
-        ), "The number of spatial coordinates and labels must be the same. Please check the data."
-
     # downsampling if n_sampling is set
     for i in range(len(slices)):
         sampling_idx = (
@@ -336,7 +380,8 @@ def overlay_slices_2d(
             else np.arange(spatial_coords[i].shape[0])
         )
         spatial_coords[i] = spatial_coords[i][sampling_idx]
-        labels[i] = labels[i][sampling_idx]
+        if label_key is not None:
+            labels[i] = labels[i][sampling_idx]
 
     # center the coordinates
     if center_coordinate:
@@ -355,7 +400,7 @@ def overlay_slices_2d(
                     {
                         "x": spatial_coords[i][:, 0],
                         "y": spatial_coords[i][:, 1],
-                        "label": labels[i],
+                        "label": labels[i] if label_key is not None else "unknow",
                         "overlay_id": "current",
                         "slice_id": slice_ids[i],
                         "col": i % ncols,
@@ -365,7 +410,7 @@ def overlay_slices_2d(
             ],
             axis=0,
         )
-        if (i > 1) and (overlay_type == "forward") or (overlay_type == "both"):
+        if (i > 0) and ((overlay_type == "forward") or (overlay_type == "both")):
             slices_spatial_data = pd.concat(
                 [
                     slices_spatial_data,
@@ -373,7 +418,7 @@ def overlay_slices_2d(
                         {
                             "x": spatial_coords[i - 1][:, 0],
                             "y": spatial_coords[i - 1][:, 1],
-                            "label": labels[i - 1],
+                            "label": labels[i - 1] if label_key is not None else "unknow",
                             "overlay_id": "forward",
                             "slice_id": slice_ids[i - 1],
                             "col": i % ncols,
@@ -383,7 +428,7 @@ def overlay_slices_2d(
                 ],
                 axis=0,
             )
-        if (i < len(slices) - 1) and (overlay_type == "backward") or (overlay_type == "both"):
+        if (i < len(slices) - 1) and ((overlay_type == "backward") or (overlay_type == "both")):
             slices_spatial_data = pd.concat(
                 [
                     slices_spatial_data,
@@ -391,7 +436,7 @@ def overlay_slices_2d(
                         {
                             "x": spatial_coords[i + 1][:, 0],
                             "y": spatial_coords[i + 1][:, 1],
-                            "label": labels[i + 1],
+                            "label": labels[i + 1] if label_key is not None else "unknow",
                             "overlay_id": "backward",
                             "slice_id": slice_ids[i + 1],
                             "col": i % ncols,
@@ -550,7 +595,19 @@ def overlay_slices_2d(
 
     # TODO: add save_return_show_fig_utils
     # plt.tight_layout()
-    return g, palette
+    return save_return_show_fig_utils(
+        save_show_or_return=save_show_or_return,
+        show_legend=show_legend,
+        background="white",
+        prefix="multi_slices",
+        save_kwargs=save_kwargs,
+        total_panels=len(slice_ids),
+        fig=g,
+        axes=g,
+        return_all=False,
+        return_all_list=None,
+    )
+    # return g, palette
 
 
 def multi_slices(

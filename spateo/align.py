@@ -4,6 +4,7 @@ from .alignment import (
     Mesh_correction,
     align_preprocess,
     calc_exp_dissimilarity,
+    generate_label_transfer_dict,
     generate_label_transfer_prior,
     get_optimal_mapping_relationship,
     grid_deformation,

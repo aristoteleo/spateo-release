@@ -218,6 +218,16 @@ class Backend:
         """
         raise NotImplementedError()
 
+    def arange(self, stop, start=0, step=1, type_as=None):
+        r"""
+        Returns evenly spaced values within a given interval.
+
+        This function follows the api from :any:`numpy.arange`
+
+        See: https://numpy.org/doc/stable/reference/generated/numpy.arange.html
+        """
+        raise NotImplementedError()
+
     def max(self, a, axis=None, keepdims=False):
         r"""
         Returns the maximum of an array or maximum along given dimensions.
@@ -1039,6 +1049,9 @@ class NumpyBackend(Backend):
     def sum(self, a, axis=None, keepdims=False):
         return np.sum(a, axis, keepdims=keepdims)
 
+    def arange(self, stop, start=0, step=1, type_as=None):
+        return np.arange(start, stop, step)
+
     def data(self, a, type_as=None):
         if type_as is None:
             return np.asarray(a)
@@ -1240,6 +1253,12 @@ class TorchBackend(Backend):
             return torch.ones(shape)
         else:
             return torch.ones(shape, dtype=type_as.dtype, device=type_as.device)
+
+    def arange(self, stop, start=0, step=1, type_as=None):
+        if type_as is None:
+            return torch.arange(start, stop, step)
+        else:
+            return torch.arange(start, stop, step, device=type_as.device)
 
     def maximum(self, a, b):
         if isinstance(a, int) or isinstance(a, float):

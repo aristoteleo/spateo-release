@@ -3,14 +3,13 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+import functools
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
 
 from spateo.alignment.methods import Morpho_pairwise, empty_cache
-
-# from .transform import BA_transform, BA_transform_and_assignment
 from spateo.alignment.utils import _iteration, downsampling
 from spateo.logging import logger_manager as lm
 
@@ -73,6 +72,7 @@ def morpho_align(
     for i in _iteration(n=len(align_models) - 1, progress_name=progress_name, verbose=True):
         modelA = align_models[i]
         modelB = align_models[i + 1]
+
         morpho_model = Morpho_pairwise(
             sampleA=modelB,  # reverse
             sampleB=modelA,  # reverse

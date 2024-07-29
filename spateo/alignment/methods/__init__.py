@@ -28,6 +28,7 @@ from .utils import (
     con_K,
     empty_cache,
     filter_common_genes,
+    generate_label_transfer_dict,
     intersect_lsts,
 )
 
