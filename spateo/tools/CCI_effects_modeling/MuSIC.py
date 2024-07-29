@@ -222,7 +222,7 @@ class MuSIC:
         self.tf_tf_db = None
         self.x_chunk = None
 
-    def _set_up_model(self, verbose: bool = True, downstream: bool = False):
+    def _set_up_model(self, verbose: bool = True):
         if self.mod_type is None and self.adata_path is not None:
             raise ValueError(
                 "No model type provided; need to provide a model type to fit. Options: 'niche', 'lr', "
@@ -299,15 +299,15 @@ class MuSIC:
 
         # Perform subsampling if applicable:
         if self.group_subset:
-            subset = self.adata.obs[self.group_key].isin(self.group_subset)
-            self.subset_indices = [self.sample_names.get_loc(name) for name in subset.index]
-            self.subset_sample_names = subset.index
+            subset = self.adata[self.adata.obs[self.group_key].isin(self.group_subset)].copy()
+            self.subset_indices = [self.sample_names.get_loc(name) for name in subset.obs_names]
+            self.subset_sample_names = subset.obs_names
             self.n_samples_subset = len(subset)
             self.subset = True
         else:
             self.subset = False
 
-        if self.spatial_subsample or self.total_counts_threshold != 0.0 or self.group_subset is not None:
+        if self.spatial_subsample or self.total_counts_threshold != 0.0:
             self.run_subsample(verbose=verbose)
             # Indicate model has been subsampled:
             self.subsampled = True
@@ -485,6 +485,7 @@ class MuSIC:
             )
 
         self.adata.uns["__type"] = "UMI"
+        self.orig_adata = self.adata.copy()
 
         self.sample_names = self.adata.obs_names
         self.coords = self.adata.obsm[self.coords_key]
@@ -533,6 +534,10 @@ class MuSIC:
                 names_all_neighbors = self.sample_names[unique_indices]
                 self.adata = self.adata[self.adata.obs_names.isin(names_all_neighbors)].copy()
                 self.group_subsampled_sample_names = self.adata.obs_names
+                # Update coordinates, sample names and the number of samples:
+                self.coords = self.adata.obsm[self.coords_key]
+                self.n_samples = self.adata.n_obs
+                self.sample_names = self.adata.obs_names
 
             if self.distr in ["poisson", "nb"]:
                 if self.normalize or self.smooth or self.log_transform:
@@ -1035,6 +1040,7 @@ class MuSIC:
                             "Tfrc",
                             "Trf",
                             "Lamc1",
+                            "Aldh1a1",
                             "Aldh1a2",
                             "Dhcr24",
                             "Rnaset2a",
@@ -1043,6 +1049,7 @@ class MuSIC:
                             "Trf",
                             "Fdx1",
                             "Kdr",
+                            "Apoa1",
                             "Apoa2",
                             "Apoe",
                             "Dhcr7",
@@ -1054,6 +1061,20 @@ class MuSIC:
                             "Ubash3d",
                             "Psap",
                             "Lck",
+                            "Lipa",
+                            "Alox5",
+                            "Alox5ap",
+                            "Alox12",
+                            "Cbr1",
+                            "Srd5a3",
+                            "Ddc",
+                            "Ggt1",
+                            "Ggt5",
+                            "Srd5a1",
+                            "Tyr",
+                            "Mmp2",
+                            "Ttr",
+                            "Alb",
                         ]
                     ]
                     l_complexes = [elem for elem in ligands if "_" in elem]
@@ -2923,7 +2944,7 @@ class MuSIC:
             X_labels = self.feature_names
         n_samples = X.shape[0]
 
-        if self.subsampled:
+        if self.subsampled or self.group_subset is not None:
             true = y[self.x_chunk]
         else:
             true = y
@@ -3532,15 +3553,16 @@ class MuSIC:
         if coeffs is None:
             coeffs, _ = self.return_outputs(adjust_for_subsampling=adjust_for_subsampling)
 
+        if self.subset_sample_names is not None:
+            index = self.subset_sample_names
+        else:
+            index = self.sample_names
         # If dictionary, compute outputs for the multiple dependent variables and concatenate together:
         if isinstance(coeffs, Dict):
-            all_y_pred = pd.DataFrame(index=self.sample_names)
+            all_y_pred = pd.DataFrame(index=index)
             for target in coeffs:
                 if input.shape[0] != coeffs[target].shape[0]:
-                    raise ValueError(
-                        f"Input data has {input.shape[0]} samples but coefficients for target {target} have "
-                        f"{coeffs[target].shape[0]} samples."
-                    )
+                    input = input.loc[coeffs[target].index, :]
 
                 # Subset to the specific features that were used for this dependent variable:
                 feats = [
@@ -3561,7 +3583,7 @@ class MuSIC:
                     y_pred -= 1
                     y_pred[y_pred < 0] = 0.0
 
-                y_pred = pd.DataFrame(y_pred, index=self.sample_names, columns=[target])
+                y_pred = pd.DataFrame(y_pred, index=index, columns=[target])
                 all_y_pred = pd.concat([all_y_pred, y_pred], axis=1)
             return all_y_pred
 
@@ -3777,10 +3799,10 @@ class MuSIC:
 
                 feat_sub = [col.replace("b_", "") for col in betas.columns]
                 if isinstance(betas.index[0], int) or isinstance(betas.index[0], float):
-                    betas.index = [self.X_df.index[int(idx)] for idx in betas.index]
+                    betas.index = [self.adata.obs_names[int(idx)] for idx in betas.index]
                 standard_errors = all_outputs[[col for col in all_outputs.columns if col.startswith("se_")]]
                 if isinstance(standard_errors.index[0], int) or isinstance(standard_errors.index[0], float):
-                    standard_errors.index = [self.X_df.index[int(idx)] for idx in standard_errors.index]
+                    standard_errors.index = [self.adata.obs_names[int(idx)] for idx in standard_errors.index]
 
                 if adjust_for_subsampling:
                     # If subsampling was performed, extend coefficients to non-sampled neighboring points (only if
@@ -3809,10 +3831,10 @@ class MuSIC:
                         # is unknown whether the ligand/receptor (the half of the interacting pair that is missing) is
                         # present in the neighborhood of these cells:
                         if self.mod_type in ["receptor", "ligand", "downstream"]:
-                            mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
+                            mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
                             betas *= mask_matrix
                             standard_errors *= mask_matrix
-                        mask_df = (self.X_df != 0).astype(int)
+                        mask_df = (self.X_df.loc[betas.index] != 0).astype(int)
                         mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
                         for col in betas.columns:
                             if col.replace("b_", "") not in mask_df.columns:
@@ -3829,18 +3851,17 @@ class MuSIC:
                     all_outputs = pd.concat([betas, standard_errors], axis=1)
                     # Adjust betas such that entries where the target gene is not expressed are zero, and which do
                     # not have receptor expression/ligand expression in neighborhood to zero:
-                    target_expressed = self.adata[:, target].X.toarray()
+                    target_expressed = self.adata[all_outputs.index, target].X.toarray()
                     mask = target_expressed == 0
                     indices = np.where(mask)
-                    index_cell_names = self.adata.obs_names[indices[0]]
 
-                    all_outputs.loc[index_cell_names] = 0
+                    all_outputs.iloc[indices[0]] = 0
 
                     for col in betas.columns:
                         if "intercept" not in col:
                             interaction_coeff = col.replace("b_", "")
                             interaction_coeff = interaction_coeff.replace("se_", "")
-                            mask = self.X_df[interaction_coeff] != 0
+                            mask = self.X_df.loc[all_outputs.index, interaction_coeff] != 0
                             all_outputs[col] *= mask
 
                     all_outputs.to_csv(os.path.join(parent_dir, file))
@@ -3848,10 +3869,10 @@ class MuSIC:
                     if not load_for_interpreter:
                         # Same processing as for subsampling, but without the subsampling:
                         if self.mod_type in ["receptor", "ligand", "downstream"]:
-                            mask_matrix = (self.adata[:, target].X != 0).toarray().astype(int)
+                            mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
                             betas *= mask_matrix
                             standard_errors *= mask_matrix
-                        mask_df = (self.X_df != 0).astype(int)
+                        mask_df = (self.X_df.loc[betas.index] != 0).astype(int)
                         mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
                         for col in betas.columns:
                             if col.replace("b_", "") not in mask_df.columns:
@@ -3868,17 +3889,17 @@ class MuSIC:
                         all_outputs = pd.concat([betas, standard_errors], axis=1)
                         # Adjust betas such that entries where the target gene is not expressed are zero, and which do
                         # not have receptor expression/ligand expression in neighborhood to zero:
-                        target_expressed = self.adata[:, target].X.toarray()
+                        target_expressed = self.adata[betas.index, target].X.toarray()
                         mask = target_expressed == 0
                         indices = np.where(mask)
-                        index_cell_names = self.adata.obs_names[indices[0]]
+                        index_cell_names = self.sample_names[indices[0]]
                         all_outputs.loc[index_cell_names] = 0
 
                         for col in betas.columns:
                             if "intercept" not in col:
                                 interaction_coeff = col.replace("b_", "")
                                 interaction_coeff = interaction_coeff.replace("se_", "")
-                                mask = self.X_df[interaction_coeff] != 0
+                                mask = self.X_df.loc[betas.index, interaction_coeff] != 0
                                 all_outputs[col] *= mask
 
                         all_outputs.to_csv(os.path.join(parent_dir, file))

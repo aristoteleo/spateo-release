@@ -471,7 +471,11 @@ def define_spateo_argparse(**kwargs):
         arg_info = arg_dict[key]
         arg_type = arg_info.get("type")
         if arg_type is not None:
-            if not isinstance(value, arg_type):
+            if isinstance(value, Iterable):
+                check = next(iter(value))
+            else:
+                check = value
+            if not isinstance(check, arg_type):
                 raise TypeError(f"Argument {key} must be of type {arg_type}.")
 
         if arg_info.get("action") == "store_true" and not isinstance(value, bool):
