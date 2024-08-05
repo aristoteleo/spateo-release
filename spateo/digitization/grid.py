@@ -23,7 +23,7 @@ def digitize(
     spatial_key: str = "spatial",
     dgl_layer_key: str = "digital_layer",
     dgl_column_key: str = "digital_column",
-    max_itr: int = 1e5,
+    max_itr: int = 1e6,
     lh: float = 1,
     hh: float = 100,
 ) -> None:

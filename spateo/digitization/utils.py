@@ -469,8 +469,8 @@ def domain_heat_eqn_solver(
     edge_line_b: np.ndarray,
     field_border: np.ndarray,
     field_mask: np.ndarray,
-    max_err: float = 1e-5,
-    max_itr: float = 1e5,
+    max_err: float = 1e-20,
+    max_itr: float = 1e6,
     lh: float = 1,
     hh: float = 100,
 ) -> np.ndarray:
@@ -529,7 +529,7 @@ def digitize_general(
     adj_mtx: np.ndarray,
     boundary_lower: np.ndarray,
     boundary_upper: np.ndarray,
-    max_itr: int = 1e5,
+    max_itr: int = 1e6,
     lh: float = 1,
     hh: float = 100,
 ) -> np.ndarray:
