@@ -41,6 +41,7 @@ def gen_cluster_image(
             prepared from the designated cmap.
     """
 
+    import matplotlib as mpl
     import matplotlib.pyplot as plt
 
     if bin_size is None:
@@ -49,7 +50,7 @@ def gen_cluster_image(
     lm.main_info(f"Set up the color for the clusters with the {cmap} colormap.")
 
     # TODO: what if cluster number is larger than cmap.N?
-    cmap = plt.cm.get_cmap(cmap)
+    cmap = mpl.colormaps[cmap]
     colors = cmap(np.arange(cmap.N))
     color_ls = []
     for i in range(cmap.N):

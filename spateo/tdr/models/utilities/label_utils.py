@@ -55,7 +55,7 @@ def add_model_labels(
         # Set raw hex.
         if isinstance(colormap, str):
             if colormap in list(mpl.colormaps()):
-                lscmap = mpl.cm.get_cmap(colormap)
+                lscmap = mpl.colormaps[colormap]
                 raw_hex_list = [mpl.colors.to_hex(lscmap(i)) for i in np.linspace(0, 1, len(cu_arr))]
                 for label, color in zip(cu_arr, raw_hex_list):
                     raw_labels_hex[raw_labels_hex == label] = color

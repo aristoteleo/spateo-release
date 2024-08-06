@@ -346,6 +346,7 @@ def scatters(
             then this will simply display inline.
     """
 
+    import matplotlib as mpl
     import matplotlib.pyplot as plt
     from matplotlib import rcParams
     from matplotlib.colors import rgb2hex, to_hex
@@ -776,7 +777,7 @@ def scatters(
                 if stack_colors:
                     # main_debug("stack colors: changing cmap")
                     _cmap = stack_colors_cmaps[ax_index % len(stack_colors_cmaps)]
-                    max_color = matplotlib.cm.get_cmap(_cmap)(float("inf"))
+                    max_color = mpl.colormaps[_cmap](float("inf"))
                     legend_circle = Line2D(
                         [0],
                         [0],

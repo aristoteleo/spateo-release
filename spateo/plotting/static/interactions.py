@@ -467,7 +467,7 @@ def plot_connections(
 
     # Set label colors:
     if isinstance(colormap, str):
-        cmap = mpl.cm.get_cmap(colormap)
+        cmap = mpl.colormaps[colormap]
     else:
         cmap = colormap
 
