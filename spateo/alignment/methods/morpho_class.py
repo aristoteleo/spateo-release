@@ -143,7 +143,7 @@ class Morpho_pairwise:
         kappa: Union[float, np.ndarray] = 1.0,
         partial_robust_level: float = 25,
         normalize_c: bool = True,
-        normalize_g: bool = True,
+        normalize_g: bool = False,
         separate_mean: bool = True,
         separate_scale: bool = False,
         dtype: str = "float32",
@@ -238,7 +238,7 @@ class Morpho_pairwise:
         Returns:
             np.ndarray: The final cell-cell assignment matrix.
         """
-
+        # print(f'summin: {self.nx.sum(self.exp_layers_A[0], axis=1, keepdims=True).min()}')
         if self.nn_init:
             self._coarse_rigid_alignment()
 
@@ -250,7 +250,6 @@ class Morpho_pairwise:
             self.exp_layer_dist = calc_distance(
                 X=self.exp_layers_A, Y=self.exp_layers_B, metric=self.dissimilarity, label_transfer=self.label_transfer
             )
-
         if self.iter_key_added is not None:
             self.iter_added = dict()
             self.iter_added[self.key_added] = {}
@@ -263,8 +262,6 @@ class Morpho_pairwise:
             else range(self.max_iter)
         )
         for iter in iteration:
-            # if iter > 2:
-            #     break
             if self.iter_key_added is not None:
                 self._save_iter(iter=iter)
             if self.SVI_mode:
@@ -553,7 +550,8 @@ class Morpho_pairwise:
         self.X_BI = self.nx.from_numpy(self.guidance_pair[0], type_as=self.type_as)
         self.X_AI = self.nx.from_numpy(self.guidance_pair[1], type_as=self.type_as)
         self.V_AI = self.nx.zeros(self.X_AI.shape, type_as=self.type_as)
-        print(self.V_AI)
+        self.R_AI = self.nx.zeros(self.X_AI.shape, type_as=self.type_as)
+        # print(self.V_AI)
 
         if self.normalize_c:
             # Normalize the guidance pairs
@@ -639,15 +637,15 @@ class Morpho_pairwise:
 
                 for l in range(len(exp_layers)):
                     normalize_scale += self.nx.sqrt(
-                        self.nx.einsum("ij->", self.nx.einsum("ij,ij->ij", exp_layers[i][l], exp_layers[i][l]))
-                        / exp_layers[i][l].shape[0]
+                        self.nx.einsum("ij->", self.nx.einsum("ij,ij->ij", exp_layers[l][i], exp_layers[l][i]))
+                        / exp_layers[l][i].shape[0]
                     )
 
                 normalize_scale /= len(exp_layers)
 
                 # Apply the normalization scale
                 for l in range(len(exp_layers)):
-                    exp_layers[i][l] /= normalize_scale
+                    exp_layers[l][i] /= normalize_scale
 
                 if self.verbose:
                     lm.main_info(message=f"Gene expression normalization params:", indent_level=1)
@@ -775,16 +773,19 @@ class Morpho_pairwise:
                 sub_sample_B = (
                     np.random.choice(self.NB, subsample, replace=False) if self.NB > subsample else np.arange(self.NB)
                 )
+
                 [exp_dist] = calc_distance(
                     X=exp_A[sub_sample_A],
                     Y=exp_B[sub_sample_B],
                     metric=d_s,
                 )
+                # print(exp_A[sub_sample_A])
                 min_exp_dist = self.nx.min(exp_dist, 1)
                 self.probability_parameters[i] = self.nx.maximum(
                     min_exp_dist[self.nx.argsort(min_exp_dist)[int(sub_sample_A.shape[0] * 0.05)]] / 5,
                     self.nx.data(0.01, self.type_as),
                 )
+
             else:
                 pass  # Handle other probability types if necessary
 
@@ -1307,7 +1308,7 @@ class Morpho_pairwise:
         ).T
 
         if self.guidance_effect in ("rigid", "both"):
-            A -= (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * _dot(self.nx)(
+            A -= (self.sigma2 * self.guidance_weight * self.Sp / self.X_BI.shape[0]) * _dot(self.nx)(
                 X_AI_hat.T, V_AI_hat - X_BI_hat
             ).T
 
@@ -1330,10 +1331,10 @@ class Morpho_pairwise:
         t_deno = _copy(self.nx, self.Sp)
 
         if self.guidance and (self.guidance_effect in ("rigid", "both")):
-            t_numerator += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.nx.sum(
+            t_numerator += (self.sigma2 * self.guidance_weight * self.Sp / self.X_BI.shape[0]) * self.nx.sum(
                 self.X_BI - self.V_AI - _dot(self.nx)(self.X_AI, self.R.T), axis=0
             )
-            t_deno += (self.sigma2 * self.guidance_weight * self.Sp / self.U_I.shape[0]) * self.X_BI.shape[0]
+            t_deno += (self.sigma2 * self.guidance_weight * self.Sp / self.X_BI.shape[0]) * self.X_BI.shape[0]
 
         if self.nn_init:
             t_numerator += (self.sigma2 * self.nn_init_weight * self.Sp / self.nx.sum(self.inlier_P)) * _dot(self.nx)(

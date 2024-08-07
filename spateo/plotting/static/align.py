@@ -33,7 +33,7 @@ def slices_2d(
     title_kwargs: Optional[dict] = None,
     show_legend: bool = True,
     legend_kwargs: Optional[dict] = None,
-    axis_off: bool = True,
+    axis_off: bool = False,
     axis_kwargs: Optional[dict] = None,
     ticks_off: bool = True,
     x_min=None,
@@ -502,6 +502,8 @@ def overlay_slices_2d(
         aspect=aspect_ratio,
         despine=False,
         gridspec_kws=_gridspec_kws,
+        xlim=(x_min, x_max) if x_min is not None and x_max is not None else None,
+        ylim=(y_min, y_max) if y_min is not None and y_max is not None else None,
     )
 
     scatterplot_kwargs = {"x": "x", "y": "y", "alpha": alpha, "s": point_size, "legend": False, "edgecolor": None}
@@ -526,6 +528,11 @@ def overlay_slices_2d(
         if ticks_off:
             ax.set_xticks([])
             ax.set_yticks([])
+
+        # if x_max is not None and x_min is not None:
+        #     ax.set_xlim(x_min, x_max)
+        # if y_max is not None and y_min is not None:
+        #     ax.set_ylim(y_min, y_max)
 
         ax.set_xlabel("")
         ax.set_ylabel("")

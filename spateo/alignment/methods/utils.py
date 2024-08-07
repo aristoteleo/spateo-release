@@ -681,18 +681,20 @@ def _kl_distance_backend(
 
     # Get the appropriate backend (either NumPy or PyTorch)
     nx = get_backend(X, Y)
-
+    X = X + 0.01
+    Y = Y + 0.01
     # Normalize rows to sum to 1 if probabilistic is True
     if probabilistic:
         X = X / nx.sum(X, axis=1, keepdims=True)
         Y = Y / nx.sum(Y, axis=1, keepdims=True)
 
     # Compute log of X and Y
-    log_X = nx.log(X + 1e-8)  # Adding epsilon to avoid log(0)
-    log_Y = nx.log(Y + 1e-8)  # Adding epsilon to avoid log(0)
+    log_X = nx.log(X + eps)  # Adding epsilon to avoid log(0)
+    log_Y = nx.log(Y + eps)  # Adding epsilon to avoid log(0)
 
     # Compute X log X and the pairwise KL divergence
     X_log_X = nx.sum(X * log_X, axis=1, keepdims=True)
+
     D = X_log_X - nx.dot(X, log_Y.T)
 
     return D
