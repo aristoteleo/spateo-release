@@ -7,7 +7,9 @@ except ImportError:
 
 import anndata
 import cv2
+import numpy as np
 from scipy.sparse import isspmatrix
+from scipy.spatial import distance
 
 from ...configuration import SKM
 from .leiden import calculate_leiden_partition
@@ -233,5 +235,42 @@ def scc(
     )
 
     adata.obs[key_added] = clusters
+    adata.obs[key_added] = adata.obs[key_added].astype(str)
 
     return adata
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def optimize_cluster(adata: anndata.AnnData, radius: int = 50, key: str = "label") -> list:
+    """
+    Optimize the label by majority voting in the neighborhood.
+
+    Args:
+        adata: an Anndata object, after normalization.
+        radius: the radius of the neighborhood.
+        key: the key in `.obs` that corresponds to the cluster labels.
+    """
+
+    n_neigh = radius
+    new_type = []
+    old_type = adata.obs[key].values
+
+    # calculate distance
+    position = adata.obsm["spatial"]
+    dist_matrix = distance.cdist(position, position, metric="euclidean")
+
+    n_cell = dist_matrix.shape[0]
+
+    for i in range(n_cell):
+        vec = dist_matrix[i, :]
+        index = vec.argsort()
+        neigh_type = []
+        for j in range(1, n_neigh + 1):
+            neigh_type.append(old_type[index[j]])
+        max_type = max(neigh_type, key=neigh_type.count)
+        new_type.append(max_type)
+
+    new_type = [str(i) for i in list(new_type)]
+    # adata.obs['label_refined'] = np.array(new_type)
+
+    return new_type
