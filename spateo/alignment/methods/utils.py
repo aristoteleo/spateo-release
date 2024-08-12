@@ -972,11 +972,11 @@ def calc_probability(
     """
 
     # Get the appropriate backend (either NumPy or PyTorch)
-    if probability_type.lower() == "gauss":
+    if probability_type.lower() in ["gauss", "gaussian"]:
         if probability_parameter is None:
             raise ValueError("probability_parameter must be provided for 'Gauss' probability type.")
         probability = nx.exp(-distance_matrix / (2 * probability_parameter))
-    elif probability_type.lower() == "cos_prob":
+    elif probability_type.lower() in ["cos", "cosine"]:
         probability = 1 - distance_matrix
     elif probability_type.lower() == "prob":
         probability = distance_matrix

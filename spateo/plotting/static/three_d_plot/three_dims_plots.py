@@ -201,6 +201,7 @@ def three_d_plot(
     view_up: tuple = (0.5, 0.5, 1),
     framerate: int = 24,
     plotter_filename: Optional[str] = None,
+    show_axes: bool = False,
 ):
     """
     Visualize reconstructed 3D model.
@@ -298,6 +299,7 @@ def three_d_plot(
         jupyter=False if jupyter is False else True,
         window_size=window_size,
         background=background,
+        show_axes=show_axes,
     )
     model_kwargs = dict(
         background=background,

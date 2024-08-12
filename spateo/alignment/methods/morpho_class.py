@@ -121,6 +121,7 @@ class Morpho_pairwise:
         probability_parameters: Optional[Union[float, List[float]]] = None,
         label_transfer_dict: Optional[Union[dict, List[dict]]] = None,
         nn_init: bool = True,
+        init_transform: bool = True,
         allow_flip: bool = False,
         init_layer: str = "X",
         init_field: str = "layer",
@@ -141,7 +142,7 @@ class Morpho_pairwise:
         gamma_a: float = 1.0,
         gamma_b: float = 1.0,
         kappa: Union[float, np.ndarray] = 1.0,
-        partial_robust_level: float = 25,
+        partial_robust_level: float = 10,
         normalize_c: bool = True,
         normalize_g: bool = False,
         separate_mean: bool = True,
@@ -174,6 +175,7 @@ class Morpho_pairwise:
         self.probability_parameters = probability_parameters
         self.label_transfer_dict = label_transfer_dict
         self.nn_init = nn_init
+        self.init_transform = init_transform
         self.nn_init_top_K = nn_init_top_K
         self.max_iter = max_iter
         self.allow_flip = allow_flip
@@ -985,8 +987,10 @@ class Morpho_pairwise:
         self.init_R = self.nx.from_numpy(R, type_as=self.type_as)
         self.init_t = self.nx.from_numpy(t, type_as=self.type_as)
 
-        self.inlier_A = self.inlier_A @ self.init_R.T + self.init_t
-        self.coordsA = self.coordsA @ self.init_R.T + self.init_t
+        # transform the data
+        if self.init_transform:
+            self.inlier_A = self.inlier_A @ self.init_R.T + self.init_t
+            self.coordsA = self.coordsA @ self.init_R.T + self.init_t
 
         # self.init_coordsA = self.nx.to_numpy(_copy(self.nx, self.coordsA))
         # self.init_coordsB = self.nx.to_numpy(_copy(self.nx, self.coordsB))
@@ -1104,6 +1108,7 @@ class Morpho_pairwise:
                 Y=self.coordsB[self.batch_idx, :] if self.SVI_mode else self.coordsB,
                 metric="euc",
             )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
+            # print(self.pre_compute_dist)
             if self.pre_compute_dist:
                 exp_layer_dist = (
                     [exp_layer_d[:, self.batch_idx] for exp_layer_d in self.exp_layer_dist]
@@ -1113,7 +1118,8 @@ class Morpho_pairwise:
             else:
                 exp_layer_dist = calc_distance(
                     X=self.exp_layers_A,
-                    Y=[e_l[self.batch_idx] for e_l in self.exp_layers_B],
+                    Y=[e_l[self.batch_idx] if self.SVI_mode else e_l for e_l in self.exp_layers_B],
+                    # Y=[e_l[self.batch_idx] for e_l in self.exp_layers_B],
                     metric=self.dissimilarity,
                     label_transfer=self.label_transfer,
                 )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
