@@ -175,8 +175,70 @@ def find_cci_two_group(
             raise ValueError(f"No intersected receptor between your adata object and lr_network dataset.")
         lr_network = lr_network[lr_network["to"].isin(expressed_receptor)]
 
+        ligands = list(set(lr_network["from"]))
+        ligands_test = [l[0].upper() + l[1:].lower() for l in ligands]
+        ligands = [
+            l
+            for l in ligands_test
+            if l.title()
+            not in [
+                "Lta4h",
+                "Fdx1",
+                "Tfrc",
+                "Trf",
+                "Lamc1",
+                "Aldh1a1",
+                "Aldh1a2",
+                "Dhcr24",
+                "Rnaset2a",
+                "Ptges3",
+                "Nampt",
+                "Trf",
+                "Fdx1",
+                "Kdr",
+                "Apoa1",
+                "Apoa2",
+                "Apoe",
+                "Dhcr7",
+                "Enho",
+                "Ptgr1",
+                "Agrp",
+                "Pnmt",
+                "Akr1b3",
+                "Daglb",
+                "Ubash3d",
+                "Psap",
+                "Lck",
+                "Lipa",
+                "Alox5",
+                "Alox5ap",
+                "Alox12",
+                "Cbr1",
+                "Srd5a3",
+                "Ddc",
+                "Ggt1",
+                "Ggt5",
+                "Srd5a1",
+                "Tyr",
+                "Mmp2",
+                "Ttr",
+                "Alb",
+                "Sult2a1",
+                "Hsd17b6",
+                "Cyp11a1",
+                "Cyp11b1",
+                "Cyp11b2",
+                "Cyp17a1",
+                "Cyp19a1",
+                "Cyp21a1",
+                "Cyp27b1",
+                "Sult1e1",
+                "Dio3",
+            ]
+        ]
+
         # ligand_sender_spec
-        adata_l = adata[:, list(set(lr_network["from"]))]
+        adata_l = adata[:, ligands]
         for g in adata.obs[group_sp].unique():
             # Of all cells expressing particular ligand, what proportion are group g:
             frac = (adata_l[adata_l.obs[group_sp] == g].X > 0).sum(axis=0) / (adata_l.X > 0).sum(axis=0)
@@ -280,7 +342,7 @@ def find_cci_two_group(
         # real lr_cp_exp_score
         ligand_data = adata[cell_pair["cell_sender"], lr_network["from"]]
         receptor_data = adata[cell_pair["cell_receiver"], lr_network["to"]]
-        lr_data = ligand_data.X.A * receptor_data.X.A if x_sparse else ligand_data.X * receptor_data.X
+        lr_data = ligand_data.X.toarray() * receptor_data.X.toarray() if x_sparse else ligand_data.X * receptor_data.X
         lr_data = np.array(lr_data)
         if cell_pair.shape[0] == 0:
             lr_prod = np.zeros(lr_network.shape[0])
@@ -312,7 +374,9 @@ def find_cci_two_group(
             per_ligand_data = adata[per_sender_id, lr_network["from"]]
             per_receptor_data = adata[per_receiver_id, lr_network["to"]]
             per_lr_data = (
-                per_ligand_data.X.A * per_receptor_data.X.A if x_sparse else per_ligand_data.X * per_receptor_data.X
+                per_ligand_data.X.toarray() * per_receptor_data.X.toarray()
+                if x_sparse
+                else per_ligand_data.X * per_receptor_data.X
             )
             per_lr_co_exp_ratio = np.apply_along_axis(lambda x: np.sum(x > 0) / x.size, 0, per_lr_data)
             if np.isnan(per_lr_co_exp_ratio).all():
@@ -359,9 +423,9 @@ def calculate_group_pair_lr_pair(
 
     ## ligand-20 groups; receptor-20 groups
     for g in cols:
-        meanl = np.mean(adata_l[adata_l.obs[group] == g].X.A, axis=0)
+        meanl = np.mean(adata_l[adata_l.obs[group] == g].X.toarray(), axis=0)
         dfl[g] = meanl
-        meanr = np.mean(adata_r[adata_r.obs[group] == g].X.A, axis=0)
+        meanr = np.mean(adata_r[adata_r.obs[group] == g].X.toarray(), axis=0)
         dfr[g] = meanr
 
     ## group_pairs

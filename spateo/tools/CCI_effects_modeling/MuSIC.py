@@ -2,6 +2,7 @@
 Modeling cell-cell communication using a regression model that is considerate of the spatial heterogeneity of (and thus
 the context-dependency of the relationships of) the response variable.
 """
+
 import argparse
 import itertools
 import json
@@ -293,6 +294,8 @@ class MuSIC:
             for file in file_list:
                 if not "predictions" in file:
                     check = pd.read_csv(os.path.join(parent_dir, file), index_col=0)
+                    if isinstance(check.index[0], int):
+                        check.index = check.index.astype(str)
                     if any([name not in check.index for name in self.sample_names]):
                         self.map_new_cells()
                     break
@@ -635,6 +638,10 @@ class MuSIC:
                     self.adata.X.data += 1
                 else:
                     self.adata.X += 1
+            else:
+                self.adata.layers[
+                    "original_counts"
+                ] = self.adata.X.copy()  # add this since gaussian model may also need this in downstream model
 
             if "downstream" in self.mod_type:
                 # For finding upstream associations with ligand
@@ -759,7 +766,7 @@ class MuSIC:
 
             # Define ligand/receptor/pathway expression array:
             self.targets_expr = pd.DataFrame(
-                adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
+                adata[:, targets].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
                 index=adata.obs_names,
                 columns=targets,
             )
@@ -767,7 +774,7 @@ class MuSIC:
             adata_orig = adata.copy()
             adata_orig.X = adata.layers["original_counts"]
             targets_expr_raw = pd.DataFrame(
-                adata_orig[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata_orig[:, targets].X,
+                adata_orig[:, targets].X.toarray() if scipy.sparse.issparse(adata.X) else adata_orig[:, targets].X,
                 index=adata.obs_names,
                 columns=targets,
             )
@@ -836,7 +843,7 @@ class MuSIC:
                         f"covariate to the X matrix."
                     )
             matched_obs_matrix = self.adata.obs[matched_obs].to_numpy()
-            matched_var_matrix = self.adata[:, matched_var_names].X.A
+            matched_var_matrix = self.adata[:, matched_var_names].X.toarray()
             cov_names = matched_obs + matched_var_names
             concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
             self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
@@ -942,7 +949,7 @@ class MuSIC:
                 all_targets = [t for t in all_targets if t in self.grn.index]
 
                 self.targets_expr = pd.DataFrame(
-                    adata[:, all_targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, all_targets].X,
+                    adata[:, all_targets].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, all_targets].X,
                     index=adata.obs_names,
                     columns=all_targets,
                 )
@@ -1030,9 +1037,10 @@ class MuSIC:
                     ligands = [l for l in ligands if l in database_ligands]
                     # Some ligands in the mouse database are not ligands, but internal factors that interact w/ i.e.
                     # the hormone receptors:
+                    ligands_test = l_test = [l[0].upper() + l[1:].lower() for l in ligands]
                     ligands = [
                         l
-                        for l in ligands
+                        for l in ligands_test
                         if l.title()
                         not in [
                             "Lta4h",
@@ -1056,6 +1064,7 @@ class MuSIC:
                             "Enho",
                             "Ptgr1",
                             "Agrp",
+                            "Pnmt",
                             "Akr1b3",
                             "Daglb",
                             "Ubash3d",
@@ -1075,6 +1084,17 @@ class MuSIC:
                             "Mmp2",
                             "Ttr",
                             "Alb",
+                            "Sult2a1",
+                            "Hsd17b6",
+                            "Cyp11a1",
+                            "Cyp11b1",
+                            "Cyp11b2",
+                            "Cyp17a1",
+                            "Cyp19a1",
+                            "Cyp21a1",
+                            "Cyp27b1",
+                            "Sult1e1",
+                            "Dio3",
                         ]
                     ]
                     l_complexes = [elem for elem in ligands if "_" in elem]
@@ -1157,7 +1177,7 @@ class MuSIC:
                 ligands = [l for l in ligands if l in adata.var_names]
 
                 self.ligands_expr = pd.DataFrame(
-                    adata[:, ligands].X.A if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
+                    adata[:, ligands].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, ligands].X,
                     index=adata.obs_names,
                     columns=ligands,
                 )
@@ -1294,7 +1314,7 @@ class MuSIC:
                 receptors = [r for r in receptors if r in adata.var_names]
 
                 self.receptors_expr = pd.DataFrame(
-                    adata[:, receptors].X.A if scipy.sparse.issparse(adata.X) else adata[:, receptors].X,
+                    adata[:, receptors].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, receptors].X,
                     index=adata.obs_names,
                     columns=receptors,
                 )
@@ -1448,10 +1468,11 @@ class MuSIC:
                 targets = np.array(targets)[target_expr_percentage > self.target_expr_threshold]
 
             # Filter targets to those that can be found in our prior GRN:
-            targets = [t for t in targets if t in self.grn.index]
+            if self.mod_type != "niche":
+                targets = [t for t in targets if t in self.grn.index]
 
             self.targets_expr = pd.DataFrame(
-                adata[:, targets].X.A if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
+                adata[:, targets].X.toarray() if scipy.sparse.issparse(adata.X) else adata[:, targets].X,
                 index=adata.obs_names,
                 columns=targets,
             )
@@ -1540,9 +1561,9 @@ class MuSIC:
                         matching_rows["type"].str.contains("Secreted Signaling").any()
                         or matching_rows["type"].str.contains("ECM-Receptor").any()
                     ):
-                        lagged_expr = spatial_weights_secreted.dot(expr_sparse).A.flatten()
+                        lagged_expr = spatial_weights_secreted.dot(expr_sparse).toarray().flatten()
                     else:
-                        lagged_expr = spatial_weights_membrane_bound.dot(expr_sparse).A.flatten()
+                        lagged_expr = spatial_weights_membrane_bound.dot(expr_sparse).toarray().flatten()
                     lagged_expr_mat[:, i] = lagged_expr
                 self.ligands_expr = pd.DataFrame(
                     lagged_expr_mat, index=adata.obs_names, columns=self.ligands_expr.columns
@@ -1679,13 +1700,15 @@ class MuSIC:
                     threshold = (
                         0.67
                         if len(receptor_cols) == 2
-                        else 0.5
-                        if len(receptor_cols) == 3
-                        else 0.4
-                        if len(receptor_cols) == 4
-                        else 0.33
-                        if len(receptor_cols) >= 5
-                        else 1
+                        else (
+                            0.5
+                            if len(receptor_cols) == 3
+                            else 0.4
+                            if len(receptor_cols) == 4
+                            else 0.33
+                            if len(receptor_cols) >= 5
+                            else 1
+                        )
                     )
                     # If overlap is greater than threshold, combine columns
                     if len(receptor_cols) > 1 and overlap > threshold:
@@ -1726,13 +1749,15 @@ class MuSIC:
                                 threshold = (
                                     0.67
                                     if len(combined_cols) == 2
-                                    else 0.5
-                                    if len(combined_cols) == 3
-                                    else 0.4
-                                    if len(combined_cols) == 4
-                                    else 0.33
-                                    if len(combined_cols) >= 5
-                                    else 1
+                                    else (
+                                        0.5
+                                        if len(combined_cols) == 3
+                                        else 0.4
+                                        if len(combined_cols) == 4
+                                        else 0.33
+                                        if len(combined_cols) >= 5
+                                        else 1
+                                    )
                                 )
                                 combined_receptor_df = receptor_df[(receptor_df[combined_cols] != 0).any(axis=1)]
                                 # Calculate overlap for combined ligands
@@ -2029,7 +2054,7 @@ class MuSIC:
                         f"covariate to the X matrix."
                     )
             matched_obs_matrix = self.adata.obs[matched_obs].to_numpy()
-            matched_var_matrix = self.adata[:, matched_var_names].X.A
+            matched_var_matrix = self.adata[:, matched_var_names].X.toarray()
             cov_names = matched_obs + matched_var_names
             concatenated_matrix = np.concatenate((matched_obs_matrix, matched_var_matrix), axis=1)
             self.X = np.concatenate((self.X, concatenated_matrix), axis=1)
@@ -2453,7 +2478,11 @@ class MuSIC:
             if hasattr(self, "targets_expr"):
                 targets = self.targets_expr.columns
                 y_arr = pd.DataFrame(
-                    self.adata[:, targets].X.A if scipy.sparse.issparse(self.adata.X) else self.adata[:, targets].X,
+                    (
+                        self.adata[:, targets].X.toarray()
+                        if scipy.sparse.issparse(self.adata.X)
+                        else self.adata[:, targets].X
+                    ),
                     index=self.sample_names,
                     columns=targets,
                 )
@@ -2738,7 +2767,10 @@ class MuSIC:
                 pred_y = np.dot(X[i], betas)
 
             residual = y[i] - pred_y
-            diagnostic = residual
+            if isinstance(residual, np.ndarray) or isinstance(residual, list):
+                diagnostic = residual[0]
+            else:
+                diagnostic = residual
             # Reshape coefficients if necessary:
             betas = betas.flatten()
             # Effect of deleting sample i from the dataset on the estimated predicted value at sample i:
@@ -3430,7 +3462,6 @@ class MuSIC:
                 indices = self.subsampled_indices[target]
                 self.x_chunk = np.array(indices)
 
-            if self.mod_type != "niche":
                 # To avoid false negative coefficients due to collinearity, feature mask based on the global correlation
                 correlations = []
                 for idx in range(X.shape[1]):
@@ -3447,7 +3478,11 @@ class MuSIC:
                     else:
                         # Compute the Pearson correlation coefficient for the subset
                         if len(X_subset) > 1:  # Ensure there are at least 2 data points to compute correlation
-                            correlation = scipy.stats.pearsonr(X_subset, y_subset)[0]
+                            try:
+                                correlation = scipy.stats.pearsonr(X_subset, y_subset)[0]
+                            except ValueError:
+                                self.logger.info("Some values are missing in the data. Skipping.")
+                                correlation = np.nan
                         else:
                             correlation = np.nan  # Not enough data points to compute correlation
 
@@ -3831,9 +3866,13 @@ class MuSIC:
                         # is unknown whether the ligand/receptor (the half of the interacting pair that is missing) is
                         # present in the neighborhood of these cells:
                         if self.mod_type in ["receptor", "ligand", "downstream"]:
-                            mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
+                            if isinstance(self.adata[betas.index, target].X, np.ndarray):
+                                mask_matrix = (self.adata[betas.index, target].X != 0).astype(int)
+                            else:
+                                mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
                             betas *= mask_matrix
                             standard_errors *= mask_matrix
+
                         mask_df = (self.X_df.loc[betas.index] != 0).astype(int)
                         mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
                         for col in betas.columns:
@@ -3868,10 +3907,9 @@ class MuSIC:
                 else:
                     if not load_for_interpreter:
                         # Same processing as for subsampling, but without the subsampling:
-                        if self.mod_type in ["receptor", "ligand", "downstream"]:
-                            mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
-                            betas *= mask_matrix
-                            standard_errors *= mask_matrix
+                        mask_matrix = (self.adata[betas.index, target].X != 0).toarray().astype(int)
+                        betas *= mask_matrix
+                        standard_errors *= mask_matrix
                         mask_df = (self.X_df.loc[betas.index] != 0).astype(int)
                         mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
                         for col in betas.columns:

@@ -34,7 +34,7 @@ def bin_adata(
     adata = adata.copy()
     adata.obsm[layer] = (adata.obsm[layer] // bin_size).astype(np.int32)
     df = (
-        pd.DataFrame(adata.X.A, columns=adata.var_names)
+        pd.DataFrame(adata.X.toarray(), columns=adata.var_names)
         if issparse(adata.X)
         else pd.DataFrame(adata.X, columns=adata.var_names)
     )
@@ -66,12 +66,12 @@ def shuffle_adata(
         return adata
     np.random.seed(seed)
     if issparse(adata.X):
-        tmp = adata.X.A
+        tmp = adata.X.toarray()
         if replace:
             tmp = tmp[np.random.randint(len(tmp), size=len(tmp))]
         else:
             np.random.shuffle(tmp)
-        adata.X.A = tmp
+        adata.X = csr_matrix(tmp)
     else:
         tmp = adata.X
         if replace:
@@ -115,7 +115,7 @@ def get_genes_by_pos_ratio(
         AnnData object.
     """
     adata = adata.copy()
-    adata.var["nCells"] = np.sum(adata.X.A > 0, axis=0) if issparse(adata.X) else np.sum(adata.X > 0, axis=0)
+    adata.var["nCells"] = np.sum(adata.X.toarray() > 0, axis=0) if issparse(adata.X) else np.sum(adata.X > 0, axis=0)
     adata.var["raw_pos_rate"] = adata.var["nCells"] / adata.n_obs
     return adata.var_names[adata.var["nCells"] / adata.n_obs > pos_ratio].to_list(), adata
 
@@ -134,12 +134,14 @@ def add_pos_ratio_to_adata(adata: AnnData, layer: str = None, var_name: str = "r
     """
     if layer:
         adata.var[var_name] = (
-            np.sum(adata.layers[layer].A > 0, axis=0)
+            np.sum(adata.layers[layer].toarray() > 0, axis=0)
             if issparse(adata.layers[layer])
             else np.sum(adata.layers[layer] > 0, axis=0)
         )
     else:
-        adata.var[var_name] = np.sum(adata.X.A > 0, axis=0) if issparse(adata.X) else np.sum(adata.X > 0, axis=0)
+        adata.var[var_name] = (
+            np.sum(adata.X.toarray() > 0, axis=0) if issparse(adata.X) else np.sum(adata.X > 0, axis=0)
+        )
     adata.var[var_name] = adata.var[var_name] / adata.n_obs
 
 
@@ -175,17 +177,17 @@ def cal_geodesic_distance(
     # remove islated one cell
     b = adata[
         np.min(
-            adata.obsp["spatial_distances"].A,
+            adata.obsp["spatial_distances"].toarray(),
             axis=1,
             initial=1e10,
-            where=np.array(adata.obsp["spatial_distances"].A > 0),
+            where=np.array(adata.obsp["spatial_distances"].toarray() > 0),
         )
         <= min_dis_cutoff
     ]
     lm.main_info(f"The cell/buckets number after filtering by min_dis_cutoff is {len(b)}")
 
     # remove sparse cells
-    b = b[np.max(b.obsp["spatial_distances"].A, axis=1) <= max_dis_cutoff]
+    b = b[np.max(b.obsp["spatial_distances"].toarray(), axis=1) <= max_dis_cutoff]
     lm.main_info(f"The cell/buckets number after filtering by max_dis_cutoff is {len(b)}")
 
     dyn.tl.neighbors(
@@ -220,16 +222,16 @@ def cal_euclidean_distance(
     # remove islated one cell
     b = adata[
         np.min(
-            adata.obsp["spatial_distances"].A,
+            adata.obsp["spatial_distances"].toarray(),
             axis=1,
             initial=1e10,
-            where=np.array(adata.obsp["spatial_distances"].A > 0),
+            where=np.array(adata.obsp["spatial_distances"].toarray() > 0),
         )
         <= min_dis_cutoff
     ]
 
     # remove sparse cells
-    b = b[np.max(b.obsp["spatial_distances"].A, axis=1) <= max_dis_cutoff]
+    b = b[np.max(b.obsp["spatial_distances"].toarray(), axis=1) <= max_dis_cutoff]
 
     # from scipy.sparse import csr_matrix
     # from scipy.sparse.csgraph import floyd_warshall
@@ -259,19 +261,16 @@ def scale_to(
 
     """
     adata = adata.copy()
-    if issparse(adata.X):
-        adata.X.A = adata.X.A.astype(np.float64)
-    else:
-        adata.X = adata.X.astype(np.float64)
+    adata.X = adata.X.astype(np.float64)
 
     if to_median:
         if issparse(adata.X):
-            N = np.median(np.sum(adata.X.A, axis=1))
+            N = np.median(np.sum(adata.X.toarray(), axis=1))
         else:
             N = np.median(np.sum(adata.X, axis=1))
 
     if issparse(adata.X):
-        adata.X.A = (adata.X.A.T / (np.sum(adata.X.A, axis=1) / N)).T
+        adata.X = csr_matrix((adata.X.toarray().T / (np.sum(adata.X.toarray(), axis=1) / N)).T)
     else:
         adata.X = (adata.X.T / (np.sum(adata.X, axis=1) / N)).T
     return adata
@@ -325,13 +324,10 @@ def loess_reg(
     layers: str = "X",
 ) -> AnnData:
     adata = adata.copy()
-    if issparse(adata.X):
-        adata.X.A = adata.X.A.astype(np.float64)
-    else:
-        adata.X = adata.X.astype(np.float64)
+    adata.X = adata.X.astype(np.float64)
 
     if issparse(adata.X):
-        adata.X.A = (adata.X.A.T / (np.sum(adata.X.A, axis=1) / N)).T
+        adata.X = csr_matrix((adata.X.toarray().T / (np.sum(adata.X.toarray(), axis=1) / N)).T)
     else:
         adata.X = (adata.X.T / (np.sum(adata.X, axis=1) / N)).T
     return adata

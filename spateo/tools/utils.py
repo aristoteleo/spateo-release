@@ -60,7 +60,7 @@ def flatten(arr):
     if type(arr) == pd.core.series.Series:
         ret = arr.values.flatten()
     elif sp.issparse(arr):
-        ret = arr.A.flatten()
+        ret = arr.toarray().flatten()
     else:
         ret = arr.flatten()
     return ret

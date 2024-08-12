@@ -108,7 +108,7 @@ def niches(
     if len(expressed_receptor) == 0:
         raise ValueError(f"No intersected receptor between your adata object" f" and lr_network dataset.")
     lr_network = lr_network[lr_network["to"].isin(expressed_receptor)]
-    ligand_matrix = adata[:, lr_network["from"]].X.A.T if x_sparse else adata[:, lr_network["from"]].X.T
+    ligand_matrix = adata[:, lr_network["from"]].X.toarray().T if x_sparse else adata[:, lr_network["from"]].X.T
 
     # spatial neighbors
     if spatial_neighbors not in adata.uns.keys():
@@ -133,14 +133,14 @@ def niches(
             row, col = np.diag_indices_from(nw["weights"])
             nw["weights"][row, col] = 1
             weight = np.zeros(shape=(adata.n_obs, k))
-            for i, row in enumerate(nw["weights"].A):
+            for i, row in enumerate(nw["weights"].toarray()):
                 weight[i, :] = 1 / row[nw["neighbors"][i]]
             for i in range(ligand_matrix.shape[1]):
-                receptor_matrix = adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :]
+                receptor_matrix = adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T * weight[i, :]
                 X[:, i * k : (i + 1) * k] = receptor_matrix * ligand_matrix[:, i].reshape(-1, 1)
         else:
             for i in range(ligand_matrix.shape[1]):
-                receptor_matrix = adata[nw["neighbors"][i], lr_network["to"]].X.A.T
+                receptor_matrix = adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T
                 X[:, i * k : (i + 1) * k] = receptor_matrix * ligand_matrix[:, i].reshape(-1, 1)
         # bucket-bucket pair
         cell_pair = []
@@ -158,24 +158,24 @@ def niches(
             row, col = np.diag_indices_from(nw["weights"])
             nw["weights"][row, col] = 1
             weight = np.zeros(shape=(adata.n_obs, k))
-            for i, row in enumerate(nw["weights"].A):
+            for i, row in enumerate(nw["weights"].toarray()):
                 weight[i, :] = 1 / row[nw["neighbors"][i]]
             for i in range(ligand_matrix.shape[1]):
                 if method == "gmean":
                     receptor_matrix = (
-                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.A.T + 1) * weight[i, :], axis=1)
+                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T + 1) * weight[i, :], axis=1)
                         if x_sparse
                         else gmean((adata[nw["neighbors"][i], lr_network["to"]].X.T + 1) * weight[i, :], axis=1)
                     )
                 elif method == "mean":
                     receptor_matrix = (
-                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
+                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T * weight[i, :], axis=1)
                         if x_sparse
                         else np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.T * weight[i, :], axis=1)
                     )
                 else:
                     receptor_matrix = (
-                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
+                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T * weight[i, :], axis=1)
                         if x_sparse
                         else np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.T * weight[i, :], axis=1)
                     )
@@ -184,19 +184,19 @@ def niches(
             for i in range(ligand_matrix.shape[1]):
                 if method == "gmean":
                     receptor_matrix = (
-                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.A.T + 1), axis=1)
+                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T + 1), axis=1)
                         if x_sparse
                         else gmean((adata[nw["neighbors"][i], lr_network["to"]].X.T + 1), axis=1)
                     )
                 elif method == "mean":
                     receptor_matrix = (
-                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T, axis=1)
+                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T, axis=1)
                         if x_sparse
                         else np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.T, axis=1)
                     )
                 else:
                     receptor_matrix = (
-                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.A.T, axis=1)
+                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T, axis=1)
                         if x_sparse
                         else np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.T, axis=1)
                     )
@@ -215,39 +215,39 @@ def niches(
             row, col = np.diag_indices_from(nw["weights"])
             nw["weights"][row, col] = 1
             weight = np.zeros(shape=(adata.n_obs, k))
-            for i, row in enumerate(nw["weights"].A):
+            for i, row in enumerate(nw["weights"].toarray()):
                 weight[i, :] = 1 / row[nw["neighbors"][i]]
             for i in range(ligand_matrix.shape[1]):
                 if method == "gmean":
                     receptor_matrix = (
-                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.A.T + 1) * weight[i, :], axis=1)
+                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T + 1) * weight[i, :], axis=1)
                         if x_sparse
                         else gmean((adata[nw["neighbors"][i], lr_network["to"]].X.T + 1) * weight[i, :], axis=1)
                     )
                     ligand_matrix = (
-                        gmean((adata[nw["neighbors"][i], lr_network["from"]].X.A.T + 1) * weight[i, :], axis=1)
+                        gmean((adata[nw["neighbors"][i], lr_network["from"]].X.toarray().T + 1) * weight[i, :], axis=1)
                         if x_sparse
                         else gmean((adata[nw["neighbors"][i], lr_network["from"]].X.T + 1) * weight[i, :], axis=1)
                     )
                 elif method == "mean":
                     receptor_matrix = (
-                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
+                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T * weight[i, :], axis=1)
                         if x_sparse
                         else np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.T * weight[i, :], axis=1)
                     )
                     ligand_matrix = (
-                        np.mean(adata[nw["neighbors"][i], lr_network["from"]].X.A.T * weight[i, :], axis=1)
+                        np.mean(adata[nw["neighbors"][i], lr_network["from"]].X.toarray().T * weight[i, :], axis=1)
                         if x_sparse
                         else np.mean(adata[nw["neighbors"][i], lr_network["from"]].X.T * weight[i, :], axis=1)
                     )
                 else:
                     receptor_matrix = (
-                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.A.T * weight[i, :], axis=1)
+                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T * weight[i, :], axis=1)
                         if x_sparse
                         else np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.T * weight[i, :], axis=1)
                     )
                     ligand_matrix = (
-                        np.sum(adata[nw["neighbors"][i], lr_network["from"]].X.A.T * weight[i, :], axis=1)
+                        np.sum(adata[nw["neighbors"][i], lr_network["from"]].X.toarray().T * weight[i, :], axis=1)
                         if x_sparse
                         else np.sum(adata[nw["neighbors"][i], lr_network["from"]].X.T * weight[i, :], axis=1)
                     )
@@ -258,34 +258,34 @@ def niches(
             for i in range(ligand_matrix.shape[1]):
                 if method == "gmean":
                     receptor_matrix = (
-                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.A.T + 1), axis=1)
+                        gmean((adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T + 1), axis=1)
                         if x_sparse
                         else gmean((adata[nw["neighbors"][i], lr_network["to"]].X.T + 1), axis=1)
                     )
                     ligand_matrix = (
-                        gmean((adata[nw["neighbors"][i], lr_network["from"]].X.A.T + 1), axis=1)
+                        gmean((adata[nw["neighbors"][i], lr_network["from"]].X.toarray().T + 1), axis=1)
                         if x_sparse
                         else gmean((adata[nw["neighbors"][i], lr_network["from"]].X.T + 1), axis=1)
                     )
                 elif method == "mean":
                     receptor_matrix = (
-                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.A.T, axis=1)
+                        np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T, axis=1)
                         if x_sparse
                         else np.mean(adata[nw["neighbors"][i], lr_network["to"]].X.T, axis=1)
                     )
                     ligand_matrix = (
-                        np.mean(adata[nw["neighbors"][i], lr_network["from"]].X.A.T, axis=1)
+                        np.mean(adata[nw["neighbors"][i], lr_network["from"]].X.toarray().T, axis=1)
                         if x_sparse
                         else np.mean(adata[nw["neighbors"][i], lr_network["from"]].X.T, axis=1)
                     )
                 else:
                     receptor_matrix = (
-                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.A.T, axis=1)
+                        np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.toarray().T, axis=1)
                         if x_sparse
                         else np.sum(adata[nw["neighbors"][i], lr_network["to"]].X.T, axis=1)
                     )
                     ligand_matrix = (
-                        np.sum(adata[nw["neighbors"][i], lr_network["from"]].X.A.T, axis=1)
+                        np.sum(adata[nw["neighbors"][i], lr_network["from"]].X.toarray().T, axis=1)
                         if x_sparse
                         else np.sum(adata[nw["neighbors"][i], lr_network["from"]].X.T, axis=1)
                     )
@@ -355,10 +355,10 @@ def predict_ligand_activities(
 
     # Define expressed genes in sender and receiver cell populations(pct>0.1)
     expressed_genes_sender = np.array(adata.var_names)[
-        np.count_nonzero(adata[sender_cells, :].X.A, axis=0) / len(sender_cells) > 0.01
+        np.count_nonzero(adata[sender_cells, :].X.toarray(), axis=0) / len(sender_cells) > 0.01
     ].tolist()
     expressed_genes_receiver = np.array(adata.var_names)[
-        np.count_nonzero(adata[receiver_cells, :].X.A, axis=0) / len(receiver_cells) > 0.01
+        np.count_nonzero(adata[receiver_cells, :].X.toarray(), axis=0) / len(receiver_cells) > 0.01
     ].tolist()
 
     # Define a set of potential ligands
@@ -380,7 +380,9 @@ def predict_ligand_activities(
         response_expressed_genes = list(set(expressed_genes_receiver) & set(ligand_target_matrix.index))
         response_expressed_genes_df = pd.DataFrame(response_expressed_genes)
         response_expressed_genes_df = response_expressed_genes_df.rename(columns={0: "gene"})
-        response_expressed_genes_df["avg_expr"] = np.mean(adata[receiver_cells, response_expressed_genes].X.A, axis=0)
+        response_expressed_genes_df["avg_expr"] = np.mean(
+            adata[receiver_cells, response_expressed_genes].X.toarray(), axis=0
+        )
         lt_matrix = ligand_target_matrix[potential_ligands.tolist()].loc[response_expressed_genes_df["gene"].tolist()]
         de = []
         for ligand in lt_matrix:
@@ -482,7 +484,7 @@ def predict_target_genes(
         top_n_score = ligand_target_matrix[ligand].sort_values(ascending=False)[:top_target]
         if geneset is None:
             expressed_genes_receiver = np.array(adata.var_names)[
-                np.count_nonzero(adata[receiver_cells, :].X.A, axis=0) / len(receiver_cells) > 0.01
+                np.count_nonzero(adata[receiver_cells, :].X.toarray(), axis=0) / len(receiver_cells) > 0.01
             ].tolist()
             response_expressed_genes = list(set(expressed_genes_receiver) & set(ligand_target_matrix.index))
             targets = list(set(top_n_score.index) & set(response_expressed_genes))

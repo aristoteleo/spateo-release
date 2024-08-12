@@ -60,7 +60,7 @@ def deep_intepretation(
     if len(var_keys) != 0:
         var_data = source_adata[:, var_keys].X
         if issparse(var_data):
-            var_data = var_data.A
+            var_data = var_data.toarray()
         info_data = np.c_[info_data, var_data]
     info_data = info_data[:, 1:]
 
