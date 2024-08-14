@@ -8,7 +8,12 @@ from .morphometrics_plots import (
     jacobian,
     torsion,
 )
-from .pairwise_align_plots import pairwise_iteration, pairwise_mapping, pi_heatmap, pairwise_iteration_panel
+from .pairwise_align_plots import (
+    pairwise_iteration,
+    pairwise_iteration_panel,
+    pairwise_mapping,
+    pi_heatmap,
+)
 from .three_dims_plots import (
     merge_animations,
     three_d_animate,
