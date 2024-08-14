@@ -702,7 +702,6 @@ def pairwise_iteration(
     )
 
 
-
 def pairwise_iteration_panel(
     adataA: AnnData,
     adataB: AnnData,
@@ -762,21 +761,11 @@ def pairwise_iteration_panel(
     else:
         coordsB = adataB.obsm[spatial_key]
         # adataB.obsm[spatial_key] = np.c_[adataB.obsm[spatial_key], z]
-        
-    points_coordinates = np.concatenate(
-        [
-            coordsA[select_idxA],
-            coordsB[select_idxB]
-        ],
-        axis=0
-    )
-    points_scalars = np.concatenate(
-        [
-            np.zeros(coordsA[select_idxA].shape[0]),
-            np.ones(coordsB[select_idxB].shape[0])
-        ]
-    )
+
+    points_coordinates = np.concatenate([coordsA[select_idxA], coordsB[select_idxB]], axis=0)
+    points_scalars = np.concatenate([np.zeros(coordsA[select_idxA].shape[0]), np.ones(coordsB[select_idxB].shape[0])])
     import pyvista as pv
+
     plotter = pv.Plotter(notebook=False, off_screen=True)
     # cpo = plotter.show(return_cpos=True, jupyter_backend="none", cpos=cpo)
     # plotter.camera_position = cpo
@@ -789,7 +778,7 @@ def pairwise_iteration_panel(
     )
     plotter.camera_position = cpo
     plotter.background_color = background
-    
+
     filename_format = filename.split(".")[-1]
     if filename_format == "gif":
         plotter.open_gif(filename)
@@ -800,6 +789,7 @@ def pairwise_iteration_panel(
     nframe = len(adataB.uns[iter_key][spatial_key].keys())
     # for phase in np.linspace(0, 2 * np.pi, nframe + 1)[:nframe]:
     from tqdm import tqdm
+
     for i in tqdm(range(nframe)):
         spatialB_dims = adataB.uns[iter_key][spatial_key][i].shape[1]
         if spatialB_dims == 2:
@@ -807,13 +797,7 @@ def pairwise_iteration_panel(
             coordsB = np.c_[adataB.uns[iter_key][spatial_key][i], z]
         else:
             coordsB = adataB.uns[iter_key][spatial_key][i]
-        points_coordinates = np.concatenate(
-            [
-                coordsA[select_idxA],
-                coordsB[select_idxB]
-            ],
-            axis=0
-        )
+        points_coordinates = np.concatenate([coordsA[select_idxA], coordsB[select_idxB]], axis=0)
         plotter.update_coordinates(points_coordinates, render=False)
         # plotter.update_scalars(z.ravel(), render=False)
 
