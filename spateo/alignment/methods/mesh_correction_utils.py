@@ -1,4 +1,3 @@
-import alphashape
 import numpy as np
 from shapely.geometry import MultiPolygon, Polygon
 
@@ -13,6 +12,11 @@ import cv2
 from scipy.spatial import KDTree
 
 from ..utils import _iteration
+
+try:
+    import alphashape
+except ImportError:
+    print("alphashape is not installed. Please install it using 'pip install alphashape'.")
 
 ##################
 # Transformation #
