@@ -274,6 +274,11 @@ def get_labels_based_on_coords(
     return merge_data
 
 
+#########################
+# Some helper functions #
+#########################
+
+
 def solve_RT_by_correspondence(
     X: np.ndarray, Y: np.ndarray, return_scale: bool = False
 ) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray, float]]:
@@ -327,3 +332,21 @@ def solve_RT_by_correspondence(
         return R, t, s
     else:
         return R, t
+
+
+def split_slice(
+    adata,
+    spatial_key,
+    split_num=5,
+    axis=2,
+):
+    spatial_points = adata.obsm[spatial_key]
+    N = spatial_points.shape[0]
+    sorted_points = np.argsort(spatial_points[:, axis])
+    points_per_segment = len(sorted_points) // split_num
+    split_adata = []
+    for slice_id, i in enumerate(range(0, N, points_per_segment)):
+        sorted_adata = adata[sorted_points[i : i + points_per_segment], :].copy()
+        sorted_adata.obs["slice"] = slice_id
+        split_adata.append(sorted_adata)
+    return split_adata[:split_num]

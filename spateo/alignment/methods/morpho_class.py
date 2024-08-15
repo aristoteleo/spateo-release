@@ -155,6 +155,7 @@ class Morpho_pairwise:
         guidance_weight: float = 1.0,
         use_chunk: bool = False,
         chunk_capacity: float = 1.0,
+        return_mapping: bool = False,
     ) -> None:
 
         # initialization
@@ -209,6 +210,7 @@ class Morpho_pairwise:
         self.gamma_b = gamma_b
         self.kappa = kappa
         self.nonrigid_start_iter = nonrigid_start_iter
+        self.return_mapping = return_mapping
 
         # checking keys
         self._check()
@@ -280,7 +282,7 @@ class Morpho_pairwise:
             self._update_sigma2(iter=iter)
 
         # Retrieve the full cell-cell assignment
-        if self.SVI_mode:
+        if self.return_mapping and self.SVI_mode:
             self.SVI_mode = False
             self._update_assignment_P()
 
@@ -1405,9 +1407,14 @@ class Morpho_pairwise:
 
         mu_XnA, mu_XnB = (
             _dot(self.nx)(self.K_NA, self.coordsA) / self.Sp,
-            _dot(self.nx)(self.K_NB, self.coordsB) / self.Sp,
+            _dot(self.nx)(self.K_NB, self.coordsB[self.batch_idx, :]) / self.Sp
+            if self.SVI_mode
+            else _dot(self.nx)(self.K_NB, self.coordsB) / self.Sp,
         )
-        XnABar, XnBBar = self.coordsA - mu_XnA, self.coordsB - mu_XnB
+        XnABar, XnBBar = (
+            self.coordsA - mu_XnA,
+            self.coordsB[self.batch_idx, :] - mu_XnB if self.SVI_mode else self.coordsB - mu_XnB,
+        )
         A = _dot(self.nx)(_dot(self.nx)(self.P, XnBBar).T, XnABar)
 
         # get the optimal rotation matrix R

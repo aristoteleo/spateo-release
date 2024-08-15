@@ -150,7 +150,7 @@ def slices_2d(
     # generate palette
     if (palette is None) and (label_type == "cluster"):
         palette = _agenerate_palette(*labels, cmap=cmap)
-    else:
+    elif label_type == "scalar":
         palette = cmap
 
     # adjust the gridspec
