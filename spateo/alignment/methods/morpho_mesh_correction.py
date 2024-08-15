@@ -15,7 +15,6 @@ from pyvista import PolyData  # type: ignore
 from spateo.logging import logger_manager as lm
 
 from ..utils import _iteration
-from .libfastpd import fastpd
 from .mesh_correction_utils import (
     _calculate_loss,
     _extract_contour_alpha_shape,
@@ -28,6 +27,11 @@ from .mesh_correction_utils import (
     _transform_points,
     _update_parameter,
 )
+
+try:
+    from .libfastpd import fastpd
+except ImportError:
+    print("fastpd is not installed. Please compile the fastpd library.")
 
 
 # TODO: add str as the input type for the models
