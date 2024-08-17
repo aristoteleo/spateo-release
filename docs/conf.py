@@ -236,11 +236,11 @@ nbsphinx_prolog = r"""
 )
 nbsphinx_thumbnails = {
     "tutorials/notebooks/cell_segmentation": "_static/tutorials/1_cell_segmentation.png",
-    "tutorials/notebooks/2_cluster_digitization": "_static/tutorials/2_cluster_digitization.png",
-    "tutorials/notebooks/3_cci": "_static/tutorials/3_cci.png",
-    "tutorials/notebooks/4_alignment": "_static/tutorials/4_alignment.png",
-    "tutorials/notebooks/5_tdr": "_static/tutorials/5_tdr.png",
-    "tutorials/notebooks/6_morphogenesis": "_static/tutorials/6_morphogenesis.png",
-    "tutorials/notebooks/7_interactive": "_static/tutorials/7_interactive.png",
-    "tutorials/notebooks/8_svg_identification": "_static/tutorials/8_svg_identification.png",
+    "tutorials/notebooks/2_svg_identification": "_static/tutorials/2_svg_identification.png",
+    "tutorials/notebooks/3_alignment": "_static/tutorials/3_alignment.png",
+    "tutorials/notebooks/4_tdr": "_static/tutorials/4_tdr.png",
+    "tutorials/notebooks/5_cluster_digitization": "_static/tutorials/5_cluster_digitization.png",
+    "tutorials/notebooks/6_cci": "_static/tutorials/6_cci.png",
+    "tutorials/notebooks/7_morphogenesis": "_static/tutorials/7_morphogenesis.png",
+    "tutorials/notebooks/8_interactive": "_static/tutorials/8_interactive.png",
 }
