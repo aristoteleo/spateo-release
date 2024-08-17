@@ -23,9 +23,19 @@ As shown, the calculation is exactly correct only when column boundaries $ \Gamm
 
 
 As seen in the ‘spatial domain digitization’ chapter of method section in our paper, we set the boundary conditions as follows:
+
+
 $$\psi_{\Gamma _{1}} = uniform(1, -1)$$
+
+
 $$\psi_{\Gamma _{2}} = -1$$
+
+
 $$\psi_{\Gamma _{3}} = uniform(-1, 1)$$
+
+
 $$\psi_{\Gamma _{4}} = 1$$
+
+
 and use the Jacobi method to iteratively solve the equations numerically.
 
