@@ -139,6 +139,7 @@ class Morpho_pairwise:
         K: Union[int, float] = 15,
         kernel_type: str = "euc",
         sigma2_init_scale: Optional[Union[int, float]] = 0.1,
+        sigma2_end: Optional[Union[int, float]] = None,
         gamma_a: float = 1.0,
         gamma_b: float = 1.0,
         kappa: Union[float, np.ndarray] = 1.0,
@@ -193,6 +194,7 @@ class Morpho_pairwise:
         self.kernel_type = kernel_type
         self.kernel_bandwidth = beta
         self.sigma2_init_scale = sigma2_init_scale
+        self.sigma2_end = sigma2_end
         self.partial_robust_level = partial_robust_level
         self.normalize_c = normalize_c
         self.normalize_g = normalize_g
@@ -280,6 +282,9 @@ class Morpho_pairwise:
             self._update_rigid()
             self.XAHat = self.VnA + self.RnA
             self._update_sigma2(iter=iter)
+
+        if self.sigma2_end is not None:
+            self.sigma2 = _data(self.nx, self.sigma2_end, self.type_as)
 
         # Retrieve the full cell-cell assignment
         if self.return_mapping and self.SVI_mode:
@@ -588,7 +593,8 @@ class Morpho_pairwise:
         # get the global means for whole coords if "separate_mean" is True
         if not self.separate_mean:
             global_mean = self.nx.mean(normalize_means, axis=0)
-            normalize_means = self.nx.full((len(coords), self.D), global_mean)
+            normalize_means = self.nx.repeat(global_mean, 2, axis=0)
+            # normalize_means = self.nx.full((len(coords), self.D), global_mean)
 
         # move each coords to zero center and calculate the normalization scale
         for i in range(len(coords)):
@@ -598,7 +604,7 @@ class Morpho_pairwise:
             )
             normalize_scales[i] = normalize_scale
 
-        # get the global scale for whole coords if "separate_scale" is True
+        # get the global scale for whole coords if "separate_scale" is False
         if not self.separate_scale:
             global_scale = self.nx.mean(normalize_scales)
             normalize_scales = self.nx.full((len(coords),), global_scale)
@@ -816,7 +822,11 @@ class Morpho_pairwise:
         """
 
         unique_spatial_coords = _unique(self.nx, self.coordsA, 0)
-        inducing_variables_idx = np.random.choice(unique_spatial_coords.shape[0], inducing_variables_num, replace=False)
+        inducing_variables_idx = (
+            np.random.choice(unique_spatial_coords.shape[0], inducing_variables_num, replace=False)
+            if unique_spatial_coords.shape[0] > inducing_variables_num
+            else np.arange(unique_spatial_coords.shape[0])
+        )
         self.inducing_variables = unique_spatial_coords[inducing_variables_idx, :]
         # (self.inducing_variables, _) = sample(
         #     X=unique_spatial_coords, n_sampling=inducing_variables_num, sampling_method=sampling_method
@@ -1451,6 +1461,13 @@ class Morpho_pairwise:
             self.P = self.nx.to_numpy(self.P)
 
         if not (self.vecfld_key_added is None):
+            norm_dict = {
+                "mean_transformed": self.nx.to_numpy(self.normalize_means[1]),
+                "mean_fixed": self.nx.to_numpy(self.normalize_means[0]),
+                "scale": self.nx.to_numpy(self.normalize_scales[1]),
+                "scale_transformed": self.nx.to_numpy(self.normalize_scales[1]),
+                "scale_fixed": self.nx.to_numpy(self.normalize_scales[0]),
+            }
 
             self.vecfld = {
                 "R": self.nx.to_numpy(self.R),
