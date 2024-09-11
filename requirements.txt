@@ -4,7 +4,7 @@ colorcet>=2.0.1
 cvxopt>=1.2.3
 csbdeep>=0.6.3
 descartes
-dynamo-release>=1.3.0
+dynamo-release>=1.4.1
 folium>=0.12.1
 geopandas>=0.10.2
 gpytorch
