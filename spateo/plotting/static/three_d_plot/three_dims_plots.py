@@ -1251,7 +1251,7 @@ def visualize_3D_increasing_direction_gradient(
             1 - (1 - coords_norm) * (1 - new_center) / 0.5,  # Compress the upper half
         )
 
-    colors = mpl.cm.get_cmap(cmap)(coords_norm)
+    colors = mpl.colormaps[cmap](coords_norm)
     # Convert colors to hex format:
     colors = ["#" + "".join([f"{int(c * 255):02x}" for c in color[:3]]) for color in colors]
 

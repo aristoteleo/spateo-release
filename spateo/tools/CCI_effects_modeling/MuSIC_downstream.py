@@ -21,7 +21,7 @@ from itertools import product
 from typing import List, Literal, Optional, Tuple, Union
 
 import anndata
-import matplotlib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -2537,7 +2537,7 @@ class MuSIC_Interpreter(MuSIC):
 
         if region_lower_bound is not None and region_upper_bound is not None:
             width = region_upper_bound - region_lower_bound
-            region_box = matplotlib.patches.Rectangle(
+            region_box = mpl.patches.Rectangle(
                 (region_lower_bound, ax.get_ylim()[0]),
                 width,
                 ax.get_ylim()[1] - ax.get_ylim()[0],
@@ -2547,7 +2547,7 @@ class MuSIC_Interpreter(MuSIC):
                 alpha=0.2,
             )
             ax.add_patch(region_box)
-            region_box_legend = matplotlib.patches.Patch(color="#1CE6FF", alpha=0.2, label=region_label)
+            region_box_legend = mpl.patches.Patch(color="#1CE6FF", alpha=0.2, label=region_label)
             handles, labels = ax.get_legend_handles_labels()
             handles.append(region_box_legend)
             labels.append(region_label)
@@ -3049,14 +3049,14 @@ class MuSIC_Interpreter(MuSIC):
                 n = 6
             figsize = (n, m)
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-        cmap = plt.cm.get_cmap(cmap)
+        cmap = mpl.colormaps[cmap]
 
         # Center colormap at 0 for heatmap:
         if plot_type == "heatmap":
             max_distance = max(abs(df.max().max()), abs(df.min().min()))
             norm = plt.Normalize(-max_distance, max_distance)
             colors = cmap(norm(df))
-            custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list("custom", colors)
+            custom_cmap = mpl.colors.LinearSegmentedColormap.from_list("custom", colors)
         else:
             max_distance = max(abs(df["log2FC"].max()), abs(df["log2FC"].min()))
 
@@ -4152,7 +4152,7 @@ class MuSIC_Interpreter(MuSIC):
         else:
             group_labels = [idx.split("-")[1] for idx in df.index]
 
-        target_colors = plt.cm.get_cmap("tab20").colors
+        target_colors = mpl.colormaps["tab20"].colors
         if group_y_cell_type:
             color_mapping = {
                 annotation: target_colors[i % len(target_colors)] for i, annotation in enumerate(set(cell_types))
@@ -4251,7 +4251,7 @@ class MuSIC_Interpreter(MuSIC):
             rem_interactions = [i for i in interaction_subset if i in df.columns]
             fig, axes = plt.subplots(nrows=len(rem_interactions), ncols=1, figsize=figsize)
             fig.subplots_adjust(hspace=0.4)
-            colormap = plt.cm.get_cmap(cmap)
+            colormap = mpl.colormaps[cmap]
             # Determine the order of the plot based on averaging over the chosen interactions (if there is more than
             # one):
             df_sub = df[rem_interactions]
@@ -4300,7 +4300,7 @@ class MuSIC_Interpreter(MuSIC):
                 vmin = 0
                 vmax = 1 if normalize else df[interaction_subset].max().values
 
-                norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+                norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
                 colors = [colormap(norm(val)) for val in df[interaction_subset].values]
                 sns.barplot(
                     x=df[interaction_subset].index,
@@ -4325,7 +4325,7 @@ class MuSIC_Interpreter(MuSIC):
 
                     vmin = 0
                     vmax = 1 if normalize else interaction_series.max()
-                    norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+                    norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
                     colors = [colormap(norm(val)) for val in interaction_series]
                     sns.barplot(
                         x=interaction_series.index,
@@ -4609,7 +4609,7 @@ class MuSIC_Interpreter(MuSIC):
             figsize = (n, m)
         fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
 
-        cmap = plt.cm.get_cmap(cmap)
+        cmap = mpl.colormaps[cmap]
         # Center colormap at 0:
         max_distance = max(abs(results["Fold Change"]).max(), abs(results["Fold Change"]).min())
         max_pos = results["Fold Change"].max()
