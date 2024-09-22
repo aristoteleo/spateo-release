@@ -73,7 +73,7 @@ def create_plotter(
 
 
 def _set_jupyter(
-    jupyter: Union[bool, Literal["trame", "panel", "none", "static"]] = False,
+    jupyter: Union[bool, Literal["trame", "panel", "none", "static", "html"]] = False,
     off_screen: bool = False,
 ):
     if jupyter is False:
@@ -82,7 +82,7 @@ def _set_jupyter(
     elif jupyter is True:
         off_screen1, off_screen2 = True, off_screen
         jupyter_backend = "static"
-    elif jupyter in ["trame", "panel", "none", "static"]:
+    elif jupyter in ["trame", "panel", "none", "static", "html"]:
         off_screen1, off_screen2 = True, off_screen
         jupyter_backend = jupyter
     else:
@@ -535,7 +535,7 @@ def output_plotter(
     filename: Optional[str] = None,
     view_up: tuple = (0.5, 0.5, 1),
     framerate: int = 15,
-    jupyter: Union[bool, Literal["trame", "panel", "none", "static"]] = False,
+    jupyter: Union[bool, Literal["trame", "panel", "none", "static", "html"]] = False,
 ):
     """
     Output plotter as image, gif file or mp4 file.

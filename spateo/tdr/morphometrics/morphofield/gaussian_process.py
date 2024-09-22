@@ -80,20 +80,38 @@ def _con_K_geodist(
         return K
 
 
+# def _gp_velocity(X: np.ndarray, vf_dict: dict) -> np.ndarray:
+#     # pre_scale = vf_dict["pre_norm_scale"]
+#     norm_x = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
+#     if vf_dict["kernel_dict"]["dist"] == "cdist":
+#         quary_kernel = _con_K(norm_x, vf_dict["inducing_variables"], vf_dict["beta"])
+#     elif vf_dict["kernel_dict"]["dist"] == "geodist":
+#         quary_kernel = _con_K_geodist(norm_x, vf_dict["kernel_dict"], vf_dict["beta"])
+#     else:
+#         raise ValueError(f"current only support cdist and geodist")
+#     quary_velocities = np.dot(quary_kernel, vf_dict["Coff"])
+#     quary_rigid = np.dot(norm_x, vf_dict["R"].T) + vf_dict["t"]
+#     quary_norm_x = quary_velocities + quary_rigid
+#     quary_x = quary_norm_x * vf_dict["norm_dict"]["scale_fixed"] + vf_dict["norm_dict"]["mean_fixed"]
+#     _velocities = quary_x - X
+#     return _velocities / 10000
+
+
 def _gp_velocity(X: np.ndarray, vf_dict: dict) -> np.ndarray:
     # pre_scale = vf_dict["pre_norm_scale"]
     norm_x = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
     if vf_dict["kernel_dict"]["dist"] == "cdist":
-        quary_kernel = _con_K(norm_x, vf_dict["X_ctrl"], vf_dict["beta"])
+        quary_kernel = _con_K(norm_x, vf_dict["inducing_variables"], vf_dict["beta"])
     elif vf_dict["kernel_dict"]["dist"] == "geodist":
         quary_kernel = _con_K_geodist(norm_x, vf_dict["kernel_dict"], vf_dict["beta"])
     else:
         raise ValueError(f"current only support cdist and geodist")
-    quary_velocities = np.dot(quary_kernel, vf_dict["C"])
+    quary_velocities = np.dot(quary_kernel, vf_dict["Coff"])
     quary_rigid = np.dot(norm_x, vf_dict["R"].T) + vf_dict["t"]
     quary_norm_x = quary_velocities + quary_rigid
-    quary_x = quary_norm_x * vf_dict["norm_dict"]["scale_fixed"] + vf_dict["norm_dict"]["mean_fixed"]
-    _velocities = quary_x - X
+    _velocities = (
+        quary_norm_x * vf_dict["norm_dict"]["scale_fixed"] - norm_x * vf_dict["norm_dict"]["scale_transformed"]
+    )
     return _velocities / 10000
 
 

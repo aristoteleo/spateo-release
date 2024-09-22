@@ -95,10 +95,10 @@ def construct_lines(
         plot_cmap: Recommended colormap parameter values for plotting.
     """
 
-    padding = np.array([2] * edges.shape[0], int)
-    edges_w_padding = np.vstack((padding, edges.T)).T
-    model = pv.PolyData(points, edges_w_padding)
-
+    # padding = np.array([2] * edges.shape[0], int)
+    # edges_w_padding = np.vstack((padding, edges.T)).T
+    # model = pv.PolyData(points, edges_w_padding)
+    model = pv.PolyData(points, lines=pv.CellArray.from_regular_cells(np.array(edges)))
     labels = np.asarray([label] * points.shape[0]) if isinstance(label, str) else np.asarray(label)
     assert len(labels) == points.shape[0], "The number of labels is not equal to the number of points."
     plot_cmap = None

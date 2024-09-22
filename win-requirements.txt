@@ -12,7 +12,7 @@ kneed>=0.7.0
 kornia>=0.6.4
 loompy>=3.0.5
 mapclassify>=2.4.2
-matplotlib<=3.5.3
+matplotlib>=3.7.5
 nbconvert
 networkx>=2.6.3
 nudged>=0.3.1
