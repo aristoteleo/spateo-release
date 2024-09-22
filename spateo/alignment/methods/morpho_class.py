@@ -242,7 +242,6 @@ class Morpho_pairwise:
         Returns:
             np.ndarray: The final cell-cell assignment matrix.
         """
-        # print(f'summin: {self.nx.sum(self.exp_layers_A[0], axis=1, keepdims=True).min()}')
         if self.nn_init:
             self._coarse_rigid_alignment()
 
@@ -555,7 +554,6 @@ class Morpho_pairwise:
         self.X_AI = self.nx.from_numpy(self.guidance_pair[1], type_as=self.type_as)
         self.V_AI = self.nx.zeros(self.X_AI.shape, type_as=self.type_as)
         self.R_AI = self.nx.zeros(self.X_AI.shape, type_as=self.type_as)
-        # print(self.V_AI)
 
         if self.normalize_c:
             # Normalize the guidance pairs
@@ -783,7 +781,6 @@ class Morpho_pairwise:
                     Y=exp_B[sub_sample_B],
                     metric=d_s,
                 )
-                # print(exp_A[sub_sample_A])
                 min_exp_dist = self.nx.min(exp_dist, 1)
                 self.probability_parameters[i] = self.nx.maximum(
                     min_exp_dist[self.nx.argsort(min_exp_dist)[int(sub_sample_A.shape[0] * 0.05)]] / 5,
@@ -1087,7 +1084,6 @@ class Morpho_pairwise:
                 exp_layer_dist = calc_distance(
                     self.exp_layers_A, exp_layer_B_chunk, self.dissimilarity, self.label_transfer
                 )
-
                 P, K_NA_spatial_chunk, K_NA_sigma2_chunk, sigma2_related_chunk = get_P_core(
                     spatial_dist=spatial_dist, exp_dist=exp_layer_dist, **common_kwargs
                 )
@@ -1110,7 +1106,6 @@ class Morpho_pairwise:
                 Y=self.coordsB[self.batch_idx, :] if self.SVI_mode else self.coordsB,
                 metric="euc",
             )  # NA x batch_size (SVI_mode) / NA x NB (not SVI_mode)
-            # print(self.pre_compute_dist)
             if self.pre_compute_dist:
                 exp_layer_dist = (
                     [exp_layer_d[:, self.batch_idx] for exp_layer_d in self.exp_layer_dist]
@@ -1153,7 +1148,6 @@ class Morpho_pairwise:
             self.K_NA_sigma2 = self.K_NA_sigma2.to_dense()
 
         self.sigma2_related = sigma2_related / (self.Dim * self.Sp_sigma2)
-        # print(self.sigma2_related)
 
     def _update_gamma(
         self,
@@ -1272,7 +1266,6 @@ class Morpho_pairwise:
             if self.SVI_mode
             else _dot(self.nx)(self.K_NB, self.coordsB)[None, :],
         )
-        # print(self.Sp)
         # solve rotation using SVD formula
         mu_XB, mu_XA, mu_Vn = PXB, PXA, PVA
         mu_X_deno, mu_Vn_deno = _copy(self.nx, self.Sp), _copy(self.nx, self.Sp)

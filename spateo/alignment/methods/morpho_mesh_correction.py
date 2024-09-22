@@ -31,7 +31,7 @@ from .mesh_correction_utils import (
 try:
     from .libfastpd import fastpd
 except ImportError:
-    print("fastpd is not installed. Please compile the fastpd library.")
+    print("fastpd is not installed. If you need mesh correction, please compile the fastpd library.")
 
 
 # TODO: add str as the input type for the models
