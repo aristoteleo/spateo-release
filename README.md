@@ -20,7 +20,7 @@ https://www.biorxiv.org/content/10.1101/2022.12.07.519417v1
 Cells do not live in a vacuum, but in a milieu defined by cell–cell communication that can be measured via emerging high-resolution spatial transcriptomics approaches. However, analytical tools that fully leverage such data for kinetic modeling remain lacking. Here we present Spateo (aristoteleo/spateo-release), a general framework for quantitative spatiotemporal modeling of single-cell resolution spatial transcriptomics. Spateo delivers novel methods for digitizing spatial layers/columns to identify spatially-polar genes, and develops a comprehensive framework of cell-cell interaction to reveal spatial effects of niche factors and cell type-specific ligand-receptor interactions. Furthermore, Spateo reconstructs 3D models of whole embryos, and performs 3D morphometric analyses. Lastly, Spateo introduces the concept of “morphometric vector field” of cell migrations, and integrates spatial differential geometry to unveil regulatory programs underlying various organogenesis patterns of Drosophila. Thus, Spateo enables the study of the ecology of organs at a molecular level in 3D space, beyond isolated single cells. 
 </p
 
-![Spateo](https://user-images.githubusercontent.com/7456281/206298806-eb7df755-5fc4-46b6-80cc-baab86f0611f.png)
+![Spateo](https://github.com/user-attachments/assets/91662173-b46e-43ea-88d3-69beafee7eba)
 
 ## Highlights of Spateo:
 
