@@ -818,13 +818,16 @@ class Morpho_pairwise:
             NotImplementedError: If the specified kernel type is not implemented.
         """
 
-        unique_spatial_coords = _unique(self.nx, self.coordsA, 0)
+        # unique_spatial_coords = _unique(self.nx, self.coordsA, 0)
+        unique_spatial_coords, unique_idx = self.nx.unique(self.coordsA, return_index=True, axis=0)
         inducing_variables_idx = (
             np.random.choice(unique_spatial_coords.shape[0], inducing_variables_num, replace=False)
             if unique_spatial_coords.shape[0] > inducing_variables_num
             else np.arange(unique_spatial_coords.shape[0])
         )
-        self.inducing_variables = unique_spatial_coords[inducing_variables_idx, :]
+        inducing_variables_idx = unique_idx[inducing_variables_idx]
+        self.inducing_variables = self.coordsA[inducing_variables_idx, :]
+        # self.inducing_variables = unique_spatial_coords[inducing_variables_idx, :]
         # (self.inducing_variables, _) = sample(
         #     X=unique_spatial_coords, n_sampling=inducing_variables_num, sampling_method=sampling_method
         # )
@@ -836,6 +839,14 @@ class Morpho_pairwise:
                 if self.guidance_effect in ["nonrigid", "both"]
                 else None
             )
+        elif self.kernel_type == "geodist":
+            pass
+            # TODO: finish this
+            # if self.graph is None:
+            #     self.graph = _construct_graph(self.coordsA, self.knn)
+            #     self.GammaSparse = con_K_graph(self.graph, inducing_variables_idx, inducing_variables_idx, beta=self.kernel_bandwidth)
+            #     self.U = con_K_graph(self.graph, np.arange(self.NA), inducing_variables_idx, beta=self.kernel_bandwidth)
+
         else:
             raise NotImplementedError(f"Kernel type '{self.kernel_type}' is not implemented.")
 
@@ -1455,11 +1466,11 @@ class Morpho_pairwise:
 
         if not (self.vecfld_key_added is None):
             norm_dict = {
-                "mean_transformed": self.nx.to_numpy(self.normalize_means[1]),
-                "mean_fixed": self.nx.to_numpy(self.normalize_means[0]),
+                "mean_transformed": self.nx.to_numpy(self.normalize_means[0]),
+                "mean_fixed": self.nx.to_numpy(self.normalize_means[1]),
                 "scale": self.nx.to_numpy(self.normalize_scales[1]),
-                "scale_transformed": self.nx.to_numpy(self.normalize_scales[1]),
-                "scale_fixed": self.nx.to_numpy(self.normalize_scales[0]),
+                "scale_transformed": self.nx.to_numpy(self.normalize_scales[0]),
+                "scale_fixed": self.nx.to_numpy(self.normalize_scales[1]),
             }
 
             self.vecfld = {
@@ -1481,4 +1492,5 @@ class Morpho_pairwise:
                 "NA": self.NA,
                 "sigma2_variance": self.nx.to_numpy(self.sigma2_variance),
                 "method": "Spateo",
+                "norm_dict": norm_dict,
             }

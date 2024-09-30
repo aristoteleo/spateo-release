@@ -10,11 +10,12 @@ import numpy as np
 from anndata import AnnData
 
 from spateo.alignment.methods import Morpho_pairwise, empty_cache
+from spateo.alignment.transform import BA_transform
 from spateo.alignment.utils import _iteration, downsampling
 from spateo.logging import logger_manager as lm
 
 
-# TODO: if return the full mapping assignment
+# TODO: update the args docstring
 def morpho_align(
     models: List[AnnData],
     rep_layer: Union[str, List[str]] = "X",
@@ -31,7 +32,7 @@ def morpho_align(
     device: str = "cpu",
     verbose: bool = True,
     **kwargs,
-) -> Tuple[List[AnnData], List[np.ndarray], List[np.ndarray]]:
+) -> Tuple[List[AnnData], List[np.ndarray]]:
     """
     Continuous alignment of spatial transcriptomic coordinates based on Morpho.
 
@@ -62,11 +63,9 @@ def morpho_align(
 
     align_models = [model.copy() for model in models]
     for m in align_models:
-        m.obsm[key_added] = m.obsm[spatial_key]
-    for m in align_models:
-        m.obsm[f"{key_added}_rigid"] = m.obsm[spatial_key]
-    for m in align_models:
-        m.obsm[f"{key_added}_nonrigid"] = m.obsm[spatial_key]
+        m.obsm[key_added] = m.obsm[spatial_key].copy()
+        m.obsm[f"{key_added}_rigid"] = m.obsm[spatial_key].copy()
+        m.obsm[f"{key_added}_nonrigid"] = m.obsm[spatial_key].copy()
 
     pis = []
     progress_name = f"Models alignment based on morpho, mode: {mode}."
@@ -109,27 +108,28 @@ def morpho_align(
     return align_models, pis
 
 
+# TODO: add the args docstring
 def morpho_align_ref(
     models: List[AnnData],
     models_ref: Optional[List[AnnData]] = None,
     n_sampling: Optional[int] = 2000,
     sampling_method: str = "trn",
-    layer: str = "X",
+    rep_layer: Union[str, List[str]] = "X",
+    rep_field: Union[str, List[str]] = "layer",
     genes: Optional[Union[list, np.ndarray]] = None,
     spatial_key: str = "spatial",
     key_added: str = "align_spatial",
     iter_key_added: Optional[str] = "iter_spatial",
     vecfld_key_added: Optional[str] = "VecFld_morpho",
     mode: Literal["SN-N", "SN-S"] = "SN-S",
-    dissimilarity: str = "kl",
-    max_iter: int = 100,
-    SVI_mode: bool = True,
-    return_full_assignment: bool = False,
+    dissimilarity: Union[str, List[str]] = "kl",
+    max_iter: int = 200,
+    # return_full_assignment: bool = False,
     dtype: str = "float32",
     device: str = "cpu",
     verbose: bool = True,
     **kwargs,
-) -> Tuple[List[AnnData], List[AnnData], List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
+) -> Tuple[List[AnnData], List[AnnData], List[np.ndarray], List[np.ndarray]]:
     """
     Continuous alignment of spatial transcriptomic coordinates with the reference models based on Morpho.
 
@@ -165,6 +165,7 @@ def morpho_align_ref(
     """
 
     # Downsampling
+    # TODO: this operation is very reducdant, need to be optimized
     if models_ref is None:
         models_sampling = [model.copy() for model in models]
         models_ref = downsampling(
@@ -174,82 +175,95 @@ def morpho_align_ref(
             spatial_key=spatial_key,
         )
 
-    pis, pis_ref, sigma2s = [], [], []
+    pis, pis_ref = [], []
 
     align_models = [model.copy() for model in models]
     for model in align_models:
-        model.obsm[key_added] = model.obsm[spatial_key]
-        model.obsm["Rigid_align_spatial"] = model.obsm[spatial_key]
-        model.obsm["Nonrigid_align_spatial"] = model.obsm[spatial_key]
+        model.obsm[key_added] = model.obsm[spatial_key].copy()
+        model.obsm[f"{key_added}_rigid"] = model.obsm[spatial_key].copy()
+        model.obsm[f"{key_added}_nonrigid"] = model.obsm[spatial_key].copy()
+
     align_models_ref = [model.copy() for model in models_ref]
     for model in align_models_ref:
-        model.obsm[key_added] = model.obsm[spatial_key]
-        model.obsm["Rigid_align_spatial"] = model.obsm[spatial_key]
-        model.obsm["Nonrigid_align_spatial"] = model.obsm[spatial_key]
+        model.obsm[key_added] = model.obsm[spatial_key].copy()
+        model.obsm[f"{key_added}_rigid"] = model.obsm[spatial_key].copy()
+        model.obsm[f"{key_added}_nonrigid"] = model.obsm[spatial_key].copy()
+
     progress_name = f"Models alignment with ref-models based on morpho, mode: {mode}."
     for i in _iteration(n=len(align_models) - 1, progress_name=progress_name, verbose=True):
         modelA_ref = align_models_ref[i]
         modelB_ref = align_models_ref[i + 1]
 
-        _, P, sigma2 = BA_align(
-            sampleA=modelA_ref,
-            sampleB=modelB_ref,
+        morpho_model = Morpho_pairwise(
+            sampleA=modelB_ref,  # reverse
+            sampleB=modelA_ref,  # reverse
+            rep_layer=rep_layer,
+            rep_field=rep_field,
+            dissimilarity=dissimilarity,
             genes=genes,
             spatial_key=key_added,
             key_added=key_added,
             iter_key_added=iter_key_added,
             vecfld_key_added=vecfld_key_added,
-            layer=layer,
-            dissimilarity=dissimilarity,
             max_iter=max_iter,
-            SVI_mode=SVI_mode,
             dtype=dtype,
             device=device,
-            inplace=True,
             verbose=verbose,
             **kwargs,
         )
+        P = morpho_model.run()
+        modelB_ref.obsm[f"{key_added}_rigid"] = morpho_model.optimal_RnA.copy()
+        modelB_ref.obsm[f"{key_added}_nonrigid"] = morpho_model.XAHat.copy()
+
         if mode == "SN-S":
-            modelB_ref.obsm[key_added] = modelB_ref.obsm["Rigid_align_spatial"]
+            modelB_ref.obsm[key_added] = modelB_ref.obsm[f"{key_added}_rigid"]
         elif mode == "SN-N":
-            modelB_ref.obsm[key_added] = modelB_ref.obsm["Nonrigid_align_spatial"]
+            modelB_ref.obsm[key_added] = modelB_ref.obsm[f"{key_added}_nonrigid"]
+
         align_models_ref[i + 1] = modelB_ref
         pis_ref.append(P)
-        sigma2s.append(sigma2)
 
-        modelA, modelB = align_models[i], align_models[i + 1]
-        modelB.uns[vecfld_key_added] = modelB_ref.uns[vecfld_key_added]
-        if return_full_assignment:
-            (
-                modelB.obsm["Nonrigid_align_spatial"],
-                _,
-                modelB.obsm["Rigid_align_spatial"],
-                P,
-            ) = BA_transform_and_assignment(
-                samples=[modelB, modelA],
-                vecfld=modelB_ref.uns[vecfld_key_added],
-                genes=genes,
-                layer=layer,
-                spatial_key=spatial_key,
-                device=device,
-                dtype=dtype,
-                **kwargs,
-            )
-        else:
-            modelB.obsm["Nonrigid_align_spatial"], _, modelB.obsm["Rigid_align_spatial"] = BA_transform(
-                vecfld=modelB_ref.uns[vecfld_key_added],
-                quary_points=modelB.obsm[spatial_key],
-                device=device,
-                dtype=dtype,
-            )
+        # use the reference model to align the original model
+        modelB = align_models[i + 1]
+        vecfld = morpho_model.vecfld
+        if iter_key_added is not None:
+            modelB_ref.uns[iter_key_added] = morpho_model.iter_added
+            modelB.uns[iter_key_added] = morpho_model.iter_added
+        if vecfld_key_added is not None:
+            modelB_ref.uns[vecfld_key_added] = morpho_model.vecfld
+            modelB.uns[vecfld_key_added] = morpho_model.vecfld
+        ## Deprecated
+        # if return_full_assignment:
+        #     (
+        #         modelB.obsm[f"{key_added}_nonrigid"],
+        #         _,
+        #         modelB.obsm[f"{key_added}_rigid"],
+        #         P,
+        #     ) = BA_transform_and_assignment(
+        #         samples=[modelB, modelA],
+        #         vecfld=modelB_ref.uns[vecfld_key_added],
+        #         genes=genes,
+        #         layer=layer,
+        #         spatial_key=spatial_key,
+        #         device=device,
+        #         dtype=dtype,
+        #         **kwargs,
+        #     )
+        # else:
+        modelB.obsm[f"{key_added}_nonrigid"], _, modelB.obsm[f"{key_added}_rigid"] = BA_transform(
+            vecfld=vecfld,
+            quary_points=modelB.obsm[key_added],
+            device=device,
+            dtype=dtype,
+        )
         if mode == "SN-S":
-            modelB.obsm[key_added] = modelB.obsm["Rigid_align_spatial"]
+            modelB.obsm[key_added] = modelB.obsm[f"{key_added}_rigid"]
         elif mode == "SN-N":
-            modelB.obsm[key_added] = modelB.obsm["Nonrigid_align_spatial"]
+            modelB.obsm[key_added] = modelB.obsm[f"{key_added}_nonrigid"]
 
         pis.append(P)
 
-    return align_models, align_models_ref, pis, pis_ref, sigma2s
+    return align_models, align_models_ref, pis, pis_ref
 
 
 ## Deprecated

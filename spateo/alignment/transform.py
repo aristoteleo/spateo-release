@@ -75,15 +75,21 @@ def BA_transform(
     """
     # Determine if gpu or cpu is being used
     nx, type_as = check_backend(device=device, dtype=dtype)
-    normalize_scale = _data(nx, vecfld["normalize_scale"], type_as)
-    normalize_mean_ref = _data(nx, vecfld["normalize_mean_list"][0], type_as)
-    normalize_mean_quary = _data(nx, vecfld["normalize_mean_list"][1], type_as)
+    # normalize_scale = _data(nx, vecfld["normalize_scale"], type_as)
+    # normalize_mean_ref = _data(nx, vecfld["normalize_mean_list"][0], type_as)
+    # normalize_mean_quary = _data(nx, vecfld["normalize_mean_list"][1], type_as)
+
+    normalize_scale = _data(nx, vecfld["norm_dict"]["scale_transformed"], type_as)
+    normalize_mean_ref = _data(nx, vecfld["norm_dict"]["mean_fixed"], type_as)
+    normalize_mean_quary = _data(nx, vecfld["norm_dict"]["mean_transformed"], type_as)
     XA = _data(nx, quary_points, type_as)
 
     # normalize coordinate
     if vecfld["normalize_c"]:
         XA = (XA - normalize_mean_quary) / normalize_scale
-    ctrl_pts = _data(nx, vecfld["ctrl_pts"], type_as)
+    ctrl_pts = _data(nx, vecfld["inducing_variables"], type_as)
+    beta = vecfld["beta"]
+    quary_kernel = con_K(XA, ctrl_pts, beta)
     Coff = _data(nx, vecfld["Coff"], type_as)
     R = _data(nx, vecfld["R"], type_as)
     t = _data(nx, vecfld["t"], type_as)
@@ -93,8 +99,6 @@ def BA_transform(
     init_t = _data(nx, vecfld["init_t"], type_as)
     XA = _dot(nx)(XA, init_R.T) + init_t
 
-    beta = vecfld["beta"]
-    quary_kernel = con_K(XA, ctrl_pts, beta)
     quary_velocities = _dot(nx)(quary_kernel, Coff) * deformation_scale
     quary_similarity = _dot(nx)(XA, R.T) + t
     quary_optimal_similarity = _dot(nx)(XA, optimal_R.T) + optimal_t
