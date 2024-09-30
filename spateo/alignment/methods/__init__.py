@@ -23,6 +23,7 @@ from .utils import (
     _power,
     _prod,
     _unsqueeze,
+    calc_distance,
     check_backend,
     check_exp,
     con_K,

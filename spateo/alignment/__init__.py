@@ -2,6 +2,7 @@ from .deformation import grid_deformation
 from .methods import (
     Mesh_correction,
     align_preprocess,
+    calc_distance,
     calc_exp_dissimilarity,
     generate_label_transfer_dict,
 )

@@ -528,7 +528,7 @@ class Backend:
         """
         raise NotImplementedError()
 
-    def unique(self, a, return_inverse=False):
+    def unique(self, a, return_index=False, return_inverse=False):
         r"""
         Finds unique elements of given tensor.
 
@@ -1058,8 +1058,8 @@ class NumpyBackend(Backend):
         else:
             return np.asarray(a, dtype=type_as.dtype)
 
-    def unique(self, a, return_inverse=False, axis=None):
-        return np.unique(a, return_inverse=return_inverse, axis=axis)
+    def unique(self, a, return_index, return_inverse=False, axis=None):
+        return np.unique(a, return_index=return_index, return_inverse=return_inverse, axis=axis)
 
     def unsqueeze(self, a, axis=-1):
         return np.expand_dims(a, axis)
@@ -1325,8 +1325,27 @@ class TorchBackend(Backend):
         else:
             return torch.as_tensor(a, dtype=type_as.dtype, device=type_as.device)
 
-    def unique(self, a, return_inverse=False, axis=None):
-        return torch.unique(a, return_inverse=return_inverse, dim=axis)
+    def unique(self, a, return_index=False, return_inverse=False, axis=None):
+        unique_values, inverse_indices = torch.unique(a, sorted=False, return_inverse=True, dim=axis)
+
+        result = [unique_values]
+
+        if return_index:
+            x_sort, idx_sorted = torch.sort(inverse_indices)
+            return_index = idx_sorted[
+                torch.hstack(
+                    [
+                        torch.where((x_sort[1:] - x_sort[:-1]) != 0)[0],
+                        torch.tensor([len(inverse_indices) - 1], device=x_sort.device),
+                    ]
+                )
+            ]
+            result.append(return_index)
+
+        if return_inverse:
+            result.append(inverse_indices)
+
+        return tuple(result) if len(result) > 1 else result[0]
 
     def unsqueeze(self, a, axis=-1):
         return torch.unsqueeze(a, axis)

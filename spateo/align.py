@@ -3,6 +3,7 @@ from .alignment import (
     BA_transform_and_assignment,
     Mesh_correction,
     align_preprocess,
+    calc_distance,
     calc_exp_dissimilarity,
     generate_label_transfer_dict,
     generate_label_transfer_prior,
