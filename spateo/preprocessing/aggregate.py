@@ -33,7 +33,7 @@ def bin_adata(
     adata.obsm[coords_key] = (adata.obsm[coords_key] // bin_size).astype(np.int32)
 
     if scipy.issparse(adata.X):
-        df = pd.DataFrame(adata.X.A, columns=adata.var_names)
+        df = pd.DataFrame(adata.X.toarray(), columns=adata.var_names)
     else:
         df = pd.DataFrame(adata.X, columns=adata.var_names)
 

@@ -182,7 +182,7 @@ def three_d_plot(
     model: Union[PolyData, UnstructuredGrid, MultiBlock],
     key: Union[str, list] = None,
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany", "html"]] = False,
     off_screen: bool = False,
     window_size: tuple = (512, 512),
     background: str = "white",
@@ -201,6 +201,7 @@ def three_d_plot(
     view_up: tuple = (0.5, 0.5, 1),
     framerate: int = 24,
     plotter_filename: Optional[str] = None,
+    show_axes: bool = False,
 ):
     """
     Visualize reconstructed 3D model.
@@ -298,6 +299,7 @@ def three_d_plot(
         jupyter=False if jupyter is False else True,
         window_size=window_size,
         background=background,
+        show_axes=show_axes,
     )
     model_kwargs = dict(
         background=background,
@@ -344,7 +346,7 @@ def three_d_multi_plot(
     model: Union[PolyData, UnstructuredGrid, MultiBlock],
     key: Union[str, list] = None,
     filename: Optional[str] = None,
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany", "html"]] = False,
     off_screen: bool = False,
     shape: Union[str, list, tuple] = None,
     window_size: Optional[tuple] = None,
@@ -574,7 +576,7 @@ def three_d_animate(
     stable_kwargs: Optional[dict] = None,
     key: Optional[str] = None,
     filename: str = "animate.mp4",
-    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany"]] = False,
+    jupyter: Union[bool, Literal["panel", "none", "pythreejs", "static", "ipygany", "html"]] = False,
     off_screen: bool = False,
     window_size: tuple = (512, 512),
     background: str = "white",
@@ -1249,7 +1251,7 @@ def visualize_3D_increasing_direction_gradient(
             1 - (1 - coords_norm) * (1 - new_center) / 0.5,  # Compress the upper half
         )
 
-    colors = mpl.cm.get_cmap(cmap)(coords_norm)
+    colors = mpl.colormaps[cmap](coords_norm)
     # Convert colors to hex format:
     colors = ["#" + "".join([f"{int(c * 255):02x}" for c in color[:3]]) for color in colors]
 

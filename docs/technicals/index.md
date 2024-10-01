@@ -7,4 +7,5 @@ implementations in a more technical point of view.
 :maxdepth: 2
 
 cell_segmentation
+digitization
 ```

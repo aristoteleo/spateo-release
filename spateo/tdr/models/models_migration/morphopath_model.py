@@ -157,7 +157,7 @@ def construct_genesis(
 def construct_trajectory_X(
     cells_states: Union[np.ndarray, List[np.ndarray]],
     init_states: Optional[np.ndarray] = None,
-    n_sampling: Optional[int] = None,
+    n_sampling: Optional[Union[int, np.ndarray]] = None,
     sampling_method: str = "trn",
     key_added: str = "trajectory",
     label: Optional[Union[str, list, np.ndarray]] = None,
@@ -202,13 +202,15 @@ def construct_trajectory_X(
     else:
         raise ValueError("`label` value is wrong.")
 
-    if not (n_sampling is None):
+    if (n_sampling is not None) and (isinstance(n_sampling, int)):
         index_arr = sample(
             arr=index_arr,
             n=n_sampling,
             method=sampling_method,
             X=init_states,
         )
+    elif (n_sampling is not None) and (isinstance(n_sampling, np.ndarray)):
+        index_arr = n_sampling
     else:
         if index_arr.shape[0] > 200:
             lm.main_warning(
@@ -244,6 +246,7 @@ def construct_trajectory_X(
 
     streamlines, plot_cmap = construct_lines(
         points=np.concatenate(trajectories_points, axis=0),
+        # points=trajectories_points,
         edges=np.concatenate(trajectories_edges, axis=0),
         key_added=key_added,
         label=np.asarray(trajectories_labels),
@@ -271,7 +274,7 @@ def construct_trajectory_X(
 def construct_trajectory(
     adata: AnnData,
     fate_key: str = "fate_develop",
-    n_sampling: Optional[int] = None,
+    n_sampling: Optional[Union[int, np.ndarray]] = None,
     sampling_method: str = "trn",
     key_added: str = "trajectory",
     label: Optional[Union[str, list, np.ndarray]] = None,

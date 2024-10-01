@@ -511,8 +511,8 @@ class SpaGCN(object):
         assert adata.shape[0] == adj.shape[0] == adj.shape[1]
         pca = PCA(n_components=self.num_pcs)
         if issparse(adata.X):
-            pca.fit(adata.X.A)
-            embed = pca.transform(adata.X.A)
+            pca.fit(adata.X.toarray())
+            embed = pca.transform(adata.X.toarray())
         else:
             pca.fit(adata.X)
             embed = pca.transform(adata.X)

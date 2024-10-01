@@ -159,27 +159,27 @@ def Jacobian_GP_gaussian_kernel(X: np.ndarray, vf_dict: dict, vectorize: bool = 
     x_norm = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
     if x_norm.ndim == 1:
         if vf_dict["kernel_dict"]["dist"] == "cdist":
-            K, D = _con_K(x_norm[None, :], vf_dict["X_ctrl"], vf_dict["beta"], return_d=True)
+            K, D = _con_K(x_norm[None, :], vf_dict["inducing_variables"], vf_dict["beta"], return_d=True)
         else:
             K, D = _con_K_geodist(x_norm[None, :], vf_dict["kernel_dict"], vf_dict["beta"], return_d=True)
-        J = (vf_dict["C"].T * K) @ D[0].T
+        J = (vf_dict["Coff"].T * K) @ D[0].T
     elif not vectorize:
         n, d = x_norm.shape
         J = np.zeros((d, d, n))
         for i, xi in enumerate(x_norm):
             if vf_dict["kernel_dict"]["dist"] == "cdist":
-                K, D = _con_K(xi[None, :], vf_dict["X_ctrl"], vf_dict["beta"], return_d=True)
+                K, D = _con_K(xi[None, :], vf_dict["inducing_variables"], vf_dict["beta"], return_d=True)
             else:
                 K, D = _con_K_geodist(xi[None, :], vf_dict["kernel_dict"], vf_dict["beta"], return_d=True)
-            J[:, :, i] = (vf_dict["C"].T * K) @ D[0].T
+            J[:, :, i] = (vf_dict["Coff"].T * K) @ D[0].T
     else:
         if vf_dict["kernel_dict"]["dist"] == "cdist":
-            K, D = _con_K(x_norm, vf_dict["X_ctrl"], vf_dict["beta"], return_d=True)
+            K, D = _con_K(x_norm, vf_dict["inducing_variables"], vf_dict["beta"], return_d=True)
         else:
             K, D = _con_K_geodist(x_norm, vf_dict["kernel_dict"], vf_dict["beta"], return_d=True)
         if K.ndim == 1:
             K = K[None, :]
-        J = np.einsum("nm, mi, njm -> ijn", K, vf_dict["C"], D)
+        J = np.einsum("nm, mi, njm -> ijn", K, vf_dict["Coff"], D)
 
     return -2 * vf_dict["beta"] * J * pre_scale
 

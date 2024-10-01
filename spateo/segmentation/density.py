@@ -121,7 +121,7 @@ def _segment_densities(
     # Make dense and normalize.
     if issparse(X):
         lm.main_debug("Converting to dense matrix.")
-        X = X.A
+        X = X.toarray()
     lm.main_debug("Normalizing matrix.")
     X = X / X.max()
 
@@ -199,7 +199,7 @@ def segment_densities(
         X = bin_matrix(X, binsize)
         if issparse(X):
             lm.main_debug("Converting to dense matrix.")
-            X = X.A
+            X = X.toarray()
     lm.main_info("Finding density bins.")
     bins = _segment_densities(X, k, dk, distance_threshold)
     if background is not False:

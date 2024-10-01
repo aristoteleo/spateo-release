@@ -4,7 +4,8 @@ import numpy as np
 import ot
 import pandas as pd
 import torch
-from scipy.sparse import coo_array
+
+# from scipy.sparse import coo_array
 from torch import sparse_coo_tensor as SparseTensor
 
 from .utils import _data, _identity, _linalg, _unsqueeze
@@ -113,9 +114,8 @@ def calc_P_related(
     labelB = None if labelA is None else labelB.values
     # metric = 'square_euc'
     NA, NB = XnAHat.shape[0], XnB.shape[0]
-    D = XnAHat.shape[1]
-    G = X_A.shape[1]
-    batch_base = 1e9
+    D, G = XnAHat.shape[1], X_A.shape[1]
+    batch_base = 1e8  # 1e7
     split_size = min(int(batch_capacity * batch_base / (NA * G)), NB)
     split_size = 1 if split_size == 0 else split_size
 
@@ -124,8 +124,10 @@ def calc_P_related(
     # only chunk XnB and X_B (data points)
     XnB_chunks = _split(nx, XnB, split_size, dim=0)
     X_B_chunks = _split(nx, X_B, split_size, dim=0)
+    labelB_chunks = [None] * len(XnB_chunks) if labelB is None else torch_like_split(labelB, split_size, dim=0)
+    # label_mask = _construct_label_mask(labelA, labelB, label_transfer_prior).T
 
-    labelB_chunks = [None] * len(XnB_chunks) if labelB is None else _torch_like_split(labelB, split_size, dim=0)
+    # mask_chunks_arr = _split(nx, nx.arange(NB), split_size, dim=0)
 
     K_NA_spatial = nx.zeros((NA,), type_as=XnAHat)
     K_NA_sigma2 = nx.zeros((NA,), type_as=XnAHat)
@@ -138,7 +140,6 @@ def calc_P_related(
             if labelA is None
             else _construct_label_mask(nx, labelA, labelB_chunk, label_transfer_prior, XnB_chunk).T
         )
-
         # calculate distance matrix (common step)
         SpatialMat = _dist(XnAHat, XnB_chunk, "square_euc")
         # calculate spatial_P and keep K_NA_spatials
@@ -277,6 +278,15 @@ def _init_guess_beta2(
     return beta2, beta2_end
 
 
+# def _construct_label_mask(labelA, labelB, label_transfer_prior):
+#     label_mask = np.zeros((labelB.shape[0], labelA.shape[0]))
+#     for k in label_transfer_prior.keys():
+#         idx = np.where((labelB == k))[0]
+#         cur_P = labelA.map(label_transfer_prior[k]).values
+#         label_mask[idx, :] = cur_P
+#     return label_mask
+
+
 def _construct_label_mask(nx, labelA, labelB, label_transfer_prior, type_as):
     label_mask = nx.zeros((labelB.shape[0], labelA.shape[0]), type_as=type_as)
     for k in label_transfer_prior.keys():
@@ -322,11 +332,28 @@ def _dense_to_sparse(
     return results
 
 
+# def _SparseTensor(nx, row, col, value, sparse_sizes):
+#     if nx_torch(nx):
+#         return SparseTensor(indices=torch.vstack((row, col)), values=value, size=sparse_sizes)
+#     else:
+#         return coo_array((value, (row, col)), shape=sparse_sizes)
 def _SparseTensor(nx, row, col, value, sparse_sizes):
+    return SparseTensor(indices=torch.vstack((row, col)), values=value, size=sparse_sizes)
+
+
+def _cos_similarity(
+    mat1: Union[np.ndarray, torch.Tensor],
+    mat2: Union[np.ndarray, torch.Tensor],
+):
+    nx = ot.backend.get_backend(mat1, mat2)
     if nx_torch(nx):
-        return SparseTensor(indices=torch.vstack((row, col)), values=value, size=sparse_sizes)
+        torch_cos = torch.nn.CosineSimilarity(dim=1)
+        mat1_unsqueeze = mat1.unsqueeze(-1)
+        mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0, 2)
+        distMat = -torch_cos(mat1_unsqueeze, mat2_unsqueeze) * 0.5 + 0.5
     else:
-        return coo_array((value, (row, col)), shape=sparse_sizes)
+        distMat = (ot.dist(mat1, mat2, metric="cosine")) * 0.5
+    return distMat
 
 
 def _cosine_distance_backend(
@@ -442,7 +469,7 @@ _split = (
 )
 
 
-def _torch_like_split(arr, size, dim=0):
+def torch_like_split(arr, size, dim=0):
     if dim < 0:
         dim += arr.ndim
     shape = arr.shape

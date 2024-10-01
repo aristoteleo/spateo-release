@@ -15,7 +15,7 @@ import numpy as np
 import ot
 import pandas as pd
 from anndata import AnnData
-from scipy.sparse import issparse
+from scipy.sparse import csr_matrix, issparse
 from tqdm import tqdm
 from typing_extensions import Literal
 
@@ -58,7 +58,7 @@ def bin_adata(adata, bin_size=1):
     adata = adata.copy()
     adata.obsm["spatial"] = (adata.obsm["spatial"] // bin_size).astype(np.int32)
     df = (
-        pd.DataFrame(adata.X.A, columns=adata.var_names)
+        pd.DataFrame(adata.X.toarray(), columns=adata.var_names)
         if issparse(adata.X)
         else pd.DataFrame(adata.X, columns=adata.var_names)
     )
@@ -82,14 +82,14 @@ def _cal_geodesic_distance(adata, n_neighbors=30, min_dis_cutoff=2.0, max_dis_cu
 
     b = adata[
         np.min(
-            adata.obsp["spatial_distances"].A,
+            adata.obsp["spatial_distances"].toarray(),
             axis=1,
             initial=1e10,
-            where=np.array(adata.obsp["spatial_distances"].A > 0),
+            where=np.array(adata.obsp["spatial_distances"].toarray() > 0),
         )
         <= min_dis_cutoff
     ]
-    b = b[np.max(b.obsp["spatial_distances"].A, axis=1) <= max_dis_cutoff]
+    b = b[np.max(b.obsp["spatial_distances"].toarray(), axis=1) <= max_dis_cutoff]
 
     dyn.tl.neighbors(
         b,
@@ -114,7 +114,7 @@ def _cal_wass_dis_on_genes(M, inp):  # adata, gene_ids, b=[], numItermax=1000000
     ws = []
     pos_rs = []
     if issparse(adata.X):
-        df = pd.DataFrame(adata.X.A, columns=adata.var_names)
+        df = pd.DataFrame(adata.X.toarray(), columns=adata.var_names)
     else:
         df = pd.DataFrame(adata.X, columns=adata.var_names)
 
@@ -144,9 +144,9 @@ def shuffle_adata(adata: AnnData, seed: int = 0):
     np.random.seed(seed)
 
     if issparse(adata.X):
-        tmp = adata.X.A
+        tmp = adata.X.toarray()
         np.random.shuffle(tmp)
-        adata.X.A = tmp
+        adata.X = csr_matrix(tmp)
     else:
         tmp = adata.X
         np.random.shuffle(tmp)
@@ -199,10 +199,7 @@ def cal_wass_dis_bs(
     if compare_to == "uniform":
         b = []
     elif compare_to == "allUMI":
-        if issparse(adata.X):
-            b = np.array(adata.X.A.sum(axis=1) / adata.X.A.sum(), dtype=np.float64)
-        else:
-            b = np.array(adata.X.sum(axis=1) / adata.X.sum(), dtype=np.float64)
+        b = np.array(adata.X.sum(axis=1) / adata.X.sum(), dtype=np.float64)
 
     # pbar=tqdm(total=bootstrap+1)
     genes, ws, pos_rs = _cal_wass_dis_on_genes(M, (adata, gene_set, b, numItermax))
@@ -214,10 +211,7 @@ def cal_wass_dis_bs(
         if compare_to == "uniform":
             b = []
         elif compare_to == "allUMI":
-            if issparse(adata.X):
-                b = np.array(adata.X.A.sum(axis=1) / adata.X.A.sum(), dtype=np.float64)
-            else:
-                b = np.array(adata.X.sum(axis=1) / adata.X.sum(), dtype=np.float64)
+            b = np.array(adata.X.sum(axis=1) / adata.X.sum(), dtype=np.float64)
 
         bs.append(b)
 

@@ -12,8 +12,10 @@ from spateo.logging import logger_manager as lm
 ####################
 
 
-def _iteration(n: int, progress_name: str, verbose: bool = True):
-    iteration = lm.progress_logger(range(n), progress_name=progress_name) if verbose else range(n)
+def _iteration(n: int, progress_name: str, verbose: bool = True, indent_level=1):
+    iteration = (
+        lm.progress_logger(range(n), progress_name=progress_name, indent_level=indent_level) if verbose else range(n)
+    )
     return iteration
 
 
@@ -40,6 +42,43 @@ def downsampling(
         sampling_model = sampling_model[sampling, :]
         sampling_models.append(sampling_model)
     return sampling_models
+
+
+## generate label transfer prior
+def generate_label_transfer_prior(cat1, cat2, positive_pairs=None, negative_pairs=None):
+    label_transfer_prior = dict()
+    if positive_pairs is None:
+        positive_pairs = []
+    if negative_pairs is None:
+        negative_pairs = []
+    # let same annotation to have a high value
+    if (len(positive_pairs) == 0) and (len(negative_pairs) == 0):
+        for c in cat1:
+            if c in cat2:
+                positive_pairs.append({"left": [c], "right": [c], "value": 10})
+    for c2 in cat2:
+        cur_transfer_prior = dict()
+        for c1 in cat1:
+            cur_transfer_prior[c1] = 1
+        label_transfer_prior[c2] = cur_transfer_prior
+    for p in positive_pairs:
+        for l in p["left"]:
+            for r in p["right"]:
+                label_transfer_prior[r][l] = p["value"]
+        # label_transfer_prior[p[1]][p[0]] = p[2]
+    for p in negative_pairs:
+        for l in p["left"]:
+            for r in p["right"]:
+                label_transfer_prior[r][l] = p["value"]
+        # label_transfer_prior[p[1]][p[0]] = p[2]
+    norm_label_transfer_prior = dict()
+    for c2 in cat2:
+        norm_c = np.array([label_transfer_prior[c2][c1] for c1 in cat1]).sum()
+        cur_transfer_prior = dict()
+        for c1 in cat1:
+            cur_transfer_prior[c1] = label_transfer_prior[c2][c1] / norm_c
+        norm_label_transfer_prior[c2] = cur_transfer_prior
+    return norm_label_transfer_prior
 
 
 ###################
@@ -233,3 +272,145 @@ def get_labels_based_on_coords(
     Y_data["map_index"] = Y_data.index
     merge_data = pd.merge(Y_data, X_data, on=cols, how="inner")
     return merge_data
+
+
+#########################
+# Some helper functions #
+#########################
+
+
+def solve_RT_by_correspondence(
+    X: np.ndarray, Y: np.ndarray, return_scale: bool = False
+) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray, float]]:
+    """
+    Solve for the rotation matrix R and translation vector t that best align the points in X to the points in Y.
+
+    Args:
+        X (np.ndarray): Source points, shape (N, D).
+        Y (np.ndarray): Target points, shape (N, D).
+        return_scale (bool, optional): Whether to return the scale factor. Defaults to False.
+
+    Returns:
+        Union[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray, float]]:
+        If return_scale is False, returns the rotation matrix R and translation vector t.
+        If return_scale is True, also returns the scale factor s.
+    """
+
+    D = X.shape[1]
+    N = X.shape[0]
+
+    # Calculate centroids of X and Y
+    tX = np.mean(X, axis=0)
+    tY = np.mean(Y, axis=0)
+
+    # Demean the points
+    X_demean = X - tX
+    Y_demean = Y - tY
+
+    # Compute the covariance matrix
+    H = np.dot(Y_demean.T, X_demean)
+
+    # Singular Value Decomposition
+    U, S, Vt = np.linalg.svd(H)
+
+    # Compute the rotation matrix
+    R = np.dot(Vt.T, U.T)
+
+    # Ensure the rotation matrix is proper
+    # if np.linalg.det(R) < 0:
+    #     Vt[-1, :] *= -1
+    #     R = np.dot(Vt.T, U.T)
+
+    # Compute the translation vector
+    t = tX - np.dot(tY, R.T)
+
+    if return_scale:
+        # Compute the scale factor
+        s = np.trace(np.dot(X_demean.T, X_demean) - np.dot(R.T, np.dot(Y_demean.T, X_demean))) / np.trace(
+            np.dot(Y_demean.T, Y_demean)
+        )
+        return R, t, s
+    else:
+        return R, t
+
+
+##############
+# Simulation #
+##############
+
+
+def split_slice(
+    adata,
+    spatial_key,
+    split_num=5,
+    axis=2,
+):
+    spatial_points = adata.obsm[spatial_key]
+    N = spatial_points.shape[0]
+    sorted_points = np.argsort(spatial_points[:, axis])
+    points_per_segment = len(sorted_points) // split_num
+    split_adata = []
+    for slice_id, i in enumerate(range(0, N, points_per_segment)):
+        sorted_adata = adata[sorted_points[i : i + points_per_segment], :].copy()
+        sorted_adata.obs["slice"] = slice_id
+        split_adata.append(sorted_adata)
+    return split_adata[:split_num]
+
+
+def tps_deformation(
+    adata,
+    spatial_key,
+    key_added,
+    grid_num=2,
+    tps_noise_scale=25,
+    add_corner_points=True,
+    alpha=0.1,
+    inplace=True,
+):
+    from tps import ThinPlateSpline
+
+    spatial = adata.obsm[spatial_key]
+    # get min max
+    x_min, x_max = np.min(spatial[:, 0]), np.max(spatial[:, 0])
+    y_min, y_max = np.min(spatial[:, 1]), np.max(spatial[:, 1])
+
+    # define the length of grid
+    grid_size_x = (x_max - x_min) / grid_num
+    grid_size_y = (y_max - y_min) / grid_num
+    # generate the grid
+    x_grid = np.linspace(x_min, x_max, grid_num + 1)[:-1] + grid_size_x / 2
+    y_grid = np.linspace(y_min, y_max, grid_num + 1)[:-1] + grid_size_y / 2
+    xx, yy = np.meshgrid(x_grid, y_grid)
+    # generate control points
+    src_points = []
+    dst_points = []
+    for i in range(xx.shape[0]):
+        for j in range(xx.shape[1]):
+            x_center, y_center = xx[i, j], yy[i, j]
+            x = x_center
+            y = y_center
+            src_points.append(np.column_stack([x, y]))
+            dst_points.append(
+                src_points[-1] + np.random.normal(scale=(grid_size_x + grid_size_y) * tps_noise_scale / 2, size=(1, 2))
+            )
+    src_points = np.concatenate(src_points, axis=0)
+    dst_points = np.concatenate(dst_points, axis=0)
+    if add_corner_points:
+        src_points = np.concatenate(
+            [np.array([[x_min, y_min], [x_min, y_max], [x_max, y_max], [x_max, y_min]]), src_points], 0
+        )
+        dst_points = np.concatenate(
+            [np.array([[x_min, y_min], [x_min, y_max], [x_max, y_max], [x_max, y_min]]), dst_points], 0
+        )
+    # calculate the TPS deformation
+    tps = ThinPlateSpline(alpha=alpha)  # Regularization
+    tps.fit(src_points, dst_points)
+    # perform tps deformation
+    tps_spatial = tps.transform(spatial)
+    if inplace:
+        adata.obsm[key_added] = tps_spatial
+        return lambda x: tps.transform(x)
+    else:
+        adata_tps = adata.copy()
+        adata_tps.obsm[key_added] = tps_spatial
+        return adata_tps, lambda x: tps.transform(x)
