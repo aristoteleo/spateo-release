@@ -14,8 +14,10 @@ except ImportError:
     from typing_extensions import Literal
 
 import numpy as np
+import pandas as pd
 import scipy
 from anndata import AnnData
+from scipy.sparse import csr_matrix, issparse
 from sklearn.utils import sparsefuncs
 
 from ..logging import logger_manager as lm
@@ -615,3 +617,111 @@ def factor_normalization(
     else:
         normalize_total(adata, norm_factor=norm_factors, **normalize_total_params)
         return adata
+
+
+def calc_mean_and_var(X: Union[csr_matrix, np.ndarray], axis: int):
+    if issparse(X):
+        from ._fast_utils import calc_mean_and_var_sparse
+
+        return calc_mean_and_var_sparse(X.shape[0], X.shape[1], X.data, X.indices, X.indptr, axis)
+    else:
+        from ._fast_utils import calc_mean_and_var_dense
+
+        return calc_mean_and_var_dense(X.shape[0], X.shape[1], X, axis)
+
+
+def calc_expm1(X: Union[csr_matrix, np.ndarray]) -> np.ndarray:
+
+    """
+    exponential minus one
+
+    """
+    if not issparse(X):
+        return np.expm1(X)
+    res = X.copy()
+    np.expm1(res.data, out=res.data)
+    return res
+
+
+def select_hvf_seurat_single(
+    X: Union[csr_matrix, np.ndarray],
+    n_top: int,
+    min_disp: float,
+    max_disp: float,
+    min_mean: float,
+    max_mean: float,
+):
+    """HVF selection for one channel using Seurat method"""
+    X = calc_expm1(X)
+
+    mean, var = calc_mean_and_var(X, axis=0)
+
+    dispersion = np.full(X.shape[1], np.nan)
+    idx_valid = (mean > 0.0) & (var > 0.0)
+    dispersion[idx_valid] = var[idx_valid] / mean[idx_valid]
+
+    mean = np.log1p(mean)
+    dispersion = np.log(dispersion)
+
+    df = pd.DataFrame({"log_dispersion": dispersion, "bin": pd.cut(mean, bins=20)})
+    log_disp_groups = df.groupby("bin")["log_dispersion"]
+    log_disp_mean = log_disp_groups.mean()
+    log_disp_std = log_disp_groups.std(ddof=1)
+    log_disp_zscore = (df["log_dispersion"].values - log_disp_mean.loc[df["bin"]].values) / log_disp_std.loc[
+        df["bin"]
+    ].values
+    log_disp_zscore[np.isnan(log_disp_zscore)] = 0.0
+
+    hvf_rank = np.full(X.shape[1], -1, dtype=int)
+    ords = np.argsort(log_disp_zscore)[::-1]
+
+    if n_top is None:
+        hvf_rank[ords] = range(X.shape[1])
+        idx = np.logical_and.reduce(
+            (
+                mean > min_mean,
+                mean < max_mean,
+                log_disp_zscore > min_disp,
+                log_disp_zscore < max_disp,
+            )
+        )
+        hvf_rank[~idx] = -1
+    else:
+        hvf_rank[ords[:n_top]] = range(n_top)
+
+    return hvf_rank
+
+
+def select_hvf_seurat(
+    data: AnnData,
+    n_top: int = 2000,
+    min_disp: float = 0.5,
+    max_disp: float = np.inf,
+    min_mean: float = 0.0125,
+    max_mean: float = 7,
+) -> None:
+    """Select highly variable features using Seurat method."""
+    from ..logging import logger_manager as lm
+
+    logger = lm.get_main_logger()
+
+    logger.info(f"Using Seurat method to select highly variable features")
+    data.var["robust"] = True
+    robust_idx = data.var["robust"].values
+    X = data.X[:, robust_idx]
+    logger.info(f"Start to calculate the top {n_top} highly variable genes", indent_level=2)
+    hvf_rank = select_hvf_seurat_single(
+        X,
+        n_top=n_top,
+        min_disp=min_disp,
+        max_disp=max_disp,
+        min_mean=min_mean,
+        max_mean=max_mean,
+    )
+    logger.finish_progress(progress_name="Calculated the hvf %s" % ("seurat"))
+    hvf_index = hvf_rank >= 0
+
+    data.var["hvf_rank"] = -1
+    data.var.loc[robust_idx, "hvf_rank"] = hvf_rank
+    data.var["highly_variable_features"] = False
+    data.var.loc[robust_idx, "highly_variable_features"] = hvf_index

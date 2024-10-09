@@ -5,12 +5,18 @@ try:
 except ImportError:
     from typing_extensions import Literal
 
+import os
+
 import anndata
 import cv2
+import numpy as np
+import pandas as pd
 from scipy.sparse import isspmatrix
+from scipy.spatial import distance
+from tqdm import tqdm
 
 from ...configuration import SKM
-from .leiden import calculate_leiden_partition
+from .leiden import calculate_leiden_partition, calculate_louvain_partition
 from .spagcn_utils import *
 from .utils import spatial_adj
 
@@ -193,6 +199,7 @@ def scc(
     e_neigh: int = 30,
     s_neigh: int = 6,
     resolution: Optional[float] = None,
+    cluster_method: str = "louvain",
 ) -> Optional[anndata.AnnData]:
     """Spatially constrained clustering (scc) to identify continuous tissue domains.
 
@@ -211,7 +218,7 @@ def scc(
         pca_key: label for the .obsm key containing PCA information (without the potential prefix "X_")
         e_neigh: the number of nearest neighbor in gene expression space.
         s_neigh: the number of nearest neighbor in physical space.
-        resolution: the resolution parameter of the louvain clustering algorithm.
+        resolution: the resolution parameter of the leiden clustering algorithm.
 
     Returns:
         adata: An `~anndata.AnnData` object with cluster info in .obs.
@@ -227,11 +234,233 @@ def scc(
     )
 
     # Perform Leiden clustering:
-    clusters = calculate_leiden_partition(
-        adj=adj,
-        resolution=resolution,
-    )
+    if cluster_method == "louvain":
+        clusters = calculate_louvain_partition(
+            adj=adj,
+            resolution=resolution,
+        )
+    else:
+        clusters = calculate_leiden_partition(
+            adj=adj,
+            resolution=resolution,
+        )
 
     adata.obs[key_added] = clusters
+    adata.obs[key_added] = adata.obs[key_added].astype(str)
 
     return adata
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def smooth(adata: anndata.AnnData, radius: int = 50, key: str = "label") -> list:
+    """
+    Optimize the label by majority voting in the neighborhood.
+
+    Args:
+        adata: an Anndata object, after normalization.
+        radius: the radius of the neighborhood.
+        key: the key in `.obs` that corresponds to the cluster labels.
+    """
+
+    from ...logging import logger_manager as lm
+
+    logger = lm.get_main_logger()
+
+    logger.info("Optimizing the label by majority voting in the neighborhood.")
+    n_neigh = radius
+    new_type = []
+    old_type = adata.obs[key].values
+
+    # calculate distance
+    position = adata.obsm["spatial"]
+    dist_matrix = distance.cdist(position, position, metric="euclidean")
+
+    n_cell = dist_matrix.shape[0]
+
+    from tqdm import tqdm
+
+    for i in tqdm(range(n_cell)):
+        vec = dist_matrix[i, :]
+        index = vec.argsort()
+        neigh_type = []
+        for j in range(1, n_neigh + 1):
+            neigh_type.append(old_type[index[j]])
+        max_type = max(neigh_type, key=neigh_type.count)
+        new_type.append(max_type)
+
+    new_type = [str(i) for i in list(new_type)]
+    adata.obs[key + "_smooth"] = new_type
+
+    logger.info(f"Finish smoothing the label. The new label is stored in adata.obs[{key}+'_smooth']")
+    # adata.obs['label_refined'] = np.array(new_type)
+
+    return new_type
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def mclust_py(adata, n_components=None, use_rep: str = "X_pca", modelNames="EEE", random_seed=42):
+    """Clustering using Gaussian Mixture Model (GMM), similar to mclust in R.
+
+    Args:
+        adata: an Anndata object, after normalization.
+        n_components: int, optional, default: None
+            The number of mixture components.
+        use_rep: str, optional, default: 'X_pca'
+            The representation to be used for clustering.
+        modelNames: str, optional, default: 'EEE'
+            The model name to be used for clustering.
+                - EEE: represents Equal volume, shape, and orientation (spherical).
+                - VVV: represents Variable volume, shape, and orientation.
+                - EEV: represents Equal volume and shape, variable orientation (tied).
+                - VVI: represents Variable volume and shape, equal orientation (diag).
+        random_seed: int, optional, default: 42
+            Random seed for reproducibility.
+
+    """
+    from ...logging import logger_manager as lm
+
+    logger = lm.get_main_logger()
+    if n_components is None:
+        logger.info("You need to input the `n_components` when methods is `GMM`")
+        return
+    logger.info(f"""running GaussianMixture clustering""")
+    # Extract the data to be clustered
+    data = adata.obsm[use_rep]
+
+    import numpy as np
+    from sklearn.mixture import GaussianMixture
+
+    np.random.seed(random_seed)
+
+    # Extract the data to be clustered
+    data = adata.obsm[use_rep]
+
+    # Map modelNames to scikit-learn covariance_type
+    covariance_type_map = {
+        "EEE": "spherical",  # Equal volume, shape, and orientation (spherical)
+        "VVV": "full",  # Variable volume, shape, and orientation
+        "EEV": "tied",  # Equal volume and shape, variable orientation (tied)
+        "VVI": "diag",  # Variable volume and shape, equal orientation (diag)
+        # Add more mappings as needed
+    }
+
+    covariance_type = covariance_type_map.get(modelNames, "full")
+
+    # Initialize and fit the Gaussian Mixture Model
+    gmm = GaussianMixture(n_components=n_components, covariance_type=covariance_type, random_state=random_seed)
+    gmm.fit(data)
+
+    # Get the cluster labels
+    mclust_res = gmm.predict(data)
+    logger.finish_progress(progress_name="GaussianMixture clustering")
+
+    # Add the cluster labels to adata.obs
+    logger.info(f"""Adding the cluster labels to adata.obs['mclust']""")
+    adata.obs["mclust"] = mclust_res
+    adata.obs["mclust"] = adata.obs["mclust"].astype("int")
+    adata.obs["mclust"] = adata.obs["mclust"].astype("str")
+    # adata.obs['mclust'] = adata.obs['mclust'].astype('category')
+    adata.obs["gmm_cluster"] = adata.obs["mclust"]
+
+    return adata
+
+
+@SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
+def CAST(
+    adata,
+    sample_key=None,
+    basis="spatial",
+    layer="norm_1e4",
+    n_components=10,
+    output_path="output/CAST_Mark",
+    gpu_t=0,
+    device="cuda:0",
+    **kwargs,
+):
+    """
+    CAST is a Python library for physically aligning different spatial transcriptome regardless of technologies, magnification, individual variation, and experimental batch effects. CAST is composed of three modules: CAST Mark, CAST Stack, and CAST Projection.
+
+    Args:
+        adata: an Anndata object, after normalization.
+        sample_key: str, optional, default: None
+            The key in `.obs` that corresponds to the sample labels.
+        basis: str, optional, default: 'spatial'
+            The basis used for CAST.
+        layer: str, optional, default: 'norm_1e4'
+            The layer used for CAST.
+        output_path: str, optional, default: 'output/CAST_Mark'
+            The path to save the CAST results.
+        gpu_t: int, optional, default: 0
+            The GPU index to be used.
+        device: str, optional, default: 'cuda:0'
+            The device to be used.
+        kwargs: additional parameters for CAST.
+    """
+    from ...logging import logger_manager as lm
+
+    logger = lm.get_main_logger()
+    if issparse(adata.obsm[basis]):
+        adata.obsm[basis] = adata.obsm[basis].toarray()
+    adata.obs["x"] = adata.obsm[basis][:, 0]
+    adata.obs["y"] = adata.obsm[basis][:, 1]
+
+    logger.info(f"""running CAST""")
+    logger.info(f"Get the coordinates and expression data for each sample", indent_level=2)
+    # Get the coordinates and expression data for each sample
+    samples = np.unique(adata.obs[sample_key])  # used samples in adata
+    coords_raw = {sample_t: np.array(adata.obs[["x", "y"]])[adata.obs[sample_key] == sample_t] for sample_t in samples}
+    exp_dict = {sample_t: adata[adata.obs[sample_key] == sample_t].layers[layer] for sample_t in samples}
+
+    os.makedirs(output_path, exist_ok=True)
+    from ...external.CAST import CAST_MARK
+
+    embed_dict = CAST_MARK(coords_raw, exp_dict, output_path, gpu_t=gpu_t, device=device, **kwargs)
+    logger.finish_progress(progress_name="CAST")
+
+    adata.obsm["X_cast"] = np.zeros((adata.shape[0], 512))
+
+    adata.obsm["X_cast"] = pd.DataFrame(adata.obsm["X_cast"], index=adata.obs.index)
+    for key in tqdm(embed_dict.keys()):
+        adata.obsm["X_cast"].loc[adata.obs[sample_key] == key] += embed_dict[key].cpu().numpy()
+    adata.obsm["X_cast"] = adata.obsm["X_cast"].values
+    logger.info(f"""CAST embedding is saved in adata.obsm['X_cast']""", indent_level=2)
+    # print('CAST embedding is saved in adata.obsm[\'X_cast\']')
+
+    from sklearn.cluster import KMeans, MiniBatchKMeans
+
+    kmeans = MiniBatchKMeans(n_clusters=n_components, random_state=42).fit(adata.obsm["X_cast"])
+    adata.obs["CAST_clusters"] = kmeans.labels_
+    adata.obs["CAST_clusters"] = adata.obs["CAST_clusters"].astype("str")
+    logger.info(f"""CAST clusters using kmeans are saved in adata.obs['CAST_clusters']""", indent_level=2)
+    # adata.obs['cast_clusters']=adata.obs['cast_clusters'].astype('category')
+
+
+def kmeans_clustering(adata, n_clusters=10, use_rep="X_cast", random_state=42, cluster_key="kmeans_clusters"):
+    """
+    KMeans clustering for spatial transcriptomics data.
+
+    Args:
+        adata: an Anndata object, after normalization.
+        n_clusters: int, optional, default: 10
+            The number of clusters.
+        use_rep: str, optional, default: 'X_cast'
+            The representation to be used for clustering.
+        random_state: int, optional, default: 42
+            Random seed for reproducibility.
+        cluster_key: str, optional, default: 'kmeans_clusters'
+            The key in `.obs` that corresponds to the cluster labels
+    """
+    from ...logging import logger_manager as lm
+
+    logger = lm.get_main_logger()
+
+    logger.info(f"""running KMeans clustering""")
+    logger.info(f"Get the coordinates and expression data", indent_level=2)
+    # Get the coordinates and expression data
+    data = adata.obsm[use_rep]
+    from sklearn.cluster import KMeans, MiniBatchKMeans
+
+    kmeans = MiniBatchKMeans(n_clusters=n_clusters, random_state=random_state).fit(data)
+    adata.obs[cluster_key] = kmeans.labels_
+    adata.obs[cluster_key] = adata.obs[cluster_key].astype(str)
+    logger.info(f"""KMeans clusters are saved in adata.obs['{cluster_key}']""", indent_level=2)

@@ -6,11 +6,12 @@ except ImportError:
     from typing_extensions import Literal
 
 import numpy as np
-import tensorflow as tf
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+# import tensorflow as tf
 from dynamo.tools.sampling import sample
-from keras import optimizers
-from keras.layers import Dense, Input
-from keras.models import Model
 
 from .backbone_utils import sort_nodes_of_curve
 
@@ -32,7 +33,7 @@ def orth_dist(y_true, y_pred):
     Loss function for the NLPCA NN. Returns the sum of the orthogonal
     distance from the output tensor to the real tensor.
     """
-    loss = tf.math.reduce_sum((y_true - y_pred) ** 2)
+    loss = torch.sum((y_true - y_pred) ** 2)
     return loss
 
 
@@ -43,6 +44,7 @@ class NLPCA(object):
     """
 
     def __init__(self):
+        super(NLPCA, self).__init__()
         self.fit_points = None
         self.model = None
         self.intermediate_layer_model = None
@@ -61,17 +63,23 @@ class NLPCA(object):
         """
         num_dim = data.shape[1]  # get number of dimensions for pts
 
-        # create models, base and intermediate
-        model = self.create_model(num_dim, nodes=nodes, lr=lr)
-        bname = model.layers[2].name  # bottle-neck layer name
+        # create model
+        self.model = self.create_model(num_dim, nodes=nodes)
+        optimizer = optim.Adam(self.model.parameters(), lr=lr)
 
-        # The itermediate model gets the output of the bottleneck layer,
-        # which acts as the projection layer.
-        self.intermediate_layer_model = Model(inputs=model.input, outputs=model.get_layer(bname).output)
+        data_tensor = torch.tensor(data, dtype=torch.float32)
 
-        # Fit the model and set the instances self.model to model
-        model.fit(data, data, epochs=epochs, verbose=verbose)
-        self.model = model
+        for epoch in range(epochs):
+            self.model.train()
+            optimizer.zero_grad()
+
+            output = self.model(data_tensor)
+            loss = orth_dist(data_tensor, output)
+            loss.backward()
+            optimizer.step()
+
+            if verbose and epoch % 100 == 0:
+                print(f"Epoch {epoch}, Loss: {loss.item()}")
 
         return
 
@@ -89,43 +97,45 @@ class NLPCA(object):
         """
         num_dim = data.shape[1]  # get number of dimensions for pts
 
-        pts = self.model.predict(data)
-        proj = self.intermediate_layer_model.predict(data)
+        data_tensor = torch.tensor(data, dtype=torch.float32)
+        self.model.eval()
+        with torch.no_grad():
+            pts = self.model(data_tensor).numpy()
+            proj = self.intermediate_layer_model.numpy()
         self.fit_points = pts
 
-        all = np.concatenate([pts, proj], axis=1)
-        all_sorted = all[all[:, num_dim].argsort()]
+        all_data = np.concatenate([pts, proj], axis=1)
+        all_sorted = all_data[all_data[:, num_dim].argsort()]
 
         return proj, all_sorted
 
-    def create_model(self, num_dim: int, nodes: int, lr: float):
+    def create_model(self, num_dim: int, nodes: int):
         """
-        Creates a tf model.
+        Creates a PyTorch model.
 
         Args:
             num_dim: How many dimensions the input space is
             nodes: How many nodes for the construction layers
-            lr: Learning rate of backpropigation
 
         Returns:
-            model (object): Keras Model
+            model (object): PyTorch Model
         """
-        # Create layers:
-        # Function G
-        input = Input(shape=(num_dim,))  # input layer
-        mapping = Dense(nodes, activation="sigmoid")(input)  # mapping layer
-        bottle = Dense(1, activation="sigmoid")(mapping)  # bottle-neck layer
 
-        # Function H
-        demapping = Dense(nodes, activation="sigmoid")(bottle)  # mapping layer
-        output = Dense(num_dim)(demapping)  # output layer
+        class Autoencoder(nn.Module):
+            def __init__(self, num_dim, nodes):
+                super(Autoencoder, self).__init__()
+                # Encoder
+                self.encoder = nn.Sequential(nn.Linear(num_dim, nodes), nn.Sigmoid(), nn.Linear(nodes, 1), nn.Sigmoid())
+                # Decoder
+                self.decoder = nn.Sequential(nn.Linear(1, nodes), nn.Sigmoid(), nn.Linear(nodes, num_dim))
 
-        # Connect and compile model:
-        model = Model(inputs=input, outputs=output)
-        gradient_descent = optimizers.Adam(learning_rate=lr)
-        model.compile(loss=orth_dist, optimizer=gradient_descent)
+            def forward(self, x):
+                bottleneck = self.encoder(x)
+                self.intermediate_layer_model = bottleneck
+                output = self.decoder(bottleneck)
+                return output
 
-        return model
+        return Autoencoder(num_dim, nodes)
 
 
 ###########

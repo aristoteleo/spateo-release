@@ -14,7 +14,10 @@ import numpy as np
 import pandas as pd
 import scipy
 import statsmodels.stats.multitest
-import tensorflow as tf
+
+# import tensorflow as tf
+import torch
+import torch.nn.functional as F
 from numpy import linalg
 from sklearn.metrics import confusion_matrix, recall_score
 from sklearn.preprocessing import MinMaxScaler
@@ -443,16 +446,16 @@ def weighted_binary_crossentropy(y_true: np.ndarray, y_pred: np.ndarray, weight_
         Weighted binary cross-entropy loss
     """
     # Small constant to avoid division by zero
-    epsilon = tf.keras.backend.epsilon()
+    epsilon = 1e-7
 
     # Apply class weights
     weights = y_true * weight_1 + (1 - y_true) * weight_0
 
     # Clip predicted probabilities to avoid log(0) and log(1)
-    y_pred = tf.clip_by_value(y_pred, epsilon, 1 - epsilon)
+    y_pred = torch.clamp(y_pred, epsilon, 1 - epsilon)
 
     # Compute weighted binary cross-entropy loss
-    loss = -tf.reduce_mean(weights * y_true * tf.math.log(y_pred) + (1 - y_true) * tf.math.log(1 - y_pred))
+    loss = -torch.mean(weights * y_true * torch.log(y_pred) + (1 - y_true) * torch.log(1 - y_pred))
     return loss
 
 
