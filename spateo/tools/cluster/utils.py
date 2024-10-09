@@ -295,7 +295,8 @@ def spatial_adj(
     _, adata = neighbors(
         adata,
         n_neighbors=s_neigh,
-        basis=spatial_key,
+        basis="spatial",
+        spatial_key=spatial_key,
         n_pca_components=n_pca_components,
     )
 

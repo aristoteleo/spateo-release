@@ -540,7 +540,7 @@ class MuSIC_Interpreter(MuSIC):
                 data=df,
                 x="Gene",
                 y="Pearson coefficient",
-                palette=colors["Pearson coefficient"],
+                # palette=colors["Pearson coefficient"],
                 edgecolor="black",
                 dodge=True,
             )
@@ -568,7 +568,7 @@ class MuSIC_Interpreter(MuSIC):
                 data=df,
                 x="Gene",
                 y="Spearman coefficient",
-                palette=colors["Spearman coefficient"],
+                # palette=colors["Spearman coefficient"],
                 edgecolor="black",
                 dodge=True,
             )
@@ -594,7 +594,7 @@ class MuSIC_Interpreter(MuSIC):
                 data=df,
                 x="Gene",
                 y="Pearson coefficient (expressing cells)",
-                palette=colors["Pearson coefficient (expressing cells)"],
+                # palette=colors["Pearson coefficient (expressing cells)"],
                 edgecolor="black",
                 dodge=True,
             )
@@ -620,7 +620,7 @@ class MuSIC_Interpreter(MuSIC):
                 data=df,
                 x="Gene",
                 y="Spearman coefficient (expressing cells)",
-                palette=colors["Spearman coefficient (expressing cells)"],
+                # palette=colors["Spearman coefficient (expressing cells)"],
                 edgecolor="black",
                 dodge=True,
             )
@@ -4174,8 +4174,8 @@ class MuSIC_Interpreter(MuSIC):
             vmin = 0
             vmax = 1 if normalize else df.max().max()
 
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-            divider = make_axes_locatable(ax)
+            fig, axes = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            divider = make_axes_locatable(axes)
             ax2 = divider.append_axes("right", size=ax2_size, pad=0)
 
             # Keep track of groups:
@@ -4213,7 +4213,7 @@ class MuSIC_Interpreter(MuSIC):
                 vmin=vmin,
                 vmax=vmax,
                 mask=mask,
-                ax=ax,
+                ax=axes,
             )
 
             # Outer frame:
@@ -4222,7 +4222,7 @@ class MuSIC_Interpreter(MuSIC):
                 spine.set_linewidth(thickness * 2.5)
 
             # Adjust colorbar settings:
-            divider = make_axes_locatable(ax)
+            divider = make_axes_locatable(axes)
             # Append axes to the top of the plot, where the colorbar will be placed
             if df.shape[0] > df.shape[1]:
                 cax = divider.append_axes("top", size="30%", pad=0)
@@ -4237,11 +4237,11 @@ class MuSIC_Interpreter(MuSIC):
             cbar.ax.tick_params(labelsize=fontsize * 1.5)
             cbar.ax.set_aspect(0.02)
 
-            ax.set_xlabel(x_label, fontsize=fontsize * 1.25)
-            ax.set_ylabel("Cell Type-Specific Target", fontsize=fontsize * 1.25)
-            ax.tick_params(axis="x", labelsize=fontsize, rotation=90)
-            ax.tick_params(axis="y", labelsize=fontsize)
-            ax.set_title(title, fontsize=fontsize * 1.5, pad=20)
+            axes.set_xlabel(x_label, fontsize=fontsize * 1.25)
+            axes.set_ylabel("Cell Type-Specific Target", fontsize=fontsize * 1.25)
+            axes.tick_params(axis="x", labelsize=fontsize, rotation=90)
+            axes.tick_params(axis="y", labelsize=fontsize)
+            axes.set_title(title, fontsize=fontsize * 1.5, pad=20)
 
             # Use the saved name for the AnnData object to define part of the name of the saved file:
             base_name = os.path.basename(self.adata_path)
@@ -6915,7 +6915,6 @@ class MuSIC_Interpreter(MuSIC):
                 if scipy.sparse.issparse(adata.X):
                     nnz_counts = np.array(adata[:, all_TFs].X.getnnz(axis=0)).flatten()
                 else:
-                    # nnz_counts = np.array(adata[:, all_TFs].X.getnnz(axis=0)).flatten()
                     nnz_counts = np.count_nonzero(
                         adata[:, all_TFs].X, axis=0
                     ).flatten()  # np.ndarray have no getnnz attributes
@@ -7646,7 +7645,6 @@ class MuSIC_Interpreter(MuSIC):
                         all_cells_affected = dm[dm[f"regulator_{interaction}"] > 0]
                     else:
                         all_cells_affected = dm[dm[interaction] > 0]
-
                     specificity = (all_coeffs_target.loc[all_cells_affected.index, interaction] != 0).mean()
                     all_plot_values.loc[interaction, target] = specificity
         all_plot_values.index = [replace_col_with_collagens(f) for f in all_plot_values.index]
