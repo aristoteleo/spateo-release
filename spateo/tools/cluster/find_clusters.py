@@ -12,7 +12,7 @@ from scipy.sparse import isspmatrix
 from scipy.spatial import distance
 
 from ...configuration import SKM
-from .leiden import calculate_leiden_partition
+from .leiden import calculate_leiden_partition, calculate_louvain_partition
 from .spagcn_utils import *
 from .utils import spatial_adj
 
@@ -195,6 +195,7 @@ def scc(
     e_neigh: int = 30,
     s_neigh: int = 6,
     resolution: Optional[float] = None,
+    cluster_method="louvain",
 ) -> Optional[anndata.AnnData]:
     """Spatially constrained clustering (scc) to identify continuous tissue domains.
 
@@ -213,7 +214,7 @@ def scc(
         pca_key: label for the .obsm key containing PCA information (without the potential prefix "X_")
         e_neigh: the number of nearest neighbor in gene expression space.
         s_neigh: the number of nearest neighbor in physical space.
-        resolution: the resolution parameter of the louvain clustering algorithm.
+        resolution: the resolution parameter of the leiden clustering algorithm.
 
     Returns:
         adata: An `~anndata.AnnData` object with cluster info in .obs.
@@ -229,10 +230,16 @@ def scc(
     )
 
     # Perform Leiden clustering:
-    clusters = calculate_leiden_partition(
-        adj=adj,
-        resolution=resolution,
-    )
+    if cluster_method == "louvain":
+        clusters = calculate_louvain_partition(
+            adj=adj,
+            resolution=resolution,
+        )
+    else:
+        clusters = calculate_leiden_partition(
+            adj=adj,
+            resolution=resolution,
+        )
 
     adata.obs[key_added] = clusters
     adata.obs[key_added] = adata.obs[key_added].astype(str)
@@ -241,7 +248,7 @@ def scc(
 
 
 @SKM.check_adata_is_type(SKM.ADATA_UMI_TYPE)
-def optimize_cluster(adata: anndata.AnnData, radius: int = 50, key: str = "label") -> list:
+def smooth(adata: anndata.AnnData, radius: int = 50, key: str = "label") -> list:
     """
     Optimize the label by majority voting in the neighborhood.
 
