@@ -1,5 +1,5 @@
 """Module providing a encapsulation of pySTAGATE."""
-import scanpy as sc
+
 import torch
 import torch.nn.functional as F
 from anndata import AnnData
@@ -147,6 +147,7 @@ class pySTAGATE:
         """
 
         import numpy as np
+        import scanpy as sc
         from scipy.spatial import distance_matrix
 
         sc.pp.neighbors(self.adata, n_neighbors=n_neighbors, use_rep="STAGATE")
