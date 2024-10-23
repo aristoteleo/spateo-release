@@ -15,7 +15,7 @@ random.seed(888)
 
 # To allow for running by function definition (for more flexible option)
 def define_spateo_argparse(**kwargs):
-    """Defines and returns MPI and argparse objects for model fitting and interpretation.
+    """Defines and returns argparse objects for model fitting and interpretation.
 
     Args:
         kwargs: Keyword arguments for any of the argparse arguments defined below.
@@ -366,7 +366,7 @@ def define_spateo_argparse(**kwargs):
             "cell when defining the independent variable array for secreted or ECM ligands. Will also be used to "
             "define the number of neighbors to consider for lagged ligand expression.",
         },
-        "-distr": {"default": "gaussian", "type": str},
+        "-distr": {"default": "poisson", "type": str},
         "-fit_intercept": {"action": "store_true"},
         "-tolerance": {"default": 1e-3, "type": float},
         "-max_iter": {"default": 500, "type": int},
@@ -494,6 +494,8 @@ def define_spateo_argparse(**kwargs):
 
     # Initialize parser:
     parser = argparse.ArgumentParser(description="MuSIC arguments", allow_abbrev=False)
+    # Add dummy argument for running in notebook environment
+    parser.add_argument("-f")
 
     # Use arg_dict to populate the parser:
     for arg, arg_info in arg_dict.items():

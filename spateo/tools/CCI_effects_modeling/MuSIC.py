@@ -1041,7 +1041,7 @@ class MuSIC:
                     ligands = [
                         l
                         for l in ligands_test
-                        if l.title()
+                        if l.lower().capitalize()
                         not in [
                             "Lta4h",
                             "Fdx1",
@@ -1095,6 +1095,7 @@ class MuSIC:
                             "Cyp27b1",
                             "Sult1e1",
                             "Dio3",
+                            "Ptgis",
                         ]
                     ]
                     l_complexes = [elem for elem in ligands if "_" in elem]
