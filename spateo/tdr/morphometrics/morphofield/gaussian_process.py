@@ -100,10 +100,12 @@ def _con_K_geodist(
 def _gp_velocity(X: np.ndarray, vf_dict: dict) -> np.ndarray:
     # pre_scale = vf_dict["pre_norm_scale"]
     norm_x = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
-    if vf_dict["kernel_dict"]["dist"] == "cdist":
+    if vf_dict["kernel_type"] == "euc":
         quary_kernel = _con_K(norm_x, vf_dict["inducing_variables"], vf_dict["beta"])
-    elif vf_dict["kernel_dict"]["dist"] == "geodist":
-        quary_kernel = _con_K_geodist(norm_x, vf_dict["kernel_dict"], vf_dict["beta"])
+    elif vf_dict["kernel_type"] == "geodist":
+        pass
+        # not implemented yet
+        # quary_kernel = _con_K_geodist(norm_x, vf_dict["kernel_dict"], vf_dict["beta"])
     else:
         raise ValueError(f"current only support cdist and geodist")
     quary_velocities = np.dot(quary_kernel, vf_dict["Coff"])
@@ -112,6 +114,7 @@ def _gp_velocity(X: np.ndarray, vf_dict: dict) -> np.ndarray:
     _velocities = (
         quary_norm_x * vf_dict["norm_dict"]["scale_fixed"] - norm_x * vf_dict["norm_dict"]["scale_transformed"]
     )
+    _velocities = quary_velocities * vf_dict["norm_dict"]["scale_fixed"]
     return _velocities / 10000
 
 
