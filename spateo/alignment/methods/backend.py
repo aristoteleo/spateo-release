@@ -28,6 +28,7 @@ import warnings
 import numpy as np
 import scipy
 import scipy.linalg
+import scipy.sparse as sp
 import scipy.special as special
 from scipy.sparse import coo_matrix, csr_matrix, issparse
 
@@ -1044,10 +1045,18 @@ class NumpyBackend(Backend):
         return np.log(a)
 
     def concatenate(self, arrays, axis=0):
-        return np.concatenate(arrays, axis)
+        if all(issparse(arr) for arr in arrays):
+            return sp.vstack(arrays) if axis == 0 else sp.hstack(arrays)
+        elif all(isinstance(arr, np.ndarray) for arr in arrays):
+            return np.concatenate(arrays, axis)
+        else:
+            raise ValueError("All arrays should be of the same type")
 
     def sum(self, a, axis=None, keepdims=False):
-        return np.sum(a, axis, keepdims=keepdims)
+        if issparse(a):
+            return a.sum(axis=axis)
+        else:
+            return np.sum(a, axis, keepdims=keepdims)
 
     def arange(self, stop, start=0, step=1, type_as=None):
         return np.arange(start, stop, step)
@@ -1071,7 +1080,15 @@ class NumpyBackend(Backend):
         return np.power(a, exponents)
 
     def dot(self, a, b):
-        return np.dot(a, b)
+        if sp.issparse(a):
+            if sp.issparse(b):
+                return a.dot(b)
+            else:
+                return a.dot(b)
+        elif sp.issparse(b):
+            return b.T.dot(a.T).T
+        else:
+            return np.dot(a, b)
 
     def prod(self, a, axis=0):
         return np.prod(a, axis=axis)

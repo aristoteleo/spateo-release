@@ -1,7 +1,12 @@
 """Spatiotemporal modeling of spatial transcriptomics
 """
 from .agg import box_qc_regions, imshow, qc_regions
-from .align import overlay_slices_2d, slices_2d
+from .align import (
+    optimization_animation,
+    overlay_slices_2d,
+    plot_deformation_grid,
+    slices_2d,
+)
 from .bbs import delaunay, polygon
 from .colorlabel import color_label
 from .contour import spatial_domains

@@ -1,5 +1,6 @@
 from typing import List, Optional, Tuple, Union
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 from anndata import AnnData
@@ -79,6 +80,71 @@ def generate_label_transfer_prior(cat1, cat2, positive_pairs=None, negative_pair
             cur_transfer_prior[c1] = label_transfer_prior[c2][c1] / norm_c
         norm_label_transfer_prior[c2] = cur_transfer_prior
     return norm_label_transfer_prior
+
+
+# group pca
+def group_pca(
+    adatas: List[ad.AnnData],
+    batch_key: str = "batch",
+    pca_key: str = "X_pca",
+    use_hvg: bool = True,
+    hvg_key: str = "highly_variable",
+    **args,
+) -> None:
+    """
+    Perform PCA on a concatenated set of AnnData objects and store the results back in each individual AnnData.
+
+    Parameters:
+    ----------
+    adatas : List[AnnData]
+        A list of AnnData objects to be concatenated and processed.
+    batch_key : str, optional
+        The key to distinguish different batches in the concatenated AnnData object (default is 'batch').
+    pca_key : str, optional
+        The key under which to store the PCA results in each AnnData's `.obsm` attribute (default is 'X_pca').
+    use_hvg : bool, optional
+        Whether to perform PCA using only highly variable genes (default is True).
+    hvg_key : str, optional
+        The key under which highly variable genes are marked in `.var` (default is 'highly_variable').
+    **args
+        Additional arguments to pass to `sc.tl.pca`.
+
+    Raises:
+    ------
+    ValueError:
+        If the specified batch_key already exists in any of the input AnnData objects.
+        If no highly variable genes are found when use_hvg is True.
+    """
+
+    import scanpy as sc
+
+    # Check if batch_key already exists in any of the adatas
+    for i, adata in enumerate(adatas):
+        if batch_key in adata.obs.columns:
+            raise ValueError(
+                f"batch_key '{batch_key}' already exists in adata.obs for dataset {i}. Please choose a different key."
+            )
+
+    # Concatenate all AnnData objects, using batch_key to differentiate them
+    adata_pca = ad.concat(adatas, label=batch_key)
+
+    # Identify and use highly variable genes for PCA if requested
+    if use_hvg:
+        sc.pp.highly_variable_genes(adata_pca, batch_key=batch_key)
+        if not adata_pca.var[hvg_key].any():
+            raise ValueError(
+                "No highly variable genes were found. Please check your data or parameters for highly variable gene selection."
+            )
+
+        # Perform PCA using only highly variable genes
+        sc.tl.pca(adata_pca, **args, use_highly_variable=True)
+    else:
+        # Perform PCA without restricting to highly variable genes
+        sc.tl.pca(adata_pca, **args)
+
+    # Split the PCA results back into the original AnnData objects
+    for i in range(len(adatas)):
+        adatas[i].obsm[pca_key] = adata_pca[adata_pca.obs[batch_key] == str(i)].obsm["X_pca"].copy()
 
 
 ###################
@@ -355,6 +421,65 @@ def split_slice(
         sorted_adata.obs["slice"] = slice_id
         split_adata.append(sorted_adata)
     return split_adata[:split_num]
+
+
+# def tps_deformation(
+#     adata,
+#     spatial_key,
+#     key_added,
+#     grid_num=2,
+#     tps_noise_scale=25,
+#     add_corner_points=True,
+#     alpha=0.1,
+#     inplace=True,
+# ):
+#     from tps import ThinPlateSpline
+
+#     spatial = adata.obsm[spatial_key]
+#     # get min max
+#     x_min, x_max = np.min(spatial[:, 0]), np.max(spatial[:, 0])
+#     y_min, y_max = np.min(spatial[:, 1]), np.max(spatial[:, 1])
+
+#     # define the length of grid
+#     grid_size_x = (x_max - x_min) / grid_num
+#     grid_size_y = (y_max - y_min) / grid_num
+#     # generate the grid
+#     x_grid = np.linspace(x_min, x_max, grid_num + 1)[:-1] + grid_size_x / 2
+#     y_grid = np.linspace(y_min, y_max, grid_num + 1)[:-1] + grid_size_y / 2
+#     xx, yy = np.meshgrid(x_grid, y_grid)
+#     # generate control points
+#     src_points = []
+#     dst_points = []
+#     for i in range(xx.shape[0]):
+#         for j in range(xx.shape[1]):
+#             x_center, y_center = xx[i, j], yy[i, j]
+#             x = x_center
+#             y = y_center
+#             src_points.append(np.column_stack([x, y]))
+#             dst_points.append(
+#                 src_points[-1] + np.random.normal(scale=(grid_size_x + grid_size_y) * tps_noise_scale / 2, size=(1, 2))
+#             )
+#     src_points = np.concatenate(src_points, axis=0)
+#     dst_points = np.concatenate(dst_points, axis=0)
+#     if add_corner_points:
+#         src_points = np.concatenate(
+#             [np.array([[x_min, y_min], [x_min, y_max], [x_max, y_max], [x_max, y_min]]), src_points], 0
+#         )
+#         dst_points = np.concatenate(
+#             [np.array([[x_min, y_min], [x_min, y_max], [x_max, y_max], [x_max, y_min]]), dst_points], 0
+#         )
+#     # calculate the TPS deformation
+#     tps = ThinPlateSpline(alpha=alpha)  # Regularization
+#     tps.fit(src_points, dst_points)
+#     # perform tps deformation
+#     tps_spatial = tps.transform(spatial)
+#     if inplace:
+#         adata.obsm[key_added] = tps_spatial
+#         return lambda x: tps.transform(x)
+#     else:
+#         adata_tps = adata.copy()
+#         adata_tps.obsm[key_added] = tps_spatial
+#         return adata_tps, lambda x: tps.transform(x)
 
 
 def tps_deformation(

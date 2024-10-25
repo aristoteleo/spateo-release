@@ -9,6 +9,7 @@ from .alignment import (
     generate_label_transfer_prior,
     get_optimal_mapping_relationship,
     grid_deformation,
+    group_pca,
     morpho_align,
     morpho_align_ref,
     paste_align,
@@ -16,4 +17,5 @@ from .alignment import (
     paste_transform,
     solve_RT_by_correspondence,
     split_slice,
+    tps_deformation,
 )

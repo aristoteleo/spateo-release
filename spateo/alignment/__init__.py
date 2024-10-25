@@ -14,8 +14,10 @@ from .utils import (
     generate_label_transfer_prior,
     get_labels_based_on_coords,
     get_optimal_mapping_relationship,
+    group_pca,
     mapping_aligned_coords,
     mapping_center_coords,
     solve_RT_by_correspondence,
     split_slice,
+    tps_deformation,
 )

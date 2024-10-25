@@ -1,16 +1,19 @@
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import networkx
 import numpy as np
 
 # import ot
 import pandas as pd
+import scipy.sparse as sp
 import torch
 from anndata import AnnData
 from numpy import ndarray
 from scipy.linalg import pinv
 from scipy.sparse import issparse
 from scipy.special import psi
+from sklearn.neighbors import kneighbors_graph
 from torch import sparse_coo_tensor as SparseTensor
 
 from spateo.alignment.methods.backend import NumpyBackend, TorchBackend, get_backend
@@ -1135,8 +1138,63 @@ def con_K(
     return K
 
 
-def con_K_geodist():
-    pass
+def construct_knn_graph(
+    points: Union[np.ndarray, torch.Tensor],
+    knn: int = 10,
+):
+    """
+    Construct a k-nearest neighbor graph from the given points.
+
+    Args:
+        points: The points to construct the graph from.
+        knn: The number of nearest neighbors to consider.
+
+    Returns:
+        The networks graph object.
+    """
+    nx = get_backend(points)
+    if nx_torch(nx):
+        points = points.cpu().numpy()
+    A = kneighbors_graph(points, knn, mode="distance", include_self=False)
+    A = A.toarray()
+
+    graph = networkx.Graph()
+    for i in range(points.shape[0]):
+        for j, connected in enumerate(A[i]):
+            if connected:
+                graph.add_edge(i, j, weight=connected)
+
+    return graph
+
+
+def con_K_graph(
+    graph: networkx.Graph,
+    inducing_idx: Union[np.ndarray, torch.Tensor],
+    beta: Union[int, float] = 0.01,
+):
+    """
+    Construct the kernel matrix from the given graph and inducing points.
+
+    Args:
+        graph: The graph object.
+        inducing_idx: The indices of the inducing points.
+
+    Returns:
+        The kernel matrix.
+    """
+    nx = get_backend(inducing_idx)
+    D = 1e5 * nx.ones((graph.number_of_nodes(), inducing_idx.shape[0]), type_as=inducing_idx)
+    inducing_idx = nx.to_numpy(inducing_idx)
+
+    for i in range(inducing_idx.shape[0]):
+        distance, path = networkx.single_source_dijkstra(graph, source=inducing_idx[i], weight="weight")
+        for j in range(graph.number_of_nodes()):
+            try:
+                D[j, i] = distance[j]
+            except KeyError:
+                pass
+    K = nx.exp(-beta * D**2)
+    return K
 
 
 def inlier_from_NN(
@@ -1303,23 +1361,25 @@ def _dense_to_sparse(
     ], "``sparse_method`` value is wrong. Available ``sparse_method`` are: ``'topk'`` and ``'threshold'``."
     threshold = int(threshold) if sparse_method == "topk" else threshold
     nx = get_backend(mat)
-
     NA, NB = mat.shape[0], mat.shape[1]
-
     if sparse_method == "topk":
         sorted_mat, sorted_idx = _sort(nx, mat, axis=axis, descending=descending)
         if axis == 0:
+            if threshold > NA:
+                threshold = NA
             col = _repeat_interleave(nx, nx.arange(NB, type_as=mat), threshold, axis=0)
             row = sorted_idx[:threshold, :].T.reshape(-1)
             val = sorted_mat[:threshold, :].T.reshape(-1)
+
         elif axis == 1:
+            if threshold > NB:
+                threshold = NB
             col = sorted_idx[:, :threshold].reshape(-1)
             row = _repeat_interleave(nx, nx.arange(NA, type_as=mat), threshold, axis=0)
             val = sorted_mat[:, :threshold].reshape(-1)
     elif sparse_method == "threshold":
         row, col = _where(nx, mat < threshold)
         val = mat[row, col]
-
     results = _SparseTensor(nx=nx, row=row, col=col, value=val, sparse_sizes=(NA, NB))
     return results
 
@@ -1424,8 +1484,10 @@ def _sort(nx, arr, axis=-1, descending=False):
 
 
 def _SparseTensor(nx, row, col, value, sparse_sizes):
-
-    return SparseTensor(indices=torch.vstack((row, col)), values=value, size=sparse_sizes)
+    if nx_torch(nx):
+        return SparseTensor(indices=torch.vstack((row, col)), values=value, size=sparse_sizes)
+    else:
+        return sp.coo_matrix((value, (row, col)), shape=sparse_sizes)
 
 
 def sparse_tensor_to_scipy(sparse_tensor):
