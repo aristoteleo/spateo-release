@@ -8,19 +8,25 @@
 [Installation](https://spateo-release.readthedocs.io/en/latest/installation.html) - [Tutorials](https://spateo-release.readthedocs.io/en/latest/tutorials/index.html) - [API](https://spateo-release.readthedocs.io/en/latest/autoapi/spateo/index.html) - [Citation](https://www.biorxiv.org/content/10.1101/2022.12.07.519417v1) - [Technical](https://spateo-release.readthedocs.io/en/latest/technicals/index.html)
 
 # Citation
-Xiaojie Qiu1$\*, Daniel Y. Zhu3$, Jiajun Yao2, 4, 5, 6$, Zehua Jing2, 4,7$, Lulu Zuo8$, Mingyue Wang2, 4, 9, 10$, Kyung Hoi (Joseph) Min11, Hailin Pan2, 4, Shuai Wang2, 4, 7, Sha Liao4, Yiwei Lai4, Shijie Hao2, 4, 7, Yuancheng Ryan Lu1, Matthew Hill17, Jorge D. Martin-Rufino17, Chen Weng1, Anna Maria Riera-Escandell18, Mengnan Chen2, 4, Liang Wu4, Yong Zhang4, Xiaoyu Wei2, 4, Mei Li4, Xin Huang4, Rong Xiang2, 4, 7, Zhuoxuan Yang4, 12, Chao Liu4, Tianyi Xia4, Yingxin Liang10, Junqiang Xu4,7, Qinan Hu9, 10, Yuhui Hu9, 10, Hongmei Zhu8, Yuxiang Li4, Ao Chen4, Miguel A. Esteban4, Ying Gu2, 4,7, Douglas A. Lauffenburger3, Xun Xu2, 4, 13, Longqi Liu2, 4, 14, 15\*, Jonathan S. Weissman1,19, 20\*, Shiping Liu2, 4, 14, 15, 16\*, Yinqi Bai2, 4\*  $Co-first authors; *:Corresponding authors
+Xiaojie Qiu1, 7, 8$*, Daniel Y. Zhu3$, Yifan Lu1, 7, 8, 9$, Jiajun Yao2, 4, 10$, Zehua Jing2, 4, 11$, Kyung Hoi (Joseph) Min12$, Mengnan Cheng2，6$, Hailin Pan6, Lulu Zuo6, Samuel King13, Qi Fang2, 6, Huiwen Zheng2, 11, Mingyue Wang2, 14, Shuai Wang2, 11, Qingquan Zhang25, Sichao Yu5, Sha Liao6, 17, 18, Chao Liu15, Xinchao Wu2, 4, 16, Yiwei Lai6, Shijie Hao2, Zhewei Zhang2, 4, 16, Liang Wu18, Yong Zhang15, Mei Li17, Zhencheng Tu2, 11, Jinpei Lin2, 4, Zhuoxuan Yang2, 16, Yuxiang Li15, Ying Gu2, 6, 11, Ao Chen6, 17, 18, Longqi Liu2, 19, 20, Jonathan S. Weissman5, 22, 23, Jiayi Ma9*, Xun Xu2, 11, 21*, Shiping Liu2, 19, 20, 24*, Yinqi Bai4, 26*  $Co-first authors; *:Corresponding authors
  
-Spateo: multidimensional spatiotemporal modeling of single-cell spatial transcriptomics 
+Spatiotemporal modeling of molecular holograms 
 
 https://www.biorxiv.org/content/10.1101/2022.12.07.519417v1
 
 # Abstract
 
 <p align="justify">
-Cells do not live in a vacuum, but in a milieu defined by cell–cell communication that can be measured via emerging high-resolution spatial transcriptomics approaches. However, analytical tools that fully leverage such data for kinetic modeling remain lacking. Here we present Spateo (aristoteleo/spateo-release), a general framework for quantitative spatiotemporal modeling of single-cell resolution spatial transcriptomics. Spateo delivers novel methods for digitizing spatial layers/columns to identify spatially-polar genes, and develops a comprehensive framework of cell-cell interaction to reveal spatial effects of niche factors and cell type-specific ligand-receptor interactions. Furthermore, Spateo reconstructs 3D models of whole embryos, and performs 3D morphometric analyses. Lastly, Spateo introduces the concept of “morphometric vector field” of cell migrations, and integrates spatial differential geometry to unveil regulatory programs underlying various organogenesis patterns of Drosophila. Thus, Spateo enables the study of the ecology of organs at a molecular level in 3D space, beyond isolated single cells. 
-</p
+Quantifying spatiotemporal dynamics during embryogenesis is crucial for understanding congenital diseases. We developed Spateo, a 3D spatiotemporal modeling framework, and applied it to a 3D mouse embryogenesis atlas at E9.5 and E11.5, capturing eight million cells. Spateo enables scale, partial, non-rigid alignment, multi-slice refinement and mesh correction to create molecular holograms of whole embryos. It introduces digitization methods to uncover multi-level biology from subcellular to whole-organ, identifying expression gradients along orthogonal axes of emergent 3D structures, e.g. secondary organizers such as MHB. Spateo further jointly models intercellular and intracellular interaction to dissect signaling landscapes in 3D structures, including the ZLI. Lastly, Spateo introduces “morphometric vector fields” of cell migration, integrates spatial differential geometry to unveil molecular programs underlying asymmetrical murine heart organogenesis and others, bridging macroscopic changes with molecular dynamics. Thus, Spateo enables the study of organ ecology at a molecular level in 3D space over time.
+</p>
 
-![Spateo](https://github.com/user-attachments/assets/91662173-b46e-43ea-88d3-69beafee7eba)
+# Keywords
+
+<p align="justify">
+Spateo, whole embryo 3D spatial transcriptomics, 3D reconstruction, Stereo-seq, spatial domain digitization, ligand receptor cell-cell interactions, intercellular and intracellular interactions, organogenesis mode, morphometric vector field, spatial differential geometry analyses
+</p>
+
+![Spateo](https://github.com/user-attachments/assets/9581284c-0617-4561-8827-81134618dabf)
 
 ## Highlights of Spateo:
 
