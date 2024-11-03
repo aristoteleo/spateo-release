@@ -8,10 +8,10 @@
 [Installation](https://spateo-release.readthedocs.io/en/latest/installation.html) - [Tutorials](https://spateo-release.readthedocs.io/en/latest/tutorials/index.html) - [API](https://spateo-release.readthedocs.io/en/latest/autoapi/spateo/index.html) - [Citation](https://www.biorxiv.org/content/10.1101/2022.12.07.519417v1) - [Technical](https://spateo-release.readthedocs.io/en/latest/technicals/index.html)
 
 # Citation
+<b> Spatiotemporal modeling of molecular holograms </b>
+
 Xiaojie Qiu1, 7, 8$*, Daniel Y. Zhu3$, Yifan Lu1, 7, 8, 9$, Jiajun Yao2, 4, 10$, Zehua Jing2, 4, 11$, Kyung Hoi (Joseph) Min12$, Mengnan Cheng2，6$, Hailin Pan6, Lulu Zuo6, Samuel King13, Qi Fang2, 6, Huiwen Zheng2, 11, Mingyue Wang2, 14, Shuai Wang2, 11, Qingquan Zhang25, Sichao Yu5, Sha Liao6, 17, 18, Chao Liu15, Xinchao Wu2, 4, 16, Yiwei Lai6, Shijie Hao2, Zhewei Zhang2, 4, 16, Liang Wu18, Yong Zhang15, Mei Li17, Zhencheng Tu2, 11, Jinpei Lin2, 4, Zhuoxuan Yang2, 16, Yuxiang Li15, Ying Gu2, 6, 11, Ao Chen6, 17, 18, Longqi Liu2, 19, 20, Jonathan S. Weissman5, 22, 23, Jiayi Ma9*, Xun Xu2, 11, 21*, Shiping Liu2, 19, 20, 24*, Yinqi Bai4, 26*  $Co-first authors; *:Corresponding authors
  
-Spatiotemporal modeling of molecular holograms 
-
 https://www.biorxiv.org/content/10.1101/2022.12.07.519417v1
 
 # Abstract
