@@ -7,6 +7,8 @@
 
 [Installation](https://spateo-release.readthedocs.io/en/latest/installation.html) - [Tutorials](https://spateo-release.readthedocs.io/en/latest/tutorials/index.html) - [API](https://spateo-release.readthedocs.io/en/latest/autoapi/spateo/index.html) - [Citation](https://www.biorxiv.org/content/10.1101/2022.12.07.519417v1) - [Technical](https://spateo-release.readthedocs.io/en/latest/technicals/index.html)
 
+![Spateo](https://github.com/user-attachments/assets/9581284c-0617-4561-8827-81134618dabf)
+
 # Citation
 <b> Spatiotemporal modeling of molecular holograms </b>
 
@@ -26,7 +28,6 @@ Quantifying spatiotemporal dynamics during embryogenesis is crucial for understa
 Spateo, whole embryo 3D spatial transcriptomics, 3D reconstruction, Stereo-seq, spatial domain digitization, ligand receptor cell-cell interactions, intercellular and intracellular interactions, organogenesis mode, morphometric vector field, spatial differential geometry analyses
 </p>
 
-![Spateo](https://github.com/user-attachments/assets/9581284c-0617-4561-8827-81134618dabf)
 
 ## Highlights of Spateo:
 
