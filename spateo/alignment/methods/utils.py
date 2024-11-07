@@ -1104,6 +1104,34 @@ def get_P_core(
     return P, K_NA_spatial, K_NA_sigma2, sigma2_related
 
 
+def solve_RT_by_correspondence(
+    X: np.ndarray,
+    Y: np.ndarray,
+    return_s=False,
+):
+    # if len(X.shape) == 3:
+    #     X = X[:, :2]
+    # if len(Y.shape) == 3:
+    #     Y = Y[:, :2]
+    D = X.shape[1]
+    N = X.shape[0]
+    # find R and t that minimize the distance between spatial1 and spatial2
+
+    tX = np.mean(X, axis=0)
+    tY = np.mean(Y, axis=0)
+    X = X - tX
+    Y = Y - tY
+    H = np.dot(Y.T, X)
+    U, S, Vt = np.linalg.svd(H)
+    R = Vt.T.dot(U.T)
+    t = np.mean(X, axis=0) - np.mean(Y, axis=0) + tX - np.dot(tY, R.T)
+    s = np.trace(np.dot(X.T, X) - np.dot(R.T, np.dot(Y.T, X))) / np.trace(np.dot(Y.T, Y))
+    if return_s:
+        return R, t, s
+    else:
+        return R, t
+
+
 #################################
 # Kernel construction functions #
 #################################

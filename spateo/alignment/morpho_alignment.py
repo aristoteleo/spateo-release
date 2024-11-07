@@ -4,14 +4,17 @@ except ImportError:
     from typing_extensions import Literal
 
 import functools
+import os
+from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
+import anndata as ad
 import numpy as np
 from anndata import AnnData
 
 from spateo.alignment.methods import Morpho_pairwise, empty_cache
 from spateo.alignment.transform import BA_transform
-from spateo.alignment.utils import _iteration, downsampling
+from spateo.alignment.utils import _iteration, downsampling, solve_RT_by_correspondence
 from spateo.logging import logger_manager as lm
 
 
@@ -106,6 +109,209 @@ def morpho_align(
         empty_cache(device=device)
 
     return align_models, pis
+
+
+def morpho_align_transformation(
+    models: List[Union[AnnData, str]],
+    models_path: Optional[str] = None,
+    save_transformation: bool = False,
+    transformation_path: Optional[str] = "./Spateo_transformation",
+    resume: bool = False,
+    rep_layer: Union[str, List[str]] = "X",
+    rep_field: Union[str, List[str]] = "layer",
+    genes: Optional[Union[List[str], np.ndarray]] = None,
+    spatial_key: str = "spatial",
+    key_added: str = "align_spatial",
+    iter_key_added: Optional[str] = "iter_spatial",
+    vecfld_key_added: str = "VecFld_morpho",
+    dissimilarity: Union[str, List[str]] = "kl",
+    max_iter: int = 200,
+    dtype: str = "float32",
+    device: str = "cpu",
+    verbose: bool = True,
+    **kwargs,
+):
+    """
+    Continuous alignment of spatial transcriptomic coordinates based on Morpho, and return the transformation matrix.
+
+    Args:
+        models (List[AnnData]): _description_
+
+    Returns:
+        _type_: _description_
+    """
+
+    # check models is a list of anndata or a list of file name
+    if models_path is not None:
+        assert all(
+            [isinstance(model, str) for model in models]
+        ), "models should be a list of file name if models_path is given."
+    else:
+        assert all(
+            [isinstance(model, AnnData) for model in models]
+        ), "models should be a list of anndata if models_path is not given."
+
+    # check if files exists in models_path
+    if models_path is not None:
+        assert all(
+            [os.path.exists(os.path.join(models_path, model)) for model in models]
+        ), "Some files in models_path do not exist."
+
+    iteration = 0
+    transformation = []
+    if save_transformation:
+        Path(transformation_path).mkdir(parents=True, exist_ok=True)
+        if resume:
+            # find the highest iteration number
+            for i in range(len(models) - 1):
+                if os.path.exists(os.path.join(transformation_path, f"transformation_{i}.npy")):
+                    iteration = i
+                    transformation.append(np.load(os.path.join(transformation_path, f"transformation_{i}.npy")))
+        else:
+            # remove all files in the transformation_path
+            remove_all_files_in_directory(transformation_path)
+
+    if resume:
+        progress_name = f"Models alignment based on morpho, starting from iteration {iteration}."
+    else:
+        progress_name = f"Models alignment based on morpho."
+
+    if models_path is not None:
+        modelA = ad.read_h5ad(os.path.join(models_path, models[iteration]))
+    for i in _iteration(start_n=iteration, n=len(models) - 1, progress_name=progress_name, verbose=True):
+        # load models if models is a list of file name
+        if models_path is not None:
+            modelB = ad.read_h5ad(os.path.join(models_path, models[i + 1]))
+        else:
+            modelA = models[i]
+            modelB = models[i + 1]
+
+        morpho_model = Morpho_pairwise(
+            sampleA=modelB,  # reverse
+            sampleB=modelA,  # reverse
+            rep_layer=rep_layer,
+            rep_field=rep_field,
+            dissimilarity=dissimilarity,
+            genes=genes,
+            spatial_key=spatial_key,
+            key_added=key_added,
+            iter_key_added=iter_key_added,
+            vecfld_key_added=vecfld_key_added,
+            max_iter=max_iter,
+            dtype=dtype,
+            device=device,
+            verbose=verbose,
+            **kwargs,
+        )
+        _ = morpho_model.run()
+
+        optimal_R, optimal_t = solve_RT_by_correspondence(
+            morpho_model.optimal_RnA[:, :2], modelB.obsm[spatial_key][:, :2]
+        )
+        cur_transformation = {"Rotation": optimal_R, "Translation": optimal_t}
+        transformation.append(cur_transformation)
+        if save_transformation:
+            np.save(os.path.join(transformation_path, f"transformation_{i}.npy"), cur_transformation)
+
+        if models_path is not None:
+            modelA = modelB
+    return transformation
+
+
+def morpho_align_apply_transformation(
+    models: List[Union[AnnData, str]],
+    models_path: Optional[str] = None,
+    transformation: List[dict] = None,
+    transformation_path: Optional[str] = "./Spateo_transformation",
+    spatial_key: str = "spatial",
+    key_added: str = "align_spatial",
+    save_models_path: Optional[str] = None,
+    verbose: bool = True,
+):
+    """
+    Apply the transformation to the models.
+
+    Args:
+        models (List[AnnData]): _description_
+        transformation (List[dict]): _description_
+
+    Returns:
+        _type_: _description_
+    """
+
+    # check models is a list of anndata or a list of file name
+    if models_path is not None:
+        assert all(
+            [isinstance(model, str) for model in models]
+        ), "models should be a list of file name if models_path is given."
+    else:
+        assert all(
+            [isinstance(model, AnnData) for model in models]
+        ), "models should be a list of anndata if models_path is not given."
+
+    # check if files exists in models_path
+    if models_path is not None:
+        assert all(
+            [os.path.exists(os.path.join(models_path, model)) for model in models]
+        ), "Some files in models_path do not exist."
+
+    if transformation is None:
+        assert os.path.exists(transformation_path), "transformation_path does not exist."
+        # check if transformations exists in transformation_path
+        transformation = []
+        for i in range(len(models) - 1):
+            cur_transformation = np.load(
+                os.path.join(transformation_path, f"transformation_{i}.npy"), allow_pickle=True
+            )
+            transformation.append(cur_transformation)
+    else:
+        assert len(transformation) == len(models) - 1, "The length of transformation should be len(models) - 1."
+
+    if save_models_path is not None:
+        Path(save_models_path).mkdir(parents=True, exist_ok=True)
+
+    # initialize rotation and translation
+    cur_R = np.diag((1, 1))
+    cur_t = np.zeros((2,))
+
+    if models_path is not None and save_models_path is None:
+        align_models = []
+
+    if models_path is not None:
+        cur_model = ad.read_h5ad(os.path.join(models_path, models[0]))
+    else:
+        cur_model = models[0]
+    cur_model.obsm[key_added] = cur_model.obsm[spatial_key].copy()
+
+    if save_models_path is not None:
+        cur_model.write(os.path.join(save_models_path, models[0]))
+    else:
+        if models_path is not None:
+            align_models.append(cur_model)
+
+    progress_name = f"Models alignment based on morpho, applying transformation."
+    for i in _iteration(n=len(models) - 1, progress_name=progress_name, verbose=True):
+        # load models if models is a list of file name
+        if models_path is not None:
+            cur_model = ad.read_h5ad(os.path.join(models_path, models[i + 1]))
+        else:
+            cur_model = models[i + 1]
+
+        cur_t = transformation[i]["Translation"] @ cur_R.T + cur_t
+        cur_R = cur_R @ transformation[i]["Rotation"]
+
+        cur_model.obsm[key_added] = cur_model.obsm[spatial_key].copy() @ cur_R.T + cur_t
+
+        if save_models_path is not None:
+            cur_model.write(os.path.join(save_models_path, models[i + 1]))
+        else:
+            if models_path is not None:
+                align_models.append(cur_model)
+
+    if models_path is not None:
+        return align_models
+    else:
+        return models
 
 
 # TODO: add the args docstring
@@ -453,3 +659,18 @@ def morpho_align_ref(
 #         empty_cache(device=device)
 
 #     return align_models, pis, sigma2s
+
+
+def remove_all_files_in_directory(directory_path):
+    if os.path.exists(directory_path):
+        for filename in os.listdir(directory_path):
+            file_path = os.path.join(directory_path, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print(f"Failed to delete {file_path}. Reason: {e}")
+    else:
+        print(f"The directory {directory_path} does not exist.")

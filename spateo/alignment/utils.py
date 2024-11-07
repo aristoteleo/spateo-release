@@ -13,9 +13,11 @@ from spateo.logging import logger_manager as lm
 ####################
 
 
-def _iteration(n: int, progress_name: str, verbose: bool = True, indent_level=1):
+def _iteration(n: int, progress_name: str, verbose: bool = True, start_n: int = 0, indent_level=1):
     iteration = (
-        lm.progress_logger(range(n), progress_name=progress_name, indent_level=indent_level) if verbose else range(n)
+        lm.progress_logger(range(start_n, n), progress_name=progress_name, indent_level=indent_level)
+        if verbose
+        else range(n)
     )
     return iteration
 

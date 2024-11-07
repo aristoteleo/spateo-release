@@ -6,7 +6,12 @@ from .methods import (
     calc_exp_dissimilarity,
     generate_label_transfer_dict,
 )
-from .morpho_alignment import morpho_align, morpho_align_ref
+from .morpho_alignment import (
+    morpho_align,
+    morpho_align_apply_transformation,
+    morpho_align_ref,
+    morpho_align_transformation,
+)
 from .paste_alignment import paste_align, paste_align_ref
 from .transform import BA_transform, BA_transform_and_assignment, paste_transform
 from .utils import (

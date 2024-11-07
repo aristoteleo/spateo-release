@@ -31,6 +31,7 @@ from .utils import (
     filter_common_genes,
     generate_label_transfer_dict,
     intersect_lsts,
+    solve_RT_by_correspondence,
 )
 
 # from .utils import (  # PCA_project,; PCA_recover,; PCA_reduction,

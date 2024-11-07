@@ -89,7 +89,7 @@ def slices_2d(
 
     # infer the label_type if not specified
     if label_type is None:
-        if labels[0].values.dtype in ["float16", "float32", "float64", "int16", "int32", "int64"]:
+        if labels[0].dtype in ["float16", "float32", "float64", "int16", "int32", "int64"]:
             label_type = "scalar"
         else:
             label_type = "cluster"

@@ -158,25 +158,31 @@ def Jacobian_GP_gaussian_kernel(X: np.ndarray, vf_dict: dict, vectorize: bool = 
     pre_scale = vf_dict["norm_dict"]["scale_fixed"] / vf_dict["norm_dict"]["scale_transformed"]
     x_norm = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
     if x_norm.ndim == 1:
-        if vf_dict["kernel_dict"]["dist"] == "cdist":
+        if vf_dict["kernel_type"] == "euc":
             K, D = _con_K(x_norm[None, :], vf_dict["inducing_variables"], vf_dict["beta"], return_d=True)
-        else:
+        elif vf_dict["kernel_type"] == "geodist":
             K, D = _con_K_geodist(x_norm[None, :], vf_dict["kernel_dict"], vf_dict["beta"], return_d=True)
+        else:
+            raise ValueError(f"current only support euc and geodist")
         J = (vf_dict["Coff"].T * K) @ D[0].T
     elif not vectorize:
         n, d = x_norm.shape
         J = np.zeros((d, d, n))
         for i, xi in enumerate(x_norm):
-            if vf_dict["kernel_dict"]["dist"] == "cdist":
+            if vf_dict["kernel_type"] == "euc":
                 K, D = _con_K(xi[None, :], vf_dict["inducing_variables"], vf_dict["beta"], return_d=True)
-            else:
+            elif vf_dict["kernel_type"] == "geodist":
                 K, D = _con_K_geodist(xi[None, :], vf_dict["kernel_dict"], vf_dict["beta"], return_d=True)
+            else:
+                raise ValueError(f"current only support euc and geodist")
             J[:, :, i] = (vf_dict["Coff"].T * K) @ D[0].T
     else:
-        if vf_dict["kernel_dict"]["dist"] == "cdist":
+        if vf_dict["kernel_type"] == "euc":
             K, D = _con_K(x_norm, vf_dict["inducing_variables"], vf_dict["beta"], return_d=True)
-        else:
+        elif vf_dict["kernel_type"] == "geodist":
             K, D = _con_K_geodist(x_norm, vf_dict["kernel_dict"], vf_dict["beta"], return_d=True)
+        else:
+            raise ValueError(f"current only support euc and geodist")
         if K.ndim == 1:
             K = K[None, :]
         J = np.einsum("nm, mi, njm -> ijn", K, vf_dict["Coff"], D)

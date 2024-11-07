@@ -124,6 +124,7 @@ class Morpho_pairwise:
         probability_type: Union[str, List[str]] = "gauss",
         probability_parameters: Optional[Union[float, List[float]]] = None,
         label_transfer_dict: Optional[Union[dict, List[dict]]] = None,
+        use_hvg: bool = True,
         nn_init: bool = True,
         init_transform: bool = True,
         allow_flip: bool = False,
@@ -182,6 +183,7 @@ class Morpho_pairwise:
         self.probability_type = probability_type
         self.probability_parameters = probability_parameters
         self.label_transfer_dict = label_transfer_dict
+        self.use_hvg = use_hvg
         self.nn_init = nn_init
         self.init_transform = init_transform
         self.nn_init_top_K = nn_init_top_K
@@ -466,7 +468,14 @@ class Morpho_pairwise:
         (self.nx, self.type_as) = check_backend(device=device, dtype=dtype)
 
         # Get the common genes
-        all_samples_genes = [self.sampleA[0].var.index, self.sampleB[0].var.index]
+        if (
+            self.use_hvg
+            and ("highly_variable" in self.sampleA.var.columns)
+            and ("highly_variable" in self.sampleB.var.columns)
+        ):
+            all_samples_genes = [self.sampleA[0].var.highly_variable, self.sampleB[0].var.highly_variable]
+        else:
+            all_samples_genes = [self.sampleA[0].var.index, self.sampleB[0].var.index]
         common_genes = filter_common_genes(*all_samples_genes, verbose=self.verbose)
         self.genes = common_genes if self.genes is None else intersect_lsts(common_genes, self.genes)
 
@@ -1469,10 +1478,42 @@ class Morpho_pairwise:
             self.RnA = self.RnA * self.normalize_scales[1] + self.normalize_means[1]
             self.optimal_RnA = self.optimal_RnA * self.normalize_scales[1] + self.normalize_means[1]
 
+        # account for the normalization
+        if self.normalize_c:
+            self.t = (
+                self.t * self.normalize_scales[1]
+                + self.normalize_means[1]
+                - self.normalize_scales[1] / self.normalize_scales[0] * self.normalize_means[0] @ self.R.T
+            )
+            self.R = self.normalize_scales[1] / self.normalize_scales[0] * self.R
+            self.optimal_t = (
+                self.optimal_t * self.normalize_scales[1]
+                + self.normalize_means[1]
+                - self.normalize_scales[1] / self.normalize_scales[0] * self.normalize_means[0] @ self.optimal_R.T
+            )
+            self.optimal_R = self.normalize_scales[1] / self.normalize_scales[0] * self.optimal_R
+            self.init_t = (
+                self.init_t * self.normalize_scales[1]
+                + self.normalize_means[1]
+                - self.normalize_scales[1] / self.normalize_scales[0] * self.normalize_means[0] @ self.init_R.T
+                if self.nn_init
+                else None
+            )
+            self.init_R = self.normalize_scales[1] / self.normalize_scales[0] * self.init_R if self.nn_init else None
+
         # Save aligned coordinates
         self.XAHat = self.nx.to_numpy(self.XAHat).copy()
         self.optimal_RnA = self.nx.to_numpy(self.optimal_RnA).copy()
         self.RnA = self.nx.to_numpy(self.RnA).copy()
+
+        # save the transformation parameters
+        self.R = self.nx.to_numpy(self.R)
+        self.t = self.nx.to_numpy(self.t)
+        self.optimal_R = self.nx.to_numpy(self.optimal_R)
+        self.optimal_t = self.nx.to_numpy(self.optimal_t)
+        self.init_R = self.nx.to_numpy(self.init_R) if self.nn_init else None
+        self.init_t = self.nx.to_numpy(self.init_t) if self.nn_init else None
+
         if self.sparse_calculation_mode and nx_torch(self.nx):
             self.P = sparse_tensor_to_scipy(self.P)
         else:
