@@ -402,6 +402,34 @@ def solve_RT_by_correspondence(
         return R, t
 
 
+def rigid_transformation(
+    adata,
+    spatial_key,
+    key_added,
+    theta=None,
+    translation=None,
+    inplace=True,
+):
+    if inplace == False:
+        adata = adata.copy()
+    spatial = adata.obsm[spatial_key]
+    mean = np.mean(spatial, axis=0)
+    spatial = spatial - mean
+    if theta is None:
+        # random rotation
+        theta = np.random.rand() * 2 * np.pi
+    rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    spatial = np.matmul(spatial, rotation_matrix)
+    spatial = spatial + mean
+    if translation is not None:
+        spatial = spatial + translation
+    adata.obsm[key_added] = spatial
+    if inplace:
+        pass
+    else:
+        return adata
+
+
 ##############
 # Simulation #
 ##############

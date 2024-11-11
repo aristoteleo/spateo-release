@@ -17,6 +17,7 @@ from .alignment import (
     paste_align,
     paste_align_ref,
     paste_transform,
+    rigid_transformation,
     solve_RT_by_correspondence,
     split_slice,
     tps_deformation,

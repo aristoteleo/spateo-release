@@ -22,6 +22,7 @@ from .utils import (
     group_pca,
     mapping_aligned_coords,
     mapping_center_coords,
+    rigid_transformation,
     solve_RT_by_correspondence,
     split_slice,
     tps_deformation,

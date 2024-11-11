@@ -567,7 +567,7 @@ def overlay_slices_2d(
     for i, (col_val, ax) in enumerate(g.axes_dict.items()):
         if i < len(slices):
             if slices_key is False:
-                ax.set_title("")
+                ax.set_title(title)
             else:
                 ax.set_title(f"Slice {slice_ids[i]}", title_kwargs)
         else:

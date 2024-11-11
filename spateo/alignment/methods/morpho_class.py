@@ -473,7 +473,10 @@ class Morpho_pairwise:
             and ("highly_variable" in self.sampleA.var.columns)
             and ("highly_variable" in self.sampleB.var.columns)
         ):
-            all_samples_genes = [self.sampleA[0].var.highly_variable, self.sampleB[0].var.highly_variable]
+            all_samples_genes = [
+                self.sampleA[0].var.index[self.sampleA[0].var.highly_variable],
+                self.sampleB[0].var.index[self.sampleB[0].var.highly_variable],
+            ]
         else:
             all_samples_genes = [self.sampleA[0].var.index, self.sampleB[0].var.index]
         common_genes = filter_common_genes(*all_samples_genes, verbose=self.verbose)
@@ -761,6 +764,9 @@ class Morpho_pairwise:
             chunk_base = 1e8  # 1e7
             self.split_size = min(int(self.chunk_capacity * chunk_base / (self.NA)), self.NB)
             self.split_size = 1 if self.split_size == 0 else self.split_size
+            if self.verbose:
+                lm.main_info(message=f"Using chunk calculation", indent_level=1)
+                lm.main_info(message=f"split_size: {self.split_size}.", indent_level=2)
 
     def _init_probability_parameters(
         self,
@@ -1478,41 +1484,10 @@ class Morpho_pairwise:
             self.RnA = self.RnA * self.normalize_scales[1] + self.normalize_means[1]
             self.optimal_RnA = self.optimal_RnA * self.normalize_scales[1] + self.normalize_means[1]
 
-        # account for the normalization
-        if self.normalize_c:
-            self.t = (
-                self.t * self.normalize_scales[1]
-                + self.normalize_means[1]
-                - self.normalize_scales[1] / self.normalize_scales[0] * self.normalize_means[0] @ self.R.T
-            )
-            self.R = self.normalize_scales[1] / self.normalize_scales[0] * self.R
-            self.optimal_t = (
-                self.optimal_t * self.normalize_scales[1]
-                + self.normalize_means[1]
-                - self.normalize_scales[1] / self.normalize_scales[0] * self.normalize_means[0] @ self.optimal_R.T
-            )
-            self.optimal_R = self.normalize_scales[1] / self.normalize_scales[0] * self.optimal_R
-            self.init_t = (
-                self.init_t * self.normalize_scales[1]
-                + self.normalize_means[1]
-                - self.normalize_scales[1] / self.normalize_scales[0] * self.normalize_means[0] @ self.init_R.T
-                if self.nn_init
-                else None
-            )
-            self.init_R = self.normalize_scales[1] / self.normalize_scales[0] * self.init_R if self.nn_init else None
-
         # Save aligned coordinates
         self.XAHat = self.nx.to_numpy(self.XAHat).copy()
         self.optimal_RnA = self.nx.to_numpy(self.optimal_RnA).copy()
         self.RnA = self.nx.to_numpy(self.RnA).copy()
-
-        # save the transformation parameters
-        self.R = self.nx.to_numpy(self.R)
-        self.t = self.nx.to_numpy(self.t)
-        self.optimal_R = self.nx.to_numpy(self.optimal_R)
-        self.optimal_t = self.nx.to_numpy(self.optimal_t)
-        self.init_R = self.nx.to_numpy(self.init_R) if self.nn_init else None
-        self.init_t = self.nx.to_numpy(self.init_t) if self.nn_init else None
 
         if self.sparse_calculation_mode and nx_torch(self.nx):
             self.P = sparse_tensor_to_scipy(self.P)
@@ -1533,8 +1508,8 @@ class Morpho_pairwise:
                 "t": self.nx.to_numpy(self.t),
                 "optimal_R": self.nx.to_numpy(self.optimal_R),
                 "optimal_t": self.nx.to_numpy(self.optimal_t),
-                "init_R": self.nx.to_numpy(self.init_R) if self.nn_init else None,
-                "init_t": self.nx.to_numpy(self.init_t) if self.nn_init else None,
+                "init_R": self.nx.to_numpy(self.init_R) if self.nn_init else np.eye(self.Dim),
+                "init_t": self.nx.to_numpy(self.init_t) if self.nn_init else np.zeros(self.Dim),
                 "beta": self.beta,
                 "Coff": self.nx.to_numpy(self.Coff),
                 "inducing_variables": self.nx.to_numpy(self.inducing_variables),
