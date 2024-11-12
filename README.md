@@ -14,12 +14,12 @@
 
 Xiaojie Qiu1, 7, 8$\*, Daniel Y. Zhu3$, Yifan Lu1, 7, 8, 9$, Jiajun Yao2, 4, 10$, Zehua Jing2, 4, 11$, Kyung Hoi (Joseph) Min12$, Mengnan Cheng2，6$, Hailin Pan6, Lulu Zuo6, Samuel King13, Qi Fang2, 6, Huiwen Zheng2, 11, Mingyue Wang2, 14, Shuai Wang2, 11, Qingquan Zhang25, Sichao Yu5, Sha Liao6, 17, 18, Chao Liu15, Xinchao Wu2, 4, 16, Yiwei Lai6, Shijie Hao2, Zhewei Zhang2, 4, 16, Liang Wu18, Yong Zhang15, Mei Li17, Zhencheng Tu2, 11, Jinpei Lin2, 4, Zhuoxuan Yang2, 16, Yuxiang Li15, Ying Gu2, 6, 11, Ao Chen6, 17, 18, Longqi Liu2, 19, 20, Jonathan S. Weissman5, 22, 23, Jiayi Ma9*, Xun Xu2, 11, 21*, Shiping Liu2, 19, 20, 24*, Yinqi Bai4, 26*  $Co-first authors; *:Corresponding authors
  
-https://www.biorxiv.org/content/10.1101/2022.12.07.519417v1
+https://www.cell.com/cell/fulltext/S0092-8674(24)01159-0 
 
 # Abstract
 
 <p align="justify">
-Quantifying spatiotemporal dynamics during embryogenesis is crucial for understanding congenital diseases. We developed Spateo, a 3D spatiotemporal modeling framework, and applied it to a 3D mouse embryogenesis atlas at E9.5 and E11.5, capturing eight million cells. Spateo enables scale, partial, non-rigid alignment, multi-slice refinement and mesh correction to create molecular holograms of whole embryos. It introduces digitization methods to uncover multi-level biology from subcellular to whole-organ, identifying expression gradients along orthogonal axes of emergent 3D structures, e.g. secondary organizers such as MHB. Spateo further jointly models intercellular and intracellular interaction to dissect signaling landscapes in 3D structures, including the ZLI. Lastly, Spateo introduces “morphometric vector fields” of cell migration, integrates spatial differential geometry to unveil molecular programs underlying asymmetrical murine heart organogenesis and others, bridging macroscopic changes with molecular dynamics. Thus, Spateo enables the study of organ ecology at a molecular level in 3D space over time.
+Quantifying spatiotemporal dynamics during embryogenesis is crucial for understanding congenital diseases. We developed Spateo (https://github.com/aristoteo/spateo-release), a 3D spatiotemporal modeling framework, and applied it to a 3D mouse embryogenesis atlas at E9.5 and E11.5, capturing eight million cells. Spateo enables scalable, partial, non-rigid alignment, multi-slice refinement, and mesh correction to create molecular holograms of whole embryos. It introduces digitization methods to uncover multi-level biology from subcellular to whole organ, identifying expression gradients along orthogonal axes of emergent 3D structures, e.g., secondary organizers such as midbrain-hindbrain boundary (MHB). Spateo further jointly models intercellular and intracellular interaction to dissect signaling landscapes in 3D structures, including the zona limitans intrathalamica (ZLI). Lastly, Spateo introduces “morphometric vector fields” of cell migration and integrates spatial differential geometry to unveil molecular programs underlying asymmetrical murine heart organogenesis and others, bridging macroscopic changes with molecular dynamics. Thus, Spateo enables the study of organ ecology at a molecular level in 3D space over time.
 </p>
 
 # Keywords
@@ -40,6 +40,11 @@ Spateo, whole embryo 3D spatial transcriptomics, 3D reconstruction, Stereo-seq, 
 * <p align="justify"> Spateo enables reconstruction of 3D whole-organ models from 2D slices, identifying different “organogenesis modes” (patterns of cell migration during organogenesis) for each organ and quantifying morphometric properties (such as organ surface area, volume, length and cell density) over time. </p
 
 * <p align="justify"> Spateo brings in the concept of the “morphometric vector field” that predicts migration paths for each cell within an organ in a 3D fashion and reveals principles of cell migration by exploring various differential geometry quantities. </p
+
+## News
+* Nov/11/2024: We are also honored to have Nature highlighted this work: https://nature.com/articles/d41586-024-03615-8.  
+* Nov/11/2024: We are thrilled to share the publication of Spateo in Cell today: https://cell.com/cell/fulltext/S0092-8674(24)01159-0. 
+
 
 ## Spateo Development Process
 - Follow feature-staging-main review process
