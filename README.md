@@ -25,34 +25,34 @@ Quantifying spatiotemporal dynamics during embryogenesis is crucial for understa
 # Keywords
 
 <p align="justify">
-Spateo, whole embryo 3D spatial transcriptomics, 3D reconstruction, Stereo-seq, spatial domain digitization, ligand receptor cell-cell interactions, intercellular and intracellular interactions, organogenesis mode, morphometric vector field, spatial differential geometry analyses
+Spateo, whole embryo 3D spatial transcriptomics, 3D reconstruction, Stereo-seq, spatial domain digitization, ligand-receptor cell-cell interactions, intercellular and intracellular interactions, organogenesis mode, morphometric vector field, spatial differential geometry analyses
 </p>
 
 
 ## Highlights of Spateo:
 
-*  <p align="justify"> Spateo introduces a sophisticated approach, Starro, to segment single cells based purely on RNA signal, unsupervisedly identifies continuous tissue domains via spatially-constrained clustering, and dissect the intricate spatial cell type distribution and tissue composition;
+*  <p align="justify"> Spateo introduces a sophisticated approach, Starro, to segment single cells based purely on RNA signal, unsupervisedly identify continuous tissue domains via spatially-constrained clustering, and dissect the intricate spatial cell type distribution and tissue composition;
 
-* <p align="justify"> Spateo identifies spatial polarity/gradient genes (e.g. neuronal layer specific genes) by solving a partial differential equation to digitize layers and columns of a spatial domain. </p
+* <p align="justify"> Spateo identifies spatial polarity/gradient genes (e.g. neuronal layer-specific genes) by solving a partial differential equation to digitize layers and columns of a spatial domain. </p
 
 * <p align="justify"> Spateo implements a full suite of spatially-aware modules for differential expression inference, including novel parametric models for spatially-informed prediction of cell-cell interactions and interpretable estimation of downstream effects. </p
 
-* <p align="justify"> Spateo enables reconstruction of 3D whole-organ models from 2D slices, identifying different “organogenesis modes” (patterns of cell migration during organogenesis) for each organ and quantifying morphometric properties (such as organ surface area, volume, length and cell density) over time. </p
+* <p align="justify"> Spateo enables the reconstruction of 3D whole-organ models from 2D slices, identifying different “organogenesis modes” (patterns of cell migration during organogenesis) for each organ and quantifying morphometric properties (such as organ surface area, volume, length and cell density) over time. </p
 
 * <p align="justify"> Spateo brings in the concept of the “morphometric vector field” that predicts migration paths for each cell within an organ in a 3D fashion and reveals principles of cell migration by exploring various differential geometry quantities. </p
 
 ## News
-* Nov/11/2024: We are also honored to have Nature highlighted this work: https://nature.com/articles/d41586-024-03615-8.  
+* Nov/11/2024: We are also honored Nature highlighted this work: https://nature.com/articles/d41586-024-03615-8.  
 * Nov/11/2024: We are thrilled to share the publication of Spateo in Cell today: https://cell.com/cell/fulltext/S0092-8674(24)01159-0. 
 
 
 ## Spateo Development Process
 - Follow feature-staging-main review process
-    - create a specific branch for new feature
+    - create a specific branch for new features
     - implement and test on your branch; add unit tests
     - create pull request
     - discuss with lab members and merge into the main branch once all checks pass
-- Follow python [Google code style](https://google.github.io/styleguide/pyguide.html)
+- Follow Python [Google code style](https://google.github.io/styleguide/pyguide.html)
 
 ## Code quality
 - File and function docstrings should be written in [Google style](https://google.github.io/styleguide/pyguide.html)
@@ -100,5 +100,5 @@ It is important to keep the submodule up to date with the main repository and th
    git commit -m "Updated all submodules"
    git push
    ```
-Once you are done the above, check the link directory (something like spateo-tutorials @ 8e372ee) under the `docs` folder to make sure the related commit (such as 8e372ee) is the same as the latest one in the spateo-tutorials repository. If not, you may need to redo the above procedure again. 
-```
+Once you finish the above, check the link directory (something like spateo-tutorials @ 8e372ee) under the `docs` folder to make sure the related commit (such as 8e372ee) is the same as the latest one in the spateo-tutorials repository. If not, you may need to redo the above procedure again. 
+
