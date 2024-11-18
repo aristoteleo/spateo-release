@@ -4,22 +4,25 @@
 
 [![documentation](https://readthedocs.org/projects/spateo-release/badge/?version=latest)](https://spateo-release.readthedocs.io/en/latest/)
 
-
 [Installation](https://spateo-release.readthedocs.io/en/latest/installation.html) - [Tutorials](https://spateo-release.readthedocs.io/en/latest/tutorials/index.html) - [API](https://spateo-release.readthedocs.io/en/latest/autoapi/spateo/index.html) - [Citation](https://www.biorxiv.org/content/10.1101/2022.12.07.519417v1) - [Technical](https://spateo-release.readthedocs.io/en/latest/technicals/index.html)
 
 ![Spateo](https://github.com/user-attachments/assets/9581284c-0617-4561-8827-81134618dabf)
 
 # Citation
-<b> Spatiotemporal modeling of molecular holograms </b>
+### <b> Spatiotemporal modeling of molecular holograms </b>
 
-Xiaojie Qiu1, 7, 8$\*, Daniel Y. Zhu3$, Yifan Lu1, 7, 8, 9$, Jiajun Yao2, 4, 10$, Zehua Jing2, 4, 11$, Kyung Hoi (Joseph) Min12$, Mengnan Cheng2，6$, Hailin Pan6, Lulu Zuo6, Samuel King13, Qi Fang2, 6, Huiwen Zheng2, 11, Mingyue Wang2, 14, Shuai Wang2, 11, Qingquan Zhang25, Sichao Yu5, Sha Liao6, 17, 18, Chao Liu15, Xinchao Wu2, 4, 16, Yiwei Lai6, Shijie Hao2, Zhewei Zhang2, 4, 16, Liang Wu18, Yong Zhang15, Mei Li17, Zhencheng Tu2, 11, Jinpei Lin2, 4, Zhuoxuan Yang2, 16, Yuxiang Li15, Ying Gu2, 6, 11, Ao Chen6, 17, 18, Longqi Liu2, 19, 20, Jonathan S. Weissman5, 22, 23, Jiayi Ma9*, Xun Xu2, 11, 21*, Shiping Liu2, 19, 20, 24*, Yinqi Bai4, 26*  $Co-first authors; *:Corresponding authors
+Xiaojie Qiu<sup>1, 7, 8, $, </sup>\*, Daniel Y. Zhu<sup>3, $</sup>, Yifan Lu<sup>1, 7, 8, 9, $</sup>, Jiajun Yao<sup>2, 4, 10, $</sup>, Zehua Jing<sup>2, 4, 11, $</sup>, Kyung Hoi (Joseph) Min<sup>12, $</sup>, Mengnan Cheng<sup>2, 6, $</sup>, Hailin Pan<sup>6</sup>, Lulu Zuo<sup>6</sup>, Samuel King<sup>13</sup>, Qi Fang<sup>2, 6</sup>, Huiwen Zheng<sup>2, 11</sup>, Mingyue Wang<sup>2, 14</sup>, Shuai Wang<sup>2, 11</sup>, Qingquan Zhang<sup>25</sup>, Sichao Yu<sup>5</sup>, Sha Liao<sup>6, 17, 18</sup>, Chao Liu<sup>15</sup>, Xinchao Wu<sup>2, 4, 16</sup>, Yiwei Lai<sup>6</sup>, Shijie Hao<sup>2</sup>, Zhewei Zhang<sup>2, 4, 16</sup>, Liang Wu<sup>18</sup>, Yong Zhang<sup>15</sup>, Mei Li<sup>17</sup>, Zhencheng Tu<sup>2, 11</sup>, Jinpei Lin<sup>2, 4</sup>, Zhuoxuan Yang<sup>2, 16</sup>, Yuxiang Li<sup>15</sup>, Ying Gu<sup>2, 6, 11</sup>, Ao Chen<sup>6, 17, 18</sup>, Longqi Liu<sup>2, 19, 20</sup>, Jonathan S. Weissman<sup>5, 22, 23</sup>, Jiayi Ma<sup>9, </sup>\*, Xun Xu<sup>2, 11, 21, </sup>\*, Shiping Liu<sup>2, 19, 20, 24, </sup>\*, Yinqi Bai<sup>4, 26, </sup>\*  
+
+<sup>$</sup> Co-first authors
+
+\* Corresponding authors
  
 https://www.cell.com/cell/fulltext/S0092-8674(24)01159-0 
 
 # Abstract
 
 <p align="justify">
-Quantifying spatiotemporal dynamics during embryogenesis is crucial for understanding congenital diseases. We developed Spateo ([https://github.com/aristoteo/spateo-release](https://github.com/aristoteleo/spateo-release)), a 3D spatiotemporal modeling framework, and applied it to a 3D mouse embryogenesis atlas at E9.5 and E11.5, capturing eight million cells. Spateo enables scalable, partial, non-rigid alignment, multi-slice refinement, and mesh correction to create molecular holograms of whole embryos. It introduces digitization methods to uncover multi-level biology from subcellular to whole organ, identifying expression gradients along orthogonal axes of emergent 3D structures, e.g., secondary organizers such as midbrain-hindbrain boundary (MHB). Spateo further jointly models intercellular and intracellular interaction to dissect signaling landscapes in 3D structures, including the zona limitans intrathalamica (ZLI). Lastly, Spateo introduces “morphometric vector fields” of cell migration and integrates spatial differential geometry to unveil molecular programs underlying asymmetrical murine heart organogenesis and others, bridging macroscopic changes with molecular dynamics. Thus, Spateo enables the study of organ ecology at a molecular level in 3D space over time.
+Quantifying spatiotemporal dynamics during embryogenesis is crucial for understanding congenital diseases. We developed Spateo (https://github.com/aristoteleo/spateo-release), a 3D spatiotemporal modeling framework, and applied it to a 3D mouse embryogenesis atlas at E9.5 and E11.5, capturing eight million cells. Spateo enables scalable, partial, non-rigid alignment, multi-slice refinement, and mesh correction to create molecular holograms of whole embryos. It introduces digitization methods to uncover multi-level biology from subcellular to whole organ, identifying expression gradients along orthogonal axes of emergent 3D structures, e.g., secondary organizers such as midbrain-hindbrain boundary (MHB). Spateo further jointly models intercellular and intracellular interaction to dissect signaling landscapes in 3D structures, including the zona limitans intrathalamica (ZLI). Lastly, Spateo introduces “morphometric vector fields” of cell migration and integrates spatial differential geometry to unveil molecular programs underlying asymmetrical murine heart organogenesis and others, bridging macroscopic changes with molecular dynamics. Thus, Spateo enables the study of organ ecology at a molecular level in 3D space over time.
 </p>
 
 # Keywords
