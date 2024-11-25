@@ -2,8 +2,10 @@ import gpytorch
 import torch
 from tqdm import tqdm
 
+from spateo.alignment.utils import _iteration
 
-def gp_train(model, likelihood, train_loader, train_epochs, method, N, device):
+
+def gp_train(model, likelihood, train_loader, train_epochs, method, N, device, keys, verbose=True):
     if torch.cuda.is_available() and device != "cpu":
         model = model.cuda()
         likelihood = likelihood.cuda()
@@ -24,16 +26,15 @@ def gp_train(model, likelihood, train_loader, train_epochs, method, N, device):
         lr=0.01,
     )
 
-    epochs_iter = tqdm(range(train_epochs), desc="Epoch")
+    progress_name = f"Interpolation based on Gaussian Process Regression for {keys[0]}"
+    epochs_iter = _iteration(n=train_epochs, progress_name=progress_name, verbose=verbose)
     for i in epochs_iter:
         if method == "SVGP":
             # Within each iteration, we will go over each minibatch of data
-            minibatch_iter = tqdm(train_loader, desc="Minibatch", leave=True)
-            for x_batch, y_batch in minibatch_iter:
+            for x_batch, y_batch in train_loader:
                 optimizer.zero_grad()
                 output = model(x_batch)
                 loss = -mll(output, y_batch)
-                minibatch_iter.set_postfix(loss=loss.item())
                 loss.backward()
                 optimizer.step()
         else:

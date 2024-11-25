@@ -35,6 +35,8 @@ class Imputation_GPR:
         inducing_num: int = 512,
         normalize_spatial: bool = True,
     ):
+
+        self.keys = keys
         # Source data
         source_adata = source_adata.copy()
         source_adata.X = source_adata.X if layer == "X" else source_adata.layers[layer]
@@ -70,7 +72,6 @@ class Imputation_GPR:
         self.train_y = self.train_y.squeeze()
 
         self.nx = ot.backend.get_backend(self.train_x, self.train_y)
-
         self.normalize_spatial = normalize_spatial
         if self.normalize_spatial:
             self.train_x = self.normalize_coords(self.train_x)
@@ -96,7 +97,6 @@ class Imputation_GPR:
 
         self.PCA_reduction = False
         self.info_keys = {"obs_keys": obs_keys, "var_keys": var_keys}
-        print(self.info_keys)
 
         # Target data
         self.target_points = torch.from_numpy(target_points).float()
@@ -104,7 +104,7 @@ class Imputation_GPR:
 
     def normalize_coords(self, data: Union[np.ndarray, torch.Tensor], given_normalize: bool = False):
         if not given_normalize:
-            self.mean_data = _unsqueeze(self.nx)(self.nx.mean(data, axis=0), 0)
+            self.mean_data = self.nx.mean(data, axis=0)[None, :]
         data = data - self.mean_data
         if not given_normalize:
             self.variance = self.nx.sqrt(self.nx.sum(data**2) / data.shape[0])
@@ -114,12 +114,16 @@ class Imputation_GPR:
     def inference(
         self,
         training_iter: int = 50,
+        verbose: bool = True,
     ):
         self.likelihood = GaussianLikelihood()
         if self.method == "SVGP":
             self.GPR_model = Approx_GPModel(inducing_points=self.inducing_points)
         elif self.method == "ExactGP":
-            self.GPR_model = Exact_GPModel(self.train_x, self.train_y, self.likelihood)
+            self.GPR_models = [
+                Exact_GPModel(self.train_x, self.train_y[:, i], self.likelihoods[i])
+                for i in range(self.train_y.shape[1])
+            ]
         # if to convert to GPU
         if self.device != "cpu":
             self.GPR_model = self.GPR_model.cuda()
@@ -134,6 +138,8 @@ class Imputation_GPR:
             method=self.method,
             N=self.N,
             device=self.device,
+            verbose=verbose,
+            keys=self.keys,
         )
 
         self.GPR_model.eval()
@@ -181,6 +187,7 @@ def gp_interpolation(
     batch_size: int = 1024,
     shuffle: bool = True,
     inducing_num: int = 512,
+    verbose: bool = True,
 ) -> AnnData:
     """
     Learn a continuous mapping from space to gene expression pattern with the Gaussian Process method.
@@ -197,36 +204,60 @@ def gp_interpolation(
     Returns:
         interp_adata: an anndata object that has interpolated expression.
     """
+    assert keys != None, "`keys` cannot be None."
+    keys = [keys] if isinstance(keys, str) else keys
+    obs_keys = [key for key in keys if key in source_adata.obs.keys()]
+    var_keys = [key for key in keys if key in source_adata.var_names.tolist()]
+    info_keys = {"obs_keys": obs_keys, "var_keys": var_keys}
+    print(info_keys)
+    obs_data = []
+    var_data = []
+    if len(obs_keys) != 0:
+        for key in obs_keys:
+            GPR = Imputation_GPR(
+                source_adata=source_adata,
+                target_points=target_points,
+                keys=[key],
+                spatial_key=spatial_key,
+                layer=layer,
+                device=device,
+                method=method,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                inducing_num=inducing_num,
+            )
+            GPR.inference(training_iter=training_iter, verbose=verbose)
 
-    # Inference
-    GPR = Imputation_GPR(
-        source_adata=source_adata,
-        target_points=target_points,
-        keys=keys,
-        spatial_key=spatial_key,
-        layer=layer,
-        device=device,
-        method=method,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        inducing_num=inducing_num,
-    )
-    GPR.inference(training_iter=training_iter)
+            # Interpolation
+            target_info_data = GPR.interpolate(use_chunk=True)
+            obs_data.append(target_info_data[:, None])
+    if len(var_keys) != 0:
+        for key in var_keys:
+            GPR = Imputation_GPR(
+                source_adata=source_adata,
+                target_points=target_points,
+                keys=[key],
+                spatial_key=spatial_key,
+                layer=layer,
+                device=device,
+                method=method,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                inducing_num=inducing_num,
+            )
+            GPR.inference(training_iter=training_iter, verbose=verbose)
 
-    # Interpolation
-    target_info_data = GPR.interpolate(use_chunk=True)
-    target_info_data = target_info_data[:, None]
+            # Interpolation
+            target_info_data = GPR.interpolate(use_chunk=True)
+            var_data.append(target_info_data[:, None])
+
     # Output interpolated anndata
     lm.main_info("Creating an adata object with the interpolated expression...")
-
-    obs_keys = GPR.info_keys["obs_keys"]
     if len(obs_keys) != 0:
-        obs_data = target_info_data[:, : len(obs_keys)]
+        obs_data = np.concatenate(obs_data, axis=1)
         obs_data = pd.DataFrame(obs_data, columns=obs_keys)
-
-    var_keys = GPR.info_keys["var_keys"]
     if len(var_keys) != 0:
-        X = target_info_data[:, len(obs_keys) :]
+        X = np.concatenate(var_data, axis=1)
         var_data = pd.DataFrame(index=var_keys)
 
     interp_adata = AnnData(
