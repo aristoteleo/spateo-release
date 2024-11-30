@@ -22,6 +22,7 @@ setup(
         "3d": read_requirements("3d-requirements.txt"),
     },
     packages=find_packages(exclude=("tests", "docs")),
+    include_package_data=True,
     classifiers=[
         "Development Status :: 4 - Beta",
         "Programming Language :: Python :: 3.7",
