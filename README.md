@@ -4,7 +4,7 @@
 
 [![documentation](https://readthedocs.org/projects/spateo-release/badge/?version=latest)](https://spateo-release.readthedocs.io/en/latest/)
 
-[Installation](https://spateo-release.readthedocs.io/en/latest/installation.html) - [Tutorials](https://spateo-release.readthedocs.io/en/latest/tutorials/index.html) - [API](https://spateo-release.readthedocs.io/en/latest/autoapi/spateo/index.html) - [Citation](https://www.biorxiv.org/content/10.1101/2022.12.07.519417v1) - [Technical](https://spateo-release.readthedocs.io/en/latest/technicals/index.html)
+[Installation](https://spateo-release.readthedocs.io/en/latest/installation.html) - [Tutorials](https://spateo-release.readthedocs.io/en/latest/tutorials/index.html) - [API](https://spateo-release.readthedocs.io/en/latest/autoapi/spateo/index.html) - [Citation](https://www.cell.com/cell/fulltext/S0092-8674(24)01159-0) - [Technical](https://spateo-release.readthedocs.io/en/latest/technicals/index.html)
 
 ![Spateo](https://github.com/user-attachments/assets/9581284c-0617-4561-8827-81134618dabf)
 
