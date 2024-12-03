@@ -621,7 +621,6 @@ class Morpho_pairwise:
                 self.nx.einsum("ij->", self.nx.einsum("ij,ij->ij", coords[i], coords[i])) / coords[i].shape[0]
             )
             normalize_scales[i] = normalize_scale
-
         # get the global scale for whole coords if "separate_scale" is False
         if not self.separate_scale:
             global_scale = self.nx.mean(normalize_scales)
@@ -638,7 +637,7 @@ class Morpho_pairwise:
         if self.verbose:
             lm.main_info(message=f"Spatial coordinates normalization params:", indent_level=1)
             lm.main_info(message=f"Scale: {normalize_scales[:2]}...", indent_level=2)
-            lm.main_info(message=f"Scale: {normalize_means[:2]}...", indent_level=2)
+            lm.main_info(message=f"Mean: {normalize_means[:2]}...", indent_level=2)
 
     def _normalize_exps(
         self,

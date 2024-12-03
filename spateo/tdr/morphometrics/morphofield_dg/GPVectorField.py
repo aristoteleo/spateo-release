@@ -194,7 +194,7 @@ class GPVectorField:
     def __init__(self):
         self.data = {}
 
-    def from_adata(self, adata: AnnData, vf_key: str = "VecFld"):
+    def from_adata(self, adata: AnnData, vf_key: str = "VecFld", nonrigid_only: bool = False):
         from ..morphofield.gaussian_process import _gp_velocity
 
         if vf_key in adata.uns.keys():
@@ -206,7 +206,8 @@ class GPVectorField:
             )
 
         self.vf_dict = vf_dict
-        self.func = lambda x: _gp_velocity(x, vf_dict)
+        self.nonrigid_only = nonrigid_only
+        self.func = lambda x: _gp_velocity(x, vf_dict, nonrigid_only=nonrigid_only)
         self.data["X"] = vf_dict["X"]
         self.data["V"] = vf_dict["V"]
 
@@ -216,7 +217,7 @@ class GPVectorField:
     def compute_velocity(self, X: np.ndarray):
         from ..morphofield.gaussian_process import _gp_velocity
 
-        return _gp_velocity(X, self.vf_dict)
+        return _gp_velocity(X, self.vf_dict, nonrigid_only=self.nonrigid_only)
 
     def compute_acceleration(self, X: Optional[np.ndarray] = None, **kwargs):
         X = self.data["X"] if X is None else X

@@ -1051,16 +1051,12 @@ def get_P_core(
 
     # Calculate spatial probability with sigma2_variance
     spatial_prob = calc_probability(nx, spatial_dist, "gauss", probability_parameter=sigma2 / sigma2_variance)  # N x M
-    # print(spatial_prob.sum())
     # TODO: everytime this will generate D/2 on GPU, may influence the runtime
     outlier_s = samples_s * spatial_dist.shape[0]
     # outlier_s = samples_s
-    # print(outlier_s)
     spatial_outlier = _power(nx)((2 * _pi(nx) * sigma2), Dim / 2) * (1 - gamma) / (gamma * outlier_s)  # scalar
-    # print(spatial_outlier)
     # TODO: the position of the following is unclear
     spatial_inlier = 1 - spatial_outlier / (spatial_outlier + nx.sum(spatial_prob, axis=0, keepdims=True))  # 1 x M
-    # print(spatial_inlier.mean())
     spatial_prob = spatial_prob * model_mul
 
     # spatial P

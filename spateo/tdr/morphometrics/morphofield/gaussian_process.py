@@ -83,10 +83,12 @@ def _con_K_geodist(
 # def _gp_velocity(X: np.ndarray, vf_dict: dict) -> np.ndarray:
 #     # pre_scale = vf_dict["pre_norm_scale"]
 #     norm_x = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
-#     if vf_dict["kernel_dict"]["dist"] == "cdist":
+#     if vf_dict["kernel_type"] == "euc":
 #         quary_kernel = _con_K(norm_x, vf_dict["inducing_variables"], vf_dict["beta"])
-#     elif vf_dict["kernel_dict"]["dist"] == "geodist":
-#         quary_kernel = _con_K_geodist(norm_x, vf_dict["kernel_dict"], vf_dict["beta"])
+#     elif vf_dict["kernel_type"] == "geodist":
+#         pass
+#         # not implemented yet
+#         # quary_kernel = _con_K_geodist(norm_x, vf_dict["kernel_dict"], vf_dict["beta"])
 #     else:
 #         raise ValueError(f"current only support cdist and geodist")
 #     quary_velocities = np.dot(quary_kernel, vf_dict["Coff"])
@@ -97,25 +99,75 @@ def _con_K_geodist(
 #     return _velocities / 10000
 
 
-def _gp_velocity(X: np.ndarray, vf_dict: dict) -> np.ndarray:
-    # pre_scale = vf_dict["pre_norm_scale"]
+def _gp_velocity(
+    X: np.ndarray,
+    vf_dict: dict,
+    nonrigid_only: bool = False,
+) -> np.ndarray:
     norm_x = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
     if vf_dict["kernel_type"] == "euc":
         quary_kernel = _con_K(norm_x, vf_dict["inducing_variables"], vf_dict["beta"])
     elif vf_dict["kernel_type"] == "geodist":
-        pass
+        raise NotImplementedError("geodist is not implemented yet")
         # not implemented yet
         # quary_kernel = _con_K_geodist(norm_x, vf_dict["kernel_dict"], vf_dict["beta"])
     else:
         raise ValueError(f"current only support cdist and geodist")
     quary_velocities = np.dot(quary_kernel, vf_dict["Coff"])
-    quary_rigid = np.dot(norm_x, vf_dict["R"].T) + vf_dict["t"]
-    quary_norm_x = quary_velocities + quary_rigid
-    _velocities = (
-        quary_norm_x * vf_dict["norm_dict"]["scale_fixed"] - norm_x * vf_dict["norm_dict"]["scale_transformed"]
-    )
-    _velocities = quary_velocities * vf_dict["norm_dict"]["scale_fixed"]
+    if nonrigid_only:
+        _velocities = (
+            quary_velocities * vf_dict["norm_dict"]["scale_fixed"]
+            + (vf_dict["norm_dict"]["scale_fixed"] - vf_dict["norm_dict"]["scale_transformed"]) * norm_x
+        )
+    else:
+        quary_rigid = np.dot(norm_x, vf_dict["R"].T) + vf_dict["t"]
+        quary_norm_x = quary_velocities + quary_rigid
+        quary_x = quary_norm_x * vf_dict["norm_dict"]["scale_fixed"] + vf_dict["norm_dict"]["mean_fixed"]
+        _velocities = quary_x - X
     return _velocities / 10000
+
+
+# def _gp_velocity(X: np.ndarray, vf_dict: dict) -> np.ndarray:
+#     # pre_scale = vf_dict["pre_norm_scale"]
+#     norm_x = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
+#     if vf_dict["kernel_type"] == "euc":
+#         quary_kernel = _con_K(norm_x, vf_dict["inducing_variables"], vf_dict["beta"])
+#     elif vf_dict["kernel_type"] == "geodist":
+#         pass
+#         # not implemented yet
+#         # quary_kernel = _con_K_geodist(norm_x, vf_dict["kernel_dict"], vf_dict["beta"])
+#     else:
+#         raise ValueError(f"current only support cdist and geodist")
+#     quary_velocities = np.dot(quary_kernel, vf_dict["Coff"])
+#     quary_rigid = np.dot(norm_x, vf_dict["R"].T) + vf_dict["t"]
+#     quary_norm_x = quary_velocities + quary_rigid
+#     _velocities = (
+#         quary_norm_x * vf_dict["norm_dict"]["scale_fixed"] - norm_x * vf_dict["norm_dict"]["scale_transformed"]
+#     )
+#     _velocities = quary_velocities * vf_dict["norm_dict"]["scale_fixed"]
+#     return _velocities / 10000
+
+# def _gp_velocity(X: np.ndarray, vf_dict: dict) -> np.ndarray:
+#     # pre_scale = vf_dict["pre_norm_scale"]
+#     # pre_scale = vf_dict["norm_dict"]["scale_fixed"] / vf_dict["norm_dict"]["scale_transformed"]
+#     norm_x = (X - vf_dict["norm_dict"]["mean_transformed"]) / vf_dict["norm_dict"]["scale_transformed"]
+#     if vf_dict["kernel_type"] == "euc":
+#         quary_kernel = _con_K(norm_x, vf_dict["inducing_variables"], vf_dict["beta"])
+#     elif vf_dict["kernel_type"] == "geodist":
+#         pass
+#         # not implemented yet
+#         # quary_kernel = _con_K_geodist(norm_x, vf_dict["kernel_dict"], vf_dict["beta"])
+#     else:
+#         raise ValueError(f"current only support cdist and geodist")
+#     quary_velocities = np.dot(quary_kernel, vf_dict["Coff"])
+#     quary_rigid = np.dot(norm_x, vf_dict["R"].T) + vf_dict["t"]
+#     quary_norm_x = quary_velocities + quary_rigid
+#     _velocities = (
+#         quary_norm_x * vf_dict["norm_dict"]["scale_fixed"] - norm_x * vf_dict["norm_dict"]["scale_transformed"]
+#     )
+#     _velocities = quary_velocities * vf_dict["norm_dict"]["scale_fixed"]
+#     # _velocities = quary_velocities
+#     return _velocities / 10000
 
 
 def morphofield_gp(
@@ -124,6 +176,7 @@ def morphofield_gp(
     vf_key: str = "VecFld_morpho",
     NX: Optional[np.ndarray] = None,
     grid_num: Optional[List[int]] = None,
+    nonrigid_only: bool = False,
     inplace: bool = True,
 ) -> Optional[AnnData]:
     """
@@ -136,6 +189,7 @@ def morphofield_gp(
         key_added: The key that will be used for the vector field key in ``.uns``.
         NX: The spatial coordinates of new data point. If NX is None, generate new points based on grid_num.
         grid_num: The number of grids in each dimension for generating the grid velocity. Default is ``[50, 50, 50]``.
+        nonrigid_only: If True, only the nonrigid part of the vector field will be calculated.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
@@ -155,7 +209,7 @@ def morphofield_gp(
     if vf_key in adata.uns.keys():
         vf_dict = adata.uns[vf_key]
         vf_dict["X"] = np.asarray(adata.obsm[spatial_key], dtype=float)
-        vf_dict["V"] = _gp_velocity(vf_dict["X"], vf_dict=vf_dict)
+        vf_dict["V"] = _gp_velocity(vf_dict["X"], vf_dict=vf_dict, nonrigid_only=nonrigid_only)
 
         if not (NX is None):
             predict_X = NX
@@ -166,7 +220,7 @@ def morphofield_gp(
             _, _, Grid, grid_in_hull = get_X_Y_grid(X=vf_dict["X"].copy(), Y=vf_dict["V"].copy(), grid_num=grid_num)
             predict_X = Grid
         vf_dict["grid"] = predict_X
-        vf_dict["grid_V"] = _gp_velocity(predict_X, vf_dict=vf_dict)
+        vf_dict["grid_V"] = _gp_velocity(predict_X, vf_dict=vf_dict, nonrigid_only=nonrigid_only)
 
         vf_dict["method"] = "gaussian_process"
         lm.main_finish_progress(progress_name="morphofield")

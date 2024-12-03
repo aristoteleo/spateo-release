@@ -18,6 +18,7 @@ def morphopath(
     t_end: Optional[Union[int, float]] = None,
     average: bool = False,
     cores: int = 1,
+    nonrigid_only: bool = False,
     inplace: bool = True,
     **kwargs,
 ) -> Optional[AnnData]:
@@ -39,6 +40,7 @@ def morphopath(
                  ``False``, no averaging will be applied.
         cores: Number of cores to calculate path integral for predicting cell fate. If cores is set to be > 1,
                multiprocessing will be used to parallel the fate prediction.
+        nonrigid_only: If True, only the nonrigid part of the vector field will be calculated.
         inplace: Whether to copy adata or modify it inplace.
         **kwargs: Additional parameters that will be passed into the ``fate`` function.
 
@@ -89,7 +91,7 @@ def morphopath(
             direction=direction,
             average=average,
             cores=cores,
-            VecFld_true=lambda X: _gp_velocity(X=X, vf_dict=fate_adata.uns[vf_key]),
+            VecFld_true=lambda X: _gp_velocity(X=X, vf_dict=fate_adata.uns[vf_key], nonrigid_only=nonrigid_only),
             **kwargs,
         )
     elif method == "sparsevfc":

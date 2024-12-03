@@ -9,13 +9,18 @@ except ImportError:
     from typing_extensions import Literal
 
 
-def _generate_vf_class(adata: AnnData, vf_key: str, method: str = "gaussian_process"):
+def _generate_vf_class(
+    adata: AnnData,
+    vf_key: str,
+    method: str = "gaussian_process",
+    nonrigid_only: bool = False,
+):
     if vf_key in adata.uns.keys():
         if method == "gaussian_process":
             from .GPVectorField import GPVectorField
 
             vector_field_class = GPVectorField()
-            vector_field_class.from_adata(adata, vf_key=vf_key)
+            vector_field_class.from_adata(adata, vf_key=vf_key, nonrigid_only=nonrigid_only)
         elif method == "sparsevfc":
             from dynamo.vectorfield.scVectorField import SvcVectorField
 
@@ -38,6 +43,7 @@ def morphofield_velocity(
     adata: AnnData,
     vf_key: str = "VecFld_morpho",
     key_added: str = "velocity",
+    nonrigid_only: bool = False,
     inplace: bool = True,
 ) -> Optional[AnnData]:
     """
@@ -47,13 +53,16 @@ def morphofield_velocity(
         adata: AnnData object that contains the reconstructed vector field.
         vf_key: The key in ``.uns`` that corresponds to the reconstructed vector field.
         key_added: The key that will be used for the velocity key in ``.obsm``.
+        nonrigid_only: If True, only the nonrigid part of the vector field will be calculated.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
         An ``AnnData`` object is updated/copied with the ``key_added`` in the ``.obsm`` attribute which contains velocities.
     """
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"])
+    vector_field_class = _generate_vf_class(
+        adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"], nonrigid_only=nonrigid_only
+    )
 
     init_states = adata.uns[vf_key]["X"]
     adata.obsm[key_added] = vector_field_class.func(init_states)
@@ -66,6 +75,7 @@ def morphofield_acceleration(
     vf_key: str = "VecFld_morpho",
     key_added: str = "acceleration",
     method: str = "analytical",
+    nonrigid_only: bool = False,
     inplace: bool = True,
 ) -> Optional[AnnData]:
     """
@@ -80,6 +90,7 @@ def morphofield_acceleration(
                 ``'analytical'`` method uses the analytical expressions for calculating acceleration while ``'numerical'``
                 method uses numdifftools, a numerical differentiation tool, for computing acceleration. ``'analytical'``
                 method is much more efficient.
+        nonrigid_only: If True, only the nonrigid part of the vector field will be calculated.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
@@ -90,7 +101,9 @@ def morphofield_acceleration(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"])
+    vector_field_class = _generate_vf_class(
+        adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"], nonrigid_only=nonrigid_only
+    )
 
     X, V = vector_field_class.get_data()
     adata.obs[key_added], adata.obsm[key_added] = vector_field_class.compute_acceleration(X=X, method=method)
@@ -104,6 +117,7 @@ def morphofield_curvature(
     key_added: str = "curvature",
     formula: int = 2,
     method: str = "analytical",
+    nonrigid_only: bool = False,
     inplace: bool = True,
 ) -> Optional[AnnData]:
     """
@@ -121,6 +135,7 @@ def morphofield_curvature(
                 ``'analytical'`` method uses the analytical expressions for calculating curvature while ``'numerical'``
                 method uses numdifftools, a numerical differentiation tool, for computing curvature. ``'analytical'``
                 method is much more efficient.
+        nonrigid_only: If True, only the nonrigid part of the vector field will be calculated.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
@@ -132,7 +147,9 @@ def morphofield_curvature(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"])
+    vector_field_class = _generate_vf_class(
+        adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"], nonrigid_only=nonrigid_only
+    )
 
     X, V = vector_field_class.get_data()
     adata.obs[key_added], adata.obsm[key_added] = vector_field_class.compute_curvature(
@@ -147,6 +164,7 @@ def morphofield_curl(
     vf_key: str = "VecFld_morpho",
     key_added: str = "curl",
     method: str = "analytical",
+    nonrigid_only: bool = False,
     inplace: bool = True,
 ) -> Optional[AnnData]:
     """
@@ -161,6 +179,7 @@ def morphofield_curl(
                 ``'analytical'`` method uses the analytical expressions for calculating torsion while ``'numerical'``
                 method uses numdifftools, a numerical differentiation tool, for computing torsion. ``'analytical'``
                 method is much more efficient.
+        nonrigid_only: If True, only the nonrigid part of the vector field will be calculated.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
@@ -171,7 +190,9 @@ def morphofield_curl(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"])
+    vector_field_class = _generate_vf_class(
+        adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"], nonrigid_only=nonrigid_only
+    )
 
     X, V = vector_field_class.get_data()
     curl = vector_field_class.compute_curl(X=X, method=method)
@@ -188,6 +209,7 @@ def morphofield_torsion(
     vf_key: str = "VecFld_morpho",
     key_added: str = "torsion",
     method: str = "analytical",
+    nonrigid_only: bool = False,
     inplace: bool = True,
 ) -> Optional[AnnData]:
     """
@@ -202,6 +224,7 @@ def morphofield_torsion(
                 ``'analytical'`` method uses the analytical expressions for calculating torsion while ``'numerical'``
                 method uses numdifftools, a numerical differentiation tool, for computing torsion. ``'analytical'``
                 method is much more efficient.
+        nonrigid_only: If True, only the nonrigid part of the vector field will be calculated.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
@@ -212,7 +235,9 @@ def morphofield_torsion(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"])
+    vector_field_class = _generate_vf_class(
+        adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"], nonrigid_only=nonrigid_only
+    )
 
     X, V = vector_field_class.get_data()
     torsion_mat = vector_field_class.compute_torsion(X=X, method=method)
@@ -230,6 +255,7 @@ def morphofield_divergence(
     key_added: str = "divergence",
     method: str = "analytical",
     vectorize_size: Optional[int] = 1000,
+    nonrigid_only: bool = False,
     inplace: bool = True,
 ) -> Optional[AnnData]:
     """
@@ -248,6 +274,7 @@ def morphofield_divergence(
 
                 * If vectorize_size = 1, there's no vectorization whatsoever.
                 * If vectorize_size = None, all samples are vectorized.
+        nonrigid_only: If True, only the nonrigid part of the vector field will be calculated.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
@@ -257,7 +284,9 @@ def morphofield_divergence(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"])
+    vector_field_class = _generate_vf_class(
+        adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"], nonrigid_only=nonrigid_only
+    )
 
     X, V = vector_field_class.get_data()
     adata.obs[key_added] = vector_field_class.compute_divergence(X=X, method=method, vectorize_size=vectorize_size)
@@ -270,6 +299,7 @@ def morphofield_jacobian(
     vf_key: str = "VecFld_morpho",
     key_added: str = "jacobian",
     method: str = "analytical",
+    nonrigid_only: bool = False,
     inplace: bool = True,
 ) -> Optional[AnnData]:
     """
@@ -284,6 +314,7 @@ def morphofield_jacobian(
                 ``'analytical'`` method uses the analytical expressions for calculating jacobian while ``'numerical'``
                 method uses numdifftools, a numerical differentiation tool, for computing jacobian. ``'analytical'``
                 method is much more efficient.
+        nonrigid_only: If True, only the nonrigid part of the vector field will be calculated.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
@@ -294,7 +325,9 @@ def morphofield_jacobian(
     """
 
     adata = adata if inplace else adata.copy()
-    vector_field_class = _generate_vf_class(adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"])
+    vector_field_class = _generate_vf_class(
+        adata=adata, vf_key=vf_key, method=adata.uns[vf_key]["method"], nonrigid_only=nonrigid_only
+    )
     X, V = vector_field_class.get_data()
     Jac_func = vector_field_class.get_Jacobian(method=method)
 
