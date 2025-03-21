@@ -8,10 +8,12 @@ from typing import Optional, Union
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pyvista as pv
 import seaborn as sns
 from anndata import AnnData
 from pyvista import PolyData
 from scipy.sparse import issparse
+from tqdm import tqdm
 
 from ....alignment import get_optimal_mapping_relationship
 from ....tdr import (
@@ -702,10 +704,115 @@ def pairwise_iteration(
     )
 
 
+# def pairwise_iteration_panel(
+#     adataA: AnnData,
+#     adataB: AnnData,
+#     layer: str = "X",
+#     group_key: Union[str, list] = None,
+#     select_group: Union[str, list] = None,
+#     spatial_key: str = "align_spatial",
+#     iter_key: str = "iter_spatial",
+#     filename: str = "animate.mp4",
+#     jupyter: Union[bool, Literal["none", "static", "trame"]] = False,
+#     off_screen: bool = False,
+#     id_key: Optional[str] = None,
+#     cpo: Optional[Union[str, list]] = None,
+#     window_size: Optional[tuple] = None,
+#     background: str = "black",
+#     modelA_cmap: str = "dodgerblue",
+#     modelB_cmap: str = "red",
+#     ambient: Union[int, float] = 0.3,
+#     modelA_opacity: Union[int, float] = 0.8,
+#     modelB_opacity: Union[int, float] = 1.0,
+#     model_size: Union[float, list] = 6.0,
+#     show_axes: bool = True,
+#     show_legend: bool = True,
+#     legend_kwargs: Optional[dict] = None,
+#     text: Union[bool, str] = True,
+#     text_kwargs: Optional[dict] = None,
+#     framerate: int = 6,
+#     **kwargs,
+# ):
+#     adataA, adataB = adataA.copy(), adataB.copy()
+#     if id_key is None:
+#         id_key = "slices"
+#         adataA.obs[id_key] = "slice_1"
+#         adataB.obs[id_key] = "slice_2"
+
+#     # group_key = id_key if group_key is None else group_key
+#     select_idxA = adataA.obs[group_key].isin(select_group) if group_key is not None else np.arange(adataA.n_obs)
+#     select_idxB = adataB.obs[group_key].isin(select_group) if group_key is not None else np.arange(adataB.n_obs)
+#     # idA = str(adataA.obs[id_key].unique().tolist()[0])
+#     # idB = str(adataB.obs[id_key].unique().tolist()[0])
+
+#     spatialA_dims = adataA.obsm[spatial_key].shape[1]
+#     spatialB_dims = adataB.obsm[spatial_key].shape[1]
+#     if cpo is None:
+#         cpo = "xy" if spatialA_dims == 2 else "iso"
+
+#     # Check the spatial coordinates
+#     if spatialA_dims == 2:
+#         z = np.zeros(shape=(adataA.obsm[spatial_key].shape[0], 1))
+#         coordsA = np.c_[adataA.obsm[spatial_key], z]
+#     else:
+#         coordsA = adataA.obsm[spatial_key]
+#         # adataA.obsm[spatial_key] = np.c_[adataA.obsm[spatial_key], z]
+#     if spatialB_dims == 2:
+#         z = np.zeros(shape=(adataB.obsm[spatial_key].shape[0], 1))
+#         coordsB = np.c_[adataB.obsm[spatial_key], z]
+#     else:
+#         coordsB = adataB.obsm[spatial_key]
+#         # adataB.obsm[spatial_key] = np.c_[adataB.obsm[spatial_key], z]
+
+#     points_coordinates = np.concatenate([coordsA[select_idxA], coordsB[select_idxB]], axis=0)
+#     points_scalars = np.concatenate([np.zeros(coordsA[select_idxA].shape[0]), np.ones(coordsB[select_idxB].shape[0])])
+
+
+#     plotter = pv.Plotter(notebook=False, off_screen=True)
+#     # cpo = plotter.show(return_cpos=True, jupyter_backend="none", cpos=cpo)
+#     # plotter.camera_position = cpo
+#     plotter.add_mesh(
+#         points_coordinates,
+#         scalars=points_scalars,
+#         lighting=False,
+#         show_edges=True,
+#         clim=[-1, 1],
+#     )
+#     plotter.camera_position = cpo
+#     plotter.background_color = background
+
+#     filename_format = filename.split(".")[-1]
+#     if filename_format == "gif":
+#         plotter.open_gif(filename)
+#     elif filename_format == "mp4":
+#         plotter.open_movie(filename, framerate=framerate, quality=5)
+
+#     # Update Z and write a frame for each updated position
+#     nframe = len(adataB.uns[iter_key][spatial_key].keys())
+#     # for phase in np.linspace(0, 2 * np.pi, nframe + 1)[:nframe]:
+#     from tqdm import tqdm
+
+#     for i in tqdm(range(nframe)):
+#         spatialB_dims = adataB.uns[iter_key][spatial_key][i].shape[1]
+#         if spatialB_dims == 2:
+#             z = np.zeros(shape=(adataB.uns[iter_key][spatial_key][i].shape[0], 1))
+#             coordsB = np.c_[adataB.uns[iter_key][spatial_key][i], z]
+#         else:
+#             coordsB = adataB.uns[iter_key][spatial_key][i]
+#         points_coordinates = np.concatenate([coordsA[select_idxA], coordsB[select_idxB]], axis=0)
+#         plotter.update_coordinates(points_coordinates, render=False)
+#         # plotter.update_scalars(z.ravel(), render=False)
+
+#         # Write a frame. This triggers a render.
+#         plotter.write_frame()
+
+#     # Closes and finalizes movie
+#     plotter.close()
+
+
 def pairwise_iteration_panel(
     adataA: AnnData,
     adataB: AnnData,
-    layer: str = "X",
     group_key: Union[str, list] = None,
     select_group: Union[str, list] = None,
     spatial_key: str = "align_spatial",
@@ -764,17 +871,31 @@ def pairwise_iteration_panel(
 
     points_coordinates = np.concatenate([coordsA[select_idxA], coordsB[select_idxB]], axis=0)
     points_scalars = np.concatenate([np.zeros(coordsA[select_idxA].shape[0]), np.ones(coordsB[select_idxB].shape[0])])
-    import pyvista as pv
+
+    pc_A = pv.PolyData(coordsA[select_idxA])
+    pc_B = pv.PolyData(coordsB[select_idxB])
 
     plotter = pv.Plotter(notebook=False, off_screen=True)
     # cpo = plotter.show(return_cpos=True, jupyter_backend="none", cpos=cpo)
     # plotter.camera_position = cpo
+    # plotter.add_mesh(
+    #     points_coordinates,
+    #     scalars=points_scalars,
+    #     lighting=False,
+    #     show_edges=True,
+    #     clim=[-1, 1],
+    # )
     plotter.add_mesh(
-        points_coordinates,
-        scalars=points_scalars,
+        pc_A,
+        color=np.array([208, 53, 43]) / 255,
         lighting=False,
         show_edges=True,
-        clim=[-1, 1],
+    )
+    plotter.add_mesh(
+        pc_B,
+        color=np.array([84, 158, 63]) / 255,
+        lighting=False,
+        show_edges=True,
     )
     plotter.camera_position = cpo
     plotter.background_color = background
@@ -788,7 +909,6 @@ def pairwise_iteration_panel(
     # Update Z and write a frame for each updated position
     nframe = len(adataB.uns[iter_key][spatial_key].keys())
     # for phase in np.linspace(0, 2 * np.pi, nframe + 1)[:nframe]:
-    from tqdm import tqdm
 
     for i in tqdm(range(nframe)):
         spatialB_dims = adataB.uns[iter_key][spatial_key][i].shape[1]
@@ -797,8 +917,10 @@ def pairwise_iteration_panel(
             coordsB = np.c_[adataB.uns[iter_key][spatial_key][i], z]
         else:
             coordsB = adataB.uns[iter_key][spatial_key][i]
-        points_coordinates = np.concatenate([coordsA[select_idxA], coordsB[select_idxB]], axis=0)
-        plotter.update_coordinates(points_coordinates, render=False)
+
+        pc_B.points = coordsB
+        # points_coordinates = np.concatenate([coordsA[select_idxA], coordsB[select_idxB]], axis=0)
+        # plotter.update_coordinates(points_coordinates, render=False)
         # plotter.update_scalars(z.ravel(), render=False)
 
         # Write a frame. This triggers a render.

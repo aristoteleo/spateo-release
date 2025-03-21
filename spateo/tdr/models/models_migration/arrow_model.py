@@ -103,7 +103,7 @@ def construct_arrows(
     start_points: np.ndarray,
     direction: np.ndarray = None,
     arrows_scale: Optional[np.ndarray] = None,
-    n_sampling: Optional[int] = None,
+    n_sampling: Optional[Union[int, np.ndarray]] = None,
     sampling_method: str = "trn",
     factor: float = 1.0,
     key_added: Optional[str] = "arrow",
@@ -138,18 +138,34 @@ def construct_arrows(
     from dynamo.tools.sampling import sample
 
     index_arr = np.arange(0, start_points.shape[0])
-    if not (n_sampling is None):
+    # if not (n_sampling is None):
+    #     index_arr = sample(
+    #         arr=index_arr,
+    #         n=n_sampling,
+    #         method=sampling_method,
+    #         X=start_points,
+    #     )
+    # else:
+    #     if len(start_points) > 500:
+    #         lm.main_warning(
+    #             f"The number of start_points is more than 500. You may want to "
+    #             f"lower the max number of arrows to draw."
+    #         )
+
+    if (n_sampling is not None) and (isinstance(n_sampling, int)):
         index_arr = sample(
             arr=index_arr,
             n=n_sampling,
             method=sampling_method,
             X=start_points,
         )
+    elif (n_sampling is not None) and (isinstance(n_sampling, np.ndarray)):
+        index_arr = n_sampling
     else:
-        if len(start_points) > 500:
+        if index_arr.shape[0] > 500:
             lm.main_warning(
-                f"The number of start_points is more than 500. You may want to "
-                f"lower the max number of arrows to draw."
+                f"The number of cells is more than 200. You may want to "
+                f"lower the max number of cell trajectories to draw."
             )
 
     start_points = start_points[index_arr, :].copy()

@@ -196,7 +196,7 @@ def polyhull(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> PolyData:
         poly: a PolyData object generated with the convex hull constructed based on the input data points.
     """
     hull = ConvexHull(np.column_stack((x, y, z)))
-    faces = np.column_stack((3 * np.ones((len(hull.simplices), 1), dtype=np.int), hull.simplices)).flatten()
+    faces = np.column_stack((3 * np.ones((len(hull.simplices), 1), dtype=int), hull.simplices)).flatten()
     poly = PolyData(hull.points, faces)
     return hull, poly
 

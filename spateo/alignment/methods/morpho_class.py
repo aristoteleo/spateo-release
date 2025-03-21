@@ -164,6 +164,7 @@ class Morpho_pairwise:
         use_chunk: bool = False,
         chunk_capacity: float = 1.0,
         return_mapping: bool = False,
+        update_R: bool = True,
     ) -> None:
 
         # initialization
@@ -223,6 +224,7 @@ class Morpho_pairwise:
         self.kappa = kappa
         self.nonrigid_start_iter = nonrigid_start_iter
         self.return_mapping = return_mapping
+        self.update_R = update_R
 
         # checking keys
         self._check()
@@ -1369,11 +1371,12 @@ class Morpho_pairwise:
         svdU, svdS, svdV = _linalg(self.nx).svd(A)
         self.C[-1, -1] = _linalg(self.nx).det(self.nx.dot(svdU, svdV))
 
-        R = self.nx.dot(self.nx.dot(svdU, self.C), svdV)
-        if self.SVI_mode and self.step_size < 1:
-            self.R = self.step_size * R + (1 - self.step_size) * self.R
-        else:
-            self.R = R
+        if self.update_R:
+            R = self.nx.dot(self.nx.dot(svdU, self.C), svdV)
+            if self.SVI_mode and self.step_size < 1:
+                self.R = self.step_size * R + (1 - self.step_size) * self.R
+            else:
+                self.R = R
 
         # solve translation using SVD formula
         t_numerator = PXB - PVA - self.nx.dot(PXA, self.R.T)

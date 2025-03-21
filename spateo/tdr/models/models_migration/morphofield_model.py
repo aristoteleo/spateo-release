@@ -17,7 +17,7 @@ def construct_field(
     model: PolyData,
     vf_key: str = "VecFld_morpho",
     arrows_scale_key: Optional[str] = None,
-    n_sampling: Optional[int] = None,
+    n_sampling: Optional[Union[int, np.ndarray]] = None,
     sampling_method: str = "trn",
     factor: float = 1.0,
     key_added: str = "v_arrows",
