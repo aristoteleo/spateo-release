@@ -25,6 +25,8 @@ def glm_degs(
     qval_threshold: Optional[float] = 0.05,
     llf_threshold: Optional[float] = -2000,
     ci_alpha: float = 0.05,
+    use_zinb: bool = False,
+    zero_infl_formula: Optional[str] = None,
     inplace: bool = True,
 ) -> Optional[AnnData]:
     """Differential genes expression tests using generalized linear regressions. Here only size factor normalized gene
@@ -49,6 +51,8 @@ def glm_degs(
         qval_threshold: Only keep the glm test results whose qval is less than the ``qval_threshold``.
         llf_threshold: Only keep the glm test results whose log-likelihood is less than the ``llf_threshold``.
         ci_alpha: The significance level for the confidence interval. The default ``ci_alpha = .05`` returns a 95% confidence interval.
+        use_zinb: Whether to use zero-inflated negative binomial model.
+        zero_infl_formula: A formula string specifying the zero-inflated part of the model.
         inplace: Whether to copy adata or modify it inplace.
 
     Returns:
@@ -96,14 +100,20 @@ def glm_degs(
         expression = X_data[:, i].toarray() if sparse else X_data[:, i]
         df_factors["expression"] = expression
         try:
-            nb2_full, nb2_null = glm_test(df_factors, fullModelFormulaStr, reducedModelFormulaStr)
+            if use_zinb:
+                zinb_full, zinb_null = zinb_test(
+                    df_factors, fullModelFormulaStr, reducedModelFormulaStr, zero_infl_formula
+                )
+                pval = lrt(zinb_full, zinb_null)
+                deg_df.iloc[i, :] = ("ok", "ZINB", zinb_full.llf, pval)
+            else:
+                nb2_full, nb2_null = glm_test(df_factors, fullModelFormulaStr, reducedModelFormulaStr)
 
-            pval = lrt(nb2_full, nb2_null)
-            deg_df.iloc[i, :] = ("ok", "NB2", nb2_full.llf, pval)
+                pval = lrt(nb2_full, nb2_null)
+                deg_df.iloc[i, :] = ("ok", "NB2", nb2_full.llf, pval)
 
             df_factors_gene = df_factors.copy()
             df_factors_gene["mu"] = nb2_full.mu
-            # df_factors_gene["fitted_expression"] = nb2_full.predict() this is equal to nb2_full.mu
             df_factors_gene["resid_deviance"] = nb2_full.resid_deviance
             df_factors_gene["resid_pearson"] = nb2_full.resid_pearson
             df_factors_gene[["ci_lower", "ci_upper"]] = nb2_full.get_prediction().conf_int(alpha=ci_alpha)
@@ -140,7 +150,40 @@ def glm_test(
     nb2_family = sm.families.NegativeBinomial()  # (alpha=aux_olsr_results.params[0])
     nb2_full = sm.GLM(data["expression"], transformed_x, family=nb2_family).fit()
     nb2_null = sm.GLM(data["expression"], transformed_x_null, family=nb2_family).fit()
+
+    # print(nb2_full.summary())
+    # print(nb2_null.summary())
     return nb2_full, nb2_null
+
+
+def zinb_test(data, full_count_formula: str, reduced_count_formula: str, zero_infl_formula: Optional[str] = None):
+    """Fit zero-inflated negative binomial model"""
+    from statsmodels.discrete.count_model import ZeroInflatedNegativeBinomialP
+
+    # Generate design matrix for count model
+    count_x_full = dmatrix(full_count_formula, data, return_type="dataframe")
+    count_x_reduced = dmatrix(reduced_count_formula, data, return_type="dataframe")
+
+    # Design matrix for zero-inflation part (defaults to same as reduced model)
+    if zero_infl_formula is None:
+        zero_infl_x = count_x_reduced  # Use intercept by default
+    else:
+        zero_infl_x = dmatrix(zero_infl_formula, data, return_type="dataframe")
+
+    # Fit full model
+    zinb_full = ZeroInflatedNegativeBinomialP(
+        endog=data["expression"], exog=count_x_full, exog_infl=zero_infl_x, inflation="logit"
+    ).fit(method="nm", maxiter=10000, disp=False)
+
+    # Fit reduced model (keeping zero-inflation part unchanged)
+    zinb_null = ZeroInflatedNegativeBinomialP(
+        endog=data["expression"], exog=count_x_reduced, exog_infl=zero_infl_x, inflation="logit"
+    ).fit(method="nm", maxiter=10000, disp=False)
+
+    # print(zinb_full.summary())
+    # print(zinb_null.summary())
+
+    return zinb_full, zinb_null
 
 
 def lrt(full, restr):

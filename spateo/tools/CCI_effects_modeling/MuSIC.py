@@ -2359,7 +2359,7 @@ class MuSIC:
                     # based on the subset already generated from that:
                     if "threshold_sampled_names" in locals():
                         updated_sampled_names = set(threshold_sampled_names).intersection(sampled_df.index)
-                        sampled_df = sampled_df.loc[updated_sampled_names]
+                        sampled_df = sampled_df.loc[list(updated_sampled_names)]
 
                     if verbose:
                         self.logger.info(f"For target {target} subsampled from {n_samples} to {len(sampled_df)} cells.")
@@ -2492,7 +2492,7 @@ class MuSIC:
 
             for target in y_arr.columns:
                 ref_values = y_arr[target].loc[check.index].values
-                query_values = y_arr[target].loc[new_samples].values
+                query_values = y_arr[target].loc[list(new_samples)].values
 
                 # Create a mask for non-matching expression patterns b/w sampled and close-by neighbors:
                 ref_expression = (ref_values != 0).flatten()
@@ -3833,7 +3833,7 @@ class MuSIC:
                     os.remove(os.path.join(parent_dir, file))
                     continue
 
-                feat_sub = [col.replace("b_", "") for col in betas.columns]
+                feat_sub = list([col.replace("b_", "") for col in betas.columns])
                 if isinstance(betas.index[0], int) or isinstance(betas.index[0], float):
                     betas.index = [self.adata.obs_names[int(idx)] for idx in betas.index]
                 standard_errors = all_outputs[[col for col in all_outputs.columns if col.startswith("se_")]]
@@ -3875,7 +3875,7 @@ class MuSIC:
                             standard_errors *= mask_matrix
 
                         mask_df = (self.X_df.loc[betas.index] != 0).astype(int)
-                        mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
+                        mask_df = mask_df.loc[:, list([g for g in mask_df.columns if g in feat_sub])]
                         for col in betas.columns:
                             if col.replace("b_", "") not in mask_df.columns:
                                 mask_df[col] = 0
@@ -3912,7 +3912,7 @@ class MuSIC:
                         betas *= mask_matrix
                         standard_errors *= mask_matrix
                         mask_df = (self.X_df.loc[betas.index] != 0).astype(int)
-                        mask_df = mask_df.loc[:, [g for g in mask_df.columns if g in feat_sub]]
+                        mask_df = mask_df.loc[:, list([g for g in mask_df.columns if g in feat_sub])]
                         for col in betas.columns:
                             if col.replace("b_", "") not in mask_df.columns:
                                 mask_df[col] = 0
@@ -3931,7 +3931,7 @@ class MuSIC:
                         target_expressed = self.adata[betas.index, target].X.toarray()
                         mask = target_expressed == 0
                         indices = np.where(mask)
-                        index_cell_names = self.sample_names[indices[0]]
+                        index_cell_names = list(self.sample_names[indices[0]])
                         all_outputs.loc[index_cell_names] = 0
 
                         for col in betas.columns:

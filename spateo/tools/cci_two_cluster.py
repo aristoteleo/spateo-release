@@ -176,7 +176,7 @@ def find_cci_two_group(
         lr_network = lr_network[lr_network["to"].isin(expressed_receptor)]
 
         ligands = list(set(lr_network["from"]))
-        ligands_test = [l[0].upper() + l[1:].lower() for l in ligands]
+        ligands_test = [l.upper() if species == "human" else l[0].upper() + l[1:].lower() for l in ligands]
         ligands = [
             l
             for l in ligands_test
@@ -238,6 +238,7 @@ def find_cci_two_group(
         ]
 
         # ligand_sender_spec
+        print(ligands)
         adata_l = adata[:, ligands]
         for g in adata.obs[group_sp].unique():
             # Of all cells expressing particular ligand, what proportion are group g:
