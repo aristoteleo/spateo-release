@@ -13,7 +13,7 @@ with open("README.md", "r", encoding="UTF-8") as fh:
 
 setup(
     name="spateo-release",
-    version="1.1.0",
+    version="1.1.1",
     python_requires=">=3.7",
     install_requires=read_requirements("requirements.txt"),
     extras_require={
@@ -35,7 +35,7 @@ setup(
     ],
     author="Xiaojie Qiu",
     author_email="xqiu@wi.mit.edu",
-    description="Spateo: multidimensional spatiotemporal modeling of single-cell spatial transcriptomics",
+    description="Spatiotemporal modeling of molecular holograms",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="BSD",

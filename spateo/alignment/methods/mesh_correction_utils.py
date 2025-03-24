@@ -16,7 +16,8 @@ from ..utils import _iteration
 try:
     import alphashape
 except ImportError:
-    print("alphashape is not installed. Please install it using 'pip install alphashape'.")
+    # print("alphashape is not installed. Please install it using 'pip install alphashape'.")
+    pass
 
 ##################
 # Transformation #
