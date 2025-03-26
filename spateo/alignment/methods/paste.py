@@ -116,7 +116,7 @@ def paste_pairwise_align(
     except ImportError:
         from ot.gromov import cg
 
-    pi, log = ot.gromov.cg(
+    pi, log = ot.cg(
         a,
         b,
         (1 - alpha) * M,
