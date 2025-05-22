@@ -592,12 +592,7 @@ def _matplotlib_points(
     # Color by values
     elif values is not None:
         # main_debug("drawing points by values")
-        cmap_ = copy.copy(mpl.colormaps[cmap])
-        cmap_.set_bad("lightgray")
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            mpl.colormaps.register(name=cmap_.name, cmap=cmap_, force=True)
+        # Note: No need to register colormap - matplotlib handles built-in colormaps automatically
 
         if values.shape[0] != points.shape[0]:
             raise ValueError(
@@ -785,7 +780,8 @@ def _matplotlib_points(
         if show_colorbar:
             cb = plt.colorbar(mappable, cax=set_colorbar(ax, inset_dict), ax=ax)
             cb.set_alpha(1)
-            cb.draw_all()
+            # Note: cb.draw_all() was removed in newer matplotlib versions
+            # The colorbar will be drawn automatically when the figure is displayed
             cb.locator = MaxNLocator(nbins=3, integer=True)
             cb.update_ticks()
 
