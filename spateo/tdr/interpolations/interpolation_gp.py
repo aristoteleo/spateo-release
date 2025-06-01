@@ -7,13 +7,14 @@ except ImportError:
 
 import gpytorch
 import numpy as np
-import ot
 import pandas as pd
 import torch
 from anndata import AnnData
 from gpytorch.likelihoods import GaussianLikelihood
 from numpy import ndarray
 from scipy.sparse import issparse
+
+from spateo.alignment.methods.backend import get_backend
 
 from ...alignment.methods import _chunk, _unsqueeze
 from ...logging import logger_manager as lm
@@ -71,7 +72,7 @@ class Imputation_GPR:
             self.train_y = self.train_y.cuda()
         self.train_y = self.train_y.squeeze()
 
-        self.nx = ot.backend.get_backend(self.train_x, self.train_y)
+        self.nx = get_backend(self.train_x, self.train_y)
         self.normalize_spatial = normalize_spatial
         if self.normalize_spatial:
             self.train_x = self.normalize_coords(self.train_x)

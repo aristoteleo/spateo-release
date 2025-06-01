@@ -2,7 +2,6 @@ import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-import ot
 import pandas as pd
 import torch
 from anndata import AnnData
@@ -11,6 +10,7 @@ from scipy.linalg import pinv
 from scipy.sparse import issparse
 from scipy.special import psi
 
+from spateo.alignment.methods.backend import NumpyBackend, TorchBackend, get_backend
 from spateo.logging import logger_manager as lm
 
 # Get the intersection of lists
@@ -42,14 +42,14 @@ def check_backend(device: str = "cpu", dtype: str = "float32", verbose: bool = T
         type_as: The type_as.device is the device used to run the program and the type_as.dtype is the floating-point number type.
     """
     if device == "cpu":
-        backend = ot.backend.NumpyBackend()
+        backend = NumpyBackend()
     else:
         os.environ["CUDA_VISIBLE_DEVICES"] = device
         if torch.cuda.is_available():
             torch.cuda.init()
-            backend = ot.backend.TorchBackend()
+            backend = TorchBackend()
         else:
-            backend = ot.backend.NumpyBackend()
+            backend = NumpyBackend()
             if verbose:
                 lm.main_info(
                     message="GPU is not available, resorting to torch cpu.",
@@ -258,7 +258,7 @@ def check_label_transfer_dict(
 
 # Finished
 def check_label_transfer(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     type_as: Union[torch.Tensor, np.ndarray],
     samples: List[AnnData],
     obs_key: str,
@@ -380,7 +380,7 @@ def generate_label_transfer_dict(
 
 # Finished
 def get_rep(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     type_as: Union[torch.Tensor, np.ndarray],
     sample: AnnData,
     rep: str = "X",
@@ -455,7 +455,7 @@ def filter_common_genes(*genes, verbose: bool = True) -> list:
 
 # Finished
 def normalize_coords(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     coords: List[Union[np.ndarray, torch.Tensor]],
     verbose: bool = True,
     separate_scale: bool = True,
@@ -470,8 +470,8 @@ def normalize_coords(
     ----------
     coords : List[Union[np.ndarray, torch.Tensor]]
         Spatial coordinates of the samples. Each element in the list can be a numpy array or a torch tensor.
-    nx : Union[ot.backend.TorchBackend, ot.backend.NumpyBackend], optional
-        The backend to use for computations. Default is `ot.backend.NumpyBackend`.
+    nx : Union[TorchBackend, NumpyBackend], optional
+        The backend to use for computations. Default is `NumpyBackend`.
     verbose : bool, optional
         If `True`, print progress updates. Default is `True`.
     separate_scale : bool, optional
@@ -527,7 +527,7 @@ def normalize_coords(
 
 # Finished
 def normalize_exps(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     exp_layers: List[List[Union[np.ndarray, torch.Tensor]]],
     rep_field: Union[str, List[str]] = "layer",
     verbose: bool = True,
@@ -536,8 +536,8 @@ def normalize_exps(
     Normalize the gene expression matrices.
 
     Args:
-        nx (Union[ot.backend.TorchBackend, ot.backend.NumpyBackend], optional):
-            The backend to use for computations. Defaults to `ot.backend.NumpyBackend`.
+        nx (Union[TorchBackend, NumpyBackend], optional):
+            The backend to use for computations. Defaults to `NumpyBackend`.
         exp_layers (List[List[Union[np.ndarray, torch.Tensor]]]):
             Gene expression and optionally the representation matrices of the samples.
             Each element in the list can be a numpy array or a torch tensor.
@@ -594,7 +594,7 @@ def align_preprocess(
     device: str = "cpu",
     verbose: bool = True,
 ) -> Tuple[
-    Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    Union[TorchBackend, NumpyBackend],
     Union[torch.Tensor, np.ndarray],
     List[List[Union[np.ndarray, torch.Tensor]]],
     List[Union[np.ndarray, torch.Tensor]],
@@ -730,7 +730,7 @@ def align_preprocess(
 
 # Finished
 def guidance_pair_preprocess(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     type_as: Union[torch.Tensor, np.ndarray],
     guidance_pair: List[np.ndarray],
     normalize_scales: Union[torch.Tensor, np.ndarray],
@@ -740,8 +740,8 @@ def guidance_pair_preprocess(
     Preprocess guidance pairs by normalizing them.
 
     Args:
-        nx (Union[ot.backend.TorchBackend, ot.backend.NumpyBackend], optional):
-            Backend module for computations (e.g., numpy or torch). Defaults to `ot.backend.NumpyBackend`.
+        nx (Union[TorchBackend, NumpyBackend], optional):
+            Backend module for computations (e.g., numpy or torch). Defaults to `NumpyBackend`.
         type_as (Union[torch.Tensor, np.ndarray]):
             Type to which the output should be cast.
         guidance_pair (List[np.ndarray]):
@@ -846,7 +846,7 @@ def _kl_distance_backend(
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
 
     # Get the appropriate backend (either NumPy or PyTorch)
-    nx = ot.backend.get_backend(X, Y)
+    nx = get_backend(X, Y)
 
     # Normalize rows to sum to 1 if probabilistic is True
     if probabilistic:
@@ -895,7 +895,7 @@ def _cosine_distance_backend(
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
 
     # Get the appropriate backend (either NumPy or PyTorch)
-    nx = ot.backend.get_backend(X, Y)
+    nx = get_backend(X, Y)
 
     # Normalize rows to unit vectors
     X_norm = nx.sqrt(nx.sum(X**2, axis=1, keepdims=True))
@@ -940,7 +940,7 @@ def _euc_distance_backend(
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
 
     # Get the appropriate backend (either NumPy or PyTorch)
-    nx = ot.backend.get_backend(X, Y)
+    nx = get_backend(X, Y)
 
     D = nx.sum(X**2, 1)[:, None] + nx.sum(Y**2, 1)[None, :] - 2 * nx.dot(X, Y.T)
 
@@ -983,7 +983,7 @@ def _label_distance_backend(
     assert X.ndim == 1, "X should be a 1-dimensional array."
     assert Y.ndim == 1, "Y should be a 1-dimensional array."
 
-    nx = ot.backend.get_backend(X, Y, label_transfer)
+    nx = get_backend(X, Y, label_transfer)
 
     if nx_torch(nx):
         assert not (torch.is_floating_point(X) or torch.is_floating_point(Y)), "X and Y should contain integer values."
@@ -1135,7 +1135,7 @@ def calc_probability(
     """
 
     # Get the appropriate backend (either NumPy or PyTorch)
-    nx = ot.backend.get_backend(distance_matrix)
+    nx = get_backend(distance_matrix)
 
     if probability_type.lower() == "gauss":
         if probability_parameter is None:
@@ -1157,7 +1157,7 @@ def calc_probability(
 
 
 def get_P_core(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     type_as: Union[torch.Tensor, np.ndarray],
     Dim: Union[torch.Tensor, np.ndarray],
     spatial_dist: Union[np.ndarray, torch.Tensor],
@@ -1268,7 +1268,7 @@ def get_P_core(
 
 
 def get_P(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     type_as: Union[torch.Tensor, np.ndarray],
     Dim: Union[torch.Tensor, np.ndarray],
     spatial_dist: Union[np.ndarray, torch.Tensor],
@@ -1324,7 +1324,7 @@ def get_P(
 
 
 def get_P_sparse(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     type_as: Union[torch.Tensor, np.ndarray],
     Dim: Union[torch.Tensor, np.ndarray],
     spatial_XA: Union[np.ndarray, torch.Tensor],
@@ -1704,7 +1704,7 @@ def con_K(
     """
 
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
-    nx = ot.backend.get_backend(X, Y)
+    nx = get_backend(X, Y)
 
     [K] = calc_distance(
         X=X,
@@ -1792,7 +1792,7 @@ def kl_divergence_backend(X, Y, probabilistic=True):
         D: np array with dim (n_samples by m_samples). Pairwise KL divergence matrix.
     """
     assert X.shape[1] == Y.shape[1], "X and Y do not have the same number of features."
-    nx = ot.backend.get_backend(X, Y)
+    nx = get_backend(X, Y)
     if probabilistic:
         X = X / nx.sum(X, axis=1, keepdims=True)
         Y = Y / nx.sum(Y, axis=1, keepdims=True)
@@ -1823,7 +1823,7 @@ def kl_distance(
     Returns:
         Union[np.ndarray, torch.Tensor]: KL distance matrix of two vectors with shape n x m.
     """
-    nx = ot.backend.get_backend(X_A, X_B)
+    nx = get_backend(X_A, X_B)
     data_on_gpu = False
     if nx_torch(nx):
         if X_A.is_cuda:
@@ -1933,7 +1933,7 @@ def calc_exp_dissimilarity(
     Returns:
         Union[np.ndarray, torch.Tensor]: The dissimilarity matrix of two feature samples.
     """
-    nx = ot.backend.get_backend(X_A, X_B)
+    nx = get_backend(X_A, X_B)
 
     assert dissimilarity in [
         "kl",
@@ -1987,7 +1987,9 @@ def cal_dist(
     Returns:
         Union[np.ndarray, torch.Tensor]: Distance matrix of two vectors with shape n x m.
     """
-    nx = ot.backend.get_backend(X_A, X_B)
+    import ot
+
+    nx = get_backend(X_A, X_B)
     data_on_gpu = False
     if nx_torch(nx):
         if X_A.is_cuda:
@@ -2056,7 +2058,7 @@ def cal_dot(
     Returns:
         Union[np.ndarray, torch.Tensor]: Matrix multiplication result with shape n x m
     """
-    nx = ot.backend.get_backend(mat1, mat2)
+    nx = get_backend(mat1, mat2)
     type_as = mat1[0, 0]
     use_gpu = True if use_gpu and nx_torch(nx) and torch.cuda.is_available() else False
     if not use_chunk:
@@ -2095,7 +2097,7 @@ def get_optimal_R(
     Returns:
         Union[np.ndarray, torch.Tensor]: The optimal rotation matrix R with shape d x d
     """
-    nx = ot.backend.get_backend(coordsA, coordsB, P, R_init)
+    nx = get_backend(coordsA, coordsB, P, R_init)
     NA, NB, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
     Sp = nx.einsum("ij->", P)
     K_NA = nx.einsum("ij->i", P)
@@ -2137,7 +2139,9 @@ def _cos_similarity(
     mat1: Union[np.ndarray, torch.Tensor],
     mat2: Union[np.ndarray, torch.Tensor],
 ):
-    nx = ot.backend.get_backend(mat1, mat2)
+    import ot
+
+    nx = get_backend(mat1, mat2)
     if nx_torch(nx):
         mat1_unsqueeze = mat1.unsqueeze(-1)
         mat2_unsqueeze = mat2.unsqueeze(-1).transpose(0, 2)
@@ -2159,7 +2163,7 @@ def _dist(
         "cos",
         "cosine",
     ], "``metric`` value is wrong. Available ``metric`` are: ``'euc'``, ``'euclidean'`` and ``'kl'``."
-    nx = ot.backend.get_backend(mat1, mat2)
+    nx = get_backend(mat1, mat2)
     if metric.lower() == "euc" or metric.lower() == "euclidean":
         distMat = nx.sum(mat1**2, 1)[:, None] + nx.sum(mat2**2, 1)[None, :] - 2 * _dot(nx)(mat1, mat2.T)
     elif metric.lower() == "kl":
@@ -2192,7 +2196,7 @@ def _dist(
 #         mean_data_mat (Union[np.ndarray, torch.Tensor]): The mean of the input data matrix.
 #     """
 
-#     nx = ot.backend.get_backend(data_mat)
+#     nx = get_backend(data_mat)
 #     mean_data_mat = _unsqueeze(nx)(nx.mean(data_mat, axis=0), 0)
 #     if center:
 #         mean_re_data_mat = data_mat - mean_data_mat
@@ -2211,7 +2215,7 @@ def _dist(
 #     V_new_basis: Union[np.ndarray, torch.Tensor],
 #     center: bool = True,
 # ):
-#     nx = ot.backend.get_backend(data_mat)
+#     nx = get_backend(data_mat)
 #     return nx.einsum("ij,jk->ik", data_mat, V_new_basis)
 
 
@@ -2220,7 +2224,7 @@ def _dist(
 #     V_new_basis: Union[np.ndarray, torch.Tensor],
 #     mean_data_mat: Union[np.ndarray, torch.Tensor],
 # ) -> Union[np.ndarray, torch.Tensor]:
-#     nx = ot.backend.get_backend(projected_data)
+#     nx = get_backend(projected_data)
 #     return nx.einsum("ij,jk->ik", projected_data, V_new_basis.t()) + mean_data_mat
 
 # Finished
@@ -2337,7 +2341,7 @@ def coarse_rigid_alignment(
 ) -> Tuple[Any, Any, Any, Any, Union[ndarray, Any], Union[ndarray, Any]]:
     if verbose:
         lm.main_info("Performing coarse rigid alignment...")
-    nx = ot.backend.get_backend(coordsA, coordsB)
+    nx = get_backend(coordsA, coordsB)
     if transformed_points is None:
         transformed_points = coordsA
     N, M, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
@@ -2356,7 +2360,7 @@ def coarse_rigid_alignment(
 
     transformed_points = nx.to_numpy(transformed_points)
     sub_coordsA = coordsA
-    nx = ot.backend.NumpyBackend()
+    nx = NumpyBackend()
 
     item2 = np.argpartition(DistMat, top_K, axis=0)[:top_K, :].T
     item1 = np.repeat(np.arange(DistMat.shape[1])[:, None], top_K, axis=1)
@@ -2464,7 +2468,7 @@ def coarse_rigid_alignment_debug(
     coordsA: Union[np.ndarray, torch.Tensor],
     coordsB: Union[np.ndarray, torch.Tensor],
     DistMat: Union[np.ndarray, torch.Tensor],
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     sub_sample_num: int = -1,
     top_K: int = 10,
     transformed_points: Optional[Union[np.ndarray, torch.Tensor]] = None,
@@ -2475,7 +2479,7 @@ def coarse_rigid_alignment_debug(
     assert (
         coordsB.shape[0] == DistMat.shape[1]
     ), "coordsB and the second dim of DistMat do not have the same number of features."
-    nx = ot.backend.get_backend(coordsA, coordsB, DistMat)
+    nx = get_backend(coordsA, coordsB, DistMat)
     if transformed_points is None:
         transformed_points = coordsA
     N, M, D = coordsA.shape[0], coordsB.shape[0], coordsA.shape[1]
@@ -2492,7 +2496,7 @@ def coarse_rigid_alignment_debug(
         sub_coordsA = coordsA[idxA, :]
         coordsB = coordsB[idxB, :]
         DistMat = DistMat[idxA, :][:, idxB]
-    # nx = ot.backend.NumpyBackend()
+    # nx = NumpyBackend()
 
     # construct nearest neighbor set using KDTree
     # tree = KDTree(X_B)
@@ -2555,7 +2559,7 @@ def inlier_from_NN_debug(
     train_y,
     distance,
 ):
-    nx = ot.backend.get_backend(train_x, train_y, distance)
+    nx = get_backend(train_x, train_y, distance)
     N, D = train_x.shape[0], train_x.shape[1]
     alpha = _data(nx, 1.0, type_as=distance)
     distance = nx.maximum(0, distance)
@@ -2614,7 +2618,7 @@ def inlier_from_NN_debug(
 
 
 def voxel_data(
-    nx: Union[ot.backend.TorchBackend, ot.backend.NumpyBackend],
+    nx: Union[TorchBackend, NumpyBackend],
     coords: Union[np.ndarray, torch.Tensor],
     gene_exp: Union[np.ndarray, torch.Tensor],
     voxel_size: Optional[float] = None,
@@ -2639,7 +2643,7 @@ def voxel_data(
     voxel_gene_exp: np.ndarray or torch.Tensor
         The gene expression of the voxels.
     """
-    # nx = ot.backend.get_backend(coords, gene_exp)
+    # nx = get_backend(coords, gene_exp)
     N, D = coords.shape[0], coords.shape[1]
     coords = nx.to_numpy(coords)
     gene_exp = nx.to_numpy(gene_exp)
@@ -2801,7 +2805,7 @@ def _dense_to_sparse(
         "threshold",
     ], "``sparse_method`` value is wrong. Available ``sparse_method`` are: ``'topk'`` and ``'threshold'``."
     threshold = int(threshold) if sparse_method == "topk" else threshold
-    nx = ot.backend.get_backend(mat)
+    nx = get_backend(mat)
 
     NA, NB = mat.shape[0], mat.shape[1]
 
@@ -2835,7 +2839,7 @@ def empty_cache(device: str = "cpu"):
 
 
 # Check if nx is a torch backend
-nx_torch = lambda nx: True if isinstance(nx, ot.backend.TorchBackend) else False
+nx_torch = lambda nx: True if isinstance(nx, TorchBackend) else False
 
 # Concatenate expression matrices
 _cat = lambda nx, x, dim: torch.cat(x, dim=dim) if nx_torch(nx) else np.concatenate(x, axis=dim)

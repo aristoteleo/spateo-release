@@ -1,9 +1,10 @@
 from typing import List, Optional, Union
 
 import numpy as np
-import ot
 import torch
 from anndata import AnnData
+
+from spateo.alignment.methods.backend import NumpyBackend, TorchBackend, get_backend
 
 # from .methods.morpho import con_K
 from .methods import (
@@ -234,7 +235,7 @@ def get_P_chunk(
     assert XnAHat.shape[0] == alpha.shape[0], "XnAHat and alpha do not have the same length."
     assert XnAHat.shape[0] == Sigma.shape[0], "XnAHat and Sigma do not have the same length."
 
-    nx = ot.backend.get_backend(XnAHat, XnB)
+    nx = get_backend(XnAHat, XnB)
     if samples_s is None:
         samples_s = nx.maximum(
             _prod(nx)(nx.max(XnAHat, axis=0) - nx.min(XnAHat, axis=0)),

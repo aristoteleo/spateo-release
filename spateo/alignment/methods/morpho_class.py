@@ -2,7 +2,6 @@ import random
 
 import networkx
 import numpy as np
-import ot
 import scipy.sparse as sp
 import torch
 from anndata import AnnData
