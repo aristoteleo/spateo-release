@@ -175,12 +175,20 @@ def find_cci_two_group(
             raise ValueError(f"No intersected receptor between your adata object and lr_network dataset.")
         lr_network = lr_network[lr_network["to"].isin(expressed_receptor)]
 
+        # Extract unique ligand names from ligand-receptor network
         ligands = list(set(lr_network["from"]))
-        ligands_test = [l.upper() if species == "human" else l[0].upper() + l[1:].lower() for l in ligands]
+
+        # Convert all ligand names to mouse format (first letter uppercase, rest lowercase)
+        # This standardizes the format for comparison with the exclusion list
+        ligands_test = [l[0].upper() + l[1:].lower() for l in ligands]
+
+        # Filter out non-specific ligands that may cause noise in CCI analysis
+        # These include metabolic enzymes, carrier proteins, and other genes that
+        # are not typical cell-cell communication signals
         ligands = [
             l
-            for l in ligands_test
-            if l.title()
+            for l, l_test in zip(ligands, ligands_test)
+            if l_test
             not in [
                 "Lta4h",
                 "Fdx1",
@@ -238,7 +246,6 @@ def find_cci_two_group(
         ]
 
         # ligand_sender_spec
-        print(ligands)
         adata_l = adata[:, ligands]
         for g in adata.obs[group_sp].unique():
             # Of all cells expressing particular ligand, what proportion are group g:

@@ -21,6 +21,7 @@ from .models_migration import (
     construct_arrows,
     construct_axis_line,
     construct_field,
+    construct_field_plain,
     construct_field_streams,
     construct_genesis,
     construct_genesis_X,

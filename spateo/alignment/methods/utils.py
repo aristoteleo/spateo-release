@@ -3,8 +3,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import networkx
 import numpy as np
-
-# import ot
 import pandas as pd
 import scipy.sparse as sp
 import torch

@@ -7,7 +7,11 @@ from .line_model import (
     construct_lines,
     generate_edges,
 )
-from .morphofield_model import construct_field, construct_field_streams
+from .morphofield_model import (
+    construct_field,
+    construct_field_plain,
+    construct_field_streams,
+)
 from .morphopath_model import (
     construct_genesis,
     construct_genesis_X,
