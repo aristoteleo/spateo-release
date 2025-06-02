@@ -1,10 +1,6 @@
-from ._model import MERFISHVI, SCVI
-from .multimodal_spatial_vae import MultiModalSpatialVAE
-from .scvi_spatial_module import SpatialVAE
+from ._model import MERFISHVI, SpatialSCVI
 
 __all__ = [
-    "SCVI",
+    "SpatialSCVI",
     "MERFISHVI",
-    "MultiModalSpatialVAE",
-    "SpatialVAE",
 ]

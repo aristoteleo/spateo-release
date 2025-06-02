@@ -10,28 +10,30 @@ from scipy.sparse import coo_matrix
 
 # Import libraries needed for spatial graph processing
 from scipy.spatial import Delaunay
+from scvi import REGISTRY_KEYS, settings
+from scvi.data import AnnDataManager
+from scvi.data._constants import ADATA_MINIFY_TYPE
+from scvi.data._utils import _get_adata_minify_type
+from scvi.data.fields import (
+    CategoricalJointObsField,
+    CategoricalObsField,
+    LayerField,
+    NumericalJointObsField,
+    NumericalObsField,
+)
+from scvi.model._utils import _init_library_size
+from scvi.model.base import (
+    ArchesMixin,
+    BaseMinifiedModeModelClass,
+    EmbeddingMixin,
+    RNASeqMixin,
+    UnsupervisedTrainingMixin,
+    VAEMixin,
+)
+from scvi.module import VAE
+from scvi.utils import setup_anndata_dsp
 from sklearn.neighbors import kneighbors_graph
 from torch_geometric.utils import from_scipy_sparse_matrix
-
-# Remove scvi imports from module level
-# from scvi import REGISTRY_KEYS, settings
-# from scvi.data import AnnDataManager
-# from scvi.data._constants import ADATA_MINIFY_TYPE
-# from scvi.data._utils import _get_adata_minify_type
-# from scvi.data.fields import (
-#     CategoricalJointObsField,
-#     CategoricalObsField,
-#     LayerField,
-#     NumericalJointObsField,
-#     NumericalObsField,
-# )
-# from scvi.model._utils import _init_library_size
-# from scvi.model.base import EmbeddingMixin, UnsupervisedTrainingMixin
-# from scvi.module import VAE
-# from scvi.utils import setup_anndata_dsp
-
-# from scvi.model.base import ArchesMixin, BaseMinifiedModeModelClass, RNASeqMixin, VAEMixin
-
 
 if TYPE_CHECKING:
     from typing import Literal
@@ -41,13 +43,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class SCVI(
-    # EmbeddingMixin,
-    # RNASeqMixin,
-    # VAEMixin,
-    # ArchesMixin,
-    # UnsupervisedTrainingMixin,
-    # BaseMinifiedModeModelClass,
+class SpatialSCVI(
+    EmbeddingMixin,
+    RNASeqMixin,
+    VAEMixin,
+    ArchesMixin,
+    UnsupervisedTrainingMixin,
+    BaseMinifiedModeModelClass,
 ):
     """Single-cell Variational Inference model.
 
@@ -112,7 +114,7 @@ class SCVI(
     >>> adata.obsm["X_scVI"] = model.get_latent_representation()
     """
 
-    # _module_cls = VAE
+    _module_cls = VAE
     # Key names for latent variable mean and variance
     latent_mean_key = "scvi_latent_qzm"
     latent_var_key = "scvi_latent_qzv"
@@ -136,32 +138,6 @@ class SCVI(
         spatial_kl_weight: float = 0.01,
         **kwargs,
     ):
-        # Import scvi classes inside the method
-        from scvi import settings
-        from scvi.data._constants import ADATA_MINIFY_TYPE
-        from scvi.data._utils import _get_adata_minify_type
-        from scvi.model._utils import _init_library_size
-        from scvi.model.base import (
-            ArchesMixin,
-            BaseMinifiedModeModelClass,
-            EmbeddingMixin,
-            RNASeqMixin,
-            UnsupervisedTrainingMixin,
-            VAEMixin,
-        )
-        from scvi.module import VAE
-
-        # Setup base class inheritance dynamically
-        self.__class__.__bases__ = (
-            EmbeddingMixin,
-            RNASeqMixin,
-            VAEMixin,
-            ArchesMixin,
-            UnsupervisedTrainingMixin,
-            BaseMinifiedModeModelClass,
-        )
-        self._module_cls = VAE
-
         # Initialize parent class
         super().__init__(adata)
 
@@ -180,7 +156,7 @@ class SCVI(
 
         # Create model summary string
         self._model_summary_string = (
-            "SCVI model parameter summary: \n"
+            "SpatialSCVI model parameter summary: \n"
             f"Hidden layer nodes: {n_hidden}, Latent dimensions: {n_latent}, Spatial dimensions: {n_spatial}, "
             f"Layers: {n_layers}, Dropout rate: {dropout_rate}, "
             f"Dispersion type: {dispersion}, Gene likelihood: {gene_likelihood}, "
@@ -295,6 +271,7 @@ class SCVI(
         self.init_params_ = self._get_init_params(locals())
 
     @classmethod
+    @setup_anndata_dsp.dedent
     def setup_anndata(
         cls,
         adata: AnnData,
@@ -306,7 +283,7 @@ class SCVI(
         continuous_covariate_keys: list[str] | None = None,
         **kwargs,
     ):
-        """Set up AnnData object for SCVI model training.
+        """Set up AnnData object for SpatialSCVI model training.
 
         This method prepares for training by registering necessary data fields.
 
@@ -327,30 +304,38 @@ class SCVI(
         continuous_covariate_keys
             List of keys in adata.obs representing continuous covariates (like quality control metrics)
         """
-        # Import scvi modules inside the method
-        from scvi.data import AnnDataManager
-        from scvi.data._utils import _get_adata_minify_type
-        from scvi.data.fields import (
-            CategoricalJointObsField,
-            CategoricalObsField,
-            LayerField,
-            NumericalJointObsField,
-            NumericalObsField,
-        )
-        from scvi.utils import setup_anndata_dsp
+        # Store setup parameters
+        setup_args = cls._get_setup_method_args(**locals())
 
-        # Apply setup_anndata_dsp decorator
-        setup_method = setup_anndata_dsp(cls.setup_anndata)
-        return setup_method(
-            adata=adata,
-            layer=layer,
-            batch_key=batch_key,
-            labels_key=labels_key,
-            size_factor_key=size_factor_key,
-            categorical_covariate_keys=categorical_covariate_keys,
-            continuous_covariate_keys=continuous_covariate_keys,
-            **kwargs,
-        )
+        # Define all data fields needed by the model
+        data_fields = [
+            # Main expression data (X)
+            LayerField("X", layer, is_count_data=True),
+            # Batch information, used for handling batch effects
+            CategoricalObsField("batch", batch_key),
+            # Cell type or other label information
+            CategoricalObsField("labels", labels_key),
+            # Size factor for normalization (optional)
+            NumericalObsField("size_factor", size_factor_key, required=False),
+            # Additional categorical and continuous covariates
+            CategoricalJointObsField("categorical_covariates", categorical_covariate_keys),
+            NumericalJointObsField("continuous_covariates", continuous_covariate_keys),
+        ]
+
+        # Check if data is in minified format and add appropriate fields
+        data_type = _get_adata_minify_type(adata)
+        if data_type is not None:
+            # Add required fields for minified data format
+            data_fields += cls._get_fields_for_adata_minification(data_type)
+
+        # Create manager for data fields
+        adata_manager = AnnDataManager(fields=data_fields, setup_method_args=setup_args)
+
+        # Register all fields to AnnData object
+        adata_manager.register_fields(adata, **kwargs)
+
+        # Register manager to model class
+        cls.register_manager(adata_manager)
 
     def setup_spatial_graph(self, adata: AnnData):
         """Set up spatial graph for spatial information processing.
@@ -363,9 +348,6 @@ class SCVI(
         adata
             AnnData object containing spatial coordinates in adata.obsm['spatial']
         """
-        # Import scvi settings inside the method
-        from scvi import settings
-
         try:
             # Get spatial coordinates
             if "spatial" not in adata.obsm:
@@ -483,7 +465,7 @@ class SCVI(
             self.use_spatial = False
 
 
-class MERFISHVI(SCVI):
+class MERFISHVI(SpatialSCVI):
     """MERFISH spatial multimodal variational inference model.
 
     This model extends SCVI to simultaneously process MERFISH data with spatial information and
@@ -546,9 +528,6 @@ class MERFISHVI(SCVI):
         modality_weights: Dict[str, float] = {"spatial": 1.0, "nonspatial": 1.0},
         **kwargs,
     ):
-        # Import scvi settings inside the method
-        from scvi import settings
-
         # Store non-spatial modality data
         self.adata_nonspatial = adata_nonspatial
         self.modality_weights = modality_weights
@@ -611,6 +590,7 @@ class MERFISHVI(SCVI):
         self.init_params_ = self._get_init_params(locals())
 
     @classmethod
+    @setup_anndata_dsp.dedent
     def setup_nonspatial_anndata(cls, adata: AnnData, **kwargs):
         """Set up non-spatial modality AnnData object.
 
@@ -619,18 +599,8 @@ class MERFISHVI(SCVI):
         adata
             Non-spatial modality AnnData object
         """
-        # Import scvi modules inside the method
-        from scvi.data import AnnDataManager
-        from scvi.data._utils import _get_adata_minify_type
-        from scvi.data.fields import (
-            CategoricalJointObsField,
-            CategoricalObsField,
-            LayerField,
-            NumericalJointObsField,
-            NumericalObsField,
-        )
-
         # Create separate data manager for non-spatial modality
+
         # Store setup parameters
         setup_args = cls._get_setup_method_args(**locals())
 
@@ -663,10 +633,6 @@ class MERFISHVI(SCVI):
 
     def _create_module(self):
         """Create model module"""
-        # Import scvi modules inside the method
-        from scvi.data._constants import ADATA_MINIFY_TYPE
-        from scvi.model._utils import _init_library_size
-
         # Get spatial modality data information
         n_vars_spatial = self.summary_stats.n_vars
         n_batch_spatial = self.summary_stats.n_batch
@@ -837,27 +803,3 @@ class MERFISHVI(SCVI):
             return self.module.get_fused_representation(adata, indices, batch_size)
         else:
             return self.get_latent_representation(adata, indices, batch_size)
-
-    @classmethod
-    def _get_setup_method_args(cls, **locals_dict):
-        # Import scvi modules inside the method
-        from scvi.model.base import BaseModelClass
-
-        # 调用父类方法
-        return BaseModelClass._get_setup_method_args(**locals_dict)
-
-    @classmethod
-    def _get_fields_for_adata_minification(cls, data_type):
-        # Import scvi modules inside the method
-        from scvi.model.base import BaseMinifiedModeModelClass
-
-        # 调用父类方法
-        return BaseMinifiedModeModelClass._get_fields_for_adata_minification(data_type)
-
-    @classmethod
-    def register_manager(cls, adata_manager):
-        # Import scvi modules inside the method
-        from scvi.model.base import BaseModelClass
-
-        # 调用父类方法
-        return BaseModelClass.register_manager(adata_manager)

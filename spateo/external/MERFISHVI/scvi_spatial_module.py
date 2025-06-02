@@ -8,68 +8,76 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from anndata import AnnData
 from torch.distributions import Distribution, Normal, kl_divergence
 
 # Import GATv2Conv with fallback
+try:
+    from torch_geometric.nn import GATv2Conv
+except ImportError:
+    try:
+        from torch_geometric.nn.conv import GATv2Conv
+    except ImportError:
+        raise ImportError("Failed to import GATv2Conv, please install PyTorch Geometric")
 
-# Remove scvi imports from module level
-# from scvi import REGISTRY_KEYS
+from scvi import REGISTRY_KEYS
 
-# # Import auto_move_data with fallback options
-# try:
-#     from scvi.module.base import auto_move_data, LossOutput
-# except ImportError:
-#     try:
-#         from scvi.nn.base import auto_move_data
-#         from scvi.module.base import LossOutput
-#     except ImportError:
-#         try:
-#             from scvi.nn import auto_move_data
-#             from scvi.model.base import LossOutput
-#         except ImportError:
-#             raise ImportError("Failed to import auto_move_data and LossOutput, please check scvi-tools version")
+# Import auto_move_data with fallback options
+try:
+    from scvi.module.base import LossOutput, auto_move_data
+except ImportError:
+    try:
+        from scvi.module.base import LossOutput
+        from scvi.nn.base import auto_move_data
+    except ImportError:
+        try:
+            from scvi.model.base import LossOutput
+            from scvi.nn import auto_move_data
+        except ImportError:
+            raise ImportError("Failed to import auto_move_data and LossOutput, please check scvi-tools version")
 
-# # Import unsupported_if_adata_minified
-# try:
-#     from scvi.utils import unsupported_if_adata_minified
-# except ImportError:
-#     try:
-#         from scvi.model.base import unsupported_if_adata_minified
-#     except ImportError:
-#         # If not available, create a dummy decorator
-#         def unsupported_if_adata_minified(fn):
-#             return fn
-
-# from scvi.nn import Encoder
-
-# # Import VAE with fallbacks
-# try:
-#     from scvi.module import VAE
-# except ImportError:
-#     try:
-#         from scvi.module.base import VAE
-#     except ImportError:
-#         try:
-#             from scvi.nn import VAE
-#         except ImportError:
-#             raise ImportError("Failed to import VAE class, please check scvi-tools version")
+# Import unsupported_if_adata_minified
+try:
+    from scvi.utils import unsupported_if_adata_minified
+except ImportError:
+    try:
+        from scvi.model.base import unsupported_if_adata_minified
+    except ImportError:
+        # If not available, create a dummy decorator
+        def unsupported_if_adata_minified(fn):
+            return fn
 
 
-# # Import AnnTorchDataset with fallbacks
-# try:
-#     from scvi.data import AnnTorchDataset
-# except ImportError:
-#     try:
-#         from scvi.data._anntorchdataset import AnnTorchDataset
-#     except ImportError:
-#         try:
-#             from scvi.dataloaders import AnnTorchDataset
-#         except ImportError:
-#             # Define a placeholder that will raise a more helpful error when used
-#             class AnnTorchDataset:
-#                 def __init__(self, *args, **kwargs):
-#                     raise ImportError("Failed to import AnnTorchDataset class, please check scvi-tools version")
+from scvi.nn import Encoder
+
+# Import VAE with fallbacks
+try:
+    from scvi.module import VAE
+except ImportError:
+    try:
+        from scvi.module.base import VAE
+    except ImportError:
+        try:
+            from scvi.nn import VAE
+        except ImportError:
+            raise ImportError("Failed to import VAE class, please check scvi-tools version")
+
+from anndata import AnnData
+
+# Import AnnTorchDataset with fallbacks
+try:
+    from scvi.data import AnnTorchDataset
+except ImportError:
+    try:
+        from scvi.data._anntorchdataset import AnnTorchDataset
+    except ImportError:
+        try:
+            from scvi.dataloaders import AnnTorchDataset
+        except ImportError:
+            # Define a placeholder that will raise a more helpful error when used
+            class AnnTorchDataset:
+                def __init__(self, *args, **kwargs):
+                    raise ImportError("Failed to import AnnTorchDataset class, please check scvi-tools version")
+
 
 logger = logging.getLogger(__name__)
 
@@ -102,14 +110,6 @@ class SpatialEncoder(nn.Module):
         var_eps: float = 1e-4,
     ):
         super().__init__()
-
-        try:
-            from torch_geometric.nn import GATv2Conv
-        except ImportError:
-            try:
-                from torch_geometric.nn.conv import GATv2Conv
-            except ImportError:
-                raise ImportError("Failed to import GATv2Conv, please install PyTorch Geometric")
 
         # Graph attention network to transform latent representations into spatial features
         self.gat = GATv2Conv(
@@ -208,7 +208,7 @@ class SpatialEncoder(nn.Module):
             return spatial_mean, spatial_var, spatial_sample
 
 
-class SpatialVAE:
+class SpatialVAE(VAE):
     """Variational autoencoder with spatial information support.
 
     Extends standard VAE to include spatial information processing. Uses graph attention networks
@@ -296,21 +296,6 @@ class SpatialVAE:
         var_eps
             Small constant for variance
         """
-        # Import VAE inside the method
-        try:
-            from scvi.module import VAE
-        except ImportError:
-            try:
-                from scvi.module.base import VAE
-            except ImportError:
-                try:
-                    from scvi.nn import VAE
-                except ImportError:
-                    raise ImportError("Failed to import VAE class, please check scvi-tools version")
-
-        # Set inheritance dynamically
-        self.__class__.__bases__ = (VAE,)
-
         # Initialize base VAE
         super().__init__(
             n_input=n_input,
@@ -362,6 +347,7 @@ class SpatialVAE:
         self.edge_index = edge_index
         self.register_buffer("_edge_index", edge_index)
 
+    @auto_move_data
     def inference(
         self,
         x: torch.Tensor,
@@ -394,35 +380,6 @@ class SpatialVAE:
         dict
             Dictionary containing latent representation and spatial features
         """
-        # Import auto_move_data
-        try:
-            from scvi.module.base import auto_move_data
-        except ImportError:
-            try:
-                from scvi.nn.base import auto_move_data
-            except ImportError:
-                try:
-                    from scvi.nn import auto_move_data
-                except ImportError:
-                    # Create a simple decorator if not available
-                    def auto_move_data(func):
-                        return func
-
-        # Apply decorator
-        inference_func = auto_move_data(self._inference)
-        return inference_func(x, batch_index, cont_covs, cat_covs, cont_covariates, cat_covariates, **kwargs)
-
-    def _inference(
-        self,
-        x: torch.Tensor,
-        batch_index: torch.Tensor,
-        cont_covs: torch.Tensor | None = None,
-        cat_covs: torch.Tensor | None = None,
-        cont_covariates: torch.Tensor | None = None,
-        cat_covariates: torch.Tensor | None = None,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        """Internal inference implementation."""
         # Parameter name unification
         if cont_covs is None and cont_covariates is not None:
             cont_covs = cont_covariates
@@ -482,6 +439,7 @@ class SpatialVAE:
 
         return inference_outputs
 
+    @auto_move_data
     def forward(self, tensors, inference_kwargs=None, compute_loss=True, **kwargs):
         """Forward pass process.
 
@@ -499,26 +457,6 @@ class SpatialVAE:
         tuple
             Inference outputs, generative outputs and loss
         """
-        # Import auto_move_data
-        try:
-            from scvi.module.base import auto_move_data
-        except ImportError:
-            try:
-                from scvi.nn.base import auto_move_data
-            except ImportError:
-                try:
-                    from scvi.nn import auto_move_data
-                except ImportError:
-                    # Create a simple decorator if not available
-                    def auto_move_data(func):
-                        return func
-
-        # Apply decorator
-        forward_func = auto_move_data(self._forward)
-        return forward_func(tensors, inference_kwargs, compute_loss, **kwargs)
-
-    def _forward(self, tensors, inference_kwargs=None, compute_loss=True, **kwargs):
-        """Internal forward implementation."""
         # Ensure no duplicate parameters will be passed
         # Remove items from kwargs that might conflict with parameters in parent's forward
         if "get_inference_input_kwargs" in kwargs:
@@ -536,10 +474,13 @@ class SpatialVAE:
         if "cat_covariates" in tensors and "cat_covs" not in tensors:
             tensors["cat_covs"] = tensors.pop("cat_covariates")
 
+        # return inference_outputs, generative_outputs, losses
+
         if compute_loss:
             inference_outputs, generative_outputs, losses = super().forward(
                 tensors, inference_kwargs=inference_kwargs, compute_loss=compute_loss, **kwargs
             )
+            # losses = module.loss(tensors, inference_outputs, generative_outputs, **loss_kwargs)
             return inference_outputs, generative_outputs, losses
         else:
             inference_outputs, generative_outputs = super().forward(
@@ -547,13 +488,14 @@ class SpatialVAE:
             )
             return inference_outputs, generative_outputs
 
+    @unsupported_if_adata_minified
     def loss(
         self,
         tensors: dict[str, torch.Tensor],
         inference_outputs: dict[str, torch.Tensor | Distribution | None],
         generative_outputs: dict[str, Distribution | None],
         kl_weight: torch.tensor | float = 1.0,
-    ):
+    ) -> LossOutput:
         """Calculate loss function, including KL divergence of spatial features.
 
         Parameters
@@ -572,61 +514,6 @@ class SpatialVAE:
         LossOutput
             Loss output object
         """
-        # Import unsupported_if_adata_minified and LossOutput
-        try:
-            from scvi.module.base import LossOutput
-            from scvi.utils import unsupported_if_adata_minified
-        except ImportError:
-            try:
-                from scvi.model.base import unsupported_if_adata_minified
-                from scvi.module.base import LossOutput
-            except ImportError:
-                # Create dummy decorator if not available
-                def unsupported_if_adata_minified(fn):
-                    return fn
-
-                # Importing LossOutput from different locations
-                try:
-                    from scvi.module.base import LossOutput
-                except ImportError:
-                    try:
-                        from scvi.model.base import LossOutput
-                    except ImportError:
-                        # Create a simple LossOutput class if not available
-                        class LossOutput:
-                            def __init__(self, loss, reconstruction_loss, kl_local, extra_metrics=None):
-                                self.loss = loss
-                                self.reconstruction_loss = reconstruction_loss
-                                self.kl_local = kl_local
-                                self.extra_metrics = extra_metrics or {}
-
-        # Apply decorator
-        loss_func = unsupported_if_adata_minified(self._loss)
-        return loss_func(tensors, inference_outputs, generative_outputs, kl_weight)
-
-    def _loss(
-        self,
-        tensors: dict[str, torch.Tensor],
-        inference_outputs: dict[str, torch.Tensor | Distribution | None],
-        generative_outputs: dict[str, Distribution | None],
-        kl_weight: torch.tensor | float = 1.0,
-    ):
-        """Internal loss function implementation."""
-        # Import LossOutput
-        try:
-            from scvi.module.base import LossOutput
-        except ImportError:
-            try:
-                from scvi.model.base import LossOutput
-            except ImportError:
-                # Create a simple LossOutput class if not available
-                class LossOutput:
-                    def __init__(self, loss, reconstruction_loss, kl_local, extra_metrics=None):
-                        self.loss = loss
-                        self.reconstruction_loss = reconstruction_loss
-                        self.kl_local = kl_local
-                        self.extra_metrics = extra_metrics or {}
-
         # Get base VAE loss
         base_loss = super().loss(tensors, inference_outputs, generative_outputs, kl_weight)
 
@@ -1127,13 +1014,6 @@ class SpatialVAE:
         dict
             Processing results
         """
-        # Import scvi and required classes inside the function
-        try:
-            from scvi import REGISTRY_KEYS
-            from scvi.data import AnnDataManager
-        except ImportError:
-            raise ImportError("Failed to import required scvi classes. Please install scvi-tools.")
-
         # Try different locations for AnnTorchDataset
         try:
             from scvi.data import AnnTorchDataset
@@ -1145,6 +1025,8 @@ class SpatialVAE:
                     from scvi.dataloaders import AnnTorchDataset
                 except ImportError:
                     raise ImportError("Failed to import AnnTorchDataset class, please check scvi-tools version")
+
+        from scvi.data import AnnDataManager
 
         # Get AnnData object
         if adata is None:

@@ -8,45 +8,53 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from anndata import AnnData
 from torch.distributions import Distribution, Normal, kl_divergence
+
+try:
+    from torch_geometric.nn import GATv2Conv
+except ImportError:
+    try:
+        from torch_geometric.nn.conv import GATv2Conv
+    except ImportError:
+        raise ImportError("Failed to import GATv2Conv, please install PyTorch Geometric")
+
+from scvi import REGISTRY_KEYS
+
+try:
+    from scvi.module.base import LossOutput, auto_move_data
+except ImportError:
+    try:
+        from scvi.module.base import LossOutput
+        from scvi.nn.base import auto_move_data
+    except ImportError:
+        try:
+            from scvi.model.base import LossOutput
+            from scvi.nn import auto_move_data
+        except ImportError:
+            raise ImportError("Failed to import auto_move_data and LossOutput, please check scvi-tools version")
+
+try:
+    from scvi.utils import unsupported_if_adata_minified
+except ImportError:
+    try:
+        from scvi.model.base import unsupported_if_adata_minified
+    except ImportError:
+        # Create a dummy decorator if not available
+        def unsupported_if_adata_minified(fn):
+            return fn
+
+
+from anndata import AnnData
+from scvi.module import VAE
+from scvi.nn import Decoder, Encoder, FCLayers
 
 # Import SpatialEncoder and SpatialVAE
 from .scvi_spatial_module import SpatialEncoder, SpatialVAE
 
-# Remove scvi imports from module level
-# from scvi import REGISTRY_KEYS
-
-# try:
-#     from scvi.module.base import auto_move_data, LossOutput
-# except ImportError:
-#     try:
-#         from scvi.nn.base import auto_move_data
-#         from scvi.module.base import LossOutput
-#     except ImportError:
-#         try:
-#             from scvi.nn import auto_move_data
-#             from scvi.model.base import LossOutput
-#         except ImportError:
-#             raise ImportError("Failed to import auto_move_data and LossOutput, please check scvi-tools version")
-
-# try:
-#     from scvi.utils import unsupported_if_adata_minified
-# except ImportError:
-#     try:
-#         from scvi.model.base import unsupported_if_adata_minified
-#     except ImportError:
-#         # Create a dummy decorator if not available
-#         def unsupported_if_adata_minified(fn):
-#             return fn
-
-# from scvi.nn import Encoder, FCLayers, Decoder
-# from scvi.module import VA
-
 logger = logging.getLogger(__name__)
 
 
-class MultiModalSpatialVAE:
+class MultiModalSpatialVAE(SpatialVAE):
     """Multi-modal spatial variational autoencoder.
 
     Processes both modalities with spatial information and those without spatial information.
@@ -118,26 +126,14 @@ class MultiModalSpatialVAE:
         var_eps: float = 1e-4,
         **kwargs,
     ):
-        # Import SpatialVAE inside the method
-        from .scvi_spatial_module import SpatialVAE
-
-        # Import required scvi modules
-        try:
-            from scvi.nn import Decoder, Encoder, FCLayers
-        except ImportError:
-            raise ImportError("Failed to import Encoder, FCLayers, Decoder from scvi. Please install scvi-tools.")
-
-        # Set inheritance dynamically
-        self.__class__.__bases__ = (SpatialVAE,)
-
         # Initialize base VAE (note here we do not call SpatialVAE's initialization, but directly call VAE's initialization)
-        super().__init__(
+        VAE.__init__(
+            self,
             n_input=n_input_spatial,
             n_batch=n_batch_spatial,
             n_labels=n_labels_spatial,
             n_hidden=n_hidden,
             n_latent=n_latent,
-            n_spatial=n_spatial,
             n_layers=n_layers,
             dropout_rate=dropout_rate,
             dispersion=dispersion,
@@ -148,15 +144,23 @@ class MultiModalSpatialVAE:
             use_size_factor_key=use_size_factor_spatial,
             library_log_means=library_log_means_spatial,
             library_log_vars=library_log_vars_spatial,
-            edge_index=edge_index,
-            attention_heads=attention_heads,
-            spatial_kl_weight=spatial_kl_weight,
-            var_eps=var_eps,
             **kwargs,
         )
 
         # Store configuration parameters
+        self.n_spatial = n_spatial
+        self.spatial_kl_weight = spatial_kl_weight
         self.modality_weights = modality_weights
+        self.var_eps = var_eps
+
+        # Initialize spatial encoder
+        self.spatial_encoder = SpatialEncoder(
+            n_latent=n_latent,
+            n_spatial=n_spatial,
+            attention_heads=attention_heads,
+            dropout_rate=dropout_rate,
+            var_eps=var_eps,
+        )
 
         # Create encoder for non-spatial modality
         self.nonspatial_encoder = Encoder(
@@ -202,6 +206,33 @@ class MultiModalSpatialVAE:
                 else torch.zeros(n_batch_nonspatial if n_batch_nonspatial > 0 else 1)
             )
 
+        # Process edge_index (spatial graph)
+        if edge_index is not None:
+            if not isinstance(edge_index, torch.Tensor):
+                try:
+                    edge_index = torch.tensor(edge_index, dtype=torch.long)
+                except Exception as e:
+                    warnings.warn(f"Failed to convert edge_index to tensor: {str(e)}, will set to None", UserWarning)
+                    edge_index = None
+            elif edge_index.dtype != torch.long:
+                try:
+                    edge_index = edge_index.long()
+                except Exception as e:
+                    warnings.warn(f"Failed to convert edge_index to long type: {str(e)}, will set to None", UserWarning)
+                    edge_index = None
+
+            # Check edge_index shape
+            if edge_index is not None and (len(edge_index.shape) != 2 or edge_index.shape[0] != 2):
+                warnings.warn(
+                    f"edge_index shape error: {edge_index.shape}, should be [2, num_edges], will set to None",
+                    UserWarning,
+                )
+                edge_index = None
+
+        self.edge_index = edge_index
+        self.register_buffer("_edge_index", edge_index)
+
+    @auto_move_data
     def inference_spatial(
         self, x: torch.Tensor, batch_index: Optional[torch.Tensor] = None, **kwargs
     ) -> Dict[str, torch.Tensor]:
@@ -219,30 +250,8 @@ class MultiModalSpatialVAE:
         dict
             Dictionary containing inference results
         """
-        # Import auto_move_data
-        try:
-            from scvi.module.base import auto_move_data
-        except ImportError:
-            try:
-                from scvi.nn.base import auto_move_data
-            except ImportError:
-                try:
-                    from scvi.nn import auto_move_data
-                except ImportError:
-                    # Create a simple decorator if not available
-                    def auto_move_data(func):
-                        return func
-
-        # Apply decorator
-        inference_func = auto_move_data(self._inference_spatial)
-        return inference_func(x, batch_index, **kwargs)
-
-    def _inference_spatial(
-        self, x: torch.Tensor, batch_index: Optional[torch.Tensor] = None, **kwargs
-    ) -> Dict[str, torch.Tensor]:
-        """Internal spatial modality inference implementation."""
         # Call base VAE inference
-        outputs = super().inference(x, batch_index, **kwargs)
+        outputs = VAE.inference(self, x, batch_index, **kwargs)
 
         # Get latent representation
         z = outputs["z"]
@@ -287,6 +296,7 @@ class MultiModalSpatialVAE:
 
         return outputs
 
+    @auto_move_data
     def inference_nonspatial(
         self, x: torch.Tensor, batch_index: Optional[torch.Tensor] = None, **kwargs
     ) -> Dict[str, torch.Tensor]:
@@ -304,31 +314,10 @@ class MultiModalSpatialVAE:
         dict
             Dictionary containing inference results
         """
-        # Import auto_move_data
-        try:
-            from scvi.module.base import auto_move_data
-        except ImportError:
-            try:
-                from scvi.nn.base import auto_move_data
-            except ImportError:
-                try:
-                    from scvi.nn import auto_move_data
-                except ImportError:
-                    # Create a simple decorator if not available
-                    def auto_move_data(func):
-                        return func
-
-        # Apply decorator
-        inference_func = auto_move_data(self._inference_nonspatial)
-        return inference_func(x, batch_index, **kwargs)
-
-    def _inference_nonspatial(
-        self, x: torch.Tensor, batch_index: Optional[torch.Tensor] = None, **kwargs
-    ) -> Dict[str, torch.Tensor]:
-        """Internal non-spatial modality inference implementation."""
         # Use non-spatial modality encoder
         return self.nonspatial_encoder(x, batch_index)
 
+    @auto_move_data
     def inference(
         self,
         x_spatial: torch.Tensor,
@@ -355,42 +344,15 @@ class MultiModalSpatialVAE:
         dict
             Dictionary containing joint inference results
         """
-        # Import auto_move_data
-        try:
-            from scvi.module.base import auto_move_data
-        except ImportError:
-            try:
-                from scvi.nn.base import auto_move_data
-            except ImportError:
-                try:
-                    from scvi.nn import auto_move_data
-                except ImportError:
-                    # Create a simple decorator if not available
-                    def auto_move_data(func):
-                        return func
-
-        # Apply decorator
-        inference_func = auto_move_data(self._inference)
-        return inference_func(x_spatial, x_nonspatial, batch_index_spatial, batch_index_nonspatial, **kwargs)
-
-    def _inference(
-        self,
-        x_spatial: torch.Tensor,
-        x_nonspatial: Optional[torch.Tensor] = None,
-        batch_index_spatial: Optional[torch.Tensor] = None,
-        batch_index_nonspatial: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> Dict[str, torch.Tensor]:
-        """Internal joint inference implementation."""
         # First perform spatial modality inference
-        outputs = self._inference_spatial(x_spatial, batch_index_spatial, **kwargs)
+        outputs = self.inference_spatial(x_spatial, batch_index_spatial, **kwargs)
 
         # If no non-spatial modality input, return spatial modality results directly
         if x_nonspatial is None:
             return outputs
 
         # Perform non-spatial modality inference
-        nonspatial_outputs = self._inference_nonspatial(x_nonspatial, batch_index_nonspatial)
+        nonspatial_outputs = self.inference_nonspatial(x_nonspatial, batch_index_nonspatial)
 
         # Fuse latent representations of two modalities
         w1 = self.modality_weights.get("spatial", 1.0)
@@ -416,6 +378,7 @@ class MultiModalSpatialVAE:
 
         return outputs
 
+    @auto_move_data
     def generative_spatial(
         self, z: torch.Tensor, batch_index: Optional[torch.Tensor] = None, **kwargs
     ) -> Dict[str, torch.Tensor]:
@@ -433,30 +396,9 @@ class MultiModalSpatialVAE:
         dict
             Generative output
         """
-        # Import auto_move_data
-        try:
-            from scvi.module.base import auto_move_data
-        except ImportError:
-            try:
-                from scvi.nn.base import auto_move_data
-            except ImportError:
-                try:
-                    from scvi.nn import auto_move_data
-                except ImportError:
-                    # Create a simple decorator if not available
-                    def auto_move_data(func):
-                        return func
+        return VAE.generative(self, z, batch_index, **kwargs)
 
-        # Apply decorator
-        generative_func = auto_move_data(self._generative_spatial)
-        return generative_func(z, batch_index, **kwargs)
-
-    def _generative_spatial(
-        self, z: torch.Tensor, batch_index: Optional[torch.Tensor] = None, **kwargs
-    ) -> Dict[str, torch.Tensor]:
-        """Internal spatial modality generative implementation."""
-        return super().generative(z, batch_index, **kwargs)
-
+    @auto_move_data
     def generative_nonspatial(
         self,
         z: torch.Tensor,
@@ -480,32 +422,6 @@ class MultiModalSpatialVAE:
         dict
             Generative output
         """
-        # Import auto_move_data
-        try:
-            from scvi.module.base import auto_move_data
-        except ImportError:
-            try:
-                from scvi.nn.base import auto_move_data
-            except ImportError:
-                try:
-                    from scvi.nn import auto_move_data
-                except ImportError:
-                    # Create a simple decorator if not available
-                    def auto_move_data(func):
-                        return func
-
-        # Apply decorator
-        generative_func = auto_move_data(self._generative_nonspatial)
-        return generative_func(z, batch_index, library_size, **kwargs)
-
-    def _generative_nonspatial(
-        self,
-        z: torch.Tensor,
-        batch_index: Optional[torch.Tensor] = None,
-        library_size: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> Dict[str, torch.Tensor]:
-        """Internal non-spatial modality generative implementation."""
         # Generate reconstruction of non-spatial modality
         px_rate = self.nonspatial_decoder(z, batch_index)
 
@@ -543,6 +459,7 @@ class MultiModalSpatialVAE:
 
         return outputs
 
+    @auto_move_data
     def generative(
         self,
         z: torch.Tensor,
@@ -572,42 +489,12 @@ class MultiModalSpatialVAE:
         dict
             Dictionary containing outputs of two modalities generative process
         """
-        # Import auto_move_data
-        try:
-            from scvi.module.base import auto_move_data
-        except ImportError:
-            try:
-                from scvi.nn.base import auto_move_data
-            except ImportError:
-                try:
-                    from scvi.nn import auto_move_data
-                except ImportError:
-                    # Create a simple decorator if not available
-                    def auto_move_data(func):
-                        return func
-
-        # Apply decorator
-        generative_func = auto_move_data(self._generative)
-        return generative_func(
-            z, batch_index_spatial, batch_index_nonspatial, library_size_spatial, library_size_nonspatial, **kwargs
-        )
-
-    def _generative(
-        self,
-        z: torch.Tensor,
-        batch_index_spatial: Optional[torch.Tensor] = None,
-        batch_index_nonspatial: Optional[torch.Tensor] = None,
-        library_size_spatial: Optional[torch.Tensor] = None,
-        library_size_nonspatial: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> Dict[str, Dict[str, torch.Tensor]]:
-        """Internal joint generative implementation."""
         # Generate reconstruction of spatial modality
-        spatial_outputs = self._generative_spatial(z, batch_index_spatial, library_size=library_size_spatial, **kwargs)
+        spatial_outputs = self.generative_spatial(z, batch_index_spatial, library_size=library_size_spatial, **kwargs)
 
         # If batch_index_nonspatial is not None, generate reconstruction of non-spatial modality
         if batch_index_nonspatial is not None:
-            nonspatial_outputs = self._generative_nonspatial(
+            nonspatial_outputs = self.generative_nonspatial(
                 z, batch_index_nonspatial, library_size=library_size_nonspatial, **kwargs
             )
 
@@ -617,6 +504,7 @@ class MultiModalSpatialVAE:
             # Return output of spatial modality only
             return {"spatial": spatial_outputs}
 
+    @auto_move_data
     def forward(
         self, tensors: Dict[str, torch.Tensor], inference_kwargs: Dict = None, compute_loss: bool = True, **kwargs
     ) -> Tuple:
@@ -636,28 +524,6 @@ class MultiModalSpatialVAE:
         tuple
             Inference output, generative output and loss
         """
-        # Import auto_move_data
-        try:
-            from scvi.module.base import auto_move_data
-        except ImportError:
-            try:
-                from scvi.nn.base import auto_move_data
-            except ImportError:
-                try:
-                    from scvi.nn import auto_move_data
-                except ImportError:
-                    # Create a simple decorator if not available
-                    def auto_move_data(func):
-                        return func
-
-        # Apply decorator
-        forward_func = auto_move_data(self._forward)
-        return forward_func(tensors, inference_kwargs, compute_loss, **kwargs)
-
-    def _forward(
-        self, tensors: Dict[str, torch.Tensor], inference_kwargs: Dict = None, compute_loss: bool = True, **kwargs
-    ) -> Tuple:
-        """Internal forward implementation."""
         # Ensure no conflicting parameters are passed
         if inference_kwargs is None:
             inference_kwargs = {}
@@ -692,7 +558,7 @@ class MultiModalSpatialVAE:
             )
 
         inference_inputs.update(inference_kwargs)
-        inference_outputs = self._inference(**inference_inputs)
+        inference_outputs = self.inference(**inference_inputs)
 
         # Perform joint generative
         generative_inputs = {
@@ -707,7 +573,7 @@ class MultiModalSpatialVAE:
                 }
             )
 
-        generative_outputs = self._generative(**generative_inputs)
+        generative_outputs = self.generative(**generative_inputs)
 
         if compute_loss:
             # Calculate joint loss
@@ -722,13 +588,14 @@ class MultiModalSpatialVAE:
         else:
             return inference_outputs, generative_outputs
 
+    @unsupported_if_adata_minified
     def loss(
         self,
         tensors: Dict[str, torch.Tensor],
         inference_outputs: Dict[str, torch.Tensor | Distribution | None],
         generative_outputs: Dict[str, Dict[str, Distribution | None]],
         kl_weight: torch.tensor | float = 1.0,
-    ):
+    ) -> LossOutput:
         """Calculate joint loss function.
 
         Parameters
@@ -747,53 +614,6 @@ class MultiModalSpatialVAE:
         LossOutput
             Loss output object
         """
-        # Import unsupported_if_adata_minified and LossOutput
-        try:
-            from scvi.module.base import LossOutput
-            from scvi.utils import unsupported_if_adata_minified
-        except ImportError:
-            try:
-                from scvi.model.base import unsupported_if_adata_minified
-                from scvi.module.base import LossOutput
-            except ImportError:
-                # Create a dummy decorator and class if not available
-                def unsupported_if_adata_minified(fn):
-                    return fn
-
-                class LossOutput:
-                    def __init__(self, loss, reconstruction_loss, kl_local, extra_metrics=None):
-                        self.loss = loss
-                        self.reconstruction_loss = reconstruction_loss
-                        self.kl_local = kl_local
-                        self.extra_metrics = extra_metrics or {}
-
-        # Apply decorator
-        loss_func = unsupported_if_adata_minified(self._loss)
-        return loss_func(tensors, inference_outputs, generative_outputs, kl_weight)
-
-    def _loss(
-        self,
-        tensors: Dict[str, torch.Tensor],
-        inference_outputs: Dict[str, torch.Tensor | Distribution | None],
-        generative_outputs: Dict[str, Dict[str, Distribution | None]],
-        kl_weight: torch.tensor | float = 1.0,
-    ):
-        """Internal loss function implementation."""
-        # Import LossOutput
-        try:
-            from scvi.module.base import LossOutput
-        except ImportError:
-            try:
-                from scvi.model.base import LossOutput
-            except ImportError:
-                # Create a simple class if not available
-                class LossOutput:
-                    def __init__(self, loss, reconstruction_loss, kl_local, extra_metrics=None):
-                        self.loss = loss
-                        self.reconstruction_loss = reconstruction_loss
-                        self.kl_local = kl_local
-                        self.extra_metrics = extra_metrics or {}
-
         # Extract weights of two modalities
         w_spatial = self.modality_weights.get("spatial", 1.0)
         w_nonspatial = self.modality_weights.get("nonspatial", 1.0)
