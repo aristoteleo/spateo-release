@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class SpatialSCVI(
+class SpatialVI(
     EmbeddingMixin,
     RNASeqMixin,
     VAEMixin,
@@ -156,7 +156,7 @@ class SpatialSCVI(
 
         # Create model summary string
         self._model_summary_string = (
-            "SpatialSCVI model parameter summary: \n"
+            "SpatialVI model parameter summary: \n"
             f"Hidden layer nodes: {n_hidden}, Latent dimensions: {n_latent}, Spatial dimensions: {n_spatial}, "
             f"Layers: {n_layers}, Dropout rate: {dropout_rate}, "
             f"Dispersion type: {dispersion}, Gene likelihood: {gene_likelihood}, "
@@ -283,7 +283,7 @@ class SpatialSCVI(
         continuous_covariate_keys: list[str] | None = None,
         **kwargs,
     ):
-        """Set up AnnData object for SpatialSCVI model training.
+        """Set up AnnData object for SpatialVI model training.
 
         This method prepares for training by registering necessary data fields.
 
@@ -465,7 +465,7 @@ class SpatialSCVI(
             self.use_spatial = False
 
 
-class MERFISHVI(SpatialSCVI):
+class MERFISHVI(SpatialVI):
     """MERFISH spatial multimodal variational inference model.
 
     This model extends SCVI to simultaneously process MERFISH data with spatial information and

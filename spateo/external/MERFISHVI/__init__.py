@@ -1,6 +1,6 @@
-from ._model import MERFISHVI, SpatialSCVI
+from ._model import MERFISHVI, SpatialVI
 
 __all__ = [
-    "SpatialSCVI",
+    "SpatialVI",
     "MERFISHVI",
 ]
