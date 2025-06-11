@@ -289,6 +289,7 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
 
         Args:
             tensors: Input data tensors
+
             full_forward_pass: Whether to execute full forward pass
 
         Returns:
@@ -313,12 +314,12 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
                 "cont_covariates": tensors.get("continuous_covariates", None),  # Continuous covariates
                 "cat_covariates": tensors.get("categorical_covariates", None),  # Categorical covariates
             }
-        # Minified data case: provide pre-computed latent variable distribution parameters
+        # Simplified data case: provide pre-computed latent variable distribution parameters
         else:
             return {
                 "qzm": tensors["scvi_latent_qzm"],  # Latent variable means
                 "qzv": tensors["scvi_latent_qzv"],  # Latent variable variances
-                "observed_lib_size": tensors["observed_lib_size"],  # Observed library sizes
+                "observed_lib_size": tensors["observed_lib_size"],  # Observed library size
             }
 
     def _get_generative_input(
@@ -328,16 +329,17 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
     ) -> dict[str, torch.Tensor | None]:
         """Get input tensors for the generative process.
 
-        Combines inference step outputs with original data to prepare generative network inputs.
+        Combine outputs from the inference step with original data to prepare
+        inputs for the generative network.
 
         Args:
             tensors: Original data tensors
-            inference_outputs: Outputs from inference process
+            inference_outputs: Outputs from the inference process
 
         Returns:
-            Input dictionary required for generative process
+            Input dictionary required for the generative process
         """
-        # Get size_factor if provided
+        # Get size_factor (if provided)
         size_factor = tensors.get("size_factor", None)
         if size_factor is not None:
             size_factor = torch.log(size_factor)
@@ -365,7 +367,7 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
             batch_index: Batch index tensor of shape (batch_size, 1)
 
         Returns:
-            tuple: Two tensors containing log library size means and variances
+            tuple: Contains two tensors, log library size means and variances respectively
         """
         from torch.nn.functional import linear
 
@@ -375,12 +377,12 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         # Convert batch indices to one-hot encoding
         batch_one_hot = one_hot(batch_index.squeeze(-1), num_batches).float()
 
-        # Calculate log library size means for each cell
-        # Equivalent to looking up corresponding batch values from global library means table
+        # Compute log library size means for each cell
+        # Equivalent to looking up the corresponding batch value from the global library means table
         library_log_means = linear(batch_one_hot, self.library_log_means)
 
-        # Calculate log library size variances for each cell
-        # Equivalent to looking up corresponding batch values from global library variances table
+        # Compute log library size variances for each cell
+        # Equivalent to looking up the corresponding batch value from the global library variances table
         library_log_vars = linear(batch_one_hot, self.library_log_vars)
 
         return library_log_means, library_log_vars
@@ -394,7 +396,7 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         cat_covs: torch.Tensor | None = None,
         n_samples: int = 1,
     ) -> dict[str, torch.Tensor | Distribution | None]:
-        """Run regular inference process to obtain latent representation of data.
+        """Run regular inference process to obtain latent representations of data.
 
         Args:
             x: Gene expression data
@@ -408,14 +410,14 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         """
         x_ = x
         if self.use_observed_lib_size:
-            # Calculate observed library size (sum of gene expressions)
+            # Compute observed library size (sum of gene expression)
             library = torch.log(x.sum(1)).unsqueeze(1)
         if self.log_variational:
-            # Take logarithm of data for numerical stability
+            # Take log of data for numerical stability
             x_ = torch.log1p(x_)
 
         if cont_covs is not None and self.encode_covariates:
-            # Concatenate gene expression with continuous covariates
+            # Concatenate gene expression and continuous covariates
             encoder_input = torch.cat((x_, cont_covs), dim=-1)
         else:
             encoder_input = x_
@@ -426,22 +428,22 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
             categorical_input = ()
 
         if self.batch_representation == "embedding" and self.encode_covariates:
-            # Use embedding representation for batches
+            # Use embedding representation for batch
             batch_embedding = self.compute_embedding("batch", batch_index)
             encoder_input = torch.cat([encoder_input, batch_embedding], dim=-1)
             # Get latent variable distribution and samples
             qz, z = self.z_encoder(encoder_input, *categorical_input)
         else:
-            # Use one-hot encoding representation for batches
+            # Use one-hot encoding representation for batch
             qz, z = self.z_encoder(encoder_input, batch_index, *categorical_input)
 
         ql = None
         if not self.use_observed_lib_size:
             if self.batch_representation == "embedding":
-                # Use embedding representation for batches to encode library size
+                # Use embedding representation for batch to encode library size
                 ql, library_encoded = self.l_encoder(encoder_input, *categorical_input)
             else:
-                # Use one-hot encoding representation for batches to encode library size
+                # Use one-hot encoding representation for batch to encode library size
                 ql, library_encoded = self.l_encoder(encoder_input, batch_index, *categorical_input)
             library = library_encoded
 
@@ -471,13 +473,14 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
     ) -> dict[str, torch.Tensor | None]:
         """Perform inference using cached latent variable distribution parameters.
 
-        This method is mainly used when latent variable distributions have already been
-        computed and stored, which can speed up inference without re-running encoder networks.
+        This method is mainly used when latent variable distributions have already
+        been computed and stored, which can speed up inference without re-running
+        the encoder network.
 
         Args:
             qzm: Latent variable means
             qzv: Latent variable variances
-            observed_lib_size: Observed library sizes
+            observed_lib_size: Observed library size
             n_samples: Number of samples
 
         Returns:
@@ -489,7 +492,7 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         latent_dist = Normal(qzm, qzv.sqrt())
 
         # Sample from distribution
-        # Use sample() instead of rsample() since we don't need to optimize z
+        # Use sample() instead of rsample() because we don't need to optimize z
         if n_samples == 1:
             untransformed_z = latent_dist.sample()
         else:
@@ -498,7 +501,7 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         # Transform latent variables (if using logistic normal distribution)
         z = self.z_encoder.z_transformation(untransformed_z)
 
-        # Calculate library size (take logarithm)
+        # Compute library size (take log)
         library = torch.log(observed_lib_size)
 
         # Expand library size for multiple samples case
@@ -669,40 +672,40 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         generative_outputs: dict[str, Distribution | None],
         kl_weight: torch.tensor | float = 1.0,
     ) -> LossOutput:
-        """Calculate the loss function for the variational autoencoder.
+        """Compute the loss function for the variational autoencoder.
 
         The loss function consists of two parts: reconstruction loss and KL divergence:
-        1. Reconstruction loss: measures how well generated data matches original data
-        2. KL divergence: measures difference between posterior and prior distributions, acting as regularization
+        1. Reconstruction loss: measures how well the generated data matches the original data
+        2. KL divergence: measures the difference between posterior and prior distributions, acting as regularization
 
         Args:
             tensors: Original data tensors
-            inference_outputs: Outputs from inference process
-            generative_outputs: Outputs from generative process
+            inference_outputs: Outputs from the inference process
+            generative_outputs: Outputs from the generative process
             kl_weight: Weight coefficient for KL divergence term (used for KL annealing)
 
         Returns:
-            Object containing total loss and component losses
+            Object containing total loss and individual loss components
         """
         from torch.distributions import kl_divergence
 
         # Get original gene expression data
         x = tensors["X"]  # Use intuitive X instead of REGISTRY_KEYS.X_KEY
 
-        # Calculate KL divergence for latent variables: difference between posterior q(z|x) and prior p(z)
+        # Compute KL divergence for latent variables: difference between posterior q(z|x) and prior p(z)
         kl_divergence_z = kl_divergence(inference_outputs["qz"], generative_outputs["latent_space"]).sum(dim=-1)
 
-        # Calculate KL divergence for library size (if using learned library size)
+        # Compute KL divergence for library size (if using learned library size)
         if not self.use_observed_lib_size:
             kl_divergence_l = kl_divergence(inference_outputs["ql"], generative_outputs["library_size"]).sum(dim=1)
         else:
             # If using observed library size, KL divergence is 0
             kl_divergence_l = torch.zeros_like(kl_divergence_z)
 
-        # Calculate reconstruction loss: negative log likelihood
+        # Compute reconstruction loss: negative log likelihood
         reconstruction_loss = -generative_outputs["gene_expression"].log_prob(x).sum(-1)
 
-        # Distinguish KL divergence that needs weight adjustment (for KL annealing)
+        # Distinguish KL divergences that need weight adjustment (for KL annealing)
         kl_for_warmup = kl_divergence_z  # KL divergence for latent variable z participates in annealing
         kl_no_warmup = kl_divergence_l  # KL divergence for library size l does not participate in annealing
 
