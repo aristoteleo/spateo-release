@@ -289,12 +289,13 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
 
         Args:
             tensors: Input data tensors
-            full_forward_pass: Whether to execute a full forward pass
+
+            full_forward_pass: Whether to execute full forward pass
 
         Returns:
-            Input dictionary for the inference process
+            Input dictionary for inference process
         """
-        # Choose loading method based on data type
+        # Select loading method based on data type
         if full_forward_pass or self.minified_data_type is None:
             loader = "full_data"
         elif self.minified_data_type in [
