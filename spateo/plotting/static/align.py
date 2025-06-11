@@ -14,6 +14,7 @@ except ImportError:
     from typing_extensions import Literal
 
 import numpy as np
+from scipy.sparse import issparse
 
 from ...tools.cluster.utils import integrate, to_dense_matrix
 from ...tools.utils import compute_smallest_distance
@@ -49,8 +50,91 @@ def slices_2d(
     return_palette: bool = False,
     save_show_or_return: Literal["save", "show", "return", "both", "all"] = "show",
     save_kwargs: Optional[dict] = None,
+    sort_values: bool = True,
+    sort_ascending: bool = True,
     **kwargs,
 ):
+    """Plot multiple 2D spatial transcriptomics slices for both categorical clusters and scalar values.
+
+    Parameters
+    ----------
+    slices
+        A single :class:`~anndata.AnnData` object **or** a list of ``AnnData``,
+        each element represents one spatial slice.
+    slices_key
+        Column in ``.obs`` that identifies each slice.  Required when a
+        single ``AnnData`` containing multiple batches is supplied.
+    label_key
+        Column name in ``.obs`` **or** gene name in ``.var`` whose values will
+        be visualised. If the value is numeric, it will be treated as a scalar value, otherwise it will be treated as a cluster.
+    label_type
+        Force interpretation of ``label_key`` as ``'cluster'`` or
+        ``'scalar'``. If *None* the type is inferred automatically. If the value is numeric, it will be treated as a scalar value, otherwise it will be treated as a cluster.
+    spatial_key
+        Key in ``.obsm`` that stores the spatial coordinates (default
+        ``'spatial'``).
+    point_size
+        Size of scatter points in points².  If *None* an empirical value is
+        computed based on the overall point density.
+    n_sampling
+        Down-sample each slice to *n_sampling* points (without replacement).
+        Supply ``-1`` to disable down-sampling.
+    palette
+        Mapping from category → color for cluster plots **or** a colormap name
+        for scalar plots.  If *None* a palette/colormap is generated
+        automatically.
+    ncols
+        Number of subplot columns.  The value is automatically clipped so as
+        not to exceed the number of slices.
+    title, title_kwargs
+        Common title string and optional ``Axes.set_title`` keyword arguments.
+    show_legend, legend_kwargs
+        Whether to draw a legend (clusters) or colour-bar (scalar) and optional
+        keyword overrides.
+    axis_off, axis_kwargs
+        Whether to hide the axis frame/ticks and optional overrides to
+        ``Axes.axis``.
+    ticks_off
+        If *True* x/y-tick labels are removed.
+    x_min, x_max, y_min, y_max
+        Explicit axis limits.  When *None* the limits are derived from the
+        data and padded by 5 % so that points at the border are still visible.
+    height
+        Height of **one** subplot in inches.
+    alpha
+        Global alpha (transparency) for all points.
+    cmap
+        Name of a matplotlib colormap to use when ``label_type == 'scalar'``.
+    center_coordinate
+        If *True* centre the coordinates of every slice at (0, 0).
+    gridspec_kws
+        Extra keyword arguments passed to ``plt.subplots`` via the
+        ``gridspec_kw`` parameter.
+    return_palette
+        If *True* the colour mapping used for plotting is returned alongside
+        the figure.
+    save_show_or_return
+        One of ``'save'``, ``'show'``, ``'return'`` or ``'both'`` / ``'all'`` –
+        forwarded to :func:`save_return_show_fig_utils`.
+    save_kwargs
+        Extra keyword arguments for saving.
+    sort_values
+        Only relevant for scalar plots.  If *True* the points are rendered in
+        order of ``label_key`` (after sorting) so that points with higher (or
+        lower) values are drawn on top.
+    sort_ascending
+        Sort direction used when ``sort_values`` is *True* (ascending ⇢ smaller
+        values on top).
+    **kwargs
+        Additional keyword arguments forwarded to :func:`matplotlib.pyplot.scatter`.
+
+    Returns
+    -------
+    Depending on ``save_show_or_return`` either a :class:`matplotlib.figure.Figure`
+    object, ``None`` (when the figure is saved/shown directly), or a tuple
+    containing both the figure and the palette.
+    """
+
     # Check slices object.
     if isinstance(slices, AnnData):
         slices = [slices]
@@ -69,7 +153,11 @@ def slices_2d(
             labels.append(s.obs[label_key].copy())
             # label_type = "cluster"
         elif label_key in s.var_names:
-            labels.append(s[:, label_key].X.A.copy().squeeze())
+            X_data = s[:, label_key].X
+            if issparse(X_data):  # Check if it's a sparse matrix
+                labels.append(X_data.A.copy().squeeze())
+            else:
+                labels.append(X_data.copy().squeeze())
             # label_type = "scalar"
         else:
             raise ValueError(f"adata.obs['{label_key}'] or adata.var['{label_key}'] does not exist.")
@@ -109,33 +197,52 @@ def slices_2d(
         for i in range(len(slices)):
             spatial_coords[i] = spatial_coords[i] - np.mean(spatial_coords[i], axis=0)
 
-    # Set the arrangement of subgraphs
-    nrows = math.ceil(len(slices) / ncols)
-    # create dataframe for ploting
-    slices_spatial_data = pd.DataFrame(columns=["x", "y", "label", "slice_id", "col", "row"])
-    for i in range(len(slices)):
-        slices_spatial_data = pd.concat(
-            [
-                slices_spatial_data,
-                pd.DataFrame(
-                    {
-                        "x": spatial_coords[i][:, 0],
-                        "y": spatial_coords[i][:, 1],
-                        "label": labels[i],
-                        "slice_id": slice_ids[i],
-                        "col": i % ncols,
-                        "row": i // ncols,
-                    }
-                ),
-            ],
-            axis=0,
-        )
+    # calculate global spatial bounds for consistent scaling
+    all_coords = np.vstack(spatial_coords)
+    x_global_min, x_global_max = all_coords[:, 0].min(), all_coords[:, 0].max()
+    y_global_min, y_global_max = all_coords[:, 1].min(), all_coords[:, 1].max()
 
-    # set the aspect ratio of each subplot
-    ptp_vec = slices_spatial_data[["x", "y"]].values.ptp(0)
+    # expand bounds by 2% to prevent edge points from being cut off
+    x_range = x_global_max - x_global_min
+    y_range = y_global_max - y_global_min
+    expand_factor = 0.05
+
+    x_global_min -= x_range * expand_factor
+    x_global_max += x_range * expand_factor
+    y_global_min -= y_range * expand_factor
+    y_global_max += y_range * expand_factor
+
+    # use provided limits if available (override expanded bounds)
+    if x_min is not None:
+        x_global_min = x_min
+    if x_max is not None:
+        x_global_max = x_max
+    if y_min is not None:
+        y_global_min = y_min
+    if y_max is not None:
+        y_global_max = y_max
+
+    # set the aspect ratio
+    ptp_vec = all_coords.ptp(0)
     aspect_ratio = ptp_vec[0] / ptp_vec[1]
 
-    # Set multi-plot grid for plotting.
+    # Set the arrangement of subgraphs
+    # Adjust ncols if it's larger than the number of slices
+    ncols = min(ncols, len(slices))
+    nrows = math.ceil(len(slices) / ncols)
+
+    # generate palette
+    if (palette is None) and (label_type == "cluster"):
+        palette = _agenerate_palette(*labels, cmap=cmap)
+    elif label_type == "scalar":
+        palette = cmap
+
+    # determine the pointsize if not specified
+    if point_size is None:
+        total_points = sum(len(coords) for coords in spatial_coords)
+        point_size = 500 * height**2 * aspect_ratio / (total_points / len(slices))
+
+    # Set plot theme
     sns.set_theme(
         context="paper",
         style="white",
@@ -148,56 +255,85 @@ def slices_2d(
         },
     )
 
-    # generate palette
-    if (palette is None) and (label_type == "cluster"):
-        palette = _agenerate_palette(*labels, cmap=cmap)
-    elif label_type == "scalar":
-        palette = cmap
-
     # adjust the gridspec
     _gridspec_kws = {"wspace": 0.1, "hspace": 0.2}
+    if slices_key is False:
+        _gridspec_kws["hspace"] = _gridspec_kws["wspace"] * aspect_ratio
     if gridspec_kws is not None:
         _gridspec_kws.update(gridspec_kws)
 
-    if slices_key is False:
-        _gridspec_kws["hspace"] = _gridspec_kws["wspace"] * aspect_ratio
-
-    # determine the pointsize if not specified
-    if point_size is None:
-        point_size = 500 * height**2 * aspect_ratio / (slices_spatial_data.shape[0] / len(slices))
-
-    # plotting
-    g = sns.FacetGrid(
-        slices_spatial_data,
-        col="col",
-        row="row",
-        hue="label",
-        palette=palette,
-        sharex=True,
-        sharey=True,
-        height=height,
-        aspect=aspect_ratio,
-        despine=False,
-        gridspec_kws=_gridspec_kws,
+    # Create subplots
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(ncols * height * aspect_ratio, nrows * height),
+        gridspec_kw=_gridspec_kws,
     )
 
-    scatterplot_kwargs = {"x": "x", "y": "y", "alpha": alpha, "s": point_size, "legend": False, "edgecolor": None}
-    scatterplot_kwargs.update(kwargs)
+    # Handle single subplot case
+    if nrows == 1 and ncols == 1:
+        axes = [axes]
+    elif nrows == 1 or ncols == 1:
+        axes = axes.flatten()
+    else:
+        axes = axes.flatten()
 
-    g.map_dataframe(sns.scatterplot, **scatterplot_kwargs)
+    if label_type == "scalar":
+        all_scalar_vals = np.concatenate([np.asarray(l) for l in labels])
+        scalar_norm = mpl.colors.Normalize(vmin=all_scalar_vals.min(), vmax=all_scalar_vals.max())
+    else:
+        scalar_norm = None
 
-    for i, (col_val, ax) in enumerate(g.axes_dict.items()):
-        if i < len(slices):
-            if slices_key is False:
-                ax.set_title("")
-            else:
-                ax.set_title(f"Slice {slice_ids[i]}", title_kwargs)
+    # Plot each slice
+    for i in range(len(slices)):
+        ax = axes[i]
+
+        if label_type == "cluster":
+            # For categorical data, use scatter with color mapping
+            unique_labels = np.unique(labels[i])
+            for label in unique_labels:
+                mask = labels[i] == label
+                if np.any(mask):
+                    ax.scatter(
+                        spatial_coords[i][mask, 0],
+                        spatial_coords[i][mask, 1],
+                        c=[palette[label]],
+                        s=point_size,
+                        alpha=alpha,
+                        label=label,
+                        edgecolors="none",
+                        **kwargs,
+                    )
         else:
-            ax.set_title("")
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.axis("off")
+            # For scalar data, use continuous color mapping
+            cur_vals = np.asarray(labels[i])
+            if sort_values:
+                # Sort points by values to control plotting order
+                sort_idx = np.argsort(cur_vals)
+                if not sort_ascending:
+                    sort_idx = sort_idx[::-1]  # Reverse for descending order
+                cur_vals = cur_vals[sort_idx]
+                cur_coords = spatial_coords[i][sort_idx]
+            else:
+                cur_coords = spatial_coords[i]
+
+            scatter = ax.scatter(
+                cur_coords[:, 0],
+                cur_coords[:, 1],
+                c=cur_vals,
+                s=point_size,
+                alpha=alpha,
+                cmap=palette,
+                norm=scalar_norm,
+                edgecolors="none",
+                **kwargs,
+            )
+
+        # Set axis properties
+        ax.set_xlim(x_global_min, x_global_max)
+        ax.set_ylim(y_global_min, y_global_max)
         ax.set_aspect("equal")
+
         if axis_off:
             ax.axis("off")
         if ticks_off:
@@ -207,7 +343,23 @@ def slices_2d(
         ax.set_xlabel("")
         ax.set_ylabel("")
 
-    # create legend
+        # Set title
+        if slices_key is False:
+            ax.set_title("")
+        else:
+            title_text = f"Slice {slice_ids[i]}" if title == "" else title
+            if title_kwargs:
+                ax.set_title(title_text, **title_kwargs)
+            else:
+                ax.set_title(title_text)
+
+    # Hide unused subplots
+    for i in range(len(slices), len(axes)):
+        axes[i].axis("off")
+        axes[i].set_xticks([])
+        axes[i].set_yticks([])
+
+    # Create legend / colorbar
     if show_legend:
         if label_type == "cluster":
             _legend_kwargs = {
@@ -223,41 +375,27 @@ def slices_2d(
             }
             if legend_kwargs:
                 _legend_kwargs.update(legend_kwargs)
-                # if legend_kwargs.get('loc', None) == 'upper center':
-                #     _legend_kwargs['bbox_to_anchor'] = (0.5, 0)
+
             legend_elements = [
                 mpl.lines.Line2D(
                     [0], [0], marker="o", color="w", label=k, markerfacecolor=v, markersize=6, markeredgecolor="k"
                 )
                 for k, v in palette.items()
             ]
-            g.figure.legend(handles=legend_elements, **_legend_kwargs)
+            fig.legend(handles=legend_elements, **_legend_kwargs)
         else:
-            _legend_kwargs = {
-                "loc": "center left",
-                # 'bbox_to_anchor': (1, 0.5, 0.5, 1.0),
-                # 'prop': {'family': 'Arial', 'size': 10},
-                # 'fancybox': False,
-                # 'edgecolor': 'black',
-                # 'framealpha': 1,
-                # 'columnspacing': 0.5,
-                # 'handletextpad': 0.1,
-                # 'frameon': True,
-            }
-            if legend_kwargs:
-                _legend_kwargs.update(legend_kwargs)
-                # if legend_kwargs.get('loc', None) == 'upper center':
-                #     _legend_kwargs['bbox_to_anchor'] = (0.5, 0, 0.5, 1.0)
-            # TODO: add colorbar for scalar value input
-            label_values = slices_spatial_data["label"].values
-            norm = mpl.colors.Normalize(vmin=None, vmax=None)
-            mappable = mpl.cm.ScalarMappable(norm=norm, cmap=palette)
-            mappable.set_array(label_values)
             from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-            g.figure.colorbar(
-                mappable,
-                use_gridspec=False,
+            # For scalar data, add a global colorbar using all scalar values
+            sm = mpl.cm.ScalarMappable(cmap=palette, norm=scalar_norm)
+            sm.set_array([])
+            # Place below all panels
+            cbar = fig.colorbar(
+                sm,
+                ax=axes.tolist(),
+                orientation="vertical",
+                fraction=0.05,
+                pad=0.07,
                 shrink=0.5,
                 cax=inset_axes(
                     ax,
@@ -269,20 +407,21 @@ def slices_2d(
                     bbox_transform=ax.transAxes,
                 ),
             )
+            cbar.set_label(label_key if label_key else "Value", fontsize=10)
 
-    # TODO: add save_return_show_fig_utils
-    # plt.tight_layout()
+    plt.tight_layout()
+
     if return_palette:
         return (
             save_return_show_fig_utils(
                 save_show_or_return=save_show_or_return,
                 show_legend=show_legend,
                 background="white",
-                prefix="multi_slices",
+                prefix="multi_slices_scatter",
                 save_kwargs=save_kwargs,
                 total_panels=len(slice_ids),
-                fig=g,
-                axes=g,
+                fig=fig,
+                axes=axes,
                 return_all=False,
                 return_all_list=None,
             ),
@@ -293,15 +432,14 @@ def slices_2d(
             save_show_or_return=save_show_or_return,
             show_legend=show_legend,
             background="white",
-            prefix="multi_slices",
+            prefix="multi_slices_scatter",
             save_kwargs=save_kwargs,
             total_panels=len(slice_ids),
-            fig=g,
-            axes=g,
+            fig=fig,
+            axes=axes,
             return_all=False,
             return_all_list=None,
         )
-    # return g, palette
 
 
 def overlay_slices_2d(
@@ -353,7 +491,11 @@ def overlay_slices_2d(
                 labels.append(s.obs[label_key].copy())
                 label_type = "cluster"
             elif label_key in s.var_names:
-                labels.append(s[:, label_key].X.A.copy().squeeze())
+                X_data = s[:, label_key].X
+                if issparse(X_data):  # Check if it's a sparse matrix
+                    labels.append(X_data.A.copy().squeeze())
+                else:
+                    labels.append(X_data.copy().squeeze())
                 label_type = "scalar"
             else:
                 raise ValueError(f"adata.obs['{label_key}'] or adata.var['{label_key}'] does not exist.")
