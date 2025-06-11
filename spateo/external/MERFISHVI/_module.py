@@ -285,16 +285,16 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         tensors: dict[str, torch.Tensor | None],
         full_forward_pass: bool = False,
     ) -> dict[str, torch.Tensor | None]:
-        """获取推断过程所需的输入张量。
+        """Get input tensors required for the inference process.
 
         Args:
-            tensors: 输入数据张量
-            full_forward_pass: 是否执行完整的前向传播
+            tensors: Input data tensors
+            full_forward_pass: Whether to execute a full forward pass
 
         Returns:
-            用于推断过程的输入字典
+            Input dictionary for the inference process
         """
-        # 根据数据类型选择加载方式
+        # Choose loading method based on data type
         if full_forward_pass or self.minified_data_type is None:
             loader = "full_data"
         elif self.minified_data_type in [
@@ -303,22 +303,22 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         ]:
             loader = "minified_data"
         else:
-            raise NotImplementedError(f"未知的简化数据类型: {self.minified_data_type}")
+            raise NotImplementedError(f"Unknown minified data type: {self.minified_data_type}")
 
-        # 完整数据情况：提供表达数据和批次信息
+        # Full data case: provide expression data and batch information
         if loader == "full_data":
             return {
-                "x": tensors["X"],  # 基因表达数据
-                "batch_index": tensors["batch"],  # 批次索引
-                "cont_covariates": tensors.get("continuous_covariates", None),  # 连续型协变量
-                "cat_covariates": tensors.get("categorical_covariates", None),  # 分类型协变量
+                "x": tensors["X"],  # Gene expression data
+                "batch_index": tensors["batch"],  # Batch indices
+                "cont_covariates": tensors.get("continuous_covariates", None),  # Continuous covariates
+                "cat_covariates": tensors.get("categorical_covariates", None),  # Categorical covariates
             }
-        # 简化数据情况：提供已计算的潜在变量分布参数
+        # Simplified data case: provide pre-computed latent variable distribution parameters
         else:
             return {
-                "qzm": tensors["scvi_latent_qzm"],  # 潜变量均值
-                "qzv": tensors["scvi_latent_qzv"],  # 潜变量方差
-                "observed_lib_size": tensors["observed_lib_size"],  # 观测到的文库大小
+                "qzm": tensors["scvi_latent_qzm"],  # Latent variable means
+                "qzv": tensors["scvi_latent_qzv"],  # Latent variable variances
+                "observed_lib_size": tensors["observed_lib_size"],  # Observed library size
             }
 
     def _get_generative_input(
@@ -326,60 +326,62 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         tensors: dict[str, torch.Tensor],
         inference_outputs: dict[str, torch.Tensor | Distribution | None],
     ) -> dict[str, torch.Tensor | None]:
-        """获取生成过程的输入张量。
+        """Get input tensors for the generative process.
 
-        将推断步骤的输出与原始数据结合，准备生成网络的输入。
+        Combine outputs from the inference step with original data to prepare
+        inputs for the generative network.
 
         Args:
-            tensors: 原始数据张量
-            inference_outputs: 推断过程的输出
+            tensors: Original data tensors
+            inference_outputs: Outputs from the inference process
 
         Returns:
-            生成过程所需的输入字典
+            Input dictionary required for the generative process
         """
-        # 获取size_factor（如果提供）
+        # Get size_factor (if provided)
         size_factor = tensors.get("size_factor", None)
         if size_factor is not None:
             size_factor = torch.log(size_factor)
 
         return {
-            "z": inference_outputs["z"],  # 潜在空间表示
-            "library": inference_outputs["library"],  # 文库大小
-            "batch_index": tensors["batch"],  # 批次索引
-            "y": tensors["labels"],  # 细胞类型标签
-            "cont_covariates": tensors.get("continuous_covariates", None),  # 连续型协变量
-            "cat_covariates": tensors.get("categorical_covariates", None),  # 分类型协变量
-            "size_factor": size_factor,  # 大小因子
+            "z": inference_outputs["z"],  # Latent space representation
+            "library": inference_outputs["library"],  # Library size
+            "batch_index": tensors["batch"],  # Batch indices
+            "y": tensors["labels"],  # Cell type labels
+            "cont_covariates": tensors.get("continuous_covariates", None),  # Continuous covariates
+            "cat_covariates": tensors.get("categorical_covariates", None),  # Categorical covariates
+            "size_factor": size_factor,  # Size factor
         }
 
     def _compute_local_library_params(
         self,
         batch_index: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """计算局部文库参数。
+        """Compute local library parameters.
 
-        为每个细胞计算文库大小的均值和方差参数，这些参数取决于细胞所属的批次。
+        Calculate mean and variance parameters for library size for each cell,
+        which depend on the batch the cell belongs to.
 
         Args:
-            batch_index: 形状为 (batch_size, 1) 的批次索引张量
+            batch_index: Batch index tensor of shape (batch_size, 1)
 
         Returns:
-            tuple: 包含两个张量，分别是文库大小对数的均值和方差
+            tuple: Contains two tensors, log library size means and variances respectively
         """
         from torch.nn.functional import linear
 
-        # 批次数量
+        # Number of batches
         num_batches = self.library_log_means.shape[1]
 
-        # 将批次索引转换为独热编码
+        # Convert batch indices to one-hot encoding
         batch_one_hot = one_hot(batch_index.squeeze(-1), num_batches).float()
 
-        # 计算每个细胞的文库大小对数均值
-        # 相当于从全局文库均值表中查找对应批次的值
+        # Compute log library size means for each cell
+        # Equivalent to looking up the corresponding batch value from the global library means table
         library_log_means = linear(batch_one_hot, self.library_log_means)
 
-        # 计算每个细胞的文库大小对数方差
-        # 相当于从全局文库方差表中查找对应批次的值
+        # Compute log library size variances for each cell
+        # Equivalent to looking up the corresponding batch value from the global library variances table
         library_log_vars = linear(batch_one_hot, self.library_log_vars)
 
         return library_log_means, library_log_vars
@@ -393,59 +395,59 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         cat_covs: torch.Tensor | None = None,
         n_samples: int = 1,
     ) -> dict[str, torch.Tensor | Distribution | None]:
-        """运行常规推断过程，获取数据的潜在表示。
+        """Run regular inference process to obtain latent representations of data.
 
         Args:
-            x: 基因表达数据
-            batch_index: 批次索引
-            cont_covs: 连续型协变量
-            cat_covs: 分类型协变量
-            n_samples: 采样数量
+            x: Gene expression data
+            batch_index: Batch indices
+            cont_covs: Continuous covariates
+            cat_covs: Categorical covariates
+            n_samples: Number of samples
 
         Returns:
-            包含潜在变量和分布的字典
+            Dictionary containing latent variables and distributions
         """
         x_ = x
         if self.use_observed_lib_size:
-            # 计算观测到的文库大小（基因表达总和）
+            # Compute observed library size (sum of gene expression)
             library = torch.log(x.sum(1)).unsqueeze(1)
         if self.log_variational:
-            # 对数据取对数，增加数值稳定性
+            # Take log of data for numerical stability
             x_ = torch.log1p(x_)
 
         if cont_covs is not None and self.encode_covariates:
-            # 将基因表达和连续协变量拼接起来
+            # Concatenate gene expression and continuous covariates
             encoder_input = torch.cat((x_, cont_covs), dim=-1)
         else:
             encoder_input = x_
         if cat_covs is not None and self.encode_covariates:
-            # 处理分类协变量
+            # Process categorical covariates
             categorical_input = torch.split(cat_covs, 1, dim=1)
         else:
             categorical_input = ()
 
         if self.batch_representation == "embedding" and self.encode_covariates:
-            # 使用嵌入表示批次
+            # Use embedding representation for batch
             batch_embedding = self.compute_embedding("batch", batch_index)
             encoder_input = torch.cat([encoder_input, batch_embedding], dim=-1)
-            # 获取潜在变量分布和样本
+            # Get latent variable distribution and samples
             qz, z = self.z_encoder(encoder_input, *categorical_input)
         else:
-            # 使用独热编码表示批次
+            # Use one-hot encoding representation for batch
             qz, z = self.z_encoder(encoder_input, batch_index, *categorical_input)
 
         ql = None
         if not self.use_observed_lib_size:
             if self.batch_representation == "embedding":
-                # 使用嵌入表示批次来编码文库大小
+                # Use embedding representation for batch to encode library size
                 ql, library_encoded = self.l_encoder(encoder_input, *categorical_input)
             else:
-                # 使用独热编码表示批次来编码文库大小
+                # Use one-hot encoding representation for batch to encode library size
                 ql, library_encoded = self.l_encoder(encoder_input, batch_index, *categorical_input)
             library = library_encoded
 
         if n_samples > 1:
-            # 多个样本情况下的处理
+            # Handle multiple samples case
             untran_z = qz.sample((n_samples,))
             z = self.z_encoder.z_transformation(untran_z)
             if self.use_observed_lib_size:
@@ -454,10 +456,10 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
                 library = ql.sample((n_samples,))
 
         return {
-            "z": z,  # 潜在空间表示
-            "qz": qz,  # 潜在空间分布
-            "ql": ql,  # 文库大小分布
-            "library": library,  # 文库大小
+            "z": z,  # Latent space representation
+            "qz": qz,  # Latent space distribution
+            "ql": ql,  # Library size distribution
+            "library": library,  # Library size
         }
 
     @auto_move_data
@@ -468,47 +470,48 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         observed_lib_size: torch.Tensor,
         n_samples: int = 1,
     ) -> dict[str, torch.Tensor | None]:
-        """使用缓存的潜在变量分布参数进行推断。
+        """Perform inference using cached latent variable distribution parameters.
 
-        这种方法主要用于已经计算并存储了潜在变量分布的情况，
-        可以加快推断速度，无需重新运行编码器网络。
+        This method is mainly used when latent variable distributions have already
+        been computed and stored, which can speed up inference without re-running
+        the encoder network.
 
         Args:
-            qzm: 潜在变量均值
-            qzv: 潜在变量方差
-            observed_lib_size: 观测到的文库大小
-            n_samples: 采样数量
+            qzm: Latent variable means
+            qzv: Latent variable variances
+            observed_lib_size: Observed library size
+            n_samples: Number of samples
 
         Returns:
-            包含潜在变量和分布的字典
+            Dictionary containing latent variables and distributions
         """
         from torch.distributions import Normal
 
-        # 创建潜在变量的正态分布
+        # Create normal distribution for latent variables
         latent_dist = Normal(qzm, qzv.sqrt())
 
-        # 从分布中采样
-        # 使用sample()而不是rsample()，因为我们不需要对z进行优化
+        # Sample from distribution
+        # Use sample() instead of rsample() because we don't need to optimize z
         if n_samples == 1:
             untransformed_z = latent_dist.sample()
         else:
             untransformed_z = latent_dist.sample((n_samples,))
 
-        # 变换潜在变量（如果使用的是logistic normal分布）
+        # Transform latent variables (if using logistic normal distribution)
         z = self.z_encoder.z_transformation(untransformed_z)
 
-        # 计算文库大小（取对数）
+        # Compute library size (take log)
         library = torch.log(observed_lib_size)
 
-        # 多样本情况下扩展文库大小
+        # Expand library size for multiple samples case
         if n_samples > 1:
             library = library.unsqueeze(0).expand((n_samples, library.size(0), library.size(1)))
 
         return {
-            "z": z,  # 潜在空间表示
-            "qz": latent_dist,  # 潜在空间分布
-            "ql": None,  # 没有文库大小分布（使用观测值）
-            "library": library,  # 文库大小
+            "z": z,  # Latent space representation
+            "qz": latent_dist,  # Latent space distribution
+            "ql": None,  # No library size distribution (using observed values)
+            "library": library,  # Library size
         }
 
     @auto_move_data
@@ -668,66 +671,66 @@ class VAE(EmbeddingModuleMixin, BaseMinifiedModeModuleClass):
         generative_outputs: dict[str, Distribution | None],
         kl_weight: torch.tensor | float = 1.0,
     ) -> LossOutput:
-        """计算变分自编码器的损失函数。
+        """Compute the loss function for the variational autoencoder.
 
-        损失函数由重构损失和KL散度两部分组成：
-        1. 重构损失：衡量生成的数据与原始数据的匹配程度
-        2. KL散度：衡量后验分布与先验分布的差异，起到正则化作用
+        The loss function consists of two parts: reconstruction loss and KL divergence:
+        1. Reconstruction loss: measures how well the generated data matches the original data
+        2. KL divergence: measures the difference between posterior and prior distributions, acting as regularization
 
         Args:
-            tensors: 原始数据张量
-            inference_outputs: 推断过程的输出
-            generative_outputs: 生成过程的输出
-            kl_weight: KL散度项的权重系数（用于KL退火）
+            tensors: Original data tensors
+            inference_outputs: Outputs from the inference process
+            generative_outputs: Outputs from the generative process
+            kl_weight: Weight coefficient for KL divergence term (used for KL annealing)
 
         Returns:
-            包含总损失和各部分损失的对象
+            Object containing total loss and individual loss components
         """
         from torch.distributions import kl_divergence
 
-        # 获取原始基因表达数据
-        x = tensors["X"]  # 使用直观的X代替REGISTRY_KEYS.X_KEY
+        # Get original gene expression data
+        x = tensors["X"]  # Use intuitive X instead of REGISTRY_KEYS.X_KEY
 
-        # 计算潜在变量的KL散度：后验分布q(z|x)与先验分布p(z)之间的差异
+        # Compute KL divergence for latent variables: difference between posterior q(z|x) and prior p(z)
         kl_divergence_z = kl_divergence(inference_outputs["qz"], generative_outputs["latent_space"]).sum(dim=-1)
 
-        # 计算文库大小的KL散度（如果使用学习的文库大小）
+        # Compute KL divergence for library size (if using learned library size)
         if not self.use_observed_lib_size:
             kl_divergence_l = kl_divergence(inference_outputs["ql"], generative_outputs["library_size"]).sum(dim=1)
         else:
-            # 如果使用观测的文库大小，则KL散度为0
+            # If using observed library size, KL divergence is 0
             kl_divergence_l = torch.zeros_like(kl_divergence_z)
 
-        # 计算重构损失：负对数似然
+        # Compute reconstruction loss: negative log likelihood
         reconstruction_loss = -generative_outputs["gene_expression"].log_prob(x).sum(-1)
 
-        # 区分需要进行权重调整的KL散度（用于KL退火）
-        kl_for_warmup = kl_divergence_z  # 潜在变量z的KL散度会参与退火
-        kl_no_warmup = kl_divergence_l  # 文库大小l的KL散度不参与退火
+        # Distinguish KL divergences that need weight adjustment (for KL annealing)
+        kl_for_warmup = kl_divergence_z  # KL divergence for latent variable z participates in annealing
+        kl_no_warmup = kl_divergence_l  # KL divergence for library size l does not participate in annealing
 
-        # 应用权重后的KL散度
+        # Apply weighted KL divergence
         weighted_kl = kl_weight * kl_for_warmup + kl_no_warmup
 
-        # 总损失 = 重构损失 + 加权KL散度
+        # Total loss = reconstruction loss + weighted KL divergence
         total_loss = torch.mean(reconstruction_loss + weighted_kl)
 
-        # 为自动调优准备额外的指标（如果需要）
+        # Prepare additional metrics for auto-tuning (if needed)
         if self.extra_payload_autotune:
             extra_metrics = {
                 "z": inference_outputs["z"],
-                "batch": tensors["batch"],  # 使用直观的batch代替REGISTRY_KEYS.BATCH_KEY
-                "labels": tensors["labels"],  # 使用直观的labels代替REGISTRY_KEYS.LABELS_KEY
+                "batch": tensors["batch"],  # Use intuitive batch instead of REGISTRY_KEYS.BATCH_KEY
+                "labels": tensors["labels"],  # Use intuitive labels instead of REGISTRY_KEYS.LABELS_KEY
             }
         else:
             extra_metrics = {}
 
-        # 返回损失对象
+        # Return loss object
         return LossOutput(
             loss=total_loss,
             reconstruction_loss=reconstruction_loss,
             kl_local={
-                "kl_divergence_l": kl_divergence_l,  # 文库大小的KL散度
-                "kl_divergence_z": kl_divergence_z,  # 潜在变量的KL散度
+                "kl_divergence_l": kl_divergence_l,  # KL divergence for library size
+                "kl_divergence_z": kl_divergence_z,  # KL divergence for latent variables
             },
             extra_metrics=extra_metrics,
         )
