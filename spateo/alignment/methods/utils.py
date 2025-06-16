@@ -432,7 +432,7 @@ def generate_label_transfer_dict(
     norm_label_transfer_dict = dict()
     for c1 in cat1:
         norm_c = np.array([label_transfer_dict[c1][c2] for c2 in cat2]).sum()
-        norm_label_transfer_dict[c1] = {c2: label_transfer_dict[c1][c2] / norm_c for c2 in cat2}
+        norm_label_transfer_dict[c1] = {c2: label_transfer_dict[c1][c2] / (norm_c + 1e-8) for c2 in cat2}
 
     return norm_label_transfer_dict
 
