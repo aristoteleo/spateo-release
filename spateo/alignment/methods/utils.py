@@ -378,7 +378,8 @@ def generate_label_transfer_dict(
     cat2: List[str],
     positive_pairs: Optional[List[Dict[str, Union[List[str], float]]]] = None,
     negative_pairs: Optional[List[Dict[str, Union[List[str], float]]]] = None,
-    default_positve_value: float = 10.0,
+    default_positive_value: float = 10.0,
+    default_negative_value: float = 1.0,
 ) -> Dict[str, Dict[str, float]]:
     """
     Generate a label transfer dictionary with normalized values.
@@ -394,6 +395,8 @@ def generate_label_transfer_dict(
             List of negative pairs with transfer values. Each dictionary should have 'left', 'right', and 'value' keys. Defaults to None.
         default_positive_value (float, optional):
             Default value for positive pairs if none are provided. Defaults to 10.0.
+        default_negative_value (float, optional):
+            Default value for negative pairs if none are provided. Defaults to 1.0.
 
     Returns:
         Dict[str, Dict[str, float]]:
@@ -401,13 +404,13 @@ def generate_label_transfer_dict(
     """
 
     # Initialize label transfer dictionary with default values
-    # label_transfer_dict = {c2: {c1: 1.0 for c1 in cat1} for c2 in cat2}
     label_transfer_dict = {c1: {c2: 1.0 for c2 in cat2} for c1 in cat1}
 
     # Generate default positive pairs if none provided
     if (positive_pairs is None) and (negative_pairs is None):
+        label_transfer_dict = {c1: {c2: default_negative_value for c2 in cat2} for c1 in cat1}
         common_cat = np.union1d(cat1, cat2)
-        positive_pairs = [{"left": [c], "right": [c], "value": default_positve_value} for c in common_cat]
+        positive_pairs = [{"left": [c], "right": [c], "value": default_positive_value} for c in common_cat]
 
     # Apply positive pairs to the dictionary
     if positive_pairs is not None:
@@ -430,11 +433,6 @@ def generate_label_transfer_dict(
     for c1 in cat1:
         norm_c = np.array([label_transfer_dict[c1][c2] for c2 in cat2]).sum()
         norm_label_transfer_dict[c1] = {c2: label_transfer_dict[c1][c2] / norm_c for c2 in cat2}
-
-    # norm_label_transfer_dict = dict()
-    # for c2 in cat2:
-    #     norm_c = np.array([label_transfer_dict[c2][c1] for c1 in cat1]).sum()
-    #     norm_label_transfer_dict[c2] = {c1: label_transfer_dict[c2][c1] / norm_c for c1 in cat1}
 
     return norm_label_transfer_dict
 
