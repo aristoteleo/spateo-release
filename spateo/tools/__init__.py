@@ -27,4 +27,5 @@ from .glm import glm_degs
 from .labels import Label, create_label_class
 from .lisa import GM_lag_model, lisa_geo_df, local_moran_i
 from .live_wire import LiveWireSegmentation, compute_shortest_path, live_wire
+from .spatial_correlation import spatial_bv_local_moran, spatial_bv_moran_obs_genes
 from .spatial_degs import cellbin_morani, moran_i
