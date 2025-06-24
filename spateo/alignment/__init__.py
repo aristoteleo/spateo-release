@@ -11,6 +11,7 @@ from .morpho_alignment import (
     morpho_align_apply_transformation,
     morpho_align_ref,
     morpho_align_transformation,
+    morpho_multi_refinement,
 )
 from .paste_alignment import paste_align, paste_align_ref
 from .transform import BA_transform, BA_transform_and_assignment, paste_transform

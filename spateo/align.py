@@ -14,6 +14,7 @@ from .alignment import (
     morpho_align_apply_transformation,
     morpho_align_ref,
     morpho_align_transformation,
+    morpho_multi_refinement,
     paste_align,
     paste_align_ref,
     paste_transform,

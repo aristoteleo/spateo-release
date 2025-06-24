@@ -467,3 +467,170 @@ def remove_all_files_in_directory(directory_path):
                 print(f"Failed to delete {file_path}. Reason: {e}")
     else:
         print(f"The directory {directory_path} does not exist.")
+
+
+def morpho_multi_refinement(
+    models: List[AnnData],
+    rep_layer: List[str] = None,
+    rep_field: List[str] = None,
+    genes: Optional[Union[List[str], np.ndarray]] = None,
+    spatial_key: str = "spatial",
+    key_added: str = "align_spatial",
+    max_global_iter: int = 2,
+    neighbor_size: int = 3,
+    mode: Literal["SN-N", "SN-S"] = "SN-S",
+    dissimilarity: Union[str, List[str]] = "kl",
+    max_iter: int = 200,
+    dtype: str = "float32",
+    vecfld_key_added: str = "VecFld_morpho",
+    device: str = "1",
+    iter_key_added: Optional[str] = None,
+    subsample_neighbor_slices: bool = False,
+    verbose: bool = False,
+    **kwargs,
+) -> List[AnnData]:
+    """Refine multi-slice alignment using neighboring slices.
+
+    This function performs iterative refinement of spatial slice alignment by utilizing
+    neighboring slices to optimize the global alignment. It's particularly useful for
+    improving alignment quality in multi-slice spatial transcriptomics datasets. In each
+    global iteration, for each slice, its neighbors are concatenated to form a reference, and
+    the slice is aligned to this reference. This process is repeated for `max_global_iter`
+    times.
+
+    Args:
+        models (List[AnnData]): A list of `AnnData` objects, each representing a spatial slice.
+        rep_layer (List[str], optional): If `'X'`, uses `.X` to calculate dissimilarity.
+            Otherwise, uses the representation in `.layers[rep_layer]`. Can be a list of layers. Defaults to None.
+        rep_field (List[str], optional): The field of representation. Can be "X", "layers",
+            "obsm", etc. Can be a list of fields. Defaults to None.
+        genes (Optional[Union[List[str], np.ndarray]]): A list of genes to be used for alignment.
+            If `None`, all common genes are used. Defaults to None.
+        spatial_key (str): The key in `.obsm` corresponding to the spatial coordinates.
+            Defaults to "spatial".
+        key_added (str): The key in `.obsm` under which to store the aligned coordinates.
+            Defaults to "align_spatial".
+        max_global_iter (int): Maximum number of global refinement iterations. Defaults to 2.
+        neighbor_size (int): The number of neighboring slices to consider on each side for
+            constructing the reference. Defaults to 3.
+        mode (Literal["SN-N", "SN-S"]): The alignment mode. Either "SN-S" for rigid alignment
+            or "SN-N" for non-rigid alignment. "SN-S" uses non-rigid transformation to find a
+            better rigid alignment. Defaults to "SN-S".
+        dissimilarity (Union[str, List[str]]): The dissimilarity metric to use.
+            Can be 'kl' or 'euclidean'. Defaults to "kl".
+        max_iter (int): Maximum number of iterations for pairwise morpho alignment. Defaults to 200.
+        dtype (str): The data type for computations ('float32' or 'float64').
+            Defaults to "float32".
+        vecfld_key_added (str): The key in `.uns` to store the vector field.
+            Defaults to "VecFld_morpho".
+        device (str): The device to use for computation (e.g., 'cpu', '0' for GPU).
+            Defaults to "1".
+        iter_key_added (Optional[str]): The key in `.uns` to store iteration results.
+            If `None`, results are not saved. Defaults to None.
+        subsample_neighbor_slices (bool): Whether to subsample neighbor slices to speed up
+            computation. Defaults to False.
+        verbose (bool): If `True`, print progress information. Defaults to False.
+        **kwargs: Additional keyword arguments passed to `spateo.alignment.methods.Morpho_pairwise`.
+
+    Returns:
+        List[AnnData]: A list of `AnnData` objects with the globally aligned coordinates
+            stored in `.obsm[key_added]`.
+    """
+
+    # Initialize global alignment slices
+    global_align_slices = [s.copy() for s in models]
+    for m in global_align_slices:
+        m.obsm[key_added] = m.obsm[spatial_key].copy()
+        m.obsm[f"{key_added}_rigid"] = m.obsm[spatial_key].copy()
+        m.obsm[f"{key_added}_nonrigid"] = m.obsm[spatial_key].copy()
+
+    n_models = len(global_align_slices)
+
+    progress_name = f"Models alignment based on morpho, mode: {mode}, max_global_iter: {max_global_iter}."
+    for global_iter in _iteration(n=max_global_iter, progress_name=progress_name, verbose=True):
+        if global_iter == 0:
+            # if this is the first global iteration, use the sequential order
+            permute = np.arange(n_models)
+        else:
+            permute = np.random.permutation(range(n_models))
+
+        for i in range(n_models):
+            model_index = permute[i]
+            # if this is the first global iteration, skip the first slice
+            if (global_iter == 0) and (model_index == 0):
+                continue
+
+            cur_slice = global_align_slices[model_index]
+
+            # Determine neighbor slice indices
+            index_min, index_max = model_index - neighbor_size, model_index + neighbor_size
+            index_min = max(index_min, 0)
+            index_max = max(index_max, index_min + 2 * neighbor_size)
+            index_max = min(index_max, n_models)
+            index_min = min(index_min, index_max - 2 * neighbor_size)
+
+            if global_iter == 0:
+                index_min = model_index - 2 * neighbor_size
+                index_min = max(index_min, 0)
+                neighbor_slices = [
+                    global_align_slices[neighbor_model_index]
+                    for neighbor_model_index in range(n_models)
+                    if (neighbor_model_index < model_index) and (neighbor_model_index >= index_min)
+                ]
+            else:
+                neighbor_slices = [
+                    global_align_slices[neighbor_model_index]
+                    for neighbor_model_index in range(n_models)
+                    if (
+                        (neighbor_model_index >= index_min)
+                        and (neighbor_model_index <= index_max)
+                        and (neighbor_model_index != model_index)
+                    )
+                ]
+
+            # Subsample neighbor slices
+            if subsample_neighbor_slices:
+                neighbor_slices_sub = []
+                for s in neighbor_slices:
+                    neighbor_subsample = int(s.n_obs / len(global_align_slices))
+                    neighbor_slices_sub.append(s[np.random.choice(s.n_obs, neighbor_subsample, replace=False), :])
+            else:
+                neighbor_slices_sub = neighbor_slices
+
+            if len(neighbor_slices_sub) == 0:
+                continue
+
+            neighbor_slices_sub = ad.concat(neighbor_slices_sub)
+
+            # Perform morpho alignment
+            morpho_model = Morpho_pairwise(
+                sampleA=cur_slice,  # reverse
+                sampleB=neighbor_slices_sub,  # reverse
+                rep_layer=rep_layer,
+                rep_field=rep_field,
+                dissimilarity=dissimilarity,
+                genes=genes,
+                spatial_key=key_added,
+                key_added=key_added,
+                iter_key_added=iter_key_added,
+                vecfld_key_added=vecfld_key_added,
+                max_iter=max_iter,
+                dtype=dtype,
+                device=device,
+                verbose=verbose,
+                **kwargs,
+            )
+            P = morpho_model.run()
+            # Update global alignment coordinates
+            global_align_slices[model_index].obsm[f"{key_added}_rigid"] = morpho_model.optimal_RnA.copy()
+            global_align_slices[model_index].obsm[f"{key_added}_nonrigid"] = morpho_model.XAHat.copy()
+            if mode == "SN-S":
+                global_align_slices[model_index].obsm[key_added] = global_align_slices[model_index].obsm[
+                    f"{key_added}_rigid"
+                ]
+            elif mode == "SN-N":
+                global_align_slices[model_index].obsm[key_added] = global_align_slices[model_index].obsm[
+                    f"{key_added}_nonrigid"
+                ]
+
+    return global_align_slices
