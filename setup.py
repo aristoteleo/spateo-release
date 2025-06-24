@@ -1,6 +1,56 @@
 import os
+import sys
 
-from setuptools import find_packages, setup
+import pybind11
+from setuptools import Extension, find_packages, setup
+from setuptools.command.build_ext import build_ext
+
+
+class BuildExt(build_ext):
+    c_opts = {
+        "unix": ["-O3", "-std=c++11", "-fPIC"],
+        "msvc": ["/EHsc"],
+    }
+
+    def build_extensions(self):
+        ct = self.compiler.compiler_type
+        opts = self.c_opts.get(ct, [])
+        if ct == "unix":
+            if sys.platform == "darwin":
+                opts += ["-stdlib=libc++", "-mmacosx-version-min=10.9"]
+        for ext in self.extensions:
+            ext.extra_compile_args = opts
+        build_ext.build_extensions(self)
+
+
+# Relative path to C++ source files
+fastpd_src = [
+    # Corresponds to the source code under external/fastpd/fastpd/
+    os.path.join("external", "fastpd", "fastpd", "FastPD.cpp"),
+    os.path.join("external", "fastpd", "fastpd", "graph.cpp"),
+    # Plus the module initialization file
+    os.path.join("external", "fastpd", "init_fastpd.cpp"),
+]
+
+# Include search paths for header files
+include_dirs = [
+    # PyBind11's headers
+    pybind11.get_include(),
+    # The directory where FastPD's own header files are located
+    os.path.join("external", "fastpd", "fastpd"),
+    # If FastPD uses other custom includes, add them here
+]
+
+extensions = [
+    Extension(
+        name="spateo.libfastpd.libfastpd",  # This is the final module name in Python
+        sources=fastpd_src,
+        include_dirs=include_dirs,
+        language="c++",
+        # libraries=[] If you need to link to Python3 itself, you usually don't need to write it explicitly, because PyBind11 will handle it implicitly
+        # library_dirs=[] If there are additional library paths, write them here as well
+    ),
+]
 
 
 def read_requirements(path):
@@ -52,4 +102,7 @@ setup(
         "osmFISH",
         "spatiotemporal",
     ],
+    ext_modules=extensions,
+    cmdclass={"build_ext": BuildExt},
+    zip_safe=False,
 )

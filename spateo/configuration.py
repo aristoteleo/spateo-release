@@ -167,6 +167,24 @@ class SpateoAdataKeyManager:
             adata.layers[layer] = vals
 
     def get_adata_type(adata: AnnData) -> str:
+        """Get the type of AnnData object.
+
+        Args:
+            adata: AnnData object
+            auto_infer: If True, automatically infer and set type when missing
+
+        Returns:
+            Type string of the AnnData object
+        """
+        if SpateoAdataKeyManager.ADATA_TYPE_KEY not in adata.uns:
+            raise ConfigurationError(
+                f"AnnData type not found in adata.uns['{SpateoAdataKeyManager.ADATA_TYPE_KEY}']. "
+                f"Please initialize with spateo.SKM.init_adata_type(adata, type). "
+                f"Or directly set the type with adata.uns['{SpateoAdataKeyManager.ADATA_TYPE_KEY}'] = type."
+                f"type can be: "
+                f"{SpateoAdataKeyManager.ADATA_AGG_TYPE} if you are using aggregated UMI counts; "
+                f"{SpateoAdataKeyManager.ADATA_UMI_TYPE} if you are using UMI counts (default for spateo)."
+            )
         return adata.uns[SpateoAdataKeyManager.ADATA_TYPE_KEY]
 
     def adata_is_type(adata: AnnData, t: str) -> bool:

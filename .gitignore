@@ -1,6 +1,17 @@
 
 spateo_release.egg-info/
 *.html
+
+# fastpd related
+external/fastpd/CMakeFiles/
+external/fastpd/cmake_install.cmake
+external/fastpd/CMakeCache.txt
+external/fastpd/Makefile
+external/fastpd/cmake_uninstall.cmake
+external/fastpd/CTestTestfile.cmake
+external/fastpd/cmake_clean.cmake
+external/fastpd/spateo/
+
 # vscode related
 .vscode/
 spateo/.vscode/
