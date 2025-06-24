@@ -12,11 +12,13 @@ from typing import List, Optional, Tuple, Union
 
 from pyvista import PolyData  # type: ignore
 
+import spateo.libfastpd.fastpd as fastpd
 from spateo.logging import logger_manager as lm
 
 from ..utils import _iteration
 from .mesh_correction_utils import (
     _calculate_loss,
+    _eliminate_shift,
     _extract_contour_alpha_shape,
     _extract_contour_opencv,
     _generate_labeling,
@@ -28,11 +30,18 @@ from .mesh_correction_utils import (
     _update_parameter,
 )
 
-try:
-    from .libfastpd import fastpd
-except ImportError:
-    # print("fastpd is not installed. If you need mesh correction, please compile the fastpd library.")
-    pass
+# try:
+#     from .libfastpd import fastpd
+# except ImportError:
+#     print("fastpd is not installed. If you need mesh correction, please compile the fastpd library.")
+#     pass
+
+
+# try:
+#     import spateo.libfastpd.fastpd as fastpd
+# except ImportError:
+#     print("fastpd is not installed. If you need mesh correction, please compile the fastpd library.")
+#     pass
 
 
 # TODO: add str as the input type for the models
@@ -85,7 +94,7 @@ class Mesh_correction:
         subsample_slices: Optional[int] = None,
         verbose: bool = False,
     ) -> None:
-
+        print("changed")
         self.n_slices = len(slices)
 
         # check if all slices have the same spatial key in the ".obsm" attribute
@@ -348,18 +357,39 @@ class Mesh_correction:
 
     def perform_correction(
         self,
+        slices,
+        smooth: bool = True,
+        spatial_key: str = "spatial",
+        key_added: str = "align_spatial",
     ):
         """
         Performs the correction using the best transformation found.
         """
 
         # apply the best transformation to the mesh
-        self.mesh.points = _transform_points(
-            self.mesh.points,
+        self.transformed_mesh = self.mesh.copy()
+        self.transformed_mesh.points = _transform_points(
+            self.transformed_mesh.points,
             self.best_transformation["rotation"],
             self.best_transformation["translation"],
             self.best_transformation["scaling"],
         )
-
+        print("changed")
         # get rotation and translation for each slice
-        rotations, translations = _eliminate_shift(self.contours, self.mesh, self.z_heights)
+        z_shift, R_shift = _eliminate_shift(self.contours, self.transformed_mesh, self.z_heights)
+
+        z_shift = np.array(z_shift)
+        if smooth:
+            x = np.arange(0, z_shift.shape[0])
+            degree = 3
+            coeffs = np.polyfit(x, z_shift[:, 0], degree)
+            poly = np.poly1d(coeffs)
+            z_shift[:, 0] = poly(x)
+            coeffs = np.polyfit(x, z_shift[:, 1], degree)
+            poly = np.poly1d(coeffs)
+            z_shift[:, 1] = poly(x)
+        self.z_shift = z_shift
+        self.R_shift = R_shift
+
+        for i in range(len(slices)):
+            slices[i].obsm[key_added] = (slices[i].obsm[spatial_key].copy() - self.z_shift[i]) @ self.R_shift[i]

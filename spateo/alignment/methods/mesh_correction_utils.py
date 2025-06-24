@@ -401,6 +401,49 @@ def _calculate_loss(
     return label_cost
 
 
+def _eliminate_shift(
+    contours,
+    mesh,
+    z_values,
+    allow_rotation: bool = True,
+):
+    assert len(contours) == len(z_values)
+
+    contours_Z = mesh.contour(isosurfaces=z_values, scalars=mesh.points[:, 2])
+    tol = np.abs(z_values[:-1] - z_values[1:]).min()
+    transform_contours = []
+    for z in z_values:
+        idx = (contours_Z.points[:, 2] > (z - 0.1 * tol)) & (contours_Z.points[:, 2] < (z + 0.1 * tol))
+        transform_contours.append(np.array(contours_Z.points[idx, :]))
+    flag = True
+    for s in transform_contours:
+        if s.shape[0] == 0:
+            flag = False
+            break
+    ts = []
+    Rs = []
+    if flag == True:
+        for i in range(len(contours)):
+            gamma1, _, t, _, _, R = ICP(
+                contours[i], transform_contours[i][:, :2], max_iter=100, allow_rotation=allow_rotation
+            )
+            gamma2, _, t2, _, _, R2 = ICP(
+                transform_contours[i][:, :2], contours[i], max_iter=100, allow_rotation=allow_rotation
+            )
+            if i == 0:
+                print(gamma1, gamma2)
+                print(t, t2)
+                print(R, R2)
+            if gamma2 > gamma1:
+                t = -t2 @ R2
+                R = R2.T
+            # contours[i] = (contours[i] - t) @ R.T
+            ts.append(t)
+            Rs.append(R)
+
+    return ts, Rs
+
+
 def ICP(
     contour_1: np.ndarray,
     contour_2: np.ndarray,
@@ -541,7 +584,8 @@ def solve_RT_by_correspondence(
         R = np.dot(Vt.T, U.T)
 
     # Compute the translation vector
-    t = tY - np.dot(tX, R.T)
+    # t = tY - np.dot(tX, R.T)
+    t = tX - np.dot(tY, R.T)
 
     if return_scale:
         # Compute the scale factor
@@ -551,3 +595,31 @@ def solve_RT_by_correspondence(
         return R, t, s
     else:
         return R, t
+
+
+# def solve_RT_by_correspondence(
+#     X,
+#     Y,
+#     return_s = False,
+# ):
+#     # if len(X.shape) == 3:
+#     #     X = X[:, :2]
+#     # if len(Y.shape) == 3:
+#     #     Y = Y[:, :2]
+#     D = X.shape[1]
+#     N = X.shape[0]
+#     # find R and t that minimize the distance between spatial1 and spatial2
+
+#     tX = np.mean(X, axis=0)
+#     tY = np.mean(Y, axis=0)
+#     X = X - tX
+#     Y = Y - tY
+#     H = np.dot(Y.T, X)
+#     U, S, Vt = np.linalg.svd(H)
+#     R = Vt.T.dot(U.T)
+#     t = np.mean(X, axis=0) - np.mean(Y, axis=0) + tX - np.dot(tY, R.T)
+#     s = np.trace(np.dot(X.T, X) - np.dot(R.T, np.dot(Y.T, X))) / np.trace(np.dot(Y.T, Y))
+#     if return_s:
+#         return R, t, s
+#     else:
+#         return R, t
