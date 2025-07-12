@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 
 from anndata import AnnData
 
@@ -20,6 +20,7 @@ def morphopath(
     cores: int = 1,
     nonrigid_only: bool = False,
     inplace: bool = True,
+    ivp_args: Optional[Tuple] = None,
     **kwargs,
 ) -> Optional[AnnData]:
     """
@@ -58,7 +59,7 @@ def morphopath(
                         embeddings. Of note, if the average is set to be True, the average cell state at each time point
                         is calculated for all cells.
     """
-    from dynamo.prediction.fate import fate
+    
 
     adata = adata if inplace else adata.copy()
     fate_adata = adata.copy()
@@ -80,8 +81,9 @@ def morphopath(
     method = adata.uns[vf_key]["method"]
     if method == "gaussian_process":
         from .gaussian_process import _gp_velocity
+        from .fate import fate as fate_spateo
 
-        fate(
+        fate_spateo(
             fate_adata,
             init_cells=fate_adata.obs_names.tolist(),
             basis=key_added,
@@ -92,10 +94,12 @@ def morphopath(
             average=average,
             cores=cores,
             VecFld_true=lambda X: _gp_velocity(X=X, vf_dict=fate_adata.uns[vf_key], nonrigid_only=nonrigid_only),
+            ivp_args=ivp_args,
             **kwargs,
         )
     elif method == "sparsevfc":
-        fate(
+        from dynamo.prediction.fate import fate as fate_dyn
+        fate_dyn(
             fate_adata,
             init_cells=fate_adata.obs_names.tolist(),
             basis=key_added,
