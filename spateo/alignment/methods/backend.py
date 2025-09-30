@@ -1067,7 +1067,7 @@ class NumpyBackend(Backend):
         else:
             return np.asarray(a, dtype=type_as.dtype)
 
-    def unique(self, a, return_index, return_inverse=False, axis=None):
+    def unique(self, a, return_index=False, return_inverse=False, axis=None):
         return np.unique(a, return_index=return_index, return_inverse=return_inverse, axis=axis)
 
     def unsqueeze(self, a, axis=-1):
