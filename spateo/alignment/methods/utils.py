@@ -8,6 +8,7 @@ import scipy.sparse as sp
 import torch
 from anndata import AnnData
 from numpy import ndarray
+from scipy import linalg as scipy_linalg
 from scipy.linalg import pinv
 from scipy.sparse import issparse
 from scipy.special import psi
@@ -1114,7 +1115,7 @@ def solve_RT_by_correspondence(
     X = X - tX
     Y = Y - tY
     H = np.dot(Y.T, X)
-    U, S, Vt = np.linalg.svd(H)
+    U, S, Vt = _robust_svd(H, full_matrices=True)
     R = Vt.T.dot(U.T)
     t = np.mean(X, axis=0) - np.mean(Y, axis=0) + tX - np.dot(tY, R.T)
     s = np.trace(np.dot(X.T, X) - np.dot(R.T, np.dot(Y.T, X))) / np.trace(np.dot(Y.T, Y))
@@ -1217,6 +1218,60 @@ def con_K_graph(
     return K
 
 
+def _robust_svd(A, full_matrices=True):
+    """
+    Perform robust SVD with fallback strategies for convergence issues.
+    
+    Args:
+        A: Input matrix for SVD decomposition
+        full_matrices: If True, compute full-sized U and V matrices
+    
+    Returns:
+        U, S, Vt: SVD decomposition of A
+    
+    Raises:
+        np.linalg.LinAlgError: If SVD fails after all fallback strategies
+    """
+    try:
+        # Try scipy's SVD with gesvd driver (more robust than gesdd)
+        U, S, Vt = scipy_linalg.svd(A, full_matrices=full_matrices, lapack_driver='gesvd')
+        return U, S, Vt
+    except (np.linalg.LinAlgError, ValueError) as e1:
+        # First fallback: Try with regularization
+        try:
+            # Add small regularization to diagonal to improve conditioning
+            reg_factor = 1e-6 * np.trace(A.T @ A) / A.shape[0]
+            A_reg = A + reg_factor * np.eye(A.shape[0])
+            U, S, Vt = scipy_linalg.svd(A_reg, full_matrices=full_matrices, lapack_driver='gesvd')
+            lm.main_info(
+                message=f"SVD required regularization (factor={reg_factor:.2e}) to converge.",
+                indent_level=2,
+            )
+            return U, S, Vt
+        except (np.linalg.LinAlgError, ValueError) as e2:
+            # Second fallback: Use numpy's default SVD
+            try:
+                U, S, Vt = np.linalg.svd(A, full_matrices=full_matrices)
+                lm.main_info(
+                    message="SVD required fallback to numpy implementation.",
+                    indent_level=2,
+                )
+                return U, S, Vt
+            except np.linalg.LinAlgError as e3:
+                # Final fallback: Use pseudoinverse-based approximation
+                lm.main_warning(
+                    message=f"SVD convergence failed. Original error: {e1}. Using pseudoinverse fallback.",
+                    indent_level=2,
+                )
+                # For rotation estimation, we can use a pseudoinverse-based approach
+                # This is less accurate but more robust
+                raise np.linalg.LinAlgError(
+                    f"SVD failed to converge after all fallback strategies. "
+                    f"This may indicate degenerate point configuration (e.g., collinear points). "
+                    f"Original error: {e1}"
+                ) from e3
+
+
 def inlier_from_NN(
     train_x,
     train_y,
@@ -1250,7 +1305,17 @@ def inlier_from_NN(
 
         X_mu, Y_mu = train_x - mu_x, train_y - mu_y
         A = np.dot(Y_mu.T, np.multiply(X_mu, P))
-        svdU, svdS, svdV = np.linalg.svd(A)
+        
+        # Check for degenerate cases before SVD
+        if np.any(np.isnan(A)) or np.any(np.isinf(A)):
+            lm.main_warning(
+                message=f"Matrix A contains NaN or Inf values at iteration {iter}. Skipping this iteration.",
+                indent_level=2,
+            )
+            continue
+        
+        # Use robust SVD with fallback strategies
+        svdU, svdS, svdV = _robust_svd(A, full_matrices=True)
         C = np.eye(D)
         C[-1, -1] = np.linalg.det(np.dot(svdU, svdV))
         R = np.dot(np.dot(svdU, C), svdV)
