@@ -3,6 +3,7 @@ https://github.com/MouseLand/cellpose
 
 [Stringer20]_
 """
+
 from typing import Optional, Union
 
 import numpy as np
@@ -16,6 +17,7 @@ except ImportError:
     # Try importing only CellposeModel (newer versions)
     try:
         from cellpose.models import CellposeModel  # type: ignore
+
         Cellpose = None  # type: ignore
     except Exception:
         Cellpose = None  # type: ignore
