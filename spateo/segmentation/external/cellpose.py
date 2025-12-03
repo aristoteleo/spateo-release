@@ -8,11 +8,18 @@ from typing import Optional, Union
 import numpy as np
 from anndata import AnnData
 
+# Cellpose API has changed across versions: some releases expose `Cellpose`,
+# others only `CellposeModel`. Be permissive in imports and handle both cases.
 try:
     from cellpose.models import Cellpose, CellposeModel
-except ModuleNotFoundError:
-    Cellpose = None
-    CellposeModel = None
+except ImportError:
+    # Try importing only CellposeModel (newer versions)
+    try:
+        from cellpose.models import CellposeModel  # type: ignore
+        Cellpose = None  # type: ignore
+    except Exception:
+        Cellpose = None  # type: ignore
+        CellposeModel = None  # type: ignore
 from typing_extensions import Literal
 
 from ...configuration import SKM
@@ -40,8 +47,16 @@ def _cellpose(
     Returns:
         Numpy array containing cell labels.
     """
+    # If a string model name was provided, instantiate the appropriate model class.
     if isinstance(model, str):
-        model = Cellpose(model_type=model, gpu=True)  # Use GPU if available
+        # Prefer the legacy `Cellpose` class if available, otherwise use
+        # `CellposeModel` which newer releases expose.
+        if Cellpose is not None:
+            model = Cellpose(model_type=model, gpu=True)  # Use GPU if available
+        elif CellposeModel is not None:
+            model = CellposeModel(model_type=model, gpu=True)  # Use GPU if available
+        else:
+            raise ModuleNotFoundError("cellpose is not available in the environment.")
 
     masks, flows, styles, diams = model.eval(img, **kwargs)
     return masks
@@ -79,7 +94,8 @@ def cellpose(
     Returns:
         Numpy array containing cell labels.
     """
-    if Cellpose is None or CellposeModel is None:
+    # Ensure at least one of the model classes is importable
+    if Cellpose is None and CellposeModel is None:
         raise ModuleNotFoundError("Please install Cellpose by running `pip install cellpose`.")
 
     if layer not in adata.layers:
