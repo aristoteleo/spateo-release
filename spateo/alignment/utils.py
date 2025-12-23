@@ -4,9 +4,63 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from scipy import linalg as scipy_linalg
 from scipy.spatial import cKDTree
 
 from spateo.logging import logger_manager as lm
+
+
+def _robust_svd(A, full_matrices=True):
+    """
+    Perform robust SVD with fallback strategies for convergence issues.
+    
+    Args:
+        A: Input matrix for SVD decomposition
+        full_matrices: If True, compute full-sized U and V matrices
+    
+    Returns:
+        U, S, Vt: SVD decomposition of A
+    
+    Raises:
+        np.linalg.LinAlgError: If SVD fails after all fallback strategies
+    """
+    try:
+        # Try scipy's SVD with gesvd driver (more robust than gesdd)
+        U, S, Vt = scipy_linalg.svd(A, full_matrices=full_matrices, lapack_driver='gesvd')
+        return U, S, Vt
+    except (np.linalg.LinAlgError, ValueError) as e1:
+        # First fallback: Try with regularization
+        try:
+            # Add small regularization to diagonal to improve conditioning
+            reg_factor = 1e-6 * np.trace(A.T @ A) / A.shape[0]
+            A_reg = A + reg_factor * np.eye(A.shape[0])
+            U, S, Vt = scipy_linalg.svd(A_reg, full_matrices=full_matrices, lapack_driver='gesvd')
+            lm.main_info(
+                message=f"SVD required regularization (factor={reg_factor:.2e}) to converge.",
+                indent_level=2,
+            )
+            return U, S, Vt
+        except (np.linalg.LinAlgError, ValueError) as e2:
+            # Second fallback: Use numpy's default SVD
+            try:
+                U, S, Vt = np.linalg.svd(A, full_matrices=full_matrices)
+                lm.main_info(
+                    message="SVD required fallback to numpy implementation.",
+                    indent_level=2,
+                )
+                return U, S, Vt
+            except np.linalg.LinAlgError as e3:
+                # Final fallback: Raise informative error
+                lm.main_warning(
+                    message=f"SVD convergence failed. Original error: {e1}",
+                    indent_level=2,
+                )
+                raise np.linalg.LinAlgError(
+                    f"SVD failed to converge after all fallback strategies. "
+                    f"This may indicate degenerate point configuration (e.g., collinear points). "
+                    f"Original error: {e1}"
+                ) from e3
+
 
 ####################
 # Before Alignment #
@@ -378,8 +432,8 @@ def solve_RT_by_correspondence(
     # Compute the covariance matrix
     H = np.dot(Y_demean.T, X_demean)
 
-    # Singular Value Decomposition
-    U, S, Vt = np.linalg.svd(H)
+    # Singular Value Decomposition with robust fallback
+    U, S, Vt = _robust_svd(H, full_matrices=True)
 
     # Compute the rotation matrix
     R = np.dot(Vt.T, U.T)
