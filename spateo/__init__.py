@@ -1,5 +1,4 @@
-"""Spatiotemporal modeling of spatial transcriptomics
-"""
+"""Spatiotemporal modeling of spatial transcriptomics"""
 
 from .get_version import get_version
 
@@ -23,6 +22,7 @@ tl = LazyLoader("spateo.tl", globals())
 
 # Lazy load config
 from ._lazy_loader import LazyAttribute
+
 config = LazyAttribute("spateo.configuration", "config")
 
 # These are simple re-exports from anndata, keep them as direct imports

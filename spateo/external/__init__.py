@@ -20,6 +20,7 @@ class _MERFISHVILazyLoader:
         self._import_attempted = True
         try:
             import importlib
+
             self._module = importlib.import_module(".MERFISHVI", package="spateo.external")
             return self._module
         except ImportError as e:

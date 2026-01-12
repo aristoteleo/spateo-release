@@ -5,8 +5,8 @@ This module provides a lazy loading mechanism to speed up initial package import
 by deferring the loading of heavy submodules until they are actually accessed.
 """
 
-import sys
 import importlib
+import sys
 from types import ModuleType
 from typing import List
 
@@ -19,8 +19,7 @@ class LazyLoader:
     actually imports the underlying module when an attribute is accessed.
     """
 
-    def __init__(self, name: str, parent_module_globals: dict,
-                 warning_message: str = None):
+    def __init__(self, name: str, parent_module_globals: dict, warning_message: str = None):
         """
         Initialize the lazy loader.
 
@@ -43,6 +42,7 @@ class LazyLoader:
         if self._module is None:
             if self._warning_message:
                 import warnings
+
                 warnings.warn(self._warning_message, UserWarning, stacklevel=3)
 
             # Import the module
