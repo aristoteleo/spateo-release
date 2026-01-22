@@ -8,4 +8,6 @@ implementations in a more technical point of view.
 
 cell_segmentation
 digitization
+spatial_transcriptomics_alignment
+3d_reconstruction
 ```

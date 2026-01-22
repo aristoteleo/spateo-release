@@ -512,6 +512,152 @@ def split_slice(
 #         return adata_tps, lambda x: tps.transform(x)
 
 
+def assign_z_coordinates(
+    adatas: Union[List[AnnData], AnnData],
+    spatial_key: str = "spatial",
+    z_spacing: Optional[Union[float, List[float]]] = None,
+    tissue_thickness: Optional[float] = None,
+    z_offset: float = 0.0,
+    inplace: bool = True,
+) -> Union[List[AnnData], AnnData, None]:
+    """
+    Assign z-coordinates to a list of 2D spatial slices for 3D reconstruction.
+
+    This function facilitates 3D reconstruction from multiple 2D spatial transcriptomics slices by
+    assigning appropriate z-axis coordinates. It supports multiple spacing strategies including
+    uniform spacing, custom spacing per slice, or tissue thickness-based spacing.
+
+    Args:
+        adatas: A single AnnData object or a list of AnnData objects representing sequential tissue slices.
+                Each should have 2D spatial coordinates in `obsm[spatial_key]`.
+        spatial_key: The key in `adata.obsm` where spatial coordinates are stored. Default is ``'spatial'``.
+        z_spacing: Spacing between consecutive slices along the z-axis. Can be:
+                   - A single float value for uniform spacing between all slices
+                   - A list of float values specifying the spacing after each slice (length should be n_slices - 1)
+                   - None (default): automatically calculated as 1.0 for uniform spacing
+        tissue_thickness: Optional tissue thickness parameter. If provided, this value is used as uniform
+                          z_spacing (overrides z_spacing parameter). This is useful when you know the
+                          physical thickness of your tissue sections.
+        z_offset: Starting z-coordinate for the first slice. Default is 0.0.
+        inplace: If True, modifies the input AnnData objects in place. If False, returns modified copies.
+                 Default is True.
+
+    Returns:
+        If inplace is True, returns None. If inplace is False, returns the modified AnnData object(s)
+        (single AnnData or list of AnnData objects with 3D coordinates).
+
+    Examples:
+        >>> # Example 1: Uniform spacing with default spacing of 1.0
+        >>> slices_3d = st.tl.assign_z_coordinates(slice_list, spatial_key="spatial")
+
+        >>> # Example 2: Uniform spacing with custom spacing
+        >>> slices_3d = st.tl.assign_z_coordinates(
+        ...     slice_list,
+        ...     spatial_key="align_spatial",
+        ...     z_spacing=10.0,
+        ...     inplace=False
+        ... )
+
+        >>> # Example 3: Using tissue thickness
+        >>> st.tl.assign_z_coordinates(
+        ...     slice_list,
+        ...     tissue_thickness=15.0,  # 15 µm tissue sections
+        ...     z_offset=0.0
+        ... )
+
+        >>> # Example 4: Custom spacing between each slice
+        >>> # For 4 slices, provide 3 spacing values
+        >>> st.tl.assign_z_coordinates(
+        ...     slice_list,
+        ...     z_spacing=[10.0, 12.0, 10.0],  # Variable spacing
+        ...     inplace=True
+        ... )
+
+    Notes:
+        - Input slices should have 2D spatial coordinates (shape: N x 2)
+        - The function will add a third column (z-coordinate) to create 3D coordinates (shape: N x 3)
+        - If input already has 3D coordinates, the existing z-values will be overwritten
+        - For sequential slices, z-coordinates increase along the slice order
+        - The z-coordinate assignment follows the pattern:
+          * Slice 0: z = z_offset
+          * Slice i: z = z_offset + sum(z_spacing[0:i])
+
+    See Also:
+        - :func:`spateo.alignment.morpho_align`: For aligning multiple slices
+        - :func:`spateo.plotting.static.three_d_plot.multi_models`: For 3D visualization
+    """
+    # Handle single AnnData input
+    is_single = not isinstance(adatas, list)
+    adata_list = [adatas] if is_single else adatas
+
+    if len(adata_list) == 0:
+        raise ValueError("Empty list of AnnData objects provided.")
+
+    # Determine z_spacing strategy
+    if tissue_thickness is not None:
+        # Use tissue thickness as uniform spacing
+        z_spacing_values = [tissue_thickness] * (len(adata_list) - 1)
+    elif z_spacing is None:
+        # Default uniform spacing of 1.0
+        z_spacing_values = [1.0] * (len(adata_list) - 1)
+    elif isinstance(z_spacing, (int, float)):
+        # Single value: uniform spacing
+        z_spacing_values = [float(z_spacing)] * (len(adata_list) - 1)
+    elif isinstance(z_spacing, (list, tuple, np.ndarray)):
+        # List of values: custom spacing
+        z_spacing_values = list(z_spacing)
+        if len(z_spacing_values) != len(adata_list) - 1:
+            raise ValueError(
+                f"Length of z_spacing list ({len(z_spacing_values)}) must equal number of slices - 1 ({len(adata_list) - 1})"
+            )
+    else:
+        raise ValueError(
+            "z_spacing must be None, a numeric value, or a list/array of numeric values."
+        )
+
+    # Calculate cumulative z-positions for each slice
+    z_positions = [z_offset]
+    for spacing in z_spacing_values:
+        z_positions.append(z_positions[-1] + spacing)
+
+    # Process each slice
+    result_list = []
+    for i, adata in enumerate(adata_list):
+        # Work on copy if not inplace
+        adata_proc = adata if inplace else adata.copy()
+
+        # Get current spatial coordinates
+        if spatial_key not in adata_proc.obsm:
+            raise ValueError(f"Spatial key '{spatial_key}' not found in adata.obsm")
+
+        coords = adata_proc.obsm[spatial_key]
+
+        # Check dimensionality
+        if coords.shape[1] < 2:
+            raise ValueError(
+                f"Spatial coordinates must have at least 2 dimensions, got {coords.shape[1]}"
+            )
+
+        # Create z-coordinate column with the assigned z-position
+        n_cells = coords.shape[0]
+        z_coord = np.full((n_cells, 1), z_positions[i])
+
+        # Assign 3D coordinates
+        if coords.shape[1] == 2:
+            # Add z-coordinate as third dimension
+            adata_proc.obsm[spatial_key] = np.c_[coords, z_coord]
+        else:
+            # Replace existing z-coordinate (third column)
+            adata_proc.obsm[spatial_key][:, 2:3] = z_coord
+
+        result_list.append(adata_proc)
+
+    if inplace:
+        return None
+    else:
+        return result_list[0] if is_single else result_list
+
+
 def tps_deformation(
     adata,
     spatial_key,
