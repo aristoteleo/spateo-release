@@ -9,6 +9,7 @@ from sklearn.decomposition import NMF
 from spateo.logging import logger_manager as lm
 
 from .deprecated_utils import (
+    paste_align_preprocess,
     align_preprocess,
     calc_exp_dissimilarity,
     check_exp,
@@ -70,7 +71,7 @@ def paste_pairwise_align(
     """
 
     # Preprocessing
-    (nx, type_as, new_samples, exp_matrices, spatial_coords, normalize_scale, normalize_mean_list,) = align_preprocess(
+    (nx, type_as, new_samples, exp_matrices, spatial_coords, normalize_scale, normalize_mean_list,) = paste_align_preprocess(
         samples=[sampleA, sampleB],
         genes=genes,
         spatial_key=spatial_key,
@@ -116,7 +117,7 @@ def paste_pairwise_align(
     except ImportError:
         from ot.gromov import cg
 
-    pi, log = ot.gromov.cg(
+    pi, log = cg(
         a,
         b,
         (1 - alpha) * M,
