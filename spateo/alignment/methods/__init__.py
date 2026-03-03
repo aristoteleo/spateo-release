@@ -2,6 +2,7 @@
 # from .morpho_sparse import BA_align_sparse
 from .backend import NumpyBackend, TorchBackend
 from .deprecated_utils import (
+    paste_align_preprocess,
     align_preprocess,
     cal_dist,
     cal_dot,
