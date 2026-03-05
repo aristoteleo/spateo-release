@@ -32,17 +32,20 @@ def bin_adata(
     adata = adata.copy()
     adata.obsm[coords_key] = (adata.obsm[coords_key] // bin_size).astype(np.int32)
 
-    if scipy.issparse(adata.X):
+    if scipy.sparse.issparse(adata.X):
         df = pd.DataFrame(adata.X.toarray(), columns=adata.var_names)
     else:
         df = pd.DataFrame(adata.X, columns=adata.var_names)
 
     df[["x", "y"]] = adata.obsm[coords_key]
     df2 = df.groupby(by=["x", "y"]).sum()
+    _spatial = np.array(df2.index.to_list())
+    _idx = [str(i[0]) + "_" + str(i[1]) for i in df2.index.to_list()]
+    df2.index = _idx
 
     adata_binned = AnnData(df2)
     adata_binned.uns["__type"] = "UMI"
-    adata_binned.obs_names = [str(i[0]) + "_" + str(i[1]) for i in df2.index.to_list()]
-    adata_binned.obsm[coords_key] = np.array([list(i) for i in df2.index.to_list()], dtype=np.float64)
+    adata_binned.obs_names = _idx
+    adata_binned.obsm[coords_key] = _spatial
 
     return adata_binned
