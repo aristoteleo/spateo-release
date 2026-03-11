@@ -15,6 +15,7 @@ from .morpho_alignment import (
 from .paste_alignment import paste_align, paste_align_ref
 from .transform import BA_transform, BA_transform_and_assignment, paste_transform
 from .utils import (
+    assign_z_coordinates,
     downsampling,
     generate_label_transfer_prior,
     get_labels_based_on_coords,

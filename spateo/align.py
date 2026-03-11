@@ -1,4 +1,5 @@
 from .alignment import (
+    assign_z_coordinates,
     BA_transform,
     BA_transform_and_assignment,
     Mesh_correction,
