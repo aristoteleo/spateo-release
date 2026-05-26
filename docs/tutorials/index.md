@@ -13,4 +13,5 @@ This page provides links to handy step-by-step tutorials for key features of *sp
    notebooks/6_cci
    notebooks/7_morphogenesis
    notebooks/8_interactive
+   notebooks/9_imputation
 ```
